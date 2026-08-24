@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #0A0A0C;
+  --color-surface: #121216;
+  --color-surface-secondary: #1A1A22;
+  --color-surface-tertiary: #24242F;
+  --color-surface-hover: #2C2C3A;
+  --color-border: #262630;
+  --color-border-subtle: #1C1C24;
+  --color-border-active: #3F3F50;
+  --color-brand: #7C3AED;
+  --color-brand-light: #9333EA;
+  --color-brand-glow: #A855F7;
+  --color-brand-blue: #3B82F6;
+  --color-brand-cyan: #06B6D4;
+  --color-accent-orange: #F97316;
+  --color-accent-green: #10B981;
+  --color-accent-pink: #EC4899;
+  --color-accent-yellow: #EAB308;
+}
+
+body {
+  background-color: #0A0A0C;
+  color: #F3F4F6;
+  font-family: 'Inter', 'PingFang SC', 'HarmonyOS Sans', sans-serif;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* Custom Scrollbar for sleek dark MiniMax UI */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0D0D11;
+}
+::-webkit-scrollbar-thumb {
+  background: #262633;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3B3B4F;
+}
+
+/* Glassmorphism & Glow styles */
+.glass-panel {
+  background: rgba(18, 18, 22, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.glow-border {
+  box-shadow: 0 0 15px -3px rgba(124, 58, 237, 0.3);
+}
+
+.glow-border-active {
+  box-shadow: 0 0 20px 2px rgba(124, 58, 237, 0.6);
+  border-color: #7C3AED !important;
+}
+
+/* Range slider styling */
+input[type="range"] {
+  accent-color: #7C3AED;
+}

@@ -1,0 +1,71 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+.venv/
+venv/
+env/
+ENV/
+.env
+.conda/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ===== Node / Frontend =====
+client/node_modules/
+client/dist/
+client/dist-ssr/
+client/.vite/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# ===== Build / Release =====
+build/
+dist/
+*.spec.bak
+*.manifest
+*.pyinstaller/
+
+# ===== Storage / Generated Artifacts =====
+storage/generated/*
+!storage/generated/.gitkeep
+storage/workflows/*
+!storage/workflows/.gitkeep
+storage/*.mp3
+storage/*.wav
+storage/*.png
+storage/__pycache__/
+exports/_assets/
+exports/MiniMax_Draft_*/
+exports/Orchestrated_Drama_*/
+
+# ===== OS / Editor =====
+.vs/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# ===== Secrets / Local Config =====
+server/.env
+*.pem
+*.key
+
+# ===== External Engines (sub-repos, optional) =====
+external_engines/
+
+# ===== Temp =====
+tmp/
+temp_test_output.wav
+*.tmp

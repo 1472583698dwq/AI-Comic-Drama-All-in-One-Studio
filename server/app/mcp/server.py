@@ -1,0 +1,460 @@
+"""
+MCP 统一工具中枢 - 动态可扩展版
+所有生成能力均通过 Provider Registry 动态分发，支持：
+- 图片：comfyui(含工作流)/siliconflow/dashscope/openai_compat 动态扩展
+- 音频：minimax/elevenlabs/cosyvoice/gpt_sovits 动态扩展
+- 导演Agent 暴露全部生成工具
+"""
+import time
+from typing import Dict, Any, List, Optional
+
+from app.models.schemas import MCPToolDefinition, MCPToolCallResponse, Project
+from app.pipelines.script_agent import script_agent
+from app.pipelines.jianyin_exporter import jianyin_exporter
+
+# Open-Source Integration: fastmcp
+try:
+    from fastmcp import FastMCP
+    mcp_app = FastMCP("MiniMax-AI-Comic-Drama-MCP-Server")
+    HAS_FASTMCP = True
+except ImportError:
+    HAS_FASTMCP = False
+    mcp_app = None
+
+
+# 相机参数计算表
+FRAMING_CAMERA = {
+    "extreme_close_up": {"fov": 22, "position": [0, 1.55, 0.9], "target": [0, 1.5, 0]},
+    "close_up": {"fov": 30, "position": [0, 1.52, 1.6], "target": [0, 1.45, 0]},
+    "medium": {"fov": 45, "position": [0, 1.5, 3.2], "target": [0, 1.4, 0]},
+    "full": {"fov": 50, "position": [0, 1.4, 4.8], "target": [0, 1.1, 0]},
+    "long": {"fov": 55, "position": [0, 1.6, 6.5], "target": [0, 1.3, 0]},
+    "bird_eye": {"fov": 60, "position": [0, 7.0, 2.0], "target": [0, 0.8, 0]},
+    "low_angle": {"fov": 40, "position": [0, 0.5, 2.6], "target": [0, 1.6, 0]},
+}
+
+MOTION_TRAJECTORY = {
+    "static": {"path_type": "hold", "amplitude_m": 0.0, "duration_hint_s": 0.0},
+    "push_in": {"path_type": "dolly_in", "amplitude_m": 0.8, "duration_hint_s": 2.0},
+    "pull_out": {"path_type": "dolly_out", "amplitude_m": 1.2, "duration_hint_s": 2.2},
+    "pan_left": {"path_type": "pan", "amplitude_deg": -35.0, "duration_hint_s": 1.8},
+    "pan_right": {"path_type": "pan", "amplitude_deg": 35.0, "duration_hint_s": 1.8},
+    "tilt_up": {"path_type": "tilt", "amplitude_deg": 25.0, "duration_hint_s": 1.5},
+    "tilt_down": {"path_type": "tilt", "amplitude_deg": -25.0, "duration_hint_s": 1.5},
+    "orbit": {"path_type": "orbit", "amplitude_deg": 180.0, "duration_hint_s": 4.0},
+    "shake": {"path_type": "handheld_shake", "amplitude_m": 0.06, "frequency_hz": 9.0, "duration_hint_s": 1.5},
+}
+
+
+def _lazy_image_registry():
+    from app.providers.image.registry import image_registry
+    from app.providers.init_providers import init_all_providers
+    # 确保已初始化
+    if not image_registry.list_ids():
+        try:
+            init_all_providers()
+        except Exception:
+            pass
+    return image_registry
+
+def _lazy_audio_registry():
+    from app.providers.audio.registry import audio_registry
+    from app.providers.init_providers import init_all_providers
+    if not audio_registry.list_ids():
+        try:
+            init_all_providers()
+        except Exception:
+            pass
+    return audio_registry
+
+def _lazy_workflow_manager():
+    from app.providers.workflow.manager import workflow_manager
+    return workflow_manager
+
+
+class MCPServerRegistry:
+    def __init__(self):
+        self.tools: Dict[str, MCPToolDefinition] = {}
+        self._register_default_tools()
+        if HAS_FASTMCP and mcp_app:
+            self._setup_fastmcp_tools()
+
+    def _setup_fastmcp_tools(self):
+        """Register tools to FastMCP server instance"""
+        @mcp_app.tool
+        async def split_novel_script(novel_text: str, style_preset: str = "donghua_xianxia", aspect_ratio: str = "9:16") -> dict:
+            """解析长篇小说章节并输出分镜 JSON"""
+            proj = await script_agent.parse_novel_to_project(novel_text, style_preset, aspect_ratio)
+            return proj.model_dump()
+
+        @mcp_app.tool
+        async def generate_image(prompt: str, provider: str = "", workflow_id: str = "", aspect_ratio: str = "9:16", style_preset: str = "donghua_xianxia", negative_prompt: str = "", seed: int = 0) -> dict:
+            """通用图片生成（动态Provider + 工作流）"""
+            from app.providers.image.base import ImageGenerateRequest
+            reg = _lazy_image_registry()
+            req = ImageGenerateRequest(prompt=prompt, negative_prompt=negative_prompt, aspect_ratio=aspect_ratio, style_preset=style_preset or None, seed=seed if seed else None, workflow_id=workflow_id or None, provider=provider or None)
+            # 指定provider或使用workflow则精确路由
+            prov_id = provider if provider else ("comfyui" if workflow_id else None)
+            res = await reg.generate(req, provider_id=prov_id)
+            return {"image_url": res.image_url, "local_path": res.local_path, "provider": res.provider, "engine": res.engine, "seed": res.seed}
+
+        @mcp_app.tool
+        async def generate_voice(text: str, voice_id: str = "male-qn-qingse", provider: str = "minimax", emotion: str = "neutral", speed: float = 1.0) -> dict:
+            """通用语音生成（动态Provider）"""
+            from app.providers.audio.base import AudioGenerateRequest
+            reg = _lazy_audio_registry()
+            req = AudioGenerateRequest(text=text, voice_id=voice_id, emotion=emotion, speed=speed)
+            res = await reg.generate(req, provider_id=provider or None)
+            return {"audio_url": res.audio_url, "duration": res.duration, "provider": res.provider, "engine": res.engine}
+
+        @mcp_app.tool
+        async def comfyui_render_node(prompt: str, aspect_ratio: str = "9:16") -> dict:
+            """ComfyUI 生图（兼容旧工具，内部走通用 generate_image）"""
+            from app.providers.image.base import ImageGenerateRequest
+            reg = _lazy_image_registry()
+            req = ImageGenerateRequest(prompt=prompt, aspect_ratio=aspect_ratio)
+            res = await reg.generate(req, provider_id="comfyui")
+            return {"image_url": res.image_url, "provider": res.provider, "engine": res.engine}
+
+        @mcp_app.tool
+        async def generate_minimax_voice(text: str, voice_id: str = "male-qn-qingse", emotion: str = "neutral") -> dict:
+            """MiniMax 配音（兼容）"""
+            from app.providers.audio.base import AudioGenerateRequest
+            reg = _lazy_audio_registry()
+            req = AudioGenerateRequest(text=text, voice_id=voice_id, emotion=emotion)
+            res = await reg.generate(req, provider_id="minimax")
+            return {"audio_url": res.audio_url, "duration": res.duration, "provider": res.provider}
+
+        @mcp_app.tool
+        async def list_image_providers() -> dict:
+            """列出所有图片Providers"""
+            reg = _lazy_image_registry()
+            return {"providers": reg.list_providers()}
+
+        @mcp_app.tool
+        async def list_voice_providers() -> dict:
+            """列出所有音频Providers"""
+            reg = _lazy_audio_registry()
+            return {"providers": reg.list_providers()}
+
+    def _register_default_tools(self):
+        # 1. 小说拆解
+        self.register_tool(MCPToolDefinition(
+            name="split_novel_script",
+            description="[剧本 Agent (ViMax/小云雀)] 解析长篇网文或小说章节，提取人物关系并生成标准分镜序列 JSON",
+            category="ai_generation",
+            icon="BookOpen",
+            author="HKUDS ViMax & MiniMax",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "novel_text": {"type": "string", "description": "小说或剧本文本内容"},
+                    "style_preset": {"type": "string", "enum": ["donghua_xianxia", "japanese_anime", "modern_webtoon", "cinematic_3d", "dark_comic"], "default": "donghua_xianxia"},
+                    "aspect_ratio": {"type": "string", "enum": ["9:16", "16:9", "1:1"], "default": "9:16"}
+                },
+                "required": ["novel_text"]
+            }
+        ))
+
+        # 2. 通用图片生成（核心新增，对Agent暴露）
+        self.register_tool(MCPToolDefinition(
+            name="generate_image",
+            description="[通用生图] 动态选择Provider生成漫剧分镜图像。支持provider=comfyui/siliconflow/dashscope/openai_compat，支持workflow_id指定ComfyUI自定义工作流。Agent应优先使用此工具。",
+            category="ai_generation",
+            icon="Image",
+            author="Dynamic Image Registry",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "生图提示词（英文画面描述，自动追加风格后缀）"},
+                    "provider": {"type": "string", "enum": ["comfyui", "siliconflow", "dashscope", "openai_compat"], "description": "指定Provider，不填则使用系统默认 IMAGE_PROVIDER"},
+                    "workflow_id": {"type": "string", "description": "ComfyUI自定义工作流ID（仅provider=comfyui时有效，可通过list_comfyui_workflows查询）"},
+                    "negative_prompt": {"type": "string", "description": "负向提示词"},
+                    "aspect_ratio": {"type": "string", "enum": ["9:16", "16:9", "1:1"], "default": "9:16"},
+                    "style_preset": {"type": "string", "enum": ["donghua_xianxia", "japanese_anime", "modern_webtoon", "cinematic_3d", "dark_comic"]},
+                    "seed": {"type": "integer", "description": "随机种子"},
+                    "model": {"type": "string", "description": "覆盖默认模型（如 siliconflow的 FLUX 模型）"},
+                    "steps": {"type": "integer", "description": "采样步数 8-50"},
+                    "cfg": {"type": "number", "description": "CFG 1.0-12.0"},
+                },
+                "required": ["prompt"]
+            }
+        ))
+
+        # 3. 兼容旧：comfyui_render_node
+        self.register_tool(MCPToolDefinition(
+            name="comfyui_render_node",
+            description="[ComfyUI生图-兼容] 通过 ComfyUI 生成图像（等价于 generate_image provider=comfyui）。保留兼容，老工作流可继续调用。",
+            category="ai_generation",
+            icon="Cpu",
+            author="ComfyUI Open Source",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "生图提示词"},
+                    "negative_prompt": {"type": "string"},
+                    "aspect_ratio": {"type": "string", "enum": ["9:16", "16:9", "1:1"], "default": "9:16"},
+                    "style_preset": {"type": "string", "enum": ["donghua_xianxia", "japanese_anime", "modern_webtoon", "cinematic_3d", "dark_comic"]},
+                    "seed": {"type": "integer"},
+                    "workflow_id": {"type": "string", "description": "指定已导入的ComfyUI工作流ID"},
+                    "model": {"type": "string"}
+                },
+                "required": ["prompt"]
+            }
+        ))
+
+        # 4. 通用语音生成（核心新增）
+        self.register_tool(MCPToolDefinition(
+            name="generate_voice",
+            description="[通用配音] 动态选择TTS Provider生成语音。支持provider=minimax/elevenlabs/cosyvoice/gpt_sovits，支持emotion/speed/pitch/克隆。",
+            category="audio",
+            icon="Mic2",
+            author="Dynamic Audio Registry",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "配音台词或旁白"},
+                    "provider": {"type": "string", "enum": ["minimax", "elevenlabs", "cosyvoice", "gpt_sovits"], "default": "minimax"},
+                    "voice_id": {"type": "string", "description": "音色ID（minimax: male-qn-qingse/female-shaonv等；elevenlabs: voice_id；cosyvoice/gpt_sovits: 参考音色）"},
+                    "emotion": {"type": "string", "enum": ["neutral", "intense", "sorrow", "excited", "fearful", "whispering"], "default": "neutral"},
+                    "speed": {"type": "number", "default": 1.0, "description": "语速 0.5-2.0"},
+                    "pitch": {"type": "number", "default": 0.0, "description": "音调，仅部分Provider支持"},
+                    "ref_audio_path": {"type": "string", "description": "克隆参考音频路径（gpt_sovits/cosyvoice）"},
+                    "model": {"type": "string", "description": "覆盖TTS模型"}
+                },
+                "required": ["text"]
+            }
+        ))
+
+        # 5. 兼容旧：generate_minimax_voice
+        self.register_tool(MCPToolDefinition(
+            name="generate_minimax_voice",
+            description="[MiniMax配音-兼容] 调用 MiniMax Speech-01（等价于 generate_voice provider=minimax）。保留兼容。",
+            category="audio",
+            icon="Mic",
+            author="MiniMax Speech",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string"},
+                    "voice_id": {"type": "string", "default": "male-qn-qingse"},
+                    "emotion": {"type": "string", "enum": ["neutral", "intense", "sorrow", "excited", "fearful", "whispering"], "default": "neutral"},
+                    "speed": {"type": "number", "default": 1.0}
+                },
+                "required": ["text"]
+            }
+        ))
+
+        # 6. 列出图片Providers
+        self.register_tool(MCPToolDefinition(
+            name="list_image_providers",
+            description="[查询] 列出所有已注册的图片生成Providers及其健康状态与能力，供Agent自主选择最合适的生图通道。",
+            category="utility",
+            icon="List",
+            author="System",
+            is_enabled=True,
+            input_schema={"type": "object", "properties": {}, "required": []}
+        ))
+
+        # 7. 列出音频Providers
+        self.register_tool(MCPToolDefinition(
+            name="list_voice_providers",
+            description="[查询] 列出所有已注册的音频Providers及其能力，供Agent选择配音通道。",
+            category="utility",
+            icon="ListMusic",
+            author="System",
+            is_enabled=True,
+            input_schema={"type": "object", "properties": {}, "required": []}
+        ))
+
+        # 8. 列出ComfyUI工作流
+        self.register_tool(MCPToolDefinition(
+            name="list_comfyui_workflows",
+            description="[查询] 列出所有已导入的ComfyUI自定义工作流（ID/名称/节点分析/映射），供Agent选择 workflow_id 进行风格化生图。",
+            category="utility",
+            icon="Workflow",
+            author="System",
+            is_enabled=True,
+            input_schema={"type": "object", "properties": {}, "required": []}
+        ))
+
+        # 9. 查询指定Provider音色列表
+        self.register_tool(MCPToolDefinition(
+            name="list_voices",
+            description="[查询] 查询指定TTS Provider的可用音色列表。",
+            category="utility",
+            icon="Voices",
+            author="System",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "provider": {"type": "string", "enum": ["minimax", "elevenlabs", "cosyvoice", "gpt_sovits"], "default": "minimax"}
+                },
+                "required": []
+            }
+        ))
+
+        # 10. 剪映导出
+        self.register_tool(MCPToolDefinition(
+            name="export_jianyin_draft",
+            description="[pyJianYingDraft] 将漫剧多轨时间线无损导出为剪映/CapCut官方草稿工程",
+            category="export",
+            icon="Share2",
+            author="pyJianYingDraft",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "project": {"type": "object", "description": "完整漫剧 Project JSON"}
+                },
+                "required": ["project"]
+            }
+        ))
+
+        # 11. 3D导演台
+        self.register_tool(MCPToolDefinition(
+            name="director_3d_stage_plan",
+            description="[3D导演台] 根据景别与运镜计算相机FOV/机位/轨迹",
+            category="workflow",
+            icon="Camera",
+            author="MiniMax Design",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "framing": {"type": "string", "enum": ["extreme_close_up", "close_up", "medium", "full", "long", "bird_eye", "low_angle"]},
+                    "motion": {"type": "string", "enum": ["static", "push_in", "pull_out", "pan_left", "pan_right", "tilt_up", "tilt_down", "orbit", "shake"]},
+                    "pose": {"type": "string", "enum": ["stand", "fight", "look_back", "run"]}
+                },
+                "required": ["framing", "motion"]
+            }
+        ))
+
+    def register_tool(self, tool: MCPToolDefinition):
+        self.tools[tool.name] = tool
+
+    def get_mcp_http_app(self):
+        if not (HAS_FASTMCP and mcp_app):
+            return None
+        return mcp_app.http_app(path="/")
+
+    def get_all_tools(self) -> List[MCPToolDefinition]:
+        return list(self.tools.values())
+
+    async def execute_tool(self, tool_name: str, arguments: Dict[str, Any], project_context: Any = None) -> MCPToolCallResponse:
+        start_time = time.time()
+        if tool_name not in self.tools:
+            return MCPToolCallResponse(tool_name=tool_name, status="error", result=None, error=f"MCP Tool '{tool_name}' not found", execution_time_ms=0)
+        try:
+            result = None
+            if tool_name == "split_novel_script":
+                text = arguments.get("novel_text", "")
+                style = arguments.get("style_preset", "donghua_xianxia")
+                ratio = arguments.get("aspect_ratio", "9:16")
+                project = await script_agent.parse_novel_to_project(text, style, ratio)
+                result = project.model_dump()
+
+            elif tool_name in ("generate_image", "comfyui_render_node"):
+                from app.providers.image.base import ImageGenerateRequest
+                reg = _lazy_image_registry()
+                # 兼容：comfyui_render_node 默认 provider=comfyui
+                provider = arguments.get("provider")
+                if tool_name == "comfyui_render_node" and not provider:
+                    provider = "comfyui"
+                req = ImageGenerateRequest(
+                    prompt=arguments.get("prompt", ""),
+                    negative_prompt=arguments.get("negative_prompt") or "",
+                    aspect_ratio=arguments.get("aspect_ratio", "9:16"),
+                    style_preset=arguments.get("style_preset"),
+                    seed=arguments.get("seed"),
+                    workflow_id=arguments.get("workflow_id"),
+                    model=arguments.get("model"),
+                    steps=arguments.get("steps"),
+                    cfg=arguments.get("cfg"),
+                )
+                if not req.prompt or not req.prompt.strip():
+                    raise ValueError("生图提示词 prompt 不能为空")
+                img_res = await reg.generate(req, provider_id=provider)
+                result = {"image_url": img_res.image_url, "local_path": img_res.local_path, "provider": img_res.provider, "engine": img_res.engine, "seed": img_res.seed, "width": img_res.width, "height": img_res.height, "elapsed_ms": img_res.elapsed_ms}
+
+            elif tool_name in ("generate_voice", "generate_minimax_voice"):
+                from app.providers.audio.base import AudioGenerateRequest
+                reg = _lazy_audio_registry()
+                provider = arguments.get("provider")
+                if tool_name == "generate_minimax_voice" and not provider:
+                    provider = "minimax"
+                req = AudioGenerateRequest(
+                    text=arguments.get("text", ""),
+                    voice_id=arguments.get("voice_id", "male-qn-qingse"),
+                    emotion=arguments.get("emotion", "neutral"),
+                    speed=float(arguments.get("speed", 1.0)),
+                    pitch=float(arguments.get("pitch", 0.0)),
+                    ref_audio_path=arguments.get("ref_audio_path"),
+                    ref_text=arguments.get("ref_text"),
+                    model=arguments.get("model"),
+                )
+                audio_res = await reg.generate(req, provider_id=provider or "minimax")
+                result = {"audio_url": audio_res.audio_url, "local_path": audio_res.local_path, "provider": audio_res.provider, "engine": audio_res.engine, "duration": audio_res.duration, "voice_id": audio_res.voice_id}
+
+            elif tool_name == "list_image_providers":
+                reg = _lazy_image_registry()
+                providers = reg.list_providers()
+                # 附带健康检查
+                health = await reg.check_health_all()
+                for p in providers:
+                    h = health.get(p["id"], {})
+                    p["health"] = h
+                result = {"providers": providers}
+
+            elif tool_name == "list_voice_providers":
+                reg = _lazy_audio_registry()
+                providers = reg.list_providers()
+                health = await reg.check_health_all()
+                for p in providers:
+                    h = health.get(p["id"], {})
+                    p["health"] = h
+                result = {"providers": providers}
+
+            elif tool_name == "list_comfyui_workflows":
+                mgr = _lazy_workflow_manager()
+                result = {"workflows": mgr.list_workflows()}
+
+            elif tool_name == "list_voices":
+                reg = _lazy_audio_registry()
+                provider = arguments.get("provider", "minimax")
+                prov = reg.get(provider)
+                if not prov:
+                    raise ValueError(f"未知音频Provider: {provider}")
+                voices = await prov.list_voices()
+                result = {"provider": provider, "voices": voices}
+
+            elif tool_name == "export_jianyin_draft":
+                project_payload = project_context or arguments.get("project")
+                if not project_payload:
+                    return MCPToolCallResponse(tool_name=tool_name, status="error", result=None, error="export_jianyin_draft 需要完整Project JSON", execution_time_ms=int((time.time()-start_time)*1000))
+                project = Project.model_validate(project_payload)
+                result = await jianyin_exporter.export_project_to_jianyin_draft_async(project)
+
+            elif tool_name == "director_3d_stage_plan":
+                framing = arguments.get("framing", "medium")
+                motion = arguments.get("motion", "push_in")
+                pose = arguments.get("pose", "stand")
+                cam = FRAMING_CAMERA.get(framing, FRAMING_CAMERA["medium"])
+                traj = MOTION_TRAJECTORY.get(motion, MOTION_TRAJECTORY["push_in"])
+                result = {"camera_fov": cam["fov"], "camera_position": cam["position"], "target_position": cam["target"], "motion_trajectory": traj, "pose_preset": pose, "depth_guidance_ready": True, "engine": "local-camera-calculator"}
+
+            elapsed_ms = int((time.time() - start_time) * 1000)
+            return MCPToolCallResponse(tool_name=tool_name, status="success", result=result, execution_time_ms=elapsed_ms)
+
+        except Exception as e:
+            elapsed_ms = int((time.time() - start_time) * 1000)
+            return MCPToolCallResponse(tool_name=tool_name, status="error", result=None, error=str(e), execution_time_ms=elapsed_ms)
+
+
+mcp_registry = MCPServerRegistry()
