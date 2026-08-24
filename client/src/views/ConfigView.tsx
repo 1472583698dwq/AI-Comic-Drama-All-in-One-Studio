@@ -702,6 +702,47 @@ export const ConfigView: React.FC = () => {
                   </div>
                 </div>
 
+                {/* ComfyUI Workflows Direct Directory */}
+                <div className="bg-surface rounded-2xl border border-border p-5 space-y-4">
+                  <div className="flex items-center justify-between border-b border-border pb-3">
+                    <div className="flex items-center space-x-2">
+                      <span className="w-2 h-2 rounded-full bg-brand" />
+                      <span className="text-xs font-bold text-white">ComfyUI 工作流目录直读（无需手动导入）</span>
+                    </div>
+                    <span className="text-[10px] text-gray-500">指定后自动扫描全部 *.json，一键可用</span>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-300">COMFYUI_WORKFLOWS_DIR (ComfyUI 工作流文件夹路径)</label>
+                    <div className="mt-1.5 flex items-center space-x-2">
+                      <input
+                        value={form.COMFYUI_WORKFLOWS_DIR || ''}
+                        onChange={(e) => setField('COMFYUI_WORKFLOWS_DIR', e.target.value)}
+                        placeholder="例如: D:/ComfyUI/workflows 或 D:/ComfyUI/user/default/workflows"
+                        className="flex-1 bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs font-mono text-white placeholder-gray-500 focus:outline-none focus:border-brand"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const v = form.COMFYUI_WORKFLOWS_DIR || '';
+                          if (!v) setMsg({type:'error', text:'请先填入路径后再保存'});
+                          else handleTest('comfyui');
+                        }}
+                        className="px-3 py-2 rounded-xl bg-surface-tertiary border border-border text-xs text-gray-300 hover:text-white"
+                      >
+                        检测目录
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-gray-500 mt-2 leading-4">
+                      • 填入后保存，系统将递归扫描该目录下所有 <code className="px-1 py-0.5 rounded bg-surface-tertiary text-brand-light">*.json</code> 工作流<br/>
+                      • 仅 <span className="text-accent-green">API Format</span> 可直接执行，Save Format 会提示需在ComfyUI中 Export API Format<br/>
+                      • 外部工作流 id 以 <code className="px-1 py-0.5 rounded bg-surface-tertiary text-brand-light">ext_xxx</code> 开头，可直接在生图时指定 <code className="px-1 py-0.5 rounded bg-surface-tertiary text-brand-light">workflow_id</code> 使用，无需导入；如需编辑映射可一键导入为内部工作流
+                    </p>
+                  </div>
+                  <div className="flex items-center space-x-3">
+                    <span className="text-[10px] text-gray-500">当前已配置: {form.COMFYUI_WORKFLOWS_DIR ? <span className="text-accent-green font-mono">{form.COMFYUI_WORKFLOWS_DIR}</span> : <span className="text-gray-600">未配置（仅显示内部工作流）</span>}</span>
+                  </div>
+                </div>
+
                 {/* Cloud Providers */}
                 <div className="bg-surface rounded-2xl border border-border p-5 space-y-4">
                   <div className="flex items-center justify-between border-b border-border pb-3">

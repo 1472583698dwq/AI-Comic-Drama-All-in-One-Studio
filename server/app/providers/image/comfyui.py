@@ -188,11 +188,16 @@ class ComfyUIProvider(ImageProvider):
         async with httpx.AsyncClient(timeout=15.0) as client:
             # 决定工作流来源
             if req.workflow_id:
-                # 自定义工作流模式：自动注入提示词/尺寸/随机种子，并智能处理 checkpoint
-                wf = workflow_manager.get_workflow(req.workflow_id)
-                meta = workflow_manager.get_meta(req.workflow_id)
+                # 自定义工作流模式：支持内部+外部目录直读（外部id为 ext_*）
+                if hasattr(workflow_manager, "get_workflow_with_meta"):
+                    wf, meta = workflow_manager.get_workflow_with_meta(req.workflow_id)
+                else:
+                    wf = workflow_manager.get_workflow(req.workflow_id)
+                    meta = workflow_manager.get_meta(req.workflow_id)
                 if not wf:
-                    raise FileNotFoundError(f"工作流不存在: {req.workflow_id}")
+                    raise FileNotFoundError(f"工作流不存在: {req.workflow_id}（若为外部工作流，请确认 COMFYUI_WORKFLOWS_DIR 配置正确且为API Format）")
+                if meta and not meta.get("is_api_format", True):
+                    raise ValueError(f"该工作流非API Format，无法直接执行: {meta.get('error')} hint: {meta.get('hint','')}")
                 mapping = (meta or {}).get("mapping", {})
                 style_suffix = STYLE_SUFFIX.get(req.style_preset, "") if req.style_preset else ""
                 # 若用户未指定checkpoint且配置也为空，则自动探测可用checkpoint并注入

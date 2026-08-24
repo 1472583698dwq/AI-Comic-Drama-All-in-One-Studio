@@ -285,18 +285,47 @@ async def generate_character_3views(req: Character3ViewsRequest):
         "status": "success" if not errors else "partial",
     }
 
-# --- ComfyUI 工作流管理 ---
+# --- ComfyUI 工作流管理（支持外部目录直读）---
 @router.get("/images/workflows")
-async def list_workflows():
-    """列出所有已导入的ComfyUI工作流"""
+async def list_workflows(source: str = "all"):
+    """
+    列出所有ComfyUI工作流
+    source: all | internal | external
+    - internal: 仅 storage/workflows 中导入的
+    - external: 仅 COMFYUI_WORKFLOWS_DIR 目录直读的
+    - all: 合并两者，Agent/前端可直接用 workflow_id 生成（外部id为 ext_xxx）
+    """
     mgr = get_workflow_manager()
-    return {"workflows": mgr.list_workflows()}
+    if source not in ("all", "internal", "external"):
+        source = "all"
+    workflows = mgr.list_workflows(source=source)
+    return {
+        "workflows": workflows,
+        "source": source,
+        "external_dir": mgr.get_external_dir(),
+        "counts": {
+            "total": len(workflows),
+            "internal": len([w for w in workflows if w.get("source") == "internal"]),
+            "external": len([w for w in workflows if w.get("source") == "external"]),
+        }
+    }
+
+@router.get("/images/workflows/external/dir")
+async def get_external_workflows_dir():
+    mgr = get_workflow_manager()
+    ext_dir = mgr.get_external_dir()
+    cfg_dir = getattr(settings, "COMFYUI_WORKFLOWS_DIR", "")
+    return {
+        "configured_dir": cfg_dir,
+        "resolved_dir": ext_dir,
+        "exists": bool(ext_dir and os.path.exists(ext_dir)),
+        "is_configured": bool(cfg_dir),
+    }
 
 @router.get("/images/workflows/{workflow_id}")
 async def get_workflow(workflow_id: str):
     mgr = get_workflow_manager()
-    wf = mgr.get_workflow(workflow_id)
-    meta = mgr.get_meta(workflow_id)
+    wf, meta = mgr.get_workflow_with_meta(workflow_id) if hasattr(mgr, "get_workflow_with_meta") else (mgr.get_workflow(workflow_id), mgr.get_meta(workflow_id))
     if not wf:
         raise HTTPException(status_code=404, detail=f"工作流不存在: {workflow_id}")
     return {"workflow_id": workflow_id, "meta": meta, "workflow": wf}
@@ -304,11 +333,25 @@ async def get_workflow(workflow_id: str):
 @router.delete("/images/workflows/{workflow_id}")
 async def delete_workflow(workflow_id: str):
     mgr = get_workflow_manager()
+    if workflow_id.startswith("ext_"):
+        raise HTTPException(status_code=400, detail="外部工作流为只读，不能删除。请直接在文件系统中删除对应JSON文件，或先导入为内部工作流")
     wf = mgr.get_workflow(workflow_id)
     if not wf:
         raise HTTPException(status_code=404, detail=f"工作流不存在: {workflow_id}")
     mgr.delete_workflow(workflow_id)
     return {"status": "deleted", "workflow_id": workflow_id}
+
+@router.post("/images/workflows/import/{external_id}")
+async def import_external_workflow(external_id: str, new_name: Optional[str] = None):
+    """将外部目录中的工作流导入为内部持久化工作流（可编辑映射）"""
+    mgr = get_workflow_manager()
+    try:
+        meta = mgr.import_external_workflow(external_id, new_name=new_name)
+        return {"status": "imported", "workflow": meta}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/images/workflows/upload")
 async def upload_workflow(
@@ -574,6 +617,7 @@ class ConfigUpdateRequest(BaseModel):
     COMFYUI_SERVER_URL: Optional[str] = Field(default="http://127.0.0.1:8188")
     COMFYUI_CHECKPOINT: Optional[str] = Field(default="")
     COMFYUI_TIMEOUT_SECONDS: Optional[str] = Field(default="240")
+    COMFYUI_WORKFLOWS_DIR: Optional[str] = Field(default="")
     SILICONFLOW_API_KEY: Optional[str] = Field(default="")
     SILICONFLOW_IMAGE_MODEL: Optional[str] = Field(default="black-forest-labs/FLUX.1-schnell")
     DASHSCOPE_API_KEY: Optional[str] = Field(default="")

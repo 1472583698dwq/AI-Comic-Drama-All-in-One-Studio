@@ -116,9 +116,22 @@ export const apiService = {
     return await res.json();
   },
 
-  // ComfyUI 工作流管理
-  async listWorkflows(): Promise<any> {
-    const res = await fetch(`${API_BASE_URL}/images/workflows`);
+  // ComfyUI 工作流管理（支持外部目录直读）
+  async listWorkflows(source: 'all' | 'internal' | 'external' = 'all'): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/images/workflows?source=${encodeURIComponent(source)}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+
+  async getExternalWorkflowsDir(): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/images/workflows/external/dir`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+
+  async importExternalWorkflow(externalId: string, newName?: string): Promise<any> {
+    const url = `${API_BASE_URL}/images/workflows/import/${encodeURIComponent(externalId)}${newName ? `?new_name=${encodeURIComponent(newName)}` : ''}`;
+    const res = await fetch(url, { method: 'POST' });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
