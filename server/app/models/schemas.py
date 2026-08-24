@@ -108,6 +108,21 @@ class TTSGenerateRequest(BaseModel):
     ref_audio_path: Optional[str] = None
     ref_text: Optional[str] = None
 
+class VideoGenerateRequestPayload(BaseModel):
+    shot_id: Optional[str] = None
+    prompt: str = ""
+    mode: str = "i2v"  # i2v | r2v | t2v
+    first_frame_url: Optional[str] = None
+    last_frame_url: Optional[str] = None
+    reference_images: Optional[List[str]] = None
+    reference_videos: Optional[List[str]] = None
+    duration: int = 5
+    resolution: str = "720p"
+    aspect_ratio: str = "9:16"
+    seed: Optional[int] = None
+    provider: Optional[str] = None
+    workflow_id: Optional[str] = None
+
 class MCPToolDefinition(BaseModel):
     name: str
     description: str

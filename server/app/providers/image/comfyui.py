@@ -195,9 +195,11 @@ class ComfyUIProvider(ImageProvider):
                     wf = workflow_manager.get_workflow(req.workflow_id)
                     meta = workflow_manager.get_meta(req.workflow_id)
                 if not wf:
-                    raise FileNotFoundError(f"工作流不存在: {req.workflow_id}（若为外部工作流，请确认 COMFYUI_WORKFLOWS_DIR 配置正确且为API Format）")
+                    raise FileNotFoundError(f"工作流不存在: {req.workflow_id}（若为外部工作流，请确认 COMFYUI_WORKFLOWS_DIR 配置正确）")
                 if meta and not meta.get("is_api_format", True):
-                    raise ValueError(f"该工作流非API Format，无法直接执行: {meta.get('error')} hint: {meta.get('hint','')}")
+                    err = meta.get("error") or "自动转换失败"
+                    hint = meta.get("hint") or "请在 ComfyUI 中用 File→Export (API Format) 重新导出"
+                    raise ValueError(f"该工作流无法自动转换: {err} hint: {hint}")
                 mapping = (meta or {}).get("mapping", {})
                 style_suffix = STYLE_SUFFIX.get(req.style_preset, "") if req.style_preset else ""
                 # 若用户未指定checkpoint且配置也为空，则自动探测可用checkpoint并注入

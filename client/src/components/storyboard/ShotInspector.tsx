@@ -11,7 +11,13 @@ import {
   Layers,
   ChevronRight,
   Plus,
-  Trash2
+  Trash2,
+  Film,
+  Video,
+  Image as ImageIcon,
+  Sliders,
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { StoryboardShot, EmotionType } from '../../types';
@@ -27,13 +33,20 @@ export const ShotInspector: React.FC = () => {
     updateShot, 
     addShot, 
     deleteShot,
-    setActiveTab
+    setActiveTab,
+    generateShotVideo
   } = useProjectStore();
 
+  const [previewTab, setPreviewTab] = useState<'image' | 'video'>('image');
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
+  const [isGeneratingVid, setIsGeneratingVid] = useState(false);
+  const [videoMode, setVideoMode] = useState<'i2v' | 'r2v' | 't2v'>('i2v');
+  const [videoProvider, setVideoProvider] = useState<string>('comfyui_video');
   const [ttsError, setTtsError] = useState<string | null>(null);
   const [regenError, setRegenError] = useState<string | null>(null);
+  const [videoError, setVideoError] = useState<string | null>(null);
+  const [videoSuccess, setVideoSuccess] = useState(false);
   const [audioEl, setAudioEl] = useState<HTMLAudioElement | null>(null);
 
   const shots: StoryboardShot[] = project?.scenes.flatMap((s) => s.shots) || [];
@@ -73,7 +86,7 @@ export const ShotInspector: React.FC = () => {
     }
   };
 
-  // ComfyUI 真实生图 — 更新该分镜的 image_url
+  // 真实生图 — 更新该分镜的 image_url
   const handleRegenerateImage = async () => {
     if (!activeShot.image_prompt?.trim()) { setRegenError('生图提示词为空'); return; }
     setRegenError(null);
@@ -86,6 +99,7 @@ export const ShotInspector: React.FC = () => {
         style_preset: project?.style_preset,
       });
       updateShot(activeShot.id, { image_url: res.image_url, status: 'completed' });
+      setPreviewTab('image');
     } catch (e: any) {
       setRegenError(e?.message || '生图失败');
       updateShot(activeShot.id, { status: 'error' });
@@ -94,10 +108,52 @@ export const ShotInspector: React.FC = () => {
     }
   };
 
+  // 动态视频生成 (I2V / R2V / T2V)
+  const handleGenerateVideo = async () => {
+    const prompt = activeShot.video_prompt?.trim() || activeShot.action_desc || activeShot.image_prompt;
+    if (!prompt) {
+      setVideoError('请填写视频运动运镜提示词');
+      return;
+    }
+    if (videoMode === 'i2v' && !activeShot.image_url) {
+      setVideoError('图生视频模式需要先生成或上传首帧画面');
+      return;
+    }
+    setVideoError(null);
+    setIsGeneratingVid(true);
+    try {
+      await generateShotVideo(activeShot.id, {
+        mode: videoMode,
+        prompt,
+        duration: Math.round(activeShot.duration) || 5,
+        provider: videoProvider,
+      });
+      setVideoSuccess(true);
+      setPreviewTab('video');
+      setTimeout(() => setVideoSuccess(false), 3000);
+    } catch (e: any) {
+      setVideoError(e?.message || '视频生成失败');
+    } finally {
+      setIsGeneratingVid(false);
+    }
+  };
+
+  const getMediaUrl = (url?: string | null) => {
+    if (!url) return '';
+    return url.startsWith('/') ? API_ORIGIN + url : url;
+  };
+
+  const videoMotionPresets = [
+    { label: '🔥 极速推进 (Push In)', prompt: '镜头极速推向主角面部，眼神爆发金光，背景光芒拉丝' },
+    { label: '🌀 360° 环绕 (Orbit)', prompt: '动态弧形 360 度环拍，主角发丝与衣袂随风狂舞' },
+    { label: '⚡ 战斗震颤 (Combat Shake)', prompt: '手持镜头激烈震动，冲击波扩散，雷电特效环绕' },
+    { label: '🌌 渐远拉出 (Pull Out)', prompt: '镜头由近及远缓缓拉出，展现广袤天地与宏伟背景' },
+  ];
+
   return (
     <div className="flex-1 flex h-full overflow-hidden bg-background">
       {/* 1. Left Column: Shot List Thumbnail Drawer */}
-      <div className="w-64 bg-surface border-r border-border flex flex-col">
+      <div className="w-64 bg-surface border-r border-border flex flex-col shrink-0">
         <div className="p-3 border-b border-border flex items-center justify-between">
           <div className="flex items-center space-x-1.5">
             <Layers className="w-4 h-4 text-brand-light" />
@@ -116,6 +172,7 @@ export const ShotInspector: React.FC = () => {
         <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
           {shots.map((shot) => {
             const isSelected = shot.id === activeShot.id;
+            const hasVideo = Boolean(shot.video_url);
             return (
               <div
                 key={shot.id}
@@ -129,18 +186,24 @@ export const ShotInspector: React.FC = () => {
                 <div className="relative aspect-video rounded-lg overflow-hidden bg-black/60 mb-1.5">
                   {shot.image_url ? (
                     <img 
-                      src={shot.image_url.startsWith('/') ? API_ORIGIN + shot.image_url : shot.image_url}
+                      src={getMediaUrl(shot.image_url)} 
                       alt="" 
                       className="w-full h-full object-cover" 
                     />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-[9px] text-gray-500">
-                      {shot.status === 'generating_image' ? '生成中...' : '待生成'}
+                      {shot.status === 'generating_image' ? '生图中...' : (shot.status === 'generating_video' ? '生视频中...' : '待生成')}
                     </div>
                   )}
                   <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-black/70 text-[9px] font-mono text-brand-light font-bold">
                     #{shot.shot_index}
                   </span>
+                  {hasVideo && (
+                    <span className="absolute top-1 right-1 px-1.5 py-0.5 rounded bg-accent-orange/90 text-[8px] font-bold text-white uppercase tracking-wider flex items-center space-x-0.5">
+                      <Film className="w-2.5 h-2.5" />
+                      <span>VID</span>
+                    </span>
+                  )}
                   <span className="absolute bottom-1 right-1 px-1 rounded bg-black/70 text-[9px] text-gray-300 font-mono">
                     {shot.duration}s
                   </span>
@@ -156,13 +219,71 @@ export const ShotInspector: React.FC = () => {
       </div>
 
       {/* 2. Center Column: Main Canvas Monitor */}
-      <div className="flex-1 flex flex-col items-center justify-center p-6 bg-[#08080B] relative">
+      <div className="flex-1 flex flex-col items-center justify-center p-6 bg-[#08080B] relative overflow-hidden">
+        {/* Top Preview Mode Switcher (Image vs Video) */}
+        <div className="mb-3 z-10 flex items-center space-x-1.5 bg-surface/90 backdrop-blur-md p-1 rounded-xl border border-border shadow-lg">
+          <button
+            onClick={() => setPreviewTab('image')}
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              previewTab === 'image'
+                ? 'bg-brand text-white shadow-md'
+                : 'text-gray-400 hover:text-white'
+            }`}
+          >
+            <ImageIcon className="w-3.5 h-3.5" />
+            <span>首帧静态图</span>
+          </button>
+          <button
+            onClick={() => setPreviewTab('video')}
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              previewTab === 'video'
+                ? 'bg-gradient-to-r from-accent-orange to-brand-glow text-white shadow-md'
+                : 'text-gray-400 hover:text-white'
+            }`}
+          >
+            <Film className="w-3.5 h-3.5" />
+            <span>动态视频 (I2V/R2V)</span>
+            {activeShot.video_url && (
+              <span className="w-2 h-2 rounded-full bg-accent-green" />
+            )}
+          </button>
+        </div>
+
         {regenError && <div className="mb-2 px-3 py-1.5 rounded bg-red-500/15 border border-red-500/40 text-xs text-red-300 max-w-md truncate">⚠️ {regenError}</div>}
+        {videoError && <div className="mb-2 px-3 py-1.5 rounded bg-red-500/15 border border-red-500/40 text-xs text-red-300 max-w-md truncate">⚠️ {videoError}</div>}
         {ttsError && <div className="mb-2 px-3 py-1.5 rounded bg-red-500/15 border border-red-500/40 text-xs text-red-300 max-w-md truncate">⚠️ {ttsError}</div>}
-        <div className="relative max-h-[70vh] aspect-[9/16] rounded-2xl overflow-hidden shadow-2xl border border-border/80 group">
-          {activeShot.image_url ? (
+
+        <div className="relative max-h-[70vh] aspect-[9/16] rounded-2xl overflow-hidden shadow-2xl border border-border/80 group bg-black">
+          {previewTab === 'video' ? (
+            activeShot.video_url ? (
+              <video
+                key={activeShot.video_url}
+                src={getMediaUrl(activeShot.video_url)}
+                controls
+                autoPlay
+                loop
+                playsInline
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <div className="w-full h-full min-h-[50vh] min-w-[28vh] bg-surface-secondary flex flex-col items-center justify-center text-gray-400 text-xs space-y-3 p-6 text-center">
+                <Film className="w-10 h-10 text-accent-orange/60" />
+                <span className="font-semibold text-white">当前分镜尚未生成动态视频</span>
+                <span className="text-[11px] text-gray-500">
+                  支持基于首帧图像的 I2V (图生视频) 与多参考图 R2V
+                </span>
+                <button
+                  onClick={handleGenerateVideo}
+                  disabled={isGeneratingVid}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-accent-orange to-brand-glow text-white text-xs font-bold shadow-lg hover:opacity-90 disabled:opacity-40"
+                >
+                  {isGeneratingVid ? '视频生成中...' : '立即生成动态视频'}
+                </button>
+              </div>
+            )
+          ) : activeShot.image_url ? (
             <img
-              src={activeShot.image_url.startsWith('/') ? API_ORIGIN + activeShot.image_url : activeShot.image_url}
+              src={getMediaUrl(activeShot.image_url)}
               alt="Shot Preview"
               className={`w-full h-full object-cover transition-transform duration-1000 ${
                 activeShot.camera_motion === 'push_in' ? 'group-hover:scale-105' : ''
@@ -170,13 +291,13 @@ export const ShotInspector: React.FC = () => {
             />
           ) : (
             <div className="w-full h-full min-h-[50vh] min-w-[28vh] bg-surface-secondary flex flex-col items-center justify-center text-gray-500 text-xs space-y-3 p-4 text-center">
-              <span>{activeShot.status === 'generating_image' ? 'ComfyUI 生成中，请稍候...' : '该分镜暂无画面'}</span>
-              <button onClick={handleRegenerateImage} disabled={isRegenerating} className="px-3 py-1 rounded bg-brand text-white text-xs disabled:opacity-40">点击生成画面</button>
+              <span>{activeShot.status === 'generating_image' ? '画面生成中，请稍候...' : '该分镜暂无首帧画面'}</span>
+              <button onClick={handleRegenerateImage} disabled={isRegenerating} className="px-3 py-1 rounded bg-brand text-white text-xs disabled:opacity-40">点击生成首帧画面</button>
             </div>
           )}
 
           {/* Top Info Pill */}
-          <div className="absolute top-3 left-3 flex items-center space-x-2 bg-black/70 backdrop-blur-md px-2.5 py-1 rounded-lg border border-white/10">
+          <div className="absolute top-3 left-3 flex items-center space-x-2 bg-black/70 backdrop-blur-md px-2.5 py-1 rounded-lg border border-white/10 pointer-events-none">
             <span className="text-[11px] font-bold text-white font-mono">镜头 #{activeShot.shot_index}</span>
             <span className="text-[10px] px-1.5 rounded bg-brand/30 text-brand-light border border-brand/40">
               {activeShot.camera_framing}
@@ -188,7 +309,7 @@ export const ShotInspector: React.FC = () => {
 
           {/* Subtitle / Dialogue Bubble Overlay at bottom */}
           {activeShot.subtitle_text && (
-            <div className="absolute bottom-6 left-4 right-4 bg-black/75 backdrop-blur-md p-3 rounded-xl border border-white/15 text-center shadow-lg animate-fade-in">
+            <div className="absolute bottom-6 left-4 right-4 bg-black/75 backdrop-blur-md p-3 rounded-xl border border-white/15 text-center shadow-lg animate-fade-in pointer-events-none">
               <span className="text-xs font-bold text-white tracking-wide">
                 {activeShot.subtitle_text}
               </span>
@@ -209,7 +330,7 @@ export const ShotInspector: React.FC = () => {
               onClick={handleRegenerateImage}
               disabled={isRegenerating}
               className="p-2 rounded-xl bg-black/70 hover:bg-brand text-white backdrop-blur-md border border-white/10 transition-all shadow-md disabled:opacity-40"
-              title="通过 ComfyUI 真实生成分镜画面"
+              title="重新生成分镜首帧画面"
             >
               <RefreshCw className={`w-4 h-4 text-brand-light ${isRegenerating ? 'animate-spin' : ''}`} />
             </button>
@@ -218,7 +339,7 @@ export const ShotInspector: React.FC = () => {
       </div>
 
       {/* 3. Right Column: Shot Inspector Properties */}
-      <div className="w-80 bg-surface border-l border-border p-4 flex flex-col space-y-4 overflow-y-auto custom-scrollbar">
+      <div className="w-88 bg-surface border-l border-border p-4 flex flex-col space-y-4 overflow-y-auto custom-scrollbar shrink-0 shadow-xl">
         <div className="flex items-center justify-between border-b border-border pb-2">
           <span className="text-xs font-semibold text-white">分镜参数检查器</span>
           <button
@@ -234,7 +355,7 @@ export const ShotInspector: React.FC = () => {
         <div>
           <label className="text-xs text-gray-300 font-medium mb-1.5 block flex items-center justify-between">
             <span>🗣️ 角色台词 / 旁白</span>
-            <span className="text-[10px] text-gray-500">MiniMax Speech-01 (真实)</span>
+            <span className="text-[10px] text-gray-500">MiniMax / 动态TTS</span>
           </label>
           <div className="space-y-2">
             <input
@@ -281,7 +402,7 @@ export const ShotInspector: React.FC = () => {
               <button
                 onClick={handlePlayTTS}
                 className="p-1.5 rounded-lg bg-accent-pink/20 border border-accent-pink/40 hover:bg-accent-pink text-accent-pink hover:text-white transition-all flex items-center space-x-1 text-xs px-2.5"
-                title="调用 MiniMax TTS 真实生成并试听"
+                title="调用 TTS 真实生成并试听"
               >
                 <Volume2 className={`w-3.5 h-3.5 ${isPlayingAudio ? 'animate-bounce' : ''}`} />
                 <span>{isPlayingAudio ? '播放中' : '试听'}</span>
@@ -293,7 +414,7 @@ export const ShotInspector: React.FC = () => {
         {/* 2. Visual Action Description */}
         <div>
           <label className="text-xs text-gray-300 font-medium mb-1.5 block">
-            🎬 画面剧情动作
+            🎬 画面剧情动作描述
           </label>
           <textarea
             value={activeShot.action_desc}
@@ -303,37 +424,147 @@ export const ShotInspector: React.FC = () => {
           />
         </div>
 
-        {/* 3. Image Prompt */}
-        <div>
-          <label className="text-xs text-gray-300 font-medium mb-1.5 block flex items-center justify-between">
-            <span>✨ 生图提示词 (Prompt)</span>
-            <span className="text-[10px] text-accent-green">ComfyUI · 真实</span>
+        {/* 3. Image Prompt (首帧静态生图) */}
+        <div className="p-3 rounded-xl bg-surface-secondary/40 border border-border space-y-2">
+          <label className="text-xs text-gray-300 font-semibold flex items-center justify-between">
+            <span className="flex items-center space-x-1">
+              <ImageIcon className="w-3.5 h-3.5 text-accent-green" />
+              <span>首帧提示词 (Image Prompt)</span>
+            </span>
+            <span className="text-[10px] text-accent-green">多Provider生图</span>
           </label>
           <textarea
             value={activeShot.image_prompt}
             onChange={(e) => updateShot(activeShot.id, { image_prompt: e.target.value })}
-            rows={3}
-            className="w-full bg-surface-secondary border border-border rounded-xl p-2.5 text-xs font-mono text-gray-300 placeholder-gray-500 focus:outline-none focus:border-brand"
+            rows={2}
+            className="w-full bg-surface-secondary border border-border rounded-xl p-2 text-xs font-mono text-gray-300 placeholder-gray-500 focus:outline-none focus:border-brand"
           />
-          <button onClick={handleRegenerateImage} disabled={isRegenerating} className="mt-1 w-full py-1.5 rounded-lg bg-brand text-white text-xs font-semibold disabled:opacity-40">
-            {isRegenerating ? 'ComfyUI 生成中...' : '用 ComfyUI 生成/重绘画面'}
+          <button
+            onClick={handleRegenerateImage}
+            disabled={isRegenerating}
+            className="w-full py-1.5 rounded-lg bg-brand hover:opacity-90 text-white text-xs font-semibold disabled:opacity-40 transition-all shadow-md"
+          >
+            {isRegenerating ? '生成首帧画面中...' : '生成 / 重绘首帧画面'}
           </button>
         </div>
 
-        {/* 4. Shot Duration */}
-        <div>
-          <label className="text-xs text-gray-300 font-medium mb-1.5 block flex items-center justify-between">
-            <span>⏱️ 镜头时长: {activeShot.duration} 秒</span>
-          </label>
-          <input
-            type="range"
-            min="1.5"
-            max="10.0"
-            step="0.5"
-            value={activeShot.duration}
-            onChange={(e) => updateShot(activeShot.id, { duration: parseFloat(e.target.value) })}
-            className="w-full"
-          />
+        {/* 4. Video Prompt & Generation (图生视频 / 参考生视频) */}
+        <div className="p-3 rounded-xl bg-accent-orange/5 border border-accent-orange/30 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-accent-orange flex items-center space-x-1">
+              <Film className="w-4 h-4" />
+              <span>动态视频生成 (I2V / R2V)</span>
+            </span>
+            <span className="text-[10px] bg-accent-orange/20 text-accent-orange px-2 py-0.5 rounded-full font-mono">
+              {videoMode.toUpperCase()}
+            </span>
+          </div>
+
+          {/* Mode Switcher */}
+          <div className="grid grid-cols-3 gap-1.5">
+            {[
+              { id: 'i2v', label: '图生视频', desc: '首帧驱动' },
+              { id: 'r2v', label: '参考生视频', desc: '强一致性' },
+              { id: 't2v', label: '文生视频', desc: '自由生成' },
+            ].map((m) => (
+              <button
+                key={m.id}
+                onClick={() => setVideoMode(m.id as any)}
+                className={`p-1.5 rounded-lg text-center border transition-all ${
+                  videoMode === m.id
+                    ? 'bg-accent-orange/20 border-accent-orange text-white font-bold'
+                    : 'bg-surface-secondary border-border text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                <div className="text-[11px]">{m.label}</div>
+                <div className="text-[8px] text-gray-500">{m.desc}</div>
+              </button>
+            ))}
+          </div>
+
+          {/* Provider Selection */}
+          <div className="flex items-center space-x-2">
+            <span className="text-[11px] text-gray-400 shrink-0">通道:</span>
+            <select
+              value={videoProvider}
+              onChange={(e) => setVideoProvider(e.target.value)}
+              className="w-full bg-surface-secondary border border-border rounded-lg px-2 py-1 text-xs text-brand-light focus:outline-none focus:border-brand"
+            >
+              <option value="comfyui_video">ComfyUI 本地 (SVD / AnimateDiff / Mock)</option>
+              <option value="minimax_video">MiniMax H3 / 云端视频模型</option>
+            </select>
+          </div>
+
+          {/* Video Prompt Textarea */}
+          <div>
+            <label className="text-[11px] text-gray-300 font-medium mb-1 block">
+              🚀 运镜与运动描述 (Motion Prompt)
+            </label>
+            <textarea
+              value={activeShot.video_prompt || ''}
+              onChange={(e) => updateShot(activeShot.id, { video_prompt: e.target.value })}
+              placeholder="描述镜头运动与主体动态（例如：镜头急速拉近，角色眼神发光，发丝随风飘扬...）"
+              rows={2}
+              className="w-full bg-surface-secondary border border-border rounded-xl p-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-accent-orange"
+            />
+          </div>
+
+          {/* Preset Chips */}
+          <div className="space-y-1">
+            <span className="text-[10px] text-gray-500">常用运镜预设:</span>
+            <div className="grid grid-cols-2 gap-1">
+              {videoMotionPresets.map((preset, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => updateShot(activeShot.id, { video_prompt: preset.prompt })}
+                  className="text-left text-[10px] p-1.5 rounded bg-surface-secondary/80 border border-border hover:border-accent-orange text-gray-300 truncate"
+                  title={preset.prompt}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Video Duration */}
+          <div>
+            <div className="flex items-center justify-between text-[11px] text-gray-300 mb-1">
+              <span>视频生成时长:</span>
+              <span className="font-mono text-accent-orange font-bold">{Math.round(activeShot.duration)} 秒</span>
+            </div>
+            <input
+              type="range"
+              min="3"
+              max="10"
+              step="1"
+              value={Math.round(activeShot.duration)}
+              onChange={(e) => updateShot(activeShot.id, { duration: parseFloat(e.target.value) })}
+              className="w-full accent-accent-orange"
+            />
+          </div>
+
+          {/* Generate Video Action Button */}
+          <button
+            onClick={handleGenerateVideo}
+            disabled={isGeneratingVid}
+            className={`w-full py-2.5 rounded-xl text-xs font-bold flex items-center justify-center space-x-2 transition-all shadow-lg ${
+              videoSuccess
+                ? 'bg-accent-green text-white shadow-accent-green/30'
+                : 'bg-gradient-to-r from-accent-orange to-brand-glow hover:opacity-95 text-white shadow-accent-orange/30 disabled:opacity-40'
+            }`}
+          >
+            {videoSuccess ? (
+              <>
+                <CheckCircle2 className="w-4 h-4" />
+                <span>动态视频生成成功！</span>
+              </>
+            ) : (
+              <>
+                <Film className={`w-4 h-4 ${isGeneratingVid ? 'animate-spin' : ''}`} />
+                <span>{isGeneratingVid ? '正在生成动态视频...' : '🚀 生成当前分镜动态视频'}</span>
+              </>
+            )}
+          </button>
         </div>
       </div>
     </div>

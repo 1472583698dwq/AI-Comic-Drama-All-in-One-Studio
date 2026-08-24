@@ -56,7 +56,7 @@ def is_api_format_workflow(data: Dict[str, Any]) -> Tuple[bool, str]:
     if not isinstance(data, dict) or not data:
         return False, "工作流为空或非对象"
     if "nodes" in data or "links" in data or "groups" in data:
-        return False, "检测到 Save Format（包含 nodes/links），请在ComfyUI中用 File→Export (API Format) 重新导出"
+        return False, "检测到 Save Format（包含 nodes/links），将自动转换为 API Format"
     for key, val in data.items():
         if not isinstance(val, dict):
             return False, f"节点 {key} 格式错误，期望对象"
@@ -65,6 +65,266 @@ def is_api_format_workflow(data: Dict[str, Any]) -> Tuple[bool, str]:
         if not isinstance(val["inputs"], dict):
             return False, f"节点 {key}.inputs 非对象"
     return True, "ok"
+
+
+def is_save_format_workflow(data: Dict[str, Any]) -> bool:
+    return isinstance(data, dict) and "nodes" in data and isinstance(data["nodes"], list)
+
+
+_OBJECT_INFO_CACHE: Optional[Dict[str, Any]] = None
+_OBJECT_INFO_CACHE_TS: float = 0
+
+
+def _fetch_object_info(timeout: float = 3.0) -> Optional[Dict[str, Any]]:
+    global _OBJECT_INFO_CACHE, _OBJECT_INFO_CACHE_TS
+    if _OBJECT_INFO_CACHE is not None and time.time() - _OBJECT_INFO_CACHE_TS < 300:
+        return _OBJECT_INFO_CACHE
+    url = (getattr(settings, "COMFYUI_SERVER_URL", "") or "http://127.0.0.1:8188").rstrip("/")
+    try:
+        import httpx
+        with httpx.Client(timeout=timeout) as c:
+            r = c.get(f"{url}/object_info")
+            if r.status_code == 200:
+                _OBJECT_INFO_CACHE = r.json()
+                _OBJECT_INFO_CACHE_TS = time.time()
+                return _OBJECT_INFO_CACHE
+    except Exception:
+        pass
+    return None
+
+
+COMMON_WIDGET_ORDER: Dict[str, List[str]] = {
+    "CheckpointLoaderSimple": ["ckpt_name"],
+    "CheckpointLoader": ["ckpt_name"],
+    "LoraLoader": ["lora_name", "strength_model", "strength_clip"],
+    "LoraLoaderModelOnly": ["lora_name", "strength_model"],
+    "CLIPTextEncode": ["text"],
+    "CLIPTextEncodeSDXL": ["width", "height", "crop_w", "crop_h", "target_width", "target_height", "text_g", "text_l"],
+    "CLIPTextEncodeFlux": ["clip_l", "t5xxl", "guidance"],
+    "EmptyLatentImage": ["width", "height", "batch_size"],
+    "KSampler": ["seed", "control_after_generate", "steps", "cfg", "sampler_name", "scheduler", "denoise"],
+    "KSamplerAdvanced": ["add_noise", "noise_seed", "control_after_generate", "steps", "cfg", "sampler_name", "scheduler", "start_at_step", "end_at_step", "return_with_leftover_noise"],
+    "VAEDecode": [],
+    "VAEEncode": [],
+    "SaveImage": ["filename_prefix"],
+    "PreviewImage": ["filename_prefix"],
+    "LoadImage": ["image", "upload"],
+    "UNETLoader": ["unet_name", "weight_dtype"],
+    "VAELoader": ["vae_name"],
+    "CLIPLoader": ["clip_name", "type"],
+    "ControlNetLoader": ["control_net_name"],
+    "IPAdapterModelLoader": ["ipadapter_file"],
+    "FluxGuidance": ["guidance", "conditioning"],
+}
+
+
+def _widget_names_for_type(node_type: str, object_info: Optional[Dict[str, Any]]) -> List[str]:
+    if object_info and node_type in object_info:
+        try:
+            info = object_info[node_type]
+            inp = info.get("input", {})
+            names: List[str] = []
+            for section in ("required", "optional"):
+                if section in inp:
+                    for k, spec in inp[section].items():
+                        if not isinstance(spec, (list, tuple)) or len(spec) == 0:
+                            continue
+                        t = spec[0]
+                        # widget if combo list or primitive string type
+                        if isinstance(t, list):
+                            names.append(k)
+                        elif isinstance(t, str) and t in ("INT", "FLOAT", "STRING", "BOOLEAN", "COMBO"):
+                            names.append(k)
+                        elif isinstance(t, str) and t.startswith("COMFY_"):
+                            names.append(k)
+                        elif isinstance(t, str) and not t.isupper():
+                            names.append(k)
+            if names:
+                return names
+        except Exception:
+            pass
+    return COMMON_WIDGET_ORDER.get(node_type, [])
+
+
+def convert_save_format_to_api_format(data: Dict[str, Any], object_info: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    if not is_save_format_workflow(data):
+        raise ValueError("非 Save Format，无法转换")
+    if object_info is None:
+        object_info = _fetch_object_info()
+
+    nodes: List[Dict[str, Any]] = data.get("nodes", [])
+    links: List[List[Any]] = data.get("links", []) or []
+
+    link_map: Dict[int, Tuple[Any, Any, Any, Any]] = {}
+    for lk in links:
+        if isinstance(lk, (list, tuple)) and len(lk) >= 5:
+            lid, src_id, src_slot, dst_id, dst_slot = lk[0], lk[1], lk[2], lk[3], lk[4]
+            link_map[lid] = (src_id, src_slot, dst_id, dst_slot)
+
+    # Collect primitive values and reroute passthrough
+    primitive_values: Dict[str, Any] = {}
+    reroute_map: Dict[str, Tuple[Any, Any]] = {}
+    node_by_id: Dict[str, Dict[str, Any]] = {}
+    for n in nodes:
+        nid = str(n.get("id"))
+        node_by_id[nid] = n
+        if n.get("type") == "PrimitiveNode":
+            wv = n.get("widgets_values") or []
+            if isinstance(wv, list) and wv:
+                primitive_values[nid] = wv[0]
+            elif isinstance(wv, dict) and wv:
+                primitive_values[nid] = next(iter(wv.values()))
+        if n.get("type") == "Reroute":
+            # find its single input link
+            for inp in (n.get("inputs") or []):
+                lk = inp.get("link")
+                if lk is not None and lk in link_map:
+                    src_id, src_slot, _, _ = link_map[lk]
+                    reroute_map[nid] = (str(src_id), src_slot)
+                    break
+
+    def resolve_reroute(src_id: str, src_slot: Any, depth: int = 0) -> Tuple[str, Any]:
+        if depth > 20:
+            return src_id, src_slot
+        if src_id in reroute_map:
+            inner_src, inner_slot = reroute_map[src_id]
+            return resolve_reroute(inner_src, inner_slot, depth + 1)
+        return src_id, src_slot
+
+    def resolve_primitive(src_id: str, src_slot: Any) -> Tuple[Optional[str], Optional[Any], Optional[Any]]:
+        # returns (resolved_id, resolved_slot, primitive_value_or_None)
+        if src_id in primitive_values:
+            return None, None, primitive_values[src_id]
+        return src_id, src_slot, None
+
+    api: Dict[str, Any] = {}
+
+    for n in nodes:
+        nid = str(n.get("id"))
+        ntype = n.get("type")
+        if not ntype or ntype in ("Note", "Reroute", "PrimitiveNode"):
+            continue
+        mode = n.get("mode", 0)
+        if mode in (2, 4):
+            continue
+
+        widgets_values = n.get("widgets_values") or []
+        if isinstance(widgets_values, dict):
+            widgets_values = list(widgets_values.values())
+        if not isinstance(widgets_values, list):
+            widgets_values = []
+
+        # Filter control_after_generate values that may be paired
+        # Keep as-is for mapping; object_info will handle ordering
+
+        # Build linked inputs
+        linked: Dict[str, Any] = {}
+        for inp in (n.get("inputs") or []):
+            lk = inp.get("link")
+            if lk is None:
+                continue
+            if lk not in link_map:
+                continue
+            src_id, src_slot, dst_id, dst_slot = link_map[lk]
+            src_id_str = str(src_id)
+            src_id_str, src_slot = resolve_reroute(src_id_str, src_slot)
+            # Primitive inline
+            _, _, prim_val = resolve_primitive(src_id_str, src_slot)
+            if prim_val is not None:
+                # Inline primitive value as widget-like
+                # We'll treat as widget; need name to place
+                # Defer: store as linked with primitive flag
+                linked[inp.get("name")] = prim_val
+                continue
+            linked[inp.get("name")] = [src_id_str, int(src_slot) if isinstance(src_slot, int) else src_slot]
+
+        # Determine widget names order
+        widget_names = _widget_names_for_type(ntype, object_info)
+        # If we have widget_names, assign widgets_values sequentially to those names not already linked
+        # For nodes without known order, fallback to node inputs with widget=True or remaining
+        inputs: Dict[str, Any] = {}
+        # first, linked
+        for k, v in linked.items():
+            if isinstance(v, list):
+                inputs[k] = v
+            else:
+                inputs[k] = v
+
+        # Assign widgets_values
+        if widget_names:
+            # Control values filtering: remove control_after_generate strings that are paired
+            filtered = []
+            for v in widgets_values:
+                if v in ("fixed", "increment", "decrement", "randomize"):
+                    continue
+                filtered.append(v)
+            # Map filtered values to widget_names that are not yet in inputs
+            pending = [w for w in widget_names if w not in inputs]
+            for idx, val in enumerate(filtered):
+                if idx < len(pending):
+                    wname = pending[idx]
+                    if wname not in inputs:
+                        inputs[wname] = val
+                else:
+                    break
+            # Any remaining widgets_values as dict entries with list/dict values (e.g., lora blocks)
+            # Keep extra dict lora entries
+            for val in widgets_values:
+                if isinstance(val, dict) and val:
+                    # find next pending lora slot
+                    for p in pending:
+                        if p.startswith("lora_") and p not in inputs:
+                            inputs[p] = val
+                            break
+        else:
+            # Fallback heuristic: remaining inputs not linked are widget slots; assign by order
+            node_input_names = [inp.get("name") for inp in (n.get("inputs") or []) if inp.get("name")]
+            # widget_inputs = those not in linked keys
+            unlinked = [nm for nm in node_input_names if nm not in inputs]
+            # For widget_values, try to assign to unlinked names if count matches, else create generic?
+            for idx, val in enumerate(widgets_values):
+                if isinstance(val, dict):
+                    continue
+                if val in ("fixed", "increment", "decrement", "randomize"):
+                    continue
+                if idx < len(unlinked):
+                    inputs[unlinked[idx]] = val
+
+        # Fill defaults for missing required combo/widget defaults if object_info available
+        if object_info and ntype in object_info:
+            try:
+                info = object_info[ntype]
+                for section in ("required", "optional"):
+                    if section not in info.get("input", {}):
+                        continue
+                    for k, spec in info["input"][section].items():
+                        if k in inputs or k in linked:
+                            continue
+                        if isinstance(spec, (list, tuple)) and len(spec) >= 2 and isinstance(spec[1], dict) and "default" in spec[1]:
+                            inputs[k] = spec[1]["default"]
+                        elif isinstance(spec, (list, tuple)) and isinstance(spec[0], list) and spec[0]:
+                            inputs[k] = spec[0][0]
+            except Exception:
+                pass
+
+        api[nid] = {"class_type": ntype, "inputs": inputs}
+        # preserve title
+        title = n.get("title") or n.get("properties", {}).get("Node name for S&R") or ntype
+        api[nid]["_meta"] = {"title": title}
+
+    if not api:
+        raise ValueError("转换后无有效节点，请确认工作流包含可执行节点")
+    return api
+
+
+def ensure_api_format(data: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
+    ok, _ = is_api_format_workflow(data)
+    if ok:
+        return data, False
+    if is_save_format_workflow(data):
+        converted = convert_save_format_to_api_format(data)
+        return converted, True
+    raise ValueError("无法识别的工作流格式")
 
 def _meta_path(workflow_id: str) -> str:
     return os.path.join(WORKFLOWS_DIR, f"{workflow_id}.meta.json")
@@ -172,7 +432,6 @@ class ComfyWorkflowManager:
         if not ext_dir or not os.path.exists(ext_dir):
             return []
         result = []
-        # 递归扫描，支持子目录
         for root, _, files in os.walk(ext_dir):
             for fname in files:
                 if not fname.lower().endswith(".json"):
@@ -209,9 +468,39 @@ class ComfyWorkflowManager:
                         "node_count": len(data),
                         "created_at": os.path.getmtime(fpath),
                         "warnings": [],
+                        "auto_converted": False,
                     })
+                elif is_save_format_workflow(data):
+                    try:
+                        converted = convert_save_format_to_api_format(data)
+                        analysis = analyze_workflow(converted)
+                        result.append({
+                            "id": _external_id_for_path(fpath),
+                            "name": os.path.splitext(fname)[0],
+                            "file_path": fpath,
+                            "relative_path": rel,
+                            "source": "external",
+                            "is_api_format": True,
+                            "analysis": analysis,
+                            "mapping": auto_generate_mapping(analysis),
+                            "node_count": len(converted),
+                            "created_at": os.path.getmtime(fpath),
+                            "warnings": [],
+                            "auto_converted": True,
+                        })
+                    except Exception as ce:
+                        result.append({
+                            "id": _external_id_for_path(fpath),
+                            "name": os.path.splitext(fname)[0],
+                            "file_path": fpath,
+                            "relative_path": rel,
+                            "source": "external",
+                            "is_api_format": False,
+                            "error": f"自动转换失败: {ce}",
+                            "node_count": 0,
+                            "hint": "请在ComfyUI中打开后 File→Export (API Format) 另存为API格式",
+                        })
                 else:
-                    # Save Format 或其他，标记不可直接执行
                     result.append({
                         "id": _external_id_for_path(fpath),
                         "name": os.path.splitext(fname)[0],
@@ -221,7 +510,7 @@ class ComfyWorkflowManager:
                         "is_api_format": False,
                         "error": msg,
                         "node_count": 0,
-                        "hint": "请在ComfyUI中打开后 File→Export (API Format) 另存为API格式",
+                        "hint": "不支持的工作流格式",
                     })
         return result
 
@@ -242,12 +531,10 @@ class ComfyWorkflowManager:
         return _get_external_workflows_dir()
 
     def get_workflow(self, workflow_id: str) -> Optional[Dict[str, Any]]:
-        # 先查内部
         path = _json_path(workflow_id)
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
-        # 再查外部（通过id反查路径）
         if workflow_id.startswith("ext_"):
             for wf_meta in self.list_external_workflows():
                 if wf_meta["id"] == workflow_id:
@@ -259,6 +546,11 @@ class ComfyWorkflowManager:
                             ok, _ = is_api_format_workflow(data)
                             if ok:
                                 return data
+                            if is_save_format_workflow(data):
+                                try:
+                                    return convert_save_format_to_api_format(data)
+                                except Exception:
+                                    return None
                         except Exception:
                             return None
         return None
@@ -277,7 +569,6 @@ class ComfyWorkflowManager:
         return None
 
     def get_workflow_with_meta(self, workflow_id: str) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
-        """同时返回 workflow 和 meta，兼容外部直接读取"""
         if workflow_id.startswith("ext_"):
             for wf_meta in self.list_external_workflows():
                 if wf_meta["id"] == workflow_id:
@@ -287,19 +578,32 @@ class ComfyWorkflowManager:
                     try:
                         with open(fpath, "r", encoding="utf-8") as f:
                             data = json.load(f)
+                        ok, _ = is_api_format_workflow(data)
+                        if not ok and is_save_format_workflow(data):
+                            try:
+                                data = convert_save_format_to_api_format(data)
+                            except Exception:
+                                return data, wf_meta
                         return data, wf_meta
                     except Exception:
                         return None, None
             return None, None
-        # 内部
         wf = self.get_workflow(workflow_id)
         meta = self.get_meta(workflow_id)
         return wf, meta
 
     def save_workflow(self, name: str, workflow_json: Dict[str, Any], mapping: Optional[Dict[str, str]] = None, description: str = "") -> Dict[str, Any]:
-        ok, msg = is_api_format_workflow(workflow_json)
-        if not ok:
-            raise ValueError(msg)
+        converted = False
+        if is_save_format_workflow(workflow_json):
+            try:
+                workflow_json = convert_save_format_to_api_format(workflow_json)
+                converted = True
+            except Exception as ce:
+                raise ValueError(f"Save Format 自动转换失败: {ce}，请在 ComfyUI 中用 File→Export (API Format) 重新导出")
+        else:
+            ok, msg = is_api_format_workflow(workflow_json)
+            if not ok:
+                raise ValueError(msg)
         warnings = []
         for nid, node in workflow_json.items():
             ct = node.get("class_type", "")
@@ -318,6 +622,8 @@ class ComfyWorkflowManager:
             if nid not in workflow_json:
                 mapping.pop(k)
                 warnings.append(f"映射 {k}->{nid} 节点不存在已移除")
+        if converted:
+            warnings.insert(0, "已自动将 Save Format 转换为 API Format")
         meta = {
             "id": workflow_id,
             "name": name,
@@ -329,6 +635,7 @@ class ComfyWorkflowManager:
             "node_count": len(workflow_json),
             "warnings": warnings,
             "source": "internal",
+            "auto_converted": converted,
         }
         with open(_meta_path(workflow_id), "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)

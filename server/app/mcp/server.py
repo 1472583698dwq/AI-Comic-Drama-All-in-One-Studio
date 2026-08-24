@@ -67,6 +67,16 @@ def _lazy_audio_registry():
             pass
     return audio_registry
 
+def _lazy_video_registry():
+    from app.providers.video.registry import video_registry
+    from app.providers.init_providers import init_all_providers
+    if not video_registry.list_ids():
+        try:
+            init_all_providers()
+        except Exception:
+            pass
+    return video_registry
+
 def _lazy_workflow_manager():
     from app.providers.workflow.manager import workflow_manager
     return workflow_manager
@@ -139,6 +149,21 @@ class MCPServerRegistry:
         async def list_voice_providers() -> dict:
             """列出所有音频Providers"""
             reg = _lazy_audio_registry()
+            return {"providers": reg.list_providers()}
+
+        @mcp_app.tool
+        async def generate_video(prompt: str, mode: str = "i2v", first_frame_url: str = "", reference_images: list = None, duration: int = 5, provider: str = "") -> dict:
+            """通用视频生成（图生视频/参考生视频/文生视频）"""
+            from app.providers.video.base import VideoGenerateRequest
+            reg = _lazy_video_registry()
+            req = VideoGenerateRequest(prompt=prompt, mode=mode, first_frame_url=first_frame_url or None, reference_images=reference_images, duration=duration, provider=provider or None)
+            res = await reg.generate(req, provider_id=provider or None)
+            return {"video_url": res.video_url, "duration": res.duration, "provider": res.provider, "engine": res.engine, "task_id": res.task_id}
+
+        @mcp_app.tool
+        async def list_video_providers() -> dict:
+            """列出所有视频Providers"""
+            reg = _lazy_video_registry()
             return {"providers": reg.list_providers()}
 
         @mcp_app.tool
@@ -294,6 +319,39 @@ class MCPServerRegistry:
             description="[查询] 列出所有已注册的音频Providers及其能力，供Agent选择配音通道。",
             category="utility",
             icon="ListMusic",
+            author="System",
+            is_enabled=True,
+            input_schema={"type": "object", "properties": {}, "required": []}
+        ))
+
+        # 7.1 通用视频生成 (I2V / R2V / T2V)
+        self.register_tool(MCPToolDefinition(
+            name="generate_video",
+            description="[通用视频] 动态选择视频Provider生成动态漫剧分镜视频。支持mode=i2v(图生视频)/r2v(参考生视频)/t2v(文生视频)，支持provider=comfyui_video/minimax_video/kling。",
+            category="ai_generation",
+            icon="Film",
+            author="Dynamic Video Registry",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "视频运动/运镜描述（如：镜头急速推近，角色长发飞扬，霸气怒吼）"},
+                    "mode": {"type": "string", "enum": ["i2v", "r2v", "t2v"], "default": "i2v", "description": "i2v: 图生视频; r2v: 参考生视频; t2v: 文生视频"},
+                    "first_frame_url": {"type": "string", "description": "首帧图像 URL (i2v 必选)"},
+                    "reference_images": {"type": "array", "items": {"type": "string"}, "description": "参考图 URL 列表 (r2v 模式)"},
+                    "duration": {"type": "integer", "default": 5, "description": "视频时长秒数 3-10"},
+                    "provider": {"type": "string", "enum": ["comfyui_video", "minimax_video", "kling"], "description": "指定Provider，不填则使用系统默认 VIDEO_PROVIDER"}
+                },
+                "required": ["prompt"]
+            }
+        ))
+
+        # 7.2 列出视频Providers
+        self.register_tool(MCPToolDefinition(
+            name="list_video_providers",
+            description="[查询] 列出所有已注册的视频生成Providers及其能力与健康状态。",
+            category="utility",
+            icon="Video",
             author="System",
             is_enabled=True,
             input_schema={"type": "object", "properties": {}, "required": []}
@@ -500,6 +558,40 @@ class MCPServerRegistry:
 
             elif tool_name == "list_voice_providers":
                 reg = _lazy_audio_registry()
+                providers = reg.list_providers()
+                health = await reg.check_health_all()
+                for p in providers:
+                    h = health.get(p["id"], {})
+                    p["health"] = h
+                result = {"providers": providers}
+
+            elif tool_name == "generate_video":
+                from app.providers.video.base import VideoGenerateRequest
+                reg = _lazy_video_registry()
+                provider = arguments.get("provider")
+                req = VideoGenerateRequest(
+                    prompt=arguments.get("prompt", ""),
+                    mode=arguments.get("mode", "i2v"),
+                    first_frame_url=arguments.get("first_frame_url"),
+                    reference_images=arguments.get("reference_images"),
+                    duration=int(arguments.get("duration", 5)),
+                    provider=provider,
+                )
+                if not req.prompt or not req.prompt.strip():
+                    raise ValueError("视频运动提示词 prompt 不能为空")
+                vid_res = await reg.generate(req, provider_id=provider)
+                result = {
+                    "video_url": vid_res.video_url,
+                    "local_path": vid_res.local_path,
+                    "provider": vid_res.provider,
+                    "engine": vid_res.engine,
+                    "duration": vid_res.duration,
+                    "elapsed_ms": vid_res.elapsed_ms,
+                    "task_id": vid_res.task_id,
+                }
+
+            elif tool_name == "list_video_providers":
+                reg = _lazy_video_registry()
                 providers = reg.list_providers()
                 health = await reg.check_health_all()
                 for p in providers:

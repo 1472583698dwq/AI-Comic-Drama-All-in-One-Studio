@@ -25,6 +25,7 @@ interface ProjectState {
 
   // Script & Generation
   importNovelScript: (text: string, style?: StylePreset, ratio?: AspectRatio) => Promise<void>;
+  generateShotVideo: (shotId: string, options?: { mode?: 'i2v' | 'r2v' | 't2v'; prompt?: string; duration?: number; provider?: string }) => Promise<void>;
   updateShot: (shotId: string, updates: Partial<StoryboardShot>) => void;
   updateCharacter: (charId: string, updates: Partial<Character>) => void;
   addShot: (sceneIndex: number, afterShotId?: string) => void;
@@ -81,6 +82,41 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     const total = newScenes.flatMap((s) => s.shots).reduce((sum, sh) => sum + sh.duration, 0);
     set({ project: { ...proj, scenes: newScenes }, totalDuration: total });
+  },
+
+  generateShotVideo: async (shotId: string, options) => {
+    const proj = get().project;
+    if (!proj) return;
+    const shot = proj.scenes.flatMap((s) => s.shots).find((s) => s.id === shotId);
+    if (!shot) return;
+
+    get().updateShot(shotId, { status: 'generating_video' });
+    try {
+      const mode = options?.mode || (shot.image_url ? 'i2v' : 't2v');
+      const prompt = options?.prompt || shot.video_prompt || shot.action_desc || shot.image_prompt || 'Cinematic dramatic dynamic anime video';
+      const duration = options?.duration || Math.round(shot.duration) || 5;
+
+      const res = await apiService.generateShotVideo({
+        prompt,
+        mode,
+        first_frame_url: shot.image_url || undefined,
+        reference_images: shot.image_url ? [shot.image_url] : undefined,
+        duration,
+        aspect_ratio: proj.aspect_ratio || '9:16',
+        provider: options?.provider,
+        shot_id: shotId,
+      });
+
+      get().updateShot(shotId, {
+        video_url: res.video_url,
+        video_prompt: prompt,
+        duration: res.duration || shot.duration,
+        status: 'completed',
+      });
+    } catch (e: any) {
+      get().updateShot(shotId, { status: 'error' });
+      throw e;
+    }
   },
 
   updateCharacter: (charId, updates) => {

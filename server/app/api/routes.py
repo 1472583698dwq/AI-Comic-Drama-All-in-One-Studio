@@ -7,6 +7,7 @@ from fastapi.concurrency import run_in_threadpool
 from app.models.schemas import (
     Project, ScriptParseRequest, TTSGenerateRequest,
     ImageGenerateRequest, Character3ViewsRequest, PipelineRunRequest,
+    VideoGenerateRequestPayload,
     MCPToolDefinition, MCPToolCallRequest, MCPToolCallResponse
 )
 from app.pipelines.script_agent import script_agent
@@ -40,6 +41,16 @@ def get_audio_registry():
         except Exception:
             pass
     return audio_registry
+
+def get_video_registry():
+    from app.providers.video.registry import video_registry
+    if not video_registry.list_ids():
+        from app.providers.init_providers import init_all_providers
+        try:
+            init_all_providers()
+        except Exception:
+            pass
+    return video_registry
 
 def get_workflow_manager():
     from app.providers.workflow.manager import workflow_manager
@@ -415,6 +426,69 @@ async def update_workflow_mapping(workflow_id: str, body: Dict[str, Any]):
         raise HTTPException(status_code=400, detail=str(e))
 
 # ============================================================
+# 动态视频生成 (I2V 图生视频 / R2V 参考生视频 / T2V 文生视频)
+# ============================================================
+
+@router.get("/videos/providers")
+async def list_video_providers():
+    """获取所有已注册的视频 Provider 列表及其特性 (I2V/R2V/T2V)"""
+    reg = get_video_registry()
+    return reg.list_providers()
+
+@router.get("/videos/health")
+async def check_videos_health():
+    """检查视频生成服务可用性与配置状态"""
+    reg = get_video_registry()
+    return await reg.check_health_all()
+
+@router.get("/videos/status/{task_id}")
+async def get_video_task_status(task_id: str):
+    """查询异步视频生成任务状态"""
+    from app.providers.video.minimax_video import CloudVideoProvider
+    return CloudVideoProvider.get_task_status(task_id)
+
+@router.post("/videos/generate")
+async def generate_video(req: VideoGenerateRequestPayload):
+    """[动态视频生成] 支持图生视频(i2v) / 参考生视频(r2v) / 文生视频(t2v)"""
+    try:
+        from app.providers.video.base import VideoGenerateRequest as VidReq
+        reg = get_video_registry()
+        vid_req = VidReq(
+            prompt=req.prompt,
+            mode=req.mode or "i2v",
+            first_frame_url=req.first_frame_url,
+            last_frame_url=req.last_frame_url,
+            reference_images=req.reference_images,
+            reference_videos=req.reference_videos,
+            duration=req.duration or 5,
+            resolution=req.resolution or "720p",
+            aspect_ratio=req.aspect_ratio or "9:16",
+            seed=req.seed,
+            provider=req.provider,
+            workflow_id=req.workflow_id,
+        )
+        res = await reg.generate(vid_req, provider_id=req.provider)
+        return {
+            "video_url": res.video_url,
+            "local_path": res.local_path,
+            "provider": res.provider,
+            "engine": res.engine,
+            "duration": res.duration,
+            "elapsed_ms": res.elapsed_ms,
+            "task_id": res.task_id,
+            "first_frame_url": res.first_frame_url,
+            "shot_id": req.shot_id,
+        }
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        msg = str(e)
+        status = 503 if any(x in msg for x in ["无法连接", "未配置", "ComfyUI", "MiniMax", "Kling"]) else 500
+        raise HTTPException(status_code=status, detail=msg)
+
+# ============================================================
 # MCP 统一协议
 # ============================================================
 
@@ -658,18 +732,23 @@ def _is_masked_placeholder(v: str) -> bool:
     return "****" in v
 
 @router.get("/config")
-async def get_config():
-    """返回当前生效配置（API Key 已脱敏）。"""
-    masked = settings.to_public_dict(masked=True)
-    raw = read_env_file()
-    from app.core.config import ENV_FILE as _ENV
+async def get_config(unmask: bool = True):
+    """返回当前生效配置。本地桌面端默认提供明文供用户编辑查看，可通过 unmask=false 脱敏。"""
+    from app.core.config import get_primary_env_file, JSON_CONFIG_FILE
+    primary_env = get_primary_env_file()
+    raw_configs = read_env_file(unmask=True)
+    masked_configs = read_env_file(unmask=False)
+
     return {
-        "config": masked,
-        "has_env_file": _ENV.exists(),
-        "env_file": str(_ENV),
+        "config": raw_configs if unmask else masked_configs,
+        "masked_config": masked_configs,
+        "has_env_file": primary_env.exists(),
+        "env_file": str(primary_env),
+        "json_backup_file": str(JSON_CONFIG_FILE),
         "checks": {
             "minimax_configured": bool(settings.MINIMAX_API_KEY),
             "openai_configured": bool(settings.OPENAI_API_KEY),
+            "responses_configured": bool(settings.RESPONSES_API_KEY or settings.OPENAI_API_KEY),
             "comfyui_url": settings.COMFYUI_SERVER_URL,
             "siliconflow_configured": bool(settings.SILICONFLOW_API_KEY),
             "dashscope_configured": bool(settings.DASHSCOPE_API_KEY),
@@ -680,18 +759,21 @@ async def get_config():
 
 @router.put("/config")
 async def save_config(req: ConfigUpdateRequest):
-    """保存配置到 .env 并热重载。前端传回的脱敏值（****）会被忽略。"""
-    raw = read_env_file()
+    """保存配置到 .env 及 storage/config_store.json 并热重载。"""
+    raw_existing = read_env_file(unmask=True)
     updates: Dict[str, str] = {}
     incoming = req.model_dump(exclude_unset=False)
+
     for k in MANAGED_KEYS:
         new_val = incoming.get(k)
         if new_val is None:
             continue
-        new_val_str = str(new_val)
+        new_val_str = str(new_val).strip()
+        # 若传入脱敏占位符则保留已有真实密钥
         if (k.endswith("_API_KEY") or k == "MINIMAX_API_KEY") and _is_masked_placeholder(new_val_str):
-            continue  # keep existing key
-        updates[k] = new_val_str
+            updates[k] = raw_existing.get(k, "")
+        else:
+            updates[k] = new_val_str
 
     if "COMFYUI_TIMEOUT_SECONDS" in updates and updates["COMFYUI_TIMEOUT_SECONDS"]:
         try:
@@ -700,7 +782,12 @@ async def save_config(req: ConfigUpdateRequest):
             raise HTTPException(status_code=400, detail="COMFYUI_TIMEOUT_SECONDS 必须为整数")
 
     write_env_file(updates)
-    return {"status": "saved", "config": settings.to_public_dict(masked=True)}
+    return {
+        "status": "saved",
+        "message": "配置已成功持久化至 .env 和 storage/config_store.json",
+        "config": read_env_file(unmask=True),
+        "env_file": str(get_primary_env_file()),
+    }
 
 @router.post("/config/test")
 async def test_config_connection(req: ConfigTestRequest):
@@ -914,3 +1001,70 @@ async def http_agent_chat(req: AgentChatRequest):
         "suggested_actions": decision.get("suggested_actions") or [],
         "executed_tools": executed_tools,
     }
+
+# ============================================================
+# 系统原生文件夹选择器与资源管理器集成
+# ============================================================
+
+class BrowseFolderRequest(BaseModel):
+    initial_dir: Optional[str] = None
+    title: Optional[str] = "请选择文件夹"
+
+class OpenFolderRequest(BaseModel):
+    folder_path: str
+
+def _sync_pick_folder(initial_dir: Optional[str] = None, title: str = "请选择文件夹") -> str:
+    """在工作线程中调用系统原生文件夹选择对话框"""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes('-topmost', True)
+        root.update()
+        selected = filedialog.askdirectory(parent=root, initialdir=initial_dir or None, title=title)
+        root.destroy()
+        if selected:
+            return selected.replace("\\", "/")
+    except Exception as e:
+        print(f"[System] Tkinter folder dialog fallback: {e}")
+
+    try:
+        import subprocess
+        ps_cmd = (
+            f"[System.Reflection.Assembly]::LoadWithPartialName('System.windows.forms') | Out-Null; "
+            f"$f = New-Object System.Windows.Forms.FolderBrowserDialog; "
+            f"$f.Description = '{title}'; "
+            f"if($f.ShowDialog() -eq 'OK'){{ $f.SelectedPath }}"
+        )
+        res = subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True, text=True, timeout=120)
+        return res.stdout.strip().replace("\\", "/")
+    except Exception as e:
+        print(f"[System] PowerShell folder dialog failed: {e}")
+        return ""
+
+@router.post("/system/browse-folder")
+async def browse_folder(req: BrowseFolderRequest):
+    """弹出系统原生文件夹选择对话框，返回选中的绝对目录路径"""
+    selected = await run_in_threadpool(_sync_pick_folder, req.initial_dir, req.title or "请选择文件夹")
+    return {
+        "selected_path": selected,
+        "cancelled": not bool(selected),
+    }
+
+@router.post("/system/open-folder")
+async def open_system_folder(req: OpenFolderRequest):
+    """在操作系统文件资源管理器中打开指定目录"""
+    import sys
+    path = req.folder_path.strip()
+    if not path or not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"文件夹路径不存在: {path}")
+    try:
+        if sys.platform == "win32":
+            os.startfile(os.path.abspath(path))
+        else:
+            import subprocess
+            subprocess.run(["xdg-open", os.path.abspath(path)])
+        return {"status": "ok", "opened": path}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"打开文件夹失败: {e}")

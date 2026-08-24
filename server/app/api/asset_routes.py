@@ -29,6 +29,114 @@ async def list_assets(
 ):
     return asset_manager.list_assets(category=category, status=status, tag=tag, q=q, project_id=project_id, page=page, limit=limit, sort=sort)
 
+@router.post("/assets/batch")
+async def batch_create_assets(
+    category: str = Form("other"),
+    tags: Optional[str] = Form(None),
+    visual_prompt: Optional[str] = Form(None),
+    files: List[UploadFile] = File(...),
+):
+    tag_list = []
+    if tags:
+        try:
+            parsed = json.loads(tags)
+            tag_list = parsed if isinstance(parsed, list) else [str(parsed)]
+        except Exception:
+            tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+    if not files:
+        raise HTTPException(status_code=400, detail="请至少选择一个文件")
+    if len(files) > 20:
+        raise HTTPException(status_code=400, detail="批量导入最多20个文件")
+    created = []
+    errors: List[str] = []
+    for uf in files:
+        try:
+            data_bytes = await uf.read()
+            if not data_bytes:
+                errors.append(f"{uf.filename}: 文件为空")
+                continue
+            fname = uf.filename or "upload.png"
+            base_name = os.path.splitext(fname)[0] or "素材"
+            data = {
+                "name": base_name,
+                "category": category,
+                "description": "",
+                "tags": tag_list,
+                "visual_prompt": visual_prompt or "",
+                "source": "upload",
+            }
+            asset = asset_manager.create_asset(data, file_bytes=data_bytes, filename=fname)
+            created.append(asset.model_dump())
+        except Exception as e:
+            errors.append(f"{uf.filename}: {e}")
+    return {"imported": len(created), "total": len(files), "assets": created, "errors": errors}
+
+
+@router.post("/assets/generate")
+async def generate_asset(
+    name: str = Form(...),
+    prompt: str = Form(...),
+    category: str = Form("character"),
+    style_preset: Optional[str] = Form(None),
+    provider: Optional[str] = Form(None),
+    workflow_id: Optional[str] = Form(None),
+    negative_prompt: Optional[str] = Form(None),
+    aspect_ratio: str = Form("1:1"),
+    seed: Optional[int] = Form(None),
+    tags: Optional[str] = Form(None),
+):
+    """
+    直接通过生图Provider生成并入库为素材
+    复用现有动态Provider能力
+    """
+    from app.providers.image.base import ImageGenerateRequest
+    from app.providers.image.registry import image_registry
+    from app.providers.init_providers import init_all_providers
+    if not image_registry.list_ids():
+        init_all_providers()
+    tag_list = []
+    if tags:
+        try:
+            tag_list = json.loads(tags)
+            if not isinstance(tag_list, list):
+                tag_list = [str(tag_list)]
+        except Exception:
+            tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+    req = ImageGenerateRequest(
+        prompt=prompt,
+        negative_prompt=negative_prompt or "",
+        aspect_ratio=aspect_ratio,
+        style_preset=style_preset,
+        seed=seed,
+        workflow_id=workflow_id,
+    )
+    try:
+        res = await image_registry.generate(req, provider_id=provider)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"生成失败: {e}")
+    try:
+        src_path = res.local_path
+        with open(src_path, "rb") as f:
+            file_bytes = f.read()
+        filename = os.path.basename(src_path)
+        data = {
+            "name": name,
+            "category": category,
+            "description": prompt[:200],
+            "tags": tag_list,
+            "visual_prompt": prompt,
+            "style_preset": style_preset,
+            "source": "generate",
+            "extra": {"provider": res.provider, "engine": res.engine, "seed": res.seed, "workflow_id": workflow_id},
+        }
+        asset = asset_manager.create_asset(data, file_bytes=file_bytes, filename=filename)
+        asset.extra.update({"generated_url": res.image_url, "generated_engine": res.engine})
+        from app.providers.asset.manager import _save_asset
+        _save_asset(asset)
+        return {"asset": asset, "generation": {"image_url": res.image_url, "provider": res.provider, "engine": res.engine, "seed": res.seed}}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"生成成功但入库失败: {e}")
+
 @router.get("/assets/{asset_id}")
 async def get_asset(asset_id: str):
     asset = asset_manager.get_asset(asset_id)
@@ -161,77 +269,6 @@ async def duplicate_asset(asset_id: str):
     if not dup:
         raise HTTPException(status_code=404, detail=f"素材不存在: {asset_id}")
     return dup
-
-@router.post("/assets/generate")
-async def generate_asset(
-    name: str = Form(...),
-    prompt: str = Form(...),
-    category: str = Form("character"),
-    style_preset: Optional[str] = Form(None),
-    provider: Optional[str] = Form(None),
-    workflow_id: Optional[str] = Form(None),
-    negative_prompt: Optional[str] = Form(None),
-    aspect_ratio: str = Form("1:1"),
-    seed: Optional[int] = Form(None),
-    tags: Optional[str] = Form(None),
-):
-    """
-    直接通过生图Provider生成并入库为素材
-    复用现有动态Provider能力
-    """
-    from app.providers.image.base import ImageGenerateRequest
-    from app.providers.image.registry import image_registry
-    from app.providers.init_providers import init_all_providers
-    if not image_registry.list_ids():
-        init_all_providers()
-    tag_list = []
-    if tags:
-        try:
-            tag_list = json.loads(tags)
-            if not isinstance(tag_list, list):
-                tag_list = [str(tag_list)]
-        except Exception:
-            tag_list = [t.strip() for t in tags.split(",") if t.strip()]
-    req = ImageGenerateRequest(
-        prompt=prompt,
-        negative_prompt=negative_prompt or "",
-        aspect_ratio=aspect_ratio,
-        style_preset=style_preset,
-        seed=seed,
-        workflow_id=workflow_id,
-    )
-    try:
-        res = await image_registry.generate(req, provider_id=provider)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"生成失败: {e}")
-    # 将生成的图片URL转为素材（下载并保存到资产库）
-    # res.image_url 是 /storage/generated/xxx.png，已落盘，直接引用
-    # 为了统一管理，复制到资产库目录
-    try:
-        # 读取已生成的文件
-        src_path = res.local_path
-        with open(src_path, "rb") as f:
-            file_bytes = f.read()
-        filename = os.path.basename(src_path)
-        data = {
-            "name": name,
-            "category": category,
-            "description": prompt[:200],
-            "tags": tag_list,
-            "visual_prompt": prompt,
-            "style_preset": style_preset,
-            "source": "generate",
-            "extra": {"provider": res.provider, "engine": res.engine, "seed": res.seed, "workflow_id": workflow_id},
-        }
-        asset = asset_manager.create_asset(data, file_bytes=file_bytes, filename=filename)
-        # 保留原始生成信息
-        asset.extra.update({"generated_url": res.image_url, "generated_engine": res.engine})
-        # 更新
-        from app.providers.asset.manager import _save_asset
-        _save_asset(asset)
-        return {"asset": asset, "generation": {"image_url": res.image_url, "provider": res.provider, "engine": res.engine, "seed": res.seed}}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"生成成功但入库失败: {e}")
 
 from pydantic import BaseModel
 

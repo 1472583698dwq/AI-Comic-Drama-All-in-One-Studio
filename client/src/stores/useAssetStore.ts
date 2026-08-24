@@ -10,16 +10,19 @@ interface AssetState {
   category: AssetCategory | 'all';
   q: string;
   tag: string;
+  sort: string;
   isLoading: boolean;
   error: string | null;
   selectedId: string | null;
 
-  fetchAssets: (opts?: { category?: string; q?: string; tag?: string; page?: number }) => Promise<void>;
+  fetchAssets: (opts?: { category?: string; q?: string; tag?: string; page?: number; sort?: string }) => Promise<void>;
   setCategory: (c: AssetCategory | 'all') => void;
   setQuery: (q: string) => void;
   setTag: (t: string) => void;
   selectAsset: (id: string | null) => void;
   createAsset: (form: FormData) => Promise<Asset>;
+  batchImport: (files: File[], meta?: { category?: string; tags?: string; visual_prompt?: string }) => Promise<{ imported: number; errors: string[] }>;
+  generateAsset: (params: { name: string; prompt: string; category?: string; style_preset?: string; provider?: string; workflow_id?: string; negative_prompt?: string; aspect_ratio?: string; seed?: number; tags?: string }) => Promise<{ asset: Asset; generation: any }>;
   deleteAsset: (id: string) => Promise<void>;
   duplicateAsset: (id: string) => Promise<void>;
 }
@@ -32,6 +35,7 @@ export const useAssetStore = create<AssetState>((set, get) => ({
   category: 'all',
   q: '',
   tag: '',
+  sort: 'updated_at',
   isLoading: false,
   error: null,
   selectedId: null,
@@ -40,19 +44,12 @@ export const useAssetStore = create<AssetState>((set, get) => ({
     const cat = opts?.category ?? get().category;
     const q = opts?.q ?? get().q;
     const tag = opts?.tag ?? get().tag;
+    const sort = opts?.sort ?? get().sort;
     const page = opts?.page ?? 1;
     set({ isLoading: true, error: null });
     try {
-      const res = await fetch(`/api/v1/assets?${new URLSearchParams({
-        ...(cat !== 'all' ? { category: cat } : {}),
-        ...(q ? { q } : {}),
-        ...(tag ? { tag } : {}),
-        page: String(page),
-        limit: String(get().limit),
-      })}`);
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
-      set({ assets: data.assets, total: data.total, page: data.page, category: cat as any, q, tag, isLoading: false });
+      const data = await apiService.listAssets({ category: cat, q, tag, page, limit: get().limit, sort });
+      set({ assets: data.assets, total: data.total, page: data.page, category: cat as any, q, tag, sort, isLoading: false });
     } catch (e: any) {
       set({ error: e?.message || '加载失败', isLoading: false });
     }
@@ -62,30 +59,35 @@ export const useAssetStore = create<AssetState>((set, get) => ({
     set({ category: c });
     get().fetchAssets({ category: c, page: 1 });
   },
-  setQuery: (q) => {
-    set({ q });
-  },
+  setQuery: (q) => set({ q }),
   setTag: (t) => set({ tag: t }),
   selectAsset: (id) => set({ selectedId: id }),
 
   createAsset: async (form) => {
-    const res = await fetch('/api/v1/assets', { method: 'POST', body: form });
-    if (!res.ok) throw new Error(await res.text());
-    const asset = await res.json();
-    // refresh
+    const asset = await apiService.createAsset(form);
     get().fetchAssets({ page: 1 });
     return asset;
   },
 
+  batchImport: async (files, meta) => {
+    const res = await apiService.batchImportAssets(files, meta);
+    get().fetchAssets({ page: 1 });
+    return { imported: res.imported, errors: res.errors || [] };
+  },
+
+  generateAsset: async (params) => {
+    const res = await apiService.generateAsset(params);
+    get().fetchAssets({ page: 1 });
+    return res;
+  },
+
   deleteAsset: async (id) => {
-    const res = await fetch(`/api/v1/assets/${encodeURIComponent(id)}`, { method: 'DELETE' });
-    if (!res.ok) throw new Error(await res.text());
+    await apiService.deleteAsset(id);
     set({ assets: get().assets.filter(a => a.id !== id), total: get().total - 1 });
   },
 
   duplicateAsset: async (id) => {
-    const res = await fetch(`/api/v1/assets/${encodeURIComponent(id)}/duplicate`, { method: 'POST' });
-    if (!res.ok) throw new Error(await res.text());
+    await apiService.duplicateAsset(id);
     get().fetchAssets({ page: 1 });
   },
 }));

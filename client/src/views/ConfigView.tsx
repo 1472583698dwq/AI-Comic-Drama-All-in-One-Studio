@@ -3,7 +3,7 @@ import {
   Settings, KeyRound, Cpu, Sliders, Info, Save, TestTube2,
   Eye, EyeOff, CheckCircle2, XCircle, Loader2, Copy, ExternalLink,
   Bot, Mic, Film, FolderCheck, ArrowLeft, RefreshCw, Sparkles, Layers,
-  Zap, Globe, Database, HelpCircle
+  Zap, Globe, Database, HelpCircle, Folder, FolderSearch, FolderOpen
 } from 'lucide-react';
 import { apiService } from '../services/api';
 import { useProjectStore } from '../stores/useProjectStore';
@@ -45,11 +45,25 @@ export const ConfigView: React.FC = () => {
     setMsg(null);
     try {
       const res = await apiService.getConfig();
-      setForm(res.config || {});
+      const loadedConfig = res.config || {};
+      setForm(loadedConfig);
       setEnvFile(res.env_file || '');
       setChecks(res.checks || {});
+      try {
+        localStorage.setItem('minimax_studio_config_backup', JSON.stringify(loadedConfig));
+      } catch (err) {}
     } catch (e: any) {
-      setMsg({ type: 'error', text: e?.message || '加载配置失败' });
+      try {
+        const cached = localStorage.getItem('minimax_studio_config_backup');
+        if (cached) {
+          setForm(JSON.parse(cached));
+          setMsg({ type: 'error', text: '后端连接异常，已自动从浏览器本地缓存恢复配置' });
+        } else {
+          setMsg({ type: 'error', text: e?.message || '加载配置失败' });
+        }
+      } catch (err) {
+        setMsg({ type: 'error', text: e?.message || '加载配置失败' });
+      }
     } finally {
       setLoading(false);
     }
@@ -71,13 +85,43 @@ export const ConfigView: React.FC = () => {
     setMsg({ type: 'success', text: '已复制到剪贴板' });
   };
 
+  const handlePickFolder = async (fieldKey: string, title: string = '请选择文件夹') => {
+    try {
+      const currentVal = form[fieldKey] || '';
+      const res = await apiService.browseFolder({ initialDir: currentVal, title });
+      if (res && res.selected_path) {
+        setField(fieldKey, res.selected_path);
+        setMsg({ type: 'success', text: `已成功选择目录: ${res.selected_path}` });
+      }
+    } catch (e: any) {
+      setMsg({ type: 'error', text: e?.message || '打开系统文件夹选择器失败' });
+    }
+  };
+
+  const handleOpenFolder = async (fieldKey: string) => {
+    const path = form[fieldKey] || '';
+    if (!path) {
+      setMsg({ type: 'error', text: '请先配置有效的文件夹路径' });
+      return;
+    }
+    try {
+      await apiService.openFolder(path);
+    } catch (e: any) {
+      setMsg({ type: 'error', text: e?.message || '打开目录失败' });
+    }
+  };
+
   const handleSave = async () => {
     setSaving(true);
     setMsg(null);
     try {
       const payload: any = { ...form };
-      await apiService.saveConfig(payload);
-      setMsg({ type: 'success', text: '配置已成功写入 server/.env 并即时热重载生效！' });
+      const res = await apiService.saveConfig(payload);
+      try {
+        localStorage.setItem('minimax_studio_config_backup', JSON.stringify(payload));
+      } catch (err) {}
+      const targetPath = res.env_file || envFile || '.env';
+      setMsg({ type: 'success', text: `配置已成功持久化至 ${targetPath} 并即时热重载生效！` });
       await load();
     } catch (e: any) {
       setMsg({ type: 'error', text: e?.message || '保存配置失败' });
@@ -722,14 +766,34 @@ export const ConfigView: React.FC = () => {
                       />
                       <button
                         type="button"
+                        onClick={() => handlePickFolder('COMFYUI_WORKFLOWS_DIR', '请选择 ComfyUI 工作流文件夹')}
+                        className="flex items-center space-x-1 px-3 py-2 rounded-xl bg-brand/20 hover:bg-brand/30 border border-brand/40 text-xs font-semibold text-brand-light hover:text-white transition-all shadow-sm"
+                        title="打开系统文件夹选择对话框"
+                      >
+                        <FolderSearch className="w-3.5 h-3.5" />
+                        <span>选择文件夹</span>
+                      </button>
+                      {form.COMFYUI_WORKFLOWS_DIR && (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenFolder('COMFYUI_WORKFLOWS_DIR')}
+                          className="flex items-center space-x-1 px-2.5 py-2 rounded-xl bg-surface-tertiary hover:bg-surface-secondary border border-border text-xs text-gray-300 hover:text-white transition-all"
+                          title="在操作系统资源管理器中打开此文件夹"
+                        >
+                          <FolderOpen className="w-3.5 h-3.5" />
+                          <span>打开</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
                         onClick={() => {
                           const v = form.COMFYUI_WORKFLOWS_DIR || '';
-                          if (!v) setMsg({type:'error', text:'请先填入路径后再保存'});
+                          if (!v) setMsg({type:'error', text:'请先填入或选择路径后再保存'});
                           else handleTest('comfyui');
                         }}
                         className="px-3 py-2 rounded-xl bg-surface-tertiary border border-border text-xs text-gray-300 hover:text-white"
                       >
-                        检测目录
+                        检测
                       </button>
                     </div>
                     <p className="text-[10px] text-gray-500 mt-2 leading-4">
@@ -1006,13 +1070,34 @@ export const ConfigView: React.FC = () => {
                       />
                       <button
                         type="button"
+                        onClick={() => handlePickFolder('JIANYIN_DRAFT_PATH', '请选择剪映草稿保存目录 (com.lveditor.draft)')}
+                        className="flex items-center space-x-1 px-3 py-2 rounded-xl bg-accent-orange/20 hover:bg-accent-orange/30 border border-accent-orange/40 text-xs font-semibold text-accent-orange hover:text-white transition-all shadow-sm"
+                        title="打开系统文件夹选择对话框"
+                      >
+                        <FolderSearch className="w-3.5 h-3.5" />
+                        <span>选择文件夹</span>
+                      </button>
+                      {form.JIANYIN_DRAFT_PATH && (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenFolder('JIANYIN_DRAFT_PATH')}
+                          className="flex items-center space-x-1 px-2.5 py-2 rounded-xl bg-surface-tertiary hover:bg-surface-secondary border border-border text-xs text-gray-300 hover:text-white transition-all"
+                          title="在操作系统资源管理器中打开此文件夹"
+                        >
+                          <FolderOpen className="w-3.5 h-3.5" />
+                          <span>打开</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
                         onClick={() => {
                           const user = 'Administrator';
                           setField('JIANYIN_DRAFT_PATH', `C:/Users/${user}/AppData/Local/JianyingPro/User Data/Projects/com.lveditor.draft`);
                         }}
-                        className="px-3 py-2 rounded-xl bg-surface-tertiary border border-border text-xs text-gray-300 hover:text-white"
+                        className="px-2.5 py-2 rounded-xl bg-surface-tertiary border border-border text-xs text-gray-400 hover:text-white"
+                        title="填入标准默认参考路径"
                       >
-                        填入默认参考路径
+                        默认路径
                       </button>
                     </div>
                   </div>

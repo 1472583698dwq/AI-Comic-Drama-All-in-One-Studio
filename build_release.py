@@ -70,11 +70,14 @@ for target_dir in [
         shutil.rmtree(target_dir)
     shutil.copytree(client_dist_src, target_dir)
 
-# 镜像到 MiniMax_AI漫剧Studio
-if os.path.exists(MINIMAX_DIR):
-    shutil.rmtree(MINIMAX_DIR)
-shutil.copytree(STUDIO_DIR, MINIMAX_DIR)
-shutil.copyfile(os.path.join(STUDIO_DIR, "Studio.exe"), os.path.join(MINIMAX_DIR, "MiniMax_AI漫剧Studio.exe"))
+# 镜像到 MiniMax_AI漫剧Studio (容错拷贝)
+try:
+    if os.path.exists(MINIMAX_DIR):
+        shutil.rmtree(MINIMAX_DIR, ignore_errors=True)
+    shutil.copytree(STUDIO_DIR, MINIMAX_DIR, dirs_exist_ok=True)
+    shutil.copyfile(os.path.join(STUDIO_DIR, "Studio.exe"), os.path.join(MINIMAX_DIR, "MiniMax_AI漫剧Studio.exe"))
+except Exception as e:
+    print(f"镜像目录更新提示: {e}")
 
 # 4. 重写启动脚本 (GBK 编码)
 print("\n[4/4] 正在更新一键启动脚本...")

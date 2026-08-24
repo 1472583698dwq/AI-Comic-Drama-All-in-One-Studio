@@ -134,9 +134,27 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
                     </div>
                   )}
                   <div className="text-[10px] text-gray-500 font-mono break-all">📁 {exportedDraft.export_dir}</div>
-                  {exportedDraft.file_url && (
-                    <a href={API_ORIGIN + exportedDraft.file_url} target="_blank" rel="noreferrer" className="text-xs text-brand-light underline">打开 draft_content.json</a>
-                  )}
+                  <div className="flex items-center space-x-2">
+                    {exportedDraft.export_dir && (
+                      <button
+                        onClick={() => apiService.openFolder(exportedDraft.export_dir)}
+                        className="flex-1 py-2 rounded-xl bg-surface-tertiary hover:bg-surface border border-border text-xs text-brand-light hover:text-white font-medium flex items-center justify-center space-x-1.5 transition-all"
+                      >
+                        <FolderDown className="w-3.5 h-3.5" />
+                        <span>在资源管理器中打开草稿箱</span>
+                      </button>
+                    )}
+                    {exportedDraft.file_url && (
+                      <a
+                        href={API_ORIGIN + exportedDraft.file_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-3 py-2 rounded-xl bg-surface-tertiary hover:bg-surface border border-border text-xs text-gray-300 hover:text-white text-center"
+                      >
+                        预览 JSON
+                      </a>
+                    )}
+                  </div>
                   <button
                     onClick={downloadJsonFile}
                     className="w-full py-2.5 rounded-xl bg-accent-green hover:bg-accent-green/90 text-black font-bold text-xs flex items-center justify-center space-x-2 shadow-lg"

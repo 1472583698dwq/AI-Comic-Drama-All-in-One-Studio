@@ -116,6 +116,72 @@ export const apiService = {
     return await res.json();
   },
 
+  // 3.5 动态视频生成 (I2V / R2V / T2V)
+  async generateShotVideo(params: {
+    prompt: string;
+    mode?: 'i2v' | 'r2v' | 't2v';
+    first_frame_url?: string;
+    last_frame_url?: string;
+    reference_images?: string[];
+    duration?: number;
+    resolution?: string;
+    aspect_ratio?: string;
+    provider?: string;
+    workflow_id?: string;
+    shot_id?: string;
+  }): Promise<{
+    video_url: string;
+    local_path?: string;
+    provider: string;
+    engine: string;
+    duration: number;
+    elapsed_ms: number;
+    task_id?: string;
+    first_frame_url?: string;
+    shot_id?: string;
+  }> {
+    const res = await fetch(`${API_BASE_URL}/videos/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: params.prompt,
+        mode: params.mode || 'i2v',
+        first_frame_url: params.first_frame_url,
+        last_frame_url: params.last_frame_url,
+        reference_images: params.reference_images,
+        duration: params.duration || 5,
+        resolution: params.resolution || '720p',
+        aspect_ratio: params.aspect_ratio || '9:16',
+        provider: params.provider,
+        workflow_id: params.workflow_id,
+        shot_id: params.shot_id,
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(extractErrorMessage(res, body));
+    }
+    return await res.json();
+  },
+
+  async listVideoProviders(): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/videos/providers`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+
+  async videoHealth(): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/videos/health`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+
+  async getVideoTaskStatus(taskId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/videos/status/${encodeURIComponent(taskId)}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+
   // ComfyUI 工作流管理（支持外部目录直读）
   async listWorkflows(source: 'all' | 'internal' | 'external' = 'all'): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/images/workflows?source=${encodeURIComponent(source)}`);
@@ -288,6 +354,97 @@ export const apiService = {
       const body = await res.json().catch(() => null);
       throw new Error(extractErrorMessage(res, body));
     }
+    return await res.json();
+  },
+
+  // ── 素材库 Asset Library ──
+  async listAssets(params?: { category?: string; status?: string; tag?: string; q?: string; project_id?: string; page?: number; limit?: number; sort?: string }): Promise<{ assets: any[]; total: number; page: number; limit: number; has_more?: boolean }> {
+    const qs = new URLSearchParams();
+    if (params) Object.entries(params).forEach(([k, v]) => { if (v != null && v !== '' && v !== 'all') qs.set(k, String(v)); });
+    const res = await fetch(`${API_BASE_URL}/assets?${qs.toString()}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async getAsset(assetId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/assets/${encodeURIComponent(assetId)}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async createAsset(form: FormData): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/assets`, { method: 'POST', body: form });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async updateAsset(assetId: string, form: FormData): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/assets/${encodeURIComponent(assetId)}`, { method: 'PUT', body: form });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async deleteAsset(assetId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/assets/${encodeURIComponent(assetId)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async duplicateAsset(assetId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/assets/${encodeURIComponent(assetId)}/duplicate`, { method: 'POST' });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async generateAsset(params: { name: string; prompt: string; category?: string; style_preset?: string; provider?: string; workflow_id?: string; negative_prompt?: string; aspect_ratio?: string; seed?: number; tags?: string }): Promise<{ asset: any; generation: any }> {
+    const fd = new FormData();
+    fd.append('name', params.name);
+    fd.append('prompt', params.prompt);
+    fd.append('category', params.category || 'character');
+    if (params.style_preset) fd.append('style_preset', params.style_preset);
+    if (params.provider) fd.append('provider', params.provider);
+    if (params.workflow_id) fd.append('workflow_id', params.workflow_id);
+    if (params.negative_prompt) fd.append('negative_prompt', params.negative_prompt);
+    if (params.aspect_ratio) fd.append('aspect_ratio', params.aspect_ratio);
+    if (params.seed != null) fd.append('seed', String(params.seed));
+    if (params.tags) fd.append('tags', params.tags);
+    const res = await fetch(`${API_BASE_URL}/assets/generate`, { method: 'POST', body: fd });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async batchImportAssets(files: File[], meta?: { category?: string; tags?: string; visual_prompt?: string }): Promise<{ imported: number; assets: any[]; errors: string[] }> {
+    const fd = new FormData();
+    files.forEach(f => fd.append('files', f));
+    if (meta?.category) fd.append('category', meta.category);
+    if (meta?.tags) fd.append('tags', meta.tags);
+    if (meta?.visual_prompt) fd.append('visual_prompt', meta.visual_prompt);
+    const res = await fetch(`${API_BASE_URL}/assets/batch`, { method: 'POST', body: fd });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async getAssetStats(): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/assets/stats`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async migrateCharacters(projectId: string, characters: any[]): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/assets/migrate/characters`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project_id: projectId, characters }) });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+
+  // 10. 系统原生文件夹选择器与资源管理器
+  async browseFolder(opts?: { initialDir?: string; title?: string }): Promise<{ selected_path: string; cancelled: boolean }> {
+    const res = await fetch(`${API_BASE_URL}/system/browse-folder`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initial_dir: opts?.initialDir, title: opts?.title || '请选择文件夹' }),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+
+  async openFolder(folderPath: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/system/open-folder`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folder_path: folderPath }),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
 };
