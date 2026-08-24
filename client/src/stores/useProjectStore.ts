@@ -5,7 +5,7 @@ import { apiService } from '../services/api';
 interface ProjectState {
   project: Project | null;
   activeShotId: string | null;
-  activeTab: 'studio' | 'director3d' | 'timeline' | 'characters' | 'mcp' | 'config';
+  activeTab: 'studio' | 'director3d' | 'timeline' | 'characters' | 'assets' | 'mcp' | 'config';
   platformMode: 'desktop' | 'mobile';
   isPlaying: boolean;
   currentTime: number; // in seconds
@@ -17,7 +17,7 @@ interface ProjectState {
   // Actions
   setProject: (project: Project) => void;
   setActiveShotId: (shotId: string | null) => void;
-  setActiveTab: (tab: 'studio' | 'director3d' | 'timeline' | 'characters' | 'mcp' | 'config') => void;
+  setActiveTab: (tab: 'studio' | 'director3d' | 'timeline' | 'characters' | 'assets' | 'mcp' | 'config') => void;
   setPlatformMode: (mode: 'desktop' | 'mobile') => void;
   setIsPlaying: (isPlaying: boolean) => void;
   setCurrentTime: (time: number) => void;

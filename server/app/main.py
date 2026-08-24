@@ -34,6 +34,13 @@ app.add_middleware(
 
 # Mount API routes
 app.include_router(router, prefix=settings.API_V1_STR)
+# 资产库路由
+try:
+    from app.api.asset_routes import router as asset_router
+    app.include_router(asset_router, prefix=settings.API_V1_STR)
+    print("[Main] Asset routes mounted at /api/v1/assets")
+except Exception as e:
+    print(f"[Main] Asset routes mount failed: {e}")
 
 # Mount standard MCP protocol server (Streamable HTTP)
 if mcp_http_app:

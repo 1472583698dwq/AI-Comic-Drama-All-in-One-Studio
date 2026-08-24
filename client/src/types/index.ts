@@ -146,3 +146,38 @@ export interface SkillExecutionResult {
   modified_data?: Record<string, any>;
 }
 
+export type AssetCategory = 'character' | 'scene' | 'prop' | 'background' | 'effect' | 'ui' | 'other';
+export type AssetStatus = 'draft' | 'approved' | 'archived';
+
+export interface Asset {
+  id: string;
+  project_id?: string;
+  name: string;
+  category: AssetCategory;
+  subcategory?: string;
+  status: AssetStatus;
+  description: string;
+  tags: string[];
+  visual_prompt: string;
+  negative_prompt?: string;
+  style_preset?: string;
+  file_url?: string;
+  thumb_url?: string;
+  file_path?: string;
+  width?: number;
+  height?: number;
+  style_anchor_id?: string;
+  lora_trigger?: string;
+  ip_adapter_refs?: string[];
+  checkpoint?: string;
+  seed?: number;
+  workflow_id?: string;
+  voice_id?: string;
+  voice_name?: string;
+  three_views?: { front?: string; side?: string; three_quarter?: string };
+  source: string;
+  extra?: Record<string, any>;
+  created_at: string;
+  updated_at: string;
+}
+

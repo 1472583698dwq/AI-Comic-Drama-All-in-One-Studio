@@ -4,6 +4,7 @@ import { ShotInspector } from './components/storyboard/ShotInspector';
 import { Director3DStage } from './components/director3d/Director3DStage';
 import { MultiTrackTimeline } from './components/timeline/MultiTrackTimeline';
 import { CharacterStudio } from './components/character/CharacterStudio';
+import { AssetLibrary } from './components/asset/AssetLibrary';
 import { MobileCardFlow } from './components/mobile/MobileCardFlow';
 import { AgentChatDrawer } from './components/agent/AgentChatDrawer';
 import { ScriptImportView } from './views/ScriptImportView';
@@ -60,8 +61,8 @@ export function App() {
         </main>
       ) : (
         <>
-          {/* Empty state when no project yet */}
-          {!project && (
+          {/* Empty state when no project yet - but not for global tabs like assets */}
+          {!project && activeTab !== 'assets' && activeTab !== 'characters' && (
             <div className="flex-1 flex flex-col items-center justify-center bg-background p-8 text-center space-y-4">
               <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-brand to-accent-pink flex items-center justify-center text-3xl shadow-xl shadow-brand/20">
                 🎬
@@ -90,8 +91,15 @@ export function App() {
             </div>
           )}
 
+           {/* Asset Library - Global, accessible without project */}
+          {(activeTab === 'assets' || activeTab === 'characters') && (
+            <main className="flex-1 flex flex-col overflow-hidden relative">
+              <AssetLibrary />
+            </main>
+          )}
+
           {/* Main Workspace Layout when project loaded */}
-          {project && (
+          {project && activeTab !== 'assets' && activeTab !== 'characters' && (
             <main className="flex-1 flex flex-col overflow-hidden relative">
               {platformMode === 'desktop' ? (
                 /* Desktop Professional Studio */
@@ -100,7 +108,6 @@ export function App() {
                   <div className="flex-1 flex overflow-hidden">
                     {activeTab === 'studio' && <ShotInspector />}
                     {activeTab === 'director3d' && <Director3DStage />}
-                    {activeTab === 'characters' && <CharacterStudio />}
                     {activeTab === 'timeline' && (
                       <div className="flex-1 flex flex-col">
                         <div className="flex-1 flex items-center justify-center bg-[#07070A]">
@@ -117,6 +124,13 @@ export function App() {
                 /* Mobile App Card-Flow View (Xiaoyunque Style) — same component, real API */
                 <MobileCardFlow onOpenExport={() => setIsExportOpen(true)} />
               )}
+            </main>
+          )}
+
+          {/* Keep legacy CharacterStudio accessible via characters tab when project exists and not assets */}
+          {project && activeTab === 'characters' && false && (
+            <main className="flex-1 flex flex-col overflow-hidden relative">
+              <CharacterStudio />
             </main>
           )}
         </>

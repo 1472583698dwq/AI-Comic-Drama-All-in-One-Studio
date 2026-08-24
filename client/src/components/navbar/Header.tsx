@@ -12,7 +12,8 @@ import {
   Play, 
   Pause,
   Compass,
-  Settings
+  Settings,
+  Library
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { useMcpStore } from '../../stores/useMcpStore';
@@ -103,15 +104,16 @@ export const Header: React.FC<HeaderProps> = ({ onOpenImport, onOpenExport, onOp
           </button>
 
           <button
-            onClick={() => setActiveTab('characters')}
+            onClick={() => setActiveTab('assets')}
             className={`flex items-center space-x-1.5 px-3 py-1 rounded-lg text-xs font-medium transition-all ${
-              activeTab === 'characters'
+              activeTab === 'assets' || activeTab === 'characters'
                 ? 'bg-surface-tertiary text-white shadow-sm border border-border-active'
                 : 'text-gray-400 hover:text-gray-200'
             }`}
           >
-            <Users className="w-3.5 h-3.5 text-accent-pink" />
-            <span>角色资产</span>
+            <Library className="w-3.5 h-3.5 text-accent-pink" />
+            <span>素材库</span>
+            <span className="text-[9px] bg-accent-pink/20 text-accent-pink px-1 rounded">人物·场景·道具</span>
           </button>
         </div>
       )}

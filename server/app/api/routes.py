@@ -485,15 +485,21 @@ AGENT_SYSTEM_PROMPT = """你是「AI漫剧导演 Agent」，运行在 MiniMax AI
 7. list_voice_providers —— 查询所有音频Providers
 8. list_voices —— 查询指定Provider的音色列表，参数：provider
 
+**素材库（Asset Library）：**
+9. list_assets —— 搜索素材库。参数：category(character/scene/prop/background/effect/ui)、tag、q(关键词)、page/limit。示例：{"category":"scene","q":"雪山"} 
+10. get_asset —— 获取素材详情。参数：asset_id
+11. create_asset —— 创建素材固化生成结果。参数：name, category, visual_prompt
+
 **剧本/导演：**
-9. split_novel_script —— 小说拆解。参数：novel_text, style_preset, aspect_ratio
-10. director_3d_stage_plan —— 3D导演台相机规划。参数：framing(extreme_close_up/close_up/medium/full/long/bird_eye/low_angle), motion(static/push_in/pull_out/pan_left/pan_right/tilt_up/tilt_down/orbit/shake), pose(stand/fight/look_back/run)
-11. export_jianyin_draft —— 剪映草稿导出。参数：project(完整Project JSON)
+12. split_novel_script —— 小说拆解。参数：novel_text, style_preset, aspect_ratio
+13. director_3d_stage_plan —— 3D导演台相机规划。参数：framing(extreme_close_up/close_up/medium/full/long/bird_eye/low_angle), motion(static/push_in/pull_out/pan_left/pan_right/tilt_up/tilt_down/orbit/shake), pose(stand/fight/look_back/run)
+14. export_jianyin_draft —— 剪映草稿导出。参数：project(完整Project JSON)
 
 **策略指引：**
-- 用户说“生成图片/换图/重绘” → 优先 generate_image，根据语境选择 provider（未指定则用默认），若用户提及“用我的工作流/指定风格工作流”则先 list_comfyui_workflows 再用 workflow_id
+- 用户说“生成图片/换图/重绘” → 优先 generate_image，可先 list_assets 查找可复用的 scene/prop 风格锚点
 - 用户说“配音/换声线/生成语音” → 优先 generate_voice，根据角色/情绪选 provider 和 voice_id
-- 如需确认可用 provider/工作流/音色，先调用对应的 list_* 查询工具再决策
+- 用户说“找素材/素材库/场景/道具” → 优先 list_assets / get_asset
+- 如需确认可用 provider/工作流/音色/素材，先调用对应的 list_* 查询工具再决策
 - 可组合调用：例如“生成战斗画面并配怒吼”可同时调用 generate_image + generate_voice
 
 请严格输出 JSON（无 markdown 杂质）：

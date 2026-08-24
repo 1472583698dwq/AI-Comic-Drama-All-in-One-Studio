@@ -71,6 +71,10 @@ def _lazy_workflow_manager():
     from app.providers.workflow.manager import workflow_manager
     return workflow_manager
 
+def _lazy_asset_manager():
+    from app.providers.asset.manager import asset_manager
+    return asset_manager
+
 
 class MCPServerRegistry:
     def __init__(self):
@@ -136,6 +140,29 @@ class MCPServerRegistry:
             """列出所有音频Providers"""
             reg = _lazy_audio_registry()
             return {"providers": reg.list_providers()}
+
+        @mcp_app.tool
+        async def list_assets(category: str = "", tag: str = "", q: str = "", page: int = 1, limit: int = 12) -> dict:
+            """搜索/列出素材库（支持按 category/tag/q 过滤）"""
+            mgr = _lazy_asset_manager()
+            res = mgr.list_assets(category=category or None, tag=tag or None, q=q or None, page=page, limit=limit)
+            return res
+
+        @mcp_app.tool
+        async def get_asset(asset_id: str) -> dict:
+            """获取单个素材详情"""
+            mgr = _lazy_asset_manager()
+            asset = mgr.get_asset(asset_id)
+            if not asset:
+                raise ValueError(f"素材不存在: {asset_id}")
+            return asset.model_dump()
+
+        @mcp_app.tool
+        async def create_asset(name: str, category: str = "character", visual_prompt: str = "", description: str = "") -> dict:
+            """创建素材（常用于将生成结果固化为可复用资产）"""
+            mgr = _lazy_asset_manager()
+            asset = mgr.create_asset({"name": name, "category": category, "visual_prompt": visual_prompt, "description": description})
+            return asset.model_dump()
 
     def _register_default_tools(self):
         # 1. 小说拆解
@@ -300,6 +327,65 @@ class MCPServerRegistry:
             }
         ))
 
+        # 9.1 素材库 - 列出/搜索
+        self.register_tool(MCPToolDefinition(
+            name="list_assets",
+            description="[素材库] 搜索/列出素材，支持按 category(character/scene/prop/background/effect/ui)、tag、关键词q 过滤，分页返回。Agent可通过此工具发现可复用的角色/场景/道具。",
+            category="utility",
+            icon="Library",
+            author="Asset Library",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "category": {"type": "string", "enum": ["character", "scene", "prop", "background", "effect", "ui", "other"], "description": "按类别过滤"},
+                    "tag": {"type": "string", "description": "按标签过滤"},
+                    "q": {"type": "string", "description": "关键词搜索 名称/描述/提示词/标签"},
+                    "page": {"type": "integer", "default": 1},
+                    "limit": {"type": "integer", "default": 12},
+                },
+                "required": []
+            }
+        ))
+
+        # 9.2 素材库 - 获取详情
+        self.register_tool(MCPToolDefinition(
+            name="get_asset",
+            description="[素材库] 获取单个素材详情，含文件URL、视觉提示词、标签、一致性参数。",
+            category="utility",
+            icon="FileSearch",
+            author="Asset Library",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "asset_id": {"type": "string", "description": "素材ID，如 ast_xxx"}
+                },
+                "required": ["asset_id"]
+            }
+        ))
+
+        # 9.3 素材库 - 创建
+        self.register_tool(MCPToolDefinition(
+            name="create_asset",
+            description="[素材库] 创建新素材，常用于将生成结果固化为可复用资产。Agent可在生成后调用此工具入库。",
+            category="ai_generation",
+            icon="FolderPlus",
+            author="Asset Library",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "素材名称"},
+                    "category": {"type": "string", "enum": ["character", "scene", "prop", "background", "effect", "ui", "other"], "default": "character"},
+                    "visual_prompt": {"type": "string", "description": "视觉提示词，用于一致性生成"},
+                    "description": {"type": "string", "description": "描述"},
+                    "tags": {"type": "array", "items": {"type": "string"}, "description": "标签列表"},
+                },
+                "required": ["name"]
+            }
+        ))
+
         # 10. 剪映导出
         self.register_tool(MCPToolDefinition(
             name="export_jianyin_draft",
@@ -433,6 +519,35 @@ class MCPServerRegistry:
                     raise ValueError(f"未知音频Provider: {provider}")
                 voices = await prov.list_voices()
                 result = {"provider": provider, "voices": voices}
+
+            elif tool_name == "list_assets":
+                mgr = _lazy_asset_manager()
+                result = mgr.list_assets(
+                    category=arguments.get("category"),
+                    tag=arguments.get("tag"),
+                    q=arguments.get("q"),
+                    page=int(arguments.get("page", 1)),
+                    limit=int(arguments.get("limit", 12)),
+                )
+
+            elif tool_name == "get_asset":
+                mgr = _lazy_asset_manager()
+                asset_id = arguments.get("asset_id", "")
+                asset = mgr.get_asset(asset_id)
+                if not asset:
+                    raise ValueError(f"素材不存在: {asset_id}")
+                result = asset.model_dump()
+
+            elif tool_name == "create_asset":
+                mgr = _lazy_asset_manager()
+                asset = mgr.create_asset({
+                    "name": arguments.get("name", "未命名素材"),
+                    "category": arguments.get("category", "character"),
+                    "visual_prompt": arguments.get("visual_prompt", ""),
+                    "description": arguments.get("description", ""),
+                    "tags": arguments.get("tags", []),
+                })
+                result = asset.model_dump()
 
             elif tool_name == "export_jianyin_draft":
                 project_payload = project_context or arguments.get("project")
