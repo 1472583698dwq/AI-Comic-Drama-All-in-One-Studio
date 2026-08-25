@@ -22,28 +22,71 @@ except ImportError:
     mcp_app = None
 
 
-# 相机参数计算表
+# 相机参数计算表 (景别与光学参数)
 FRAMING_CAMERA = {
-    "extreme_close_up": {"fov": 22, "position": [0, 1.55, 0.9], "target": [0, 1.5, 0]},
-    "close_up": {"fov": 30, "position": [0, 1.52, 1.6], "target": [0, 1.45, 0]},
-    "medium": {"fov": 45, "position": [0, 1.5, 3.2], "target": [0, 1.4, 0]},
-    "full": {"fov": 50, "position": [0, 1.4, 4.8], "target": [0, 1.1, 0]},
-    "long": {"fov": 55, "position": [0, 1.6, 6.5], "target": [0, 1.3, 0]},
-    "bird_eye": {"fov": 60, "position": [0, 7.0, 2.0], "target": [0, 0.8, 0]},
-    "low_angle": {"fov": 40, "position": [0, 0.5, 2.6], "target": [0, 1.6, 0]},
+    "extreme_close_up": {"fov": 22, "focal_length_mm": 85, "position": [0, 1.68, 0.75], "target": [0, 1.68, 0], "desc": "眼神/微表情大特写"},
+    "close_up": {"fov": 30, "focal_length_mm": 50, "position": [0, 1.55, 1.35], "target": [0, 1.5, 0], "desc": "面部与半身特写"},
+    "medium": {"fov": 45, "focal_length_mm": 35, "position": [0, 1.3, 2.4], "target": [0, 1.25, 0], "desc": "胸部以上叙事中景"},
+    "full": {"fov": 50, "focal_length_mm": 28, "position": [0, 1.15, 3.8], "target": [0, 1.0, 0], "desc": "全身与站位全景"},
+    "long": {"fov": 58, "focal_length_mm": 24, "position": [0, 1.6, 6.0], "target": [0, 1.1, 0], "desc": "远景与宏大环境"},
+    "bird_eye": {"fov": 65, "focal_length_mm": 20, "position": [0, 4.5, 2.0], "target": [0, 0.5, 0], "desc": "高空鸟瞰俯冲"},
+    "low_angle": {"fov": 52, "focal_length_mm": 28, "position": [0, 0.25, 1.8], "target": [0, 1.5, 0], "desc": "贴地仰角英雄机位"},
+    "over_shoulder": {"fov": 42, "focal_length_mm": 40, "position": [0.6, 1.55, 1.9], "target": [-0.2, 1.4, -0.2], "desc": "过肩纵深对峙机位"},
+    "dutch_angle": {"fov": 48, "focal_length_mm": 32, "position": [0, 1.2, 2.2], "target": [0, 1.2, 0], "roll_deg": -15.0, "desc": "荷兰角倾斜悬疑机位"},
+    "high_angle": {"fov": 55, "focal_length_mm": 28, "position": [0, 2.8, 2.8], "target": [0, 1.0, 0], "desc": "俯角压制视点"},
 }
 
+# 15+ 电影级运镜与 5 大双轴复合运镜矩阵 (MiniMax 01-Director 规范)
 MOTION_TRAJECTORY = {
-    "static": {"path_type": "hold", "amplitude_m": 0.0, "duration_hint_s": 0.0},
-    "push_in": {"path_type": "dolly_in", "amplitude_m": 0.8, "duration_hint_s": 2.0},
-    "pull_out": {"path_type": "dolly_out", "amplitude_m": 1.2, "duration_hint_s": 2.2},
-    "pan_left": {"path_type": "pan", "amplitude_deg": -35.0, "duration_hint_s": 1.8},
-    "pan_right": {"path_type": "pan", "amplitude_deg": 35.0, "duration_hint_s": 1.8},
-    "tilt_up": {"path_type": "tilt", "amplitude_deg": 25.0, "duration_hint_s": 1.5},
-    "tilt_down": {"path_type": "tilt", "amplitude_deg": -25.0, "duration_hint_s": 1.5},
-    "orbit": {"path_type": "orbit", "amplitude_deg": 180.0, "duration_hint_s": 4.0},
-    "shake": {"path_type": "handheld_shake", "amplitude_m": 0.06, "frequency_hz": 9.0, "duration_hint_s": 1.5},
+    # 基础单轴运镜
+    "static": {"path_type": "hold", "amplitude_m": 0.0, "duration_hint_s": 0.0, "minimax_label": "Static Camera, Locked Shot"},
+    "push_in": {"path_type": "dolly_in", "amplitude_m": 0.9, "duration_hint_s": 2.0, "minimax_label": "Dolly In, Push towards subject"},
+    "pull_out": {"path_type": "dolly_out", "amplitude_m": 1.2, "duration_hint_s": 2.2, "minimax_label": "Dolly Out, Reveal surroundings"},
+    "pan_left": {"path_type": "pan", "amplitude_deg": -35.0, "duration_hint_s": 1.8, "minimax_label": "Pan Left, Smooth horizontal turn"},
+    "pan_right": {"path_type": "pan", "amplitude_deg": 35.0, "duration_hint_s": 1.8, "minimax_label": "Pan Right, Smooth horizontal turn"},
+    "tilt_up": {"path_type": "tilt", "amplitude_deg": 25.0, "duration_hint_s": 1.5, "minimax_label": "Tilt Up, Ascending view"},
+    "tilt_down": {"path_type": "tilt", "amplitude_deg": -25.0, "duration_hint_s": 1.5, "minimax_label": "Tilt Down, Descending view"},
+    "orbit": {"path_type": "orbit", "amplitude_deg": 180.0, "duration_hint_s": 3.5, "minimax_label": "Orbit Clockwise 180°, Cinematic arc shot"},
+    "orbit_ccw": {"path_type": "orbit_ccw", "amplitude_deg": -180.0, "duration_hint_s": 3.5, "minimax_label": "Orbit Counter-Clockwise 180°"},
+    "truck_left": {"path_type": "truck_left", "amplitude_m": 1.5, "duration_hint_s": 2.0, "minimax_label": "Truck Left, Lateral tracking"},
+    "truck_right": {"path_type": "truck_right", "amplitude_m": 1.5, "duration_hint_s": 2.0, "minimax_label": "Truck Right, Lateral tracking"},
+    "boom_up": {"path_type": "boom_up", "amplitude_m": 1.8, "duration_hint_s": 2.2, "minimax_label": "Pedestal Up / Boom Up, Crane elevation"},
+    "boom_down": {"path_type": "boom_down", "amplitude_m": -1.5, "duration_hint_s": 2.2, "minimax_label": "Pedestal Down / Crane Down"},
+    "roll_left": {"path_type": "roll", "amplitude_deg": -25.0, "duration_hint_s": 1.8, "minimax_label": "Dutch Roll Left, Dynamic rotation"},
+    "roll_right": {"path_type": "roll", "amplitude_deg": 25.0, "duration_hint_s": 1.8, "minimax_label": "Dutch Roll Right, Dynamic rotation"},
+    "tracking": {"path_type": "follow", "amplitude_m": 1.8, "duration_hint_s": 2.5, "minimax_label": "Forward Tracking Shot, Follow subject"},
+    "shake": {"path_type": "handheld_shake", "amplitude_m": 0.08, "frequency_hz": 9.0, "duration_hint_s": 1.5, "minimax_label": "Handheld Camera Shake, Action impact"},
+    
+    # 5 大电影级双轴复合运镜 (MiniMax Combos)
+    "dolly_zoom": {"path_type": "vertigo", "amplitude_m": 1.2, "fov_delta": 22.0, "duration_hint_s": 3.0, "minimax_label": "Hitchcock Vertigo Zoom (Dolly In + Zoom Out), Psychological tension"},
+    "orbit_boom_up": {"path_type": "spiral_up", "amplitude_deg": 180.0, "height_delta_m": 1.5, "duration_hint_s": 3.5, "minimax_label": "Orbit + Pedestal Up, Heroic ascending spiral reveal"},
+    "pan_left_crane_down": {"path_type": "pan_crane", "amplitude_deg": -40.0, "height_delta_m": -1.6, "duration_hint_s": 3.0, "minimax_label": "Pan Left + Crane Down, Environment sweep to battle focus"},
+    "fast_push_shake": {"path_type": "explosive_push", "amplitude_m": 1.4, "shake_intensity": 0.12, "duration_hint_s": 1.5, "minimax_label": "Fast Explosive Push-In with Impact Shake, Climax strike"},
+    "low_angle_truck_right": {"path_type": "low_truck", "amplitude_m": 1.6, "duration_hint_s": 2.2, "minimax_label": "Low-Angle Ground Lateral Slide (Truck Right), Dramatic martial hero"},
 }
+
+
+def build_minimax_camera_prompt(framing: str, motion: str, focal_length_mm: float = 35.0, roll_deg: float = 0.0, speed: str = "1.0x") -> str:
+    """生成符合 MiniMax 01-Director / Hailuo AI 规范的结构化运镜提示词标签"""
+    f_info = FRAMING_CAMERA.get(framing, FRAMING_CAMERA["medium"])
+    m_info = MOTION_TRAJECTORY.get(motion, MOTION_TRAJECTORY["push_in"])
+    
+    parts = []
+    # 1. 运镜动效
+    parts.append(f"Motion: {m_info.get('minimax_label', motion)}")
+    # 2. 景别
+    parts.append(f"Framing: {framing.replace('_', ' ').title()}")
+    # 3. 镜头焦距
+    fl = focal_length_mm or f_info.get("focal_length_mm", 35)
+    parts.append(f"Lens: {int(fl)}mm")
+    # 4. 倾斜角
+    if abs(roll_deg) > 1.0:
+        parts.append(f"Dutch Roll: {roll_deg:+.1f}°")
+    # 5. 速度
+    if speed and speed != "1.0x":
+        parts.append(f"Speed: {speed}")
+    
+    return f"[Camera: {', '.join(parts)}]"
 
 
 def _lazy_image_registry():
@@ -464,7 +507,7 @@ class MCPServerRegistry:
         # 11. 3D导演台
         self.register_tool(MCPToolDefinition(
             name="director_3d_stage_plan",
-            description="[3D导演台] 根据景别与运镜计算相机FOV/机位/轨迹",
+            description="[MiniMax 3D导演台] 根据景别、运镜、焦距与角色站位计算3D相机坐标与MiniMax 01-Director结构化运镜Prompt",
             category="workflow",
             icon="Camera",
             author="MiniMax Design",
@@ -472,11 +515,16 @@ class MCPServerRegistry:
             input_schema={
                 "type": "object",
                 "properties": {
-                    "framing": {"type": "string", "enum": ["extreme_close_up", "close_up", "medium", "full", "long", "bird_eye", "low_angle"]},
-                    "motion": {"type": "string", "enum": ["static", "push_in", "pull_out", "pan_left", "pan_right", "tilt_up", "tilt_down", "orbit", "shake"]},
-                    "pose": {"type": "string", "enum": ["stand", "fight", "look_back", "run"]}
+                    "framing": {"type": "string", "enum": ["extreme_close_up", "close_up", "medium", "full", "long", "bird_eye", "low_angle", "over_shoulder", "dutch_angle", "high_angle"], "default": "medium"},
+                    "motion": {"type": "string", "enum": ["static", "push_in", "pull_out", "pan_left", "pan_right", "tilt_up", "tilt_down", "orbit", "orbit_ccw", "truck_left", "truck_right", "boom_up", "boom_down", "roll_left", "roll_right", "tracking", "shake", "dolly_zoom", "orbit_boom_up", "pan_left_crane_down", "fast_push_shake", "low_angle_truck_right"], "default": "push_in"},
+                    "pose": {"type": "string", "enum": ["stand", "fight", "look_back", "run", "cast_spell", "kneel", "defend", "fly", "injured"], "default": "stand"},
+                    "focal_length_mm": {"type": "number", "description": "镜头焦距 (16 - 135mm)", "default": 35.0},
+                    "camera_roll_deg": {"type": "number", "description": "荷兰角倾斜度 (-45° ~ +45°)", "default": 0.0},
+                    "cast_layout": {"type": "string", "enum": ["solo", "duel", "ots", "surrounded"], "default": "solo"},
+                    "speed": {"type": "string", "enum": ["0.5x", "1.0x", "1.5x", "2.0x"], "default": "1.0x"},
+                    "ai_directive": {"type": "string", "description": "可选：自然语言导演指令，AI 自动推荐并覆盖运镜机位"}
                 },
-                "required": ["framing", "motion"]
+                "required": []
             }
         ))
 
@@ -649,12 +697,77 @@ class MCPServerRegistry:
                 result = await jianyin_exporter.export_project_to_jianyin_draft_async(project)
 
             elif tool_name == "director_3d_stage_plan":
-                framing = arguments.get("framing", "medium")
-                motion = arguments.get("motion", "push_in")
-                pose = arguments.get("pose", "stand")
+                framing = arguments.get("framing") or "medium"
+                motion = arguments.get("motion") or "push_in"
+                pose = arguments.get("pose") or "stand"
+                focal_length_mm = float(arguments.get("focal_length_mm") or 35.0)
+                camera_roll_deg = float(arguments.get("camera_roll_deg") or 0.0)
+                cast_layout = arguments.get("cast_layout") or "solo"
+                speed = arguments.get("speed") or "1.0x"
+                ai_directive = (arguments.get("ai_directive") or "").strip()
+
+                # 自然语言指令快速智能匹配（若传入）
+                if ai_directive:
+                    text_lower = ai_directive.lower()
+                    if any(w in text_lower for w in ["希区柯克", "眩晕", "vertigo", "dolly zoom"]):
+                        motion = "dolly_zoom"
+                        framing = "close_up"
+                    elif any(w in text_lower for w in ["仰视", "仰角", "霸气", "贴地", "low angle"]):
+                        framing = "low_angle"
+                        focal_length_mm = 28.0
+                    elif any(w in text_lower for w in ["特写", "眼神", "微表情", "close up"]):
+                        framing = "extreme_close_up"
+                        focal_length_mm = 85.0
+                    elif any(w in text_lower for w in ["鸟瞰", "俯冲", "高空", "俯视", "bird"]):
+                        framing = "bird_eye"
+                        focal_length_mm = 20.0
+                    elif any(w in text_lower for w in ["对峙", "交锋", "双人", "duel"]):
+                        cast_layout = "duel"
+                        pose = "fight"
+                    elif any(w in text_lower for w in ["过肩", "ots", "背后"]):
+                        framing = "over_shoulder"
+                        cast_layout = "ots"
+                    elif any(w in text_lower for w in ["环绕", "升镜", "登场"]):
+                        motion = "orbit_boom_up"
+                    elif any(w in text_lower for w in ["冲击", "震颤", "震动", "命中"]):
+                        motion = "fast_push_shake"
+                        pose = "fight"
+                    elif any(w in text_lower for w in ["施法", "御剑", "结界"]):
+                        pose = "cast_spell"
+                    elif any(w in text_lower for w in ["突进", "奔跑", "冲锋"]):
+                        pose = "run"
+
                 cam = FRAMING_CAMERA.get(framing, FRAMING_CAMERA["medium"])
                 traj = MOTION_TRAJECTORY.get(motion, MOTION_TRAJECTORY["push_in"])
-                result = {"camera_fov": cam["fov"], "camera_position": cam["position"], "target_position": cam["target"], "motion_trajectory": traj, "pose_preset": pose, "depth_guidance_ready": True, "engine": "local-camera-calculator"}
+                
+                # 如果机位有默认 roll_deg 且用户未显式设置，则使用预设
+                if camera_roll_deg == 0.0 and "roll_deg" in cam:
+                    camera_roll_deg = cam["roll_deg"]
+
+                minimax_prompt = build_minimax_camera_prompt(
+                    framing=framing,
+                    motion=motion,
+                    focal_length_mm=focal_length_mm,
+                    roll_deg=camera_roll_deg,
+                    speed=speed
+                )
+
+                result = {
+                    "framing": framing,
+                    "motion": motion,
+                    "pose": pose,
+                    "focal_length_mm": focal_length_mm,
+                    "camera_roll_deg": camera_roll_deg,
+                    "cast_layout": cast_layout,
+                    "speed": speed,
+                    "camera_fov": cam["fov"],
+                    "camera_position": cam["position"],
+                    "target_position": cam["target"],
+                    "motion_trajectory": traj,
+                    "minimax_camera_prompt": minimax_prompt,
+                    "depth_guidance_ready": True,
+                    "engine": "minimax-01-director-camera-calculator"
+                }
 
             elapsed_ms = int((time.time() - start_time) * 1000)
             return MCPToolCallResponse(tool_name=tool_name, status="success", result=result, execution_time_ms=elapsed_ms)

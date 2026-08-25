@@ -35,9 +35,11 @@ class StoryboardShot(BaseModel):
     audio_url: Optional[str] = None
     duration: float = 3.5 # in seconds
     subtitle_text: str = ""
-    status: str = "ready" # idle, generating_image, generating_video, generating_audio, completed, error
-    depth_map_url: Optional[str] = None
-    pose_preset: Optional[str] = None # for 3D director stage (stand, fight, run, look_back)
+    pose_preset: Optional[str] = None # for 3D director stage
+    focal_length_mm: Optional[float] = 35.0
+    camera_roll_deg: Optional[float] = 0.0
+    cast_layout: Optional[str] = "solo" # solo, duel, ots, surrounded
+    props_config: Optional[List[str]] = Field(default_factory=list)
 
 class Scene(BaseModel):
     id: str

@@ -14,7 +14,10 @@ export type CameraFraming =
   | 'full'
   | 'long'
   | 'bird_eye'
-  | 'low_angle';
+  | 'low_angle'
+  | 'over_shoulder'
+  | 'dutch_angle'
+  | 'high_angle';
 
 export type CameraMotion = 
   | 'static'
@@ -25,7 +28,37 @@ export type CameraMotion =
   | 'tilt_up'
   | 'tilt_down'
   | 'orbit'
-  | 'shake';
+  | 'orbit_ccw'
+  | 'truck_left'
+  | 'truck_right'
+  | 'boom_up'
+  | 'boom_down'
+  | 'roll_left'
+  | 'roll_right'
+  | 'tracking'
+  | 'shake'
+  | 'dolly_zoom'
+  | 'orbit_boom_up'
+  | 'pan_left_crane_down'
+  | 'fast_push_shake'
+  | 'low_angle_truck_right';
+
+export type PosePreset = 
+  | 'stand' 
+  | 'fight' 
+  | 'look_back' 
+  | 'run' 
+  | 'cast_spell' 
+  | 'kneel' 
+  | 'defend' 
+  | 'fly' 
+  | 'injured';
+
+export type CastLayout = 'solo' | 'duel' | 'ots' | 'surrounded';
+
+export type StagePropType = 'sword' | 'shield' | 'magic_circle' | 'spirit_particles';
+
+export type StageEnvironment = 'cyber_studio' | 'xianxia_cloud' | 'desert_battle' | 'neon_city';
 
 export type EmotionType = 
   | 'neutral'
@@ -74,8 +107,12 @@ export interface StoryboardShot {
   duration: number; // in seconds
   subtitle_text: string;
   status: 'ready' | 'generating_image' | 'generating_video' | 'generating_audio' | 'completed' | 'error';
-  pose_preset?: 'stand' | 'fight' | 'look_back' | 'run';
+  pose_preset?: PosePreset;
   depth_map_url?: string;
+  focal_length_mm?: number;
+  camera_roll_deg?: number;
+  cast_layout?: CastLayout;
+  props_config?: StagePropType[];
 }
 
 export interface Scene {
