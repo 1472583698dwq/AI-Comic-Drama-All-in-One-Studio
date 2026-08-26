@@ -54,9 +54,12 @@ class ImageProviderRegistry:
         return result
 
     async def generate(self, req: ImageGenerateRequest, provider_id: Optional[str] = None) -> ImageGenerateResult:
-        # 显式 provider_id 优先，其次 req.extra.provider，最后用默认
+        # 显式 provider_id 优先，若请求中包含自定义 workflow_id 则自动路由至 comfyui
+        target_provider = provider_id
+        if not target_provider and req.workflow_id:
+            target_provider = "comfyui"
         extra_provider = (req.extra.get("provider") if req.extra and isinstance(req.extra, dict) else None)
-        prov = self.get_active_provider(provider_id or extra_provider)
+        prov = self.get_active_provider(target_provider or extra_provider)
         return await prov.generate(req)
 
     async def check_health_all(self) -> Dict[str, Any]:

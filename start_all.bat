@@ -1,6 +1,10 @@
 @echo off
-title AI Studio
+title AI Âþ¾ç Studio
 cd /d "%~dp0"
+
+taskkill /f /im Studio.exe >nul 2>nul
+taskkill /f /im MiniMax_AIÂþ¾çStudio.exe >nul 2>nul
+timeout /t 1 /nobreak >nul
 
 if exist "%~dp0dist\Studio\Studio.exe" (
     start "" "%~dp0dist\Studio\Studio.exe"

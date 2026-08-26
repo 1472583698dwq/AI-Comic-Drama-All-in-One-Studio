@@ -39,6 +39,7 @@ MANAGED_KEYS = [
     "COMFYUI_CHECKPOINT",
     "COMFYUI_TIMEOUT_SECONDS",
     "COMFYUI_WORKFLOWS_DIR",
+    "COMFYUI_DEFAULT_IMAGE_WORKFLOW",
     "SILICONFLOW_API_KEY",
     "SILICONFLOW_IMAGE_MODEL",
     "DASHSCOPE_API_KEY",
@@ -53,6 +54,7 @@ MANAGED_KEYS = [
     "ELEVENLABS_MODEL",
     # Video Generation
     "VIDEO_PROVIDER",
+    "COMFYUI_DEFAULT_VIDEO_WORKFLOW",
     "KLING_API_KEY",
     "VIDU_API_KEY",
     # JianYing Draft & Paths
@@ -165,6 +167,7 @@ class Settings(BaseModel):
     COMFYUI_CHECKPOINT: str = os.getenv("COMFYUI_CHECKPOINT", "")
     COMFYUI_TIMEOUT_SECONDS: int = int(os.getenv("COMFYUI_TIMEOUT_SECONDS", "240"))
     COMFYUI_WORKFLOWS_DIR: str = os.getenv("COMFYUI_WORKFLOWS_DIR", "")
+    COMFYUI_DEFAULT_IMAGE_WORKFLOW: str = os.getenv("COMFYUI_DEFAULT_IMAGE_WORKFLOW", os.getenv("COMFYUI_WORKFLOW_ID", ""))
     SILICONFLOW_API_KEY: str = os.getenv("SILICONFLOW_API_KEY", "")
     SILICONFLOW_IMAGE_MODEL: str = os.getenv("SILICONFLOW_IMAGE_MODEL", "black-forest-labs/FLUX.1-schnell")
     DASHSCOPE_API_KEY: str = os.getenv("DASHSCOPE_API_KEY", "")
@@ -181,6 +184,7 @@ class Settings(BaseModel):
 
     # Video Generation Providers
     VIDEO_PROVIDER: str = os.getenv("VIDEO_PROVIDER", "comfyui_video")
+    COMFYUI_DEFAULT_VIDEO_WORKFLOW: str = os.getenv("COMFYUI_DEFAULT_VIDEO_WORKFLOW", os.getenv("COMFYUI_VIDEO_WORKFLOW_ID", ""))
     KLING_API_KEY: str = os.getenv("KLING_API_KEY", "")
     VIDU_API_KEY: str = os.getenv("VIDU_API_KEY", "")
 
@@ -188,15 +192,16 @@ class Settings(BaseModel):
     JIANYIN_DRAFT_PATH: str = os.getenv("JIANYIN_DRAFT_PATH", get_default_jianyin_draft_path())
 
     # Local storage paths
+    # 开发态：仓库根 storage；打包态：优先复用仓库根 storage（避免构建清空用户配置）
     STORAGE_DIR: str = os.path.abspath(
         os.path.join(os.path.dirname(__file__), "../../../storage")
         if not getattr(sys, "frozen", False)
-        else os.path.join(os.path.dirname(sys.executable), "storage")
+        else (os.path.join(os.path.dirname(sys.executable), "..", "..", "storage") if os.path.exists(os.path.join(os.path.dirname(sys.executable), "..", "..", "storage")) else os.path.join(os.path.dirname(sys.executable), "storage"))
     )
     EXPORTS_DIR: str = os.path.abspath(
         os.path.join(os.path.dirname(__file__), "../../../exports")
         if not getattr(sys, "frozen", False)
-        else os.path.join(os.path.dirname(sys.executable), "exports")
+        else (os.path.join(os.path.dirname(sys.executable), "..", "..", "exports") if os.path.exists(os.path.join(os.path.dirname(sys.executable), "..", "..", "exports")) else os.path.join(os.path.dirname(sys.executable), "exports"))
     )
 
     def to_public_dict(self, masked: bool = False) -> Dict[str, str]:
@@ -258,21 +263,28 @@ def _parse_env_file(filepath: Path) -> Dict[str, str]:
 
 
 def read_env_file(unmask: bool = True) -> Dict[str, str]:
-    """读取所有已持久化的真实配置（按优先级合并 .env 与 config_store.json）"""
+    """读取所有已持久化的真实配置（按优先级合并 .env 与 config_store.json，非空优先）"""
     merged: Dict[str, str] = {}
 
-    # 先读取 JSON 备份
-    merged.update(_load_json_config())
+    # 1. 优先读取 JSON 结构化存储
+    json_data = _load_json_config()
+    for k, v in json_data.items():
+        if v:
+            merged[k] = str(v)
 
-    # 再由远及近读取所有潜在 .env 覆盖
+    # 2. 读取所有潜在 .env 覆盖
     for env_p in reversed(get_possible_env_paths()):
         if env_p.exists():
-            merged.update(_parse_env_file(env_p))
+            for k, v in _parse_env_file(env_p).items():
+                if v:  # 仅非空值覆盖
+                    merged[k] = v
 
-    # 填充缺失项
+    # 3. 填充 Settings 中的默认值
     for k in MANAGED_KEYS:
-        if k not in merged or merged[k] == "":
-            merged[k] = str(getattr(settings, k, ""))
+        if not merged.get(k):
+            val = str(getattr(settings, k, ""))
+            if val:
+                merged[k] = val
 
     if not unmask:
         return {

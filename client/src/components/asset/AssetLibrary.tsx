@@ -4,6 +4,7 @@ import { useAssetStore } from '../../stores/useAssetStore';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { apiService } from '../../services/api';
 import { AssetCategory } from '../../types';
+import { WorkflowInspectorModal } from '../workflow/WorkflowInspectorModal';
 
 const CATEGORY_TABS: { key: AssetCategory | 'all'; label: string; icon: React.ReactNode }[] = [
   { key: 'all', label: '全部', icon: <Library className="w-3.5 h-3.5" /> },
@@ -39,16 +40,65 @@ export const AssetLibrary: React.FC = () => {
   const [generating, setGenerating] = useState(false);
   const [providers, setProviders] = useState<any[]>([]);
   const [workflows, setWorkflows] = useState<any[]>([]);
+  const [inspectWfId, setInspectWfId] = useState('');
+  const [workflowExposedInputs, setWorkflowExposedInputs] = useState<any[]>([]);
+  const [dynamicInputs, setDynamicInputs] = useState<Record<string, any>>({});
 
   useEffect(() => { fetchAssets({ category, page: 1 }); }, []);
   useEffect(() => { apiService.getAssetStats().then(setStats).catch(()=>{}); }, [assets.length]);
 
   useEffect(() => {
-    if (showGenerate && providers.length === 0) {
-      apiService.listImageProviders().then(d => setProviders(d.providers||d||[])).catch(()=>{});
-      apiService.listWorkflows('all').then(d => setWorkflows(d.workflows||d||[])).catch(()=>{});
+    if (showGenerate) {
+      apiService.listImageProviders().then(d => setProviders(d.providers || d || [])).catch(() => {});
+      apiService.listWorkflows('all').then(d => {
+        const wfs = d.workflows || d || [];
+        setWorkflows(wfs);
+        apiService.getConfig().then(cfg => {
+          const defaultWf = cfg?.COMFYUI_DEFAULT_IMAGE_WORKFLOW || '';
+          const targetWf = (defaultWf && wfs.some((w: any) => w.id === defaultWf)) ? defaultWf : (wfs.length > 0 ? wfs[0].id : '');
+          if (targetWf && !genForm.workflow_id) {
+            setGenForm(prev => ({
+              ...prev,
+              workflow_id: targetWf,
+              provider: 'comfyui',
+            }));
+            loadWorkflowInputs(targetWf);
+          }
+        }).catch(() => {
+          if (wfs.length > 0 && !genForm.workflow_id) {
+            setGenForm(prev => ({ ...prev, workflow_id: wfs[0].id, provider: 'comfyui' }));
+            loadWorkflowInputs(wfs[0].id);
+          }
+        });
+      }).catch(() => {});
     }
   }, [showGenerate]);
+
+  const loadWorkflowInputs = (wfId: string) => {
+    if (!wfId) {
+      setWorkflowExposedInputs([]);
+      setDynamicInputs({});
+      return;
+    }
+    apiService.inspectWorkflow(wfId).then(res => {
+      const exposed = res?.data?.exposed_inputs || res?.exposed_inputs || [];
+      setWorkflowExposedInputs(exposed);
+      const defaults: Record<string, any> = {};
+      exposed.forEach((exp: any) => {
+        if (exp.default_value !== undefined && exp.default_value !== '') {
+          defaults[exp.id || exp.node_id] = exp.default_value;
+        }
+      });
+      setDynamicInputs(prev => ({ ...defaults, ...prev }));
+    }).catch(() => {
+      setWorkflowExposedInputs([]);
+      setDynamicInputs({});
+    });
+  };
+
+  useEffect(() => {
+    loadWorkflowInputs(genForm.workflow_id);
+  }, [genForm.workflow_id]);
 
   const refreshStats = () => apiService.getAssetStats().then(setStats).catch(()=>{});
 
@@ -93,9 +143,11 @@ export const AssetLibrary: React.FC = () => {
         aspect_ratio: genForm.aspect_ratio,
         seed: genForm.seed ? Number(genForm.seed) : undefined,
         tags: genForm.tags || undefined,
+        dynamic_inputs: Object.keys(dynamicInputs).length > 0 ? dynamicInputs : undefined,
       });
       setShowGenerate(false);
       setGenForm({ name: '', prompt: '', negative_prompt: '', category: 'character', provider: '', workflow_id: '', aspect_ratio: '1:1', seed: '', tags: '' });
+      setDynamicInputs({});
       if (res?.asset) { selectAsset(res.asset.id); setDetailAsset(res.asset); }
       refreshStats();
     } catch (e: any) { alert(e.message || '生成失败'); } finally { setGenerating(false); }
@@ -372,13 +424,152 @@ export const AssetLibrary: React.FC = () => {
                 </select>
               </div>
               <div>
-                <label className="text-xs text-gray-300">工作流（ComfyUI）</label>
-                <select value={genForm.workflow_id} onChange={e=>setGenForm({...genForm, workflow_id:e.target.value})} className="mt-1 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white">
-                  <option value="">默认</option>
-                  {workflows.map((w:any)=><option key={w.id} value={w.id}>{w.name||w.id}</option>)}
+                <div className="flex items-center justify-between">
+                  <label className="text-xs text-gray-300">工作流（ComfyUI）</label>
+                  {genForm.workflow_id && (
+                    <button
+                      type="button"
+                      onClick={() => setInspectWfId(genForm.workflow_id)}
+                      className="text-[10px] text-accent-blue hover:text-blue-400 hover:underline flex items-center gap-0.5"
+                    >
+                      <span>⚙️ 参数配置与诊断</span>
+                    </button>
+                  )}
+                </div>
+                <select
+                  value={genForm.workflow_id}
+                  onChange={e => {
+                    const wfId = e.target.value;
+                    setGenForm(prev => ({
+                      ...prev,
+                      workflow_id: wfId,
+                      provider: wfId ? 'comfyui' : prev.provider,
+                    }));
+                  }}
+                  className="mt-1 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white"
+                >
+                  <option value="">默认 (内置)</option>
+                  {workflows.map((w: any) => <option key={w.id} value={w.id}>{w.name || w.id}</option>)}
                 </select>
               </div>
             </div>
+
+            {/* Dynamic Exposed Inputs Section */}
+            {workflowExposedInputs.length > 0 && (
+              <div className="bg-surface-secondary/70 border border-brand/30 rounded-xl p-3.5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-brand-light flex items-center gap-1.5">
+                    <span>⭐️ 该工作流专属输入项 ({workflowExposedInputs.length})</span>
+                  </span>
+                  <span className="text-[10px] text-gray-400">已自适应匹配工作流内部节点</span>
+                </div>
+
+                <div className="space-y-3">
+                  {workflowExposedInputs.map((exp: any) => {
+                    const key = exp.id || exp.node_id;
+                    const val = dynamicInputs[key];
+                    return (
+                      <div key={key} className="space-y-1 text-xs">
+                        <div className="flex items-center justify-between">
+                          <label className="text-gray-300 font-medium flex items-center gap-1">
+                            <span>{exp.label || exp.param_name}</span>
+                            {exp.required && <span className="text-red-400">*</span>}
+                          </label>
+                          <span className="text-[10px] text-gray-500 font-mono">
+                            #{exp.node_id} · {exp.type === 'image' ? '垫图' : exp.type === 'text' ? '文本' : exp.type}
+                          </span>
+                        </div>
+
+                        {exp.type === 'image' ? (
+                          <div className="flex items-center gap-3">
+                            {val ? (
+                              <div className="relative w-14 h-14 rounded-lg border border-brand overflow-hidden group shrink-0 bg-black/50">
+                                <img
+                                  src={resolveUrl(val)}
+                                  alt="Preview"
+                                  className="w-full h-full object-cover"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setDynamicInputs(p => ({ ...p, [key]: '' }))}
+                                  className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 text-white flex items-center justify-center text-[10px] transition"
+                                >
+                                  ✕ 移除
+                                </button>
+                              </div>
+                            ) : null}
+
+                            <div className="flex-1 flex items-center gap-2">
+                              <label className="flex-1 border border-dashed border-border hover:border-brand rounded-lg p-2.5 text-center cursor-pointer bg-surface/50 text-[11px] text-gray-300 hover:text-white transition flex items-center justify-center gap-1.5">
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  className="hidden"
+                                  onChange={e => {
+                                    const f = e.target.files?.[0];
+                                    if (f) {
+                                      const reader = new FileReader();
+                                      reader.onload = () => {
+                                        setDynamicInputs(p => ({ ...p, [key]: reader.result }));
+                                      };
+                                      reader.readAsDataURL(f);
+                                    }
+                                  }}
+                                />
+                                <Upload className="w-3.5 h-3.5 text-brand" />
+                                <span>{val ? '更换垫图 / 参考图' : '📁 上传垫图 / 角色参考图'}</span>
+                              </label>
+
+                              {assets.length > 0 && (
+                                <select
+                                  onChange={e => {
+                                    if (e.target.value) {
+                                      setDynamicInputs(p => ({ ...p, [key]: e.target.value }));
+                                    }
+                                  }}
+                                  className="bg-surface border border-border rounded-lg px-2 py-2 text-[11px] text-gray-400 focus:outline-none focus:border-brand"
+                                >
+                                  <option value="">从素材库选...</option>
+                                  {assets.map(a => (
+                                    <option key={a.id} value={a.file_url || a.thumb_url}>
+                                      {a.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
+                            </div>
+                          </div>
+                        ) : exp.type === 'number' ? (
+                          <input
+                            type="number"
+                            value={val ?? ''}
+                            onChange={e =>
+                              setDynamicInputs(p => ({ ...p, [key]: parseFloat(e.target.value) }))
+                            }
+                            placeholder={exp.description || '输入数值'}
+                            className="w-full bg-surface border border-border rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-brand font-mono"
+                          />
+                        ) : (
+                          <textarea
+                            rows={2}
+                            value={val ?? ''}
+                            onChange={e =>
+                              setDynamicInputs(p => ({ ...p, [key]: e.target.value }))
+                            }
+                            placeholder={exp.description || `输入 ${exp.label}`}
+                            className="w-full bg-surface border border-border rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-brand font-sans resize-none"
+                          />
+                        )}
+                        {exp.description && (
+                          <p className="text-[10px] text-gray-500">{exp.description}</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="text-xs text-gray-300">画幅</label>
@@ -401,6 +592,18 @@ export const AssetLibrary: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {inspectWfId && (
+        <WorkflowInspectorModal
+          workflowId={inspectWfId}
+          isOpen={!!inspectWfId}
+          onClose={() => setInspectWfId('')}
+          onSaved={() => {
+            apiService.listWorkflows('all').then(d => setWorkflows(d.workflows || d || [])).catch(() => {});
+            loadWorkflowInputs(inspectWfId);
+          }}
+        />
       )}
     </div>
   );

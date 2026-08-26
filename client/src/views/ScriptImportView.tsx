@@ -52,6 +52,7 @@ const STYLE_OPTIONS: { id: StylePreset; label: string; desc: string }[] = [
   { id: 'modern_webtoon', label: '🏙️ 韩漫 Webtoon', desc: '强对比度、现代条漫质感与锐利线条' },
   { id: 'cinematic_3d', label: '🎮 3D 虚幻引擎5', desc: '次世代 CGI 电影质感与高精建模' },
   { id: 'dark_comic', label: '🦇 暗黑美漫画风', desc: '高反差黑白阴影、硬核图画小说' },
+  { id: 'pure_white_aesthetic', label: '🤍 极简纯白美学', desc: '高调纯白光影、极简精致治愈系柔光线条' },
 ];
 
 export const ScriptImportView: React.FC<ScriptImportViewProps> = ({ isOpen, onClose }) => {

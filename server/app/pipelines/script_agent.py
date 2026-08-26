@@ -16,7 +16,9 @@ STYLE_PROMPTS = {
     "japanese_anime": "Makoto Shinkai style, high quality Japanese anime, vibrant colors, beautiful lens flare, ultra-detailed background, 4k anime visual",
     "modern_webtoon": "Korean Webtoon manhwa style, dynamic line art, sharp character shading, modern urban aesthetic, trending on Webtoon, high contrast",
     "cinematic_3d": "Unreal Engine 5 render, 3D Pixar & Disney animation quality, ray tracing, subsurface scattering, 8k CGI movie still, vivid expressions",
-    "dark_comic": "Frank Miller dark graphic novel style, high contrast noir, ink splatters, moody shadows, gritty comic book aesthetic"
+    "dark_comic": "Frank Miller dark graphic novel style, high contrast noir, ink splatters, moody shadows, gritty comic book aesthetic",
+    "pure_white_aesthetic": "Pure white aesthetic, high-key lighting, clean white minimalist anime style, bright ethereal atmosphere, soft delicate shading, pristine studio illumination, masterpiece, 8k resolution",
+    "white_minimalist": "Pure white aesthetic, high-key lighting, clean white minimalist anime style, bright ethereal atmosphere, soft delicate shading, pristine studio illumination, masterpiece, 8k resolution",
 }
 
 VALID_FRAMINGS = {"close_up", "extreme_close_up", "medium", "full", "long", "bird_eye", "low_angle"}

@@ -25,7 +25,7 @@ interface ProjectState {
 
   // Script & Generation
   importNovelScript: (text: string, style?: StylePreset, ratio?: AspectRatio) => Promise<void>;
-  generateShotVideo: (shotId: string, options?: { mode?: 'i2v' | 'r2v' | 't2v'; prompt?: string; duration?: number; provider?: string }) => Promise<void>;
+  generateShotVideo: (shotId: string, options?: { mode?: 'i2v' | 'r2v' | 't2v'; prompt?: string; duration?: number; provider?: string; workflow_id?: string; dynamic_inputs?: Record<string, any> }) => Promise<void>;
   updateShot: (shotId: string, updates: Partial<StoryboardShot>) => void;
   updateCharacter: (charId: string, updates: Partial<Character>) => void;
   addShot: (sceneIndex: number, afterShotId?: string) => void;
@@ -104,6 +104,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         duration,
         aspect_ratio: proj.aspect_ratio || '9:16',
         provider: options?.provider,
+        workflow_id: options?.workflow_id,
+        dynamic_inputs: options?.dynamic_inputs,
         shot_id: shotId,
       });
 

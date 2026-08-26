@@ -5,7 +5,9 @@ export type StylePreset =
   | 'japanese_anime' 
   | 'modern_webtoon' 
   | 'cinematic_3d' 
-  | 'dark_comic';
+  | 'dark_comic'
+  | 'pure_white_aesthetic'
+  | 'white_minimalist';
 
 export type CameraFraming = 
   | 'extreme_close_up'

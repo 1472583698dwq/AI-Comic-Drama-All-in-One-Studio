@@ -97,54 +97,149 @@ class ComfyUIVideoProvider(VideoProvider):
         if req.mode == "r2v" and not req.reference_images and not req.first_frame_url:
             raise ValueError("参考生视频需要 reference_images 或 first_frame_url")
 
-        # 若提供了 workflow_id，尝试走真实 ComfyUI 视频工作流
-        if req.workflow_id:
+        # 若提供了 workflow_id 或配置了系统默认视频工作流，尝试走真实 ComfyUI 视频工作流
+        target_wf_id = req.workflow_id or getattr(settings, "COMFYUI_DEFAULT_VIDEO_WORKFLOW", "")
+        if target_wf_id:
             try:
-                return await self._generate_via_workflow(req, started)
+                req_copy = VideoGenerateRequest(
+                    prompt=req.prompt,
+                    mode=req.mode,
+                    first_frame_url=req.first_frame_url,
+                    last_frame_url=req.last_frame_url,
+                    reference_images=req.reference_images,
+                    reference_videos=req.reference_videos,
+                    reference_audios=req.reference_audios,
+                    duration=req.duration,
+                    resolution=req.resolution,
+                    aspect_ratio=req.aspect_ratio,
+                    seed=req.seed,
+                    workflow_id=target_wf_id,
+                    provider=req.provider,
+                    dynamic_inputs=req.dynamic_inputs,
+                    extra=req.extra
+                )
+                return await self._generate_via_workflow(req_copy, started)
             except Exception as e:
                 # 降级到 Mock 并附带警告
-                print(f"[ComfyUIVideo] workflow {req.workflow_id} 执行失败，降级 Mock: {e}")
+                print(f"[ComfyUIVideo] workflow {target_wf_id} 执行失败，降级 Mock: {e}")
                 # fallthrough to mock
 
         # Mock 生成：首帧循环为视频
         return await self._generate_mock(req, started)
 
     async def _generate_via_workflow(self, req: VideoGenerateRequest, started: float) -> VideoGenerateResult:
-        from app.providers.workflow.manager import workflow_manager
+        from app.providers.workflow.manager import workflow_manager, upload_image_to_comfyui
         # 支持视频工作流同样存储在 workflows 目录（复用 manager）
         wf, meta = workflow_manager.get_workflow_with_meta(req.workflow_id) if hasattr(workflow_manager, "get_workflow_with_meta") else (workflow_manager.get_workflow(req.workflow_id), workflow_manager.get_meta(req.workflow_id))
         if not wf:
             raise FileNotFoundError(f"视频工作流不存在: {req.workflow_id}")
-        # 注入首帧：寻找 LoadImage 节点
-        # 简化：若工作流含 LoadImage，则替换其 image 为首帧文件名（需先上传首帧到 ComfyUI input）
         server_url = getattr(settings, "COMFYUI_SERVER_URL", "http://127.0.0.1:8188").rstrip("/")
-        # 下载首帧到临时
-        tmp_img = os.path.join(VIDEOS_DIR, f"tmp_{uuidlib.uuid4().hex[:6]}.png")
-        if req.first_frame_url:
-            await _download_to_temp(req.first_frame_url, tmp_img)
-            # 上传到 ComfyUI /upload/image
+
+        # 1. 上传所有输入图像到 ComfyUI，获取内部文件名（支持 I2V 首帧、尾帧、R2V多参考）
+        uploaded_first = ""
+        uploaded_last = ""
+        uploaded_refs: list[str] = []
+
+        async def _upload_one(src: str) -> str:
+            if not src:
+                return ""
+            # 复用 manager 的上传工具，自动处理 /storage, http, base64, 本地路径
+            return await upload_image_to_comfyui(src, server_url)
+
+        try:
+            if req.first_frame_url:
+                uploaded_first = await _upload_one(req.first_frame_url)
+            if req.last_frame_url:
+                uploaded_last = await _upload_one(req.last_frame_url)
+            if req.reference_images:
+                for ref in req.reference_images:
+                    if ref:
+                        uploaded_refs.append(await _upload_one(ref))
+            # 若 R2V 模式下未提供 first_frame 但有参考，取首张参考作为首帧兜底（兼容旧前端）
+            if not uploaded_first and uploaded_refs and req.mode == "r2v":
+                uploaded_first = uploaded_refs[0]
+        except Exception as e:
+            raise RuntimeError(f"上传参考图像到 ComfyUI 失败: {e}")
+
+        # 2. 判断节俭模式 vs 全量覆盖
+        #    - API 原生工作流（auto_converted=False）保持节俭，仅注入 mapping 指向节点
+        #    - UI 转换工作流（auto_converted=True）全量覆盖，页面参数覆盖原值
+        is_api_frugally = False
+        if meta:
+            # meta 来自 manager，已包含 is_api_format / auto_converted
+            auto_conv = meta.get("auto_converted", False)
+            # 内部 API 格式且未经过转换，则节俭；外部/转换后则全量以保证 I2V/R2V 适配
+            is_api_frugally = not auto_conv and meta.get("is_api_format", True) is not False
+            # 若工作流本身为外部且 is_api_format=True 且 auto_converted=False，仍视为 API 节俭
+            # 若为内部但 auto_converted=True，视为全量
+
+        # 3. 准备注入参数
+        # 分辨率 -> 宽高
+        width = height = None
+        if req.resolution or req.aspect_ratio:
+            RES_MAP = {
+                "720p": {"9:16": (720, 1280), "16:9": (1280, 720), "1:1": (720, 720)},
+                "1080p": {"9:16": (1080, 1920), "16:9": (1920, 1080), "1:1": (1080, 1080)},
+                "480p": {"9:16": (480, 832), "16:9": (832, 480), "1:1": (480, 480)},
+            }
+            if req.resolution in RES_MAP and req.aspect_ratio in RES_MAP[req.resolution]:
+                width, height = RES_MAP[req.resolution][req.aspect_ratio]
+
+        mapping = (meta or {}).get("mapping", {})
+        node_overrides = (meta or {}).get("node_overrides", {})
+
+        video_params = {
+            "prompt": req.prompt or "",
+            "negative_prompt": "",  # 视频通常无单独负向，若需要可从 dynamic_inputs 取
+            "first_frame_url": uploaded_first,
+            "last_frame_url": uploaded_last,
+            "reference_images": uploaded_refs,
+            "width": width,
+            "height": height,
+            "resolution": req.resolution,
+            "aspect_ratio": req.aspect_ratio,
+            "duration": req.duration,
+            "seed": req.seed,
+            "mode": req.mode,
+        }
+
+        # 4. 通过 manager 的视频注入器生成最终工作流
+        injected_wf = workflow_manager.inject_video_params(
+            wf,
+            mapping,
+            video_params,
+            node_overrides=node_overrides,
+            dynamic_inputs=req.dynamic_inputs,
+            is_api_frugally=is_api_frugally,
+        )
+
+        # 5. 提交到 ComfyUI（已完成 I2V/R2V 图像上传与参数注入，支持节俭/API 与全量/UI 双模式）
+        if True:
             async with httpx.AsyncClient(timeout=20.0) as client:
-                with open(tmp_img, "rb") as f:
-                    files = {"image": (os.path.basename(tmp_img), f, "image/png")}
-                    r = await client.post(f"{server_url}/upload/image", files=files)
-                    r.raise_for_status()
-                    upload_name = r.json().get("name", os.path.basename(tmp_img))
-                # 注入到工作流：首个 LoadImage
-                for nid, node in wf.items():
-                    if node.get("class_type") == "LoadImage" and "image" in node.get("inputs", {}):
-                        wf[nid]["inputs"]["image"] = upload_name
-                        break
-                # 注入 prompt / seed 等
-                for nid, node in wf.items():
-                    if node.get("class_type") in ("CLIPTextEncode", "CLIPTextEncodeSDXL"):
-                        if req.prompt and "text" in node["inputs"]:
-                            # 保留首个为正向
-                            wf[nid]["inputs"]["text"] = req.prompt
-                            break
-                # 提交
-                payload = {"prompt": wf, "client_id": str(uuidlib.uuid4())}
+                payload = {"prompt": injected_wf, "client_id": str(uuidlib.uuid4())}
                 r = await client.post(f"{server_url}/prompt", json=payload)
-                r.raise_for_status()
+                if r.status_code != 200:
+                    try:
+                        err = r.json()
+                        err_type = err.get("type") or (err.get("error", {}).get("type") if isinstance(err.get("error"), dict) else "")
+                        if err_type == "missing_node_type" or "missing_node_type" in str(err):
+                            extra = err.get("extra_info", {})
+                            cls_name = extra.get("class_type") or err.get("message", "")
+                            node_title = extra.get("node_title", "")
+                            node_id = extra.get("node_id", "") or err.get("details", "")
+                            raise RuntimeError(
+                                f"ComfyUI 缺少运行此视频工作流所需的自定义插件节点 [{cls_name}] (节点: '{node_title}', ID #{node_id})。\n"
+                                f"💡 解决方法：\n"
+                                f"1. 请在 ComfyUI Manager 中搜索并安装包含 '{cls_name}' 的插件包；\n"
+                                f"2. 或在 ComfyUI 画布中移除或替换此节点后重新导出 API Format。"
+                            )
+                        detail = err.get("error") or err.get("node_errors") or r.text
+                    except RuntimeError:
+                        raise
+                    except Exception:
+                        detail = r.text
+                    raise RuntimeError(f"ComfyUI 视频工作流提交失败 HTTP {r.status_code}: {detail}")
+
                 prompt_id = r.json()["prompt_id"]
                 # 轮询 history
                 deadline = time.time() + 120
@@ -184,8 +279,6 @@ class ComfyUIVideoProvider(VideoProvider):
                                     first_frame_url=req.first_frame_url,
                                 )
                 raise TimeoutError("ComfyUI 视频生成超时")
-        else:
-            raise RuntimeError("首帧下载失败")
 
     async def _generate_mock(self, req: VideoGenerateRequest, started: float) -> VideoGenerateResult:
         # 下载首帧

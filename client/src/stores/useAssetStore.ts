@@ -22,7 +22,11 @@ interface AssetState {
   selectAsset: (id: string | null) => void;
   createAsset: (form: FormData) => Promise<Asset>;
   batchImport: (files: File[], meta?: { category?: string; tags?: string; visual_prompt?: string }) => Promise<{ imported: number; errors: string[] }>;
-  generateAsset: (params: { name: string; prompt: string; category?: string; style_preset?: string; provider?: string; workflow_id?: string; negative_prompt?: string; aspect_ratio?: string; seed?: number; tags?: string }) => Promise<{ asset: Asset; generation: any }>;
+  generateAsset: (params: {
+    name: string; prompt: string; category?: string; style_preset?: string;
+    provider?: string; workflow_id?: string; negative_prompt?: string; aspect_ratio?: string;
+    seed?: number; tags?: string; dynamic_inputs?: Record<string, any>;
+  }) => Promise<{ asset: Asset; generation: any }>;
   deleteAsset: (id: string) => Promise<void>;
   duplicateAsset: (id: string) => Promise<void>;
 }

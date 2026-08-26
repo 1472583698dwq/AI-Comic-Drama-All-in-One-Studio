@@ -19,6 +19,8 @@ STYLE_SUFFIX = {
     "modern_webtoon": "korean webtoon manhwa style, sharp clean line art, modern urban aesthetic, high contrast shading, masterpiece, best quality",
     "cinematic_3d": "unreal engine 5 render, pixar disney 3d animation quality, ray tracing, cinematic movie still, vivid expressions, masterpiece, best quality",
     "dark_comic": "dark graphic novel style, high contrast noir ink, moody shadows, gritty comic aesthetic, masterpiece, best quality",
+    "pure_white_aesthetic": "pure white aesthetic, high-key lighting, clean white minimalist anime style, bright ethereal atmosphere, soft subtle shadows, delicate elegant linework, pristine studio clean lighting, masterpiece, ultra-detailed, 8k resolution",
+    "white_minimalist": "pure white aesthetic, high-key lighting, clean white minimalist anime style, bright ethereal atmosphere, soft subtle shadows, delicate elegant linework, pristine studio clean lighting, masterpiece, ultra-detailed, 8k resolution",
 }
 
 DEFAULT_NEGATIVE = (

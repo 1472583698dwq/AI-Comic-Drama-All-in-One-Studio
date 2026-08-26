@@ -245,7 +245,7 @@ class MCPServerRegistry:
                 "type": "object",
                 "properties": {
                     "novel_text": {"type": "string", "description": "小说或剧本文本内容"},
-                    "style_preset": {"type": "string", "enum": ["donghua_xianxia", "japanese_anime", "modern_webtoon", "cinematic_3d", "dark_comic"], "default": "donghua_xianxia"},
+                    "style_preset": {"type": "string", "enum": ["donghua_xianxia", "japanese_anime", "modern_webtoon", "cinematic_3d", "dark_comic", "pure_white_aesthetic", "white_minimalist"], "default": "donghua_xianxia"},
                     "aspect_ratio": {"type": "string", "enum": ["9:16", "16:9", "1:1"], "default": "9:16"}
                 },
                 "required": ["novel_text"]
@@ -268,7 +268,7 @@ class MCPServerRegistry:
                     "workflow_id": {"type": "string", "description": "ComfyUI自定义工作流ID（仅provider=comfyui时有效，可通过list_comfyui_workflows查询）"},
                     "negative_prompt": {"type": "string", "description": "负向提示词"},
                     "aspect_ratio": {"type": "string", "enum": ["9:16", "16:9", "1:1"], "default": "9:16"},
-                    "style_preset": {"type": "string", "enum": ["donghua_xianxia", "japanese_anime", "modern_webtoon", "cinematic_3d", "dark_comic"]},
+                    "style_preset": {"type": "string", "enum": ["donghua_xianxia", "japanese_anime", "modern_webtoon", "cinematic_3d", "dark_comic", "pure_white_aesthetic", "white_minimalist"]},
                     "seed": {"type": "integer", "description": "随机种子"},
                     "model": {"type": "string", "description": "覆盖默认模型（如 siliconflow的 FLUX 模型）"},
                     "steps": {"type": "integer", "description": "采样步数 8-50"},
@@ -292,7 +292,7 @@ class MCPServerRegistry:
                     "prompt": {"type": "string", "description": "生图提示词"},
                     "negative_prompt": {"type": "string"},
                     "aspect_ratio": {"type": "string", "enum": ["9:16", "16:9", "1:1"], "default": "9:16"},
-                    "style_preset": {"type": "string", "enum": ["donghua_xianxia", "japanese_anime", "modern_webtoon", "cinematic_3d", "dark_comic"]},
+                    "style_preset": {"type": "string", "enum": ["donghua_xianxia", "japanese_anime", "modern_webtoon", "cinematic_3d", "dark_comic", "pure_white_aesthetic", "white_minimalist"]},
                     "seed": {"type": "integer"},
                     "workflow_id": {"type": "string", "description": "指定已导入的ComfyUI工作流ID"},
                     "model": {"type": "string"}

@@ -1,14 +1,14 @@
 @import "tailwindcss";
 
 @theme {
-  --color-background: #0A0A0C;
-  --color-surface: #121216;
-  --color-surface-secondary: #1A1A22;
-  --color-surface-tertiary: #24242F;
-  --color-surface-hover: #2C2C3A;
-  --color-border: #262630;
-  --color-border-subtle: #1C1C24;
-  --color-border-active: #3F3F50;
+  --color-background: var(--color-background);
+  --color-surface: var(--color-surface);
+  --color-surface-secondary: var(--color-surface-secondary);
+  --color-surface-tertiary: var(--color-surface-tertiary);
+  --color-surface-hover: var(--color-surface-hover);
+  --color-border: var(--color-border);
+  --color-border-subtle: var(--color-border-subtle);
+  --color-border-active: var(--color-border-active);
   --color-brand: #7C3AED;
   --color-brand-light: #9333EA;
   --color-brand-glow: #A855F7;
@@ -20,15 +20,44 @@
   --color-accent-yellow: #EAB308;
 }
 
+:root {
+  --color-background: #0A0A0C;
+  --color-surface: #121216;
+  --color-surface-secondary: #1A1A22;
+  --color-surface-tertiary: #24242F;
+  --color-surface-hover: #2C2C3A;
+  --color-border: #262630;
+  --color-border-subtle: #1C1C24;
+  --color-border-active: #3F3F50;
+  --color-text-main: #F3F4F6;
+  --color-text-secondary: #9CA3AF;
+  --color-text-muted: #6B7280;
+}
+
+:root[data-theme="light"], .light {
+  --color-background: #F4F6F9;
+  --color-surface: #FFFFFF;
+  --color-surface-secondary: #F0F2F5;
+  --color-surface-tertiary: #E4E7EB;
+  --color-surface-hover: #D9DDE2;
+  --color-border: #E2E8F0;
+  --color-border-subtle: #EDF2F7;
+  --color-border-active: #CBD5E1;
+  --color-text-main: #0F172A;
+  --color-text-secondary: #334155;
+  --color-text-muted: #64748B;
+}
+
 body {
-  background-color: #0A0A0C;
-  color: #F3F4F6;
+  background-color: var(--color-background);
+  color: var(--color-text-main, #F3F4F6);
   font-family: 'Inter', 'PingFang SC', 'HarmonyOS Sans', sans-serif;
   overflow: hidden;
   user-select: none;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
-/* Custom Scrollbar for sleek dark MiniMax UI */
+/* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -44,12 +73,27 @@ body {
   background: #3B3B4F;
 }
 
+[data-theme="light"] ::-webkit-scrollbar-track {
+  background: #F1F5F9;
+}
+[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+}
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
+
 /* Glassmorphism & Glow styles */
 .glass-panel {
   background: rgba(18, 18, 22, 0.85);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+[data-theme="light"] .glass-panel {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(0, 0, 0, 0.08);
 }
 
 .glow-border {

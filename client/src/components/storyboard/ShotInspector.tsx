@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Sparkles, 
   Play, 
@@ -17,11 +17,14 @@ import {
   Image as ImageIcon,
   Sliders,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Upload,
+  UserCheck
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { StoryboardShot, EmotionType } from '../../types';
 import { apiService } from '../../services/api';
+import { WorkflowInspectorModal } from '../workflow/WorkflowInspectorModal';
 
 const API_ORIGIN = 'http://127.0.0.1:8000';
 
@@ -49,8 +52,57 @@ export const ShotInspector: React.FC = () => {
   const [videoSuccess, setVideoSuccess] = useState(false);
   const [audioEl, setAudioEl] = useState<HTMLAudioElement | null>(null);
 
+  // Workflow & Exposed Dynamic Inputs State
+  const [workflows, setWorkflows] = useState<any[]>([]);
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>('');
+  const [workflowExposedInputs, setWorkflowExposedInputs] = useState<any[]>([]);
+  const [shotDynamicInputs, setShotDynamicInputs] = useState<Record<string, any>>({});
+  const [inspectingWorkflowId, setInspectingWorkflowId] = useState<string>('');
+  const [projectAssets, setProjectAssets] = useState<any[]>([]);
+  const [uploadingInputKey, setUploadingInputKey] = useState<string | null>(null);
+
   const shots: StoryboardShot[] = project?.scenes.flatMap((s) => s.shots) || [];
   const activeShot = shots.find((s) => s.id === activeShotId) || shots[0];
+
+  // Load workflows & project assets
+  useEffect(() => {
+    loadWorkflowsAndAssets();
+  }, []);
+
+  const loadWorkflowsAndAssets = async () => {
+    try {
+      const wfRes = await apiService.listWorkflows('all');
+      setWorkflows(wfRes?.workflows || []);
+    } catch (_) {}
+    try {
+      const assetRes = await apiService.listAssets({ page: 1, limit: 100 });
+      setProjectAssets(assetRes?.assets || []);
+    } catch (_) {}
+  };
+
+  // When workflow changes, inspect its exposed inputs
+  useEffect(() => {
+    if (!selectedWorkflowId) {
+      setWorkflowExposedInputs([]);
+      return;
+    }
+    apiService.inspectWorkflow(selectedWorkflowId)
+      .then(res => {
+        const exposed = res?.data?.exposed_inputs || res?.exposed_inputs || [];
+        setWorkflowExposedInputs(exposed);
+        const initVals: Record<string, any> = {};
+        for (const exp of exposed) {
+          const key = exp.id || exp.node_id;
+          if (exp.default_value !== undefined && exp.default_value !== null) {
+            initVals[key] = exp.default_value;
+          }
+        }
+        setShotDynamicInputs(prev => ({ ...initVals, ...prev }));
+      })
+      .catch(() => {
+        setWorkflowExposedInputs([]);
+      });
+  }, [selectedWorkflowId]);
 
   if (!activeShot) {
     return (
@@ -86,6 +138,30 @@ export const ShotInspector: React.FC = () => {
     }
   };
 
+  const handleUploadImageForInput = async (key: string, file: File) => {
+    try {
+      setUploadingInputKey(key);
+      const res = await apiService.uploadImageToComfyUI(file);
+      if (res.name) {
+        setShotDynamicInputs(prev => ({ ...prev, [key]: res.name }));
+      }
+    } catch (e: any) {
+      alert(`上传垫图失败: ${e?.message || e}`);
+    } finally {
+      setUploadingInputKey(null);
+    }
+  };
+
+  const handleInjectCurrentCharacter = (key: string) => {
+    const currentChar = project?.characters.find(c => c.name === activeShot.speaker_name) || project?.characters?.[0];
+    const charImg = currentChar?.three_views?.front || currentChar?.avatar_url || currentChar?.three_views?.three_quarter;
+    if (!charImg) {
+      alert('当前角色未找到立绘或三视图图片，请在角色工坊生成');
+      return;
+    }
+    setShotDynamicInputs(prev => ({ ...prev, [key]: charImg }));
+  };
+
   // 真实生图 — 更新该分镜的 image_url
   const handleRegenerateImage = async () => {
     if (!activeShot.image_prompt?.trim()) { setRegenError('生图提示词为空'); return; }
@@ -97,6 +173,8 @@ export const ShotInspector: React.FC = () => {
         prompt: activeShot.image_prompt,
         aspect_ratio: project?.aspect_ratio || '9:16',
         style_preset: project?.style_preset,
+        workflow_id: selectedWorkflowId || undefined,
+        dynamic_inputs: Object.keys(shotDynamicInputs).length > 0 ? shotDynamicInputs : undefined,
       });
       updateShot(activeShot.id, { image_url: res.image_url, status: 'completed' });
       setPreviewTab('image');
@@ -127,6 +205,8 @@ export const ShotInspector: React.FC = () => {
         prompt,
         duration: Math.round(activeShot.duration) || 5,
         provider: videoProvider,
+        workflow_id: selectedWorkflowId || undefined,
+        dynamic_inputs: Object.keys(shotDynamicInputs).length > 0 ? shotDynamicInputs : undefined,
       });
       setVideoSuccess(true);
       setPreviewTab('video');
@@ -425,26 +505,176 @@ export const ShotInspector: React.FC = () => {
         </div>
 
         {/* 3. Image Prompt (首帧静态生图) */}
-        <div className="p-3 rounded-xl bg-surface-secondary/40 border border-border space-y-2">
-          <label className="text-xs text-gray-300 font-semibold flex items-center justify-between">
-            <span className="flex items-center space-x-1">
+        <div className="p-3 rounded-xl bg-surface-secondary/40 border border-border space-y-3">
+          <div className="flex items-center justify-between">
+            <label className="text-xs text-gray-300 font-semibold flex items-center space-x-1">
               <ImageIcon className="w-3.5 h-3.5 text-accent-green" />
               <span>首帧提示词 (Image Prompt)</span>
-            </span>
+            </label>
             <span className="text-[10px] text-accent-green">多Provider生图</span>
-          </label>
+          </div>
+
           <textarea
             value={activeShot.image_prompt}
             onChange={(e) => updateShot(activeShot.id, { image_prompt: e.target.value })}
             rows={2}
             className="w-full bg-surface-secondary border border-border rounded-xl p-2 text-xs font-mono text-gray-300 placeholder-gray-500 focus:outline-none focus:border-brand"
+            placeholder="输入画面首帧提示词..."
           />
+
+          {/* Workflow Selector & Inspector Trigger */}
+          <div className="bg-surface-secondary/70 border border-border rounded-xl p-2.5 space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] font-medium text-gray-300 flex items-center gap-1">
+                <span>ComfyUI 生图工作流</span>
+              </label>
+              {selectedWorkflowId && (
+                <button
+                  type="button"
+                  onClick={() => setInspectingWorkflowId(selectedWorkflowId)}
+                  className="text-[10px] text-brand-light hover:underline flex items-center gap-0.5"
+                >
+                  <Sliders className="w-3 h-3" />
+                  <span>⚙️ 参数与暴露诊断</span>
+                </button>
+              )}
+            </div>
+
+            <select
+              value={selectedWorkflowId}
+              onChange={(e) => setSelectedWorkflowId(e.target.value)}
+              className="w-full bg-surface-tertiary border border-border rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-brand"
+            >
+              <option value="">-- 系统默认生图工作流 --</option>
+              {workflows.map((wf) => (
+                <option key={wf.id} value={wf.id}>
+                  {wf.name || wf.id} ({wf.source === 'internal' ? '内部' : '外部'})
+                </option>
+              ))}
+            </select>
+
+            {/* Dynamic Exposed Inputs for this Shot */}
+            {workflowExposedInputs.length > 0 && (
+              <div className="pt-2 border-t border-border/60 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-amber-300 flex items-center gap-1">
+                    <span>⭐️ 专属输入暴露项 ({workflowExposedInputs.length})</span>
+                  </span>
+                  <span className="text-[10px] text-gray-400">已自适应映射节点</span>
+                </div>
+
+                <div className="space-y-2">
+                  {workflowExposedInputs.map((exp: any) => {
+                    const key = exp.id || exp.node_id;
+                    const val = shotDynamicInputs[key];
+                    return (
+                      <div key={key} className="space-y-1 bg-surface-secondary border border-border/80 rounded-lg p-2 text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-gray-300 font-medium">{exp.label || exp.param_name}</span>
+                          <span className="text-[9px] text-gray-500 font-mono">#{exp.node_id}</span>
+                        </div>
+
+                        {exp.type === 'image' ? (
+                          <div className="space-y-1.5 pt-1">
+                            {val ? (
+                              <div className="relative group w-20 h-20 rounded-lg overflow-hidden border border-brand/40 bg-black/40">
+                                <img
+                                  src={val.startsWith('/') ? API_ORIGIN + val : val.startsWith('http') || val.startsWith('data:') ? val : `${API_ORIGIN}/storage/${val}`}
+                                  alt="垫图预览"
+                                  className="w-full h-full object-cover"
+                                  onError={(e) => {
+                                    (e.target as HTMLElement).style.display = 'none';
+                                  }}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setShotDynamicInputs(p => ({ ...p, [key]: '' }))}
+                                  className="absolute top-1 right-1 bg-red-500/80 hover:bg-red-500 text-white rounded p-1 text-[10px]"
+                                  title="移除此垫图"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                {/* 快速注入当前角色立绘 */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleInjectCurrentCharacter(key)}
+                                  className="px-2 py-1 rounded bg-brand/20 hover:bg-brand/30 border border-brand/40 text-[11px] text-brand-light font-medium flex items-center gap-1 transition"
+                                  title="一键注入该分镜说话角色的立绘/三视图"
+                                >
+                                  <UserCheck className="w-3 h-3" />
+                                  <span>🎭 注入当前角色立绘</span>
+                                </button>
+
+                                {/* 本地上传 */}
+                                <label className="px-2 py-1 rounded bg-surface-tertiary hover:bg-surface-tertiary/80 border border-border text-[11px] text-gray-300 cursor-pointer flex items-center gap-1 transition">
+                                  <Upload className="w-3 h-3" />
+                                  <span>{uploadingInputKey === key ? '上传中...' : '📁 上传'}</span>
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    className="hidden"
+                                    onChange={(e) => {
+                                      const f = e.target.files?.[0];
+                                      if (f) handleUploadImageForInput(key, f);
+                                    }}
+                                  />
+                                </label>
+
+                                {/* 从素材库选择 */}
+                                {projectAssets.length > 0 && (
+                                  <select
+                                    onChange={(e) => {
+                                      if (e.target.value) {
+                                        setShotDynamicInputs(p => ({ ...p, [key]: e.target.value }));
+                                        e.target.value = '';
+                                      }
+                                    }}
+                                    defaultValue=""
+                                    className="bg-surface-tertiary border border-border rounded px-1.5 py-1 text-[10px] text-gray-300 max-w-[120px]"
+                                  >
+                                    <option value="" disabled>🖼️ 从素材库选...</option>
+                                    {projectAssets.filter(a => a.image_url).map(a => (
+                                      <option key={a.id} value={a.image_url}>{a.name}</option>
+                                    ))}
+                                  </select>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        ) : exp.type === 'number' ? (
+                          <input
+                            type="number"
+                            value={val ?? ''}
+                            onChange={(e) => setShotDynamicInputs(p => ({ ...p, [key]: parseFloat(e.target.value) || 0 }))}
+                            className="w-full bg-surface-tertiary border border-border rounded px-2 py-1 text-xs text-white"
+                          />
+                        ) : (
+                          <input
+                            type="text"
+                            value={val ?? ''}
+                            onChange={(e) => setShotDynamicInputs(p => ({ ...p, [key]: e.target.value }))}
+                            placeholder={exp.description || '输入动态参数值...'}
+                            className="w-full bg-surface-tertiary border border-border rounded px-2 py-1 text-xs font-mono text-white placeholder-gray-500"
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
           <button
             onClick={handleRegenerateImage}
             disabled={isRegenerating}
-            className="w-full py-1.5 rounded-lg bg-brand hover:opacity-90 text-white text-xs font-semibold disabled:opacity-40 transition-all shadow-md"
+            className="w-full py-2 rounded-xl bg-brand hover:opacity-90 text-white text-xs font-semibold disabled:opacity-40 transition-all shadow-md flex items-center justify-center gap-1.5"
           >
-            {isRegenerating ? '生成首帧画面中...' : '生成 / 重绘首帧画面'}
+            <RefreshCw className={`w-3.5 h-3.5 ${isRegenerating ? 'animate-spin' : ''}`} />
+            <span>{isRegenerating ? '生成首帧画面中...' : '生成 / 重绘首帧画面'}</span>
           </button>
         </div>
 
@@ -567,6 +797,23 @@ export const ShotInspector: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Workflow Inspector Modal */}
+      {inspectingWorkflowId && (
+        <WorkflowInspectorModal
+          workflowId={inspectingWorkflowId}
+          isOpen={!!inspectingWorkflowId}
+          onClose={() => setInspectingWorkflowId('')}
+          onSaved={() => {
+            loadWorkflowsAndAssets();
+            if (selectedWorkflowId) {
+              apiService.inspectWorkflow(selectedWorkflowId).then(res => {
+                setWorkflowExposedInputs(res?.exposed_inputs || []);
+              });
+            }
+          }}
+        />
+      )}
     </div>
   );
 };

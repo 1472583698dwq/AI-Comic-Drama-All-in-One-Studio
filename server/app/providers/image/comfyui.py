@@ -14,7 +14,8 @@ import httpx
 
 from app.core.config import settings
 from .base import ImageProvider, ImageGenerateRequest, ImageGenerateResult
-from ..workflow.manager import workflow_manager
+import copy
+from ..workflow.manager import workflow_manager, upload_image_to_comfyui
 
 STYLE_SUFFIX = {
     "donghua_xianxia": "chinese donghua anime style, xianxia fantasy, cinematic lighting, ethereal atmosphere, highly detailed illustration, masterpiece, best quality",
@@ -22,6 +23,8 @@ STYLE_SUFFIX = {
     "modern_webtoon": "korean webtoon manhwa style, sharp clean line art, modern urban aesthetic, high contrast shading, masterpiece, best quality",
     "cinematic_3d": "unreal engine 5 render, pixar disney 3d animation quality, ray tracing, cinematic movie still, vivid expressions, masterpiece, best quality",
     "dark_comic": "dark graphic novel style, high contrast noir ink, moody shadows, gritty comic aesthetic, masterpiece, best quality",
+    "pure_white_aesthetic": "pure white aesthetic, high-key lighting, clean white minimalist anime style, bright ethereal atmosphere, soft subtle shadows, delicate elegant linework, pristine studio clean lighting, masterpiece, ultra-detailed, 8k resolution",
+    "white_minimalist": "pure white aesthetic, high-key lighting, clean white minimalist anime style, bright ethereal atmosphere, soft subtle shadows, delicate elegant linework, pristine studio clean lighting, masterpiece, ultra-detailed, 8k resolution",
 }
 
 DEFAULT_NEGATIVE = (
@@ -146,12 +149,14 @@ class ComfyUIProvider(ImageProvider):
             if status.get("status_str") == "error":
                 messages = status.get("messages", [])
                 detail = str(messages[-1]) if messages else "未知执行错误"
-                raise RuntimeError(f"ComfyUI 工作流执行失败: {detail}")
             outputs = entry.get("outputs", {})
             for node_output in outputs.values():
                 images = node_output.get("images")
                 if images:
                     return images[0]
+            if status.get("completed"):
+                node_keys = list(outputs.keys())
+                raise RuntimeError(f"ComfyUI 工作流已完成，但未捕获到图像输出 (已生成输出节点: {node_keys})，请确认工作流中包含有效且连通的 SaveImage 节点")
         raise TimeoutError(f"ComfyUI 生图超时（>{timeout_seconds}s），任务可能仍在队列中: {prompt_id}")
 
     async def _download_image(self, client: httpx.AsyncClient, image_meta: Dict[str, Any]) -> bytes:
@@ -186,40 +191,74 @@ class ComfyUIProvider(ImageProvider):
 
         started = time.time()
         async with httpx.AsyncClient(timeout=15.0) as client:
-            # 决定工作流来源
-            if req.workflow_id:
+            # 决定工作流来源：优先显式指定，否则使用系统默认配置的工作流
+            target_wf_id = req.workflow_id or getattr(settings, "COMFYUI_DEFAULT_IMAGE_WORKFLOW", "")
+            if target_wf_id:
                 # 自定义工作流模式：支持内部+外部目录直读（外部id为 ext_*）
                 if hasattr(workflow_manager, "get_workflow_with_meta"):
-                    wf, meta = workflow_manager.get_workflow_with_meta(req.workflow_id)
+                    wf, meta = workflow_manager.get_workflow_with_meta(target_wf_id)
                 else:
-                    wf = workflow_manager.get_workflow(req.workflow_id)
-                    meta = workflow_manager.get_meta(req.workflow_id)
+                    wf = workflow_manager.get_workflow(target_wf_id)
+                    meta = workflow_manager.get_meta(target_wf_id)
                 if not wf:
-                    raise FileNotFoundError(f"工作流不存在: {req.workflow_id}（若为外部工作流，请确认 COMFYUI_WORKFLOWS_DIR 配置正确）")
+                    raise FileNotFoundError(f"工作流不存在: {target_wf_id}（若为外部工作流，请确认 COMFYUI_WORKFLOWS_DIR 配置正确）")
                 if meta and not meta.get("is_api_format", True):
                     err = meta.get("error") or "自动转换失败"
                     hint = meta.get("hint") or "请在 ComfyUI 中用 File→Export (API Format) 重新导出"
                     raise ValueError(f"该工作流无法自动转换: {err} hint: {hint}")
                 mapping = (meta or {}).get("mapping", {})
                 style_suffix = STYLE_SUFFIX.get(req.style_preset, "") if req.style_preset else ""
-                # 若用户未指定checkpoint且配置也为空，则自动探测可用checkpoint并注入
-                checkpoint_to_inject = settings.COMFYUI_CHECKPOINT or req.model
-                if not checkpoint_to_inject:
-                    try:
-                        checkpoint_to_inject = await self._resolve_checkpoint(client)
-                    except Exception:
-                        checkpoint_to_inject = None
-                injected = workflow_manager.inject_params(wf, mapping, {
-                    "prompt": req.prompt.strip(),
-                    "negative_prompt": req.negative_prompt or DEFAULT_NEGATIVE,
-                    "seed": final_seed,
-                    "width": width,
-                    "height": height,
-                    "checkpoint": checkpoint_to_inject,
-                    "steps": steps,
-                    "cfg": cfg,
-                    "style_suffix": style_suffix,
-                })
+                # 仅当用户明确指定了 model 或配置了全局 COMFYUI_CHECKPOINT 时才覆写自定义工作流中的模型
+                checkpoint_to_inject = req.model or settings.COMFYUI_CHECKPOINT or None
+                node_overrides = (meta or {}).get("node_overrides", {})
+                # 节俭模式判定：API 原生（未经过 UI 转换）保持节俭，仅注入 mapping 指向节点；UI 转换后则全量覆盖原值
+                is_api_frugally = False
+                if meta:
+                    auto_conv = meta.get("auto_converted", False)
+                    is_api = meta.get("is_api_format", True)
+                    # 若工作流本身为 API 格式且未经过自动转换，则视为节俭；否则（UI 转换而来）全量
+                    is_api_frugally = (not auto_conv) and bool(is_api)
+
+                # 处理外部表单动态输入的图片上传
+                processed_dynamic_inputs = copy.deepcopy(req.dynamic_inputs or {})
+                for k, v in list(processed_dynamic_inputs.items()):
+                    if isinstance(v, dict):
+                        for sub_k, sub_v in list(v.items()):
+                            if sub_k == "image" and isinstance(sub_v, str) and (sub_v.startswith("data:image/") or sub_v.startswith("/storage/") or sub_v.startswith("http") or os.path.isabs(sub_v)):
+                                try:
+                                    uploaded_name = await upload_image_to_comfyui(sub_v, self.server_url)
+                                    v[sub_k] = uploaded_name
+                                except Exception as upload_err:
+                                    print(f"[ComfyUI] 自动上传垫图失败: {upload_err}")
+                    elif isinstance(v, str) and (str(k).startswith("img_") or "image" in str(k).lower()):
+                        if v.startswith("data:image/") or v.startswith("/storage/") or v.startswith("http") or os.path.isabs(v):
+                            try:
+                                uploaded_name = await upload_image_to_comfyui(v, self.server_url)
+                                processed_dynamic_inputs[k] = uploaded_name
+                            except Exception as upload_err:
+                                print(f"[ComfyUI] 自动上传垫图失败: {upload_err}")
+
+                custom_steps = req.steps if req.steps is not None else None
+                custom_cfg = req.cfg if req.cfg is not None else None
+
+                injected = workflow_manager.inject_params(
+                    wf,
+                    mapping,
+                    {
+                        "prompt": req.prompt.strip(),
+                        "negative_prompt": req.negative_prompt or DEFAULT_NEGATIVE,
+                        "seed": final_seed,
+                        "width": width,
+                        "height": height,
+                        "checkpoint": checkpoint_to_inject,
+                        "steps": custom_steps,
+                        "cfg": custom_cfg,
+                        "style_suffix": style_suffix,
+                    },
+                    node_overrides=node_overrides,
+                    dynamic_inputs=processed_dynamic_inputs,
+                    is_api_frugally=is_api_frugally,
+                )
                 workflow = injected
                 checkpoint_name = checkpoint_to_inject or settings.COMFYUI_CHECKPOINT or "custom-workflow"
             else:
@@ -245,11 +284,25 @@ class ComfyUIProvider(ImageProvider):
                 f"{self.server_url}/prompt",
                 json={"prompt": workflow, "client_id": self.client_id},
             )
-            # 详细错误透传
+            # 详细错误透传与友好诊断引导
             if submit_resp.status_code != 200:
                 try:
                     err = submit_resp.json()
+                    err_type = err.get("type") or (err.get("error", {}).get("type") if isinstance(err.get("error"), dict) else "")
+                    if err_type == "missing_node_type" or "missing_node_type" in str(err):
+                        extra = err.get("extra_info", {})
+                        cls_name = extra.get("class_type") or err.get("message", "")
+                        node_title = extra.get("node_title", "")
+                        node_id = extra.get("node_id", "") or err.get("details", "")
+                        raise RuntimeError(
+                            f"ComfyUI 缺少运行此工作流所需的自定义插件节点 [{cls_name}] (节点: '{node_title}', ID #{node_id})。\n"
+                            f"💡 解决方法：\n"
+                            f"1. 请在 ComfyUI Manager (插件管理器) 中搜索并安装包含 '{cls_name}' 的插件包后重启 ComfyUI；\n"
+                            f"2. 或在 ComfyUI 画布中移除或替换此节点后重新导出 API Format。"
+                        )
                     detail = err.get("error") or err.get("node_errors") or submit_resp.text
+                except RuntimeError:
+                    raise
                 except Exception:
                     detail = submit_resp.text
                 raise RuntimeError(f"ComfyUI 提交失败 HTTP {submit_resp.status_code}: {detail}")

@@ -84,6 +84,7 @@ async def generate_asset(
     aspect_ratio: str = Form("1:1"),
     seed: Optional[int] = Form(None),
     tags: Optional[str] = Form(None),
+    dynamic_inputs: Optional[str] = Form(None),
 ):
     """
     直接通过生图Provider生成并入库为素材
@@ -102,16 +103,29 @@ async def generate_asset(
                 tag_list = [str(tag_list)]
         except Exception:
             tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+    
+    parsed_dynamic_inputs = None
+    if dynamic_inputs:
+        try:
+            parsed_dynamic_inputs = json.loads(dynamic_inputs)
+        except Exception:
+            pass
+
+    effective_provider = provider
+    if not effective_provider and workflow_id:
+        effective_provider = "comfyui"
+
     req = ImageGenerateRequest(
         prompt=prompt,
         negative_prompt=negative_prompt or "",
         aspect_ratio=aspect_ratio,
         style_preset=style_preset,
         seed=seed,
-        workflow_id=workflow_id,
+        workflow_id=workflow_id or None,
+        dynamic_inputs=parsed_dynamic_inputs,
     )
     try:
-        res = await image_registry.generate(req, provider_id=provider)
+        res = await image_registry.generate(req, provider_id=effective_provider)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"生成失败: {e}")
     try:

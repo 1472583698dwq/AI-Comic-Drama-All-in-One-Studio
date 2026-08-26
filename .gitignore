@@ -59,6 +59,7 @@ Thumbs.db
 
 # ===== Secrets / Local Config =====
 server/.env
+storage/config_store.json
 *.pem
 *.key
 

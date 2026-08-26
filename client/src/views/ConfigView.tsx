@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { apiService } from '../services/api';
 import { useProjectStore } from '../stores/useProjectStore';
+import { WorkflowInspectorModal } from '../components/workflow/WorkflowInspectorModal';
 
 type TabKey = 'llm' | 'image' | 'voice' | 'video' | 'jianyin' | 'system';
 
@@ -39,6 +40,20 @@ export const ConfigView: React.FC = () => {
   const [testing, setTesting] = useState<string | null>(null);
   const [envFile, setEnvFile] = useState('');
   const [checks, setChecks] = useState<Record<string, any>>({});
+  const [workflowList, setWorkflowList] = useState<any[]>([]);
+  const [loadingWfs, setLoadingWfs] = useState(false);
+  const [inspectingWorkflowId, setInspectingWorkflowId] = useState('');
+
+  const loadWorkflowsList = async () => {
+    setLoadingWfs(true);
+    try {
+      const res = await apiService.listWorkflows('all');
+      setWorkflowList(res.workflows || res || []);
+    } catch (e) {
+    } finally {
+      setLoadingWfs(false);
+    }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -69,7 +84,15 @@ export const ConfigView: React.FC = () => {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
+
+  useEffect(() => {
+    if (tab === 'image') {
+      loadWorkflowsList();
+    }
+  }, [tab]);
 
   const setField = (k: string, v: string) => {
     setForm((prev) => ({ ...prev, [k]: v }));
@@ -727,6 +750,62 @@ export const ConfigView: React.FC = () => {
                     </div>
                   </div>
 
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+                    <div>
+                      <label className="text-xs font-medium text-gray-300 flex items-center justify-between">
+                        <span>COMFYUI_DEFAULT_IMAGE_WORKFLOW (默认生图工作流)</span>
+                        {form.COMFYUI_DEFAULT_IMAGE_WORKFLOW && (
+                          <button
+                            type="button"
+                            onClick={() => setField('COMFYUI_DEFAULT_IMAGE_WORKFLOW', '')}
+                            className="text-[10px] text-gray-500 hover:text-red-400"
+                          >
+                            清除默认
+                          </button>
+                        )}
+                      </label>
+                      <select
+                        value={form.COMFYUI_DEFAULT_IMAGE_WORKFLOW || ''}
+                        onChange={(e) => setField('COMFYUI_DEFAULT_IMAGE_WORKFLOW', e.target.value)}
+                        className="mt-1.5 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-brand"
+                      >
+                        <option value="">-- 系统内置默认 SDXL 工作流 --</option>
+                        {workflowList.map((wf: any) => (
+                          <option key={wf.id} value={wf.id}>
+                            {wf.name || wf.id} ({wf.source === 'internal' ? '内部' : '外部'})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-medium text-gray-300 flex items-center justify-between">
+                        <span>COMFYUI_DEFAULT_VIDEO_WORKFLOW (默认生视频工作流)</span>
+                        {form.COMFYUI_DEFAULT_VIDEO_WORKFLOW && (
+                          <button
+                            type="button"
+                            onClick={() => setField('COMFYUI_DEFAULT_VIDEO_WORKFLOW', '')}
+                            className="text-[10px] text-gray-500 hover:text-red-400"
+                          >
+                            清除默认
+                          </button>
+                        )}
+                      </label>
+                      <select
+                        value={form.COMFYUI_DEFAULT_VIDEO_WORKFLOW || ''}
+                        onChange={(e) => setField('COMFYUI_DEFAULT_VIDEO_WORKFLOW', e.target.value)}
+                        className="mt-1.5 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-brand"
+                      >
+                        <option value="">-- 动态图生视频 Mock / 自动探测 --</option>
+                        {workflowList.map((wf: any) => (
+                          <option key={wf.id} value={wf.id}>
+                            {wf.name || wf.id} ({wf.source === 'internal' ? '内部' : '外部'})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
                   <div className="flex items-center space-x-3 pt-2">
                     <button
                       type="button"
@@ -805,6 +884,121 @@ export const ConfigView: React.FC = () => {
                   <div className="flex items-center space-x-3">
                     <span className="text-[10px] text-gray-500">当前已配置: {form.COMFYUI_WORKFLOWS_DIR ? <span className="text-accent-green font-mono">{form.COMFYUI_WORKFLOWS_DIR}</span> : <span className="text-gray-600">未配置（仅显示内部工作流）</span>}</span>
                   </div>
+                </div>
+
+                {/* ComfyUI Workflows List & Parameter Inspector */}
+                <div className="bg-surface rounded-2xl border border-border p-5 space-y-4">
+                  <div className="flex items-center justify-between border-b border-border pb-3">
+                    <div className="flex items-center space-x-2">
+                      <span className="w-2 h-2 rounded-full bg-accent-blue" />
+                      <span className="text-xs font-bold text-white">ComfyUI 工作流列表与节点参数深度配置 (Node & Parameter Studio)</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={loadWorkflowsList}
+                      disabled={loadingWfs}
+                      className="text-[11px] text-gray-400 hover:text-white flex items-center space-x-1"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${loadingWfs ? 'animate-spin' : ''}`} />
+                      <span>刷新工作流</span>
+                    </button>
+                  </div>
+
+                  {loadingWfs ? (
+                    <div className="py-8 text-center text-xs text-gray-500 flex items-center justify-center space-x-2">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>正在扫描并解析工作流列表...</span>
+                    </div>
+                  ) : workflowList.length === 0 ? (
+                    <div className="py-6 text-center text-xs text-gray-500">
+                      暂无可用工作流，请配置上方的 COMFYUI_WORKFLOWS_DIR 路径或导入工作流。
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {workflowList.map((wf: any) => {
+                        const isDefaultImg = form.COMFYUI_DEFAULT_IMAGE_WORKFLOW === wf.id;
+                        const isDefaultVid = form.COMFYUI_DEFAULT_VIDEO_WORKFLOW === wf.id;
+                        return (
+                          <div
+                            key={wf.id}
+                            className={`bg-surface-secondary border rounded-xl p-3.5 flex flex-col justify-between transition-all space-y-2.5 ${
+                              isDefaultImg || isDefaultVid ? 'border-brand/60 ring-1 ring-brand/30 bg-surface-secondary/90' : 'border-border hover:border-brand/40'
+                            }`}
+                          >
+                            <div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-semibold text-white truncate max-w-[180px]" title={wf.name || wf.id}>
+                                  {wf.name || wf.id}
+                                </span>
+                                <div className="flex items-center gap-1.5">
+                                  {isDefaultImg && (
+                                    <span className="text-[9px] px-1.5 py-0.5 rounded font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                                      ⭐️ 默认生图
+                                    </span>
+                                  )}
+                                  {isDefaultVid && (
+                                    <span className="text-[9px] px-1.5 py-0.5 rounded font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                                      🎬 默认生视频
+                                    </span>
+                                  )}
+                                  <span className={`text-[9px] px-2 py-0.5 rounded-full font-mono border ${
+                                    wf.source === 'internal'
+                                      ? 'bg-accent-green/15 text-accent-green border-accent-green/30'
+                                      : 'bg-accent-purple/15 text-accent-purple border-accent-purple/30'
+                                  }`}>
+                                    {wf.source === 'internal' ? '内部' : '外部直读'}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="text-[10px] text-gray-500 font-mono mt-1 truncate">
+                                ID: {wf.id} {wf.node_count ? `· ${wf.node_count} 节点` : ''}
+                              </div>
+                              {wf.description && (
+                                <p className="text-[11px] text-gray-400 mt-1 line-clamp-1">
+                                  {wf.description}
+                                </p>
+                              )}
+                            </div>
+
+                            <div className="flex items-center justify-between pt-1 border-t border-border/50">
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setField('COMFYUI_DEFAULT_IMAGE_WORKFLOW', isDefaultImg ? '' : wf.id)}
+                                  className={`text-[10px] font-medium transition ${
+                                    isDefaultImg ? 'text-amber-300 hover:text-red-400' : 'text-gray-400 hover:text-amber-300'
+                                  }`}
+                                  title={isDefaultImg ? '点击取消默认生图工作流' : '设为全局默认生图工作流'}
+                                >
+                                  {isDefaultImg ? '⭐️ 取消默认生图' : '⭐️ 设为默认生图'}
+                                </button>
+                                <span className="text-gray-600 text-[10px]">|</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setField('COMFYUI_DEFAULT_VIDEO_WORKFLOW', isDefaultVid ? '' : wf.id)}
+                                  className={`text-[10px] font-medium transition ${
+                                    isDefaultVid ? 'text-purple-300 hover:text-red-400' : 'text-gray-400 hover:text-purple-300'
+                                  }`}
+                                  title={isDefaultVid ? '点击取消默认生视频工作流' : '设为全局默认生视频工作流'}
+                                >
+                                  {isDefaultVid ? '🎬 取消默认生视频' : '🎬 设为默认生视频'}
+                                </button>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => setInspectingWorkflowId(wf.id)}
+                                className="flex items-center space-x-1 px-2.5 py-1.5 rounded-lg bg-brand/15 hover:bg-brand/25 border border-brand/30 text-[11px] font-semibold text-brand-light hover:text-white transition-all shadow-sm"
+                              >
+                                <Sliders className="w-3 h-3" />
+                                <span>⚙️ 参数与暴露</span>
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 {/* Cloud Providers */}
@@ -1177,6 +1371,15 @@ export const ConfigView: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {inspectingWorkflowId && (
+        <WorkflowInspectorModal
+          workflowId={inspectingWorkflowId}
+          isOpen={!!inspectingWorkflowId}
+          onClose={() => setInspectingWorkflowId('')}
+          onSaved={loadWorkflowsList}
+        />
+      )}
     </div>
   );
 };

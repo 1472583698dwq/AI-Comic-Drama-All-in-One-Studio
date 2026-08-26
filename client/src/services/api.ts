@@ -57,6 +57,7 @@ export const apiService = {
   async generateShotImage(params: {
     prompt: string; negative_prompt?: string; aspect_ratio?: string; style_preset?: string; seed?: number;
     provider?: string; workflow_id?: string; model?: string; steps?: number; cfg?: number; width?: number; height?: number;
+    dynamic_inputs?: Record<string, any>;
   }): Promise<{ image_url: string; seed: number; engine: string; provider: string }> {
     const res = await fetch(`${API_BASE_URL}/images/generate`, {
       method: 'POST',
@@ -74,12 +75,24 @@ export const apiService = {
         height: params.height,
         steps: params.steps,
         cfg: params.cfg,
+        dynamic_inputs: params.dynamic_inputs,
       }),
     });
     if (!res.ok) {
       const body = await res.json().catch(() => null);
       throw new Error(extractErrorMessage(res, body));
     }
+    return await res.json();
+  },
+
+  async uploadImageToComfyUI(file: File): Promise<{ status: string; name: string }> {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch(`${API_BASE_URL}/images/comfyui/upload`, {
+      method: 'POST',
+      body: fd,
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
 
@@ -128,6 +141,7 @@ export const apiService = {
     aspect_ratio?: string;
     provider?: string;
     workflow_id?: string;
+    dynamic_inputs?: Record<string, any>;
     shot_id?: string;
   }): Promise<{
     video_url: string;
@@ -154,6 +168,7 @@ export const apiService = {
         aspect_ratio: params.aspect_ratio || '9:16',
         provider: params.provider,
         workflow_id: params.workflow_id,
+        dynamic_inputs: params.dynamic_inputs,
         shot_id: params.shot_id,
       }),
     });
@@ -240,6 +255,57 @@ export const apiService = {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mapping }),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+
+  async inspectWorkflow(workflowId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/images/workflows/${encodeURIComponent(workflowId)}/inspect`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+
+  async saveWorkflowOverrides(workflowId: string, data: { mapping?: Record<string, string>; node_overrides?: Record<string, Record<string, any>>; exposed_inputs?: any[]; auto_import_if_ext?: boolean }): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/images/workflows/${encodeURIComponent(workflowId)}/overrides`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+
+  async validateWorkflow(workflowId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/images/workflows/${encodeURIComponent(workflowId)}/validate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+
+  async listWorkflowSlots(workflowId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/images/workflows/${encodeURIComponent(workflowId)}/slots`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+
+  async setWorkflowNodeParam(workflowId: string, nodeId: string, paramName: string, value: any): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/images/workflows/${encodeURIComponent(workflowId)}/node/${encodeURIComponent(nodeId)}/${encodeURIComponent(paramName)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value }),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+
+  async composeWorkflows(fragments: Array<{ workflow_id: string; prefix?: string }>, name?: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/images/workflows/compose`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fragments, name }),
     });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
@@ -390,7 +456,11 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
-  async generateAsset(params: { name: string; prompt: string; category?: string; style_preset?: string; provider?: string; workflow_id?: string; negative_prompt?: string; aspect_ratio?: string; seed?: number; tags?: string }): Promise<{ asset: any; generation: any }> {
+  async generateAsset(params: {
+    name: string; prompt: string; category?: string; style_preset?: string;
+    provider?: string; workflow_id?: string; negative_prompt?: string; aspect_ratio?: string;
+    seed?: number; tags?: string; dynamic_inputs?: Record<string, any>;
+  }): Promise<{ asset: any; generation: any }> {
     const fd = new FormData();
     fd.append('name', params.name);
     fd.append('prompt', params.prompt);
@@ -402,6 +472,7 @@ export const apiService = {
     if (params.aspect_ratio) fd.append('aspect_ratio', params.aspect_ratio);
     if (params.seed != null) fd.append('seed', String(params.seed));
     if (params.tags) fd.append('tags', params.tags);
+    if (params.dynamic_inputs) fd.append('dynamic_inputs', JSON.stringify(params.dynamic_inputs));
     const res = await fetch(`${API_BASE_URL}/assets/generate`, { method: 'POST', body: fd });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();

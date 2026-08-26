@@ -13,10 +13,13 @@ import {
   Pause,
   Compass,
   Settings,
-  Library
+  Library,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { useMcpStore } from '../../stores/useMcpStore';
+import { useThemeStore } from '../../stores/useThemeStore';
 
 interface HeaderProps {
   onOpenImport: () => void;
@@ -38,6 +41,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenImport, onOpenExport, onOp
     totalDuration 
   } = useProjectStore();
 
+  const { effectiveTheme, toggleTheme } = useThemeStore();
   const { tools } = useMcpStore();
   const activeToolsCount = tools.filter((t) => t.is_enabled).length;
 
@@ -172,6 +176,19 @@ export const Header: React.FC<HeaderProps> = ({ onOpenImport, onOpenExport, onOp
           <Sparkles className="w-3.5 h-3.5 text-accent-orange" />
           <span className="hidden lg:inline">技能工坊</span>
           <span className="text-[9px] px-1 rounded bg-accent-orange/20 text-accent-orange font-mono">Skill</span>
+        </button>
+
+        {/* Theme Mode Switcher (Dark / Light Mode) */}
+        <button
+          onClick={toggleTheme}
+          className="p-1.5 rounded-lg bg-surface-secondary border border-border hover:border-brand/40 text-gray-300 hover:text-white transition-all flex items-center justify-center"
+          title={effectiveTheme === 'dark' ? '当前：夜间模式，点击切换到明亮模式 (Light)' : '当前：明亮模式，点击切换到夜间模式 (Dark)'}
+        >
+          {effectiveTheme === 'dark' ? (
+            <Sun className="w-4 h-4 text-amber-400 hover:rotate-90 transition-transform duration-300" />
+          ) : (
+            <Moon className="w-4 h-4 text-indigo-400 hover:-rotate-12 transition-transform duration-300" />
+          )}
         </button>
 
         {/* Config / Settings */}

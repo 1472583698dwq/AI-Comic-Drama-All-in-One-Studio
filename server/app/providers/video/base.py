@@ -24,6 +24,7 @@ class VideoGenerateRequest:
     seed: Optional[int] = None
     workflow_id: Optional[str] = None  # ComfyUI 视频工作流
     provider: Optional[str] = None
+    dynamic_inputs: Optional[Dict[str, Any]] = None  # 外部暴露表单动态输入
     extra: Optional[Dict[str, Any]] = None
 
 @dataclass

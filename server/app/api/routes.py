@@ -235,6 +235,7 @@ async def generate_image(req: ImageGenerateRequest):
             height=req.height,
             steps=req.steps,
             cfg=req.cfg,
+            dynamic_inputs=req.dynamic_inputs,
         )
         prov_id = req.provider
         if req.workflow_id and not prov_id:
@@ -424,6 +425,108 @@ async def update_workflow_mapping(workflow_id: str, body: Dict[str, Any]):
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/images/workflows/{workflow_id}/inspect")
+async def inspect_workflow_parameters(workflow_id: str):
+    """深度解析工作流的所有可配置节点、参数类型与 ComfyUI 可用模型选项"""
+    mgr = get_workflow_manager()
+    try:
+        data = mgr.inspect_workflow_nodes(workflow_id)
+        return {"status": "success", "data": data}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"解析工作流参数失败: {e}")
+
+@router.post("/images/workflows/{workflow_id}/overrides")
+async def save_workflow_node_overrides(workflow_id: str, body: Dict[str, Any]):
+    """保存工作流的槽位映射、节点参数默认覆写值与外部暴露字段"""
+    mgr = get_workflow_manager()
+    mapping = body.get("mapping")
+    node_overrides = body.get("node_overrides")
+    exposed_inputs = body.get("exposed_inputs")
+    auto_import = body.get("auto_import_if_ext", True)
+    try:
+        meta = mgr.save_workflow_overrides(
+            workflow_id=workflow_id,
+            mapping=mapping,
+            node_overrides=node_overrides,
+            exposed_inputs=exposed_inputs,
+            auto_import_if_ext=auto_import
+        )
+        return {"status": "success", "meta": meta}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"保存参数覆写失败: {e}")
+
+@router.post("/images/comfyui/upload")
+async def upload_image_to_comfyui_route(file: UploadFile = File(...)):
+    """上传本地图片到 ComfyUI input 目录"""
+    from app.providers.workflow.manager import upload_image_to_comfyui
+    contents = await file.read()
+    import base64
+    b64 = f"data:image/png;base64,{base64.b64encode(contents).decode('utf-8')}"
+    try:
+        uploaded_name = await upload_image_to_comfyui(b64)
+        return {"status": "success", "name": uploaded_name}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"上传到 ComfyUI 失败: {e}")
+
+@router.post("/images/workflows/{workflow_id}/validate")
+async def validate_workflow_with_comfyui(workflow_id: str):
+    """向本地/远程 ComfyUI 发起真实校验探测"""
+    mgr = get_workflow_manager()
+    try:
+        result = await mgr.validate_workflow_against_comfyui(workflow_id)
+        return {"status": "success", "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"校验探测失败: {e}")
+
+@router.get("/images/workflows/{workflow_id}/slots")
+async def list_workflow_slots(workflow_id: str):
+    """[兼容 CLI] 列出工作流中所有可编辑槽位（等价于 `comfy workflow slots`）"""
+    mgr = get_workflow_manager()
+    try:
+        slots = mgr.list_workflow_slots(workflow_id)
+        return {"status": "success", "workflow_id": workflow_id, "slots": slots, "count": len(slots)}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取槽位失败: {e}")
+
+@router.put("/images/workflows/{workflow_id}/node/{node_id}/{param_name}")
+async def set_workflow_node_param(workflow_id: str, node_id: str, param_name: str, body: Dict[str, Any]):
+    """[兼容 CLI] 直接编辑指定节点的参数（等价于 `comfy workflow set-slot`）"""
+    mgr = get_workflow_manager()
+    if "value" not in body:
+        raise HTTPException(status_code=400, detail="需提供 body.value")
+    try:
+        result = mgr.set_workflow_node_param(workflow_id, node_id, param_name, body["value"])
+        return {"status": "success", "data": result}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"设置参数失败: {e}")
+
+@router.post("/images/workflows/compose")
+async def compose_workflow_from_fragments(body: Dict[str, Any]):
+    """[兼容 CLI] 将多个工作流片段组合为新工作流（等价于 `comfy workflow compose`）"""
+    mgr = get_workflow_manager()
+    fragments = body.get("fragments") or []
+    name = body.get("name") or "composed_workflow"
+    if not fragments:
+        raise HTTPException(status_code=400, detail="需提供 fragments: [{workflow_id, prefix}]")
+    try:
+        composed = mgr.compose_workflow_from_fragments(fragments)
+        meta = mgr.save_workflow(name=name, workflow_json=composed, description=f"由 {len(fragments)} 个片段组合")
+        return {"status": "success", "workflow_id": meta["id"], "meta": meta, "node_count": len(composed)}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"组合失败: {e}")
 
 # ============================================================
 # 动态视频生成 (I2V 图生视频 / R2V 参考生视频 / T2V 文生视频)

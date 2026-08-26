@@ -82,6 +82,7 @@ class ImageGenerateRequest(BaseModel):
     height: Optional[int] = None
     steps: Optional[int] = None
     cfg: Optional[float] = None
+    dynamic_inputs: Optional[Dict[str, Any]] = None  # 外部暴露表单动态输入 (垫图/额外提示词等)
 
 class Character3ViewsRequest(BaseModel):
     name: str

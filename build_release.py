@@ -24,6 +24,34 @@ print("==================================================")
 print("  🚀 开始全量重构与构建 AI 漫剧 Studio")
 print("==================================================")
 
+# 0. 备份用户持久化配置（避免 dist 重建导致丢失）
+print("\n[0/4] 正在备份用户配置与持久化数据...")
+_backup_store = {}
+# 需要备份的根目录配置
+_root_persist = [
+    os.path.join(ROOT, ".env"),
+    os.path.join(ROOT, "server", ".env"),
+    os.path.join(ROOT, "storage", "config_store.json"),
+]
+# 之前构建产物中的用户数据（exe 运行后会写到 dist/Studio/storage）
+_dist_persist = [
+    os.path.join(STUDIO_DIR, ".env"),
+    os.path.join(STUDIO_DIR, "server", ".env"),
+    os.path.join(STUDIO_DIR, "storage", "config_store.json"),
+    os.path.join(STUDIO_DIR, "_internal", "storage", "config_store.json"),
+]
+for _p in _root_persist + _dist_persist:
+    try:
+        if os.path.exists(_p) and os.path.isfile(_p) and os.path.getsize(_p) > 0:
+            with open(_p, "rb") as _f:
+                _c = _f.read()
+            # 至少包含一个有效键才算有价值
+            if _c.strip():
+                _backup_store[_p] = _c
+                print(f"  已备份: {_p} ({len(_c)} bytes)")
+    except Exception as _e:
+        print(f"  备份跳过 {_p}: {_e}")
+
 # 1. 编译前端
 print("\n[1/4] 正在编译前端生产资源 (Vite + TypeScript)...")
 res = subprocess.run(["npm", "run", "build"], cwd=CLIENT_DIR, shell=True)
@@ -34,6 +62,10 @@ print("✓ 前端构建完成 -> client/dist")
 
 # 2. PyInstaller 独立桌面端打包
 print("\n[2/4] 正在使用 PyInstaller 打包 Windows 独立应用...")
+try:
+    subprocess.run(["taskkill", "/F", "/IM", "Studio.exe"], capture_output=True, shell=True)
+except Exception:
+    pass
 pyinstaller_cmd = [
     sys.executable, "-m", "PyInstaller",
     "--noconfirm",
@@ -70,6 +102,52 @@ for target_dir in [
         shutil.rmtree(target_dir)
     shutil.copytree(client_dist_src, target_dir)
 
+# 3.5 还原用户配置（避免构建覆盖清空）
+def _best_backup_for(target_key: str):
+    # 优先取根目录的最新备份
+    for k in [os.path.join(ROOT, ".env"), os.path.join(ROOT, "server", ".env"), os.path.join(ROOT, "storage", "config_store.json")]:
+        if target_key in os.path.basename(k) and k in _backup_store:
+            return _backup_store[k]
+    # 其次取 dist 中的备份
+    for k, v in _backup_store.items():
+        if target_key in os.path.basename(k):
+            return v
+    return None
+
+_restore_targets = [
+    os.path.join(STUDIO_DIR, "storage", "config_store.json"),
+    os.path.join(STUDIO_DIR, "_internal", "storage", "config_store.json"),
+    os.path.join(STUDIO_DIR, ".env"),
+    os.path.join(STUDIO_DIR, "server", ".env"),
+]
+for _rt in _restore_targets:
+    # 只有当 dist 中的文件为空或缺失时才还原
+    need_restore = False
+    if not os.path.exists(_rt):
+        need_restore = True
+    else:
+        try:
+            if os.path.getsize(_rt) == 0:
+                need_restore = True
+            else:
+                with open(_rt, "r", encoding="utf-8") as _rf:
+                    _txt = _rf.read().strip()
+                # 全空值也视为需要还原
+                if _txt in ("{}", ""):
+                    need_restore = True
+        except Exception:
+            need_restore = True
+    if need_restore:
+        _best = _best_backup_for(os.path.basename(_rt))
+        if _best:
+            try:
+                os.makedirs(os.path.dirname(_rt), exist_ok=True)
+                with open(_rt, "wb") as _wf:
+                    _wf.write(_best)
+                print(f"  已还原: {_rt}")
+            except Exception as _e:
+                print(f"  还原失败 {_rt}: {_e}")
+
 # 镜像到 MiniMax_AI漫剧Studio (容错拷贝)
 try:
     if os.path.exists(MINIMAX_DIR):
@@ -82,8 +160,12 @@ except Exception as e:
 # 4. 重写启动脚本 (GBK 编码)
 print("\n[4/4] 正在更新一键启动脚本...")
 batch_content = """@echo off
-title AI Studio
+title AI 漫剧 Studio
 cd /d "%~dp0"
+
+taskkill /f /im Studio.exe >nul 2>nul
+taskkill /f /im MiniMax_AI漫剧Studio.exe >nul 2>nul
+timeout /t 1 /nobreak >nul
 
 if exist "%~dp0dist\\Studio\\Studio.exe" (
     start "" "%~dp0dist\\Studio\\Studio.exe"
