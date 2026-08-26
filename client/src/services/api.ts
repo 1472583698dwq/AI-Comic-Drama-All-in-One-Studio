@@ -199,7 +199,7 @@ export const apiService = {
 
   // ComfyUI 工作流管理（支持外部目录直读）
   async listWorkflows(source: 'all' | 'internal' | 'external' = 'all'): Promise<any> {
-    const res = await fetch(`${API_BASE_URL}/images/workflows?source=${encodeURIComponent(source)}`);
+    const res = await fetch(`${API_BASE_URL}/images/workflows?source=${encodeURIComponent(source)}&_t=${Date.now()}`, { cache: 'no-store' });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },

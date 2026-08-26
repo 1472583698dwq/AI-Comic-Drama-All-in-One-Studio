@@ -812,6 +812,14 @@ export const ShotInspector: React.FC = () => {
               });
             }
           }}
+          onDeleted={(deletedId) => {
+            loadWorkflowsAndAssets();
+            if (selectedWorkflowId === deletedId) {
+              // 若当前选中的工作流被删除，清空选择
+              // 需通过 loadWorkflowsAndAssets 刷新，额外清空暴露输入
+              setWorkflowExposedInputs([]);
+            }
+          }}
         />
       )}
     </div>

@@ -74,9 +74,10 @@ interface Props {
   isOpen: boolean;
   onClose: () => void;
   onSaved?: () => void;
+  onDeleted?: (deletedId: string) => void;
 }
 
-export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, onClose, onSaved }) => {
+export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, onClose, onSaved, onDeleted }) => {
   const [data, setData] = useState<WorkflowInspectData | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -259,6 +260,25 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
     }
   };
 
+  const handleDelete = async () => {
+    if (data?.source !== 'internal') {
+      alert('外部直读工作流为只读，请直接在文件系统中删除对应的 JSON 文件');
+      return;
+    }
+    if (!confirm(`确定要永久删除内部工作流 "${data?.name || workflowId}" 吗？\n此操作将删除 storage/workflows/${workflowId}.json 与 .meta.json，且不可恢复。`)) {
+      return;
+    }
+    try {
+      await apiService.deleteWorkflow(workflowId);
+      alert('🗑️ 内部工作流已删除');
+      if (onDeleted) onDeleted(workflowId);
+      else onSaved?.();
+      onClose();
+    } catch (e: any) {
+      alert(`删除失败: ${e.message || e}`);
+    }
+  };
+
   if (!isOpen) return null;
 
   const categoryNames: Record<string, string> = {
@@ -345,6 +365,18 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                 </>
               )}
             </button>
+
+            {data?.source === 'internal' && (
+              <button
+                onClick={handleDelete}
+                disabled={saving || loading}
+                className="px-3.5 py-1.5 rounded-lg text-xs font-medium bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 hover:text-rose-200 transition flex items-center gap-1.5"
+                title="永久删除此内部工作流"
+              >
+                <span>🗑️</span>
+                <span>删除</span>
+              </button>
+            )}
 
             <button
               onClick={handleSave}

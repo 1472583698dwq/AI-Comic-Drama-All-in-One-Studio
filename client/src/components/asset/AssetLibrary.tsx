@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Search, Plus, Layers, Users, Mountain, Box, Image as ImageIcon, Sparkles, Copy, Trash2, Tag, Filter, Library, Upload, Wand2, X, Loader2, Check, Files } from 'lucide-react';
+import { Search, Plus, Layers, Users, Mountain, Box, Image as ImageIcon, Sparkles, Copy, Trash2, Tag, Filter, Library, Upload, Wand2, X, Loader2, Check, Files, Pencil, Save, Edit3 } from 'lucide-react';
 import { useAssetStore } from '../../stores/useAssetStore';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { apiService } from '../../services/api';
@@ -21,7 +21,7 @@ const API_ORIGIN = isDev ? 'http://127.0.0.1:8000' : '';
 const resolveUrl = (u?: string) => u && u.startsWith('/') ? API_ORIGIN + u : u;
 
 export const AssetLibrary: React.FC = () => {
-  const { assets, total, category, q, isLoading, selectedId, fetchAssets, setCategory, selectAsset, createAsset, batchImport, generateAsset, deleteAsset, duplicateAsset } = useAssetStore();
+  const { assets, total, category, q, isLoading, selectedId, fetchAssets, setCategory, selectAsset, createAsset, updateAsset, batchImport, generateAsset, deleteAsset, duplicateAsset } = useAssetStore() as any;
   const { project, updateShot } = useProjectStore();
   const [searchInput, setSearchInput] = useState(q);
   const [stats, setStats] = useState<any>(null);
@@ -43,6 +43,12 @@ export const AssetLibrary: React.FC = () => {
   const [inspectWfId, setInspectWfId] = useState('');
   const [workflowExposedInputs, setWorkflowExposedInputs] = useState<any[]>([]);
   const [dynamicInputs, setDynamicInputs] = useState<Record<string, any>>({});
+
+  const [showEdit, setShowEdit] = useState(false);
+  const [editForm, setEditForm] = useState({ name: '', category: 'character' as AssetCategory, description: '', visual_prompt: '', tags: '', status: 'approved' as string });
+  const [editFile, setEditFile] = useState<File | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const editFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { fetchAssets({ category, page: 1 }); }, []);
   useEffect(() => { apiService.getAssetStats().then(setStats).catch(()=>{}); }, [assets.length]);
@@ -133,6 +139,28 @@ export const AssetLibrary: React.FC = () => {
     if (!genForm.name.trim() || !genForm.prompt.trim()) { alert('请填写名称与提示词'); return; }
     setGenerating(true);
     try {
+      // 当选择了工作流时，完全按工作流的输入设计覆盖，仅保留名称/类型等基础信息
+      // 将素材的提示词自动映射到工作流的主提示词槽位（优先匹配 User Prompt / 文本段）
+      let effectiveDynamicInputs: Record<string, any> | undefined = Object.keys(dynamicInputs).length > 0 ? { ...dynamicInputs } : undefined;
+      if (genForm.workflow_id && genForm.prompt.trim()) {
+        // 深拷贝避免污染
+        effectiveDynamicInputs = effectiveDynamicInputs ? { ...effectiveDynamicInputs } : {};
+        const promptText = genForm.prompt.trim();
+        // 优先匹配暴露输入中标题含 User/用户/文本段 的主提示词
+        const candidates = workflowExposedInputs.filter((exp: any) => exp.type === 'text');
+        let mainExp: any = null;
+        if (candidates.length > 0) {
+          mainExp = candidates.find((e: any) => /user|用户|主.*提示|文本段.*string_b/i.test(e.label + e.param_name)) || candidates.find((e: any) => e.param_name === 'string_b' || e.param_name === 'value') || candidates[0];
+          if (mainExp) {
+            const key = mainExp.id || mainExp.node_id;
+            // 仅当该槽位当前为空或为工作流默认值时，才覆盖为素材的提示词，避免误覆盖用户已手动编辑的暴露输入
+            const curVal = effectiveDynamicInputs[key];
+            if (!curVal || (typeof curVal === 'string' && curVal.trim() === '') || curVal === mainExp.default_value) {
+              effectiveDynamicInputs[key] = promptText;
+            }
+          }
+        }
+      }
       const res = await generateAsset({
         name: genForm.name.trim(),
         prompt: genForm.prompt.trim(),
@@ -143,7 +171,7 @@ export const AssetLibrary: React.FC = () => {
         aspect_ratio: genForm.aspect_ratio,
         seed: genForm.seed ? Number(genForm.seed) : undefined,
         tags: genForm.tags || undefined,
-        dynamic_inputs: Object.keys(dynamicInputs).length > 0 ? dynamicInputs : undefined,
+        dynamic_inputs: effectiveDynamicInputs && Object.keys(effectiveDynamicInputs).length > 0 ? effectiveDynamicInputs : undefined,
       });
       setShowGenerate(false);
       setGenForm({ name: '', prompt: '', negative_prompt: '', category: 'character', provider: '', workflow_id: '', aspect_ratio: '1:1', seed: '', tags: '' });
@@ -151,6 +179,42 @@ export const AssetLibrary: React.FC = () => {
       if (res?.asset) { selectAsset(res.asset.id); setDetailAsset(res.asset); }
       refreshStats();
     } catch (e: any) { alert(e.message || '生成失败'); } finally { setGenerating(false); }
+  };
+
+  const openEdit = (asset: any) => {
+    setEditForm({
+      name: asset.name || '',
+      category: (asset.category as AssetCategory) || 'character',
+      description: asset.description || '',
+      visual_prompt: asset.visual_prompt || '',
+      tags: asset.tags?.join(', ') || '',
+      status: asset.status || 'approved',
+    });
+    setEditFile(null);
+    setShowEdit(true);
+  };
+
+  const handleUpdate = async () => {
+    if (!selected) return;
+    if (!editForm.name.trim()) { alert('名称不能为空'); return; }
+    setUpdating(true);
+    try {
+      const fd = new FormData();
+      fd.append('name', editForm.name.trim());
+      fd.append('category', editForm.category);
+      if (editForm.description) fd.append('description', editForm.description);
+      if (editForm.visual_prompt) fd.append('visual_prompt', editForm.visual_prompt);
+      if (editForm.tags) fd.append('tags', editForm.tags);
+      if (editForm.status) fd.append('status', editForm.status);
+      if (editFile) fd.append('file', editFile);
+      const updated: any = await (updateAsset as any)(selected.id, fd);
+      setDetailAsset(updated);
+      // 同步更新列表中的项
+      // fetchAssets 会在 store 内自动就地更新，但为确保立即反映，额外刷新统计
+      refreshStats();
+      setShowEdit(false);
+      setEditFile(null);
+    } catch (e: any) { alert(e.message || '更新失败'); } finally { setUpdating(false); }
   };
 
   const handleMigrate = async () => {
@@ -186,7 +250,7 @@ export const AssetLibrary: React.FC = () => {
     setShowImport(true);
   };
 
-  const selected = assets.find(a => a.id === selectedId) || detailAsset;
+  const selected = assets.find((a: any) => a.id === selectedId) || detailAsset;
 
   return (
     <div className="flex-1 flex h-[calc(100vh-3.5rem)] bg-background overflow-hidden">
@@ -229,17 +293,51 @@ export const AssetLibrary: React.FC = () => {
       </div>
 
       <div className="flex-1 flex flex-col overflow-hidden relative">
-        <div className="h-10 px-4 flex items-center justify-between border-b border-border bg-surface/50 shrink-0">
-          <div className="flex items-center space-x-2 text-xs text-gray-400">
-            <Filter className="w-3.5 h-3.5" /><span>分类: {category==='all'?'全部':CATEGORY_TABS.find(c=>c.key===category)?.label}</span>
-            {q && <span className="px-2 py-0.5 rounded-full bg-brand/20 text-brand-light border border-brand/30">关键词: {q}</span>}
+        <div className="px-3 py-2 border-b border-border bg-surface/50 shrink-0 space-y-2">
+          <div className="h-8 flex items-center justify-between">
+            <div className="flex items-center space-x-2 text-xs text-gray-400">
+              <Filter className="w-3.5 h-3.5" /><span>分类: {category==='all'?'全部':CATEGORY_TABS.find(c=>c.key===category)?.label}</span>
+              {q && <span className="px-2 py-0.5 rounded-full bg-brand/20 text-brand-light border border-brand/30">关键词: {q}</span>}
+              {(() => { const s = (useAssetStore as any).getState?.()?.tag || ''; return s ? <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">标签: {s}</span> : null; })()}
+            </div>
+            <div className="flex items-center space-x-2">
+              <button onClick={()=>importInputRef.current?.click()} className="hidden md:flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-surface-secondary border border-border text-[11px] text-gray-300 hover:text-white">
+                <Files className="w-3.5 h-3.5" /><span>批量导入</span>
+              </button>
+              <input ref={importInputRef} type="file" multiple accept="image/*,audio/*,video/*,.glb,.fbx" className="hidden" onChange={e=>{ onDropFiles(e.target.files); if(e.target) e.target.value=''; }} />
+              <span className="text-[10px] text-gray-500">{isLoading?'加载中…':`${total} 个素材`}</span>
+            </div>
           </div>
-          <div className="flex items-center space-x-2">
-            <button onClick={()=>importInputRef.current?.click()} className="hidden md:flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-surface-secondary border border-border text-[11px] text-gray-300 hover:text-white">
-              <Files className="w-3.5 h-3.5" /><span>批量导入</span>
-            </button>
-            <input ref={importInputRef} type="file" multiple accept="image/*,audio/*,video/*,.glb,.fbx" className="hidden" onChange={e=>{ onDropFiles(e.target.files); if(e.target) e.target.value=''; }} />
-            <span className="text-[10px] text-gray-500">{isLoading?'加载中…':`${total} 个素材`}</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1.5 flex-1 min-w-[200px]">
+              <input
+                value={searchInput}
+                onChange={e=>setSearchInput(e.target.value)}
+                onKeyDown={e=>{ if(e.key==='Enter'){ fetchAssets({ q: searchInput, page: 1 }); } }}
+                placeholder="搜索名称/标签/提示词（回车）"
+                className="flex-1 bg-surface-secondary border border-border rounded-xl px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand"
+              />
+              <button onClick={()=>fetchAssets({ q: searchInput, page: 1 })} className="px-3 py-1.5 rounded-xl bg-brand text-white text-xs font-semibold">搜索</button>
+              {(q || searchInput) && <button onClick={()=>{ setSearchInput(''); fetchAssets({ q: '', page: 1 }); }} className="px-2 py-1.5 rounded-xl bg-surface-secondary border border-border text-xs text-gray-400 hover:text-white">清空</button>}
+            </div>
+            <select
+              value={(useAssetStore as any).getState?.()?.sort || 'updated_at'}
+              onChange={e=>fetchAssets({ sort: e.target.value, page: 1 })}
+              className="bg-surface-secondary border border-border rounded-xl px-2 py-1.5 text-xs text-white"
+              title="排序"
+            >
+              <option value="updated_at">最近更新</option>
+              <option value="created_at">创建时间</option>
+              <option value="name">名称</option>
+            </select>
+            <input
+              placeholder="标签过滤"
+              defaultValue={(useAssetStore as any).getState?.()?.tag || ''}
+              onKeyDown={e=>{ if(e.key==='Enter'){ const v=(e.target as HTMLInputElement).value; fetchAssets({ tag: v, page: 1 }); } }}
+              onBlur={e=>{ const v=e.target.value; if(v !== (useAssetStore as any).getState?.()?.tag) fetchAssets({ tag: v, page: 1 }); }}
+              className="bg-surface-secondary border border-border rounded-xl px-3 py-1.5 text-xs text-white placeholder-gray-500 w-28"
+            />
+            <button onClick={()=>fetchAssets({ tag: '', q: '', page: 1 })} className="px-2 py-1.5 rounded-xl bg-surface-secondary border border-border text-xs text-gray-400 hover:text-white" title="重置筛选">重置</button>
           </div>
         </div>
 
@@ -268,36 +366,46 @@ export const AssetLibrary: React.FC = () => {
                 <button onClick={()=>setShowGenerate(true)} className="px-4 py-2 rounded-xl bg-surface border border-border text-xs text-white flex items-center space-x-1"><Wand2 className="w-3.5 h-3.5" /><span>AI 生成</span></button>
               </div>
             </div>
-          ) : (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-              {assets.map(a => (
-                <div key={a.id} onClick={()=>{selectAsset(a.id); setDetailAsset(a);}} className={`group bg-surface border rounded-2xl overflow-hidden cursor-pointer transition-all hover:shadow-lg ${selectedId===a.id ? 'border-brand ring-1 ring-brand/30' : 'border-border hover:border-border-active'}`}>
-                  <div className="aspect-square bg-black/60 relative overflow-hidden">
-                    {a.thumb_url || a.file_url ? (
-                      <img src={resolveUrl(a.thumb_url||a.file_url)} alt={a.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                    ) : (
-                      <div className="w-full h-full flex flex-col items-center justify-center text-gray-600">
-                        <ImageIcon className="w-6 h-6 mb-1" /><span className="text-[10px]">{a.category}</span>
+            ) : (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                {assets.map((a: any) => (
+                  <div key={a.id} onClick={()=>{selectAsset(a.id); setDetailAsset(a);}} className={`group bg-surface border rounded-2xl overflow-hidden cursor-pointer transition-all hover:shadow-lg ${selectedId===a.id ? 'border-brand ring-1 ring-brand/30' : 'border-border hover:border-border-active'}`}>
+                    <div className="aspect-square bg-black/60 relative overflow-hidden">
+                      {a.thumb_url || a.file_url ? (
+                        <img src={resolveUrl(a.thumb_url||a.file_url)} alt={a.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                      ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center text-gray-600">
+                          <ImageIcon className="w-6 h-6 mb-1" /><span className="text-[10px]">{a.category}</span>
+                        </div>
+                      )}
+                      <div className="absolute top-2 left-2 flex items-center space-x-1">
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded-full border font-medium ${a.category==='character'?'bg-accent-pink/20 text-accent-pink border-accent-pink/30': a.category==='scene'?'bg-accent-green/20 text-accent-green border-accent-green/30':'bg-brand/20 text-brand-light border-brand/30'}`}>{a.category}</span>
+                        {a.status!=='approved' && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">{a.status}</span>}
                       </div>
-                    )}
-                    <div className="absolute top-2 left-2 flex items-center space-x-1">
-                      <span className={`text-[9px] px-1.5 py-0.5 rounded-full border font-medium ${a.category==='character'?'bg-accent-pink/20 text-accent-pink border-accent-pink/30': a.category==='scene'?'bg-accent-green/20 text-accent-green border-accent-green/30':'bg-brand/20 text-brand-light border-brand/30'}`}>{a.category}</span>
-                      {a.status!=='approved' && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">{a.status}</span>}
+                      {a.source==='generate' && <span className="absolute top-2 right-2 text-[8px] px-1.5 py-0.5 rounded-full bg-violet-500/90 text-white font-bold">AI</span>}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-2 space-x-1">
+                        <button onClick={(e)=>{e.stopPropagation(); handleApplyToShot(a);}} className="flex-1 py-1 rounded-lg bg-brand text-white text-[10px] font-bold">应用到镜头</button>
+                        <button onClick={(e)=>{e.stopPropagation(); duplicateAsset(a.id);}} className="p-1 rounded-lg bg-white/20 text-white hover:bg-white/30"><Copy className="w-3 h-3" /></button>
+                        <button onClick={(e)=>{e.stopPropagation(); openEdit(a);}} className="p-1 rounded-lg bg-white/20 text-white hover:bg-white/30" title="编辑"><Pencil className="w-3 h-3" /></button>
+                      </div>
                     </div>
-                    {a.source==='generate' && <span className="absolute top-2 right-2 text-[8px] px-1.5 py-0.5 rounded-full bg-violet-500/90 text-white font-bold">AI</span>}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-2 space-x-1">
-                      <button onClick={(e)=>{e.stopPropagation(); handleApplyToShot(a);}} className="flex-1 py-1 rounded-lg bg-brand text-white text-[10px] font-bold">应用到镜头</button>
-                      <button onClick={(e)=>{e.stopPropagation(); duplicateAsset(a.id);}} className="p-1 rounded-lg bg-white/20 text-white hover:bg-white/30"><Copy className="w-3 h-3" /></button>
+                    <div className="p-2.5">
+                      <div className="text-xs font-semibold text-white truncate">{a.name}</div>
+                      <div className="text-[10px] text-gray-400 truncate mt-0.5">{a.description || a.visual_prompt?.slice(0,40) || '—'}</div>
+                      {a.tags?.length>0 && <div className="flex flex-wrap gap-1 mt-1.5">{a.tags.slice(0,3).map((t:string)=><span key={t} className="text-[9px] px-1 py-0.5 rounded bg-surface-tertiary text-gray-400 flex items-center space-x-0.5"><Tag className="w-2.5 h-2.5" /><span>{t}</span></span>)}{a.tags.length>3 && <span className="text-[9px] text-gray-500">+{a.tags.length-3}</span>}</div>}
                     </div>
                   </div>
-                  <div className="p-2.5">
-                    <div className="text-xs font-semibold text-white truncate">{a.name}</div>
-                    <div className="text-[10px] text-gray-400 truncate mt-0.5">{a.description || a.visual_prompt?.slice(0,40) || '—'}</div>
-                    {a.tags?.length>0 && <div className="flex flex-wrap gap-1 mt-1.5">{a.tags.slice(0,3).map((t:string)=><span key={t} className="text-[9px] px-1 py-0.5 rounded bg-surface-tertiary text-gray-400 flex items-center space-x-0.5"><Tag className="w-2.5 h-2.5" /><span>{t}</span></span>)}{a.tags.length>3 && <span className="text-[9px] text-gray-500">+{a.tags.length-3}</span>}</div>}
-                  </div>
+                ))}
+              </div>
+              {total > 24 && (
+                <div className="mt-4 flex items-center justify-center gap-2 text-xs">
+                  <button disabled={(useAssetStore as any).getState().page <= 1} onClick={()=>fetchAssets({ page: Math.max(1, (useAssetStore as any).getState().page - 1) })} className="px-3 py-1.5 rounded-xl bg-surface-secondary border border-border text-white disabled:opacity-40">上一页</button>
+                  <span className="text-gray-400 font-mono">第 {(useAssetStore as any).getState().page} 页 / 共 {Math.ceil(total/24)} 页 · {total} 条</span>
+                  <button disabled={(useAssetStore as any).getState().page >= Math.ceil(total/24)} onClick={()=>fetchAssets({ page: (useAssetStore as any).getState().page + 1 })} className="px-3 py-1.5 rounded-xl bg-surface-secondary border border-border text-white disabled:opacity-40">下一页</button>
                 </div>
-              ))}
-            </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -333,9 +441,68 @@ export const AssetLibrary: React.FC = () => {
                 <div className="text-gray-500">来源</div><div className="text-white flex items-center space-x-1">{selected.source==='generate' && <Sparkles className="w-3 h-3 text-violet-400" />}<span>{selected.source}</span></div>
               </div>
             </div>
-            <div className="flex space-x-2">
-              <button onClick={()=>duplicateAsset(selected.id)} className="flex-1 py-2 rounded-xl bg-surface-secondary border border-border text-xs text-white flex items-center justify-center space-x-1"><Copy className="w-3.5 h-3.5" /><span>复制</span></button>
-              <button onClick={async()=>{ if(confirm('确定删除？')){ await deleteAsset(selected.id); setDetailAsset(null); selectAsset(null); } }} className="flex-1 py-2 rounded-xl bg-red-500/15 border border-red-500/30 text-xs text-red-300 flex items-center justify-center space-x-1"><Trash2 className="w-3.5 h-3.5" /><span>删除</span></button>
+            <div className="grid grid-cols-3 gap-2">
+              <button onClick={()=>openEdit(selected)} className="py-2 rounded-xl bg-brand/20 border border-brand/40 text-xs text-brand-light hover:bg-brand/30 hover:text-white flex items-center justify-center space-x-1 font-semibold"><Pencil className="w-3.5 h-3.5" /><span>编辑</span></button>
+              <button onClick={()=>duplicateAsset(selected.id)} className="py-2 rounded-xl bg-surface-secondary border border-border text-xs text-white flex items-center justify-center space-x-1"><Copy className="w-3.5 h-3.5" /><span>复制</span></button>
+              <button onClick={async()=>{ if(confirm('确定删除？')){ await deleteAsset(selected.id); setDetailAsset(null); selectAsset(null); } }} className="py-2 rounded-xl bg-red-500/15 border border-red-500/30 text-xs text-red-300 flex items-center justify-center space-x-1"><Trash2 className="w-3.5 h-3.5" /><span>删除</span></button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showEdit && selected && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={()=>setShowEdit(false)}>
+          <div className="bg-surface border border-border rounded-2xl w-full max-w-lg p-5 space-y-4 max-h-[90vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white flex items-center space-x-2"><Edit3 className="w-4 h-4 text-brand" /><span>编辑素材</span><span className="text-[10px] px-2 py-0.5 rounded-full bg-brand/15 text-brand-light border border-brand/20">更新</span></h3>
+              <button onClick={()=>setShowEdit(false)} className="text-gray-400 hover:text-white"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-gray-300">名称 *</label>
+                <input value={editForm.name} onChange={e=>setEditForm({...editForm, name:e.target.value})} placeholder="素材名称" className="mt-1 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-brand" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-300">分类</label>
+                <select value={editForm.category} onChange={e=>setEditForm({...editForm, category: e.target.value as any})} className="mt-1 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white">
+                  <option value="character">人物</option><option value="scene">场景</option><option value="prop">道具</option><option value="background">背景</option><option value="effect">特效</option><option value="other">其他</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-gray-300">描述</label>
+              <textarea value={editForm.description} onChange={e=>setEditForm({...editForm, description:e.target.value})} rows={2} placeholder="素材描述" className="mt-1 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white font-mono" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-300">视觉提示词</label>
+              <textarea value={editForm.visual_prompt} onChange={e=>setEditForm({...editForm, visual_prompt:e.target.value})} rows={3} placeholder="英文提示词，用于一致性生成" className="mt-1 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs font-mono text-white" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-gray-300">标签（逗号分隔）</label>
+                <input value={editForm.tags} onChange={e=>setEditForm({...editForm, tags:e.target.value})} placeholder="如：主角, 玄幻" className="mt-1 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-300">状态</label>
+                <select value={editForm.status} onChange={e=>setEditForm({...editForm, status:e.target.value})} className="mt-1 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white">
+                  <option value="approved">已审核</option><option value="draft">草稿</option><option value="archived">归档</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-gray-300">替换预览图（可选）</label>
+              <div className="mt-1 flex items-center gap-3">
+                <input ref={editFileRef} type="file" accept="image/*" hidden onChange={e=>{ const f=e.target.files?.[0]||null; setEditFile(f); }} />
+                <button type="button" onClick={()=>editFileRef.current?.click()} className="px-3 py-2 rounded-xl bg-surface-secondary border border-border text-xs text-white flex items-center gap-2">
+                  <Upload className="w-3.5 h-3.5" /><span>{editFile ? editFile.name : '选择图片'}</span>
+                </button>
+                {editFile && <button type="button" onClick={()=>{ setEditFile(null); if(editFileRef.current) editFileRef.current.value=''; }} className="text-xs text-gray-400 hover:text-white">清空</button>}
+                {selected.file_url && !editFile && <span className="text-[11px] text-gray-500 truncate max-w-[180px]">当前：{selected.file_url.split('/').pop()}</span>}
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <button onClick={()=>setShowEdit(false)} className="px-4 py-2 rounded-xl bg-surface-secondary border border-border text-xs text-white">取消</button>
+              <button onClick={handleUpdate} disabled={updating} className="px-5 py-2 rounded-xl bg-brand text-white text-xs font-bold disabled:opacity-40 flex items-center gap-1.5">{updating ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span>保存中…</span></> : <><Save className="w-3.5 h-3.5" /><span>保存更新</span></>}</button>
             </div>
           </div>
         </div>
@@ -530,7 +697,7 @@ export const AssetLibrary: React.FC = () => {
                                   className="bg-surface border border-border rounded-lg px-2 py-2 text-[11px] text-gray-400 focus:outline-none focus:border-brand"
                                 >
                                   <option value="">从素材库选...</option>
-                                  {assets.map(a => (
+                                  {assets.map((a: any) => (
                                     <option key={a.id} value={a.file_url || a.thumb_url}>
                                       {a.name}
                                     </option>
@@ -602,6 +769,15 @@ export const AssetLibrary: React.FC = () => {
           onSaved={() => {
             apiService.listWorkflows('all').then(d => setWorkflows(d.workflows || d || [])).catch(() => {});
             loadWorkflowInputs(inspectWfId);
+          }}
+          onDeleted={(deletedId) => {
+            setWorkflows(prev => prev.filter((w: any) => w.id !== deletedId));
+            if (genForm.workflow_id === deletedId) {
+              setGenForm(prev => ({ ...prev, workflow_id: '' }));
+              setWorkflowExposedInputs([]);
+              setDynamicInputs({});
+            }
+            apiService.listWorkflows('all').then(d => setWorkflows(d.workflows || d || [])).catch(() => {});
           }}
         />
       )}

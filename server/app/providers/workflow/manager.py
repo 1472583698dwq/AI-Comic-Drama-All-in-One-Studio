@@ -31,6 +31,130 @@ except Exception as _e:
 WORKFLOWS_DIR = os.path.join(settings.STORAGE_DIR, "workflows")
 os.makedirs(WORKFLOWS_DIR, exist_ok=True)
 
+# 已知合法的采样器与调度器（用于修复错乱的工作流）
+VALID_SAMPLERS = ["euler", "euler_ancestral", "heun", "dpm_2", "dpm_2_ancestral", "lms", "dpm_fast", "dpm_adaptive", "dpmpp_2s_ancestral", "dpmpp_sde", "dpmpp_2m", "dpmpp_2m_sde", "ddim", "uni_pc", "uni_pc_bh2"]
+VALID_SCHEDULERS = ["normal", "karras", "exponential", "sgm_uniform", "simple", "ddim_uniform", "beta"]
+
+def _fix_ksampler_node(node: Dict[str, Any]) -> bool:
+    """修复 KSampler/KsamplerAdvanced 的类型错乱，返回是否发生修复"""
+    if node.get("class_type") not in ("KSampler", "KSamplerAdvanced"):
+        return False
+    inputs = node.get("inputs", {})
+    fixed = False
+    # seed -> int
+    if "seed" in inputs:
+        try:
+            v = inputs["seed"]
+            if isinstance(v, str) and v in ("randomize", "fixed", "increment", "decrement"):
+                inputs["seed"] = int.from_bytes(os.urandom(4), "little")
+                fixed = True
+            else:
+                inputs["seed"] = int(v)
+        except Exception:
+            inputs["seed"] = int.from_bytes(os.urandom(4), "little")
+            fixed = True
+    # steps -> int 8-50
+    if "steps" in inputs:
+        v = inputs["steps"]
+        if isinstance(v, str):
+            if v in ("randomize", "fixed", "increment", "decrement", "simple"):
+                inputs["steps"] = 20
+                fixed = True
+            else:
+                try:
+                    inputs["steps"] = int(float(v))
+                    fixed = True
+                except Exception:
+                    inputs["steps"] = 20
+                    fixed = True
+        else:
+            try:
+                iv = int(v)
+                if iv < 1 or iv > 100:
+                    inputs["steps"] = 20
+                    fixed = True
+                else:
+                    inputs["steps"] = max(4, min(60, iv))
+            except Exception:
+                inputs["steps"] = 20
+                fixed = True
+    # cfg -> float
+    if "cfg" in inputs:
+        try:
+            fv = float(inputs["cfg"])
+            if fv < 0 or fv > 30:
+                inputs["cfg"] = 7.0
+                fixed = True
+            else:
+                inputs["cfg"] = fv
+        except Exception:
+            inputs["cfg"] = 7.0
+            fixed = True
+    # sampler_name -> string
+    if "sampler_name" in inputs:
+        v = inputs["sampler_name"]
+        if isinstance(v, int):
+            # 旧工作流中 1 可能代表 euler
+            try:
+                inputs["sampler_name"] = VALID_SAMPLERS[v] if 0 <= v < len(VALID_SAMPLERS) else "euler"
+                fixed = True
+            except Exception:
+                inputs["sampler_name"] = "euler"
+                fixed = True
+        elif isinstance(v, str) and v not in VALID_SAMPLERS:
+            # 尝试大小写不敏感匹配
+            low = v.lower()
+            found = next((s for s in VALID_SAMPLERS if s.lower() == low), None)
+            if found:
+                inputs["sampler_name"] = found
+            else:
+                # 数字字符串也尝试
+                try:
+                    idx = int(v)
+                    inputs["sampler_name"] = VALID_SAMPLERS[idx] if 0 <= idx < len(VALID_SAMPLERS) else "euler"
+                    fixed = True
+                except Exception:
+                    inputs["sampler_name"] = "euler"
+                    fixed = True
+    # scheduler -> string
+    if "scheduler" in inputs:
+        v = inputs["scheduler"]
+        if v not in VALID_SCHEDULERS:
+            low = str(v).lower()
+            found = next((s for s in VALID_SCHEDULERS if s.lower() == low), None)
+            if found:
+                inputs["scheduler"] = found
+            else:
+                inputs["scheduler"] = "normal"
+                fixed = True
+    # denoise -> float
+    if "denoise" in inputs:
+        try:
+            v = inputs["denoise"]
+            if isinstance(v, str):
+                if v.lower() == "simple":
+                    inputs["denoise"] = 1.0
+                    fixed = True
+                else:
+                    inputs["denoise"] = float(v)
+            else:
+                fv = float(v)
+                inputs["denoise"] = max(0.0, min(1.0, fv))
+        except Exception:
+            inputs["denoise"] = 1.0
+            fixed = True
+    return fixed
+
+def _fix_workflow_ksamplers(workflow: Dict[str, Any]) -> int:
+    """批量修复工作流中所有 KSampler 节点，返回修复数量"""
+    cnt = 0
+    for nid, node in workflow.items():
+        if isinstance(node, dict) and _fix_ksampler_node(node):
+            cnt += 1
+    if cnt:
+        logger.info(f"[WorkflowManager] 已自动修复 {cnt} 个 KSampler 节点类型错乱")
+    return cnt
+
 def _get_external_workflows_dir() -> Optional[str]:
     """获取用户配置的ComfyUI工作流外部目录"""
     cfg_dir = getattr(settings, "COMFYUI_WORKFLOWS_DIR", "") or ""
@@ -751,10 +875,16 @@ def auto_detect_exposed_inputs(clean_wf: Dict[str, Any], mapping: Optional[Dict[
                     "description": "支持上传角色立绘、构图草图或姿态参考图",
                 })
 
-        # 2. 探测独立文本提示词 (CLIPTextEncode / TextString)
-        elif ct in ("CLIPTextEncode", "CLIPTextEncodeSDXL", "CLIPTextEncodeFlux", "TextString", "PrimitiveStringMultiline"):
+        # 2. 探测独立文本提示词 (CLIPTextEncode / TextString / Primitive)
+        elif ct in ("CLIPTextEncode", "CLIPTextEncodeSDXL", "CLIPTextEncodeFlux", "TextString", "PrimitiveStringMultiline", "PrimitiveString", "StringLiteral"):
             if str(nid) != primary_prompt_nid and str(nid) != primary_neg_nid:
-                pname = "text" if "text" in inputs else "string"
+                # 兼容 PrimitiveStringMultiline 的 value 字段
+                if "value" in inputs:
+                    pname = "value"
+                elif "text" in inputs:
+                    pname = "text"
+                else:
+                    pname = "string"
                 pval = inputs.get(pname, "")
                 is_linked = isinstance(pval, list) and len(pval) == 2 and isinstance(pval[0], str)
                 if not is_linked:
@@ -768,6 +898,25 @@ def auto_detect_exposed_inputs(clean_wf: Dict[str, Any], mapping: Optional[Dict[
                         "default_value": str(pval) if pval else "",
                         "description": "可在此输入额外的角色 LoRA 触发词或局部描述",
                     })
+
+        # 2.1 探测 StringConcatenate 的可编辑文本段
+        elif ct == "StringConcatenate":
+            for sub_key in ("string_a", "string_b"):
+                if sub_key in inputs:
+                    pval = inputs.get(sub_key, "")
+                    is_linked = isinstance(pval, list) and len(pval) == 2 and isinstance(pval[0], str)
+                    if not is_linked and isinstance(pval, str):
+                        # 仅暴露非空或作为用户可编辑的 prompt 段
+                        exposed.append({
+                            "id": f"txt_{nid}_{sub_key}",
+                            "node_id": str(nid),
+                            "param_name": sub_key,
+                            "label": f"文本段 {sub_key} ({title})",
+                            "type": "text",
+                            "required": False,
+                            "default_value": str(pval)[:200] if pval else "",
+                            "description": f"工作流中 {title} 节点的 {sub_key} 文本，可用于覆盖原始提示词",
+                        })
 
     return exposed
 
@@ -1115,6 +1264,12 @@ class ComfyWorkflowManager:
             }
             if not filtered:
                 return workflow
+
+        # 1.5 自动修复 KSampler 类型错乱（历史脏数据）
+        try:
+            _fix_workflow_ksamplers(filtered)
+        except Exception:
+            pass
 
         # 2. 清理孤儿连线（引用了不存在节点的输入），与官方 CLI 的 _strip_orphan_link_inputs 保持一致
         if _HAS_CLI_CONVERTER:

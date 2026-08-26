@@ -58,7 +58,7 @@ export type PosePreset =
 
 export type CastLayout = 'solo' | 'duel' | 'ots' | 'surrounded';
 
-export type StagePropType = 'sword' | 'shield' | 'magic_circle' | 'spirit_particles';
+export type StagePropType = 'sword' | 'shield' | 'magic_circle' | 'spirit_particles' | 'chair' | 'helmet' | 'camera' | 'avocado' | 'boombox';
 
 export type StageEnvironment = 'cyber_studio' | 'xianxia_cloud' | 'desert_battle' | 'neon_city';
 

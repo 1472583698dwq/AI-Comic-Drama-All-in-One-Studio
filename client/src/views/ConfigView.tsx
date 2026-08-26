@@ -3,7 +3,7 @@ import {
   Settings, KeyRound, Cpu, Sliders, Info, Save, TestTube2,
   Eye, EyeOff, CheckCircle2, XCircle, Loader2, Copy, ExternalLink,
   Bot, Mic, Film, FolderCheck, ArrowLeft, RefreshCw, Sparkles, Layers,
-  Zap, Globe, Database, HelpCircle, Folder, FolderSearch, FolderOpen
+  Zap, Globe, Database, HelpCircle, Folder, FolderSearch, FolderOpen, Trash2
 } from 'lucide-react';
 import { apiService } from '../services/api';
 import { useProjectStore } from '../stores/useProjectStore';
@@ -52,6 +52,40 @@ export const ConfigView: React.FC = () => {
     } catch (e) {
     } finally {
       setLoadingWfs(false);
+    }
+  };
+
+  const handleDeleteWorkflow = async (wf: any) => {
+    if (wf.source !== 'internal') {
+      alert('外部直读工作流为只读，请直接在文件系统中删除对应的 JSON 文件');
+      return;
+    }
+    if (!confirm(`确定要永久删除内部工作流 "${wf.name || wf.id}" 吗？\n此操作将删除 storage/workflows/${wf.id}.json 与 .meta.json，且不可恢复。`)) return;
+    try {
+      await apiService.deleteWorkflow(wf.id);
+      // 立即本地过滤，避免后端缓存或竞态导致列表未刷新
+      setWorkflowList(prev => prev.filter((w: any) => w.id !== wf.id));
+      // 若被删的是默认工作流，同步清空默认配置（需用户手动保存）
+      let needClearDefault = false;
+      if (form.COMFYUI_DEFAULT_IMAGE_WORKFLOW === wf.id) {
+        setField('COMFYUI_DEFAULT_IMAGE_WORKFLOW', '');
+        needClearDefault = true;
+      }
+      if (form.COMFYUI_DEFAULT_VIDEO_WORKFLOW === wf.id) {
+        setField('COMFYUI_DEFAULT_VIDEO_WORKFLOW', '');
+        needClearDefault = true;
+      }
+      if (needClearDefault) {
+        setMsg({ type: 'success', text: `已删除工作流 ${wf.id}，已自动清空对应的默认配置，请记得点击“保存全部配置”` });
+      } else {
+        setMsg({ type: 'success', text: `已删除内部工作流 ${wf.id}` });
+      }
+      // 强制重新拉取以确保与后端一致（带时间戳防缓存）
+      await loadWorkflowsList();
+      // 二次校验：若仍存在则再次过滤
+      setWorkflowList(prev => prev.filter((w: any) => w.id !== wf.id));
+    } catch (e: any) {
+      alert(`删除失败: ${e.message || e}`);
     }
   };
 
@@ -985,14 +1019,27 @@ export const ConfigView: React.FC = () => {
                                 </button>
                               </div>
 
-                              <button
-                                type="button"
-                                onClick={() => setInspectingWorkflowId(wf.id)}
-                                className="flex items-center space-x-1 px-2.5 py-1.5 rounded-lg bg-brand/15 hover:bg-brand/25 border border-brand/30 text-[11px] font-semibold text-brand-light hover:text-white transition-all shadow-sm"
-                              >
-                                <Sliders className="w-3 h-3" />
-                                <span>⚙️ 参数与暴露</span>
-                              </button>
+                              <div className="flex items-center gap-1.5">
+                                {wf.source === 'internal' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteWorkflow(wf)}
+                                    className="flex items-center space-x-1 px-2.5 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-[11px] font-semibold text-rose-300 hover:text-rose-200 transition-all shadow-sm"
+                                    title="删除此内部工作流"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                    <span>删除</span>
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => setInspectingWorkflowId(wf.id)}
+                                  className="flex items-center space-x-1 px-2.5 py-1.5 rounded-lg bg-brand/15 hover:bg-brand/25 border border-brand/30 text-[11px] font-semibold text-brand-light hover:text-white transition-all shadow-sm"
+                                >
+                                  <Sliders className="w-3 h-3" />
+                                  <span>⚙️ 参数与暴露</span>
+                                </button>
+                              </div>
                             </div>
                           </div>
                         );
@@ -1378,6 +1425,13 @@ export const ConfigView: React.FC = () => {
           isOpen={!!inspectingWorkflowId}
           onClose={() => setInspectingWorkflowId('')}
           onSaved={loadWorkflowsList}
+          onDeleted={(deletedId) => {
+            setWorkflowList(prev => prev.filter((w: any) => w.id !== deletedId));
+            if (form.COMFYUI_DEFAULT_IMAGE_WORKFLOW === deletedId) setField('COMFYUI_DEFAULT_IMAGE_WORKFLOW', '');
+            if (form.COMFYUI_DEFAULT_VIDEO_WORKFLOW === deletedId) setField('COMFYUI_DEFAULT_VIDEO_WORKFLOW', '');
+            setMsg({ type: 'success', text: `已删除内部工作流 ${deletedId}，已自动清理默认配置` });
+            loadWorkflowsList();
+          }}
         />
       )}
     </div>

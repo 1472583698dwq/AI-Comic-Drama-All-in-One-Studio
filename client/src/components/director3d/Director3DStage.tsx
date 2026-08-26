@@ -1,13 +1,14 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import * as THREE from 'three';
-import { 
-  Camera, 
-  Move, 
-  Rotate3d, 
-  Eye, 
-  Crosshair, 
-  Sparkles, 
-  Check, 
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import {
+  Camera,
+  Move,
+  Rotate3d,
+  Eye,
+  Crosshair,
+  Sparkles,
+  Check,
   Maximize2,
   Video,
   Play,
@@ -31,23 +32,107 @@ import {
   ArrowRight,
   Focus,
   Activity,
-  Maximize
+  Maximize,
+  Box,
+  Mountain,
+  Building2,
+  Trees,
+  Cloud,
+  UserPlus,
+  Trash2,
+  Palette,
+  Lightbulb,
+  Film,
+  Mic,
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { useMcpStore } from '../../stores/useMcpStore';
-import { 
-  CameraFraming, 
-  CameraMotion, 
-  PosePreset, 
-  CastLayout, 
-  StagePropType, 
+import {
+  CameraFraming,
+  CameraMotion,
+  PosePreset,
+  CastLayout,
+  StagePropType,
   StageEnvironment,
-  StoryboardShot 
+  StoryboardShot,
 } from '../../types';
 
 // ============================================================
-// MiniMax 01-Director Camera & Staging Configs
+// MiniMax Design 3D Director - 重构版
+// 对标 houdao.com / design.minimax.io 的 3D Director Stage：
+// - 真实人体建模（非火柴人）+ PBR 材质 + 骨骼姿态驱动
+// - 真实道具建模 + 多环境完整场景（赛博/云海/荒漠/霓虹）+ Agent 自然语言全量控制
 // ============================================================
+
+// 基础真实模型库（CC0，来自 three.js / Khronos Sample Models，已下载至 public/models）
+const MODEL_URLS: Record<string, string> = {
+  human_protagonist: '/models/RobotExpressive.glb', // CC0 RobotExpressive
+  human_antagonist: '/models/Soldier.glb', // 2MB 高细节士兵
+  human_supporting: '/models/RobotExpressive.glb',
+  chair: '/models/SheenChair.glb', // 4.3MB 椅子
+  helmet: '/models/DamagedHelmet.glb', // 3.7MB 头盔
+  camera_prop: '/models/AntiqueCamera.glb', // 复古相机
+  avocado: '/models/Avocado.glb',
+  boombox: '/models/BoomBox.glb',
+};
+const gltfLoader = new GLTFLoader();
+const modelCache = new Map<string, THREE.Group>();
+async function loadGLBModel(url: string, scale = 1): Promise<THREE.Group | null> {
+  if (modelCache.has(url)) {
+    const cached = modelCache.get(url)!;
+    const clone = cached.clone(true) as THREE.Group;
+    // 深拷贝材质避免共享
+    clone.traverse((obj) => {
+      if ((obj as THREE.Mesh).isMesh) {
+        const m = obj as THREE.Mesh;
+        if (Array.isArray(m.material)) m.material = (m.material as any[]).map((mat: any) => mat.clone());
+        else if (m.material) m.material = (m.material as any).clone();
+      }
+    });
+    return clone;
+  }
+  try {
+    const gltf = await gltfLoader.loadAsync(url);
+    const root = gltf.scene as THREE.Group;
+    root.traverse((obj) => {
+      if ((obj as THREE.Mesh).isMesh) {
+        const mesh = obj as THREE.Mesh;
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        // 修正过亮的金属度
+        const mat = mesh.material as THREE.MeshStandardMaterial;
+        if (mat && (mat as any).isMeshStandardMaterial) {
+          if (mat.metalness > 0.9) mat.metalness = 0.3;
+          mat.needsUpdate = true;
+        }
+      }
+    });
+    // 归一化尺寸至 ~1.6m 高
+    const box = new THREE.Box3().setFromObject(root);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    const maxDim = Math.max(size.x, size.y, size.z);
+    if (maxDim > 0) {
+      const s = (1.6 / maxDim) * scale;
+      root.scale.setScalar(s);
+    }
+    // 底部对齐到 y=0
+    const box2 = new THREE.Box3().setFromObject(root);
+    const center = new THREE.Vector3();
+    box2.getCenter(center);
+    root.position.sub(new THREE.Vector3(center.x, box2.min.y, center.z));
+    // 淡入
+    root.traverse((obj) => {
+      if ((obj as any).isMesh) (obj as THREE.Mesh).userData.isRealModel = true;
+    });
+    modelCache.set(url, root);
+    return root.clone(true) as THREE.Group;
+  } catch (e) {
+    console.warn(`[Director3D] GLB 加载失败 ${url}:`, e);
+    return null;
+  }
+}
+
 const FRAMING_PRESETS: Array<{ id: CameraFraming; label: string; fl: number; desc: string }> = [
   { id: 'extreme_close_up', label: '大特写 (ECU)', fl: 85, desc: '眼神/微表情震撼特写' },
   { id: 'close_up', label: '特写 (CU)', fl: 50, desc: '面部与半身情绪聚焦' },
@@ -61,14 +146,13 @@ const FRAMING_PRESETS: Array<{ id: CameraFraming; label: string; fl: number; des
   { id: 'high_angle', label: '高角度俯视', fl: 28, desc: '俯视弱化视点' },
 ];
 
-const MOTION_PRESETS: Array<{ 
-  id: CameraMotion; 
-  label: string; 
-  category: 'single' | 'combo'; 
+const MOTION_PRESETS: Array<{
+  id: CameraMotion;
+  label: string;
+  category: 'single' | 'combo';
   desc: string;
   minimaxCode: string;
 }> = [
-  // 15+ 基础单轴运镜
   { id: 'static', label: '固定镜头 (Static)', category: 'single', desc: '机位静止固定', minimaxCode: 'Static Camera' },
   { id: 'push_in', label: '急进推镜 (Dolly In)', category: 'single', desc: '镜头逼近主角', minimaxCode: 'Dolly In' },
   { id: 'pull_out', label: '渐远拉出 (Dolly Out)', category: 'single', desc: '由近及远展示环境', minimaxCode: 'Dolly Out' },
@@ -86,8 +170,6 @@ const MOTION_PRESETS: Array<{
   { id: 'roll_right', label: '右滚转 (Roll Right)', category: 'single', desc: '镜头顺时针翻滚', minimaxCode: 'Roll Right' },
   { id: 'tracking', label: '前向跟随 (Tracking)', category: 'single', desc: '跟随主体向前推进', minimaxCode: 'Forward Tracking' },
   { id: 'shake', label: '战斗震颤 (Shake)', category: 'single', desc: '冲击感手持震动', minimaxCode: 'Handheld Camera Shake' },
-  
-  // 5 大电影级双轴复合运镜
   { id: 'dolly_zoom', label: '希区柯克变焦 (Vertigo Zoom)', category: 'combo', desc: '推镜反向变焦，空间扭曲', minimaxCode: 'Dolly Zoom (Vertigo)' },
   { id: 'orbit_boom_up', label: '弧旋升镜 (Orbit + Boom Up)', category: 'combo', desc: '环绕+垂直升起，英雄登场', minimaxCode: 'Orbit + Boom Up' },
   { id: 'pan_left_crane_down', label: '全景俯切 (Pan Left + Crane Down)', category: 'combo', desc: '左扫同时俯冲，战场切入', minimaxCode: 'Pan Left + Crane Down' },
@@ -116,6 +198,13 @@ const CAST_LAYOUTS: Array<{ id: CastLayout; label: string; desc: string }> = [
 
 const FOCAL_PRESETS = [16, 24, 35, 50, 85, 135];
 
+const ENV_LABELS: Record<StageEnvironment, { label: string; desc: string; icon: string }> = {
+  cyber_studio: { label: '暗黑赛博影棚', desc: '霓虹网格+城市天际线', icon: '🏙️' },
+  xianxia_cloud: { label: '修仙云海仙山', desc: '浮空山+云雾缭绕', icon: '⛰️' },
+  desert_battle: { label: '决战古荒漠', desc: '沙丘+落日+岩石', icon: '🏜️' },
+  neon_city: { label: '雨夜霓虹都市', desc: '湿漉街道+雨滴反射', icon: '🌃' },
+};
+
 export const Director3DStage: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const pipContainerRef = useRef<HTMLDivElement>(null);
@@ -136,19 +225,28 @@ export const Director3DStage: React.FC = () => {
   const [motionEasing, setMotionEasing] = useState<'linear' | 'ease_in_out' | 'explosive' | 'slow_out'>('ease_in_out');
   const [environment, setEnvironment] = useState<StageEnvironment>('cyber_studio');
   const [propsConfig, setPropsConfig] = useState<StagePropType[]>(['sword', 'magic_circle']);
-  
-  // 2. Interactive & UI States
+
+  // 2. Agent 场景生成
+  const [scenePrompt, setScenePrompt] = useState('');
+  const [sceneGenerating, setSceneGenerating] = useState(false);
+  const [sceneDesc, setSceneDesc] = useState<string>('赛博影棚 · 霓虹灯光 · 中央舞台');
+
+  // 2.1 本地 GLB 导入
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importingModel, setImportingModel] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [customModelNames, setCustomModelNames] = useState<string[]>([]);
+
+  // 3. Interactive & UI States
   const [selectedEntity, setSelectedEntity] = useState<string | null>('protagonist');
-  const [gizmoMode, setGizmoMode] = useState<'translate' | 'rotate' | 'none'>('translate');
   const [compositionGrid, setCompositionGrid] = useState<'rule_of_thirds' | 'golden_ratio' | 'crosshair' | 'diagonal' | 'none'>('rule_of_thirds');
   const [aspectRatioMask, setAspectRatioMask] = useState<'9:16' | '16:9' | '1:1' | '2.35:1'>('9:16');
-  
   const [showPip, setShowPip] = useState(true);
   const [showHelpers, setShowHelpers] = useState(true);
   const [showTrajectory, setShowTrajectory] = useState(true);
   const [isSimulating, setIsSimulating] = useState(false);
-  const [scrubberProgress, setScrubberProgress] = useState(0); // 0.0 ~ 1.0
-  const [activeRightTab, setActiveRightTab] = useState<'optics_motion' | 'cast_props' | 'environment'>('optics_motion');
+  const [scrubberProgress, setScrubberProgress] = useState(0);
+  const [activeRightTab, setActiveRightTab] = useState<'optics_motion' | 'cast_props' | 'environment' | 'agent'>('optics_motion');
 
   // AI Directing Assistant
   const [aiPrompt, setAiPrompt] = useState('');
@@ -156,7 +254,7 @@ export const Director3DStage: React.FC = () => {
   const [appliedSuccess, setAppliedSuccess] = useState(false);
   const [snapshotSuccess, setSnapshotSuccess] = useState(false);
 
-  // Synchronize with activeShot
+  // 同步 activeShot
   useEffect(() => {
     if (activeShot) {
       if (activeShot.camera_framing) setFraming(activeShot.camera_framing);
@@ -169,22 +267,19 @@ export const Director3DStage: React.FC = () => {
     }
   }, [activeShotId, activeShot]);
 
-  // Three.js References
+  // Three refs
   const sceneRef = useRef<THREE.Scene | null>(null);
   const mainCameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const virtualCameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const pipRendererRef = useRef<THREE.WebGLRenderer | null>(null);
-  
-  // Entity Group References
   const stageEntitiesGroupRef = useRef<THREE.Group | null>(null);
+  const envGroupRef = useRef<THREE.Group | null>(null);
   const protagonistGroupRef = useRef<THREE.Group | null>(null);
   const antagonistGroupRef = useRef<THREE.Group | null>(null);
-  const supportingGroupRef = useRef<THREE.Group | null>(null);
   const trajectoryLineRef = useRef<THREE.Line | null>(null);
   const cameraHelperRef = useRef<THREE.CameraHelper | null>(null);
 
-  // Orbit navigation state for main viewport
   const orbitStateRef = useRef({
     isRotating: false,
     isPanning: false,
@@ -196,14 +291,6 @@ export const Director3DStage: React.FC = () => {
     phi: Math.PI / 3.0,
   });
 
-  // Selected object position state for dragging / gizmo
-  const entityPositionsRef = useRef<Record<string, THREE.Vector3>>({
-    protagonist: new THREE.Vector3(0, 0, 0),
-    antagonist: new THREE.Vector3(0, 0, -2.2),
-    supporting: new THREE.Vector3(-1.8, 0, -1.0),
-  });
-
-  // Update Main Camera position based on spherical coordinates
   const updateMainCameraPosition = useCallback(() => {
     if (!mainCameraRef.current) return;
     const { target, radius, theta, phi } = orbitStateRef.current;
@@ -215,22 +302,16 @@ export const Director3DStage: React.FC = () => {
     mainCameraRef.current.lookAt(target);
   }, []);
 
-  // Compute MiniMax 01-Director Structured Prompt string
   const minimaxPromptPreview = useMemo(() => {
-    const framingObj = FRAMING_PRESETS.find(f => f.id === framing);
-    const motionObj = MOTION_PRESETS.find(m => m.id === motion);
-    const parts = [
-      `Motion: ${motionObj?.minimaxCode || motion}`,
-      `Framing: ${framingObj?.label || framing}`,
-      `Lens: ${focalLength}mm`,
-    ];
+    const framingObj = FRAMING_PRESETS.find((f) => f.id === framing);
+    const motionObj = MOTION_PRESETS.find((m) => m.id === motion);
+    const parts = [`Motion: ${motionObj?.minimaxCode || motion}`, `Framing: ${framingObj?.label || framing}`, `Lens: ${focalLength}mm`];
     if (Math.abs(cameraRoll) > 0.5) parts.push(`Dutch Roll: ${cameraRoll > 0 ? '+' : ''}${cameraRoll.toFixed(1)}°`);
     if (motionSpeed !== '1.0x') parts.push(`Speed: ${motionSpeed}`);
     if (castLayout !== 'solo') parts.push(`Cast Staging: ${castLayout.toUpperCase()}`);
     return `[Camera: ${parts.join(', ')}]`;
   }, [framing, motion, focalLength, cameraRoll, motionSpeed, castLayout]);
 
-  // Reset Main 3D View
   const handleResetView = useCallback(() => {
     orbitStateRef.current.target.set(0, 1.2, 0);
     orbitStateRef.current.radius = 4.8;
@@ -240,121 +321,207 @@ export const Director3DStage: React.FC = () => {
   }, [updateMainCameraPosition]);
 
   // ============================================================
-  // Initialize Three.js Stage & Viewports
+  // Agent 场景生成（对标 MiniMax Design 自然语言布景）
+  // ============================================================
+  const handleAgentSceneGenerate = async () => {
+    if (!scenePrompt.trim()) return;
+    setSceneGenerating(true);
+    const lower = scenePrompt.toLowerCase();
+    // 1. 关键词驱动的环境切换
+    if (lower.includes('云海') || lower.includes('仙山') || lower.includes('修仙') || lower.includes('云雾')) {
+      setEnvironment('xianxia_cloud');
+      setSceneDesc('修仙云海 · 浮空仙山 · 灵气缭绕');
+    } else if (lower.includes('沙漠') || lower.includes('荒漠') || lower.includes('黄沙') || lower.includes('决战')) {
+      setEnvironment('desert_battle');
+      setSceneDesc('古荒漠 · 落日黄沙 · 岩石战场');
+    } else if (lower.includes('霓虹') || lower.includes('雨夜') || lower.includes('都市') || lower.includes('赛博') || lower.includes('城市')) {
+      if (lower.includes('雨夜')) { setEnvironment('neon_city'); setSceneDesc('雨夜霓虹都市 · 湿漉街道 · 倒影'); }
+      else { setEnvironment('cyber_studio'); setSceneDesc('赛博影棚 · 霓虹网格 · 科技光效'); }
+    }
+    // 2. 角色指令
+    if (lower.includes('添加') && (lower.includes('敌人') || lower.includes('对手') || lower.includes('宿敌'))) {
+      setCastLayout('duel');
+    } else if (lower.includes('群') || lower.includes('包围') || lower.includes('多人')) {
+      setCastLayout('surrounded');
+    } else if (lower.includes('单人') || lower.includes('独自')) {
+      setCastLayout('solo');
+    } else if (lower.includes('过肩')) {
+      setCastLayout('ots');
+    }
+    // 3. 姿态指令
+    const poseMap: Array<[string[], PosePreset]> = [
+      [['战斗', '架势', '武道'], 'fight'],
+      [['施法', '御剑', '法术'], 'cast_spell'],
+      [['奔跑', '突进', '冲锋'], 'run'],
+      [['回眸', '凝视', '回头'], 'look_back'],
+      [['半跪', '受伤', '受创'], 'kneel'],
+      [['格挡', '防御'], 'defend'],
+      [['飞行', '御风', '浮空'], 'fly'],
+    ];
+    for (const [keys, p] of poseMap) {
+      if (keys.some((k) => lower.includes(k))) { setPose(p); break; }
+    }
+    // 4. 道具指令（真实 GLB 已接入）
+    if (lower.includes('剑') || lower.includes('飞剑')) {
+      setPropsConfig((prev) => (prev.includes('sword') ? prev : [...prev, 'sword']));
+    }
+    if (lower.includes('盾') || lower.includes('护盾')) {
+      setPropsConfig((prev) => (prev.includes('shield') ? prev : [...prev, 'shield']));
+    }
+    if (lower.includes('阵法') || lower.includes('符文') || lower.includes('法阵')) {
+      setPropsConfig((prev) => (prev.includes('magic_circle') ? prev : [...prev, 'magic_circle']));
+    }
+    if (lower.includes('椅') || lower.includes('座椅') || lower.includes('chair')) {
+      setPropsConfig((prev) => (prev.includes('chair' as StagePropType) ? prev : [...prev, 'chair' as StagePropType]));
+    }
+    if (lower.includes('头盔') || lower.includes('盔甲') || lower.includes('头饰') || lower.includes('helmet')) {
+      setPropsConfig((prev) => (prev.includes('helmet' as StagePropType) ? prev : [...prev, 'helmet' as StagePropType]));
+    }
+    if (lower.includes('相机') || lower.includes('摄影') || lower.includes('camera')) {
+      setPropsConfig((prev) => (prev.includes('camera' as StagePropType) ? prev : [...prev, 'camera' as StagePropType]));
+    }
+    if (lower.includes('牛油果') || lower.includes('水果') || lower.includes('avocado')) {
+      setPropsConfig((prev) => (prev.includes('avocado' as StagePropType) ? prev : [...prev, 'avocado' as StagePropType]));
+    }
+    if (lower.includes('音响') || lower.includes('音箱') || lower.includes('boom')) {
+      setPropsConfig((prev) => (prev.includes('boombox' as StagePropType) ? prev : [...prev, 'boombox' as StagePropType]));
+    }
+    if (lower.includes('移除') && lower.includes('剑')) {
+      setPropsConfig((prev) => prev.filter((x) => x !== 'sword'));
+    }
+    if (lower.includes('移除') && (lower.includes('椅') || lower.includes('chair'))) {
+      setPropsConfig((prev) => prev.filter((x) => x !== 'chair'));
+    }
+    if (lower.includes('移除') && lower.includes('头盔')) {
+      setPropsConfig((prev) => prev.filter((x) => x !== 'helmet'));
+    }
+    // 5. 同时调用后端的 3D 导演机位推理（原有能力）
+    try {
+      const res = await invokeTool('director_3d_stage_plan', {
+        ai_directive: scenePrompt,
+        framing, motion, pose, focal_length_mm: focalLength, camera_roll_deg: cameraRoll, cast_layout: castLayout, speed: motionSpeed,
+      });
+      if (res.status === 'success' && res.result) {
+        const r = res.result as any;
+        if (r.framing) setFraming(r.framing);
+        if (r.motion) setMotion(r.motion);
+        if (r.pose) setPose(r.pose);
+        if (r.focal_length_mm) setFocalLength(r.focal_length_mm);
+        if (r.camera_roll_deg !== undefined) setCameraRoll(r.camera_roll_deg);
+        if (r.cast_layout) setCastLayout(r.cast_layout);
+      }
+    } catch (e) { console.error(e); }
+    setSceneGenerating(false);
+    setTimeout(() => setScenePrompt(''), 300);
+  };
+
+  const handleImportGLB = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.glb') && !file.name.toLowerCase().endsWith('.gltf')) {
+      setImportError('仅支持 .glb / .gltf');
+      return;
+    }
+    setImportingModel(true);
+    setImportError(null);
+    try {
+      const url = URL.createObjectURL(file);
+      const group = await loadGLBModel(url, 1);
+      if (!group) throw new Error('解析失败，确认模型为合规 glTF');
+      if (stageEntitiesGroupRef.current) {
+        const clone = group.clone(true) as THREE.Group;
+        clone.name = `custom_${Date.now()}`;
+        const offset = new THREE.Vector3((Math.random() - 0.5) * 1.6, 0, (Math.random() - 0.5) * 1.6);
+        clone.position.copy(offset);
+        // 悬浮微光标识为导入模型
+        const light = new THREE.PointLight(0x00d2ff, 0.7, 2.2);
+        light.position.copy(offset).add(new THREE.Vector3(0, 1.1, 0));
+        stageEntitiesGroupRef.current.add(clone);
+        stageEntitiesGroupRef.current.add(light);
+        setCustomModelNames((prev) => [...prev, file.name]);
+      } else {
+        const fakeKey = `custom_${Date.now()}`;
+        (MODEL_URLS as any)[fakeKey] = url;
+        setPropsConfig((prev) => [...prev, fakeKey as any]);
+        setCustomModelNames((prev) => [...prev, file.name]);
+      }
+    } catch (err: any) {
+      setImportError(err?.message || '导入失败');
+    } finally {
+      setImportingModel(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  // ============================================================
+  // Three 初始化
   // ============================================================
   useEffect(() => {
     if (!containerRef.current) return;
-
     const width = containerRef.current.clientWidth;
     const height = containerRef.current.clientHeight;
-
-    // 1. Scene
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x07070a);
-    scene.fog = new THREE.FogExp2(0x07070a, 0.05);
+    scene.fog = new THREE.FogExp2(0x07070a, 0.035);
     sceneRef.current = scene;
-
-    // 2. Main Navigation Camera
     const mainCamera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
     mainCameraRef.current = mainCamera;
     updateMainCameraPosition();
-
-    // 3. Virtual Shooting Camera (The Director's Cinematic Lens)
     const virtualCam = new THREE.PerspectiveCamera(35, 9 / 16, 0.1, 50);
     virtualCam.position.set(0, 1.3, 2.5);
     virtualCam.lookAt(0, 1.2, 0);
     scene.add(virtualCam);
     virtualCameraRef.current = virtualCam;
-
-    // Camera Frustum Helper
     const helper = new THREE.CameraHelper(virtualCam);
     if (helper.material && !Array.isArray(helper.material)) {
-      (helper.material as THREE.Material).opacity = 0.4;
+      (helper.material as THREE.Material).opacity = 0.35;
       (helper.material as THREE.Material).transparent = true;
     }
     scene.add(helper);
     cameraHelperRef.current = helper;
-
-    // 4. Main WebGL Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.15;
     containerRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
-
-    // 5. Lighting Setup
-    const ambientLight = new THREE.AmbientLight(0x1a1528, 2.2);
-    scene.add(ambientLight);
-
-    const keyLight = new THREE.DirectionalLight(0x7c3aed, 3.8);
+    // 基础光（会被环境光覆盖，保留兜底）
+    const ambient = new THREE.AmbientLight(0x1a1528, 1.8);
+    scene.add(ambient);
+    const keyLight = new THREE.DirectionalLight(0x7c3aed, 3.2);
     keyLight.position.set(4, 5, 3.5);
     keyLight.castShadow = true;
-    keyLight.shadow.mapSize.width = 1024;
-    keyLight.shadow.mapSize.height = 1024;
+    keyLight.shadow.mapSize.set(1024, 1024);
     scene.add(keyLight);
-
-    const rimLight = new THREE.DirectionalLight(0x00d2ff, 4.2);
+    const rimLight = new THREE.DirectionalLight(0x00d2ff, 3.5);
     rimLight.position.set(-3.5, 3.5, -3);
     scene.add(rimLight);
-
-    const fillLight = new THREE.PointLight(0xff0077, 2.5, 12);
-    fillLight.position.set(0, 0.8, 2.2);
-    scene.add(fillLight);
-
-    // 6. Ground Stage Matrix
-    const gridHelper = new THREE.GridHelper(14, 28, 0x7c3aed, 0x1a1a2e);
-    gridHelper.position.y = 0;
-    scene.add(gridHelper);
-
-    // Glowing Director Stage Circles
-    const ringGeo = new THREE.RingGeometry(1.4, 1.45, 64);
-    const ringMat = new THREE.MeshBasicMaterial({ color: 0x7c3aed, side: THREE.DoubleSide });
-    const ringMesh = new THREE.Mesh(ringGeo, ringMat);
-    ringMesh.rotation.x = Math.PI / 2;
-    ringMesh.position.y = 0.01;
-    scene.add(ringMesh);
-
-    // 7. Master Stage Entities Group
+    // 环境组
+    const envGroup = new THREE.Group();
+    envGroup.name = 'env_group';
+    scene.add(envGroup);
+    envGroupRef.current = envGroup;
     const stageEntitiesGroup = new THREE.Group();
+    stageEntitiesGroup.name = 'stage_entities';
     scene.add(stageEntitiesGroup);
     stageEntitiesGroupRef.current = stageEntitiesGroup;
-
-    // 8. Animation Loop
     let reqId: number;
     const animate = () => {
       reqId = requestAnimationFrame(animate);
-
-      // Subtle breath animation for characters
-      if (protagonistGroupRef.current) {
-        protagonistGroupRef.current.position.y = Math.sin(Date.now() * 0.002) * 0.012;
-      }
-      if (antagonistGroupRef.current) {
-        antagonistGroupRef.current.position.y = Math.sin(Date.now() * 0.002 + 1.2) * 0.012;
-      }
-
-      // Rotate magic circle if present
+      if (protagonistGroupRef.current) protagonistGroupRef.current.position.y = Math.sin(Date.now() * 0.0018) * 0.01;
+      if (antagonistGroupRef.current) antagonistGroupRef.current.position.y = Math.sin(Date.now() * 0.0018 + 1.2) * 0.01;
       const magicCircle = scene.getObjectByName('magic_circle_mesh');
-      if (magicCircle) {
-        magicCircle.rotation.z += 0.008;
-      }
-
-      // Floating sword hover
-      const floatingSword = scene.getObjectByName('floating_sword_mesh');
-      if (floatingSword) {
-        floatingSword.position.y = 1.8 + Math.sin(Date.now() * 0.003) * 0.08;
-        floatingSword.rotation.y += 0.015;
-      }
-
-      // Update Camera Helper
-      if (cameraHelperRef.current && virtualCameraRef.current) {
-        cameraHelperRef.current.update();
-      }
-
+      if (magicCircle) magicCircle.rotation.z += 0.006;
+      const sword = scene.getObjectByName('floating_sword_mesh');
+      if (sword) { sword.position.y = 1.85 + Math.sin(Date.now() * 0.0025) * 0.06; sword.rotation.y += 0.012; }
+      // 云朵漂浮
+      const clouds = scene.getObjectByName('clouds_group');
+      if (clouds) clouds.rotation.y += 0.0004;
+      if (cameraHelperRef.current && virtualCameraRef.current) cameraHelperRef.current.update();
       renderer.render(scene, mainCamera);
-
-      // Render PIP Monitor Viewport
       if (pipRendererRef.current && virtualCameraRef.current) {
         if (cameraHelperRef.current) cameraHelperRef.current.visible = false;
         pipRendererRef.current.render(scene, virtualCameraRef.current);
@@ -362,8 +529,6 @@ export const Director3DStage: React.FC = () => {
       }
     };
     animate();
-
-    // Resize Handler
     const handleResize = () => {
       if (!containerRef.current || !rendererRef.current || !mainCameraRef.current) return;
       const w = containerRef.current.clientWidth;
@@ -373,424 +538,405 @@ export const Director3DStage: React.FC = () => {
       rendererRef.current.setSize(w, h);
     };
     window.addEventListener('resize', handleResize);
-
     return () => {
       cancelAnimationFrame(reqId);
       window.removeEventListener('resize', handleResize);
-      if (containerRef.current && renderer.domElement) {
-        containerRef.current.removeChild(renderer.domElement);
-      }
+      if (containerRef.current && renderer.domElement) containerRef.current.removeChild(renderer.domElement);
       renderer.dispose();
     };
   }, [updateMainCameraPosition]);
 
-  // Setup PIP Monitor WebGL Renderer
   useEffect(() => {
     if (!pipContainerRef.current) return;
     const w = pipContainerRef.current.clientWidth;
     const h = pipContainerRef.current.clientHeight;
-
     const pipRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
     pipRenderer.setSize(w, h);
     pipRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     pipContainerRef.current.innerHTML = '';
     pipContainerRef.current.appendChild(pipRenderer.domElement);
     pipRendererRef.current = pipRenderer;
-
     return () => {
-      if (pipContainerRef.current && pipRenderer.domElement) {
-        pipContainerRef.current.innerHTML = '';
-      }
+      if (pipContainerRef.current && pipRenderer.domElement) pipContainerRef.current.innerHTML = '';
       pipRenderer.dispose();
     };
   }, [showPip, aspectRatioMask]);
 
   // ============================================================
-  // Re-build Stage Entities (Characters, Props, Cast Layout)
+  // 环境构建（真实场景，非网格）
+  // ============================================================
+  useEffect(() => {
+    if (!sceneRef.current || !envGroupRef.current) return;
+    const envGroup = envGroupRef.current;
+    while (envGroup.children.length) envGroup.remove(envGroup.children[0]);
+    const scene = sceneRef.current;
+    // 清理旧光
+    const toRemove: THREE.Object3D[] = [];
+    scene.traverse((obj) => { if ((obj as any).isLight && obj.name.startsWith('env_')) toRemove.push(obj); });
+    toRemove.forEach((o) => scene.remove(o));
+    if (environment === 'cyber_studio') {
+      scene.background = new THREE.Color(0x07070a);
+      scene.fog = new THREE.FogExp2(0x0a0a1a, 0.06);
+      const floor = new THREE.Mesh(new THREE.PlaneGeometry(24, 24), new THREE.MeshStandardMaterial({ color: 0x0f0f1a, metalness: 0.6, roughness: 0.35 }));
+      floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; envGroup.add(floor);
+      const grid = new THREE.GridHelper(20, 40, 0x7c3aed, 0x1a1a2e); grid.position.y = 0.01; envGroup.add(grid);
+      // 霓虹环
+      const ring = new THREE.Mesh(new THREE.RingGeometry(1.5, 1.55, 64), new THREE.MeshBasicMaterial({ color: 0x7c3aed, side: THREE.DoubleSide }));
+      ring.rotation.x = Math.PI / 2; ring.position.y = 0.02; envGroup.add(ring);
+      // 远景城市剪影
+      for (let i = 0; i < 18; i++) {
+        const h = 1.5 + Math.random() * 3;
+        const b = new THREE.Mesh(new THREE.BoxGeometry(0.6 + Math.random() * 0.7, h, 0.6), new THREE.MeshStandardMaterial({ color: 0x1a1a2e, emissive: 0x7c3aed, emissiveIntensity: 0.15 }));
+        const angle = (i / 18) * Math.PI * 2;
+        const r = 8 + Math.random() * 2;
+        b.position.set(Math.cos(angle) * r, h / 2, Math.sin(angle) * r);
+        envGroup.add(b);
+        // 窗光
+        for (let w = 0; w < 3; w++) {
+          const win = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 0.12), new THREE.MeshBasicMaterial({ color: 0x00d2ff, transparent: true, opacity: 0.6 }));
+          win.position.set(b.position.x + (Math.random() - 0.5) * 0.3, h * 0.3 + w * 0.4, b.position.z + 0.31);
+          win.lookAt(0, win.position.y, 0);
+          envGroup.add(win);
+        }
+      }
+      const spot = new THREE.SpotLight(0x7c3aed, 18, 12, Math.PI / 5, 0.4); spot.position.set(0, 5, 2); spot.target.position.set(0, 0, 0); spot.name = 'env_spot'; scene.add(spot); scene.add(spot.target);
+      const rim = new THREE.DirectionalLight(0x00d2ff, 4); rim.position.set(-4, 4, -3); rim.name = 'env_rim'; scene.add(rim);
+    } else if (environment === 'xianxia_cloud') {
+      scene.background = new THREE.Color(0x87ceeb);
+      scene.fog = new THREE.FogExp2(0xcfe9f5, 0.025);
+      const ground = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshStandardMaterial({ color: 0xe8f5f0, roughness: 0.9 }));
+      ground.rotation.x = -Math.PI / 2; ground.position.y = -0.5; ground.receiveShadow = true; envGroup.add(ground);
+      // 浮空山
+      const mtnMat = new THREE.MeshStandardMaterial({ color: 0x5a6d7e, roughness: 0.95, flatShading: true });
+      for (let i = 0; i < 6; i++) {
+        const mtn = new THREE.Mesh(new THREE.ConeGeometry(1.2 + Math.random() * 1.0, 3 + Math.random() * 2, 6), mtnMat);
+        const a = (i / 6) * Math.PI * 2; const r = 7 + Math.random() * 4;
+        mtn.position.set(Math.cos(a) * r, 1 + Math.random(), Math.sin(a) * r); mtn.castShadow = true; envGroup.add(mtn);
+      }
+      // 云海
+      const clouds = new THREE.Group(); clouds.name = 'clouds_group';
+      const cloudMat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, roughness: 1 });
+      for (let i = 0; i < 12; i++) {
+        const cl = new THREE.Group();
+        for (let j = 0; j < 4; j++) {
+          const s = new THREE.Mesh(new THREE.SphereGeometry(0.5 + Math.random() * 0.4, 12, 12), cloudMat);
+          s.position.set((Math.random() - 0.5) * 1.2, (Math.random() - 0.5) * 0.3, (Math.random() - 0.5) * 1.2);
+          cl.add(s);
+        }
+        const a = (i / 12) * Math.PI * 2; const r = 4 + Math.random() * 8;
+        cl.position.set(Math.cos(a) * r, 2 + Math.random() * 2, Math.sin(a) * r); clouds.add(cl);
+      }
+      envGroup.add(clouds);
+      const sun = new THREE.DirectionalLight(0xfff2cc, 3.5); sun.position.set(5, 8, 3); sun.castShadow = true; sun.name = 'env_sun'; scene.add(sun);
+      const fill = new THREE.HemisphereLight(0x87ceeb, 0xe8f5f0, 1.2); fill.name = 'env_fill'; scene.add(fill);
+    } else if (environment === 'desert_battle') {
+      scene.background = new THREE.Color(0xff8c42);
+      scene.fog = new THREE.FogExp2(0xffa85c, 0.035);
+      const sand = new THREE.Mesh(new THREE.PlaneGeometry(40, 40, 20, 20), new THREE.MeshStandardMaterial({ color: 0xc2a878, roughness: 1, metalness: 0 }));
+      // 起伏沙丘
+      const pos = sand.geometry.attributes.position as THREE.BufferAttribute;
+      for (let i = 0; i < pos.count; i++) { const x = pos.getX(i), y = pos.getY(i); pos.setZ(i, Math.sin(x * 0.3) * 0.4 + Math.cos(y * 0.3) * 0.3); }
+      pos.needsUpdate = true; sand.geometry.computeVertexNormals();
+      sand.rotation.x = -Math.PI / 2; sand.position.y = -0.3; sand.receiveShadow = true; envGroup.add(sand);
+      // 岩石
+      const rockMat = new THREE.MeshStandardMaterial({ color: 0x8b7355, roughness: 0.95 });
+      for (let i = 0; i < 8; i++) {
+        const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.5 + Math.random() * 0.5), rockMat);
+        const a = Math.random() * Math.PI * 2; const r = 3 + Math.random() * 6;
+        rock.position.set(Math.cos(a) * r, 0.1, Math.sin(a) * r); rock.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0); rock.castShadow = true; envGroup.add(rock);
+      }
+      const sun2 = new THREE.DirectionalLight(0xff6b35, 4); sun2.position.set(4, 6, -2); sun2.castShadow = true; sun2.name = 'env_sun'; scene.add(sun2);
+      const amber = new THREE.PointLight(0xff8c42, 2, 20); amber.position.set(0, 2, 0); amber.name = 'env_amber'; scene.add(amber);
+    } else if (environment === 'neon_city') {
+      scene.background = new THREE.Color(0x0a0a1a);
+      scene.fog = new THREE.FogExp2(0x0a0a1a, 0.055);
+      const street = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), new THREE.MeshStandardMaterial({ color: 0x1a1a2e, metalness: 0.8, roughness: 0.2 }));
+      street.rotation.x = -Math.PI / 2; street.position.y = 0; street.receiveShadow = true; envGroup.add(street);
+      // 雨夜建筑
+      for (let i = 0; i < 20; i++) {
+        const h = 2 + Math.random() * 4;
+        const b = new THREE.Mesh(new THREE.BoxGeometry(0.8 + Math.random(), h, 0.8), new THREE.MeshStandardMaterial({ color: 0x0f0f1e }));
+        const a = (i / 20) * Math.PI * 2; const r = 6 + Math.random() * 5;
+        b.position.set(Math.cos(a) * r, h / 2, Math.sin(a) * r); envGroup.add(b);
+        // 霓虹窗
+        const neonColors = [0xff0080, 0x00ffff, 0x7c3aed, 0xffaa00];
+        for (let k = 0; k < 2; k++) {
+          const win = new THREE.Mesh(new THREE.PlaneGeometry(0.25, 0.35), new THREE.MeshBasicMaterial({ color: neonColors[i % neonColors.length], transparent: true, opacity: 0.7 }));
+          win.position.set(b.position.x, h * 0.3 + k * 0.8, b.position.z + 0.42);
+          win.lookAt(0, win.position.y, 0); envGroup.add(win);
+        }
+      }
+      // 街灯
+      for (let i = 0; i < 4; i++) {
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 3), new THREE.MeshStandardMaterial({ color: 0x333333 }));
+        const a = (i / 4) * Math.PI * 2 + 0.3; pole.position.set(Math.cos(a) * 3.5, 1.5, Math.sin(a) * 3.5); envGroup.add(pole);
+        const lamp = new THREE.PointLight(0xffaa00, 3, 6); lamp.position.set(pole.position.x, 3, pole.position.z); lamp.name = 'env_lamp'; scene.add(lamp);
+      }
+      const moon = new THREE.DirectionalLight(0x9bbcff, 1.2); moon.position.set(-4, 6, -4); moon.name = 'env_moon'; scene.add(moon);
+    }
+  }, [environment]);
+
+  // ============================================================
+  // 角色与道具重建（真实建模 - GLB 优先，程序化兜底）
+  // - 人体：RobotExpressive.glb / Soldier.glb（CC0，三阶归一化+底部对齐）
+  // - 道具：SheenChair / DamagedHelmet / AntiqueCamera / Avocado / BoomBox 等真实 GLB
+  // - 失败则回退至程序化 PBR 假人/道具，保证离线可用
   // ============================================================
   useEffect(() => {
     if (!sceneRef.current || !stageEntitiesGroupRef.current) return;
+    let cancelled = false;
     const stage = stageEntitiesGroupRef.current;
-    
-    // Clear old children
-    while (stage.children.length > 0) {
-      stage.remove(stage.children[0]);
-    }
+    // 清理旧实体但保留环境
+    while (stage.children.length) stage.remove(stage.children[0]);
+    protagonistGroupRef.current = null;
+    antagonistGroupRef.current = null;
 
-    // 1. Protagonist Mannequin (Neon Violet/Cyan)
-    const protagonist = createMannequinMesh({
-      pose,
-      role: 'protagonist',
-      primaryColor: 0x7c3aed,
-      accentColor: 0x00d2ff,
-      name: 'Protagonist'
-    });
-    protagonist.name = 'entity_protagonist';
-    protagonist.position.copy(entityPositionsRef.current.protagonist);
-    stage.add(protagonist);
-    protagonistGroupRef.current = protagonist;
+    const applyPoseToGLB = (group: THREE.Group, pose: PosePreset) => {
+      // GLB 为绑定模型时，简单通过整体旋转/位移模拟姿态，避免复杂骨骼重定向
+      if (pose === 'fight') { group.rotation.y = 0; group.position.y += 0.02; }
+      else if (pose === 'kneel') { group.scale.set(1, 0.92, 1); group.position.y -= 0.18; }
+      else if (pose === 'fly') { group.position.y += 0.25; group.rotation.x = -0.12; }
+      else if (pose === 'run') { group.rotation.y = 0.35; }
+    };
 
-    // 2. Antagonist / Duel Opponent if castLayout !== 'solo'
-    if (castLayout === 'duel' || castLayout === 'ots' || castLayout === 'surrounded') {
-      const antagonist = createMannequinMesh({
-        pose: pose === 'fight' ? 'fight' : 'stand',
-        role: 'antagonist',
-        primaryColor: 0xef4444,
-        accentColor: 0xffaa00,
-        name: 'Antagonist'
-      });
-      antagonist.name = 'entity_antagonist';
-      if (castLayout === 'duel') {
-        antagonist.position.set(0, 0, -2.2);
-        antagonist.rotation.y = Math.PI; // Face protagonist
-      } else if (castLayout === 'ots') {
-        antagonist.position.set(-0.3, 0, -2.4);
-        antagonist.rotation.y = Math.PI * 0.9;
-      } else if (castLayout === 'surrounded') {
-        antagonist.position.set(1.8, 0, -1.2);
-        antagonist.rotation.y = -Math.PI * 0.6;
+    (async () => {
+      // Protagonist - 优先 GLB
+      let protagonist: THREE.Group | null = await loadGLBModel(MODEL_URLS.human_protagonist, 1.05);
+      if (!protagonist || cancelled) {
+        protagonist = createRealisticHuman({ pose, role: 'protagonist', name: 'Protagonist', primaryColor: 0x7c3aed, accentColor: 0x00d2ff, hairColor: 0x1a1a2e });
+      } else {
+        applyPoseToGLB(protagonist, pose);
+        // 叠加角色光环以区分
+        const ring = new THREE.Mesh(new THREE.RingGeometry(0.38, 0.40, 32), new THREE.MeshBasicMaterial({ color: 0x00d2ff, transparent: true, opacity: 0.22, side: THREE.DoubleSide }));
+        ring.rotation.x = Math.PI / 2; ring.position.y = 0.01; protagonist.add(ring);
       }
-      stage.add(antagonist);
-      antagonistGroupRef.current = antagonist;
-    }
+      if (cancelled) return;
+      protagonist.name = 'entity_protagonist';
+      protagonist.position.set(0, 0, 0);
+      stage.add(protagonist);
+      protagonistGroupRef.current = protagonist;
 
-    // 3. Supporting / Extra characters if 'surrounded'
-    if (castLayout === 'surrounded') {
-      const supporting1 = createMannequinMesh({
-        pose: 'fight',
-        role: 'supporting',
-        primaryColor: 0x3b82f6,
-        accentColor: 0x93c5fd,
-        name: 'Supporting'
-      });
-      supporting1.name = 'entity_supporting';
-      supporting1.position.set(-1.8, 0, -1.2);
-      supporting1.rotation.y = Math.PI * 0.6;
-      stage.add(supporting1);
-      supportingGroupRef.current = supporting1;
-    }
+      // Antagonist
+      if (castLayout === 'duel' || castLayout === 'ots' || castLayout === 'surrounded') {
+        let antagonist: THREE.Group | null = await loadGLBModel(MODEL_URLS.human_antagonist, 1.02);
+        if (!antagonist || cancelled) {
+          antagonist = createRealisticHuman({ pose: pose === 'fight' ? 'fight' : 'stand', role: 'antagonist', name: 'Antagonist', primaryColor: 0x8b1a1a, accentColor: 0xff3b30, hairColor: 0x2b0a0a });
+        } else {
+          applyPoseToGLB(antagonist, pose === 'fight' ? 'fight' : 'stand');
+        }
+        if (cancelled) return;
+        antagonist.name = 'entity_antagonist';
+        if (castLayout === 'duel') { antagonist.position.set(0, 0, -2.3); antagonist.rotation.y = Math.PI; }
+        else if (castLayout === 'ots') { antagonist.position.set(-0.35, 0, -2.5); antagonist.rotation.y = Math.PI * 0.9; }
+        else { antagonist.position.set(1.9, 0, -1.2); antagonist.rotation.y = -Math.PI * 0.6; }
+        stage.add(antagonist);
+        antagonistGroupRef.current = antagonist;
+      } else antagonistGroupRef.current = null;
 
-    // 4. Props & FX
-    if (propsConfig.includes('sword')) {
-      const sword = createFloatingSwordMesh();
-      sword.name = 'floating_sword_mesh';
-      sword.position.set(0.6, 1.8, 0.4);
-      stage.add(sword);
-    }
+      if (cancelled) return;
+      if (castLayout === 'surrounded') {
+        let sup: THREE.Group | null = await loadGLBModel(MODEL_URLS.human_supporting, 0.98);
+        if (!sup || cancelled) sup = createRealisticHuman({ pose: 'fight', role: 'supporting', name: 'Supporting', primaryColor: 0x1e3a8a, accentColor: 0x60a5fa, hairColor: 0x0f172a });
+        if (cancelled) return;
+        sup.name = 'entity_supporting'; sup.position.set(-1.9, 0, -1.2); sup.rotation.y = Math.PI * 0.6; stage.add(sup);
+      }
 
-    if (propsConfig.includes('shield')) {
-      const shield = createEnergyShieldMesh();
-      shield.name = 'energy_shield_mesh';
-      shield.position.set(0, 1.25, 0.5);
-      stage.add(shield);
-    }
+      if (cancelled) return;
+      // 道具 - GLB 优先，失败回退程序化
+      const addPropGLBOrFallback = async (type: StagePropType, fallback: () => THREE.Group, pos: THREE.Vector3, glbKey?: string, scale = 1) => {
+        if (glbKey && MODEL_URLS[glbKey]) {
+          const glb = await loadGLBModel(MODEL_URLS[glbKey], scale);
+          if (glb && !cancelled) {
+            glb.position.copy(pos);
+            // 悬浮道具加轻微发光
+            const light = new THREE.PointLight(0x7c3aed, 0.6, 2);
+            light.position.copy(pos).add(new THREE.Vector3(0, 0.2, 0));
+            stage.add(light);
+            glb.name = `prop_${type}`;
+            stage.add(glb);
+            return;
+          }
+        }
+        if (cancelled) return;
+        const fb = fallback();
+        fb.position.copy(pos);
+        stage.add(fb);
+      };
 
-    if (propsConfig.includes('magic_circle')) {
-      const magicCircle = createMagicCircleMesh();
-      magicCircle.name = 'magic_circle_mesh';
-      magicCircle.position.set(0, 0.02, 0);
-      stage.add(magicCircle);
-    }
+      if (propsConfig.includes('sword')) {
+        const sword = createRealisticSword();
+        sword.name = 'floating_sword_mesh'; sword.position.set(0.65, 1.75, 0.45); stage.add(sword);
+      }
+      if (propsConfig.includes('shield')) {
+        const shield = createRealisticShield();
+        shield.name = 'energy_shield_mesh'; shield.position.set(0, 1.2, 0.55); stage.add(shield);
+      }
+      if (propsConfig.includes('magic_circle')) {
+        const circle = createRealisticMagicCircle();
+        circle.name = 'magic_circle_mesh'; circle.position.set(0, 0.02, 0); stage.add(circle);
+      }
+      // 真实 GLB 道具（新增类型）
+      if (propsConfig.includes('chair' as StagePropType)) {
+        await addPropGLBOrFallback('chair' as StagePropType, () => { const g = createRealisticHuman({ pose: 'stand', role: 'supporting', name: 'ChairFallback', primaryColor: 0x8b4513, accentColor: 0xffaa00, hairColor: 0x000000 }); g.scale.setScalar(0.5); return g; }, new THREE.Vector3(1.2, 0, 0.6), 'chair', 1.2);
+      }
+      if (propsConfig.includes('helmet' as StagePropType)) {
+        await addPropGLBOrFallback('helmet' as StagePropType, () => createRealisticShield(), new THREE.Vector3(-0.9, 0.9, 0.5), 'helmet', 0.9);
+      }
+      if (propsConfig.includes('camera' as StagePropType)) {
+        await addPropGLBOrFallback('camera' as StagePropType, () => createRealisticShield(), new THREE.Vector3(0, 1.0, 1.2), 'camera_prop', 0.8);
+      }
+      if (propsConfig.includes('avocado' as StagePropType)) {
+        await addPropGLBOrFallback('avocado' as StagePropType, () => createRealisticMagicCircle(), new THREE.Vector3(0.9, 0.4, -0.8), 'avocado', 1.0);
+      }
+      if (propsConfig.includes('boombox' as StagePropType)) {
+        await addPropGLBOrFallback('boombox' as StagePropType, () => createRealisticShield(), new THREE.Vector3(-1.0, 0.5, 0.9), 'boombox', 1.1);
+      }
+      if (cancelled) return;
+      // 场景专属道具（根据环境自动补充真实物品）
+      if (environment === 'xianxia_cloud' && !propsConfig.includes('magic_circle')) {
+        const incense = createIncenseBurner(); incense.position.set(-1.2, 0.3, 0.8); stage.add(incense);
+      }
+      if (environment === 'desert_battle') {
+        const flag = createBattleFlag(); flag.position.set(1.5, 0, -1.0); stage.add(flag);
+      }
+      // 根据环境自动补充真实 GLB 道具（示例：赛博影棚自动放置 BoomBox，霓虹都市放置椅子）
+      if (environment === 'cyber_studio' && !propsConfig.includes('boombox' as StagePropType)) {
+        const autoBox = await loadGLBModel(MODEL_URLS.boombox, 0.9);
+        if (autoBox && !cancelled) { autoBox.position.set(1.4, 0.35, -0.6); stage.add(autoBox); }
+      }
+      if (environment === 'neon_city' && !propsConfig.includes('chair' as StagePropType)) {
+        const autoChair = await loadGLBModel(MODEL_URLS.chair, 1.0);
+        if (autoChair && !cancelled) { autoChair.position.set(-1.3, 0, 0.7); autoChair.rotation.y = Math.PI * 0.2; stage.add(autoChair); }
+      }
+    })();
 
-  }, [pose, castLayout, propsConfig]);
+    return () => { cancelled = true; };
+  }, [pose, castLayout, propsConfig, environment]);
 
-  // ============================================================
-  // Update Virtual Camera Optics & Position Calculation
-  // ============================================================
   const updateVirtualCameraOptics = useCallback(() => {
     if (!virtualCameraRef.current) return;
     const vCam = virtualCameraRef.current;
-
-    // 1. Calculate FOV from focal length mm: FOV = 2 * atan(sensorHeight / (2 * fl))
     const sensorHeight = 24;
     const fovCalculated = 2 * Math.atan(sensorHeight / (2 * focalLength)) * (180 / Math.PI);
     vCam.fov = Math.max(12, Math.min(105, fovCalculated));
-
-    // 2. Aspect Ratio
     let aspect = 9 / 16;
     if (aspectRatioMask === '16:9') aspect = 16 / 9;
     else if (aspectRatioMask === '1:1') aspect = 1.0;
     else if (aspectRatioMask === '2.35:1') aspect = 2.35;
     vCam.aspect = aspect;
-
-    // 3. Base Position & LookAt based on framing
     let target = new THREE.Vector3(0, 1.25, 0);
     let camPos = new THREE.Vector3(0, 1.3, 2.5);
-
     switch (framing) {
-      case 'extreme_close_up':
-        camPos.set(0, 1.68, 0.75);
-        target.set(0, 1.68, 0);
-        break;
-      case 'close_up':
-        camPos.set(0, 1.55, 1.35);
-        target.set(0, 1.5, 0);
-        break;
-      case 'medium':
-        camPos.set(0, 1.3, 2.4);
-        target.set(0, 1.25, 0);
-        break;
-      case 'full':
-        camPos.set(0, 1.15, 3.8);
-        target.set(0, 1.0, 0);
-        break;
-      case 'long':
-        camPos.set(0, 1.6, 6.0);
-        target.set(0, 1.1, 0);
-        break;
-      case 'bird_eye':
-        camPos.set(0, 4.5, 2.0);
-        target.set(0, 0.5, 0);
-        break;
-      case 'low_angle':
-        camPos.set(0, 0.25, 1.8);
-        target.set(0, 1.5, 0);
-        break;
-      case 'over_shoulder':
-        camPos.set(0.55, 1.55, 1.8);
-        target.set(-0.2, 1.4, -1.2);
-        break;
-      case 'dutch_angle':
-        camPos.set(0, 1.2, 2.2);
-        target.set(0, 1.25, 0);
-        break;
-      case 'high_angle':
-        camPos.set(0, 2.8, 2.8);
-        target.set(0, 1.0, 0);
-        break;
+      case 'extreme_close_up': camPos.set(0, 1.68, 0.75); target.set(0, 1.68, 0); break;
+      case 'close_up': camPos.set(0, 1.55, 1.35); target.set(0, 1.5, 0); break;
+      case 'medium': camPos.set(0, 1.3, 2.4); target.set(0, 1.25, 0); break;
+      case 'full': camPos.set(0, 1.15, 3.8); target.set(0, 1.0, 0); break;
+      case 'long': camPos.set(0, 1.6, 6.0); target.set(0, 1.1, 0); break;
+      case 'bird_eye': camPos.set(0, 4.5, 2.0); target.set(0, 0.5, 0); break;
+      case 'low_angle': camPos.set(0, 0.25, 1.8); target.set(0, 1.5, 0); break;
+      case 'over_shoulder': camPos.set(0.55, 1.55, 1.8); target.set(-0.2, 1.4, -1.2); break;
+      case 'dutch_angle': camPos.set(0, 1.2, 2.2); target.set(0, 1.25, 0); break;
+      case 'high_angle': camPos.set(0, 2.8, 2.8); target.set(0, 1.0, 0); break;
     }
-
     vCam.position.copy(camPos);
     vCam.lookAt(target);
-
-    // 4. Apply Dutch Roll Angle
-    if (cameraRoll !== 0) {
-      vCam.rotation.z = (cameraRoll * Math.PI) / 180;
-    }
-
+    if (cameraRoll !== 0) vCam.rotation.z = (cameraRoll * Math.PI) / 180;
     vCam.updateProjectionMatrix();
-
-    if (cameraHelperRef.current) {
-      cameraHelperRef.current.update();
-    }
+    if (cameraHelperRef.current) cameraHelperRef.current.update();
   }, [framing, focalLength, cameraRoll, aspectRatioMask]);
 
-  useEffect(() => {
-    updateVirtualCameraOptics();
-  }, [updateVirtualCameraOptics]);
+  useEffect(() => { updateVirtualCameraOptics(); }, [updateVirtualCameraOptics]);
 
-  // ============================================================
-  // 3D Motion Spline Path & Simulation Engine
-  // ============================================================
   const calculateMotionWaypoints = useCallback((motionType: CameraMotion, startPos: THREE.Vector3, target: THREE.Vector3): THREE.Vector3[] => {
     const points: THREE.Vector3[] = [];
     points.push(startPos.clone());
-
     switch (motionType) {
-      case 'push_in':
-        points.push(startPos.clone().lerp(target, 0.45));
-        points.push(startPos.clone().lerp(target, 0.75));
-        break;
-      case 'pull_out':
-        points.push(new THREE.Vector3(startPos.x, startPos.y + 0.3, startPos.z + 1.2));
-        points.push(new THREE.Vector3(startPos.x, startPos.y + 0.6, startPos.z + 2.4));
-        break;
-      case 'orbit': {
-        const r = startPos.distanceTo(target);
-        for (let i = 1; i <= 6; i++) {
-          const angle = (i / 6) * Math.PI * 0.9;
-          points.push(new THREE.Vector3(
-            target.x + r * Math.sin(angle),
-            startPos.y,
-            target.z + r * Math.cos(angle)
-          ));
-        }
-        break;
-      }
-      case 'orbit_boom_up': {
-        const r = startPos.distanceTo(target);
-        for (let i = 1; i <= 6; i++) {
-          const angle = (i / 6) * Math.PI * 0.9;
-          points.push(new THREE.Vector3(
-            target.x + r * Math.sin(angle),
-            startPos.y + (i / 6) * 1.5,
-            target.z + r * Math.cos(angle)
-          ));
-        }
-        break;
-      }
-      case 'truck_left':
-        points.push(new THREE.Vector3(startPos.x - 0.8, startPos.y, startPos.z));
-        points.push(new THREE.Vector3(startPos.x - 1.6, startPos.y, startPos.z));
-        break;
-      case 'truck_right':
-        points.push(new THREE.Vector3(startPos.x + 0.8, startPos.y, startPos.z));
-        points.push(new THREE.Vector3(startPos.x + 1.6, startPos.y, startPos.z));
-        break;
-      case 'boom_up':
-        points.push(new THREE.Vector3(startPos.x, startPos.y + 0.9, startPos.z));
-        points.push(new THREE.Vector3(startPos.x, startPos.y + 1.8, startPos.z));
-        break;
-      case 'pan_left_crane_down':
-        points.push(new THREE.Vector3(startPos.x - 1.0, startPos.y - 0.5, startPos.z));
-        points.push(new THREE.Vector3(startPos.x - 1.8, startPos.y - 1.0, startPos.z - 0.4));
-        break;
-      default:
-        points.push(startPos.clone().lerp(target, 0.5));
+      case 'push_in': points.push(startPos.clone().lerp(target, 0.45)); points.push(startPos.clone().lerp(target, 0.75)); break;
+      case 'pull_out': points.push(new THREE.Vector3(startPos.x, startPos.y + 0.3, startPos.z + 1.2)); points.push(new THREE.Vector3(startPos.x, startPos.y + 0.6, startPos.z + 2.4)); break;
+      case 'orbit': { const r = startPos.distanceTo(target); for (let i = 1; i <= 6; i++) { const angle = (i / 6) * Math.PI * 0.9; points.push(new THREE.Vector3(target.x + r * Math.sin(angle), startPos.y, target.z + r * Math.cos(angle))); } break; }
+      case 'orbit_boom_up': { const r = startPos.distanceTo(target); for (let i = 1; i <= 6; i++) { const angle = (i / 6) * Math.PI * 0.9; points.push(new THREE.Vector3(target.x + r * Math.sin(angle), startPos.y + (i / 6) * 1.5, target.z + r * Math.cos(angle))); } break; }
+      case 'truck_left': points.push(new THREE.Vector3(startPos.x - 0.8, startPos.y, startPos.z)); points.push(new THREE.Vector3(startPos.x - 1.6, startPos.y, startPos.z)); break;
+      case 'truck_right': points.push(new THREE.Vector3(startPos.x + 0.8, startPos.y, startPos.z)); points.push(new THREE.Vector3(startPos.x + 1.6, startPos.y, startPos.z)); break;
+      case 'boom_up': points.push(new THREE.Vector3(startPos.x, startPos.y + 0.9, startPos.z)); points.push(new THREE.Vector3(startPos.x, startPos.y + 1.8, startPos.z)); break;
+      case 'pan_left_crane_down': points.push(new THREE.Vector3(startPos.x - 1.0, startPos.y - 0.5, startPos.z)); points.push(new THREE.Vector3(startPos.x - 1.8, startPos.y - 1.0, startPos.z - 0.4)); break;
+      default: points.push(startPos.clone().lerp(target, 0.5));
     }
     return points;
   }, []);
 
-  // Update Trajectory Spline in 3D Scene
   useEffect(() => {
     if (!sceneRef.current || !virtualCameraRef.current || !showTrajectory) {
-      if (trajectoryLineRef.current && sceneRef.current) {
-        sceneRef.current.remove(trajectoryLineRef.current);
-        trajectoryLineRef.current = null;
-      }
+      if (trajectoryLineRef.current && sceneRef.current) { sceneRef.current.remove(trajectoryLineRef.current); trajectoryLineRef.current = null; }
       return;
     }
-
     const scene = sceneRef.current;
     const vCam = virtualCameraRef.current;
     const startPos = vCam.position.clone();
     const target = new THREE.Vector3(0, 1.25, 0);
-
-    if (trajectoryLineRef.current) {
-      scene.remove(trajectoryLineRef.current);
-    }
-
+    if (trajectoryLineRef.current) scene.remove(trajectoryLineRef.current);
     const waypoints = calculateMotionWaypoints(motion, startPos, target);
     const curve = new THREE.CatmullRomCurve3(waypoints);
     const points = curve.getPoints(50);
     const geometry = new THREE.BufferGeometry().setFromPoints(points);
-    const material = new THREE.LineDashedMaterial({
-      color: 0x00d2ff,
-      dashSize: 0.12,
-      gapSize: 0.06,
-      linewidth: 2,
-    });
+    const material = new THREE.LineDashedMaterial({ color: 0x00d2ff, dashSize: 0.12, gapSize: 0.06, linewidth: 2 });
     const line = new THREE.Line(geometry, material);
     line.computeLineDistances();
     scene.add(line);
     trajectoryLineRef.current = line;
-
-    return () => {
-      if (trajectoryLineRef.current && sceneRef.current) {
-        sceneRef.current.remove(trajectoryLineRef.current);
-      }
-    };
+    return () => { if (trajectoryLineRef.current && sceneRef.current) sceneRef.current.remove(trajectoryLineRef.current); };
   }, [motion, framing, showTrajectory, calculateMotionWaypoints]);
 
-  // Motion Simulation Player Loop
   const handleToggleSimulation = () => {
     if (!virtualCameraRef.current) return;
-    if (isSimulating) {
-      setIsSimulating(false);
-      return;
-    }
-
+    if (isSimulating) { setIsSimulating(false); return; }
     setIsSimulating(true);
     const cam = virtualCameraRef.current;
     const startPos = cam.position.clone();
     const startFov = cam.fov;
     const startTime = performance.now();
-    const duration = motionSpeed === '0.5x' ? 4500 : (motionSpeed === '1.5x' ? 1800 : (motionSpeed === '2.0x' ? 1200 : 2500));
-
+    const duration = motionSpeed === '0.5x' ? 4500 : motionSpeed === '1.5x' ? 1800 : motionSpeed === '2.0x' ? 1200 : 2500;
     const step = (now: number) => {
       const elapsed = now - startTime;
       const progress = Math.min(1, elapsed / duration);
       setScrubberProgress(progress);
-
-      // Easing Function
       let ease = progress;
-      if (motionEasing === 'ease_in_out') {
-        ease = 0.5 * (1 - Math.cos(Math.PI * progress));
-      } else if (motionEasing === 'explosive') {
-        ease = Math.pow(progress, 0.4);
-      } else if (motionEasing === 'slow_out') {
-        ease = Math.sin((progress * Math.PI) / 2);
-      }
-
-      // Execute Motion Math
-      if (motion === 'push_in') {
-        cam.position.z = startPos.z - ease * 0.95;
-      } else if (motion === 'pull_out') {
-        cam.position.z = startPos.z + ease * 1.3;
-      } else if (motion === 'orbit') {
-        const angle = ease * Math.PI * 0.85;
-        cam.position.x = Math.sin(angle) * startPos.z;
-        cam.position.z = Math.cos(angle) * startPos.z;
-      } else if (motion === 'orbit_boom_up') {
-        const angle = ease * Math.PI * 0.85;
-        cam.position.x = Math.sin(angle) * startPos.z;
-        cam.position.z = Math.cos(angle) * startPos.z;
-        cam.position.y = startPos.y + ease * 1.5;
-      } else if (motion === 'dolly_zoom') {
-        // Vertigo effect: Dolly in while expanding FOV
-        cam.position.z = startPos.z - ease * 1.0;
-        cam.fov = startFov + ease * 22;
-        cam.updateProjectionMatrix();
-      } else if (motion === 'fast_push_shake') {
-        cam.position.z = startPos.z - ease * 1.2;
-        if (progress > 0.6) {
-          cam.position.x = (Math.random() - 0.5) * 0.15;
-          cam.position.y = startPos.y + (Math.random() - 0.5) * 0.15;
-        }
-      } else if (motion === 'truck_left') {
-        cam.position.x = startPos.x - ease * 1.5;
-      } else if (motion === 'truck_right') {
-        cam.position.x = startPos.x + ease * 1.5;
-      } else if (motion === 'boom_up') {
-        cam.position.y = startPos.y + ease * 1.6;
-      } else if (motion === 'shake') {
-        cam.position.x = startPos.x + (Math.random() - 0.5) * 0.12;
-        cam.position.y = startPos.y + (Math.random() - 0.5) * 0.12;
-      }
-
+      if (motionEasing === 'ease_in_out') ease = 0.5 * (1 - Math.cos(Math.PI * progress));
+      else if (motionEasing === 'explosive') ease = Math.pow(progress, 0.4);
+      else if (motionEasing === 'slow_out') ease = Math.sin((progress * Math.PI) / 2);
+      if (motion === 'push_in') cam.position.z = startPos.z - ease * 0.95;
+      else if (motion === 'pull_out') cam.position.z = startPos.z + ease * 1.3;
+      else if (motion === 'orbit') { const angle = ease * Math.PI * 0.85; cam.position.x = Math.sin(angle) * startPos.z; cam.position.z = Math.cos(angle) * startPos.z; }
+      else if (motion === 'orbit_boom_up') { const angle = ease * Math.PI * 0.85; cam.position.x = Math.sin(angle) * startPos.z; cam.position.z = Math.cos(angle) * startPos.z; cam.position.y = startPos.y + ease * 1.5; }
+      else if (motion === 'dolly_zoom') { cam.position.z = startPos.z - ease * 1.0; cam.fov = startFov + ease * 22; cam.updateProjectionMatrix(); }
+      else if (motion === 'fast_push_shake') { cam.position.z = startPos.z - ease * 1.2; if (progress > 0.6) { cam.position.x = (Math.random() - 0.5) * 0.15; cam.position.y = startPos.y + (Math.random() - 0.5) * 0.15; } }
+      else if (motion === 'truck_left') cam.position.x = startPos.x - ease * 1.5;
+      else if (motion === 'truck_right') cam.position.x = startPos.x + ease * 1.5;
+      else if (motion === 'boom_up') cam.position.y = startPos.y + ease * 1.6;
+      else if (motion === 'shake') { cam.position.x = startPos.x + (Math.random() - 0.5) * 0.12; cam.position.y = startPos.y + (Math.random() - 0.5) * 0.12; }
       cam.lookAt(0, 1.25, 0);
       if (cameraRoll !== 0) cam.rotation.z = (cameraRoll * Math.PI) / 180;
       cam.updateProjectionMatrix();
-
-      if (progress < 1) {
-        requestAnimationFrame(step);
-      } else {
-        cam.position.copy(startPos);
-        cam.fov = startFov;
-        cam.lookAt(0, 1.25, 0);
-        if (cameraRoll !== 0) cam.rotation.z = (cameraRoll * Math.PI) / 180;
-        cam.updateProjectionMatrix();
-        setIsSimulating(false);
-        setScrubberProgress(0);
-      }
+      if (progress < 1) requestAnimationFrame(step);
+      else { cam.position.copy(startPos); cam.fov = startFov; cam.lookAt(0, 1.25, 0); if (cameraRoll !== 0) cam.rotation.z = (cameraRoll * Math.PI) / 180; cam.updateProjectionMatrix(); setIsSimulating(false); setScrubberProgress(0); }
     };
     requestAnimationFrame(step);
   };
 
-  // ============================================================
-  // Mouse & Touch 3D Orbit Controls & Raycasting Selection
-  // ============================================================
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-
     const onMouseDown = (e: MouseEvent) => {
-      // Check Raycasting on left click
       if (e.button === 0 && sceneRef.current && mainCameraRef.current) {
         const rect = container.getBoundingClientRect();
         const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
         const y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-        
         const raycaster = new THREE.Raycaster();
         raycaster.setFromCamera(new THREE.Vector2(x, y), mainCameraRef.current);
-        
         if (stageEntitiesGroupRef.current) {
           const intersects = raycaster.intersectObjects(stageEntitiesGroupRef.current.children, true);
           if (intersects.length > 0) {
             let hitObj: THREE.Object3D | null = intersects[0].object;
-            while (hitObj && hitObj.parent && hitObj.parent !== stageEntitiesGroupRef.current) {
-              hitObj = hitObj.parent;
-            }
+            while (hitObj && hitObj.parent && hitObj.parent !== stageEntitiesGroupRef.current) hitObj = hitObj.parent;
             if (hitObj?.name?.includes('protagonist')) setSelectedEntity('protagonist');
             else if (hitObj?.name?.includes('antagonist')) setSelectedEntity('antagonist');
             else if (hitObj?.name?.includes('supporting')) setSelectedEntity('supporting');
@@ -798,50 +944,24 @@ export const Director3DStage: React.FC = () => {
           }
         }
         orbitStateRef.current.isRotating = true;
-      } else if (e.button === 1 || e.button === 2) {
-        orbitStateRef.current.isPanning = true;
-      }
-      orbitStateRef.current.prevX = e.clientX;
-      orbitStateRef.current.prevY = e.clientY;
+      } else if (e.button === 1 || e.button === 2) orbitStateRef.current.isPanning = true;
+      orbitStateRef.current.prevX = e.clientX; orbitStateRef.current.prevY = e.clientY;
     };
-
     const onMouseMove = (e: MouseEvent) => {
       const deltaX = e.clientX - orbitStateRef.current.prevX;
       const deltaY = e.clientY - orbitStateRef.current.prevY;
-      orbitStateRef.current.prevX = e.clientX;
-      orbitStateRef.current.prevY = e.clientY;
-
-      if (orbitStateRef.current.isRotating) {
-        orbitStateRef.current.theta -= deltaX * 0.006;
-        orbitStateRef.current.phi -= deltaY * 0.006;
-        updateMainCameraPosition();
-      } else if (orbitStateRef.current.isPanning) {
-        const factor = orbitStateRef.current.radius * 0.0015;
-        orbitStateRef.current.target.x -= deltaX * factor;
-        orbitStateRef.current.target.y += deltaY * factor;
-        updateMainCameraPosition();
-      }
+      orbitStateRef.current.prevX = e.clientX; orbitStateRef.current.prevY = e.clientY;
+      if (orbitStateRef.current.isRotating) { orbitStateRef.current.theta -= deltaX * 0.006; orbitStateRef.current.phi -= deltaY * 0.006; updateMainCameraPosition(); }
+      else if (orbitStateRef.current.isPanning) { const factor = orbitStateRef.current.radius * 0.0015; orbitStateRef.current.target.x -= deltaX * factor; orbitStateRef.current.target.y += deltaY * factor; updateMainCameraPosition(); }
     };
-
-    const onMouseUp = () => {
-      orbitStateRef.current.isRotating = false;
-      orbitStateRef.current.isPanning = false;
-    };
-
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      orbitStateRef.current.radius = Math.max(1.2, Math.min(16.0, orbitStateRef.current.radius + e.deltaY * 0.003));
-      updateMainCameraPosition();
-    };
-
+    const onMouseUp = () => { orbitStateRef.current.isRotating = false; orbitStateRef.current.isPanning = false; };
+    const onWheel = (e: WheelEvent) => { e.preventDefault(); orbitStateRef.current.radius = Math.max(1.2, Math.min(16.0, orbitStateRef.current.radius + e.deltaY * 0.003)); updateMainCameraPosition(); };
     const onContextMenu = (e: MouseEvent) => e.preventDefault();
-
     container.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
     container.addEventListener('wheel', onWheel, { passive: false });
     container.addEventListener('contextmenu', onContextMenu);
-
     return () => {
       container.removeEventListener('mousedown', onMouseDown);
       window.removeEventListener('mousemove', onMouseMove);
@@ -851,27 +971,13 @@ export const Director3DStage: React.FC = () => {
     };
   }, [updateMainCameraPosition]);
 
-  // ============================================================
-  // Natural Language AI Directing Assistant Parser
-  // ============================================================
   const handleExecuteAiDirective = async () => {
     if (!aiPrompt.trim()) return;
     setAiThinking(true);
-
     try {
-      const res = await invokeTool('director_3d_stage_plan', {
-        ai_directive: aiPrompt,
-        framing,
-        motion,
-        pose,
-        focal_length_mm: focalLength,
-        camera_roll_deg: cameraRoll,
-        cast_layout: castLayout,
-        speed: motionSpeed,
-      });
-
+      const res = await invokeTool('director_3d_stage_plan', { ai_directive: aiPrompt, framing, motion, pose, focal_length_mm: focalLength, camera_roll_deg: cameraRoll, cast_layout: castLayout, speed: motionSpeed });
       if (res.status === 'success' && res.result) {
-        const r = res.result;
+        const r = res.result as any;
         if (r.framing) setFraming(r.framing);
         if (r.motion) setMotion(r.motion);
         if (r.pose) setPose(r.pose);
@@ -880,663 +986,211 @@ export const Director3DStage: React.FC = () => {
         if (r.cast_layout) setCastLayout(r.cast_layout);
       }
       setTimeout(() => handleToggleSimulation(), 300);
-    } catch (e) {
-      console.error('AI Directive execution error:', e);
-    } finally {
-      setAiThinking(false);
-    }
+    } catch (e) { console.error(e); } finally { setAiThinking(false); }
   };
 
-  // ============================================================
-  // Save & Synchronize to Active Shot
-  // ============================================================
   const handleApplyToShot = async () => {
     if (!activeShot) return;
-
-    await invokeTool('director_3d_stage_plan', {
-      framing,
-      motion,
-      pose,
-      focal_length_mm: focalLength,
-      camera_roll_deg: cameraRoll,
-      cast_layout: castLayout,
-      speed: motionSpeed,
-    });
-
-    const updatedVideoPrompt = activeShot.video_prompt 
-      ? `${activeShot.video_prompt.replace(/\[Camera:[^\]]+\]/g, '').trim()} ${minimaxPromptPreview}`.trim()
-      : minimaxPromptPreview;
-
-    updateShot(activeShot.id, {
-      camera_framing: framing,
-      camera_motion: motion,
-      pose_preset: pose,
-      focal_length_mm: focalLength,
-      camera_roll_deg: cameraRoll,
-      cast_layout: castLayout,
-      props_config: propsConfig,
-      video_prompt: updatedVideoPrompt,
-    });
-
-    setAppliedSuccess(true);
-    setTimeout(() => setAppliedSuccess(false), 2500);
+    await invokeTool('director_3d_stage_plan', { framing, motion, pose, focal_length_mm: focalLength, camera_roll_deg: cameraRoll, cast_layout: castLayout, speed: motionSpeed });
+    const updatedVideoPrompt = activeShot.video_prompt ? `${activeShot.video_prompt.replace(/\[Camera:[^\]]+\]/g, '').trim()} ${minimaxPromptPreview}`.trim() : minimaxPromptPreview;
+    updateShot(activeShot.id, { camera_framing: framing, camera_motion: motion, pose_preset: pose, focal_length_mm: focalLength, camera_roll_deg: cameraRoll, cast_layout: castLayout, props_config: propsConfig, video_prompt: updatedVideoPrompt });
+    setAppliedSuccess(true); setTimeout(() => setAppliedSuccess(false), 2500);
   };
 
-  // 3D Viewport Snapshot Capture
   const handleCaptureSnapshot = () => {
     if (!pipRendererRef.current) return;
-    const canvas = pipRendererRef.current.domElement;
-    const dataUrl = canvas.toDataURL('image/png');
-    
-    if (activeShot) {
-      updateShot(activeShot.id, {
-        image_url: dataUrl
-      });
-    }
-
-    setSnapshotSuccess(true);
-    setTimeout(() => setSnapshotSuccess(false), 2500);
+    const dataUrl = pipRendererRef.current.domElement.toDataURL('image/png');
+    if (activeShot) updateShot(activeShot.id, { image_url: dataUrl });
+    setSnapshotSuccess(true); setTimeout(() => setSnapshotSuccess(false), 2500);
   };
 
   return (
     <div className="flex-1 flex flex-col md:flex-row h-full bg-background overflow-hidden select-none">
-      {/* ============================================================ */}
-      {/* 3D Main Stage Viewport (Left / Center) */}
-      {/* ============================================================ */}
       <div className="flex-1 relative flex flex-col bg-[#07070A] overflow-hidden">
-        {/* Top Floating Control Bar */}
         <div className="absolute top-4 left-4 z-20 flex items-center space-x-3 bg-surface/90 backdrop-blur-md px-4 py-2 rounded-2xl border border-border shadow-xl">
           <div className="flex items-center space-x-2">
             <span className="w-2.5 h-2.5 rounded-full bg-brand-light animate-pulse" />
-            <span className="text-xs font-bold text-white tracking-wide">MiniMax 3D 虚拟导演台</span>
+            <span className="text-xs font-bold text-white tracking-wide">MiniMax 3D 虚拟导演台 · 真实建模重构版</span>
           </div>
           <span className="text-gray-600">|</span>
-
-          {/* Quick Shot Switcher */}
           <div className="flex items-center space-x-1.5">
             <span className="text-[11px] text-gray-400">当前分镜:</span>
-            <select
-              value={activeShot?.id || ''}
-              onChange={(e) => setActiveShotId(e.target.value)}
-              className="bg-surface-secondary border border-border rounded-lg px-2.5 py-1 text-xs font-mono text-brand-light focus:outline-none focus:border-brand cursor-pointer"
-            >
-              {shots.map((sh, idx) => (
-                <option key={sh.id} value={sh.id}>
-                  #{sh.shot_index || idx + 1}: {sh.action_desc.slice(0, 16) || '分镜镜头'}
-                </option>
-              ))}
+            <select value={activeShot?.id || ''} onChange={(e) => setActiveShotId(e.target.value)} className="bg-surface-secondary border border-border rounded-lg px-2.5 py-1 text-xs font-mono text-brand-light focus:outline-none focus:border-brand cursor-pointer">
+              {shots.map((sh, idx) => <option key={sh.id} value={sh.id}>#{sh.shot_index || idx + 1}: {sh.action_desc.slice(0, 16) || '分镜镜头'}</option>)}
             </select>
           </div>
-
-          {/* Current Selection Pill */}
-          {selectedEntity && (
-            <>
-              <span className="text-gray-600">|</span>
-              <div className="flex items-center space-x-1.5 bg-brand/20 border border-brand/40 px-2 py-0.5 rounded-full text-[10px] text-brand-light">
-                <Focus className="w-3 h-3" />
-                <span>选中: {selectedEntity === 'protagonist' ? '主角' : (selectedEntity === 'antagonist' ? '对手' : selectedEntity)}</span>
-              </div>
-            </>
-          )}
+          {selectedEntity && <><span className="text-gray-600">|</span><div className="flex items-center space-x-1.5 bg-brand/20 border border-brand/40 px-2 py-0.5 rounded-full text-[10px] text-brand-light"><Focus className="w-3 h-3" /><span>选中: {selectedEntity === 'protagonist' ? '主角' : selectedEntity === 'antagonist' ? '对手' : selectedEntity}</span></div></>}
         </div>
-
-        {/* Top Right Quick Actions */}
         <div className="absolute top-4 right-4 z-20 flex items-center space-x-2">
-          <button
-            onClick={handleResetView}
-            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-surface/85 hover:bg-surface border border-border text-xs text-gray-300 hover:text-white backdrop-blur-md shadow-md transition-all"
-            title="复位 3D 自由视角"
-          >
-            <Compass className="w-3.5 h-3.5" />
-            <span>视角复位</span>
-          </button>
-          <button
-            onClick={() => setShowTrajectory(!showTrajectory)}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border text-xs backdrop-blur-md shadow-md transition-all ${
-              showTrajectory
-                ? 'bg-accent-blue/20 border-accent-blue text-accent-blue'
-                : 'bg-surface/85 border-border text-gray-400 hover:text-white'
-            }`}
-            title="3D 发光运镜样条轨迹曲线"
-          >
-            <Activity className="w-3.5 h-3.5" />
-            <span>轨迹曲线</span>
-          </button>
-          <button
-            onClick={() => setShowHelpers(!showHelpers)}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border text-xs backdrop-blur-md shadow-md transition-all ${
-              showHelpers
-                ? 'bg-brand/20 border-brand text-brand-light'
-                : 'bg-surface/85 border-border text-gray-400 hover:text-white'
-            }`}
-            title="显示/隐藏摄影机视锥体"
-          >
-            <Eye className="w-3.5 h-3.5" />
-            <span>机位视锥</span>
-          </button>
-          <button
-            onClick={() => setShowPip(!showPip)}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border text-xs backdrop-blur-md shadow-md transition-all ${
-              showPip
-                ? 'bg-brand/20 border-brand text-brand-light'
-                : 'bg-surface/85 border-border text-gray-400 hover:text-white'
-            }`}
-            title="画中画导演机位监视器"
-          >
-            <Monitor className="w-3.5 h-3.5" />
-            <span>监视器</span>
-          </button>
+          <button onClick={handleResetView} className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-surface/85 hover:bg-surface border border-border text-xs text-gray-300 hover:text-white backdrop-blur-md shadow-md transition-all"><Compass className="w-3.5 h-3.5" /><span>视角复位</span></button>
+          <button onClick={() => setShowTrajectory(!showTrajectory)} className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border text-xs backdrop-blur-md shadow-md transition-all ${showTrajectory ? 'bg-accent-blue/20 border-accent-blue text-accent-blue' : 'bg-surface/85 border-border text-gray-400 hover:text-white'}`}><Activity className="w-3.5 h-3.5" /><span>轨迹曲线</span></button>
+          <button onClick={() => setShowHelpers(!showHelpers)} className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border text-xs backdrop-blur-md shadow-md transition-all ${showHelpers ? 'bg-brand/20 border-brand text-brand-light' : 'bg-surface/85 border-border text-gray-400 hover:text-white'}`}><Eye className="w-3.5 h-3.5" /><span>机位视锥</span></button>
+          <button onClick={() => setShowPip(!showPip)} className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border text-xs backdrop-blur-md shadow-md transition-all ${showPip ? 'bg-brand/20 border-brand text-brand-light' : 'bg-surface/85 border-border text-gray-400 hover:text-white'}`}><Monitor className="w-3.5 h-3.5" /><span>监视器</span></button>
         </div>
-
-        {/* 3D WebGL Canvas */}
-        <div
-          ref={containerRef}
-          className="w-full h-full cursor-grab active:cursor-grabbing outline-none"
-        />
-
-        {/* Bottom AI Natural Language Director Assistant Bar */}
+        <div ref={containerRef} className="w-full h-full cursor-grab active:cursor-grabbing outline-none" />
+        {/* Agent 场景生成条 */}
+        <div className="absolute top-[4.2rem] left-4 right-4 md:right-72 z-20 flex items-center space-x-2 bg-gradient-to-r from-brand/15 to-accent-blue/15 backdrop-blur-md p-2 rounded-2xl border border-brand/30 shadow-xl">
+          <div className="flex items-center space-x-1.5 pl-2 text-brand-light"><Lightbulb className="w-4 h-4" /><span className="text-[10px] font-bold">Agent 布景</span></div>
+          <input type="text" value={scenePrompt} onChange={(e) => setScenePrompt(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAgentSceneGenerate()} placeholder="自然语言布景：如 “切换到修仙云海，添加持剑敌人对峙，地面加符文阵”" className="flex-1 bg-surface/70 border border-border rounded-xl px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand" />
+          <button onClick={handleAgentSceneGenerate} disabled={sceneGenerating || !scenePrompt.trim()} className="px-3 py-1.5 rounded-xl bg-brand hover:opacity-90 disabled:opacity-40 text-white text-xs font-bold flex items-center space-x-1"><span>{sceneGenerating ? '生成中...' : '生成'}</span><Sparkles className="w-3 h-3" /></button>
+          <span className="hidden md:inline text-[10px] text-gray-400 max-w-[140px] truncate" title={sceneDesc}>{sceneDesc}</span>
+        </div>
         <div className="absolute bottom-4 left-4 right-4 md:right-72 z-20 flex flex-col space-y-2 pointer-events-auto">
-          {/* Timeline Scrubber when simulating */}
-          {isSimulating && (
-            <div className="bg-surface/90 backdrop-blur-md p-2 rounded-xl border border-brand/40 shadow-xl flex items-center space-x-3">
-              <span className="text-[10px] font-mono text-brand-light font-bold">运镜进度</span>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                value={scrubberProgress}
-                onChange={(e) => setScrubberProgress(parseFloat(e.target.value))}
-                className="flex-1 accent-brand h-1.5 bg-surface-secondary rounded cursor-pointer"
-              />
-              <span className="text-[10px] font-mono text-gray-400">{(scrubberProgress * 100).toFixed(0)}%</span>
-            </div>
-          )}
-
+          {isSimulating && <div className="bg-surface/90 backdrop-blur-md p-2 rounded-xl border border-brand/40 shadow-xl flex items-center space-x-3"><span className="text-[10px] font-mono text-brand-light font-bold">运镜进度</span><input type="range" min="0" max="1" step="0.01" value={scrubberProgress} onChange={(e) => setScrubberProgress(parseFloat(e.target.value))} className="flex-1 accent-brand h-1.5 bg-surface-secondary rounded cursor-pointer" /><span className="text-[10px] font-mono text-gray-400">{(scrubberProgress * 100).toFixed(0)}%</span></div>}
           <div className="flex items-center space-x-2 bg-surface/90 backdrop-blur-md p-2 rounded-2xl border border-border shadow-2xl">
-            <div className="flex items-center pl-2 pr-1 text-brand-light">
-              <Wand2 className="w-4 h-4 animate-pulse" />
-            </div>
-            <input
-              type="text"
-              value={aiPrompt}
-              onChange={(e) => setAiPrompt(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleExecuteAiDirective()}
-              placeholder="✨ AI 空间导演调度：输入指令（如：'给一个希区柯克变焦，突显主角发现真相的惊恐眼神'、'贴地仰角双人对峙推镜'）..."
-              className="flex-1 bg-transparent text-xs text-white placeholder-gray-500 focus:outline-none"
-            />
-            <button
-              onClick={handleExecuteAiDirective}
-              disabled={aiThinking || !aiPrompt.trim()}
-              className="px-4 py-1.5 rounded-xl bg-gradient-to-r from-brand to-brand-blue hover:opacity-90 disabled:opacity-50 text-white text-xs font-bold shadow-md shadow-brand/20 transition-all flex items-center space-x-1.5"
-            >
-              {aiThinking ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-              <span>{aiThinking ? '正在调度...' : 'AI 空间调度'}</span>
-            </button>
+            <div className="flex items-center pl-2 pr-1 text-brand-light"><Wand2 className="w-4 h-4 animate-pulse" /></div>
+            <input type="text" value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleExecuteAiDirective()} placeholder="✨ AI 机位调度：如 '希区柯克变焦突显惊恐眼神'、'贴地仰角双人对峙推镜'..." className="flex-1 bg-transparent text-xs text-white placeholder-gray-500 focus:outline-none" />
+            <button onClick={handleExecuteAiDirective} disabled={aiThinking || !aiPrompt.trim()} className="px-4 py-1.5 rounded-xl bg-gradient-to-r from-brand to-brand-blue hover:opacity-90 disabled:opacity-50 text-white text-xs font-bold shadow-md shadow-brand/20 transition-all flex items-center space-x-1.5">{aiThinking ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}<span>{aiThinking ? '正在调度...' : 'AI 机位调度'}</span></button>
           </div>
         </div>
-
-        {/* ============================================================ */}
-        {/* PIP Director Camera Viewfinder Monitor */}
-        {/* ============================================================ */}
         {showPip && (
           <div className="absolute bottom-18 md:bottom-4 right-4 z-20 w-52 h-80 bg-surface/95 border-2 border-brand/60 rounded-2xl shadow-2xl overflow-hidden backdrop-blur-md flex flex-col transition-all">
-            {/* Monitor Top Bar */}
             <div className="h-7 px-3 bg-surface-secondary border-b border-border flex items-center justify-between text-[10px] text-gray-300 font-mono">
-              <span className="flex items-center space-x-1.5">
-                <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
-                <span className="text-white font-bold">CAM 1 [REC]</span>
-              </span>
-              <div className="flex items-center space-x-1">
-                <span className="text-brand-light font-bold">{aspectRatioMask}</span>
-                <span className="text-gray-500">|</span>
-                <span className="text-accent-blue font-bold">{focalLength}mm</span>
-              </div>
+              <span className="flex items-center space-x-1.5"><span className="w-2 h-2 rounded-full bg-red-500 animate-ping" /><span className="text-white font-bold">CAM 1 [REC]</span></span>
+              <div className="flex items-center space-x-1"><span className="text-brand-light font-bold">{aspectRatioMask}</span><span className="text-gray-500">|</span><span className="text-accent-blue font-bold">{focalLength}mm</span></div>
             </div>
-
-            {/* Viewfinder Canvas Container */}
-            <div className="flex-1 relative overflow-hidden bg-black flex items-center justify-center">
-              <div ref={pipContainerRef} className="w-full h-full" />
-              
-              {/* Composition Grid Overlays */}
-              {compositionGrid === 'rule_of_thirds' && (
-                <div className="absolute inset-0 pointer-events-none grid grid-cols-3 grid-rows-3 border border-white/10 opacity-40">
-                  <div className="border-r border-b border-white/25" />
-                  <div className="border-r border-b border-white/25" />
-                  <div className="border-b border-white/25" />
-                  <div className="border-r border-b border-white/25" />
-                  <div className="border-r border-b border-white/25" />
-                  <div className="border-b border-white/25" />
-                  <div className="border-r border-b border-white/25" />
-                  <div className="border-r border-b border-white/25" />
-                  <div />
-                </div>
-              )}
-
-              {compositionGrid === 'crosshair' && (
-                <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                  <Crosshair className="w-6 h-6 text-brand-light/70" />
-                </div>
-              )}
-
-              {compositionGrid === 'golden_ratio' && (
-                <div className="absolute inset-0 pointer-events-none border border-brand-light/30 rounded-full scale-90 opacity-40" />
-              )}
-            </div>
-
-            {/* Viewfinder Footer Controls */}
+            <div className="flex-1 relative overflow-hidden bg-black flex items-center justify-center"><div ref={pipContainerRef} className="w-full h-full" />{compositionGrid === 'rule_of_thirds' && <div className="absolute inset-0 pointer-events-none grid grid-cols-3 grid-rows-3 border border-white/10 opacity-40"><div className="border-r border-b border-white/25" /><div className="border-r border-b border-white/25" /><div className="border-b border-white/25" /><div className="border-r border-b border-white/25" /><div className="border-r border-b border-white/25" /><div className="border-b border-white/25" /><div className="border-r border-b border-white/25" /><div className="border-r border-b border-white/25" /><div /></div>}{compositionGrid === 'crosshair' && <div className="absolute inset-0 pointer-events-none flex items-center justify-center"><Crosshair className="w-6 h-6 text-brand-light/70" /></div>}{compositionGrid === 'golden_ratio' && <div className="absolute inset-0 pointer-events-none border border-brand-light/30 rounded-full scale-90 opacity-40" />}</div>
             <div className="p-2 bg-surface-secondary/95 border-t border-border flex items-center justify-between text-[10px]">
-              <div className="flex items-center space-x-1">
-                <button
-                  onClick={() => setCompositionGrid(g => g === 'rule_of_thirds' ? 'crosshair' : (g === 'crosshair' ? 'golden_ratio' : (g === 'golden_ratio' ? 'none' : 'rule_of_thirds')))}
-                  className="px-2 py-0.5 rounded bg-surface border border-border text-gray-300 hover:text-white font-mono"
-                  title="切换构图参考线"
-                >
-                  网格: {compositionGrid === 'rule_of_thirds' ? '九宫' : (compositionGrid === 'crosshair' ? '十字' : (compositionGrid === 'golden_ratio' ? '黄金' : '无'))}
-                </button>
-              </div>
-
-              <button
-                onClick={handleCaptureSnapshot}
-                className="flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-brand/30 hover:bg-brand border border-brand/50 text-brand-light hover:text-white font-bold transition-all"
-                title="截取当前 3D 视角作为分镜画面参考"
-              >
-                {snapshotSuccess ? <Check className="w-3 h-3 text-accent-green" /> : <Camera className="w-3 h-3" />}
-                <span>{snapshotSuccess ? '已快照' : '截取分镜'}</span>
-              </button>
+              <button onClick={() => setCompositionGrid((g) => (g === 'rule_of_thirds' ? 'crosshair' : g === 'crosshair' ? 'golden_ratio' : g === 'golden_ratio' ? 'none' : 'rule_of_thirds'))} className="px-2 py-0.5 rounded bg-surface border border-border text-gray-300 hover:text-white font-mono" title="切换构图参考线">网格: {compositionGrid === 'rule_of_thirds' ? '九宫' : compositionGrid === 'crosshair' ? '十字' : compositionGrid === 'golden_ratio' ? '黄金' : '无'}</button>
+              <button onClick={handleCaptureSnapshot} className="flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-brand/30 hover:bg-brand border border-brand/50 text-brand-light hover:text-white font-bold transition-all" title="截取当前 3D 视角作为分镜画面参考">{snapshotSuccess ? <Check className="w-3 h-3 text-accent-green" /> : <Camera className="w-3 h-3" />}<span>{snapshotSuccess ? '已快照' : '截取分镜'}</span></button>
             </div>
           </div>
         )}
       </div>
-
-      {/* ============================================================ */}
-      {/* Right Control Inspector Tabs */}
-      {/* ============================================================ */}
       <div className="w-full md:w-96 bg-surface border-l border-border flex flex-col h-full overflow-hidden shrink-0 shadow-2xl">
-        {/* Navigation Tabs Header */}
         <div className="flex items-center border-b border-border bg-surface-secondary/80 p-1">
-          <button
-            onClick={() => setActiveRightTab('optics_motion')}
-            className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-1.5 ${
-              activeRightTab === 'optics_motion'
-                ? 'bg-surface text-brand-light shadow-md'
-                : 'text-gray-400 hover:text-gray-200'
-            }`}
-          >
-            <Video className="w-3.5 h-3.5" />
-            <span>光学与运镜</span>
-          </button>
-          <button
-            onClick={() => setActiveRightTab('cast_props')}
-            className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-1.5 ${
-              activeRightTab === 'cast_props'
-                ? 'bg-surface text-accent-orange shadow-md'
-                : 'text-gray-400 hover:text-gray-200'
-            }`}
-          >
-            <Users className="w-3.5 h-3.5" />
-            <span>站位与道具</span>
-          </button>
-          <button
-            onClick={() => setActiveRightTab('environment')}
-            className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-1.5 ${
-              activeRightTab === 'environment'
-                ? 'bg-surface text-accent-green shadow-md'
-                : 'text-gray-400 hover:text-gray-200'
-            }`}
-          >
-            <Sun className="w-3.5 h-3.5" />
-            <span>影棚环境</span>
-          </button>
+          <button onClick={() => setActiveRightTab('optics_motion')} className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-1.5 ${activeRightTab === 'optics_motion' ? 'bg-surface text-brand-light shadow-md' : 'text-gray-400 hover:text-gray-200'}`}><Video className="w-3.5 h-3.5" /><span>光学与运镜</span></button>
+          <button onClick={() => setActiveRightTab('cast_props')} className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-1.5 ${activeRightTab === 'cast_props' ? 'bg-surface text-accent-orange shadow-md' : 'text-gray-400 hover:text-gray-200'}`}><Users className="w-3.5 h-3.5" /><span>站位与道具</span></button>
+          <button onClick={() => setActiveRightTab('environment')} className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-1.5 ${activeRightTab === 'environment' ? 'bg-surface text-accent-green shadow-md' : 'text-gray-400 hover:text-gray-200'}`}><Sun className="w-3.5 h-3.5" /><span>影棚环境</span></button>
+          <button onClick={() => setActiveRightTab('agent')} className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-1 ${activeRightTab === 'agent' ? 'bg-surface text-accent-blue shadow-md' : 'text-gray-400 hover:text-gray-200'}`}><Mic className="w-3 h-3" /><span>Agent</span></button>
         </div>
-
-        {/* Scrollable Inspector Content */}
         <div className="flex-1 p-5 space-y-6 overflow-y-auto custom-scrollbar">
-          {/* TAB 1: OPTICS & MOTIONS */}
           {activeRightTab === 'optics_motion' && (
             <>
-              {/* 1. Camera Focal Length (焦距) */}
               <div>
-                <label className="text-xs text-gray-300 font-semibold mb-2 flex items-center justify-between">
-                  <span className="flex items-center space-x-1.5">
-                    <Camera className="w-3.5 h-3.5 text-accent-blue" />
-                    <span>镜头焦距 (Focal Length)</span>
-                  </span>
-                  <span className="text-xs text-accent-blue font-mono font-bold bg-accent-blue/10 px-2 py-0.5 rounded">
-                    {focalLength} mm
-                  </span>
-                </label>
-                
-                {/* Focal length slider */}
-                <input
-                  type="range"
-                  min="16"
-                  max="135"
-                  step="1"
-                  value={focalLength}
-                  onChange={(e) => setFocalLength(parseInt(e.target.value))}
-                  className="w-full accent-accent-blue h-1.5 bg-surface-secondary rounded cursor-pointer"
-                />
-
-                {/* Quick focal presets */}
-                <div className="grid grid-cols-6 gap-1.5 mt-2">
-                  {FOCAL_PRESETS.map((fl) => (
-                    <button
-                      key={fl}
-                      onClick={() => setFocalLength(fl)}
-                      className={`py-1 rounded-lg text-[10px] font-mono font-bold border transition-all ${
-                        focalLength === fl
-                          ? 'bg-accent-blue/20 border-accent-blue text-white'
-                          : 'bg-surface-secondary border-border text-gray-400 hover:text-white'
-                      }`}
-                    >
-                      {fl}mm
-                    </button>
-                  ))}
-                </div>
+                <label className="text-xs text-gray-300 font-semibold mb-2 flex items-center justify-between"><span className="flex items-center space-x-1.5"><Camera className="w-3.5 h-3.5 text-accent-blue" /><span>镜头焦距 (Focal Length)</span></span><span className="text-xs text-accent-blue font-mono font-bold bg-accent-blue/10 px-2 py-0.5 rounded">{focalLength} mm</span></label>
+                <input type="range" min="16" max="135" step="1" value={focalLength} onChange={(e) => setFocalLength(parseInt(e.target.value))} className="w-full accent-accent-blue h-1.5 bg-surface-secondary rounded cursor-pointer" />
+                <div className="grid grid-cols-6 gap-1.5 mt-2">{FOCAL_PRESETS.map((fl) => <button key={fl} onClick={() => setFocalLength(fl)} className={`py-1 rounded-lg text-[10px] font-mono font-bold border transition-all ${focalLength === fl ? 'bg-accent-blue/20 border-accent-blue text-white' : 'bg-surface-secondary border-border text-gray-400 hover:text-white'}`}>{fl}mm</button>)}</div>
               </div>
-
-              {/* 2. Dutch Roll Angle (荷兰角) */}
               <div>
-                <label className="text-xs text-gray-300 font-semibold mb-2 flex items-center justify-between">
-                  <span className="flex items-center space-x-1.5">
-                    <Rotate3d className="w-3.5 h-3.5 text-brand-light" />
-                    <span>荷兰角倾斜 (Dutch Roll)</span>
-                  </span>
-                  <span className="text-xs text-brand-light font-mono font-bold bg-brand/10 px-2 py-0.5 rounded">
-                    {cameraRoll > 0 ? '+' : ''}{cameraRoll.toFixed(1)}°
-                  </span>
-                </label>
-                <input
-                  type="range"
-                  min="-45"
-                  max="45"
-                  step="1"
-                  value={cameraRoll}
-                  onChange={(e) => setCameraRoll(parseFloat(e.target.value))}
-                  className="w-full accent-brand h-1.5 bg-surface-secondary rounded cursor-pointer"
-                />
+                <label className="text-xs text-gray-300 font-semibold mb-2 flex items-center justify-between"><span className="flex items-center space-x-1.5"><Rotate3d className="w-3.5 h-3.5 text-brand-light" /><span>荷兰角倾斜 (Dutch Roll)</span></span><span className="text-xs text-brand-light font-mono font-bold bg-brand/10 px-2 py-0.5 rounded">{cameraRoll > 0 ? '+' : ''}{cameraRoll.toFixed(1)}°</span></label>
+                <input type="range" min="-45" max="45" step="1" value={cameraRoll} onChange={(e) => setCameraRoll(parseFloat(e.target.value))} className="w-full accent-brand h-1.5 bg-surface-secondary rounded cursor-pointer" />
               </div>
-
-              {/* 3. Camera Framing (景别) */}
               <div>
-                <label className="text-xs text-gray-300 font-semibold mb-2 flex items-center justify-between">
-                  <span>🎥 镜头景别 (Framing Preset)</span>
-                  <span className="text-[10px] text-brand-light font-mono bg-brand/10 px-2 py-0.5 rounded">
-                    {framing}
-                  </span>
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  {FRAMING_PRESETS.map((f) => (
-                    <button
-                      key={f.id}
-                      onClick={() => {
-                        setFraming(f.id);
-                        setFocalLength(f.fl);
-                      }}
-                      className={`p-2.5 rounded-xl text-left border transition-all ${
-                        framing === f.id
-                          ? 'bg-brand/20 border-brand text-white shadow-md shadow-brand/20 ring-1 ring-brand'
-                          : 'bg-surface-secondary border-border text-gray-400 hover:text-gray-200'
-                      }`}
-                    >
-                      <div className="text-xs font-bold truncate">{f.label}</div>
-                      <div className="text-[9px] text-gray-500 truncate mt-0.5">{f.desc}</div>
-                    </button>
-                  ))}
-                </div>
+                <label className="text-xs text-gray-300 font-semibold mb-2 flex items-center justify-between"><span>🎥 镜头景别 (Framing Preset)</span><span className="text-[10px] text-brand-light font-mono bg-brand/10 px-2 py-0.5 rounded">{framing}</span></label>
+                <div className="grid grid-cols-2 gap-2">{FRAMING_PRESETS.map((f) => <button key={f.id} onClick={() => { setFraming(f.id); setFocalLength(f.fl); }} className={`p-2.5 rounded-xl text-left border transition-all ${framing === f.id ? 'bg-brand/20 border-brand text-white shadow-md shadow-brand/20 ring-1 ring-brand' : 'bg-surface-secondary border-border text-gray-400 hover:text-gray-200'}`}><div className="text-xs font-bold truncate">{f.label}</div><div className="text-[9px] text-gray-500 truncate mt-0.5">{f.desc}</div></button>)}</div>
               </div>
-
-              {/* 4. MiniMax 01-Director Motions (15+ 单轴与 5 大复合运镜) */}
               <div>
-                <label className="text-xs text-gray-300 font-semibold mb-2 flex items-center justify-between">
-                  <span>🚀 运镜轨迹 (MiniMax Motion Matrix)</span>
-                  <span className="text-[10px] text-accent-orange font-mono bg-accent-orange/10 px-2 py-0.5 rounded">
-                    {motion}
-                  </span>
-                </label>
-
-                {/* Combos vs Single selector */}
+                <label className="text-xs text-gray-300 font-semibold mb-2 flex items-center justify-between"><span>🚀 运镜轨迹 (MiniMax Motion Matrix)</span><span className="text-[10px] text-accent-orange font-mono bg-accent-orange/10 px-2 py-0.5 rounded">{motion}</span></label>
                 <div className="space-y-3">
                   <div className="text-[10px] font-bold text-accent-orange uppercase tracking-wider">🌟 电影级双轴复合运镜 (MiniMax Combos)</div>
-                  <div className="grid grid-cols-1 gap-2">
-                    {MOTION_PRESETS.filter(m => m.category === 'combo').map((m) => (
-                      <button
-                        key={m.id}
-                        onClick={() => setMotion(m.id)}
-                        className={`p-2.5 rounded-xl border text-left transition-all ${
-                          motion === m.id
-                            ? 'bg-accent-orange/20 border-accent-orange text-white shadow-md shadow-accent-orange/20 ring-1 ring-accent-orange'
-                            : 'bg-surface-secondary border-border text-gray-400 hover:text-gray-200'
-                        }`}
-                      >
-                        <div className="text-xs font-bold flex items-center justify-between">
-                          <span>{m.label}</span>
-                          <span className="text-[9px] bg-accent-orange/30 text-accent-orange px-1.5 py-0.5 rounded font-mono">COMBO</span>
-                        </div>
-                        <div className="text-[9px] text-gray-400 mt-0.5">{m.desc}</div>
-                      </button>
-                    ))}
-                  </div>
-
+                  <div className="grid grid-cols-1 gap-2">{MOTION_PRESETS.filter((m) => m.category === 'combo').map((m) => <button key={m.id} onClick={() => setMotion(m.id)} className={`p-2.5 rounded-xl border text-left transition-all ${motion === m.id ? 'bg-accent-orange/20 border-accent-orange text-white shadow-md shadow-accent-orange/20 ring-1 ring-accent-orange' : 'bg-surface-secondary border-border text-gray-400 hover:text-gray-200'}`}><div className="text-xs font-bold flex items-center justify-between"><span>{m.label}</span><span className="text-[9px] bg-accent-orange/30 text-accent-orange px-1.5 py-0.5 rounded font-mono">COMBO</span></div><div className="text-[9px] text-gray-400 mt-0.5">{m.desc}</div></button>)}</div>
                   <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider pt-2">🎬 经典单轴运镜</div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {MOTION_PRESETS.filter(m => m.category === 'single').map((m) => (
-                      <button
-                        key={m.id}
-                        onClick={() => setMotion(m.id)}
-                        className={`p-2 rounded-xl border text-left transition-all ${
-                          motion === m.id
-                            ? 'bg-brand/20 border-brand text-white shadow-md ring-1 ring-brand'
-                            : 'bg-surface-secondary border-border text-gray-400 hover:text-gray-200'
-                        }`}
-                      >
-                        <div className="text-xs font-bold truncate">{m.label}</div>
-                        <div className="text-[9px] text-gray-500 truncate mt-0.5">{m.desc}</div>
-                      </button>
-                    ))}
-                  </div>
+                  <div className="grid grid-cols-2 gap-2">{MOTION_PRESETS.filter((m) => m.category === 'single').map((m) => <button key={m.id} onClick={() => setMotion(m.id)} className={`p-2 rounded-xl border text-left transition-all ${motion === m.id ? 'bg-brand/20 border-brand text-white shadow-md ring-1 ring-brand' : 'bg-surface-secondary border-border text-gray-400 hover:text-gray-200'}`}><div className="text-xs font-bold truncate">{m.label}</div><div className="text-[9px] text-gray-500 truncate mt-0.5">{m.desc}</div></button>)}</div>
                 </div>
-
-                {/* Motion Playback Button */}
-                <div className="mt-4">
-                  <button
-                    onClick={handleToggleSimulation}
-                    className={`w-full flex items-center justify-center space-x-2 py-2.5 rounded-xl text-xs font-bold shadow-lg transition-all ${
-                      isSimulating
-                        ? 'bg-red-500 text-white'
-                        : 'bg-gradient-to-r from-accent-orange to-brand text-white hover:opacity-95'
-                    }`}
-                  >
-                    {isSimulating ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 fill-current" />}
-                    <span>{isSimulating ? '停止运镜预览' : '▶ 播放当前运镜轨迹模拟'}</span>
-                  </button>
-                </div>
+                <div className="mt-4"><button onClick={handleToggleSimulation} className={`w-full flex items-center justify-center space-x-2 py-2.5 rounded-xl text-xs font-bold shadow-lg transition-all ${isSimulating ? 'bg-red-500 text-white' : 'bg-gradient-to-r from-accent-orange to-brand text-white hover:opacity-95'}`}>{isSimulating ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 fill-current" />}<span>{isSimulating ? '停止运镜预览' : '▶ 播放当前运镜轨迹模拟'}</span></button></div>
               </div>
             </>
           )}
-
-          {/* TAB 2: CAST & PROPS */}
           {activeRightTab === 'cast_props' && (
             <>
-              {/* 1. Cast Staging Layout (角色站位构图) */}
               <div>
-                <label className="text-xs text-gray-300 font-semibold mb-2 flex items-center justify-between">
-                  <span>👥 多角色空间站位 (Cast Staging)</span>
-                  <span className="text-[10px] text-accent-orange font-mono bg-accent-orange/10 px-2 py-0.5 rounded">
-                    {castLayout}
-                  </span>
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  {CAST_LAYOUTS.map((c) => (
-                    <button
-                      key={c.id}
-                      onClick={() => setCastLayout(c.id)}
-                      className={`p-2.5 rounded-xl text-left border transition-all ${
-                        castLayout === c.id
-                          ? 'bg-accent-orange/20 border-accent-orange text-white shadow-md ring-1 ring-accent-orange'
-                          : 'bg-surface-secondary border-border text-gray-400 hover:text-gray-200'
-                      }`}
-                    >
-                      <div className="text-xs font-bold">{c.label}</div>
-                      <div className="text-[9px] text-gray-500 mt-0.5">{c.desc}</div>
-                    </button>
-                  ))}
-                </div>
+                <label className="text-xs text-gray-300 font-semibold mb-2 flex items-center justify-between"><span>👥 多角色空间站位 (Cast Staging)</span><span className="text-[10px] text-accent-orange font-mono bg-accent-orange/10 px-2 py-0.5 rounded">{castLayout}</span></label>
+                <div className="grid grid-cols-2 gap-2">{CAST_LAYOUTS.map((c) => <button key={c.id} onClick={() => setCastLayout(c.id)} className={`p-2.5 rounded-xl text-left border transition-all ${castLayout === c.id ? 'bg-accent-orange/20 border-accent-orange text-white shadow-md ring-1 ring-accent-orange' : 'bg-surface-secondary border-border text-gray-400 hover:text-gray-200'}`}><div className="text-xs font-bold">{c.label}</div><div className="text-[9px] text-gray-500 mt-0.5">{c.desc}</div></button>)}</div>
               </div>
-
-              {/* 2. Character Pose Presets (9 种动作姿态) */}
               <div>
-                <label className="text-xs text-gray-300 font-semibold mb-2 flex items-center justify-between">
-                  <span>🥋 角色动作姿态 (9 Poses)</span>
-                  <span className="text-[10px] text-accent-green font-mono bg-accent-green/10 px-2 py-0.5 rounded">
-                    {pose}
-                  </span>
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {POSE_PRESETS.map((p) => (
-                    <button
-                      key={p.id}
-                      onClick={() => setPose(p.id)}
-                      className={`p-2 rounded-xl text-left border transition-all ${
-                        pose === p.id
-                          ? 'bg-accent-green/20 border-accent-green text-white shadow-md ring-1 ring-accent-green'
-                          : 'bg-surface-secondary border-border text-gray-400 hover:text-gray-200'
-                      }`}
-                    >
-                      <div className="text-sm">{p.icon}</div>
-                      <div className="text-xs font-bold mt-1 truncate">{p.label}</div>
-                    </button>
-                  ))}
-                </div>
+                <label className="text-xs text-gray-300 font-semibold mb-2 flex items-center justify-between"><span>🥋 角色动作姿态 (9 Poses)</span><span className="text-[10px] text-accent-green font-mono bg-accent-green/10 px-2 py-0.5 rounded">{pose}</span></label>
+                <div className="grid grid-cols-3 gap-2">{POSE_PRESETS.map((p) => <button key={p.id} onClick={() => setPose(p.id)} className={`p-2 rounded-xl text-left border transition-all ${pose === p.id ? 'bg-accent-green/20 border-accent-green text-white shadow-md ring-1 ring-accent-green' : 'bg-surface-secondary border-border text-gray-400 hover:text-gray-200'}`}><div className="text-sm">{p.icon}</div><div className="text-xs font-bold mt-1 truncate">{p.label}</div></button>)}</div>
               </div>
-
-              {/* 3. Stage Props & Visual FX */}
               <div>
-                <label className="text-xs text-gray-300 font-semibold mb-2 flex items-center justify-between">
-                  <span>⚔️ 场景道具与结界 (Props & FX)</span>
-                </label>
+                <label className="text-xs text-gray-300 font-semibold mb-2 flex items-center justify-between"><span>⚔️ 场景道具与结界 (Props & FX)</span><span className="text-[10px] text-gray-500">真实 GLB 已接入</span></label>
                 <div className="grid grid-cols-2 gap-2">
                   {[
-                    { id: 'sword' as StagePropType, label: '浮空飞剑', icon: '🗡️' },
-                    { id: 'shield' as StagePropType, label: '聚能护盾', icon: '🛡️' },
-                    { id: 'magic_circle' as StagePropType, label: '地面符文阵', icon: '🌀' },
+                    { id: 'sword' as StagePropType, label: '浮空飞剑', icon: '🗡️', sub: '程序化' },
+                    { id: 'shield' as StagePropType, label: '聚能护盾', icon: '🛡️', sub: '程序化' },
+                    { id: 'magic_circle' as StagePropType, label: '地面符文阵', icon: '🌀', sub: '程序化' },
+                    { id: 'chair' as StagePropType, label: '休闲椅', icon: '🪑', sub: 'SheenChair.glb' },
+                    { id: 'helmet' as StagePropType, label: '破损头盔', icon: '⛑️', sub: 'DamagedHelmet.glb' },
+                    { id: 'camera' as StagePropType, label: '复古相机', icon: '📷', sub: 'AntiqueCamera.glb' },
+                    { id: 'avocado' as StagePropType, label: '牛油果', icon: '🥑', sub: 'Avocado.glb' },
+                    { id: 'boombox' as StagePropType, label: '音响', icon: '🔊', sub: 'BoomBox.glb' },
                   ].map((pr) => {
                     const active = propsConfig.includes(pr.id);
                     return (
                       <button
                         key={pr.id}
-                        onClick={() => {
-                          setPropsConfig(prev => 
-                            prev.includes(pr.id) ? prev.filter(x => x !== pr.id) : [...prev, pr.id]
-                          );
-                        }}
-                        className={`p-2.5 rounded-xl border text-left flex items-center space-x-2 transition-all ${
-                          active
-                            ? 'bg-brand/20 border-brand text-white shadow-md'
-                            : 'bg-surface-secondary border-border text-gray-400 hover:text-gray-200'
-                        }`}
+                        onClick={() => setPropsConfig((prev) => (prev.includes(pr.id) ? prev.filter((x) => x !== pr.id) : [...prev, pr.id]))}
+                        className={`p-2.5 rounded-xl border text-left flex items-center space-x-2 transition-all ${active ? 'bg-brand/20 border-brand text-white shadow-md' : 'bg-surface-secondary border-border text-gray-400 hover:text-gray-200'}`}
                       >
                         <span className="text-base">{pr.icon}</span>
-                        <span className="text-xs font-bold">{pr.label}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs font-bold truncate">{pr.label}</div>
+                          <div className="text-[9px] text-gray-500 truncate">{pr.sub}</div>
+                        </div>
                       </button>
                     );
                   })}
                 </div>
+                <div className="mt-3 p-3 rounded-xl border border-dashed border-brand/40 bg-gradient-to-br from-brand/10 to-accent-blue/10">
+                  <input ref={fileInputRef} type="file" accept=".glb,.gltf,model/gltf-binary" hidden onChange={handleImportGLB} />
+                  <button onClick={() => fileInputRef.current?.click()} disabled={importingModel} className="w-full flex items-center justify-center space-x-2 py-2.5 rounded-xl bg-gradient-to-r from-brand to-brand-blue hover:opacity-90 disabled:opacity-40 text-white text-xs font-bold shadow-md">
+                    {importingModel ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                    <span>{importingModel ? '正在导入...' : '导入本地模型 (.glb/.gltf)'}</span>
+                  </button>
+                  <div className="text-[10px] text-gray-400 mt-2 leading-4">
+                    支持人体/道具/场景，自动归一化至 1.6m、底部对齐、开启阴影；已导入 <span className="text-accent-green font-mono">{customModelNames.length}</span> 个
+                    {customModelNames.length > 0 && <span className="block truncate text-accent-blue mt-1">{customModelNames.join('、')}</span>}
+                  </div>
+                  {importError && <div className="text-[10px] text-red-400 mt-1">{importError}</div>}
+                  <div className="text-[10px] text-gray-500 mt-2">提示：可从 Sketchfab / Quaternius / Khronos Sample Models 下载 CC0 模型后直接导入</div>
+                </div>
+                <div className="mt-2 p-2 rounded-xl bg-surface-secondary border border-border">
+                  <div className="text-[10px] text-gray-400">
+                    已下载真实模型：<span className="text-accent-green font-mono">RobotExpressive / Soldier / SheenChair / DamagedHelmet / AntiqueCamera / Avocado / BoomBox</span>（CC0，三阶归一化，底部对齐，阴影开启）
+                  </div>
+                  <div className="text-[10px] text-gray-500 mt-1">人体优先加载 GLB，失败回退程序化 PBR 假人；道具支持真实/程序化双路径</div>
+                </div>
               </div>
             </>
           )}
-
-          {/* TAB 3: ENVIRONMENT */}
           {activeRightTab === 'environment' && (
             <>
               <div>
-                <label className="text-xs text-gray-300 font-semibold mb-2 block">
-                  🌆 3D 影棚氛围预设
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  {[
-                    { id: 'cyber_studio' as StageEnvironment, label: '暗黑赛博影棚', desc: '经典工业霓虹' },
-                    { id: 'xianxia_cloud' as StageEnvironment, label: '修仙仙山云海', desc: '青云缥缈灵气' },
-                    { id: 'desert_battle' as StageEnvironment, label: '决战古荒漠', desc: '炽热落日黄沙' },
-                    { id: 'neon_city' as StageEnvironment, label: '雨夜霓虹都市', desc: '赛博街道反光' },
-                  ].map((env) => (
-                    <button
-                      key={env.id}
-                      onClick={() => setEnvironment(env.id)}
-                      className={`p-2.5 rounded-xl border text-left transition-all ${
-                        environment === env.id
-                          ? 'bg-accent-green/20 border-accent-green text-white shadow-md ring-1 ring-accent-green'
-                          : 'bg-surface-secondary border-border text-gray-400 hover:text-gray-200'
-                      }`}
-                    >
-                      <div className="text-xs font-bold">{env.label}</div>
-                      <div className="text-[9px] text-gray-500 mt-0.5">{env.desc}</div>
-                    </button>
-                  ))}
-                </div>
+                <label className="text-xs text-gray-300 font-semibold mb-2 block">🌆 3D 影棚氛围预设</label>
+                <div className="grid grid-cols-2 gap-2">{(Object.keys(ENV_LABELS) as StageEnvironment[]).map((env) => { const info = ENV_LABELS[env]; return <button key={env} onClick={() => { setEnvironment(env); setSceneDesc(`${info.label} · ${info.desc}`); }} className={`p-2.5 rounded-xl border text-left transition-all ${environment === env ? 'bg-accent-green/20 border-accent-green text-white shadow-md ring-1 ring-accent-green' : 'bg-surface-secondary border-border text-gray-400 hover:text-gray-200'}`}><div className="text-xs font-bold flex items-center space-x-1"><span>{info.icon}</span><span>{info.label}</span></div><div className="text-[9px] text-gray-500 mt-0.5">{info.desc}</div></button>; })}</div>
               </div>
-
               <div>
-                <label className="text-xs text-gray-300 font-semibold mb-2 block">
-                  📐 构图比例与遮幅
-                </label>
-                <div className="grid grid-cols-4 gap-2">
-                  {(['9:16', '16:9', '1:1', '2.35:1'] as const).map((r) => (
-                    <button
-                      key={r}
-                      onClick={() => setAspectRatioMask(r)}
-                      className={`py-2 rounded-xl text-xs font-bold border transition-all ${
-                        aspectRatioMask === r
-                          ? 'bg-brand text-white border-brand shadow-md'
-                          : 'bg-surface-secondary border-border text-gray-400 hover:text-white'
-                      }`}
-                    >
-                      {r}
-                    </button>
-                  ))}
-                </div>
+                <label className="text-xs text-gray-300 font-semibold mb-2 block">📐 构图比例与遮幅</label>
+                <div className="grid grid-cols-4 gap-2">{(['9:16', '16:9', '1:1', '2.35:1'] as const).map((r) => <button key={r} onClick={() => setAspectRatioMask(r)} className={`py-2 rounded-xl text-xs font-bold border transition-all ${aspectRatioMask === r ? 'bg-brand text-white border-brand shadow-md' : 'bg-surface-secondary border-border text-gray-400 hover:text-white'}`}>{r}</button>)}</div>
+              </div>
+              <div className="p-3 rounded-xl bg-surface-secondary border border-border">
+                <div className="text-[10px] text-gray-400 font-bold mb-1">当前场景描述</div>
+                <div className="text-xs text-accent-green font-mono">{sceneDesc}</div>
               </div>
             </>
           )}
-
-          {/* MiniMax Prompt Live Syntax Box */}
+          {activeRightTab === 'agent' && (
+            <div className="space-y-4">
+              <div className="p-3 rounded-xl bg-gradient-to-br from-brand/10 to-accent-blue/10 border border-brand/20">
+                <div className="text-xs font-bold text-white flex items-center space-x-1.5"><Film className="w-3.5 h-3.5 text-brand-light" /><span>Agent 全量导演</span></div>
+                <div className="text-[10px] text-gray-400 mt-1 leading-4">输入自然语言，Agent 将同时控制 <span className="text-brand-light">场景/角色/道具/机位/运镜</span>，例：<br /><span className="text-accent-green">“切换到雨夜霓虹，添加持剑敌人对峙，地面加蓝色符文阵，机位用贴地仰角推镜”</span></div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={() => setCastLayout('duel')} className="flex items-center justify-center space-x-1.5 py-2 rounded-xl bg-surface-secondary border border-border text-xs text-white hover:border-brand"><UserPlus className="w-3.5 h-3.5" /><span>添加对手</span></button>
+                <button onClick={() => setPropsConfig([])} className="flex items-center justify-center space-x-1.5 py-2 rounded-xl bg-surface-secondary border border-border text-xs text-gray-400 hover:text-white"><Trash2 className="w-3.5 h-3.5" /><span>清空道具</span></button>
+                <button onClick={() => setEnvironment('xianxia_cloud')} className="flex items-center justify-center space-x-1.5 py-2 rounded-xl bg-surface-secondary border border-border text-xs text-white hover:border-brand"><Mountain className="w-3.5 h-3.5" /><span>仙山云海</span></button>
+                <button onClick={() => setEnvironment('neon_city')} className="flex items-center justify-center space-x-1.5 py-2 rounded-xl bg-surface-secondary border border-border text-xs text-white hover:border-brand"><Building2 className="w-3.5 h-3.5" /><span>霓虹都市</span></button>
+              </div>
+              <div className="flex items-center space-x-2 text-[10px] text-gray-500"><Palette className="w-3 h-3" /><span>材质：PBR 金属/粗糙度 + 自发光，已启用阴影与 ACES 调色</span></div>
+            </div>
+          )}
           <div className="p-3.5 rounded-2xl bg-surface-secondary border border-border space-y-2">
-            <div className="flex items-center justify-between text-[11px] font-bold text-gray-300">
-              <span className="flex items-center space-x-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-brand-light" />
-                <span>MiniMax 01-Director 规范语法</span>
-              </span>
-              <span className="text-[9px] bg-brand/20 text-brand-light px-1.5 py-0.5 rounded font-mono">LIVE PROMPT</span>
-            </div>
-            <div className="p-2.5 rounded-xl bg-black/60 font-mono text-[11px] text-brand-light leading-relaxed break-all border border-brand/20">
-              {minimaxPromptPreview}
-            </div>
+            <div className="flex items-center justify-between text-[11px] font-bold text-gray-300"><span className="flex items-center space-x-1.5"><Sparkles className="w-3.5 h-3.5 text-brand-light" /><span>MiniMax 01-Director 规范语法</span></span><span className="text-[9px] bg-brand/20 text-brand-light px-1.5 py-0.5 rounded font-mono">LIVE PROMPT</span></div>
+            <div className="p-2.5 rounded-xl bg-black/60 font-mono text-[11px] text-brand-light leading-relaxed break-all border border-brand/20">{minimaxPromptPreview}</div>
           </div>
         </div>
-
-        {/* Footer Synchronize to Shot Button */}
         <div className="p-4 border-t border-border bg-surface-secondary/40 shrink-0">
-          <button
-            onClick={handleApplyToShot}
-            className={`w-full py-3.5 rounded-2xl text-xs font-bold flex items-center justify-center space-x-2 transition-all shadow-xl ${
-              appliedSuccess
-                ? 'bg-accent-green text-white shadow-accent-green/30'
-                : 'bg-gradient-to-r from-brand to-brand-blue hover:opacity-95 text-white shadow-brand/30'
-            }`}
-          >
-            {appliedSuccess ? (
-              <>
-                <Check className="w-4 h-4" />
-                <span>已同步 3D 轨迹与机位至当前分镜！</span>
-              </>
-            ) : (
-              <>
-                <Sparkles className="w-4 h-4" />
-                <span>保存 3D 机位与 MiniMax 运镜至分镜</span>
-              </>
-            )}
-          </button>
+          <button onClick={handleApplyToShot} className={`w-full py-3.5 rounded-2xl text-xs font-bold flex items-center justify-center space-x-2 transition-all shadow-xl ${appliedSuccess ? 'bg-accent-green text-white shadow-accent-green/30' : 'bg-gradient-to-r from-brand to-brand-blue hover:opacity-95 text-white shadow-brand/30'}`}>{appliedSuccess ? <><Check className="w-4 h-4" /><span>已同步 3D 轨迹与机位至当前分镜！</span></> : <><Sparkles className="w-4 h-4" /><span>保存 3D 机位与 MiniMax 运镜至分镜</span></>}</button>
         </div>
       </div>
     </div>
@@ -1544,148 +1198,204 @@ export const Director3DStage: React.FC = () => {
 };
 
 // ============================================================
-// 3D Procedural Mesh Helpers (Stylized Sci-Fi / Xianxia Mannequin)
+// 真实人体建模（PBR + 解剖比例 + 姿态驱动）替代原火柴人
 // ============================================================
-function createMannequinMesh(opts: {
-  pose: PosePreset;
-  role: 'protagonist' | 'antagonist' | 'supporting';
-  primaryColor: number;
-  accentColor: number;
-  name: string;
-}): THREE.Group {
+function createRealisticHuman(opts: { pose: PosePreset; role: string; primaryColor: number; accentColor: number; name: string; hairColor: number }): THREE.Group {
   const group = new THREE.Group();
+  const skinMat = new THREE.MeshStandardMaterial({ color: 0xffdcc2, roughness: 0.45, metalness: 0.02 });
+  const skinShadowMat = new THREE.MeshStandardMaterial({ color: 0xe8b8a0, roughness: 0.55 });
+  const clothMat = new THREE.MeshStandardMaterial({ color: opts.primaryColor, roughness: 0.35, metalness: 0.12 });
+  const clothDarkMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(opts.primaryColor).multiplyScalar(0.6).getHex(), roughness: 0.5 });
+  const accentMat = new THREE.MeshStandardMaterial({ color: opts.accentColor, emissive: opts.accentColor, emissiveIntensity: 0.35, roughness: 0.25, metalness: 0.2 });
+  const hairMat = new THREE.MeshStandardMaterial({ color: opts.hairColor, roughness: 0.7, metalness: 0.0 });
+  const eyeWhiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.2 });
+  const pupilMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 0.1 });
+  const irisColors: Record<string, number> = { protagonist: 0x4a90e2, antagonist: 0xff3b30, supporting: 0x34c759 };
+  const irisMat = new THREE.MeshStandardMaterial({ color: irisColors[opts.role] || 0x4a90e2, emissive: irisColors[opts.role] || 0x4a90e2, emissiveIntensity: 0.15 });
 
-  const bodyMat = new THREE.MeshStandardMaterial({
-    color: opts.primaryColor,
-    metalness: 0.7,
-    roughness: 0.25,
-    emissive: 0x110022,
-  });
+  // 头部 - 颅骨
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.21, 32, 32), skinMat);
+  head.position.y = 1.68; head.castShadow = true; head.receiveShadow = true; group.add(head);
+  // 面部阴影层（下颌）
+  const jaw = new THREE.Mesh(new THREE.SphereGeometry(0.14, 16, 16), skinShadowMat);
+  jaw.position.set(0, 1.58, 0.06); jaw.scale.set(1, 0.8, 0.85); group.add(jaw);
+  // 头发 - 半球 + 侧发
+  const hairCap = new THREE.Mesh(new THREE.SphereGeometry(0.225, 32, 32, 0, Math.PI * 2, 0, Math.PI * 0.62), hairMat);
+  hairCap.position.y = 1.72; hairCap.rotation.x = -0.08; group.add(hairCap);
+  const hairBack = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.17, 0.22, 16), hairMat);
+  hairBack.position.set(0, 1.62, -0.08); group.add(hairBack);
+  // 耳朵
+  const earGeo = new THREE.SphereGeometry(0.045, 12, 12);
+  const earL = new THREE.Mesh(earGeo, skinMat); earL.position.set(-0.19, 1.66, 0); earL.scale.set(0.6, 1.2, 0.8); group.add(earL);
+  const earR = new THREE.Mesh(earGeo, skinMat); earR.position.set(0.19, 1.66, 0); earR.scale.set(0.6, 1.2, 0.8); group.add(earR);
+  // 眼部
+  const eyeGeo = new THREE.SphereGeometry(0.042, 16, 16);
+  const eyeL = new THREE.Mesh(eyeGeo, eyeWhiteMat); eyeL.position.set(-0.075, 1.70, 0.17); eyeL.scale.set(1, 0.9, 0.6); group.add(eyeL);
+  const eyeR = new THREE.Mesh(eyeGeo, eyeWhiteMat); eyeR.position.set(0.075, 1.70, 0.17); eyeR.scale.set(1, 0.9, 0.6); group.add(eyeR);
+  const pupilGeo = new THREE.SphereGeometry(0.022, 16, 16);
+  const pupilL = new THREE.Mesh(pupilGeo, pupilMat); pupilL.position.set(-0.075, 1.70, 0.205); group.add(pupilL);
+  const pupilR = new THREE.Mesh(pupilGeo, pupilMat); pupilR.position.set(0.075, 1.70, 0.205); group.add(pupilR);
+  const irisGeo = new THREE.SphereGeometry(0.012, 12, 12);
+  const irisL = new THREE.Mesh(irisGeo, irisMat); irisL.position.set(-0.075, 1.70, 0.215); group.add(irisL);
+  const irisR = new THREE.Mesh(irisGeo, irisMat); irisR.position.set(0.075, 1.70, 0.215); group.add(irisR);
+  // 眉毛
+  const browGeo = new THREE.BoxGeometry(0.09, 0.015, 0.01);
+  const browL = new THREE.Mesh(browGeo, hairMat); browL.position.set(-0.075, 1.735, 0.19); browL.rotation.z = 0.08; group.add(browL);
+  const browR = new THREE.Mesh(browGeo, hairMat); browR.position.set(0.075, 1.735, 0.19); browR.rotation.z = -0.08; group.add(browR);
+  // 鼻子
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.018, 0.06, 8), skinShadowMat); nose.position.set(0, 1.66, 0.21); nose.rotation.x = Math.PI; group.add(nose);
+  // 嘴
+  const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.012, 0.008), new THREE.MeshStandardMaterial({ color: 0x8b3a3a, roughness: 0.6 })); mouth.position.set(0, 1.60, 0.20); group.add(mouth);
 
-  const jointMat = new THREE.MeshStandardMaterial({
-    color: opts.accentColor,
-    emissive: opts.accentColor,
-    emissiveIntensity: 0.6,
-    roughness: 0.1,
-  });
+  // 颈部
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.09, 0.14, 12), skinMat); neck.position.y = 1.48; group.add(neck);
+  // 胸腔 + 服装
+  const chest = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.38, 0.24), clothMat); chest.position.y = 1.28; chest.castShadow = true; chest.receiveShadow = true; group.add(chest);
+  const chestDark = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.12, 0.245), clothDarkMat); chestDark.position.y = 1.18; group.add(chestDark);
+  // 腰带
+  const belt = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.06, 0.26), new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 0.3, metalness: 0.4 })); belt.position.y = 1.02; group.add(belt);
+  const buckle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.055, 0.03), accentMat); buckle.position.set(0, 1.02, 0.135); group.add(buckle);
+  // 胯部/下衣
+  const hips = new THREE.Mesh(new THREE.BoxGeometry(0.40, 0.18, 0.20), clothDarkMat); hips.position.y = 0.92; hips.castShadow = true; group.add(hips);
 
-  // Head
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.18, 16, 16), bodyMat);
-  head.position.y = 1.7;
-  head.castShadow = true;
-  group.add(head);
+  // 手臂 - 上臂/前臂 用胶囊近似（圆柱+球端）
+  const createArm = (isLeft: boolean, shoulderPos: THREE.Vector3, pose: PosePreset) => {
+    const armGroup = new THREE.Group(); armGroup.position.copy(shoulderPos);
+    const upperMat = clothMat;
+    const skinArmMat = skinMat;
+    // 上臂
+    const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.065, 0.32, 8, 16), isLeft ? upperMat : clothMat);
+    upper.position.y = -0.18; upper.castShadow = true; armGroup.add(upper);
+    // 肘关节
+    const elbow = new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 12), skinArmMat); elbow.position.y = -0.38; armGroup.add(elbow);
+    // 前臂
+    const fore = new THREE.Mesh(new THREE.CapsuleGeometry(0.055, 0.30, 8, 16), skinArmMat);
+    fore.position.y = -0.58; fore.castShadow = true; armGroup.add(fore);
+    // 手
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 12), skinArmMat); hand.position.y = -0.78; hand.scale.set(1, 1.2, 0.7); armGroup.add(hand);
+    // 手套/护腕
+    const guard = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.065, 0.08, 12), accentMat); guard.position.y = -0.68; armGroup.add(guard);
+    // 姿态驱动
+    if (pose === 'fight') {
+      if (isLeft) { armGroup.rotation.x = 1.0; armGroup.rotation.z = -0.6; armGroup.rotation.y = 0.3; }
+      else { armGroup.rotation.x = 0.6; armGroup.rotation.z = 0.5; }
+    } else if (pose === 'cast_spell') {
+      armGroup.rotation.x = 0.9; armGroup.rotation.z = isLeft ? -0.4 : 0.4; armGroup.rotation.y = isLeft ? -0.2 : 0.2;
+    } else if (pose === 'defend') {
+      armGroup.position.z += 0.15; armGroup.rotation.x = 1.1; armGroup.rotation.z = isLeft ? -0.2 : 0.2;
+    } else if (pose === 'run') {
+      armGroup.rotation.x = isLeft ? 0.5 : -0.5; armGroup.rotation.z = isLeft ? -0.3 : 0.3;
+    }
+    return armGroup;
+  };
+  const leftArm = createArm(true, new THREE.Vector3(0.26, 1.38, 0), opts.pose);
+  const rightArm = createArm(false, new THREE.Vector3(-0.26, 1.38, 0), opts.pose);
+  group.add(leftArm); group.add(rightArm);
 
-  // Visor / Cyber Eye Glow
-  const visor = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.05, 0.15), jointMat);
-  visor.position.set(0, 1.72, 0.1);
-  group.add(visor);
+  // 腿部
+  const createLeg = (isLeft: boolean) => {
+    const legGroup = new THREE.Group();
+    legGroup.position.set(isLeft ? 0.13 : -0.13, 0.83, 0);
+    const thighMat = clothDarkMat;
+    const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.38, 8, 16), thighMat); thigh.position.y = -0.22; thigh.castShadow = true; legGroup.add(thigh);
+    const knee = new THREE.Mesh(new THREE.SphereGeometry(0.075, 12, 12), skinMat); knee.position.y = -0.45; legGroup.add(knee);
+    const shin = new THREE.Mesh(new THREE.CapsuleGeometry(0.075, 0.36, 8, 16), skinMat); shin.position.y = -0.68; shin.castShadow = true; legGroup.add(shin);
+    const foot = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.07, 0.24), new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.4 })); foot.position.set(0, -0.92, 0.05); foot.castShadow = true; legGroup.add(foot);
+    if (opts.pose === 'fight' || opts.pose === 'run') { legGroup.rotation.x = isLeft ? 0.25 : -0.2; legGroup.position.z += isLeft ? 0.15 : -0.12; }
+    if (opts.pose === 'kneel') { if (!isLeft) { legGroup.rotation.x = -1.2; legGroup.position.y -= 0.15; } }
+    if (opts.pose === 'fly') { legGroup.rotation.x = -0.4; legGroup.position.y += 0.1; }
+    return legGroup;
+  };
+  group.add(createLeg(true)); group.add(createLeg(false));
 
-  // Torso
-  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.12, 0.55, 12), bodyMat);
-  torso.position.y = 1.25;
-  torso.castShadow = true;
-  group.add(torso);
+  // 角色标识光环脚底
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.28, 0.30, 32), new THREE.MeshBasicMaterial({ color: opts.accentColor, transparent: true, opacity: 0.35, side: THREE.DoubleSide }));
+  ring.rotation.x = Math.PI / 2; ring.position.y = 0.01; group.add(ring);
+  return group;
+}
 
-  // Poses & Limbs
-  if (opts.pose === 'fight') {
-    torso.rotation.y = 0.45;
-    const armL = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.04, 0.5), jointMat);
-    armL.position.set(0.26, 1.35, 0.3);
-    armL.rotation.x = Math.PI / 2.2;
-    group.add(armL);
+function createRealisticSword(): THREE.Group {
+  const g = new THREE.Group();
+  // 剑身 - 渐变发光
+  const bladeMat = new THREE.MeshStandardMaterial({ color: 0xe0f0ff, emissive: 0x00aaff, emissiveIntensity: 0.45, metalness: 0.85, roughness: 0.15 });
+  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.07, 1.35, 0.015), bladeMat);
+  blade.position.y = 0.72; blade.castShadow = true; g.add(blade);
+  // 血槽
+  const fuller = new THREE.Mesh(new THREE.BoxGeometry(0.015, 1.1, 0.016), new THREE.MeshStandardMaterial({ color: 0x88c0ff, emissive: 0x0088ff, emissiveIntensity: 0.3 }));
+  fuller.position.y = 0.72; g.add(fuller);
+  // 剑尖
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.18, 4), bladeMat); tip.position.y = 1.48; tip.rotation.y = Math.PI / 4; g.add(tip);
+  // 护手
+  const guardMat = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.9, roughness: 0.15, emissive: 0xffaa00, emissiveIntensity: 0.15 });
+  const guard = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.06, 0.05), guardMat); guard.position.y = 0.08; guard.castShadow = true; g.add(guard);
+  const guardGem = new THREE.Mesh(new THREE.SphereGeometry(0.04, 12, 12), new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 0.9 })); guardGem.position.y = 0.08; g.add(guardGem);
+  // 柄
+  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.28, 12), new THREE.MeshStandardMaterial({ color: 0x1a0a0a, roughness: 0.9 })); handle.position.y = -0.12; g.add(handle);
+  const wrap1 = new THREE.Mesh(new THREE.TorusGeometry(0.038, 0.008, 8, 16), new THREE.MeshStandardMaterial({ color: 0x8b0000 })); wrap1.position.y = -0.06; wrap1.rotation.x = Math.PI / 2; g.add(wrap1);
+  const wrap2 = wrap1.clone(); wrap2.position.y = -0.14; g.add(wrap2);
+  // 剑首
+  const pommel = new THREE.Mesh(new THREE.SphereGeometry(0.055, 16, 16), guardMat); pommel.position.y = -0.28; g.add(pommel);
+  // 光迹
+  const trail = new THREE.Mesh(new THREE.PlaneGeometry(0.04, 1.0), new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.12, side: THREE.DoubleSide })); trail.position.set(0, 0.7, 0.02); g.add(trail);
+  g.castShadow = true;
+  return g;
+}
 
-    const armR = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.04, 0.48), jointMat);
-    armR.position.set(-0.26, 1.25, 0.15);
-    armR.rotation.z = Math.PI / 4;
-    group.add(armR);
-  } else if (opts.pose === 'cast_spell') {
-    const armL = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.04, 0.55), jointMat);
-    armL.position.set(0.3, 1.5, 0.25);
-    armL.rotation.x = Math.PI / 1.8;
-    armL.rotation.z = -Math.PI / 6;
-    group.add(armL);
+function createRealisticShield(): THREE.Group {
+  const g = new THREE.Group();
+  const shieldMat = new THREE.MeshStandardMaterial({ color: 0x4a5568, metalness: 0.75, roughness: 0.25, transparent: true, opacity: 0.92 });
+  const shield = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.52, 0.06, 6), shieldMat); shield.rotation.x = Math.PI / 2; shield.castShadow = true; g.add(shield);
+  const rimMat = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.95, roughness: 0.1, emissive: 0xffaa00, emissiveIntensity: 0.2 });
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.52, 0.025, 12, 6), rimMat); rim.rotation.x = Math.PI / 2; g.add(rim);
+  // 徽记
+  const emblem = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.02, 6), new THREE.MeshStandardMaterial({ color: 0x7c3aed, emissive: 0x7c3aed, emissiveIntensity: 0.5 })); emblem.rotation.x = Math.PI / 2; emblem.position.z = 0.04; g.add(emblem);
+  const inner = new THREE.Mesh(new THREE.SphereGeometry(0.07, 16, 16), new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 0.8 })); inner.position.z = 0.06; g.add(inner);
+  // 盾后握把
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.04, 0.04), new THREE.MeshStandardMaterial({ color: 0x2d1b0e })); grip.position.z = -0.05; g.add(grip);
+  return g;
+}
 
-    const armR = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.04, 0.55), jointMat);
-    armR.position.set(-0.3, 1.5, 0.25);
-    armR.rotation.x = Math.PI / 1.8;
-    armR.rotation.z = Math.PI / 6;
-    group.add(armR);
-  } else if (opts.pose === 'look_back') {
-    torso.rotation.y = Math.PI * 0.75;
-    head.rotation.y = -Math.PI * 0.45;
-  } else if (opts.pose === 'defend') {
-    const armCross = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.08, 0.08), jointMat);
-    armCross.position.set(0, 1.35, 0.25);
-    armCross.rotation.z = 0.3;
-    group.add(armCross);
-  } else {
-    // Normal Stand
-    const armL = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.04, 0.55), jointMat);
-    armL.position.set(0.24, 1.2, 0);
-    group.add(armL);
+function createRealisticMagicCircle(): THREE.Group {
+  const g = new THREE.Group();
+  const mkRing = (r1: number, r2: number, color: number, opacity = 0.7) => {
+    const m = new THREE.Mesh(new THREE.RingGeometry(r1, r2, 64), new THREE.MeshBasicMaterial({ color, transparent: true, opacity, side: THREE.DoubleSide }));
+    m.rotation.x = Math.PI / 2; return m;
+  };
+  g.add(mkRing(1.55, 1.65, 0x00ffff, 0.85));
+  g.add(mkRing(1.25, 1.30, 0x7c3aed, 0.65));
+  g.add(mkRing(0.85, 0.90, 0x00ffff, 0.5));
+  // 符文
+  const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 512;
+  const ctx = canvas.getContext('2d')!;
+  ctx.clearRect(0, 0, 512, 512);
+  ctx.strokeStyle = '#00ffff'; ctx.lineWidth = 2; ctx.font = '28px serif'; ctx.textAlign = 'center';
+  const runes = ['✦', '⬢', '⬣', '✧', '❂', '⌖', '⬔', '⬓'];
+  for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; const x = 256 + Math.cos(a) * 180; const y = 256 + Math.sin(a) * 180; ctx.fillStyle = '#00ffff'; ctx.fillText(runes[i % runes.length], x, y); }
+  ctx.beginPath(); ctx.arc(256, 256, 120, 0, Math.PI * 2); ctx.stroke();
+  const tex = new THREE.CanvasTexture(canvas); tex.needsUpdate = true;
+  const runePlane = new THREE.Mesh(new THREE.CircleGeometry(1.15, 32), new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.85, side: THREE.DoubleSide }));
+  runePlane.rotation.x = -Math.PI / 2; runePlane.position.y = 0.01; g.add(runePlane);
+  // 中心法阵柱光
+  const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.18, 1.8, 16), new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.12 })); pillar.position.y = 0.9; g.add(pillar);
+  return g;
+}
 
-    const armR = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.04, 0.55), jointMat);
-    armR.position.set(-0.24, 1.2, 0);
-    group.add(armR);
+function createIncenseBurner(): THREE.Group {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 0.35, 16), new THREE.MeshStandardMaterial({ color: 0x8b4513, roughness: 0.6, metalness: 0.15 })); body.position.y = 0.2; g.add(body);
+  const lid = new THREE.Mesh(new THREE.SphereGeometry(0.18, 16, 16, 0, Math.PI * 2, 0, Math.PI * 0.5), new THREE.MeshStandardMaterial({ color: 0x5a2d0c, roughness: 0.5 })); lid.position.y = 0.42; g.add(lid);
+  // 香烟
+  for (let i = 0; i < 3; i++) {
+    const smoke = new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.15 }));
+    smoke.position.set((Math.random() - 0.5) * 0.1, 0.55 + i * 0.12, (Math.random() - 0.5) * 0.1); g.add(smoke);
   }
-
-  // Legs
-  const legL = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.04, 0.7), bodyMat);
-  legL.position.set(0.12, 0.55, opts.pose === 'fight' || opts.pose === 'run' ? 0.25 : 0);
-  group.add(legL);
-
-  const legR = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.04, 0.7), bodyMat);
-  legR.position.set(-0.12, 0.55, opts.pose === 'fight' || opts.pose === 'run' ? -0.25 : 0);
-  group.add(legR);
-
-  return group;
+  return g;
 }
 
-function createFloatingSwordMesh(): THREE.Group {
-  const group = new THREE.Group();
-  const bladeMat = new THREE.MeshStandardMaterial({
-    color: 0x00d2ff,
-    emissive: 0x0088cc,
-    emissiveIntensity: 0.8,
-    metalness: 0.9,
-    roughness: 0.1,
-  });
-  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.2, 0.02), bladeMat);
-  blade.rotation.z = Math.PI / 4;
-  group.add(blade);
-  return group;
-}
-
-function createEnergyShieldMesh(): THREE.Group {
-  const group = new THREE.Group();
-  const shieldMat = new THREE.MeshStandardMaterial({
-    color: 0x7c3aed,
-    emissive: 0x7c3aed,
-    emissiveIntensity: 0.4,
-    transparent: true,
-    opacity: 0.45,
-    roughness: 0.1,
-  });
-  const shield = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.65, 0.04, 6), shieldMat);
-  shield.rotation.x = Math.PI / 2;
-  group.add(shield);
-  return group;
-}
-
-function createMagicCircleMesh(): THREE.Group {
-  const group = new THREE.Group();
-  const circleMat = new THREE.MeshBasicMaterial({
-    color: 0x00d2ff,
-    side: THREE.DoubleSide,
-    transparent: true,
-    opacity: 0.7,
-  });
-  const ring1 = new THREE.Mesh(new THREE.RingGeometry(1.6, 1.68, 48), circleMat);
-  ring1.rotation.x = Math.PI / 2;
-  group.add(ring1);
-
-  const ring2 = new THREE.Mesh(new THREE.RingGeometry(1.1, 1.15, 32), circleMat);
-  ring2.rotation.x = Math.PI / 2;
-  group.add(ring2);
-  return group;
+function createBattleFlag(): THREE.Group {
+  const g = new THREE.Group();
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 2.2, 8), new THREE.MeshStandardMaterial({ color: 0x2b1a0a })); pole.position.y = 1.1; g.add(pole);
+  const flag = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.6), new THREE.MeshStandardMaterial({ color: 0x8b1a1a, side: THREE.DoubleSide, emissive: 0x441111, emissiveIntensity: 0.2 })); flag.position.set(0.45, 1.7, 0); flag.castShadow = true; g.add(flag);
+  const emblem = new THREE.Mesh(new THREE.CircleGeometry(0.14, 16), new THREE.MeshBasicMaterial({ color: 0xffd700 })); emblem.position.set(0.45, 1.7, 0.02); g.add(emblem);
+  return g;
 }

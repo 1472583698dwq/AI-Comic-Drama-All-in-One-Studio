@@ -149,14 +149,33 @@ class ComfyUIProvider(ImageProvider):
             if status.get("status_str") == "error":
                 messages = status.get("messages", [])
                 detail = str(messages[-1]) if messages else "未知执行错误"
+                raise RuntimeError(f"ComfyUI 工作流执行失败: {detail}")
             outputs = entry.get("outputs", {})
-            for node_output in outputs.values():
-                images = node_output.get("images")
-                if images:
-                    return images[0]
+            # 优先查找真正的图像输出（SaveImage/PreviewImage 等），兼容任意输出键
+            for node_id, node_output in outputs.items():
+                if not isinstance(node_output, dict):
+                    continue
+                # 标准 ComfyUI 输出为 images / gifs / videos 列表
+                for key in ("images", "gifs", "videos"):
+                    lst = node_output.get(key)
+                    if isinstance(lst, list) and lst:
+                        first = lst[0]
+                        if isinstance(first, dict) and "filename" in first:
+                            return first
+                # 兜底：任意包含 filename 的列表
+                for v in node_output.values():
+                    if isinstance(v, list) and v and isinstance(v[0], dict) and "filename" in v[0]:
+                        return v[0]
             if status.get("completed"):
+                # 完成但未找到图像，尝试把 Preview 图像也视为有效（兼容 PreviewAny）
                 node_keys = list(outputs.keys())
-                raise RuntimeError(f"ComfyUI 工作流已完成，但未捕获到图像输出 (已生成输出节点: {node_keys})，请确认工作流中包含有效且连通的 SaveImage 节点")
+                # 打印详细输出供调试
+                try:
+                    import json as _json
+                    print(f"[ComfyUI] 未捕获图像，完整 outputs: {_json.dumps(outputs, ensure_ascii=False)[:800]}")
+                except Exception:
+                    pass
+                raise RuntimeError(f"ComfyUI 工作流已完成，但未捕获到图像输出 (已生成输出节点: {node_keys})，请确认工作流中包含有效且连通的 SaveImage/PreviewImage 节点。若工作流仅含 PreviewAny，请在 ComfyUI 中将 PreviewAny 替换为 SaveImage 或 PreviewImage 后重新导出")
         raise TimeoutError(f"ComfyUI 生图超时（>{timeout_seconds}s），任务可能仍在队列中: {prompt_id}")
 
     async def _download_image(self, client: httpx.AsyncClient, image_meta: Dict[str, Any]) -> bytes:

@@ -21,6 +21,7 @@ interface AssetState {
   setTag: (t: string) => void;
   selectAsset: (id: string | null) => void;
   createAsset: (form: FormData) => Promise<Asset>;
+  updateAsset: (id: string, form: FormData) => Promise<Asset>;
   batchImport: (files: File[], meta?: { category?: string; tags?: string; visual_prompt?: string }) => Promise<{ imported: number; errors: string[] }>;
   generateAsset: (params: {
     name: string; prompt: string; category?: string; style_preset?: string;
@@ -70,6 +71,13 @@ export const useAssetStore = create<AssetState>((set, get) => ({
   createAsset: async (form) => {
     const asset = await apiService.createAsset(form);
     get().fetchAssets({ page: 1 });
+    return asset;
+  },
+
+  updateAsset: async (id, form) => {
+    const asset = await apiService.updateAsset(id, form);
+    // 就地更新列表，避免整页重载
+    set({ assets: get().assets.map(a => a.id === id ? { ...a, ...asset } : a) });
     return asset;
   },
 
