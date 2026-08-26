@@ -138,23 +138,20 @@ export const AssetLibrary: React.FC = () => {
 
   const handleGenerate = async () => {
     if (!genForm.name.trim() || !genForm.prompt.trim()) { alert('请填写名称与提示词'); return; }
+    if (!genForm.workflow_id) { alert('请选择一个 ComfyUI 工作流（已去除内置非工作流生图）'); return; }
     setGenerating(true);
     try {
-      // 当选择了工作流时，完全按工作流的输入设计覆盖，仅保留名称/类型等基础信息
-      // 将素材的提示词自动映射到工作流的主提示词槽位（优先匹配 User Prompt / 文本段）
+      // 仅走工作流：提示词自动映射到工作流主文本槽位
       let effectiveDynamicInputs: Record<string, any> | undefined = Object.keys(dynamicInputs).length > 0 ? { ...dynamicInputs } : undefined;
-      if (genForm.workflow_id && genForm.prompt.trim()) {
-        // 深拷贝避免污染
+      if (genForm.prompt.trim()) {
         effectiveDynamicInputs = effectiveDynamicInputs ? { ...effectiveDynamicInputs } : {};
         const promptText = genForm.prompt.trim();
-        // 优先匹配暴露输入中标题含 User/用户/文本段 的主提示词
         const candidates = workflowExposedInputs.filter((exp: any) => exp.type === 'text');
         let mainExp: any = null;
         if (candidates.length > 0) {
           mainExp = candidates.find((e: any) => /user|用户|主.*提示|文本段.*string_b/i.test(e.label + e.param_name)) || candidates.find((e: any) => e.param_name === 'string_b' || e.param_name === 'value') || candidates[0];
           if (mainExp) {
             const key = mainExp.id || mainExp.node_id;
-            // 仅当该槽位当前为空或为工作流默认值时，才覆盖为素材的提示词，避免误覆盖用户已手动编辑的暴露输入
             const curVal = effectiveDynamicInputs[key];
             if (!curVal || (typeof curVal === 'string' && curVal.trim() === '') || curVal === mainExp.default_value) {
               effectiveDynamicInputs[key] = promptText;
@@ -166,16 +163,13 @@ export const AssetLibrary: React.FC = () => {
         name: genForm.name.trim(),
         prompt: genForm.prompt.trim(),
         category: genForm.category,
-        provider: genForm.provider || undefined,
-        workflow_id: genForm.workflow_id || undefined,
-        negative_prompt: genForm.negative_prompt || undefined,
-        aspect_ratio: genForm.aspect_ratio,
-        seed: genForm.seed ? Number(genForm.seed) : undefined,
+        provider: 'comfyui',
+        workflow_id: genForm.workflow_id,
         tags: genForm.tags || undefined,
         dynamic_inputs: effectiveDynamicInputs && Object.keys(effectiveDynamicInputs).length > 0 ? effectiveDynamicInputs : undefined,
       });
       setShowGenerate(false);
-      setGenForm({ name: '', prompt: '', negative_prompt: '', category: 'character', provider: '', workflow_id: '', aspect_ratio: '1:1', seed: '', tags: '' });
+      setGenForm({ name: '', prompt: '', negative_prompt: '', category: 'character', provider: 'comfyui', workflow_id: '', aspect_ratio: '1:1', seed: '', tags: '' });
       setDynamicInputs({});
       if (res?.asset) { selectAsset(res.asset.id); setDetailAsset(res.asset); }
       refreshStats();
@@ -540,7 +534,7 @@ export const AssetLibrary: React.FC = () => {
               <h3 className="text-sm font-bold text-white flex items-center space-x-2"><Wand2 className="w-4 h-4 text-violet-400" /><span>AI 生成素材</span><span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-300 border border-violet-500/20">入库</span></h3>
               <button onClick={()=>setShowGenerate(false)} className="text-gray-400 hover:text-white"><X className="w-4 h-4" /></button>
             </div>
-            <p className="text-[11px] text-gray-500 -mt-2">使用当前已配置的生图 Provider 直接生成并入库为素材，无需二次上传。</p>
+            <p className="text-[11px] text-gray-500 -mt-2">仅支持 ComfyUI 工作流生成（已移除内置非工作流通道），请选择已导入/外部直读的工作流。</p>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-gray-300">名称 *</label>
@@ -558,20 +552,8 @@ export const AssetLibrary: React.FC = () => {
               <textarea value={genForm.prompt} onChange={e=>setGenForm({...genForm, prompt:e.target.value})} rows={3} placeholder="英文提示词，如：ancient temple in snow mountain, cinematic lighting, ultra detailed" className="mt-1 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs font-mono text-white" />
             </div>
             <div>
-              <label className="text-xs text-gray-300">反向提示词（可选）</label>
-              <input value={genForm.negative_prompt} onChange={e=>setGenForm({...genForm, negative_prompt:e.target.value})} placeholder="如：low quality, blurry" className="mt-1 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs font-mono text-white" />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-gray-300">Provider</label>
-                <select value={genForm.provider} onChange={e=>setGenForm({...genForm, provider:e.target.value})} className="mt-1 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white">
-                  <option value="">自动（跟随系统）</option>
-                  {providers.map((p:any)=><option key={p.id||p.provider} value={p.id||p.provider}>{p.display_name||p.id||p.provider}{p.is_configured===false?' · 未配置':''}</option>)}
-                </select>
-              </div>
-              <div>
-                <div className="flex items-center justify-between">
-                  <label className="text-xs text-gray-300">工作流（ComfyUI）</label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-white">工作流（ComfyUI） *</label>
                   {genForm.workflow_id && (
                     <button
                       type="button"
@@ -589,16 +571,14 @@ export const AssetLibrary: React.FC = () => {
                     setGenForm(prev => ({
                       ...prev,
                       workflow_id: wfId,
-                      provider: wfId ? 'comfyui' : prev.provider,
                     }));
                   }}
-                  className="mt-1 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white"
+                  className="mt-1 w-full bg-surface-secondary border border-brand/40 rounded-xl px-3 py-2 text-xs text-white focus:border-brand"
                 >
-                  <option value="">默认 (内置)</option>
-                  {workflows.map((w: any) => <option key={w.id} value={w.id}>{w.name || w.id}</option>)}
+                  <option value="">— 请选择工作流（必填）—</option>
+                  {workflows.map((w: any) => <option key={w.id} value={w.id}>{w.name || w.id} {w.source==='external'?'·外部':''}</option>)}
                 </select>
               </div>
-            </div>
 
             {/* Dynamic Exposed Inputs Section */}
             {workflowExposedInputs.length > 0 && (
@@ -716,25 +696,13 @@ export const AssetLibrary: React.FC = () => {
               </div>
             )}
 
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="text-xs text-gray-300">画幅</label>
-                <select value={genForm.aspect_ratio} onChange={e=>setGenForm({...genForm, aspect_ratio:e.target.value})} className="mt-1 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white">
-                  <option value="9:16">9:16</option><option value="16:9">16:9</option><option value="1:1">1:1</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-gray-300">种子（可选）</label>
-                <input value={genForm.seed} onChange={e=>setGenForm({...genForm, seed:e.target.value.replace(/[^\d]/g,'')})} placeholder="随机" className="mt-1 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white" />
-              </div>
-              <div>
-                <label className="text-xs text-gray-300">标签</label>
-                <input value={genForm.tags} onChange={e=>setGenForm({...genForm, tags:e.target.value})} placeholder="逗号分隔" className="mt-1 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white" />
-              </div>
+            <div>
+              <label className="text-xs text-gray-300">标签（可选，逗号分隔）</label>
+              <input value={genForm.tags} onChange={e=>setGenForm({...genForm, tags:e.target.value})} placeholder="如：主角, 玄幻, 古风" className="mt-1 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white" />
             </div>
             <div className="flex justify-end space-x-2 pt-1">
               <button onClick={()=>setShowGenerate(false)} className="px-4 py-2 rounded-xl bg-surface-secondary border border-border text-xs text-white">取消</button>
-              <button onClick={handleGenerate} disabled={generating} className="px-5 py-2 rounded-xl bg-gradient-to-r from-violet-600 to-brand text-white text-xs font-bold disabled:opacity-40 flex items-center space-x-1.5">{generating? <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span>生成中…</span></> : <><Sparkles className="w-3.5 h-3.5" /><span>生成并入库</span></>}</button>
+              <button onClick={handleGenerate} disabled={generating || !genForm.workflow_id} className="px-5 py-2 rounded-xl bg-gradient-to-r from-violet-600 to-brand text-white text-xs font-bold disabled:opacity-40 flex items-center space-x-1.5" title={!genForm.workflow_id ? '请先选择工作流' : '生成并入库'}>{generating? <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span>生成中…</span></> : <><Sparkles className="w-3.5 h-3.5" /><span>生成并入库</span></>}</button>
             </div>
           </div>
         </div>

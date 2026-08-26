@@ -62,6 +62,9 @@ class AssetManager:
             # 兼容旧数据：无 scope 视为 project，无 shared_to 视为 []
             if not getattr(asset, "scope", None):
                 asset.scope = "global" if not asset.project_id else "project"
+            # 旧数据迁移：project 作用域但 project_id 为空 视为全局（磁盘默认 scope=project 导致旧全局资产被误判）
+            if getattr(asset, "scope", "project") == "project" and not asset.project_id:
+                asset.scope = "global"
             if not getattr(asset, "shared_to", None):
                 asset.shared_to = []
             # 过滤
