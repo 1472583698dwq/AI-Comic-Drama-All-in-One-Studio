@@ -254,25 +254,25 @@ export const AssetLibrary: React.FC = () => {
   const selected = assets.find((a: any) => a.id === selectedId) || detailAsset;
 
   return (
-    <div className="flex-1 flex h-[calc(100vh-3.5rem)] bg-background overflow-hidden">
-      <div className="w-60 bg-surface border-r border-border flex flex-col">
-        <div className="p-3 border-b border-border">
-          <div className="flex items-center space-x-2 mb-2">
-            <Library className="w-4 h-4 text-brand-light" />
-            <span className="text-sm font-bold text-white">素材库</span>
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-brand/20 text-brand-light border border-brand/30">{total}</span>
-            <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-surface-tertiary text-gray-400 border border-border">{(useProjectListStore as any)?.getState?.()?.activeProjectId ? '按项目隔离' : '全局'}</span>
-          </div>
-          <div className="flex items-center gap-1 mb-3">
+    <div className="flex-1 flex h-[calc(100vh-56px)] bg-background overflow-hidden">
+      <div className="w-[260px] bg-surface border-r border-border flex flex-col shrink-0">
+        <div className="h-12 px-3 border-b border-border flex items-center gap-2 shrink-0">
+          <div className="w-7 h-7 rounded-lg bg-brand/10 border border-brand/20 flex items-center justify-center"><Library className="w-3.5 h-3.5 text-brand" /></div>
+          <span className="text-xs font-bold tracking-tight text-white">素材库</span>
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-surface-secondary border border-border text-gray-400">{total}</span>
+          <span className="ml-auto text-[10px] px-2 py-1 rounded-full bg-brand/10 text-brand border border-brand/20">{(useProjectListStore as any)?.getState?.()?.activeProjectId ? '项目' : '全局'}</span>
+        </div>
+        <div className="p-3 border-b border-border space-y-2">
+          <div className="flex rounded-full bg-surface-secondary border border-border p-1 gap-1">
             {(['all','project','global'] as const).map(s=> (
-              <button key={s} onClick={()=>fetchAssets({ scope: s, page: 1 })} className={`flex-1 py-1 rounded-lg text-[11px] font-medium border ${((useAssetStore as any).getState?.().scope||'all')===s ? 'bg-brand text-white border-brand' : 'bg-surface-secondary text-gray-400 border-border'}`}>{s==='all'?'全部':s==='project'?'项目':'全局'}</button>
+              <button key={s} onClick={()=>fetchAssets({ scope: s, page: 1 })} className={`flex-1 py-1 rounded-full text-[11px] font-bold transition-all ${((useAssetStore as any).getState?.().scope||'all')===s ? 'bg-white dark:bg-brand text-surface dark:text-white shadow-sm' : 'text-gray-500 hover:text-white'}`}>{s==='all'?'全部':s==='project'?'项目':'全局'}</button>
             ))}
           </div>
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
-            <input value={searchInput} onChange={e=>setSearchInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleSearch()} placeholder="搜索 名称/标签/提示词" className="w-full bg-surface-secondary border border-border rounded-xl pl-8 pr-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand" />
+          <div className="flex items-center gap-2 rounded-full bg-surface-secondary border border-border px-3 py-1.5 focus-within:border-brand/40">
+            <Search className="w-3.5 h-3.5 text-gray-500 shrink-0" />
+            <input value={searchInput} onChange={e=>setSearchInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleSearch()} placeholder="搜索名称/标签" className="flex-1 bg-transparent text-xs text-white placeholder-gray-500 focus:outline-none min-w-0" />
+            <button onClick={handleSearch} className="text-[11px] font-bold text-brand hover:text-brand-light">搜索</button>
           </div>
-          <button onClick={handleSearch} className="mt-2 w-full py-1.5 rounded-xl bg-brand text-white text-xs font-semibold hover:opacity-90">搜索</button>
         </div>
         <div className="p-2 space-y-1 flex-1 overflow-y-auto">
           {CATEGORY_TABS.map(t => (
@@ -299,52 +299,24 @@ export const AssetLibrary: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col overflow-hidden relative">
-        <div className="px-3 py-2 border-b border-border bg-surface/50 shrink-0 space-y-2">
-          <div className="h-8 flex items-center justify-between">
-            <div className="flex items-center space-x-2 text-xs text-gray-400">
-              <Filter className="w-3.5 h-3.5" /><span>分类: {category==='all'?'全部':CATEGORY_TABS.find(c=>c.key===category)?.label}</span>
-              {q && <span className="px-2 py-0.5 rounded-full bg-brand/20 text-brand-light border border-brand/30">关键词: {q}</span>}
-              {(() => { const s = (useAssetStore as any).getState?.()?.tag || ''; return s ? <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">标签: {s}</span> : null; })()}
-            </div>
-            <div className="flex items-center space-x-2">
-              <button onClick={()=>importInputRef.current?.click()} className="hidden md:flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-surface-secondary border border-border text-[11px] text-gray-300 hover:text-white">
-                <Files className="w-3.5 h-3.5" /><span>批量导入</span>
-              </button>
-              <input ref={importInputRef} type="file" multiple accept="image/*,audio/*,video/*,.glb,.fbx" className="hidden" onChange={e=>{ onDropFiles(e.target.files); if(e.target) e.target.value=''; }} />
-              <span className="text-[10px] text-gray-500">{isLoading?'加载中…':`${total} 个素材`}</span>
-            </div>
+      <div className="flex-1 flex flex-col overflow-hidden relative min-w-0">
+        <div className="h-11 px-4 border-b border-border bg-surface/60 backdrop-blur flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-2 text-xs min-w-0">
+            <span className="w-7 h-7 rounded-lg bg-surface-secondary border border-border flex items-center justify-center shrink-0"><Filter className="w-3.5 h-3.5 text-gray-400" /></span>
+            <span className="text-white font-medium truncate">{category==='all'?'全部素材':CATEGORY_TABS.find(c=>c.key===category)?.label}</span>
+            <span className="text-gray-500">·</span>
+            <span className="text-gray-400">{total} 个</span>
+            {q && <span className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-full bg-brand/10 border border-brand/20 text-brand-light text-xs">"{q}"</span>}
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-1.5 flex-1 min-w-[200px]">
-              <input
-                value={searchInput}
-                onChange={e=>setSearchInput(e.target.value)}
-                onKeyDown={e=>{ if(e.key==='Enter'){ fetchAssets({ q: searchInput, page: 1 }); } }}
-                placeholder="搜索名称/标签/提示词（回车）"
-                className="flex-1 bg-surface-secondary border border-border rounded-xl px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand"
-              />
-              <button onClick={()=>fetchAssets({ q: searchInput, page: 1 })} className="px-3 py-1.5 rounded-xl bg-brand text-white text-xs font-semibold">搜索</button>
-              {(q || searchInput) && <button onClick={()=>{ setSearchInput(''); fetchAssets({ q: '', page: 1 }); }} className="px-2 py-1.5 rounded-xl bg-surface-secondary border border-border text-xs text-gray-400 hover:text-white">清空</button>}
-            </div>
-            <select
-              value={(useAssetStore as any).getState?.()?.sort || 'updated_at'}
-              onChange={e=>fetchAssets({ sort: e.target.value, page: 1 })}
-              className="bg-surface-secondary border border-border rounded-xl px-2 py-1.5 text-xs text-white"
-              title="排序"
-            >
-              <option value="updated_at">最近更新</option>
-              <option value="created_at">创建时间</option>
-              <option value="name">名称</option>
+          <div className="flex-1" />
+          <div className="flex items-center gap-1.5 shrink-0">
+            <select value={(useAssetStore as any).getState?.()?.sort || 'updated_at'} onChange={e=>fetchAssets({ sort: e.target.value, page: 1 })} className="hidden sm:block bg-surface-secondary border border-border rounded-full px-3 py-1 text-xs text-white focus:outline-none">
+              <option value="updated_at">最近更新</option><option value="created_at">创建时间</option><option value="name">名称</option>
             </select>
-            <input
-              placeholder="标签过滤"
-              defaultValue={(useAssetStore as any).getState?.()?.tag || ''}
-              onKeyDown={e=>{ if(e.key==='Enter'){ const v=(e.target as HTMLInputElement).value; fetchAssets({ tag: v, page: 1 }); } }}
-              onBlur={e=>{ const v=e.target.value; if(v !== (useAssetStore as any).getState?.()?.tag) fetchAssets({ tag: v, page: 1 }); }}
-              className="bg-surface-secondary border border-border rounded-xl px-3 py-1.5 text-xs text-white placeholder-gray-500 w-28"
-            />
-            <button onClick={()=>fetchAssets({ tag: '', q: '', page: 1 })} className="px-2 py-1.5 rounded-xl bg-surface-secondary border border-border text-xs text-gray-400 hover:text-white" title="重置筛选">重置</button>
+            <button onClick={()=>importInputRef.current?.click()} className="hidden md:flex items-center gap-1.5 px-3 py-1 rounded-full bg-white dark:bg-surface-secondary border border-border text-xs font-medium text-surface dark:text-white hover:border-border-active">
+              <Files className="w-3.5 h-3.5" /><span>批量</span>
+            </button>
+            <input ref={importInputRef} type="file" multiple accept="image/*,audio/*,video/*,.glb,.fbx" className="hidden" onChange={e=>{ onDropFiles(e.target.files); if(e.target) e.target.value=''; }} />
           </div>
         </div>
 

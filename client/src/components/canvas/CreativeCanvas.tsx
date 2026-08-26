@@ -256,76 +256,86 @@ const InnerCanvas: React.FC = () => {
 
   return (
     <div className="flex-1 flex overflow-hidden bg-[#0a0a0f]">
-      {/* 左侧节点仓库 */}
-      <div className="w-64 bg-surface border-r border-border flex flex-col shrink-0">
-        <div className="p-3 border-b border-border">
-          <div className="text-xs font-bold text-white flex items-center gap-1.5">节点仓库 <span className="text-[10px] px-1.5 py-0.5 rounded bg-brand/20 text-brand-light">拖拽到画布</span></div>
+      {/* 左侧节点仓库 — 280px，卡片化、留白、层级 */}
+      <div className="w-[300px] bg-surface border-r border-border flex flex-col shrink-0">
+        <div className="h-12 px-4 border-b border-border flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-lg bg-brand/10 border border-brand/20 flex items-center justify-center"><Library className="w-3.5 h-3.5 text-brand" /></div>
+            <span className="text-xs font-bold tracking-tight text-white">节点仓库</span>
+          </div>
+          <span className="text-[10px] px-2 py-1 rounded-full bg-surface-secondary border border-border text-gray-400">拖拽</span>
         </div>
-        <div className="p-2 space-y-1.5 flex-1 overflow-y-auto">
-          {NODE_LIBRARY.map(n=> (
-            <div key={n.type} draggable onDragStart={e=> e.dataTransfer.setData('application/canvas-nodetype', n.type)} className="flex items-center gap-2 p-2.5 rounded-xl bg-surface-secondary border border-border hover:border-brand/40 cursor-grab active:cursor-grabbing">
-              <n.icon className={`w-4 h-4 ${n.color}`}/><div><div className="text-xs font-semibold text-white">{n.label}</div><div className="text-[10px] text-gray-500">{n.desc}</div></div>
-            </div>
-          ))}
-          <div className="pt-3 border-t border-border mt-2">
-            <div className="text-xs font-semibold text-white mb-2 flex items-center gap-1"><Cpu className="w-3.5 h-3.5 text-violet-400"/> ComfyUI 工作流</div>
-            <div className="space-y-1 max-h-[180px] overflow-y-auto">
-              {workflows.slice(0,12).map((w:any)=>(
+        <div className="p-3 space-y-4 flex-1 overflow-y-auto">
+          <div className="grid grid-cols-2 gap-2">
+            {NODE_LIBRARY.map(n=> (
+              <div key={n.type} draggable onDragStart={e=> e.dataTransfer.setData('application/canvas-nodetype', n.type)} className="flex flex-col gap-1.5 p-3 rounded-[14px] bg-surface-secondary border border-border hover:border-brand/30 hover:bg-surface-tertiary hover:shadow-md hover:shadow-brand/5 cursor-grab active:cursor-grabbing transition-all">
+                <n.icon className={`w-4 h-4 ${n.color}`}/><div><div className="text-xs font-bold text-white leading-none">{n.label}</div><div className="text-[10px] text-gray-500 leading-none mt-1">{n.desc}</div></div>
+              </div>
+            ))}
+          </div>
+          <div className="rounded-[14px] bg-surface-secondary border border-border p-3">
+            <div className="text-xs font-bold text-white mb-2 flex items-center gap-1.5"><Cpu className="w-3.5 h-3.5 text-violet-400"/> ComfyUI 工作流 <span className="ml-auto text-[10px] text-gray-500">{workflows.length} 个</span></div>
+            <div className="space-y-1 max-h-[160px] overflow-y-auto pr-1">
+              {workflows.slice(0,10).map((w:any)=>(
                 <div key={w.id} draggable onDragStart={e=>{
                   e.dataTransfer.setData('application/canvas-nodetype','comfy-workflow');
-                  // 额外存 id，通过 dataTransfer 自定义无法直接传参，改为本地临时存
                   (window as any).__dragWorkflowId = w.id;
-                }} className="p-2 rounded-lg bg-surface-tertiary border border-border hover:border-violet-500/40 cursor-grab text-xs">
-                  <div className="text-white truncate">{w.name||w.id}</div><div className="text-[10px] text-gray-500">{w.source==='external'?'外部': '内部'} · {w.node_count}节点</div>
+                }} className="flex items-center gap-2 p-2 rounded-xl bg-surface border border-transparent hover:border-violet-500/30 hover:bg-surface-tertiary cursor-grab">
+                  <div className="w-7 h-7 rounded-lg bg-violet-500/10 border border-violet-500/20 flex items-center justify-center shrink-0"><Cpu className="w-3.5 h-3.5 text-violet-400"/></div>
+                  <div className="min-w-0"><div className="text-xs font-medium text-white truncate">{w.name||w.id}</div><div className="text-[10px] text-gray-500">{w.source==='external'?'外部': '内部'} · {w.node_count}节点</div></div>
                 </div>
               ))}
+              {workflows.length===0 && <div className="text-[11px] text-gray-500 text-center py-4">暂无工作流，去设置里配置目录</div>}
             </div>
           </div>
-          <div className="pt-3 border-t border-border">
-            <div className="text-xs font-semibold text-white mb-2 flex items-center gap-1"><Library className="w-3.5 h-3.5 text-accent-pink"/> 素材</div>
+          <div className="rounded-[14px] bg-surface-secondary border border-border p-3">
+            <div className="text-xs font-bold text-white mb-2 flex items-center gap-1.5"><Library className="w-3.5 h-3.5 text-accent-pink"/> 素材 <span className="ml-auto text-[10px] text-gray-500">{assets.length} 个</span></div>
             <div className="flex gap-1.5 mb-2">
-              <input value={assetQuery} onChange={e=>setAssetQuery(e.target.value)} onKeyDown={e=>e.key==='Enter' && apiService.listAssets({project_id: pid, q: assetQuery}).then(r=>setAssets(r.assets||[]))} placeholder="搜索素材…" className="flex-1 bg-surface-tertiary border border-border rounded-lg px-2 py-1 text-xs text-white placeholder-gray-500"/>
-              <button onClick={()=> apiService.listAssets({project_id: pid, q: assetQuery}).then(r=>setAssets(r.assets||[]))} className="p-1.5 rounded-lg bg-brand text-white"><Search className="w-3 h-3"/></button>
+              <div className="flex-1 flex items-center gap-1.5 rounded-full bg-surface border border-border px-2.5 py-1 focus-within:border-brand/40">
+                <Search className="w-3 h-3 text-gray-500 shrink-0" />
+                <input value={assetQuery} onChange={e=>setAssetQuery(e.target.value)} onKeyDown={e=>e.key==='Enter' && apiService.listAssets({project_id: pid, q: assetQuery}).then(r=>setAssets(r.assets||[]))} placeholder="搜索…" className="flex-1 bg-transparent text-xs text-white placeholder-gray-500 focus:outline-none min-w-0"/>
+              </div>
+              <button onClick={()=> apiService.listAssets({project_id: pid, q: assetQuery}).then(r=>setAssets(r.assets||[]))} className="w-7 h-7 rounded-full bg-brand text-white flex items-center justify-center shrink-0"><Search className="w-3 h-3"/></button>
             </div>
-            <div className="grid grid-cols-2 gap-1.5 max-h-[200px] overflow-y-auto">
+            <div className="grid grid-cols-2 gap-2 max-h-[180px] overflow-y-auto pr-1">
               {assets.map((a:any)=>(
-                <div key={a.id} draggable onDragStart={e=> e.dataTransfer.setData('application/canvas-assetid', a.id)} className="bg-surface-tertiary border border-border rounded-lg overflow-hidden cursor-grab">
-                  <div className="aspect-square bg-black/40 flex items-center justify-center overflow-hidden">{a.thumb_url||a.file_url ? <img src={(a.thumb_url||a.file_url).startsWith('/')? (window.location.port==='5173'?'http://127.0.0.1:8000':'')+(a.thumb_url||a.file_url) : (a.thumb_url||a.file_url)} alt="" className="w-full h-full object-cover"/> : <ImageIcon className="w-4 h-4 text-gray-500"/>}</div>
-                  <div className="p-1.5"><div className="text-[10px] text-white truncate">{a.name}</div><div className="text-[9px] text-gray-500">{a.category}</div></div>
+                <div key={a.id} draggable onDragStart={e=> e.dataTransfer.setData('application/canvas-assetid', a.id)} className="group bg-surface border border-border rounded-xl overflow-hidden cursor-grab hover:border-brand/30 hover:shadow-md transition-all">
+                  <div className="aspect-square bg-black/40 flex items-center justify-center overflow-hidden">{a.thumb_url||a.file_url ? <img src={(a.thumb_url||a.file_url).startsWith('/')? (window.location.port==='5173'?'http://127.0.0.1:8000':'')+(a.thumb_url||a.file_url) : (a.thumb_url||a.file_url)} alt="" className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform"/> : <ImageIcon className="w-4 h-4 text-gray-500"/>}</div>
+                  <div className="p-2"><div className="text-[11px] font-medium text-white truncate">{a.name}</div><div className="text-[10px] text-gray-500">{a.category}</div></div>
                 </div>
               ))}
+              {assets.length===0 && <div className="col-span-2 text-[11px] text-gray-500 text-center py-6">无素材，先导入或生成</div>}
             </div>
           </div>
         </div>
-        <div className="p-2 border-t border-border space-y-1.5">
-          <button onClick={handleManualSave} disabled={saving} className="w-full py-2 rounded-xl bg-brand text-white text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-40"><Save className="w-3.5 h-3.5"/>{saving?'保存中': '保存画布'}</button>
-          <button onClick={handleExportToShots} className="w-full py-2 rounded-xl bg-gradient-to-r from-accent-pink to-brand text-white text-xs font-bold flex items-center justify-center gap-1.5"><Download className="w-3.5 h-3.5"/> 导出为分镜并打开</button>
-          <p className="text-[10px] text-gray-500 text-center">选中节点后可用「执行选中」批量生成（含Comfy/视频/TTS）</p>
+        <div className="p-3 border-t border-border space-y-2 bg-surface-secondary/50">
+          <button onClick={handleManualSave} disabled={saving} className="w-full py-2.5 rounded-full bg-brand text-white text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-40 shadow-md shadow-brand/10"><Save className="w-3.5 h-3.5"/>{saving?'保存中': '保存画布'}</button>
+          <button onClick={handleExportToShots} className="w-full py-2.5 rounded-full bg-white dark:bg-white text-surface dark:text-surface text-xs font-bold flex items-center justify-center gap-1.5 border border-border "><Download className="w-3.5 h-3.5"/> 导出为分镜</button>
+          <p className="text-[10px] text-gray-500 text-center leading-relaxed">选中节点后「执行选中」批量生成<br/>自动保存已开启</p>
         </div>
       </div>
 
-      {/* 画布 */}
-      <div ref={wrapperRef} className="flex-1 relative bg-[#08080B]" onDrop={onDrop} onDragOver={onDragOver}>
-        <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} nodeTypes={nodeTypes} onSelectionChange={({nodes:sel})=> setSelectedIds(sel.map(n=>n.id))} deleteKeyCode="Delete" fitView className="bg-[#08080B]">
-          <Background color="#1a1a2e" gap={20}/>
-          <Controls />
-          <MiniMap className="!bg-surface !border-border" nodeColor={(n)=> n.type==='shot-card' ? '#7c3aed' : n.type==='comfy-workflow' ? '#8b5cf6' : '#333'} />
-        </ReactFlow>
-
-        {/* 顶部悬浮提示 */}
-        <div className="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none">
-          <div className="px-3 py-1.5 rounded-xl bg-black/60 backdrop-blur border border-white/10 text-xs text-white pointer-events-auto">
-            画布按项目 <span className="text-brand-light font-mono">{pid.slice(0,8)}</span> 自动保存 · 拖拽节点 · 连线 · 右键平移滚轮缩放
+      {/* 画布 — 工具带 + 画布 */}
+      <div ref={wrapperRef} className="flex-1 relative bg-[#08080B] flex flex-col min-w-0" onDrop={onDrop} onDragOver={onDragOver}>
+        <div className="h-10 px-3 border-b border-border bg-surface/80 backdrop-blur flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2 text-xs">
+            <span className="w-2 h-2 rounded-full bg-accent-green animate-pulse" />
+            <span className="text-gray-300">项目</span><span className="font-mono text-white">{pid.slice(0,8)}</span><span className="text-gray-500 hidden sm:inline">· 自动保存 · 拖拽连线 · 框选</span>
           </div>
-          <div className="flex gap-1.5 pointer-events-auto">
-            <button onClick={()=>{
-              // 简单网格自动排布
-              setNodes(nds=> nds.map((n,i)=> ({...n, position:{ x: 80 + (i%4)*360, y: 80 + Math.floor(i/4)*320 }})));
-            }} className="px-2 py-1 rounded-lg bg-surface-secondary border border-border text-xs text-white">自动排布</button>
-            <button onClick={()=> handleBatchExecute('selected')} disabled={executing} className="px-3 py-1 rounded-lg bg-violet-600 text-white text-xs disabled:opacity-40">{executing?'执行中':'执行选中'}</button>
-            <button onClick={()=> handleBatchExecute('all')} disabled={executing} className="px-3 py-1 rounded-lg bg-brand text-white text-xs disabled:opacity-40">执行全画布</button>
-            <button onClick={()=> { if(confirm('清空画布？')){ setNodes([]); setEdges([]); } }} className="px-2 py-1 rounded-lg bg-red-500/20 border border-red-500/30 text-red-300 text-xs">清空</button>
+          <div className="flex-1" />
+          <div className="flex items-center gap-1.5">
+            <button onClick={()=> setNodes(nds=> nds.map((n,i)=> ({...n, position:{ x: 80 + (i%4)*360, y: 80 + Math.floor(i/4)*320 }})))} className="hidden sm:inline px-3 py-1 rounded-full bg-surface-secondary border border-border text-xs text-white hover:border-border-active">自动排布</button>
+            <button onClick={()=> handleBatchExecute('selected')} disabled={executing || selectedIds.length===0} className="px-3.5 py-1.5 rounded-full bg-violet-600 text-white text-xs font-bold disabled:opacity-40">{executing?'执行中':`执行选中${selectedIds.length?` · ${selectedIds.length}`:''}`}</button>
+            <button onClick={()=> handleBatchExecute('all')} disabled={executing || nodes.length===0} className="px-3.5 py-1.5 rounded-full bg-brand text-white text-xs font-bold disabled:opacity-40">执行全画布</button>
+            <button onClick={()=> { if(confirm('清空画布？')){ setNodes([]); setEdges([]); } }} className="w-8 h-8 rounded-full bg-surface-secondary border border-border text-gray-400 hover:text-red-400 flex items-center justify-center" title="清空">×</button>
           </div>
+        </div>
+        <div className="flex-1 relative">
+          <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} nodeTypes={nodeTypes} onSelectionChange={({nodes:sel})=> setSelectedIds(sel.map(n=>n.id))} deleteKeyCode="Delete" fitView className="bg-[#08080B]">
+            <Background color="#1a1a2e" gap={20}/>
+            <Controls className="!bg-surface !border-border" />
+            <MiniMap className="!bg-surface !border-border" nodeColor={(n)=> n.type==='shot-card' ? '#7c3aed' : n.type==='comfy-workflow' ? '#8b5cf6' : '#333'} />
+          </ReactFlow>
         </div>
       </div>
 

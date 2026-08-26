@@ -231,21 +231,16 @@ export const ShotInspector: React.FC = () => {
   ];
 
   return (
-    <div className="flex-1 flex h-full overflow-hidden bg-background">
-      {/* 1. Left Column: Shot List Thumbnail Drawer */}
-      <div className="w-64 bg-surface border-r border-border flex flex-col shrink-0">
-        <div className="p-3 border-b border-border flex items-center justify-between">
-          <div className="flex items-center space-x-1.5">
-            <Layers className="w-4 h-4 text-brand-light" />
-            <span className="text-xs font-semibold text-white">分镜序列 ({shots.length})</span>
+    <div className="flex-1 flex gap-3 p-3 overflow-hidden bg-background">
+      {/* 1. Left Column: Shot List — 卡片化、留白 */}
+      <div className="w-[260px] bg-surface border border-border rounded-2xl flex flex-col shrink-0 overflow-hidden shadow-sm">
+        <div className="h-11 px-3 border-b border-border flex items-center justify-between shrink-0 bg-surface-secondary/50">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-brand/10 border border-brand/20 flex items-center justify-center"><Layers className="w-3.5 h-3.5 text-brand" /></div>
+            <span className="text-xs font-bold tracking-tight text-white">分镜</span>
+            <span className="text-[11px] px-2 py-0.5 rounded-full bg-surface-secondary border border-border text-gray-400">{shots.length}</span>
           </div>
-          <button
-            onClick={() => addShot(1)}
-            className="p-1 rounded-lg bg-surface-secondary border border-border hover:border-brand text-gray-300 transition-all flex items-center space-x-1 text-[11px] px-2"
-          >
-            <Plus className="w-3 h-3 text-brand-light" />
-            <span>加镜</span>
-          </button>
+          <button onClick={() => addShot(1)} className="w-7 h-7 rounded-full bg-brand text-white flex items-center justify-center hover:bg-brand-light shadow-sm" title="添加分镜"><Plus className="w-3.5 h-3.5" /></button>
         </div>
 
         {/* Shot Scroll List */}
@@ -298,34 +293,15 @@ export const ShotInspector: React.FC = () => {
         </div>
       </div>
 
-      {/* 2. Center Column: Main Canvas Monitor */}
-      <div className="flex-1 flex flex-col items-center justify-center p-6 bg-[#08080B] relative overflow-hidden">
-        {/* Top Preview Mode Switcher (Image vs Video) */}
-        <div className="mb-3 z-10 flex items-center space-x-1.5 bg-surface/90 backdrop-blur-md p-1 rounded-xl border border-border shadow-lg">
-          <button
-            onClick={() => setPreviewTab('image')}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              previewTab === 'image'
-                ? 'bg-brand text-white shadow-md'
-                : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            <ImageIcon className="w-3.5 h-3.5" />
-            <span>首帧静态图</span>
+      {/* 2. Center Column: Main Canvas Monitor — 圆角卡片、通透 */}
+      <div className="flex-1 flex flex-col items-center justify-center p-4 lg:p-6 bg-surface border border-border rounded-2xl overflow-hidden relative">
+        {/* Top Preview Mode Switcher — 胶囊分段 */}
+        <div className="mb-3 z-10 flex items-center p-1 rounded-full bg-surface-secondary border border-border shadow-sm">
+          <button onClick={() => setPreviewTab('image')} className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-all ${previewTab === 'image' ? 'bg-white dark:bg-brand text-surface dark:text-white shadow-sm' : 'text-gray-500 hover:text-white'}`}>
+            <ImageIcon className="w-3.5 h-3.5" /><span>首帧</span>
           </button>
-          <button
-            onClick={() => setPreviewTab('video')}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              previewTab === 'video'
-                ? 'bg-gradient-to-r from-accent-orange to-brand-glow text-white shadow-md'
-                : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            <Film className="w-3.5 h-3.5" />
-            <span>动态视频 (I2V/R2V)</span>
-            {activeShot.video_url && (
-              <span className="w-2 h-2 rounded-full bg-accent-green" />
-            )}
+          <button onClick={() => setPreviewTab('video')} className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-all ${previewTab === 'video' ? 'bg-brand text-white shadow-sm' : 'text-gray-500 hover:text-white'}`}>
+            <Film className="w-3.5 h-3.5" /><span>视频</span>{activeShot.video_url && <span className="w-1.5 h-1.5 rounded-full bg-accent-green" />}
           </button>
         </div>
 
@@ -418,10 +394,10 @@ export const ShotInspector: React.FC = () => {
         </div>
       </div>
 
-      {/* 3. Right Column: Shot Inspector Properties */}
-      <div className="w-88 bg-surface border-l border-border p-4 flex flex-col space-y-4 overflow-y-auto custom-scrollbar shrink-0 shadow-xl">
-        <div className="flex items-center justify-between border-b border-border pb-2">
-          <span className="text-xs font-semibold text-white">分镜参数检查器</span>
+      {/* 3. Right Column: Shot Inspector — 320px 卡片化 */}
+      <div className="w-[340px] bg-surface border border-border rounded-2xl p-4 flex flex-col space-y-4 overflow-y-auto custom-scrollbar shrink-0 shadow-sm">
+        <div className="h-8 flex items-center justify-between border-b border-border pb-2 shrink-0 -mx-1">
+          <span className="text-xs font-bold tracking-tight text-white flex items-center gap-2"><Sliders className="w-3.5 h-3.5 text-brand" /> 检查器</span>
           <button
             onClick={() => deleteShot(activeShot.id)}
             className="p-1 rounded text-gray-500 hover:text-red-400"
