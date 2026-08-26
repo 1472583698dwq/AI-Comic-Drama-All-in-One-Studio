@@ -11,11 +11,12 @@ interface AssetState {
   q: string;
   tag: string;
   sort: string;
+  scope: string; // project | global | all —— P0
   isLoading: boolean;
   error: string | null;
   selectedId: string | null;
 
-  fetchAssets: (opts?: { category?: string; q?: string; tag?: string; page?: number; sort?: string }) => Promise<void>;
+  fetchAssets: (opts?: { category?: string; q?: string; tag?: string; page?: number; sort?: string; scope?: string; project_id?: string }) => Promise<void>;
   setCategory: (c: AssetCategory | 'all') => void;
   setQuery: (q: string) => void;
   setTag: (t: string) => void;
@@ -41,6 +42,7 @@ export const useAssetStore = create<AssetState>((set, get) => ({
   q: '',
   tag: '',
   sort: 'updated_at',
+  scope: 'all',
   isLoading: false,
   error: null,
   selectedId: null,
@@ -50,11 +52,17 @@ export const useAssetStore = create<AssetState>((set, get) => ({
     const q = opts?.q ?? get().q;
     const tag = opts?.tag ?? get().tag;
     const sort = opts?.sort ?? get().sort;
+    const scope = opts?.scope ?? (get() as any).scope ?? 'all';
     const page = opts?.page ?? 1;
+    // P0: 自动带当前项目
+    let project_id = (opts as any)?.project_id;
+    if (project_id === undefined) {
+      try { project_id = (await import('./useProjectListStore')).useProjectListStore.getState().activeProjectId || (await import('./useProjectStore')).useProjectStore.getState().activeProjectId || undefined; } catch {}
+    }
     set({ isLoading: true, error: null });
     try {
-      const data = await apiService.listAssets({ category: cat, q, tag, page, limit: get().limit, sort });
-      set({ assets: data.assets, total: data.total, page: data.page, category: cat as any, q, tag, sort, isLoading: false });
+      const data = await apiService.listAssets({ category: cat, q, tag, page, limit: get().limit, sort, scope: scope==='all'?undefined:scope, project_id, include_shared: true });
+      set({ assets: data.assets, total: data.total, page: data.page, category: cat as any, q, tag, sort, scope, isLoading: false });
     } catch (e: any) {
       set({ error: e?.message || '加载失败', isLoading: false });
     }

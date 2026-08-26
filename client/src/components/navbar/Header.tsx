@@ -15,7 +15,8 @@ import {
   Settings,
   Library,
   Sun,
-  Moon
+  Moon,
+  FolderKanban
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { useMcpStore } from '../../stores/useMcpStore';
@@ -36,6 +37,8 @@ export const Header: React.FC<HeaderProps> = ({ onOpenImport, onOpenExport, onOp
     setPlatformMode, 
     activeTab, 
     setActiveTab, 
+    workspace,
+    setWorkspace,
     isPlaying, 
     setIsPlaying, 
     totalDuration 
@@ -67,9 +70,26 @@ export const Header: React.FC<HeaderProps> = ({ onOpenImport, onOpenExport, onOp
         </div>
       </div>
 
-      {/* Center: Desktop Navigation Tabs (When in Desktop Mode) */}
-      {platformMode === 'desktop' && (
-        <div className="hidden md:flex items-center bg-surface-secondary p-1 rounded-xl border border-border">
+      {/* Center: Dual Workspace + Navigation Tabs */}
+      <div className="hidden md:flex items-center gap-1.5">
+        {/* Workspace Switcher */}
+        <div className="flex items-center bg-surface-secondary p-1 rounded-xl border border-border">
+          <button onClick={()=>{ setWorkspace('production'); setActiveTab('projects'); }} className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${workspace==='production' ? 'bg-brand text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}>漫剧制作</button>
+          <button onClick={()=>{ setWorkspace('creative'); setActiveTab('canvas'); }} className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${workspace==='creative' ? 'bg-gradient-to-r from-accent-pink to-brand text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}>创意设计 <span className="text-[9px] bg-white/20 px-1 rounded ml-1">画布</span></button>
+        </div>
+        {platformMode === 'desktop' && workspace==='production' && (
+        <div className="flex items-center bg-surface-secondary p-1 rounded-xl border border-border">
+          <button
+            onClick={() => setActiveTab('projects')}
+            className={`flex items-center space-x-1.5 px-3 py-1 rounded-lg text-xs font-medium transition-all ${
+              activeTab === 'projects'
+                ? 'bg-surface-tertiary text-white shadow-sm border border-brand/40'
+                : 'text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            <FolderKanban className="w-3.5 h-3.5 text-brand" />
+            <span>项目</span>
+          </button>
           <button
             onClick={() => setActiveTab('studio')}
             className={`flex items-center space-x-1.5 px-3 py-1 rounded-lg text-xs font-medium transition-all ${
@@ -79,7 +99,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenImport, onOpenExport, onOp
             }`}
           >
             <Layers className="w-3.5 h-3.5 text-brand-light" />
-            <span>分镜工作台</span>
+            <span>分镜</span>
           </button>
 
           <button
@@ -91,8 +111,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenImport, onOpenExport, onOp
             }`}
           >
             <Compass className="w-3.5 h-3.5 text-accent-orange" />
-            <span>3D 导演台</span>
-            <span className="text-[9px] bg-accent-orange/20 text-accent-orange px-1 rounded">MiniMax</span>
+            <span>3D</span>
           </button>
 
           <button
@@ -104,7 +123,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenImport, onOpenExport, onOp
             }`}
           >
             <Video className="w-3.5 h-3.5 text-brand-blue" />
-            <span>多轨剪辑</span>
+            <span>剪辑</span>
           </button>
 
           <button
@@ -116,11 +135,17 @@ export const Header: React.FC<HeaderProps> = ({ onOpenImport, onOpenExport, onOp
             }`}
           >
             <Library className="w-3.5 h-3.5 text-accent-pink" />
-            <span>素材库</span>
-            <span className="text-[9px] bg-accent-pink/20 text-accent-pink px-1 rounded">人物·场景·道具</span>
+            <span>素材</span>
           </button>
         </div>
-      )}
+        )}
+        {workspace==='creative' && (
+          <div className="flex items-center bg-surface-secondary p-1 rounded-xl border border-border">
+            <button onClick={()=>setActiveTab('canvas')} className={`px-3 py-1 rounded-lg text-xs font-medium ${activeTab==='canvas' ? 'bg-surface-tertiary text-white shadow-sm border border-accent-pink/40' : 'text-gray-400'}`}>无限画布</button>
+            <span className="text-[10px] text-gray-500 px-2">P1 即将上线</span>
+          </div>
+        )}
+      </div>
 
       {/* Right: Dual-Mode Switcher, MCP Tools & Export Actions */}
       <div className="flex items-center space-x-2.5">

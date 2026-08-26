@@ -41,6 +41,20 @@ try:
     print("[Main] Asset routes mounted at /api/v1/assets")
 except Exception as e:
     print(f"[Main] Asset routes mount failed: {e}")
+# 项目管理路由 (P0)
+try:
+    from app.api.project_routes import router as project_router
+    app.include_router(project_router, prefix=settings.API_V1_STR)
+    print("[Main] Project routes mounted at /api/v1/projects")
+except Exception as e:
+    print(f"[Main] Project routes mount failed: {e}")
+# 画布执行路由 (P2)
+try:
+    from app.api.canvas_routes import router as canvas_router
+    app.include_router(canvas_router, prefix=settings.API_V1_STR)
+    print("[Main] Canvas routes mounted at /api/v1/canvas")
+except Exception as e:
+    print(f"[Main] Canvas routes mount failed: {e}")
 
 # Mount standard MCP protocol server (Streamable HTTP)
 if mcp_http_app:

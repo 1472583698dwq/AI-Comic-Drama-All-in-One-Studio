@@ -423,10 +423,67 @@ export const apiService = {
     return await res.json();
   },
 
-  // ── 素材库 Asset Library ──
-  async listAssets(params?: { category?: string; status?: string; tag?: string; q?: string; project_id?: string; page?: number; limit?: number; sort?: string }): Promise<{ assets: any[]; total: number; page: number; limit: number; has_more?: boolean }> {
+  // ── Project 管理 (P0) ──
+  async listProjects(params?: { q?: string; status?: string; sort?: string }): Promise<{ projects: any[]; total: number }> {
     const qs = new URLSearchParams();
-    if (params) Object.entries(params).forEach(([k, v]) => { if (v != null && v !== '' && v !== 'all') qs.set(k, String(v)); });
+    if (params?.q) qs.set('q', params.q);
+    if (params?.status) qs.set('status', params.status);
+    if (params?.sort) qs.set('sort', params.sort);
+    const res = await fetch(`${API_BASE_URL}/projects?${qs.toString()}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async createProject(params: { title: string; style_preset?: string; aspect_ratio?: string; description?: string }): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/projects`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(params) });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async getProject(projectId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async openProject(projectId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/open`, { method: 'POST' });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async deleteProject(projectId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async duplicateProject(projectId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/duplicate`, { method: 'POST' });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async importProjectFile(file: File): Promise<{ project: any; content?: any }> {
+    const fd = new FormData(); fd.append('file', file);
+    const res = await fetch(`${API_BASE_URL}/projects/import`, { method: 'POST', body: fd });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async saveProjectContent(projectId: string, content: any): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/content`, { method: 'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(content) });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async getProjectCanvas(projectId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/canvas`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async saveProjectCanvas(projectId: string, snapshot: any): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/canvas`, { method: 'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(snapshot) });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+
+  // ── 素材库 Asset Library ──
+  async listAssets(params?: { category?: string; status?: string; tag?: string; q?: string; project_id?: string; scope?: string; include_shared?: boolean; page?: number; limit?: number; sort?: string }): Promise<{ assets: any[]; total: number; page: number; limit: number; has_more?: boolean }> {
+    const qs = new URLSearchParams();
+    if (params) Object.entries(params).forEach(([k, v]) => { if (v != null && v !== '' && (k!=='scope' || v!=='all')) qs.set(k, String(v)); else if(k==='scope'&&v==='all'){} else if(v!=null) qs.set(k,String(v)); });
     const res = await fetch(`${API_BASE_URL}/assets?${qs.toString()}`);
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
@@ -494,6 +551,16 @@ export const apiService = {
   },
   async migrateCharacters(projectId: string, characters: any[]): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/assets/migrate/characters`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project_id: projectId, characters }) });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async shareAsset(assetId: string, params: { scope?: string; target_project_ids?: string[] }): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/assets/${encodeURIComponent(assetId)}/share`, { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(params) });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async copyAssetToProject(assetId: string, target_project_id: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/assets/${encodeURIComponent(assetId)}/copy`, { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ target_project_id }) });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },

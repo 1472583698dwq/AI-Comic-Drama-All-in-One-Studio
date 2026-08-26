@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Search, Plus, Layers, Users, Mountain, Box, Image as ImageIcon, Sparkles, Copy, Trash2, Tag, Filter, Library, Upload, Wand2, X, Loader2, Check, Files, Pencil, Save, Edit3 } from 'lucide-react';
 import { useAssetStore } from '../../stores/useAssetStore';
 import { useProjectStore } from '../../stores/useProjectStore';
+import { useProjectListStore } from '../../stores/useProjectListStore';
 import { apiService } from '../../services/api';
 import { AssetCategory } from '../../types';
 import { WorkflowInspectorModal } from '../workflow/WorkflowInspectorModal';
@@ -256,10 +257,16 @@ export const AssetLibrary: React.FC = () => {
     <div className="flex-1 flex h-[calc(100vh-3.5rem)] bg-background overflow-hidden">
       <div className="w-60 bg-surface border-r border-border flex flex-col">
         <div className="p-3 border-b border-border">
-          <div className="flex items-center space-x-2 mb-3">
+          <div className="flex items-center space-x-2 mb-2">
             <Library className="w-4 h-4 text-brand-light" />
             <span className="text-sm font-bold text-white">素材库</span>
             <span className="text-[10px] px-2 py-0.5 rounded-full bg-brand/20 text-brand-light border border-brand/30">{total}</span>
+            <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-surface-tertiary text-gray-400 border border-border">{(useProjectListStore as any)?.getState?.()?.activeProjectId ? '按项目隔离' : '全局'}</span>
+          </div>
+          <div className="flex items-center gap-1 mb-3">
+            {(['all','project','global'] as const).map(s=> (
+              <button key={s} onClick={()=>fetchAssets({ scope: s, page: 1 })} className={`flex-1 py-1 rounded-lg text-[11px] font-medium border ${((useAssetStore as any).getState?.().scope||'all')===s ? 'bg-brand text-white border-brand' : 'bg-surface-secondary text-gray-400 border-border'}`}>{s==='all'?'全部':s==='project'?'项目':'全局'}</button>
+            ))}
           </div>
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />

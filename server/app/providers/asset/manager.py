@@ -45,7 +45,7 @@ def _save_asset(asset: Asset):
         json.dump(asset.model_dump(), f, ensure_ascii=False, indent=2)
 
 class AssetManager:
-    def list_assets(self, category: Optional[str] = None, status: Optional[str] = None, tag: Optional[str] = None, q: Optional[str] = None, project_id: Optional[str] = None, page: int = 1, limit: int = 24, sort: str = "updated_at") -> Dict[str, Any]:
+    def list_assets(self, category: Optional[str] = None, status: Optional[str] = None, tag: Optional[str] = None, q: Optional[str] = None, project_id: Optional[str] = None, page: int = 1, limit: int = 24, sort: str = "updated_at", scope: Optional[str] = None, include_shared: bool = True) -> Dict[str, Any]:
         assets: List[Asset] = []
         if not os.path.exists(ASSETS_ROOT):
             return {"assets": [], "total": 0, "page": page, "limit": limit}
@@ -59,13 +59,34 @@ class AssetManager:
             asset = _load_asset(entry)
             if not asset:
                 continue
+            # 兼容旧数据：无 scope 视为 project，无 shared_to 视为 []
+            if not getattr(asset, "scope", None):
+                asset.scope = "global" if not asset.project_id else "project"
+            if not getattr(asset, "shared_to", None):
+                asset.shared_to = []
             # 过滤
             if category and asset.category != category:
                 continue
             if status and asset.status != status:
                 continue
-            if project_id and asset.project_id != project_id:
+            if scope and getattr(asset, "scope", "project") != scope:
                 continue
+            if project_id:
+                # 资产可见性：全局 或 归属当前项目 或 已共享到当前项目
+                # 当 project_id 过滤时，scope==global 的资产始终可见（除非 scope 过滤已限制）
+                if include_shared:
+                    visible = (
+                        getattr(asset, "scope", "project") == "global"
+                        or asset.project_id == project_id
+                        or project_id in (getattr(asset, "shared_to", []) or [])
+                        or (not asset.project_id and getattr(asset, "scope", "project") == "global")
+                    )
+                    if not visible:
+                        continue
+                else:
+                    # 严格模式：仅归属该 project 的且非全局
+                    if asset.project_id != project_id:
+                        continue
             if tag and tag not in (asset.tags or []):
                 continue
             if q:
@@ -105,6 +126,15 @@ class AssetManager:
         st = data.get("status", "approved")
         if st not in ASSET_STATUS:
             st = "approved"
+        # P0: scope/shared_to
+        scope_val = data.get("scope", "project")
+        if scope_val not in ("project", "global"):
+            scope_val = "project"
+        shared = data.get("shared_to", []) or []
+        # 若 scope==global 则强制 project_id=None
+        proj_id_val = data.get("project_id")
+        if scope_val == "global":
+            proj_id_val = None
         asset = Asset(
             id=f"ast_{uuid.uuid4().hex[:8]}",
             name=data.get("name", "未命名素材"),
@@ -116,7 +146,9 @@ class AssetManager:
             visual_prompt=data.get("visual_prompt", "") or "",
             negative_prompt=data.get("negative_prompt"),
             style_preset=data.get("style_preset"),
-            project_id=data.get("project_id"),
+            project_id=proj_id_val,
+            scope=scope_val,
+            shared_to=shared,
             style_anchor_id=data.get("style_anchor_id"),
             lora_trigger=data.get("lora_trigger"),
             voice_id=data.get("voice_id"),
@@ -165,13 +197,18 @@ class AssetManager:
         if not asset:
             return None
         # 允许更新的字段
-        for k in ["name","category","subcategory","description","tags","visual_prompt","negative_prompt","style_preset","status","style_anchor_id","lora_trigger","voice_id","voice_name","three_views","extra","project_id"]:
+        for k in ["name","category","subcategory","description","tags","visual_prompt","negative_prompt","style_preset","status","style_anchor_id","lora_trigger","voice_id","voice_name","three_views","extra","project_id","scope","shared_to"]:
             if k in updates and updates[k] is not None:
                 if k == "category" and updates[k] not in ASSET_CATEGORIES:
                     continue
                 if k == "status" and updates[k] not in ASSET_STATUS:
                     continue
+                if k == "scope" and updates[k] not in ("project","global"):
+                    continue
                 setattr(asset, k, updates[k])
+        # 若改为 global，清空 project_id
+        if updates.get("scope") == "global":
+            asset.project_id = None
         if "file_url" in updates and updates["file_url"]:
             asset.file_url = updates["file_url"]
             asset.thumb_url = updates["file_url"]
@@ -217,6 +254,7 @@ class AssetManager:
     def get_stats(self) -> Dict[str, Any]:
         counts: Dict[str, int] = {c: 0 for c in ASSET_CATEGORIES}
         status_counts: Dict[str, int] = {s: 0 for s in ASSET_STATUS}
+        scope_counts: Dict[str, int] = {"project": 0, "global": 0}
         total = 0
         tags: Dict[str, int] = {}
         if os.path.exists(ASSETS_ROOT):
@@ -230,9 +268,10 @@ class AssetManager:
                 total += 1
                 counts[a.category] = counts.get(a.category, 0) + 1
                 status_counts[a.status] = status_counts.get(a.status, 0) + 1
+                scope_counts[getattr(a, "scope", "project")] = scope_counts.get(getattr(a, "scope", "project"), 0) + 1
                 for t in (a.tags or []):
                     tags[t] = tags.get(t, 0) + 1
-        return {"total": total, "by_category": counts, "by_status": status_counts, "tags": tags}
+        return {"total": total, "by_category": counts, "by_status": status_counts, "by_scope": scope_counts, "tags": tags}
 
     def search_tags(self, q: Optional[str] = None) -> List[str]:
         stats = self.get_stats()

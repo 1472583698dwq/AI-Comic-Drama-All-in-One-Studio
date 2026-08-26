@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { Header } from './components/navbar/Header';
 import { ShotInspector } from './components/storyboard/ShotInspector';
 import { Director3DStage } from './components/director3d/Director3DStage';
@@ -12,11 +12,13 @@ import { ExportModal } from './components/export/ExportModal';
 import { McpToolsModal } from './components/mcp/McpToolsModal';
 import { SkillStudioModal } from './components/skills/SkillStudioModal';
 import { ConfigView } from './views/ConfigView';
+import { ProjectDashboard } from './views/ProjectDashboard';
+const CreativeCanvas = React.lazy(()=> import('./components/canvas/CreativeCanvas').then(m=> ({default: m.CreativeCanvas})));
 import { useProjectStore } from './stores/useProjectStore';
 import { useMcpStore } from './stores/useMcpStore';
 
 export function App() {
-  const { project, activeTab, platformMode, apiError, clearApiError } = useProjectStore();
+  const { project, activeTab, workspace, platformMode, apiError, clearApiError } = useProjectStore();
   const { fetchTools } = useMcpStore();
 
   const [isImportOpen, setIsImportOpen] = useState(false);
@@ -59,35 +61,44 @@ export function App() {
         <main className="flex-1 flex flex-col overflow-hidden relative">
           <ConfigView />
         </main>
+      ) : workspace === 'creative' ? (
+        <main className="flex-1 flex flex-col overflow-hidden relative">
+          <Suspense fallback={<div className="flex-1 flex items-center justify-center text-xs text-gray-500">画布加载中…</div>}>
+            <CreativeCanvas />
+          </Suspense>
+        </main>
       ) : (
         <>
-          {/* Empty state when no project yet - but not for global tabs like assets */}
-          {!project && activeTab !== 'assets' && activeTab !== 'characters' && (
+          {/* P0: 项目看板（无需 project 即可访问） */}
+          {activeTab === 'projects' && (
+            <main className="flex-1 flex flex-col overflow-hidden relative">
+              <ProjectDashboard />
+            </main>
+          )}
+          {/* 无项目时的引导：仅在 production 非 projects/assets 时显示 */}
+          {!project && activeTab !== 'assets' && activeTab !== 'characters' && activeTab !== 'projects' && (
             <div className="flex-1 flex flex-col items-center justify-center bg-background p-8 text-center space-y-4">
               <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-brand to-accent-pink flex items-center justify-center text-3xl shadow-xl shadow-brand/20">
                 🎬
               </div>
-              <h2 className="text-lg font-bold text-white">开始你的 AI 漫剧创作</h2>
+              <h2 className="text-lg font-bold text-white">选择或创建项目以开始</h2>
               <p className="text-xs text-gray-400 max-w-md">
-                点击「导入小说」粘贴章节文本，大模型将真实拆解为角色与分镜。支持 MiniMax、DeepSeek、阿里通义千问、ComfyUI、剪映等全生态配置。
+                项目隔离素材与分镜，支持空白创建、导入小说或导入项目包。素材可设为全局或共享到其他项目。
               </p>
               <div className="flex items-center space-x-3 pt-2">
                 <button
-                  onClick={() => setIsImportOpen(true)}
+                  onClick={() => useProjectStore.getState().setActiveTab('projects')}
                   className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-brand to-brand-blue text-white text-xs font-semibold hover:opacity-90 shadow-lg shadow-brand/20 transition-all"
+                >
+                  打开项目看板
+                </button>
+                <button
+                  onClick={() => setIsImportOpen(true)}
+                  className="px-5 py-2.5 rounded-xl bg-surface-secondary border border-border text-gray-200 hover:text-white hover:border-brand text-xs font-semibold transition-all"
                 >
                   导入小说拆解
                 </button>
-                <button
-                  onClick={() => useProjectStore.getState().setActiveTab('config')}
-                  className="px-5 py-2.5 rounded-xl bg-surface-secondary border border-border text-gray-200 hover:text-white hover:border-brand text-xs font-semibold transition-all"
-                >
-                  ⚙️ 配置 API Key 与服务
-                </button>
               </div>
-              <p className="text-[10px] text-gray-500 pt-2">
-                提示：支持自定义 MiniMax / DeepSeek / 通义千问 / ComfyUI / 硅基流动 / 剪映草稿目录
-              </p>
             </div>
           )}
 
@@ -99,7 +110,7 @@ export function App() {
           )}
 
           {/* Main Workspace Layout when project loaded */}
-          {project && activeTab !== 'assets' && activeTab !== 'characters' && (
+          {project && activeTab !== 'assets' && activeTab !== 'characters' && activeTab !== 'projects' && (
             <main className="flex-1 flex flex-col overflow-hidden relative">
               {platformMode === 'desktop' ? (
                 /* Desktop Professional Studio */

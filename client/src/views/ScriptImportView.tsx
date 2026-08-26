@@ -56,7 +56,8 @@ const STYLE_OPTIONS: { id: StylePreset; label: string; desc: string }[] = [
 ];
 
 export const ScriptImportView: React.FC<ScriptImportViewProps> = ({ isOpen, onClose }) => {
-  const { importNovelScript, isLoading, loadingMessage, apiError } = useProjectStore();
+  const { importNovelScript, isLoading, loadingMessage, apiError, activeProjectId } = useProjectStore();
+  const [saveToProject, setSaveToProject] = useState(true);
 
   const [novelText, setNovelText] = useState(TEMPLATES[0].text);
   const [stylePreset, setStylePreset] = useState<StylePreset>('donghua_xianxia');
@@ -73,6 +74,13 @@ export const ScriptImportView: React.FC<ScriptImportViewProps> = ({ isOpen, onCl
     setLocalError(null);
     try {
       await importNovelScript(novelText, stylePreset, aspectRatio);
+      // P0: 自动保存到当前项目
+      if (saveToProject && activeProjectId) {
+        const proj = useProjectStore.getState().project;
+        if (proj) {
+          try { await (await import('../services/api')).apiService.saveProjectContent(activeProjectId, proj); } catch {}
+        }
+      }
       onClose();
     } catch (e: any) {
       setLocalError(e?.message || '拆解失败');
@@ -211,8 +219,10 @@ export const ScriptImportView: React.FC<ScriptImportViewProps> = ({ isOpen, onCl
         {/* Footer Action */}
         <div className="h-16 px-6 border-t border-border bg-surface-secondary/50 flex items-center justify-between">
           <div className="flex flex-col space-y-1">
-            <span className="text-[11px] text-gray-400">
-              {isLoading ? loadingMessage : '⚡ 点击后将调用 MiniMax LLM 真实拆解角色、分镜与配音数据'}
+            <span className="text-[11px] text-gray-400 flex items-center gap-2">
+              {isLoading ? loadingMessage : '⚡ 调用 MiniMax LLM 拆解角色/分镜/配音'}
+              {activeProjectId && <label className="flex items-center gap-1 text-[10px] text-gray-300 cursor-pointer"><input type="checkbox" checked={saveToProject} onChange={e=>setSaveToProject(e.target.checked)} /> 保存到当前项目</label>}
+              {!activeProjectId && <span className="text-[10px] text-amber-300">未选择项目，将仅本地预览（请先在项目看板创建/打开项目）</span>}
             </span>
             {(localError || apiError) && (
               <span className="text-[11px] text-red-400">⚠️ {localError || apiError}</span>

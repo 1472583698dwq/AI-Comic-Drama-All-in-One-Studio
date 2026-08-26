@@ -10,6 +10,8 @@ ASSET_STATUS = ["draft", "approved", "archived"]
 class Asset(BaseModel):
     id: str = Field(default_factory=lambda: f"ast_{uuid.uuid4().hex[:8]}")
     project_id: Optional[str] = None  # 所属项目/集合，None为全局
+    scope: str = "project"  # project | global —— P0 新增：隔离域
+    shared_to: List[str] = Field(default_factory=list)  # 共享到哪些项目 id
     name: str
     category: str = "character"  # character | scene | prop | background | effect | ui | other
     subcategory: Optional[str] = None  # 细分，如 character: protagonist/supporting, scene: interior/exterior

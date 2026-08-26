@@ -4,8 +4,10 @@ import { apiService } from '../services/api';
 
 interface ProjectState {
   project: Project | null;
+  activeProjectId: string | null; // P0: 关联 ProjectMeta
   activeShotId: string | null;
-  activeTab: 'studio' | 'director3d' | 'timeline' | 'characters' | 'assets' | 'mcp' | 'config';
+  activeTab: 'projects' | 'studio' | 'director3d' | 'timeline' | 'characters' | 'assets' | 'mcp' | 'config' | 'canvas';
+  workspace: 'production' | 'creative'; // P0: 双工作台
   platformMode: 'desktop' | 'mobile';
   isPlaying: boolean;
   currentTime: number; // in seconds
@@ -17,7 +19,8 @@ interface ProjectState {
   // Actions
   setProject: (project: Project) => void;
   setActiveShotId: (shotId: string | null) => void;
-  setActiveTab: (tab: 'studio' | 'director3d' | 'timeline' | 'characters' | 'assets' | 'mcp' | 'config') => void;
+  setActiveTab: (tab: 'projects' | 'studio' | 'director3d' | 'timeline' | 'characters' | 'assets' | 'mcp' | 'config' | 'canvas') => void;
+  setWorkspace: (w: 'production'|'creative') => void;
   setPlatformMode: (mode: 'desktop' | 'mobile') => void;
   setIsPlaying: (isPlaying: boolean) => void;
   setCurrentTime: (time: number) => void;
@@ -35,8 +38,10 @@ interface ProjectState {
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
   project: null,
+  activeProjectId: localStorage.getItem('activeProjectId') || null,
   activeShotId: null,
-  activeTab: 'studio',
+  activeTab: 'projects',
+  workspace: 'production',
   platformMode: 'desktop',
   isPlaying: false,
   currentTime: 0,
@@ -48,11 +53,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setProject: (project) => {
     const total = project.scenes.flatMap((s) => s.shots).reduce((sum, sh) => sum + sh.duration, 0);
     const firstShotId = project.scenes[0]?.shots[0]?.id || null;
-    set({ project, totalDuration: total, activeShotId: firstShotId, apiError: null });
+    // 同步 activeProjectId
+    if (project?.id) {
+      localStorage.setItem('activeProjectId', project.id);
+      set({ project, totalDuration: total, activeShotId: firstShotId, apiError: null, activeProjectId: project.id });
+    } else {
+      set({ project, totalDuration: total, activeShotId: firstShotId, apiError: null });
+    }
+    // 自动保存到后端（若有 activeProjectId）
+    const pid = project?.id || get().activeProjectId;
+    if (pid && project) {
+      apiService.saveProjectContent(pid, project).catch(()=>{});
+    }
   },
 
   setActiveShotId: (shotId) => set({ activeShotId: shotId }),
   setActiveTab: (tab) => set({ activeTab: tab }),
+  setWorkspace: (workspace) => set({ workspace }),
   setPlatformMode: (platformMode) => set({ platformMode }),
   setIsPlaying: (isPlaying) => set({ isPlaying }),
   setCurrentTime: (currentTime) => set({ currentTime }),

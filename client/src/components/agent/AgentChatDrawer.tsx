@@ -16,6 +16,7 @@ import {
   Move
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
+import { useCanvasStore } from '../../stores/useCanvasStore';
 import { apiService } from '../../services/api';
 
 const isDev = typeof window !== 'undefined' && window.location.port === '5173';
@@ -277,6 +278,13 @@ export const AgentChatDrawer: React.FC = () => {
     const shots = project?.scenes.flatMap((s) => s.shots) || [];
     const activeShot = shots.find((s) => s.id === activeShotId) || shots[0];
 
+    // P1: 画布感知透传
+    let canvas_summary: string | null = null;
+    try {
+      const cs = useCanvasStore.getState().summary;
+      const cn = useCanvasStore.getState().nodes;
+      if (cn.length > 0) canvas_summary = cs;
+    } catch {}
     const contextPayload = {
       project_title: project?.title,
       active_shot: activeShot
@@ -293,6 +301,8 @@ export const AgentChatDrawer: React.FC = () => {
           }
         : null,
       platform: 'desktop',
+      canvas_summary,
+      workspace: useProjectStore.getState().workspace,
     };
 
     // 1. Try WebSocket
