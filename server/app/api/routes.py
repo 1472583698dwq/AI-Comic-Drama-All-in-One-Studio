@@ -438,6 +438,56 @@ async def inspect_workflow_parameters(workflow_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"解析工作流参数失败: {e}")
 
+@router.post("/images/workflows/{workflow_id}/preview")
+async def preview_workflow_injection(workflow_id: str, body: Dict[str, Any]):
+    """预览工作流参数注入后的最终 JSON（不实际提交至 ComfyUI），用于调试暴露输入是否生效"""
+    mgr = get_workflow_manager()
+    try:
+        wf, meta = mgr.get_workflow_with_meta(workflow_id)
+        if not wf:
+            raise FileNotFoundError(f"工作流不存在: {workflow_id}")
+        mapping = (meta or {}).get("mapping", {})
+        node_overrides = (meta or {}).get("node_overrides", {})
+        is_api_frugally = False
+        if meta:
+            is_api_frugally = (not meta.get("auto_converted", False)) and bool(meta.get("is_api_format", True))
+        injected = mgr.inject_params(
+            wf,
+            mapping,
+            {
+                "prompt": body.get("prompt") or body.get("image_prompt") or "test prompt",
+                "negative_prompt": body.get("negative_prompt") or "",
+                "seed": body.get("seed") or 123,
+                "width": body.get("width") or 1024,
+                "height": body.get("height") or 1024,
+                "style_suffix": body.get("style_suffix") or "",
+                "checkpoint": body.get("checkpoint"),
+                "steps": body.get("steps"),
+                "cfg": body.get("cfg"),
+            },
+            node_overrides=node_overrides,
+            dynamic_inputs=body.get("dynamic_inputs"),
+            is_api_frugally=is_api_frugally,
+        )
+        # 标注哪些节点被 dynamic 覆盖
+        dyn = body.get("dynamic_inputs") or {}
+        annotated = {}
+        for nid, node in injected.items():
+            ann = dict(node)
+            # 检查该节点是否被 dynamic 命中
+            hit = []
+            for k in dyn.keys():
+                if str(k) in nid or str(k).endswith(f"_{nid}") or str(k) == f"txt_{nid}" or str(k) == f"img_{nid}" or str(k) == f"exp_{nid}_text" or str(k) == f"exp_{nid}_image":
+                    hit.append(k)
+            if hit:
+                ann["_dynamic_hit"] = hit
+            annotated[nid] = ann
+        return {"status": "success", "workflow_id": workflow_id, "is_api_frugally": is_api_frugally, "mapping": mapping, "injected": annotated, "dynamic_inputs_received": dyn}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"预览注入失败: {e}")
+
 @router.post("/images/workflows/{workflow_id}/overrides")
 async def save_workflow_node_overrides(workflow_id: str, body: Dict[str, Any]):
     """保存工作流的槽位映射、节点参数默认覆写值与外部暴露字段"""

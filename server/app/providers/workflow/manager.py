@@ -1357,59 +1357,7 @@ class ComfyWorkflowManager:
                         if v is not None:
                             node_inputs[k] = v
 
-        # 3. 应用外部表单动态输入 (Dynamic Inputs from Frontend Form)
-        if dynamic_inputs and isinstance(dynamic_inputs, dict):
-            for k, val in dynamic_inputs.items():
-                if val is None or val == "":
-                    continue
-                
-                # 格式 A: 完整的 {node_id: {param_name: value}}
-                if isinstance(val, dict):
-                    if str(k) in wf:
-                        node_inputs = wf[str(k)].setdefault("inputs", {})
-                        for param_k, param_v in val.items():
-                            if param_v is not None:
-                                node_inputs[param_k] = param_v
-                # 格式 B: 匹配 exp_{node_id}_{param_name}
-                elif str(k).startswith("exp_"):
-                    exp_rest = str(k)[len("exp_"):]
-                    found = False
-                    for existing_nid in wf.keys():
-                        if exp_rest.startswith(f"{existing_nid}_"):
-                            pname = exp_rest[len(f"{existing_nid}_"):]
-                            if pname and pname != "undefined":
-                                wf[existing_nid].setdefault("inputs", {})[pname] = val
-                            found = True
-                            break
-                    if not found and "_" in exp_rest:
-                        parts = exp_rest.rsplit("_", 1)
-                        if parts[0] in wf and parts[1] and parts[1] != "undefined":
-                            wf[parts[0]].setdefault("inputs", {})[parts[1]] = val
-                # 格式 C: 匹配 img_{node_id} 或 txt_{node_id} (包括子图如 img_sg12_3)
-                elif str(k).startswith("img_") or str(k).startswith("txt_"):
-                    prefix, target_nid = str(k).split("_", 1)
-                    if target_nid in wf:
-                        n_inps = wf[target_nid].setdefault("inputs", {})
-                        if prefix == "img":
-                            n_inps["image"] = val
-                        elif prefix == "txt":
-                            if "text" in n_inps:
-                                n_inps["text"] = val
-                            elif "string" in n_inps:
-                                n_inps["string"] = val
-                            else:
-                                n_inps["text"] = val
-                # 格式 D: 直接按 node_id 匹配单值
-                elif str(k) in wf:
-                    n_inps = wf[str(k)].setdefault("inputs", {})
-                    if "image" in n_inps:
-                        n_inps["image"] = val
-                    elif "text" in n_inps:
-                        n_inps["text"] = val
-                    elif "string" in n_inps:
-                        n_inps["string"] = val
-                    elif "value" in n_inps:
-                        n_inps["value"] = val
+        # 3. 外部动态输入延后至最后处理（确保暴露输入最终生效，见步骤 7）
 
         if "prompt" in params and params["prompt"]:
             prompt_text = params["prompt"]
@@ -1570,6 +1518,57 @@ class ComfyWorkflowManager:
                         n["inputs"]["steps"] = int(params["steps"])
                     if params.get("cfg") is not None and "cfg" in n["inputs"] and not isinstance(n["inputs"]["cfg"], list):
                         n["inputs"]["cfg"] = float(params["cfg"])
+        # 7. 最后应用外部动态输入（暴露输入优先，确保用户在画布/素材库中对提示词/垫图的修改最终生效）
+        if dynamic_inputs and isinstance(dynamic_inputs, dict):
+            for k, val in dynamic_inputs.items():
+                if val is None or val == "":
+                    continue
+                if isinstance(val, dict):
+                    if str(k) in wf:
+                        node_inputs = wf[str(k)].setdefault("inputs", {})
+                        for param_k, param_v in val.items():
+                            if param_v is not None:
+                                node_inputs[param_k] = param_v
+                elif str(k).startswith("exp_"):
+                    exp_rest = str(k)[len("exp_"):]
+                    found = False
+                    for existing_nid in wf.keys():
+                        if exp_rest.startswith(f"{existing_nid}_"):
+                            pname = exp_rest[len(f"{existing_nid}_"):]
+                            if pname and pname != "undefined":
+                                wf[existing_nid].setdefault("inputs", {})[pname] = val
+                            found = True
+                            break
+                    if not found and "_" in exp_rest:
+                        parts = exp_rest.rsplit("_", 1)
+                        if parts[0] in wf and parts[1] and parts[1] != "undefined":
+                            wf[parts[0]].setdefault("inputs", {})[parts[1]] = val
+                elif str(k).startswith("img_") or str(k).startswith("txt_"):
+                    try:
+                        prefix, target_nid = str(k).split("_", 1)
+                    except ValueError:
+                        continue
+                    if target_nid in wf:
+                        n_inps = wf[target_nid].setdefault("inputs", {})
+                        if prefix == "img":
+                            n_inps["image"] = val
+                        elif prefix == "txt":
+                            if "text" in n_inps:
+                                n_inps["text"] = val
+                            elif "string" in n_inps:
+                                n_inps["string"] = val
+                            else:
+                                n_inps["text"] = val
+                elif str(k) in wf:
+                    n_inps = wf[str(k)].setdefault("inputs", {})
+                    if "image" in n_inps:
+                        n_inps["image"] = val
+                    elif "text" in n_inps:
+                        n_inps["text"] = val
+                    elif "string" in n_inps:
+                        n_inps["string"] = val
+                    elif "value" in n_inps:
+                        n_inps["value"] = val
         return wf
 
     def inject_video_params(
