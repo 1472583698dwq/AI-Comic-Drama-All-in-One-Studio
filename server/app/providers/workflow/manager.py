@@ -346,13 +346,26 @@ def expand_subgraphs(data: Dict[str, Any]) -> Dict[str, Any]:
     int_link_ids = [int(lk[0]) for lk in link_map.values() if isinstance(lk[0], int)]
     next_link_id = (max(int_link_ids) if int_link_ids else 1000) + 1
 
+    # 子图保留策略：视频类等复杂子图保持为单节点，避免拆开后参数暴露失效
+    VIDEO_SUBGRAPH_HINTS = ("video", "wan", "hunyuan", "cogvideo", "mochi")
+    def _should_keep_subgraph(sg_id: str, sg_def: dict) -> bool:
+        low = sg_id.lower()
+        if any(h in low for h in VIDEO_SUBGRAPH_HINTS):
+            return True
+        inner = sg_def.get("nodes", []) or []
+        for in_n in inner:
+            ct = str(in_n.get("type", "")).lower()
+            if any(h in ct for h in ("wan", "video", "vhs")):
+                return True
+        return False
+
     while expanded and iteration < 10:
         expanded = False
         iteration += 1
         new_nodes = []
         for n in nodes:
             ntype = str(n.get("type"))
-            if ntype in subgraph_defs:
+            if ntype in subgraph_defs and not _should_keep_subgraph(ntype, subgraph_defs[ntype]):
                 expanded = True
                 sg = copy.deepcopy(subgraph_defs[ntype])
                 sg_prefix = f"sg{n.get('id')}_"
@@ -916,6 +929,27 @@ def auto_detect_exposed_inputs(clean_wf: Dict[str, Any], mapping: Optional[Dict[
                             "required": False,
                             "default_value": str(pval)[:200] if pval else "",
                             "description": f"工作流中 {title} 节点的 {sub_key} 文本，可用于覆盖原始提示词",
+                        })
+        # 3. 通用子图/自定义节点：保持为单节点的子图，其输入即暴露参数
+        #    区分输入节点（linked）与参数节点（direct）：即使已链接也暴露，允许用户覆盖外部输入
+        else:
+            # 仅对疑似子图或未在白名单的自定义节点进行通用暴露，避免过度暴露
+            if any(h in ct.lower() for h in ("video", "wan", "hunyuan", "cogvideo", "mochi")) or ct not in ALLOWED_CLASS_TYPES:
+                for pname, pval in inputs.items():
+                    is_linked = isinstance(pval, list) and len(pval) == 2 and isinstance(pval[0], str)
+                    # 仅暴露关键可编辑输入，避免噪音
+                    if pname in ("prompt", "text", "negative_prompt", "image", "reference_image", "first_frame", "last_frame", "start_image", "value", "string"):
+                        ptype = "image" if any(k in pname.lower() for k in ("image", "frame")) else "text"
+                        # 对于子图，即使已链接也暴露，允许覆盖
+                        exposed.append({
+                            "id": f"exp_{nid}_{pname}",
+                            "node_id": str(nid),
+                            "param_name": pname,
+                            "label": f"{pname} ({title})",
+                            "type": ptype,
+                            "required": False,
+                            "default_value": "" if is_linked else (str(pval)[:200] if isinstance(pval, str) else ""),
+                            "description": f"子图节点 {title} 的 {pname} 输入（{'已链接外部' if is_linked else '直连参数'}，可覆盖）",
                         })
 
     return exposed
