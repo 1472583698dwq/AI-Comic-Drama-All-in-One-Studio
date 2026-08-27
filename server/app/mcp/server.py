@@ -128,6 +128,15 @@ def _lazy_asset_manager():
     from app.providers.asset.manager import asset_manager
     return asset_manager
 
+def _infer_kind_from_doc(doc: str, url: str = "") -> str | None:
+    low = f"{doc or ''} {url or ''}".lower()
+    if any(k in low for k in ["video", "minimax_h3", "lightx2v", "kling", "vidu", "hailuo"]):
+        if "video" in low or "h3" in low or "lightx2v" in low:
+            return "video"
+    if any(k in low for k in ["audio", "tts", "voice", "speech"]):
+        return "audio"
+    return None
+
 
 class MCPServerRegistry:
     def __init__(self):
@@ -626,6 +635,53 @@ class MCPServerRegistry:
             }
         ))
 
+        # --- Canvas Agent 深度绑定 5 工具 (P4) ---
+        self.register_tool(MCPToolDefinition(
+            name="canvas_query",
+            description="[画布] 查询当前画布摘要与节点清单，Agent 画布感知入口",
+            category="workflow",
+            icon="Layout",
+            author="Canvas Engine",
+            is_enabled=True,
+            input_schema={"type":"object","properties":{"project_id":{"type":"string"}},"required":[]}
+        ))
+        self.register_tool(MCPToolDefinition(
+            name="canvas_create_node",
+            description="[画布] 创建节点，type 需为 nodeRegistry 中的合法类型",
+            category="workflow",
+            icon="Plus",
+            author="Canvas Engine",
+            is_enabled=True,
+            input_schema={"type":"object","properties":{"type":{"type":"string","description":"节点类型，如 shot-card/provider-image/load-image/text-prompt/video/tts"},"position":{"type":"object","description":"{x,y}"},"params":{"type":"object"}},"required":["type"]}
+        ))
+        self.register_tool(MCPToolDefinition(
+            name="canvas_update_node",
+            description="[画布] 更新节点数据",
+            category="workflow",
+            icon="Edit",
+            author="Canvas Engine",
+            is_enabled=True,
+            input_schema={"type":"object","properties":{"node_id":{"type":"string"},"patch":{"type":"object"}},"required":["node_id","patch"]}
+        ))
+        self.register_tool(MCPToolDefinition(
+            name="canvas_connect",
+            description="[画布] 连线两节点句柄，自动校验类型",
+            category="workflow",
+            icon="Link",
+            author="Canvas Engine",
+            is_enabled=True,
+            input_schema={"type":"object","properties":{"source":{"type":"string"},"sourceHandle":{"type":"string"},"target":{"type":"string"},"targetHandle":{"type":"string"}},"required":["source","target"]}
+        ))
+        self.register_tool(MCPToolDefinition(
+            name="canvas_execute",
+            description="[画布] 执行画布 DAG，可指定 target_ids 仅执行选中",
+            category="workflow",
+            icon="Play",
+            author="Canvas Engine",
+            is_enabled=True,
+            input_schema={"type":"object","properties":{"target_ids":{"type":"array","items":{"type":"string"}},"project_id":{"type":"string"}},"required":[]}
+        ))
+
     def register_tool(self, tool: MCPToolDefinition):
         self.tools[tool.name] = tool
 
@@ -867,8 +923,10 @@ class MCPServerRegistry:
                         raise ValueError("请提供 doc_text / doc_url / curl / openapi_url 或 definition")
                     from app.pipelines.llm_service import llm_service as _llm
                     system_prompt = """你是一个 API 集成专家。解析用户提供的生成类 API 文档并输出 ProviderDefinition JSON。
-严格输出 JSON（无 markdown），键：name, description, transport{method,url,headers,timeout}, auth{type,header_name,query_name,prefix}, mapping{request_template{model,prompt,negative_prompt,size,seed}, response_mappings{image_url:data[0].url}}, health_check{url,method}, models, default_model。
-transport.url 必须完整 https；auth.type 区分 bearer/apikey_header/apikey_query/none；request_template 用 {prompt}{negative_prompt}{width}{height}{size}{seed}{model}{api_key} 占位；response_mappings 路径如 data[0].url。"""
+严格输出 JSON（无 markdown），键：name, description, transport{method,url,headers,timeout}, auth{type,header_name,query_name,prefix}, mapping{request_template{model,prompt,negative_prompt,size,seed}, response_mappings{image_url:data[0].url}}, health_check{url,method}, models, default_model, input_schema{properties{prompt:x-handle:text, reference_images:array uri x-handle:image}}, output_schema{properties{image_url:x-handle:image}}。
+transport.url 必须完整 https；auth.type 区分 bearer/apikey_header/apikey_query/none；request_template 用 {prompt}{negative_prompt}{width}{height}{size}{seed}{model}{api_key} 占位；response_mappings 路径如 data[0].url。
+input_schema 必须含 x-handle：image→image, video→video, audio→audio, text→text；video 需 prompt:text + first_frame:image + reference_images:image[]，image 需 prompt:text + reference_images:image[]。
+output_schema 需对应 kind：image→image_url x-handle:image, video→video_url x-handle:video, audio→audio_url x-handle:audio。"""
                     user_prompt = f"kind: {kind}\nname_hint: {name}\n\nAPI 文档:\n{full_doc[:5000]}"
                     parsed = await _llm.chat_json(system_prompt=system_prompt, user_prompt=user_prompt, temperature=0.2)
                     if not isinstance(parsed, dict):
@@ -876,6 +934,10 @@ transport.url 必须完整 https；auth.type 区分 bearer/apikey_header/apikey_
                     import uuid as _uuid2
                     pid = f"prov_{_uuid2.uuid4().hex[:8]}"
                     parsed["id"] = pid
+                    # 智能纠正 kind：若 LLM 误判 image 但 doc 含 video 特征则纠正
+                    _inf = _infer_kind_from_doc(full_doc, parsed.get("transport", {}).get("url","") if isinstance(parsed.get("transport"), dict) else "")
+                    if _inf and _inf != kind and kind in (None, "", "image") and _inf == "video":
+                        kind = _inf
                     parsed["kind"] = kind
                     if not parsed.get("name"):
                         parsed["name"] = name
@@ -886,6 +948,21 @@ transport.url 必须完整 https；auth.type 区分 bearer/apikey_header/apikey_
                     parsed["raw_api_doc"] = full_doc[:4000]
                     if api_key:
                         parsed.setdefault("auth", {})["key_env"] = f"CUSTOM_PROVIDER_{pid}"
+                    # 兜底输入输出 Schema（含 x-handle 供画布连线）
+                    if not parsed.get("input_schema") or not parsed["input_schema"].get("properties"):
+                        if kind == "image":
+                            parsed["input_schema"] = {"type":"object","properties":{"prompt":{"type":"string","x-handle":"text"},"reference_images":{"type":"array","items":{"type":"string","format":"uri"},"x-handle":"image"}},"required":["prompt"]}
+                        elif kind == "video":
+                            parsed["input_schema"] = {"type":"object","properties":{"prompt":{"type":"string","x-handle":"text"},"first_frame":{"type":"string","format":"uri","x-handle":"image"},"reference_images":{"type":"array","items":{"type":"string","format":"uri"},"x-handle":"image"}},"required":["prompt"]}
+                        elif kind == "audio":
+                            parsed["input_schema"] = {"type":"object","properties":{"text":{"type":"string","x-handle":"text"}},"required":["text"]}
+                    if not parsed.get("output_schema") or not parsed["output_schema"].get("properties"):
+                        if kind == "image":
+                            parsed["output_schema"] = {"type":"object","properties":{"image_url":{"type":"string","format":"uri","x-handle":"image"}}}
+                        elif kind == "video":
+                            parsed["output_schema"] = {"type":"object","properties":{"video_url":{"type":"string","format":"uri","x-handle":"video"}}}
+                        elif kind == "audio":
+                            parsed["output_schema"] = {"type":"object","properties":{"audio_url":{"type":"string","format":"uri","x-handle":"audio"}}}
                     from app.models.provider_definition import ProviderDefinition as _PD2
                     from app.providers.custom.manager import custom_provider_manager as _mgr2
                     pd2 = _PD2.model_validate(parsed)
@@ -970,6 +1047,11 @@ transport.url 必须完整 https；auth.type 区分 bearer/apikey_header/apikey_
                         pass
                 _unreg(pid, kind=kind)
                 result = {"status": "deleted", "provider_id": pid}
+
+            elif tool_name in ("canvas_query","canvas_create_node","canvas_update_node","canvas_connect","canvas_execute"):
+                # 画布工具为前端透传型：返回指令由前端 ReactFlow 执行，Agent 仅需感知与编排
+                # 此处仅回显指令，前端监听 tool_calls 落盘
+                result = {"tool": tool_name, "arguments": arguments, "hint": "前端画布将执行此指令", "directive": True}
 
             elif tool_name == "director_3d_stage_plan":
                 framing = arguments.get("framing") or "medium"

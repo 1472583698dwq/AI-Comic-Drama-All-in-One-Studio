@@ -47,7 +47,7 @@ export const TimelineExportNode: React.FC<NodeProps> = ({ data, id }) => {
   };
 
   return (
-    <div className="w-[360px] bg-surface border-2 border-brand/40 rounded-2xl shadow-xl overflow-hidden">
+    <div className="w-[360px] bg-[#1A1A22] border-2 border-brand/40 rounded-2xl shadow-xl overflow-hidden">
       <div className="px-3 py-2 bg-gradient-to-r from-brand to-violet-600 border-b border-brand/30 flex items-center gap-1.5">
         <Film className="w-3.5 h-3.5 text-white"/><span className="text-xs font-bold text-white">时间线 / 剪映导出</span>
         <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-black/30 text-white">Jianying Draft</span>

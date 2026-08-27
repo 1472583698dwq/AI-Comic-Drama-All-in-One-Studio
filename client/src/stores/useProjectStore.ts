@@ -94,11 +94,33 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     const newScenes = proj.scenes.map((sc) => ({
       ...sc,
-      shots: sc.shots.map((sh) => (sh.id === shotId ? { ...sh, ...updates } : sh)),
+      shots: sc.shots.map((sh) => {
+        if (sh.id !== shotId) return sh;
+        const merged: any = { ...sh, ...updates };
+        // 历史：image_url/video_url 变更时追加
+        if ((updates as any).image_url && (updates as any).image_url !== sh.image_url) {
+          const hist = [...(sh.history || [])];
+          if (sh.image_url) hist.push({ image_url: sh.image_url, ts: new Date().toISOString(), provider: (sh as any).image_provider });
+          if (hist.length > 5) hist.shift();
+          merged.history = [...hist, { image_url: (updates as any).image_url, ts: new Date().toISOString(), provider: (updates as any).image_provider || (sh as any).image_provider }];
+          if (merged.history.length > 6) merged.history = merged.history.slice(-6);
+        }
+        if ((updates as any).video_url && (updates as any).video_url !== sh.video_url) {
+          const hist = [...(merged.history || sh.history || [])];
+          hist.push({ video_url: (updates as any).video_url, ts: new Date().toISOString(), provider: (updates as any).video_provider || (sh as any).video_provider });
+          if (hist.length > 6) hist.splice(0, hist.length - 6);
+          merged.history = hist;
+        }
+        return merged;
+      }),
     }));
 
     const total = newScenes.flatMap((s) => s.shots).reduce((sum, sh) => sum + sh.duration, 0);
-    set({ project: { ...proj, scenes: newScenes }, totalDuration: total });
+    const nextProj = { ...proj, scenes: newScenes };
+    set({ project: nextProj, totalDuration: total });
+    // 自动持久化
+    const pid = nextProj.id || get().activeProjectId;
+    if (pid) apiService.saveProjectContent(pid, nextProj).catch(()=>{});
   },
 
   generateShotVideo: async (shotId: string, options) => {

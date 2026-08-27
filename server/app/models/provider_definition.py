@@ -74,6 +74,9 @@ class ProviderDefinition(BaseModel):
     params_schema: Optional[Dict[str, Any]] = None
     # 默认参数值
     default_params: Dict[str, Any] = Field(default_factory=dict)
+    # 输入输出 Schema（驱动画布句柄，含 x-handle 标注）
+    input_schema: Optional[Dict[str, Any]] = None
+    output_schema: Optional[Dict[str, Any]] = None
 
     # 额外元信息
     doc_url: Optional[str] = None
@@ -109,6 +112,8 @@ class ProviderDefinition(BaseModel):
             "default_model": self.default_model,
             "params_schema": self.params_schema,
             "default_params": self.default_params,
+            "input_schema": self.input_schema,
+            "output_schema": self.output_schema,
             "transport": self.transport.model_dump(),
             "auth": {**self.auth.model_dump(), "has_key": bool(self.auth.key_env)},
             "health_check": self.health_check.model_dump(),

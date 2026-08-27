@@ -26,6 +26,51 @@ def _sanitize_for_frontend(pd: ProviderDefinition) -> Dict[str, Any]:
     return info
 
 
+def _infer_kind_from_doc(doc: str, url: str = "") -> Optional[str]:
+    low = f"{doc or ''} {url or ''}".lower()
+    if any(k in low for k in ["video", "minimax_h3", "lightx2v", "kling", "vidu", "hailuo", "wanx", "r2v", "i2v", "t2v", "comfyui_workflow"]):
+        # 若同时含 image 且明确为 image 则保留 image，否则推断 video
+        if "image" in low and "video" not in low:
+            return "image"
+        if any(v in low for v in ["video", "h3", "lightx2v", "kling"]):
+            return "video"
+    if any(k in low for k in ["audio", "tts", "voice", "speech", "sovits", "cosyvoice"]):
+        return "audio"
+    return None
+
+def _default_input_schema(kind: str) -> Dict[str, Any]:
+    if kind == "image":
+        return {"type":"object","properties":{
+            "prompt":{"type":"string","description":"画面提示词（文生图必填）","x-handle":"text"},
+            "negative_prompt":{"type":"string","description":"负向提示词","x-handle":"text"},
+            "reference_images":{"type":"array","items":{"type":"string","format":"uri"},"description":"参考图（多图）","x-handle":"image"},
+        },"required":["prompt"]}
+    elif kind == "video":
+        return {"type":"object","properties":{
+            "prompt":{"type":"string","description":"运动/运镜描述","x-handle":"text"},
+            "first_frame":{"type":"string","format":"uri","description":"首帧图像","x-handle":"image"},
+            "reference_images":{"type":"array","items":{"type":"string","format":"uri"},"description":"参考图像集（R2V 多图）","x-handle":"image"},
+            "reference_audios":{"type":"array","items":{"type":"string","format":"uri"},"description":"参考音频","x-handle":"audio"},
+            "reference_videos":{"type":"array","items":{"type":"string","format":"uri"},"description":"参考视频","x-handle":"video"},
+        },"required":["prompt"]}
+    elif kind == "audio":
+        return {"type":"object","properties":{
+            "text":{"type":"string","description":"合成文本","x-handle":"text"},
+            "reference_audio":{"type":"string","format":"uri","description":"参考音频（克隆）","x-handle":"audio"},
+        },"required":["text"]}
+    else:
+        return {"type":"object","properties":{"prompt":{"type":"string","x-handle":"text"}},"required":["prompt"]}
+
+def _default_output_schema(kind: str) -> Dict[str, Any]:
+    if kind == "image":
+        return {"type":"object","properties":{"image_url":{"type":"string","format":"uri","description":"生成图像URL","x-handle":"image"}},"required":["image_url"]}
+    elif kind == "video":
+        return {"type":"object","properties":{"video_url":{"type":"string","format":"uri","description":"生成视频URL","x-handle":"video"}},"required":["video_url"]}
+    elif kind == "audio":
+        return {"type":"object","properties":{"audio_url":{"type":"string","format":"uri","description":"生成音频URL","x-handle":"audio"}},"required":["audio_url"]}
+    else:
+        return {"type":"object","properties":{"output":{"type":"string","x-handle":"text"}}}
+
 def _default_params_schema(kind: str) -> Dict[str, Any]:
     if kind == "image":
         return {
@@ -220,9 +265,13 @@ async def create_provider(req: ProviderCreateRequest):
 
     try:
         pd = ProviderDefinition.model_validate(data)
-        # 若未提供参数 schema，补默认
+        # 若未提供参数/输入输出 schema，补默认
         if not pd.params_schema or not pd.params_schema.get("properties"):
             pd.params_schema = _default_params_schema(pd.kind)
+        if not pd.input_schema or not pd.input_schema.get("properties"):
+            pd.input_schema = _default_input_schema(pd.kind)
+        if not pd.output_schema or not pd.output_schema.get("properties"):
+            pd.output_schema = _default_output_schema(pd.kind)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Provider 定义校验失败: {e}")
 
@@ -439,6 +488,10 @@ async def import_provider_from_doc(req: ProviderImportRequest):
             pd = ProviderDefinition.model_validate(data)
             if not pd.params_schema or not pd.params_schema.get("properties"):
                 pd.params_schema = _default_params_schema(pd.kind)
+            if not pd.input_schema or not pd.input_schema.get("properties"):
+                pd.input_schema = _default_input_schema(pd.kind)
+            if not pd.output_schema or not pd.output_schema.get("properties"):
+                pd.output_schema = _default_output_schema(pd.kind)
             saved = custom_provider_manager.save_definition(pd)
             if req.api_key:
                 _save_api_key(saved.id, req.api_key)
@@ -500,7 +553,9 @@ async def import_provider_from_doc(req: ProviderImportRequest):
   "models": ["model-a", "model-b"],
   "default_model": "model-a",
   "params_schema": {"type":"object","properties":{"steps":{"type":"integer"},"cfg":{"type":"number"}}},
-  "default_params": {}
+  "default_params": {},
+  "input_schema": {"type":"object","properties":{"prompt":{"type":"string","description":"提示词","x-handle":"text"},"reference_images":{"type":"array","items":{"type":"string","format":"uri"},"description":"参考图","x-handle":"image"}},"required":["prompt"]},
+  "output_schema": {"type":"object","properties":{"image_url":{"type":"string","format":"uri","x-handle":"image"}}}
 }
 规则：
 - transport.url 必须为完整 https URL，从文档中提取
@@ -508,7 +563,9 @@ async def import_provider_from_doc(req: ProviderImportRequest):
 - mapping.request_template 使用 {prompt} {negative_prompt} {width} {height} {size} {seed} {model} {api_key} 占位
 - mapping.response_mappings 的 path 使用简化 JSONPath：如 data[0].url 或 images[0].url
 - 若文档未提及则合理推断常见路径
-只输出 JSON，不要解释。
+- input_schema 必须用 x-handle 标注句柄：image→image, video→video, audio→audio, text/prompt→text；video 需含 prompt:text, first_frame:image, reference_images:image[]（多图）, reference_audios:audio[]；image 需含 prompt:text, reference_images:image[]
+- output_schema 对应 kind：image→image_url x-handle:image, video→video_url x-handle:video, audio→audio_url x-handle:audio
+ 只输出 JSON，不要解释。
 """
         user_prompt = f"kind: {req.kind}\nname_hint: {req.name or ''}\n\nAPI 文档/示例:\n{doc_content[:6000]}"
         parsed = await llm_service.chat_json(system_prompt=system_prompt, user_prompt=user_prompt, temperature=0.2)
@@ -518,8 +575,22 @@ async def import_provider_from_doc(req: ProviderImportRequest):
         # 合并
         merged: Dict[str, Any] = {}
         merged.update(parsed)
-        # 强制覆盖 kind/name
-        merged["kind"] = req.kind or merged.get("kind", "image")
+        # 智能推断 kind：若 LLM 返回的 kind 与文档明显不符（如 H3 误判为 image），以文档为准
+        inferred = _infer_kind_from_doc(doc_content, parsed.get("transport", {}).get("url","") if isinstance(parsed.get("transport"), dict) else "")
+        if inferred and inferred != (req.kind or merged.get("kind", "image")):
+            # 若请求显式指定 kind 且与推断冲突，优先推断（避免 H3 归为 image）
+            if req.kind in (None, "", "image") and inferred == "video":
+                merged["kind"] = inferred
+            elif req.kind and inferred != req.kind:
+                # 记录但仍尊重 LLM 的 transport.url 证据，若 LLM 说 image 但 URL 含 video 则纠正
+                if "video" in (parsed.get("transport", {}).get("url","") if isinstance(parsed.get("transport"), dict) else "").lower():
+                    merged["kind"] = "video"
+                else:
+                    merged["kind"] = req.kind or merged.get("kind", "image")
+            else:
+                merged["kind"] = req.kind or merged.get("kind", "image")
+        else:
+            merged["kind"] = req.kind or merged.get("kind", "image")
         if req.name:
             merged["name"] = req.name
         elif not merged.get("name"):
@@ -543,6 +614,10 @@ async def import_provider_from_doc(req: ProviderImportRequest):
         pd = ProviderDefinition.model_validate(merged)
         if not pd.params_schema or not pd.params_schema.get("properties"):
             pd.params_schema = _default_params_schema(pd.kind)
+        if not pd.input_schema or not pd.input_schema.get("properties"):
+            pd.input_schema = _default_input_schema(pd.kind)
+        if not pd.output_schema or not pd.output_schema.get("properties"):
+            pd.output_schema = _default_output_schema(pd.kind)
         saved = custom_provider_manager.save_definition(pd)
         if req.api_key:
             _save_api_key(saved.id, req.api_key)

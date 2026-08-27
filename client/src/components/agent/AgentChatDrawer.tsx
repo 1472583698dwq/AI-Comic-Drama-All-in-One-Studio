@@ -71,6 +71,9 @@ export const AgentChatDrawer: React.FC = () => {
     },
   ]);
   const [isThinking, setIsThinking] = useState(false);
+  const [thinkingText, setThinkingText] = useState("");
+  const [isThinkingStreaming, setIsThinkingStreaming] = useState(false);
+  const [showThinking, setShowThinking] = useState(true);
   const [wsConnected, setWsConnected] = useState(false);
 
   // Position & Dragging State
@@ -171,6 +174,17 @@ export const AgentChatDrawer: React.FC = () => {
 
           if (event === 'agent_thinking') {
             setIsThinking(true);
+          } else if (event === 'agent_thinking_start') {
+            setIsThinking(true);
+            setIsThinkingStreaming(true);
+            setThinkingText("");
+            setShowThinking(true);
+          } else if (event === 'agent_thinking_chunk') {
+            setIsThinking(true);
+            setIsThinkingStreaming(true);
+            setThinkingText(prev=> prev + (data.delta || ""));
+          } else if (event === 'agent_thinking_end') {
+            setIsThinkingStreaming(false);
           } else if (event === 'tool_calling') {
             setMessages((prev) => [
               ...prev,
@@ -292,6 +306,9 @@ export const AgentChatDrawer: React.FC = () => {
     setInputText('');
     if (inputRef.current) { inputRef.current.style.height = 'auto'; }
     setIsThinking(true);
+    setThinkingText("");
+    setIsThinkingStreaming(false);
+    setShowThinking(true);
 
     const shots = project?.scenes.flatMap((s) => s.shots) || [];
     const activeShot = shots.find((s) => s.id === activeShotId) || shots[0];
@@ -614,8 +631,44 @@ export const AgentChatDrawer: React.FC = () => {
               </div>
             ))}
 
-            {isThinking && (
-              <div className="flex items-center space-x-2 text-gray-400 text-xs py-2 px-1">
+            {/* 思考过程流式展示 */}
+            {(isThinking || thinkingText) && (
+              <div className="rounded-2xl border border-violet-500/20 bg-violet-500/5 overflow-hidden">
+                <button onClick={()=> setShowThinking(v=>!v)} className="w-full px-3 py-2 flex items-center justify-between text-[11px] font-bold text-violet-300 hover:bg-violet-500/10">
+                  <span className="flex items-center gap-1.5">
+                    <span className={`w-2 h-2 rounded-full ${isThinkingStreaming ? 'bg-violet-400 animate-ping' : 'bg-violet-400'}`} />
+                    思考过程 {isThinkingStreaming && <span className="font-normal text-violet-400/70">· 流式输出中…</span>}
+                  </span>
+                  <span className="text-[10px] text-violet-400/60">{showThinking ? '收起' : '展开'} {thinkingText ? `· ${thinkingText.length}字` : ''}</span>
+                </button>
+                {showThinking && (
+                  <div className="px-3 pb-3 pt-1">
+                    {thinkingText ? (
+                      <div className="text-[11px] leading-relaxed text-violet-100 whitespace-pre-wrap max-h-[120px] overflow-y-auto custom-scrollbar bg-black/20 rounded-xl p-2 border border-violet-500/10">
+                        {thinkingText}
+                        {isThinkingStreaming && <span className="inline-block w-1.5 h-3 bg-violet-400 ml-1 animate-pulse align-middle" />}
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-violet-300/70 flex items-center gap-1.5 py-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-ping" /> 导演正在分析指令与画布上下文…
+                      </div>
+                    )}
+                    {/* 工具调用时间线简要 */}
+                    {messages.filter(m=> m.toolCall).slice(-3).length>0 && (
+                      <div className="mt-2 space-y-1">
+                        {messages.filter(m=> m.toolCall).slice(-3).map(m=>(
+                          <div key={m.id} className="text-[10px] font-mono flex items-center gap-1.5 text-violet-300/70">
+                            <Cpu className="w-3 h-3" /> {m.toolCall?.toolName} <span className={m.toolCall?.status==='completed'?'text-emerald-400': m.toolCall?.status==='error'?'text-red-400':'text-amber-400'}>{m.toolCall?.status}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+            {isThinking && !thinkingText && !isThinkingStreaming && (
+              <div className="flex items-center space-x-2 text-gray-400 text-xs py-1 px-1">
                 <span className="w-2 h-2 rounded-full bg-brand-light animate-ping" />
                 <span className="text-[11px]">导演 Agent 正在思考与调用 MCP 工具...</span>
               </div>

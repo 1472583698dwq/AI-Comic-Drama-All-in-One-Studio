@@ -3,7 +3,7 @@ import {
   ReactFlow, Background, Controls, MiniMap, useNodesState, useEdgesState, addEdge, Connection, Edge, Node, ReactFlowProvider, useReactFlow
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Search, Sparkles, Upload, Image as ImageIcon, Film, Users, Box, Library, Cpu, BookOpen, X, Save, Download, Wand2, Plug, Globe, Mic, Video as VideoIcon } from 'lucide-react';
+import { Search, Sparkles, Upload, Image as ImageIcon, Film, Users, Box, Library, Cpu, BookOpen, X, Save, Download, Wand2, Plug, Globe, Mic, Video as VideoIcon, Type } from 'lucide-react';
 import { useProjectListStore } from '../../stores/useProjectListStore';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { useCanvasStore } from '../../stores/useCanvasStore';
@@ -17,7 +17,10 @@ import { VideoNode } from './nodes/VideoNode';
 import { TTSNode } from './nodes/TTSNode';
 import { TimelineExportNode } from './nodes/TimelineExportNode';
 import { ProviderNode, ProviderImageNode, ProviderVideoNode, ProviderAudioNode } from './nodes/ProviderNode';
+import { LoadImageNode, LoadImageBatchNode, LoadVideoNode, LoadAudioNode, TextPromptNode } from './nodes/LoaderNodes';
 import { WorkflowInspectorModal } from '../workflow/WorkflowInspectorModal';
+import { NODE_SPECS, getNodeSpec } from './nodeRegistry';
+import { handleColor } from './utils/dynamicHandles';
 
 const nodeTypes: any = {
   'shot-card': ShotCardNode,
@@ -34,6 +37,11 @@ const nodeTypes: any = {
   'provider-audio': ProviderAudioNode,
   'provider': ProviderNode,
   'provider-llm': ProviderNode,
+  'load-image': LoadImageNode,
+  'load-image-batch': LoadImageBatchNode,
+  'load-video': LoadVideoNode,
+  'load-audio': LoadAudioNode,
+  'text-prompt': TextPromptNode,
 };
 
 let idSeq = 0;
@@ -42,6 +50,11 @@ const genId = (p: string) => `${p}_${Date.now()}_${++idSeq}`;
 const NODE_LIBRARY = [
   { type: 'brief', label: '灵感简报', desc: '粘贴小说/策划', icon: BookOpen, color: 'text-amber-400' },
   { type: 'script-split', label: '剧本拆解', desc: 'MiniMax LLM', icon: Sparkles, color: 'text-brand' },
+  { type: 'text-prompt', label: '文本提示词', desc:'提示词源', icon: Type as any, color:'text-sky-400' },
+  { type: 'load-image', label: '加载图像', desc:'单张参考', icon: ImageIcon, color:'text-violet-400' },
+  { type: 'load-image-batch', label:'批量图像', desc:'多张参考', icon: ImageIcon, color:'text-violet-400' },
+  { type: 'load-video', label:'加载视频', desc:'参考视频', icon: Film, color:'text-orange-400' },
+  { type: 'load-audio', label:'加载音频', desc:'参考音频', icon: Library, color:'text-pink-400' },
   { type: 'shot-card', label: '分镜卡', desc: '首帧+视频', icon: Film, color: 'text-brand-light' },
   { type: 'comfy-workflow', label: 'ComfyUI工作流', desc: '本地强控', icon: Cpu, color: 'text-violet-400' },
   { type: 'provider-image', label: '生图源', desc: '多源解耦', icon: Cpu, color: 'text-violet-400' },
@@ -59,7 +72,7 @@ const InnerCanvas: React.FC = () => {
   const { activeProjectId } = useProjectListStore();
   const pid = activeProjectId || project?.id || null;
   const { loadCanvas, debouncedSave } = useCanvasSync(pid);
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, getViewport } = useReactFlow();
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [workflows, setWorkflows] = useState<any[]>([]);
@@ -105,10 +118,34 @@ const InnerCanvas: React.FC = () => {
     // 暴露给 ProviderNode 拖拽后刷新
   }, [pid]);
 
-  // 自动保存 + 同步到 canvasStore 供 Agent 感知
+  // 自动保存 + 同步到 canvasStore 供 Agent 感知 + 视口持久化（P5）
+  const histRef = useRef<{nodes:any[],edges:any[]}[]>([]);
+  // 历史栈（P5）：50 步
   useEffect(() => {
     if (!pid || !loadedRef.current) return;
-    const snap = { nodes, edges, viewport: {}, updated_at: new Date().toISOString() };
+    histRef.current.push({nodes: JSON.parse(JSON.stringify(nodes)), edges: JSON.parse(JSON.stringify(edges))});
+    if(histRef.current.length>50) histRef.current.shift();
+  }, [nodes, edges]);
+  useEffect(()=>{
+    const onKey = (e:KeyboardEvent)=>{
+      if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z'){
+        e.preventDefault();
+        const prev = histRef.current.pop();
+        if(prev){
+          const cur = histRef.current[histRef.current.length-1];
+          if(cur){ setNodes(cur.nodes); setEdges(cur.edges as any); }
+          else if(prev){ setNodes(prev.nodes); setEdges(prev.edges as any); }
+        }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return ()=> window.removeEventListener('keydown', onKey);
+  }, []);
+  useEffect(() => {
+    if (!pid || !loadedRef.current) return;
+    let vp:any = {};
+    try{ vp = getViewport(); } catch{}
+    const snap = { nodes, edges, viewport: vp, updated_at: new Date().toISOString() };
     debouncedSave(snap);
     try { useCanvasStore.getState().setFromFlow(nodes as any, edges as any); } catch {}
   }, [nodes, edges]);
@@ -185,32 +222,81 @@ const InnerCanvas: React.FC = () => {
     }
   }, [nodes, edges, pid]);
 
+  // P2: 边校验 + 标签 + Provider 透传
+  const isValidConnection: any = useCallback((connection:any)=>{
+    const c: Connection = connection;
+    // 基于 NodeSpec 校验类型兼容
+    const src = nodes.find(n=> n.id===c.source);
+    const tgt = nodes.find(n=> n.id===c.target);
+    if(!src || !tgt) return true;
+    const srcSpec = getNodeSpec(src.type || '');
+    const tgtSpec = getNodeSpec(tgt.type || '');
+    if(!srcSpec || !tgtSpec) return true;
+    const srcOut = srcSpec.outputs.find(h=> h.id===c.sourceHandle) || srcSpec.outputs[0];
+    const tgtIn = tgtSpec.inputs.find(h=> h.id===c.targetHandle) || tgtSpec.inputs[0];
+    if(!srcOut || !tgtIn) return true;
+    // 允许 text→text, image→image, video→video, audio→audio, 宽松：text 可连所有 prompt 类
+    if(srcOut.type===tgtIn.type) return true;
+    if(tgtIn.type==='text' && srcOut.type==='text') return true;
+    // provider 型输出可连任意含 provider 的输入
+    if(srcOut.id==='provider' && tgtIn.id==='provider') return true;
+    return srcOut.type===tgtIn.type;
+  }, [nodes]);
+
   const onConnect = useCallback((params: Connection)=> {
-    setEdges(es=> addEdge({...params, type:'smoothstep', animated:true, style:{stroke:'#7c3aed'}}, es));
-    // 解耦：若 Provider 节点连入消费节点，自动注入 provider_id 到目标节点
+    // 校验
+    if(!isValidConnection(params)){
+      alert('连线类型不匹配：请检查输出/输入类型（image/audio/video/text/provider）');
+      return;
+    }
+    const srcHandle = params.sourceHandle || 'provider';
+    const tgtHandle = params.targetHandle || 'provider';
+    const label = `${srcHandle} → ${tgtHandle}`;
+    setEdges(es=> addEdge({...params, type:'smoothstep', animated:true, label, data:{mapping:`${srcHandle}->${tgtHandle}`}} as any, es as any));
     setTimeout(()=> {
       const sourceId = params.source;
       const targetId = params.target;
       if (!sourceId || !targetId) return;
-      // 查找源节点类型与 provider 信息
-      // 需在 setNodes 回调中读取最新 nodes
       setNodes(nds=> {
         const srcNode = nds.find(n=> n.id===sourceId);
         const tgtNode = nds.find(n=> n.id===targetId);
         if (!srcNode || !tgtNode) return nds;
         const srcType = srcNode.type || '';
+        const tgtType = tgtNode.type || '';
         const isProvider = srcType.startsWith('provider');
-        const isConsumer = ['shot-card','video','tts','comfy-workflow','image','generate-image'].includes(tgtNode.type || '');
-        if (isProvider && isConsumer) {
+        const isLoad = srcType.startsWith('load-') || srcType==='text-prompt';
+        // Provider 注入
+        if (isProvider) {
           const provId = (srcNode.data as any)?.provider_id || (srcNode.data as any)?.provider || srcNode.id;
           const model = (srcNode.data as any)?.model || (srcNode.data as any)?.default_model;
-          // 更新目标节点
-          return nds.map(n=> n.id===targetId ? { ...n, data: { ...n.data, provider: provId, provider_id: provId, model: model || n.data?.model, _providerName: (srcNode.data as any)?.definition?.display_name || (srcNode.data as any)?.definition?.name || provId } } : n);
+          const def = (srcNode.data as any)?.definition;
+          const params = (srcNode.data as any)?.default_params || (srcNode.data as any)?.params;
+          return nds.map(n=> n.id===targetId ? { ...n, data: { ...n.data, provider: provId, provider_id: provId, model: model || n.data?.model, definition: def || n.data?.definition, provider_params: params || n.data?.provider_params, _providerName: def?.display_name || def?.name || provId } } : n);
         }
-        return nds;
+        // Load* / TextPrompt 注入对应字段
+        if (isLoad) {
+          const srcData:any = srcNode.data;
+          const patch:any = {};
+          if(srcType==='load-image') patch.first_frame = srcData.image || srcData.url;
+          if(srcType==='load-image-batch') patch.reference_images = srcData.images || srcData.image_list;
+          if(srcType==='load-video') patch.video = srcData.video || srcData.url;
+          if(srcType==='load-audio') patch.audio = srcData.audio || srcData.url;
+          if(srcType==='text-prompt') patch.prompt = srcData.prompt || srcData.text;
+          // 兼容 r2v 的 reference_images 为 image[] 类型
+          if(params.targetHandle==='reference_images' && srcType==='load-image') patch.reference_images = [srcData.image || srcData.url];
+          if(params.targetHandle==='reference_images' && srcType==='load-image-batch') patch.reference_images = srcData.images;
+          if(params.targetHandle==='first_frame' && srcType==='load-image') patch.first_frame = srcData.image;
+          if(params.targetHandle==='prompt' && srcType==='text-prompt') patch.prompt = srcData.prompt;
+          if(params.targetHandle==='text' && srcType==='text-prompt') patch.text = srcData.prompt;
+          if(Object.keys(patch).length) {
+            return nds.map(n=> n.id===targetId ? { ...n, data: {...n.data, ...patch, _upstream: {...(n.data as any)._upstream, ...patch} } } : n);
+          }
+        }
+        // 通用：记录上游数据
+        return nds.map(n=> n.id===targetId ? { ...n, data: {...n.data, _upstream: {...(n.data as any)._upstream, _connectedFrom: sourceId, _lastHandle: `${srcHandle}→${tgtHandle}`}}} : n);
       });
     }, 0);
-  }, []);
+  }, [isValidConnection]);
 
   const onDrop = useCallback((e: React.DragEvent)=>{
     e.preventDefault();
@@ -241,6 +327,11 @@ const InnerCanvas: React.FC = () => {
     // 默认值
     if (type==='brief') node.data = { ...node.data, brief:'', style_preset:'donghua_xianxia', aspect_ratio:'9:16' };
     if (type==='shot-card') node.data = { ...node.data, image_prompt:'masterpiece, cinematic lighting', action_desc:'', subtitle_text:'' };
+    if (type==='text-prompt') node.data = { ...node.data, prompt:'' };
+    if (type==='load-image') node.data = { ...node.data, image:'' };
+    if (type==='load-image-batch') node.data = { ...node.data, images:[] };
+    if (type==='load-video') node.data = { ...node.data, video:'' };
+    if (type==='load-audio') node.data = { ...node.data, audio:'' };
     if (type && type.startsWith('provider')) {
       const kind = type==='provider-video' ? 'video' : type==='provider-audio' ? 'audio' : 'image';
       node.data = { ...node.data, kind, provider_id: '', model: '' };
@@ -309,7 +400,7 @@ const InnerCanvas: React.FC = () => {
   }
 
   return (
-    <div className="flex-1 flex overflow-hidden bg-[#0a0a0f]">
+    <div data-theme="dark" className="flex-1 flex overflow-hidden bg-[#0a0a0f]">
       {/* 左侧节点仓库 — 280px，卡片化、留白、层级 */}
       <div className="w-[300px] bg-surface border-r border-border flex flex-col shrink-0">
         <div className="h-12 px-4 border-b border-border flex items-center justify-between shrink-0">
@@ -423,10 +514,10 @@ const InnerCanvas: React.FC = () => {
           </div>
         </div>
         <div className="flex-1 relative">
-          <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} nodeTypes={nodeTypes} onSelectionChange={({nodes:sel})=> setSelectedIds(sel.map(n=>n.id))} deleteKeyCode="Delete" fitView className="bg-[#08080B]">
+          <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} isValidConnection={isValidConnection} nodeTypes={nodeTypes} onSelectionChange={({nodes:sel})=> setSelectedIds(sel.map(n=>n.id))} deleteKeyCode="Delete" fitView className="bg-[#08080B]">
             <Background color="#1a1a2e" gap={20}/>
             <Controls className="!bg-surface !border-border" />
-            <MiniMap className="!bg-surface !border-border" nodeColor={(n)=> n.type==='shot-card' ? '#7c3aed' : n.type==='comfy-workflow' ? '#8b5cf6' : '#333'} />
+            <MiniMap className="!bg-surface !border-border" nodeColor={(n:any)=> n.type==='shot-card' ? '#7c3aed' : n.type==='comfy-workflow' ? '#8b5cf6' : String(n.type||'').startsWith('load-') ? '#10b981' : n.type==='text-prompt' ? '#0ea5e9' : '#333'} />
           </ReactFlow>
         </div>
       </div>

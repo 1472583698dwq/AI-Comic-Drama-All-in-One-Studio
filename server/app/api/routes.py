@@ -737,6 +737,13 @@ AGENT_SYSTEM_PROMPT = """你是「AI漫剧导演 Agent」，运行在 MiniMax AI
 18. delete_custom_provider —— 删除自定义 Provider。参数：provider_id
 19. generate_video —— 通用视频生成。参数：prompt, mode(i2v/r2v/t2v), first_frame_url, reference_images, duration, provider
 
+**无限画布（Canvas DAG，可视化编排）：**
+20. canvas_query —— 查询画布摘要与节点清单，感知当前画布状态
+21. canvas_create_node —— 创建节点。参数：type(brief/script-split/shot-card/comfy-workflow/provider-image/provider-video/provider-audio/video/tts/load-image/load-image-batch/load-video/load-audio/text-prompt/director3d/timeline-export), position{x,y}, params(可选内部参数)
+22. canvas_update_node —— 更新节点。参数：node_id, patch(要更新的 data 字段)
+23. canvas_connect —— 连线。参数：source, sourceHandle, target, targetHandle（类型需匹配 image/video/audio/text/provider）
+24. canvas_execute —— 执行画布 DAG。参数：target_ids(可选，仅执行选中), project_id
+
 **策略指引：**
 - 用户说“生成图片/换图/重绘” → 优先 generate_image，可先 list_assets 查找可复用的 scene/prop 风格锚点；若用户指定“用XX生成源/用我的XX模型”，则用对应 provider
 - 用户说“配音/换声线/生成语音” → 优先 generate_voice，根据角色/情绪选 provider 和 voice_id
@@ -745,6 +752,7 @@ AGENT_SYSTEM_PROMPT = """你是「AI漫剧导演 Agent」，运行在 MiniMax AI
 - 如需确认可用 provider/工作流/音色/素材，先调用对应的 list_* 查询工具再决策
 - 可组合调用：例如“生成战斗画面并配怒吼”可同时调用 generate_image + generate_voice
 - 多生成源：画布中每个 Provider 节点可独立存在，生图/视频/TTS 节点通过连线绑定具体 Provider，不再全局单选
+- 用户说“画布/无限画布/连线/节点/批量生成/参考图/用工作流/让画布执行” → 优先 canvas_query 感知画布，再用 canvas_create_node/canvas_connect 编排，最后 canvas_execute 触发。参考图场景必须创建 load-image/load-image-batch 并连到 video.reference_images 或 comfy-workflow 的 image 输入
 
 请严格输出 JSON（无 markdown 杂质）：
 {

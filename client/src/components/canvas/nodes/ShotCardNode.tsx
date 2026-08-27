@@ -40,38 +40,45 @@ export const ShotCardNode: React.FC<NodeProps> = ({ data, id }) => {
   const imgUrl = localData.image_url ? (localData.image_url.startsWith('/') ? API_ORIGIN + localData.image_url : localData.image_url) : '';
   const providerBadge = d.provider || d.provider_id || localData.provider;
 
-  // 动态输入：若连接了 Provider 且其 input_schema 含多图/多音等，自动展示对应 Handle
+  // 动态输入：来自 NodeSpec + Provider input_schema
   const providerDef: any = (d as any).providerDef || (d as any).definition;
-  const dynamicHandles: any[] = providerDef?.input_schema ? Object.entries(providerDef.input_schema.properties || {}).filter(([,def]:any)=> def['x-handle'] || (def.type==='array' && def.items?.format==='uri')).map(([k,def]:any)=>({id:k, label:k, type: (def['x-handle']|| (k.includes('image')?'image':k.includes('audio')?'audio':k.includes('video')?'video':'text'))})) : [];
+  const extraHandles: any[] = providerDef?.input_schema ? Object.entries(providerDef.input_schema.properties || {}).filter(([,def]:any)=> def['x-handle'] || (def.type==='array' && def.items?.format==='uri')).map(([k,def]:any)=>({id:k, label:k, type: (def['x-handle']|| (k.includes('image')?'image':k.includes('audio')?'audio':k.includes('video')?'video':'text'))})) : [];
+  // 使用 nodeRegistry 统一输入（P0）
+  const specInputs = [
+    {id:'provider', label:'生图源', type:'image'},
+    {id:'reference', label:'参考图', type:'image'},
+    {id:'prompt', label:'提示词', type:'text'},
+    {id:'character', label:'角色', type:'text'},
+  ];
+  const allInputs = [...specInputs, ...extraHandles].slice(0,6);
 
   return (
-    <div className="w-[300px] bg-[var(--color-surface)] border border-[var(--color-border)] rounded-2xl shadow-xl overflow-hidden">
-      <div className="px-3 py-2 bg-zinc-900 border-b border-zinc-800 flex items-center justify-between">
+    <div className="w-[300px] bg-[#1A1A22] border border-[#2A2A32] rounded-2xl shadow-xl overflow-hidden">
+      <div className="px-3 py-2 bg-[#121216] border-b border-[#2A2A32] flex items-center justify-between">
         <span className="text-xs font-bold text-white flex items-center gap-1.5"><Film className="w-3.5 h-3.5 text-violet-300"/> 分镜卡 {localData.shot_index ? `#${localData.shot_index}`: ''}</span>
         <span className="flex items-center gap-1">
           {providerBadge && <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-600 text-white font-mono truncate max-w-[90px] border border-white/20" title={String(providerBadge)}>{String(providerBadge).slice(0,12)}</span>}
           <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-zinc-300 border border-white/10">{localData.camera_framing || 'medium'} · {localData.camera_motion || 'push_in'}</span>
         </span>
       </div>
-      <Handle type="target" position={Position.Left} className="!bg-violet-500 !w-3 !h-3 !border-2 !border-white" title="输入" />
-      <Handle type="source" position={Position.Right} className="!bg-violet-500 !w-3 !h-3 !border-2 !border-white" title="输出 image" />
-      <Handle type="target" position={Position.Top} id="provider" className="!bg-brand !w-3 !h-3 !border-2 !border-white" style={{ left: '25%' }} title="接 Provider (动态多模态)" />
-      <Handle type="target" position={Position.Top} id="ref" className="!bg-amber-400 !w-3 !h-3 !border-2 !border-white" style={{ left: '70%' }} title="参考图" />
-      <Handle type="source" position={Position.Bottom} id="image" className="!bg-violet-500 !w-3 !h-3 !border-2 !border-white" style={{ left: '50%' }} title="输出 image" />
-      {/* 动态 Handle 额外展示 */}
-      {dynamicHandles.slice(0,3).map((h:any, idx:number)=> (
-        <Handle key={h.id} type="target" position={Position.Left} id={h.id} className={`!w-3 !h-3 !border-2 !border-white ${h.type==='image'?'!bg-violet-500':h.type==='audio'?'!bg-pink-500':h.type==='video'?'!bg-orange-500':'!bg-sky-500'}`} style={{ top: `${30 + idx*22}%` }} title={`${h.label} (${h.type})`} />
+      {/* 输入：左侧动态 */}
+      {allInputs.map((h:any, idx:number)=> (
+        <Handle key={h.id} type="target" position={Position.Left} id={h.id} className={`!w-3 !h-3 !border-2 !border-white ${h.type==='image'?'!bg-violet-500':h.type==='audio'?'!bg-pink-500':h.type==='video'?'!bg-orange-500':'!bg-sky-500'}`} style={{ top: `${18 + idx*14}%` }} title={`${h.label} (${h.type})`} />
       ))}
+      {/* 输出：右侧 */}
+      <Handle type="source" position={Position.Right} id="image" className="!bg-violet-500 !w-3 !h-3 !border-2 !border-white" style={{ top: '30%' }} title="输出 image" />
+      <Handle type="source" position={Position.Right} id="video" className="!bg-orange-500 !w-3 !h-3 !border-2 !border-white" style={{ top: '55%' }} title="输出 video" />
+      <Handle type="source" position={Position.Right} id="shot" className="!bg-sky-500 !w-3 !h-3 !border-2 !border-white" style={{ top: '80%' }} title="输出 shot" />
 
       <div className="aspect-[9/16] max-h-[220px] bg-zinc-950 relative overflow-hidden flex items-center justify-center">
         {imgUrl ? <img src={imgUrl} alt="" className="w-full h-full object-cover"/> : <div className="text-xs text-zinc-400 flex flex-col items-center gap-1"><ImageIcon className="w-6 h-6 opacity-50"/><span>{generating ? '生成中…' : '暂无画面'}</span></div>}
         {localData.subtitle_text && <div className="absolute bottom-2 left-2 right-2 bg-black/70 backdrop-blur px-2 py-1 rounded text-[11px] text-white text-center border border-white/10">{localData.subtitle_text}</div>}
       </div>
 
-      <div className="p-2.5 space-y-2 bg-[var(--color-surface)]">
-        <textarea value={localData.action_desc || ''} onChange={e=>{ const v=e.target.value; setLocalData((p:any)=>({...p, action_desc:v})); (d.onUpdate as any)?.(id,{action_desc:v}); }} placeholder="画面动作描述…（支持多行）" rows={2} className="w-full bg-[var(--color-surface-secondary)] border border-[var(--color-border)] rounded-xl p-2 text-xs text-[var(--color-text-main)] placeholder:text-zinc-500 focus:outline-none focus:border-violet-500 resize-none"/>
-        <textarea value={localData.image_prompt || ''} onChange={e=>{ const v=e.target.value; setLocalData((p:any)=>({...p,image_prompt:v})); (d.onUpdate as any)?.(id,{image_prompt:v}); }} placeholder="英文画面提示词…（可粘贴长段）" rows={2} className="w-full bg-[var(--color-surface-secondary)] border border-[var(--color-border)] rounded-xl p-2 text-xs font-mono text-[var(--color-text-main)] placeholder:text-zinc-500 focus:outline-none focus:border-violet-500 resize-none"/>
-        {dynamicHandles.length>0 && <div className="text-[10px] text-violet-400 bg-violet-500/10 border border-violet-500/20 rounded-lg px-2 py-1">已接入 {dynamicHandles.map((h:any)=>h.label).join('、')} · 多模态输入就绪</div>}
+      <div className="p-2.5 space-y-2 bg-[#1A1A22]">
+        <textarea value={localData.action_desc || ''} onChange={e=>{ const v=e.target.value; setLocalData((p:any)=>({...p, action_desc:v})); (d.onUpdate as any)?.(id,{action_desc:v}); }} placeholder="画面动作描述…（支持多行）" rows={2} className="w-full bg-[#24242F] border border-[#2A2A32] rounded-xl p-2 text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-violet-500 resize-none"/>
+        <textarea value={localData.image_prompt || ''} onChange={e=>{ const v=e.target.value; setLocalData((p:any)=>({...p,image_prompt:v})); (d.onUpdate as any)?.(id,{image_prompt:v}); }} placeholder="英文画面提示词…（可粘贴长段）" rows={2} className="w-full bg-[#24242F] border border-[#2A2A32] rounded-xl p-2 text-xs font-mono text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-violet-500 resize-none"/>
+        {allInputs.length>0 && <div className="text-[10px] text-violet-400 bg-violet-500/10 border border-violet-500/20 rounded-lg px-2 py-1">已接入 {allInputs.map((h:any)=>h.label).join('、')} · 多模态输入就绪</div>}
         <div className="flex gap-1.5">
           <button onClick={handleGenerate} disabled={generating} className="flex-1 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold flex items-center justify-center gap-1 disabled:opacity-40 shadow-md shadow-violet-600/20">{generating ? <RefreshCw className="w-3 h-3 animate-spin"/> : <Sparkles className="w-3 h-3"/>}{generating ? '生成中' : '生成首帧'}</button>
           <button onClick={()=>{

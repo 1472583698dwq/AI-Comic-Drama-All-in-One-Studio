@@ -460,8 +460,17 @@ async def run_agent_with_langchain(
                 except Exception as e3:
                     raise e3
 
-            # 处理工具调用
+            # 处理工具调用 — 先流式推送思考过程（P 思考展示）
             if tool_calls:
+                if content and content.strip() and websocket and streaming:
+                    try:
+                        await websocket.send_json({"event": "agent_thinking_start"})
+                        for i in range(0, len(content), 6):
+                            await websocket.send_json({"event": "agent_thinking_chunk", "delta": content[i:i+6]})
+                            await asyncio.sleep(0.012)
+                        await websocket.send_json({"event": "agent_thinking_end"})
+                    except Exception:
+                        pass
                 # 通知前端开始工具调用
                 # 先将 AIMessage 加入历史
                 messages.append(AIMessage(content=content or "", tool_calls=tool_calls))

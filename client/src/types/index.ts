@@ -115,6 +115,14 @@ export interface StoryboardShot {
   camera_roll_deg?: number;
   cast_layout?: CastLayout;
   props_config?: StagePropType[];
+  // P0+: Provider 驱动落盘
+  image_provider?: string;
+  video_provider?: string;
+  audio_provider?: string;
+  provider_params?: { image?: Record<string,any>; video?: Record<string,any>; audio?: Record<string,any> };
+  dynamic_inputs?: Record<string,any>;
+  workflow_id?: string;
+  history?: Array<{ image_url?: string; video_url?: string; audio_url?: string; ts: string; provider?: string }>;
 }
 
 export interface Scene {

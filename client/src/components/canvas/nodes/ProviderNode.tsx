@@ -124,19 +124,29 @@ export const ProviderNode: React.FC<NodeProps> = ({ data, id, type }) => {
   const Icon = kindMeta.icon;
   const isBuiltin = selectedDef?.builtin;
 
-  // 动态生成输入 Handles：基于 input_schema 的 x-handle 或类型推断
-  const dynamicInputs = selectedDef?.input_schema?.properties ? Object.entries(selectedDef.input_schema.properties).filter(([, def]: any)=> {
+  // 动态 I/O：基于 input_schema/output_schema 的 x-handle（支持多图/多音）
+  const inputProps = selectedDef?.input_schema?.properties || {};
+  const outputProps = selectedDef?.output_schema?.properties || {};
+  const dynamicInputs = Object.entries(inputProps).filter(([, def]: any)=> {
     const h = (def as any)['x-handle'];
-    if (h && ['image','images','reference_images','audio','audios','reference_audios','video','videos','reference_videos'].includes(h)) return true;
+    if (h && ['image','images','reference_images','audio','audios','reference_audios','video','videos','reference_videos','text','prompt'].includes(h)) return true;
     if ((def as any).type==='array' && (def as any).items?.format==='uri') return true;
     if ((def as any).format==='uri' && ['image','audio','video'].some(k=> (def as any).description?.toLowerCase().includes(k))) return true;
-    return !!h;
-  }) : [];
-  const hasDynamicHandles = dynamicInputs.length > 0;
+    if ((def as any).type==='string' && (def as any)['x-handle']==='text') return true;
+    return !!(def as any)['x-handle'];
+  });
+  const dynamicOutputs = Object.entries(outputProps).filter(([, def]: any)=> !!(def as any)['x-handle'] || (def as any).format==='uri');
+  const getHandleColor = (key:string, def:any)=>{
+    const h = (def as any)['x-handle'] || '';
+    if(['image','images','reference_images'].includes(h) || (h==='' && key.includes('image'))) return '!bg-violet-500 !border-white';
+    if(['video','videos','reference_videos'].includes(h) || key.includes('video')) return '!bg-orange-500 !border-white';
+    if(['audio','audios','reference_audios'].includes(h) || key.includes('audio')) return '!bg-pink-500 !border-white';
+    return '!bg-sky-500 !border-white';
+  };
 
   return (
-    <div className={`w-[340px] bg-[var(--color-surface)] border-2 ${kindMeta.border} rounded-2xl shadow-xl overflow-hidden`}>
-      <div className="px-3 py-2 bg-zinc-900 border-b border-zinc-800 flex items-center gap-1.5">
+    <div className={`w-[340px] bg-[#1A1A22] border-2 ${kindMeta.border} rounded-2xl shadow-xl overflow-hidden`}>
+      <div className="px-3 py-2 bg-[#121216] border-b border-[#2A2A32] flex items-center gap-1.5">
         <div className="w-6 h-6 rounded-lg bg-white/10 border border-white/10 flex items-center justify-center"><Icon className={`w-3.5 h-3.5 ${kindMeta.color}`}/></div>
         <span className="text-xs font-bold text-white">{kindMeta.label}节点</span>
         {selectedDef && <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white truncate max-w-[110px] border border-white/10">{selectedDef.display_name || selectedDef.name || selectedId}</span>}
@@ -146,11 +156,21 @@ export const ProviderNode: React.FC<NodeProps> = ({ data, id, type }) => {
         </span>
       </div>
 
-      {/* Provider 类型的输入（上游）实际上 Provider 是源，不需要输入，但保留左侧兼容 */}
-      <Handle type="target" position={Position.Left} className="!bg-gray-500 !w-2 !h-2" style={{ visibility: 'hidden' }} />
-      <Handle type="source" position={Position.Right} className={`!w-3 !h-3 ${nodeKind==='image' ? '!bg-violet-500' : nodeKind==='video' ? '!bg-orange-500' : '!bg-pink-500'} !border-2 !border-white`} />
-      <Handle type="source" position={Position.Bottom} id="provider" className={`!w-3 !h-3 ${nodeKind==='image' ? '!bg-violet-500' : nodeKind==='video' ? '!bg-orange-500' : '!bg-pink-500'}`} />
-      {/* 额外：顶部输入供链式？隐藏 */}
+      {/* 输入：左侧数据流（文生图：prompt:text 入；视频：prompt+reference_images 等） */}
+      {dynamicInputs.length>0 ? dynamicInputs.map(([key, def]:any, idx:number)=> (
+        <Handle key={`in-${key}`} type="target" position={Position.Left} id={key} className={`!w-3 !h-3 !border-2 ${getHandleColor(key, def)}`} style={{ top: `${18 + idx*14}%` }} title={`${key} (${(def as any)['x-handle']|| (def as any).type})`} />
+      )) : (
+        <Handle type="target" position={Position.Left} id="prompt" className={`!w-3 !h-3 !border-2 !border-white ${nodeKind==='image'?'!bg-sky-500': nodeKind==='video'?'!bg-sky-500':'!bg-pink-500'}`} style={{ top: '28%' }} title="prompt (text)" />
+      )}
+      {/* 输出：右侧数据流（image/video/audio） */}
+      {dynamicOutputs.length>0 ? dynamicOutputs.map(([key, def]:any, idx:number)=> (
+        <Handle key={`out-${key}`} type="source" position={Position.Right} id={key} className={`!w-3 !h-3 !border-2 ${getHandleColor(key, def)}`} style={{ top: `${28 + idx*14}%` }} title={`${key} (${(def as any)['x-handle']})`} />
+      )) : (
+        <Handle type="source" position={Position.Right} id={nodeKind==='image'?'image': nodeKind==='video'?'video': nodeKind==='audio'?'audio':'output'} className={`!w-3 !h-3 ${nodeKind==='image' ? '!bg-violet-500' : nodeKind==='video' ? '!bg-orange-500' : '!bg-pink-500'} !border-2 !border-white`} style={{ top: '28%' }} />
+      )}
+      {/* 配置输出：底部 provider 供下游 ShotCard/Video 注入 */}
+      <Handle type="source" position={Position.Bottom} id="provider" className={`!w-3 !h-3 ${nodeKind==='image' ? '!bg-violet-500' : nodeKind==='video' ? '!bg-orange-500' : '!bg-pink-500'} !border-2 !border-white`} />
+      {/* 隐藏兼容 */}
       <Handle type="target" position={Position.Top} id="config" className="!bg-transparent !w-1 !h-1 !border-0" />
 
       <div className="p-3 space-y-3">
@@ -159,7 +179,7 @@ export const ProviderNode: React.FC<NodeProps> = ({ data, id, type }) => {
             <span className="text-[11px] font-semibold text-gray-300">选择生成源</span>
             <button onClick={fetchProviders} className="text-[10px] text-brand-light hover:underline">刷新</button>
           </div>
-          <select value={selectedId} onChange={e=>handleSelect(e.target.value)} className="w-full bg-surface-secondary border border-border rounded-xl px-2 py-2 text-xs text-white">
+          <select value={selectedId} onChange={e=>handleSelect(e.target.value)} className="w-full bg-[#24242F] border border-[#2A2A32] rounded-xl px-2 py-2 text-xs text-white">
             <option value="">— 请选择 —</option>
             {providers.map((p:any)=> (
               <option key={p.id} value={p.id}>{p.display_name || p.name || p.id} {p.builtin ? '· 内置' : '· 自定义'} {p.kind ? `· ${p.kind}`: ''}</option>
@@ -169,33 +189,33 @@ export const ProviderNode: React.FC<NodeProps> = ({ data, id, type }) => {
         </div>
 
         {selectedDef && (
-          <div className="rounded-xl bg-surface-secondary border border-border p-2.5 space-y-2">
+          <div className="rounded-xl bg-[#24242F] border border-[#2A2A32] p-2.5 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-white truncate">{selectedDef.display_name || selectedDef.name}</span>
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-black/30 text-gray-400 font-mono">{selectedDef.id}</span>
             </div>
             {selectedDef.description && <div className="text-[11px] text-gray-400 line-clamp-2">{selectedDef.description}</div>}
             <div className="flex items-center gap-1.5 text-[10px] text-gray-500">
-              <span>类型</span><span className="px-1.5 py-0.5 rounded bg-surface-tertiary text-gray-300">{selectedDef.kind || nodeKind}</span>
-              <span className="ml-auto">来源</span><span className="px-1.5 py-0.5 rounded bg-surface-tertiary text-gray-300">{selectedDef.provider_type || (selectedDef.builtin?'builtin':'http')}</span>
+              <span>类型</span><span className="px-1.5 py-0.5 rounded bg-[#2A2A32] text-gray-300">{selectedDef.kind || nodeKind}</span>
+              <span className="ml-auto">来源</span><span className="px-1.5 py-0.5 rounded bg-[#2A2A32] text-gray-300">{selectedDef.provider_type || (selectedDef.builtin?'builtin':'http')}</span>
             </div>
             {selectedDef.transport?.url && <div className="text-[10px] font-mono text-gray-500 truncate" title={selectedDef.transport.url}>URL: {selectedDef.transport.url}</div>}
             {/* Model 选择 — 支持自定义输入 */}
             <div className="space-y-1">
               <span className="text-[11px] text-gray-300">模型</span>
               {selectedDef.models?.length ? (
-                <select value={model} onChange={e=>handleModelChange(e.target.value)} className="w-full bg-surface-tertiary border border-border rounded-lg px-2 py-1.5 text-xs text-white">
+                <select value={model} onChange={e=>handleModelChange(e.target.value)} className="w-full bg-[#2A2A32] border border-[#2A2A32] rounded-lg px-2 py-1.5 text-xs text-white">
                   {selectedDef.models.map((m:string)=> <option key={m} value={m}>{m}</option>)}
                   {model && !selectedDef.models.includes(model) && <option value={model}>{model} (自定义)</option>}
                   <option value="__custom__">— 手动输入 —</option>
                 </select>
               ) : (
-                <input value={model} onChange={e=>handleModelChange(e.target.value)} placeholder={selectedDef.default_model || "输入模型名，如 FLUX.1-schnell"} className="w-full bg-surface-tertiary border border-border rounded-lg px-2 py-1.5 text-xs text-white placeholder-gray-500 font-mono"/>
+                <input value={model} onChange={e=>handleModelChange(e.target.value)} placeholder={selectedDef.default_model || "输入模型名，如 FLUX.1-schnell"} className="w-full bg-[#2A2A32] border border-[#2A2A32] rounded-lg px-2 py-1.5 text-xs text-white placeholder-gray-500 font-mono"/>
               )}
             </div>
             {/* 参数配置 — 来自 params_schema */}
             {selectedDef.params_schema?.properties && Object.keys(selectedDef.params_schema.properties).length>0 && (
-              <div className="space-y-2 rounded-lg bg-black/20 border border-border/50 p-2">
+              <div className="space-y-2 rounded-lg bg-black/20 border border-[#2A2A32]/50 p-2">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-semibold text-gray-200 flex items-center gap-1"><Settings className="w-3 h-3"/> 参数</span>
                   <button onClick={()=>setShowParams(v=>!v)} className="text-[10px] text-brand-light hover:underline">{showParams?'收起':'展开'}</button>
@@ -217,13 +237,13 @@ export const ProviderNode: React.FC<NodeProps> = ({ data, id, type }) => {
                               const next = {...paramValues, [pname]: v};
                               setParamValues(next);
                               (d.onUpdate as any)?.(id, { default_params: next, params: next });
-                            }} className="w-full bg-surface-tertiary border border-border rounded-lg px-2 py-1 text-xs text-white"/>
+                            }} className="w-full bg-[#2A2A32] border border-[#2A2A32] rounded-lg px-2 py-1 text-xs text-white"/>
                           ) : (
                             <input type="text" value={val} onChange={e=>{
                               const next = {...paramValues, [pname]: e.target.value};
                               setParamValues(next);
                               (d.onUpdate as any)?.(id, { default_params: next, params: next });
-                            }} placeholder={pdef.description || `输入 ${pname}`} className="w-full bg-surface-tertiary border border-border rounded-lg px-2 py-1 text-xs text-white placeholder-gray-500"/>
+                            }} placeholder={pdef.description || `输入 ${pname}`} className="w-full bg-[#2A2A32] border border-[#2A2A32] rounded-lg px-2 py-1 text-xs text-white placeholder-gray-500"/>
                           )}
                         </div>
                       );
@@ -257,7 +277,7 @@ export const ProviderNode: React.FC<NodeProps> = ({ data, id, type }) => {
             )}
             {/* 若无 schema，仍显示通用参数快捷输入 */}
             {(!selectedDef.params_schema || !selectedDef.params_schema.properties || Object.keys(selectedDef.params_schema.properties).length===0) && (
-              <div className="rounded-lg bg-black/10 border border-dashed border-border p-2 text-[11px] text-gray-500 text-center">
+              <div className="rounded-lg bg-black/10 border border-dashed border-[#2A2A32] p-2 text-[11px] text-gray-500 text-center">
                 暂无结构化参数（将使用默认 prompt/size/seed）。<br/>可在 “高级编辑” 中自定义 params_schema。
               </div>
             )}
@@ -266,14 +286,14 @@ export const ProviderNode: React.FC<NodeProps> = ({ data, id, type }) => {
               <div className="space-y-1">
                 <span className="text-[11px] text-gray-300 flex items-center gap-1"><Key className="w-3 h-3"/> API Key</span>
                 <div className="flex gap-1.5">
-                  <input type={showKey?'text':'password'} value={apiKeyInput} onChange={e=>setApiKeyInput(e.target.value)} placeholder={selectedDef.auth?.has_key ? '已配置（输入新 Key 覆盖）' : '输入 API Key'} className="flex-1 bg-surface-tertiary border border-border rounded-lg px-2 py-1.5 text-xs text-white placeholder-gray-500 font-mono"/>
-                  <button onClick={()=>setShowKey(v=>!v)} className="px-2 py-1 rounded-lg bg-surface-tertiary border border-border text-[11px] text-gray-300">{showKey?'隐藏':'显示'}</button>
+                  <input type={showKey?'text':'password'} value={apiKeyInput} onChange={e=>setApiKeyInput(e.target.value)} placeholder={selectedDef.auth?.has_key ? '已配置（输入新 Key 覆盖）' : '输入 API Key'} className="flex-1 bg-[#2A2A32] border border-[#2A2A32] rounded-lg px-2 py-1.5 text-xs text-white placeholder-gray-500 font-mono"/>
+                  <button onClick={()=>setShowKey(v=>!v)} className="px-2 py-1 rounded-lg bg-[#2A2A32] border border-[#2A2A32] text-[11px] text-gray-300">{showKey?'隐藏':'显示'}</button>
                 </div>
                 <button onClick={handleSaveKey} className="w-full py-1.5 rounded-lg bg-brand/20 border border-brand/30 text-brand-light text-xs">保存 Key</button>
               </div>
             )}
             <div className="flex gap-1.5">
-              <button onClick={handleTest} disabled={testing || !selectedId} className="flex-1 py-1.5 rounded-lg bg-surface-tertiary border border-border text-xs text-white flex items-center justify-center gap-1 disabled:opacity-40"><Activity className="w-3 h-3"/>{testing?'检测中…':'测试连通'}</button>
+              <button onClick={handleTest} disabled={testing || !selectedId} className="flex-1 py-1.5 rounded-lg bg-[#2A2A32] border border-[#2A2A32] text-xs text-white flex items-center justify-center gap-1 disabled:opacity-40"><Activity className="w-3 h-3"/>{testing?'检测中…':'测试连通'}</button>
               {!isBuiltin && <button onClick={()=>{
                 if(confirm(`删除 Provider ${selectedId}？`)){
                   fetch(`${API_ORIGIN || ''}/api/v1/providers/${selectedId}`, {method:'DELETE'}).then(r=>r.json()).then(r=>{
@@ -297,19 +317,19 @@ export const ProviderNode: React.FC<NodeProps> = ({ data, id, type }) => {
               // 触发全局事件，打开导演输入
               window.dispatchEvent(new CustomEvent('open-provider-create', {detail:{kind: nodeKind}}));
               alert('可在右侧 Agent 输入框粘贴 API 文档，例如：\n“帮我接入这个生图 API：https://... 文档：... Key是...”\n导演将自动调用 register_custom_provider');
-            }} className="px-3 py-1.5 rounded-lg bg-surface-secondary border border-border text-xs text-white">让导演接入</button>
+            }} className="px-3 py-1.5 rounded-lg bg-[#24242F] border border-[#2A2A32] text-xs text-white">让导演接入</button>
           </div>
           {showCreate && (
             <div className="space-y-2 pt-2 border-t border-brand/20">
-              <input id={`prov-name-${id}`} placeholder="名称，如 我的FLUX" className="w-full bg-surface-tertiary border border-border rounded-lg px-2 py-1.5 text-xs text-white placeholder-gray-500"/>
-              <input id={`prov-url-${id}`} placeholder="API URL https://api.xxx.com/v1/images/generations" className="w-full bg-surface-tertiary border border-border rounded-lg px-2 py-1.5 text-xs text-white placeholder-gray-500 font-mono"/>
-              <select id={`prov-auth-${id}`} className="w-full bg-surface-tertiary border border-border rounded-lg px-2 py-1.5 text-xs text-white">
+              <input id={`prov-name-${id}`} placeholder="名称，如 我的FLUX" className="w-full bg-[#2A2A32] border border-[#2A2A32] rounded-lg px-2 py-1.5 text-xs text-white placeholder-gray-500"/>
+              <input id={`prov-url-${id}`} placeholder="API URL https://api.xxx.com/v1/images/generations" className="w-full bg-[#2A2A32] border border-[#2A2A32] rounded-lg px-2 py-1.5 text-xs text-white placeholder-gray-500 font-mono"/>
+              <select id={`prov-auth-${id}`} className="w-full bg-[#2A2A32] border border-[#2A2A32] rounded-lg px-2 py-1.5 text-xs text-white">
                 <option value="bearer">Bearer (Authorization: Bearer)</option>
                 <option value="apikey_header">Header (X-API-Key)</option>
                 <option value="apikey_query">Query (api_key)</option>
                 <option value="none">无鉴权</option>
               </select>
-              <input id={`prov-key-${id}`} placeholder="API Key (可选)" className="w-full bg-surface-tertiary border border-border rounded-lg px-2 py-1.5 text-xs text-white placeholder-gray-500 font-mono"/>
+              <input id={`prov-key-${id}`} placeholder="API Key (可选)" className="w-full bg-[#2A2A32] border border-[#2A2A32] rounded-lg px-2 py-1.5 text-xs text-white placeholder-gray-500 font-mono"/>
               <button onClick={async()=>{
                 const name = (document.getElementById(`prov-name-${id}`) as HTMLInputElement)?.value?.trim() || `自定义${nodeKind}源`;
                 const url = (document.getElementById(`prov-url-${id}`) as HTMLInputElement)?.value?.trim();

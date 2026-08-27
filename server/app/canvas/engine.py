@@ -44,13 +44,15 @@ def topo_sort(nodes: List[Dict[str, Any]], edges: List[Dict[str, Any]]) -> List[
 
 
 def collect_upstream_data(node_id: str, nodes: List[Dict], edges: List[Dict], results: Dict[str, Any]) -> Dict[str, Any]:
-    """收集上游节点已产生的可注入数据（支持 Provider 连线）"""
+    """收集上游节点已产生的可注入数据（支持多模态句柄与 Provider 连线）"""
     incoming = [e for e in edges if e.get("target")==node_id]
     data: Dict[str, Any] = {}
     # 记录上游节点类型，便于 Provider 识别
     id_to_node = {n["id"]: n for n in nodes}
     for e in incoming:
         src_id = e.get("source")
+        tgt_handle = e.get("targetHandle") or e.get("target_handle") or ""
+        src_handle = e.get("sourceHandle") or e.get("source_handle") or ""
         src_node = id_to_node.get(src_id, {})
         src_type = src_node.get("type", "")
         src_res = results.get(src_id)
@@ -93,6 +95,47 @@ def collect_upstream_data(node_id: str, nodes: List[Dict], edges: List[Dict], re
                 if model:
                     data.setdefault("model", model)
                 continue
+        # 多模态句柄精准映射（P0 修复：支持 reference_images 等多连）
+        if tgt_handle in ("reference_images", "images", "image_list"):
+            url = (src_res.get("image_url") if src_res else None) or (src_res.get("result_url") if src_res else None) or src_res.get("file_url") if src_res else None
+            if not url:
+                url = (src_node.get("data", {}) or {}).get("image") or (src_node.get("data", {}) or {}).get("url")
+            if url:
+                data.setdefault("reference_images", [])
+                if isinstance(data["reference_images"], list) and url not in data["reference_images"]:
+                    data["reference_images"].append(url)
+                # 同时兼容单图
+                data.setdefault("image_url", url)
+            continue
+        if tgt_handle in ("reference_audios", "audios"):
+            url = (src_res.get("audio_url") if src_res else None) or (src_res.get("file_url") if src_res else None)
+            if url:
+                data.setdefault("reference_audios", [])
+                if url not in data["reference_audios"]:
+                    data["reference_audios"].append(url)
+            continue
+        if tgt_handle in ("reference_videos", "videos"):
+            url = (src_res.get("video_url") if src_res else None)
+            if url:
+                data.setdefault("reference_videos", [])
+                if url not in data["reference_videos"]:
+                    data["reference_videos"].append(url)
+            continue
+        if tgt_handle in ("first_frame", "image"):
+            url = (src_res.get("image_url") if src_res else None) or (src_res.get("result_url") if src_res else None) or (src_res.get("file_url") if src_res else None)
+            if url and "first_frame" not in data:
+                data["first_frame"] = url
+                data.setdefault("image_url", url)
+            continue
+        if tgt_handle in ("prompt", "text", "brief", "image_prompt"):
+            txt = (src_res.get("prompt") if src_res else None) or (src_res.get("text") if src_res else None) or (src_res.get("brief") if src_res else None) or (src_res.get("image_prompt") if src_res else None)
+            if txt and "prompt" not in data:
+                data["prompt"] = txt
+            continue
+        if tgt_handle == "provider" or tgt_handle == "provider_video" or tgt_handle == "provider_image" or tgt_handle == "provider_audio":
+            # 已在上方 Provider 透传处理，此处兜底
+            pass
+
         if not src_res:
             continue
         # 透传 image_url / prompt / audio_url / video_url / asset
@@ -111,6 +154,8 @@ def collect_upstream_data(node_id: str, nodes: List[Dict], edges: List[Dict], re
         # Provider result 透传（provider-image 节点产生的）
         if src_res.get("provider_id"):
             data.setdefault("provider", src_res["provider_id"])
+    # 兼容：若上游未按句柄但有多图，兜底聚合
+    # 若 data 中已有单图但 reference_images 为空，且存在多个 image 上游，尝试收集
     return data
 
 
@@ -124,12 +169,68 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
     start = time.time()
     try:
         if ntype in ("provider-image", "provider-video", "provider-audio", "provider", "provider-llm"):
-            # Provider 节点：仅透传配置，不执行生成
             prov_id = data.get("provider_id") or data.get("providerId") or node.get("id")
             if isinstance(data.get("definition"), dict):
                 prov_id = data["definition"].get("id") or prov_id
             kind = data.get("kind") or ("image" if ntype=="provider-image" else "video" if ntype=="provider-video" else "audio" if ntype=="provider-audio" else "image")
             model = data.get("model") or data.get("default_model")
+            # 若上游已传入生成所需输入（prompt/text），则直接在此节点生成，实现“文本→图像/视频/音频”直连
+            has_prompt = bool(upstream.get("prompt") or merged.get("prompt") or data.get("prompt") or upstream.get("text") or merged.get("text"))
+            has_image = bool(upstream.get("image") or upstream.get("image_url") or upstream.get("reference_images"))
+            # 仅当有输入时才执行生成，否则仅透传配置供下游消费
+            if kind == "image" and (has_prompt or has_image):
+                try:
+                    prompt = upstream.get("prompt") or merged.get("prompt") or data.get("prompt") or merged.get("image_prompt") or ""
+                    if prompt.strip():
+                        from app.providers.image.registry import image_registry
+                        from app.providers.image.base import ImageGenerateRequest
+                        # 多参考图聚合：收集上游 image[]（load-image-batch 等）
+                        ref_imgs = []
+                        for k in ["reference_images", "images", "image_list"]:
+                            v = upstream.get(k) or merged.get(k)
+                            if isinstance(v, list): ref_imgs.extend(v)
+                            elif isinstance(v, str) and v: ref_imgs.append(v)
+                        # 单图
+                        single = upstream.get("image") or upstream.get("image_url")
+                        if single and single not in ref_imgs:
+                            ref_imgs.append(single)
+                        req = ImageGenerateRequest(prompt=prompt, aspect_ratio=merged.get("aspect_ratio") or "9:16", model=model, dynamic_inputs={"reference_images": ref_imgs} if ref_imgs else None)
+                        res = await image_registry.generate(req, provider_id=prov_id if prov_id else None)
+                        return {"status":"success","provider_id": prov_id, "provider": prov_id, "kind": kind, "model": model, "definition": data.get("definition"), "image_url": res.image_url, "result_url": res.image_url, "elapsed_ms": res.elapsed_ms or int((time.time()-start)*1000)}
+                except Exception as e:
+                    # 生成失败则回退为透传，避免阻断 DAG
+                    print(f"[Canvas] provider-image generate failed, fallback to passthrough: {e}")
+            elif kind == "video" and has_prompt:
+                try:
+                    prompt = upstream.get("prompt") or merged.get("prompt") or data.get("prompt") or ""
+                    if prompt.strip():
+                        from app.providers.video.registry import video_registry
+                        from app.providers.video.base import VideoGenerateRequest
+                        ref_imgs = []
+                        for k in ["reference_images", "images"]:
+                            v = upstream.get(k) or merged.get(k)
+                            if isinstance(v, list): ref_imgs.extend(v)
+                            elif isinstance(v, str) and v: ref_imgs.append(v)
+                        first = upstream.get("first_frame") or upstream.get("image") or upstream.get("image_url")
+                        if first and not ref_imgs:
+                            # 单图作为首帧
+                            pass
+                        req = VideoGenerateRequest(prompt=prompt, mode=merged.get("mode") or "t2v" if not first and not ref_imgs else ("r2v" if ref_imgs else "i2v"), first_frame_url=first, reference_images=ref_imgs if ref_imgs else None, duration=int(merged.get("duration") or 5), provider=prov_id)
+                        res = await video_registry.generate(req, provider_id=prov_id if prov_id else None)
+                        return {"status":"success","provider_id": prov_id, "provider": prov_id, "kind": kind, "model": model, "video_url": res.video_url, "elapsed_ms": res.elapsed_ms or int((time.time()-start)*1000)}
+                except Exception as e:
+                    print(f"[Canvas] provider-video generate failed, fallback: {e}")
+            elif kind == "audio" and (upstream.get("text") or merged.get("text") or data.get("text")):
+                try:
+                    text = upstream.get("text") or merged.get("text") or data.get("text") or ""
+                    if text.strip():
+                        from app.providers.audio.registry import audio_registry
+                        from app.providers.audio.base import AudioGenerateRequest
+                        req = AudioGenerateRequest(text=text, voice_id=merged.get("voice_id") or "male-qn-qingse", emotion=merged.get("emotion") or "neutral")
+                        res = await audio_registry.generate(req, provider_id=prov_id if prov_id else None)
+                        return {"status":"success","provider_id": prov_id, "provider": prov_id, "kind": kind, "audio_url": res.audio_url, "elapsed_ms": int((time.time()-start)*1000)}
+                except Exception as e:
+                    print(f"[Canvas] provider-audio generate failed, fallback: {e}")
             return {"status":"success","provider_id": prov_id, "provider": prov_id, "kind": kind, "model": model, "definition": data.get("definition"), "elapsed_ms": int((time.time()-start)*1000)}
         elif ntype == "brief":
             return {"status":"success","brief": data.get("brief",""), "elapsed_ms": int((time.time()-start)*1000)}

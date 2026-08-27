@@ -49,7 +49,7 @@ export const VideoNode: React.FC<NodeProps> = ({ data, id }) => {
   }, [d._upstream]);
 
   return (
-    <div className="w-[340px] bg-surface border border-accent-orange/30 rounded-2xl shadow-xl overflow-hidden">
+    <div className="w-[340px] bg-[#1A1A22] border border-accent-orange/30 rounded-2xl shadow-xl overflow-hidden">
       <div className="px-3 py-2 bg-gradient-to-r from-orange-500/20 to-red-500/20 border-b border-accent-orange/20 flex items-center gap-1.5">
         <Film className="w-3.5 h-3.5 text-accent-orange"/><span className="text-xs font-bold text-white">生视频 (I2V/R2V/T2V)</span>
         { (d.provider || d.provider_id || d.provider_video) && <span className="ml-1 text-[9px] px-1 py-0.5 rounded bg-violet-600 text-white font-mono truncate max-w-[80px]">{String(d.provider || d.provider_id || d.provider_video).slice(0,10)}</span>}
@@ -63,11 +63,11 @@ export const VideoNode: React.FC<NodeProps> = ({ data, id }) => {
       <div className="p-3 space-y-2">
         <div className="grid grid-cols-3 gap-1.5">
           {(['i2v','r2v','t2v'] as const).map(m=> (
-            <button key={m} onClick={()=>{setMode(m); (d.onUpdate as any)?.(id,{mode:m});}} className={`py-1 rounded-lg text-xs border ${mode===m ? 'bg-accent-orange/20 border-accent-orange text-white' : 'bg-surface-secondary border-border text-gray-400'}`}>{m.toUpperCase()}</button>
+            <button key={m} onClick={()=>{setMode(m); (d.onUpdate as any)?.(id,{mode:m});}} className={`py-1 rounded-lg text-xs border ${mode===m ? 'bg-accent-orange/20 border-accent-orange text-white' : 'bg-[#24242F] border-[#2A2A32] text-gray-400'}`}>{m.toUpperCase()}</button>
           ))}
         </div>
         <div className="flex gap-1.5">
-          <select value={provider} onChange={e=>{setProvider(e.target.value); (d.onUpdate as any)?.(id,{provider:e.target.value});}} className="flex-1 bg-surface-secondary border border-border rounded-xl px-2 py-1.5 text-xs text-white">
+          <select value={provider} onChange={e=>{setProvider(e.target.value); (d.onUpdate as any)?.(id,{provider:e.target.value});}} className="flex-1 bg-[#24242F] border border-[#2A2A32] rounded-xl px-2 py-1.5 text-xs text-white">
             <option value="comfyui_video">ComfyUI 本地 (SVD/AnimateDiff)</option>
             <option value="minimax_video">MiniMax 云端</option>
             <option value="kling">Kling</option>
@@ -76,14 +76,14 @@ export const VideoNode: React.FC<NodeProps> = ({ data, id }) => {
           {(d.provider || d.provider_id) && <span className="text-[10px] px-2 py-1 rounded bg-violet-600/20 border border-violet-500/30 text-violet-300 flex items-center">已连线</span>}
         </div>
         {(d.provider || d.provider_id) && <div className="text-[11px] text-violet-300 bg-violet-500/10 border border-violet-500/20 rounded px-2 py-1">✓ 已绑定 Provider：{String(d.provider || d.provider_id).slice(0,20)} · 执行时优先使用连线源</div>}
-        <textarea value={prompt} onChange={e=>{setPrompt(e.target.value); (d.onUpdate as any)?.(id,{video_prompt:e.target.value});}} placeholder="运动/运镜描述：镜头极速推近，发丝狂舞…" rows={2} className="w-full bg-surface-secondary border border-border rounded-xl p-2 text-xs text-white placeholder-gray-500"/>
-        <input value={firstFrame} onChange={e=>{setFirstFrame(e.target.value); (d.onUpdate as any)?.(id,{first_frame_url:e.target.value});}} placeholder="首帧图像 URL (I2V 必选，连线自动填充)" className="w-full bg-surface-secondary border border-border rounded-xl px-2 py-1.5 text-xs text-white placeholder-gray-500 font-mono"/>
+        <textarea value={prompt} onChange={e=>{setPrompt(e.target.value); (d.onUpdate as any)?.(id,{video_prompt:e.target.value});}} placeholder="运动/运镜描述：镜头极速推近，发丝狂舞…" rows={2} className="w-full bg-[#24242F] border border-[#2A2A32] rounded-xl p-2 text-xs text-white placeholder-gray-500"/>
+        <input value={firstFrame} onChange={e=>{setFirstFrame(e.target.value); (d.onUpdate as any)?.(id,{first_frame_url:e.target.value});}} placeholder="首帧图像 URL (I2V 必选，连线自动填充)" className="w-full bg-[#24242F] border border-[#2A2A32] rounded-xl px-2 py-1.5 text-xs text-white placeholder-gray-500 font-mono"/>
         <div className="flex items-center gap-2">
           <span className="text-[11px] text-gray-400">时长</span>
           <input type="range" min={3} max={10} value={duration} onChange={e=>{setDuration(Number(e.target.value)); (d.onUpdate as any)?.(id,{duration:Number(e.target.value)});}} className="flex-1 accent-accent-orange"/>
           <span className="text-xs text-accent-orange font-mono">{duration}s</span>
         </div>
-        {firstFrame && <div className="rounded-lg overflow-hidden border border-border h-20 bg-black/40"><img src={firstFrame.startsWith('/')? API_ORIGIN+firstFrame : firstFrame} alt="" className="w-full h-full object-cover"/></div>}
+        {firstFrame && <div className="rounded-lg overflow-hidden border border-[#2A2A32] h-20 bg-black/40"><img src={firstFrame.startsWith('/')? API_ORIGIN+firstFrame : firstFrame} alt="" className="w-full h-full object-cover"/></div>}
         {videoUrl ? <video src={videoUrl.startsWith('/')? API_ORIGIN+videoUrl : videoUrl} controls autoPlay loop className="w-full rounded-lg border border-accent-green/30 max-h-[160px]"/> : null}
         <button onClick={handleGenerate} disabled={generating} className="w-full py-2 rounded-xl bg-gradient-to-r from-accent-orange to-red-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-40">
           {generating ? <><div className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin"/> 生成中…</> : <><Play className="w-3.5 h-3.5"/> 生成视频</>}
