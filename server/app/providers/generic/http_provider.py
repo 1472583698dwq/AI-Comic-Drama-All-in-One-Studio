@@ -166,13 +166,19 @@ async def _download_to_storage(url: str, prefix: str = "gen") -> tuple[str, str]
         elif url.endswith(".mp4"):
             ext = ".mp4"
         filename = f"{prefix}_{int(time.time())}_{uuidlib.uuid4().hex[:8]}{ext}"
-        local_path = os.path.join(gen_dir if ext in (".png",".jpg",".webp") else settings.STORAGE_DIR, filename)
+        # 视频与音频直接落 storage 视频目录，图片落 generated
+        if ext in (".mp4", ".mov", ".webm"):
+            videos_dir = os.path.join(settings.STORAGE_DIR, "videos")
+            os.makedirs(videos_dir, exist_ok=True)
+            local_path = os.path.join(videos_dir, filename)
+            storage_url = f"/storage/videos/{filename}"
+        else:
+            local_path = os.path.join(gen_dir if ext in (".png",".jpg",".webp") else settings.STORAGE_DIR, filename)
+            storage_url = f"/storage/generated/{filename}" if ext in (".png",".jpg",".webp") else f"/storage/{filename}"
+            if ext in (".mp3",".wav"):
+                storage_url = f"/storage/{filename}"
         with open(local_path, "wb") as f:
             f.write(content)
-        storage_url = f"/storage/generated/{filename}" if ext in (".png",".jpg",".webp",".mp4") else f"/storage/{filename}"
-        # mp3 wav 放在 storage 根，与 minimax 一致
-        if ext in (".mp3",".wav"):
-            storage_url = f"/storage/{filename}"
         return storage_url, local_path
 
 
