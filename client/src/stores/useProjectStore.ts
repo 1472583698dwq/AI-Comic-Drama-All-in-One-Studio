@@ -135,7 +135,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const prompt = options?.prompt || shot.video_prompt || shot.action_desc || shot.image_prompt || 'Cinematic dramatic dynamic anime video';
       const duration = options?.duration || Math.round(shot.duration) || 5;
 
-      const res = await apiService.generateShotVideo({
+      const res: any = await apiService.generateShotVideo({
         prompt,
         mode,
         first_frame_url: shot.image_url || undefined,
@@ -148,6 +148,53 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         shot_id: shotId,
       });
 
+      // 同步成功（直接返回 video_url）
+      if (res.video_url) {
+        get().updateShot(shotId, {
+          video_url: res.video_url,
+          video_prompt: prompt,
+          duration: res.duration || shot.duration,
+          status: 'completed',
+        });
+        return;
+      }
+      // 异步排队（AutoDL 等返回 task_id，需轮询）
+      const taskId = res.task_id || res.taskId || (res.raw && (res.raw.task_id || res.raw.taskId));
+      if (taskId) {
+        // 保持 generating 状态，前端可显示排队中
+        get().updateShot(shotId, { video_prompt: prompt, status: 'generating_video' } as any);
+        const maxAttempts = 120; // 最多轮询 6 分钟
+        for (let i = 0; i < maxAttempts; i++) {
+          await new Promise(r => setTimeout(r, 3000));
+          try {
+            const st: any = await apiService.getVideoTaskStatus(taskId);
+            const status = (st.status || st.state || "").toString().toUpperCase();
+            if (status === "SUCCESS" || status === "COMPLETED") {
+              const vurl = st.video_url || st.videoUrl || (st.results && st.results[0]) || st.url;
+              if (vurl) {
+                get().updateShot(shotId, {
+                  video_url: vurl,
+                  video_prompt: prompt,
+                  duration: st.duration || res.duration || shot.duration,
+                  status: 'completed',
+                });
+                return;
+              }
+            } else if (status === "FAILED" || status === "FAIL" || status === "ERROR") {
+              throw new Error(st.error || st.msg || "视频生成任务失败");
+            }
+            // 否则继续排队/运行中
+          } catch (e: any) {
+            // 若 getVideoTaskStatus 本身抛错，视为可重试，继续
+            if (e?.message && e.message.includes("not_found")) {
+              // 任务可能尚未注册，继续
+            }
+          }
+        }
+        throw new Error("视频生成排队超时（6分钟），请稍后在任务列表或历史中查看，或重试");
+      }
+      // 兜底：无 video_url 也无 task_id，视为失败
+      if (!res.video_url) throw new Error(res.detail || "视频生成未返回视频地址");
       get().updateShot(shotId, {
         video_url: res.video_url,
         video_prompt: prompt,

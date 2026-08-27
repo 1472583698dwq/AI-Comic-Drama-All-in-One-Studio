@@ -8,6 +8,7 @@ import time
 import json
 import uuid as uuidlib
 import re
+import asyncio
 from typing import Dict, Any, Optional, List
 import httpx
 
@@ -128,6 +129,7 @@ def _resolve_storage_url(url: str, local_path: Optional[str] = None) -> str:
 # ---------- 通用下载落盘 ----------
 
 GENERATED_DIR = None
+_CUSTOM_VIDEO_TASKS: Dict[str, Dict[str, Any]] = {}
 
 def _get_generated_dir():
     global GENERATED_DIR
@@ -172,6 +174,68 @@ async def _download_to_storage(url: str, prefix: str = "gen") -> tuple[str, str]
         if ext in (".mp3",".wav"):
             storage_url = f"/storage/{filename}"
         return storage_url, local_path
+
+
+async def _autodl_poll_and_download(task_id: str, poll_url: str, headers: Dict[str, str], provider_id: str):
+    """后台轮询 AutoDL 异步任务，完成後下载并更新 _CUSTOM_VIDEO_TASKS"""
+    from app.core.config import settings
+    videos_dir = os.path.join(settings.STORAGE_DIR, "videos")
+    os.makedirs(videos_dir, exist_ok=True)
+    # 初始化状态
+    _CUSTOM_VIDEO_TASKS[task_id] = {"status": "QUEUED", "task_id": task_id, "provider": provider_id, "created_at": time.time()}
+    max_attempts = 120  # 最多 10 分钟 (120*5s)
+    for _ in range(max_attempts):
+        await asyncio.sleep(5.0)
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.get(poll_url, headers=headers, timeout=15)
+                if resp.status_code != 200:
+                    continue
+                poll_data = resp.json()
+                # 提取 status
+                status = None
+                for spath in ["data.status", "status"]:
+                    v = _extract_by_path(poll_data, spath)
+                    if v and isinstance(v, str):
+                        status = v.upper()
+                        break
+                if status == "SUCCESS":
+                    results = _extract_by_path(poll_data, "data.results") or _extract_by_path(poll_data, "results")
+                    video_url = None
+                    if isinstance(results, list) and results:
+                        video_url = results[0] if isinstance(results[0], str) else None
+                    if not video_url:
+                        txt = json.dumps(poll_data, ensure_ascii=False)
+                        m = re.search(r"https?://[^\s\"']+\.(mp4|mov|webm)", txt)
+                        if m:
+                            video_url = m.group(0)
+                    if video_url:
+                        try:
+                            storage_url, local_path = await _download_to_storage(video_url, prefix="vid")
+                            # 若下载到 generated，移动到 videos 目录保持一致
+                            _CUSTOM_VIDEO_TASKS[task_id] = {"status": "SUCCESS", "task_id": task_id, "video_url": storage_url, "local_path": local_path, "provider": provider_id}
+                            print(f"[CustomVideo] Task {task_id} SUCCESS -> {storage_url}")
+                            return
+                        except Exception as e:
+                            print(f"[CustomVideo] download failed {task_id}: {e}")
+                            _CUSTOM_VIDEO_TASKS[task_id] = {"status": "FAILED", "error": f"下载失败: {e}", "task_id": task_id}
+                            return
+                elif status == "FAILED":
+                    err = _extract_by_path(poll_data, "data.error") or poll_data.get("msg") or "任务失败"
+                    _CUSTOM_VIDEO_TASKS[task_id] = {"status": "FAILED", "error": str(err), "task_id": task_id}
+                    print(f"[CustomVideo] Task {task_id} FAILED: {err}")
+                    return
+                else:
+                    # 更新排队状态
+                    _CUSTOM_VIDEO_TASKS[task_id].update({"status": status or "QUEUED", "last_poll": time.time()})
+        except Exception as e:
+            print(f"[CustomVideo] poll {task_id} exception: {e}")
+    # 超时
+    _CUSTOM_VIDEO_TASKS[task_id].update({"status": "TIMEOUT", "error": "轮询超时，请稍后重试"})
+
+
+def get_custom_video_task(task_id: str) -> Optional[Dict[str, Any]]:
+    return _CUSTOM_VIDEO_TASKS.get(task_id)
 
 
 # ---------- Generic Image Provider ----------
@@ -643,16 +707,54 @@ class GenericHttpVideoProvider(VideoProvider):
         api_key = _get_api_key_for_provider(self.id, definition)
         if definition.auth.type != "none" and not api_key:
             raise RuntimeError(f"Provider {self.id} 未配置 API Key")
+        # resolution 推断：优先使用 dynamic_inputs.resolution > req.resolution > 定义默认 > 回退
+        raw_resolution = None
+        if req.dynamic_inputs and isinstance(req.dynamic_inputs, dict) and req.dynamic_inputs.get("resolution"):
+            raw_resolution = req.dynamic_inputs.get("resolution")
+        elif getattr(req, 'resolution', None):
+            raw_resolution = getattr(req, 'resolution')
+        elif definition.default_params.get("resolution"):
+            raw_resolution = definition.default_params.get("resolution")
+        else:
+            raw_resolution = "480p竖" if "9:16" in (req.aspect_ratio or "") else "720p"
+        # 校验是否在 params_schema 允许枚举中，否则回退到默认
+        allowed = None
+        try:
+            allowed = (definition.params_schema or {}).get("properties", {}).get("resolution", {}).get("enum")
+        except Exception:
+            allowed = None
+        if allowed and raw_resolution not in allowed:
+            # 尝试兼容：若提供的是 720p 但仅允许 480p竖，则回退
+            raw_resolution = definition.default_params.get("resolution") or (allowed[0] if allowed else raw_resolution)
+        resolution = raw_resolution
+        # duration 同样优先 dynamic_inputs
+        raw_duration = None
+        if req.dynamic_inputs and isinstance(req.dynamic_inputs, dict) and req.dynamic_inputs.get("duration") is not None:
+            raw_duration = req.dynamic_inputs.get("duration")
+        else:
+            raw_duration = req.duration or definition.default_params.get("duration") or 5
+        try:
+            raw_duration = int(raw_duration)
+        except Exception:
+            raw_duration = 5
         context = {
             "prompt": req.prompt,
             "mode": req.mode,
             "first_frame_url": req.first_frame_url or "",
-            "duration": req.duration or 5,
+            "duration": raw_duration,
             "aspect_ratio": req.aspect_ratio or "9:16",
+            "resolution": resolution,
             "seed": req.seed or 0,
             "model": req.provider or definition.default_model or "",
             "api_key": api_key,
         }
+        # 合并剩余 dynamic_inputs 到 context（供模板占位，已处理的 resolution/duration 跳过）
+        if req.dynamic_inputs:
+            for k, v in req.dynamic_inputs.items():
+                if k in ("resolution", "duration"):
+                    continue
+                if k not in context:
+                    context[k] = v
         headers = _render_template(definition.transport.headers or {}, context, api_key)
         query = _render_template(definition.transport.query or {}, context, api_key)
         if definition.auth.type == "bearer":
@@ -663,9 +765,26 @@ class GenericHttpVideoProvider(VideoProvider):
             query[definition.auth.query_name or "api_key"] = api_key
         if definition.mapping.request_template:
             body = _render_template(definition.mapping.request_template, context, api_key)
+            # 将纯数字字符串尝试转回数值（AutoDL 要求 duration 为整数）
+            for k, v in list(body.items()):
+                if isinstance(v, str) and v.isdigit():
+                    try:
+                        body[k] = int(v)
+                    except Exception:
+                        pass
+                elif isinstance(v, str) and re.match(r"^\d+\.\d+$", v):
+                    try:
+                        body[k] = float(v)
+                    except Exception:
+                        pass
         else:
-            body = {"prompt": req.prompt, "first_frame_url": req.first_frame_url, "duration": req.duration, "model": context["model"]}
-            if not body["model"]:
+            body = {"prompt": req.prompt, "duration": req.duration, "resolution": resolution}
+            if req.first_frame_url:
+                # 对于 T2V 工作流，first_frame_url 仅在模板需要时发送；避免无关参数污染
+                pass
+            if context["model"]:
+                body["model"] = context["model"]
+            if not body.get("model"):
                 body.pop("model", None)
 
         url = _render_template(definition.transport.url, context, api_key)
@@ -689,15 +808,117 @@ class GenericHttpVideoProvider(VideoProvider):
                     storage_url, local_path = await _download_to_storage(video_url, prefix="vid")
                     return VideoGenerateResult(video_url=storage_url, local_path=local_path, provider=self.id, engine=f"custom:{self.id}", duration=req.duration, elapsed_ms=int((time.time()-started)*1000))
                 raise RuntimeError(f"Video Provider 非 JSON: {resp.text[:600]}")
-            # 提取 video_url
+            # 尝试直接提取 video_url（同步接口）
             video_url = None
             mappings = definition.mapping.response_mappings or {}
-            for key in ["video_url", "video", "url", "data.video_url", "data.url"]:
+            # 优先按 mapping 指定的 video_url 路径
+            for key in ["video_url", "video", "url", "data.video_url", "data.url", "data.results[0]", "data.results"]:
                 path = mappings.get(key) or (mappings.get("video_url") if key=="video_url" else None) or key
                 val = _extract_by_path(data, path)
-                if val and isinstance(val, str) and val.startswith("http"):
-                    video_url = val
-                    break
+                if val:
+                    if isinstance(val, list) and val and isinstance(val[0], str) and val[0].startswith("http"):
+                        video_url = val[0]
+                        break
+                    if isinstance(val, str) and val.startswith("http"):
+                        video_url = val
+                        break
+            # 若未直接获得，检查是否为异步任务（AutoDL 模式：data.task_id）
+            task_id = None
+            if not video_url:
+                for tpath in ["data.task_id", "task_id", "data.taskId", "taskId", "id", "data.id"]:
+                    # 也尝试 mapping 中 task_id
+                    cand = mappings.get("task_id") if "task_id" in mappings else None
+                    path = cand if tpath == "data.task_id" and cand else tpath
+                    val = _extract_by_path(data, path)
+                    if val and isinstance(val, str) and len(val) > 4:
+                        task_id = val
+                        break
+            if video_url:
+                # 同步成功
+                pass
+            elif task_id:
+                # 异步轮询 — AutoDL 模式
+                # 推断轮询 URL：https://autodl.art/api/v1/comfyui/comfyui_workflow/result/{task_id}
+                poll_url = None
+                if "comfyui_workflow" in url:
+                    base = url.split("/comfyui_workflow/")[0]
+                    poll_url = f"{base}/comfyui_workflow/result/{task_id}"
+                else:
+                    poll_url = f"{url.rstrip('/')}/result/{task_id}"
+                # 轮询：先同步尝试 30s，若仍排队则转后台异步并返回 task_id 供前端轮询
+                poll_interval = 3.0
+                short_timeout = 30
+                poll_deadline = time.time() + short_timeout
+                last_status = "PENDING"
+                while time.time() < poll_deadline:
+                    await asyncio.sleep(poll_interval)
+                    try:
+                        poll_resp = await client.get(poll_url, headers=headers, params=query, timeout=15)
+                    except Exception as e:
+                        print(f"[VideoProvider {self.id}] poll error, retry: {e}")
+                        continue
+                    if poll_resp.status_code < 200 or poll_resp.status_code >= 300:
+                        print(f"[VideoProvider {self.id}] poll HTTP {poll_resp.status_code}: {poll_resp.text[:300]}")
+                        continue
+                    try:
+                        poll_data = poll_resp.json()
+                    except Exception:
+                        continue
+                    status = None
+                    for spath in ["data.status", "status", "data.state", "state"]:
+                        cand = mappings.get("status") if "status" in mappings else None
+                        p = cand if spath == "data.status" and cand else spath
+                        v = _extract_by_path(poll_data, p)
+                        if v and isinstance(v, str):
+                            status = v.upper()
+                            break
+                    last_status = status or last_status
+                    if status == "SUCCESS":
+                        results = None
+                        for rpath in ["data.results", "results", "data.result", "data.video_url", "data.url"]:
+                            v = _extract_by_path(poll_data, rpath)
+                            if v:
+                                results = v
+                                break
+                        if isinstance(results, list) and results:
+                            video_url = results[0] if isinstance(results[0], str) else None
+                        elif isinstance(results, str) and results.startswith("http"):
+                            video_url = results
+                        if not video_url:
+                            txt = json.dumps(poll_data, ensure_ascii=False)
+                            m = re.search(r"https?://[^\s\"']+\.(mp4|mov|webm)", txt)
+                            if m:
+                                video_url = m.group(0)
+                        if video_url:
+                            data = poll_data
+                            break
+                        else:
+                            raise RuntimeError(f"轮询成功但未找到视频URL: {str(poll_data)[:600]}")
+                    elif status == "FAILED":
+                        err = poll_data.get("data", {}).get("error") if isinstance(poll_data.get("data"), dict) else poll_data.get("error")
+                        raise RuntimeError(f"视频生成任务失败 (task_id={task_id}): {err or poll_data}")
+                    else:
+                        continue
+                if not video_url:
+                    # 30s 内未完成，转后台轮询并立即返回 task_id，前端可通过 /videos/status/{task_id} 查询
+                    print(f"[VideoProvider {self.id}] task {task_id} still {last_status} after {short_timeout}s, switch to background polling")
+                    # 注册后台任务
+                    _CUSTOM_VIDEO_TASKS[task_id] = {"status": last_status, "task_id": task_id, "provider": self.id, "poll_url": poll_url, "headers": headers, "created_at": time.time()}
+                    try:
+                        asyncio.create_task(_autodl_poll_and_download(task_id, poll_url, headers, self.id))
+                    except Exception as e:
+                        print(f"[VideoProvider] create background task failed: {e}")
+                    # 返回带 task_id 的结果，前端据此轮询
+                    return VideoGenerateResult(
+                        video_url="",  # 占位，待轮询完成後更新
+                        local_path=None,
+                        provider=self.id,
+                        engine=f"custom:{self.id} (queued:{last_status})",
+                        duration=req.duration,
+                        elapsed_ms=int((time.time()-started)*1000),
+                        task_id=task_id,
+                        raw={"status": last_status, "task_id": task_id, "poll_url": poll_url, "queued": True, "data": data},
+                    )
             if not video_url:
                 text = json.dumps(data, ensure_ascii=False)
                 m = re.search(r"https?://[^\s\"']+\.(mp4|mov|webm)", text)
@@ -709,8 +930,7 @@ class GenericHttpVideoProvider(VideoProvider):
                         video_url = m2.group(0)
             if not video_url:
                 raise RuntimeError(f"未能提取视频 URL: {str(data)[:800]}")
-            # 若是远程 url，需下载？目前直接返回远程 URL，也可下载
-            # 尝试下载（可选）
+            # 若是远程 url，尝试下载到本地 storage
             try:
                 storage_url, local_path = await _download_to_storage(video_url, prefix="vid")
                 video_url = storage_url

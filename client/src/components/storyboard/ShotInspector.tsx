@@ -249,13 +249,15 @@ export const ShotInspector: React.FC = () => {
     setIsRegenerating(true);
     updateShot(activeShot.id, { status: 'generating_image' });
     try {
-      // 分箱：工作流暴露参数 vs 生成源参数
+      // 分箱：工作流暴露参数 vs 生成源参数 — 仅当使用 ComfyUI 工作流时才走工作流分箱
+      const isCustomImageProvider = !!imageProvider && (imageProvider.startsWith('prov_') || (imageProviderDef as any)?.provider_type === 'http');
+      const isHttpImageProvider = isCustomImageProvider || (!!imageProvider && !['comfyui',''].includes(imageProvider));
+      const useImageWorkflow = !!selectedWorkflowId && !isHttpImageProvider;
       let dynamic_inputs: Record<string,any> | undefined = undefined;
       let extraProviderParams: Record<string,any> | undefined = undefined;
-      if (selectedWorkflowId) {
-        // ComfyUI 工作流：仅发送工作流暴露项，Provider 额外参数（如 steps/cfg 若未暴露则忽略，避免未定义）
+      if (useImageWorkflow) {
+        // ComfyUI 工作流：仅发送工作流暴露项，Provider 额外参数需白名单过滤
         dynamic_inputs = Object.keys(shotDynamicInputs).length ? { ...shotDynamicInputs } : undefined;
-        // 若 Provider 有额外非暴露参数，需白名单过滤（仅当工作流也暴露该键时才透传）
         const exposedKeys = new Set(Object.keys(shotDynamicInputs));
         const filtered: Record<string,any> = {};
         Object.entries(imageProviderParams).forEach(([k,v])=>{
@@ -265,16 +267,17 @@ export const ShotInspector: React.FC = () => {
           dynamic_inputs = { ...(dynamic_inputs||{}), ...filtered };
         }
       } else {
-        // 纯 HTTP 生成源：合并工作流输入（空）+ Provider 参数
-        const merged: Record<string,any> = { ...shotDynamicInputs };
+        // 纯 HTTP 生成源：仅发送 Provider 参数，忽略工作流暴露项（避免 fps 等误传）
+        const merged: Record<string,any> = {};
         Object.entries(imageProviderParams).forEach(([k,v])=> { if(v!=='' && v!==null && v!==undefined) merged[k]=v; });
+        // 若无 Provider 参数但有工作流输入且未使用工作流，则不发送（避免污染 HTTP）
         dynamic_inputs = Object.keys(merged).length ? merged : undefined;
       }
       const res = await apiService.generateShotImage({
         prompt: activeShot.image_prompt,
         aspect_ratio: project?.aspect_ratio || '9:16',
         style_preset: project?.style_preset,
-        workflow_id: selectedWorkflowId || undefined,
+        workflow_id: useImageWorkflow ? selectedWorkflowId : undefined,
         provider: imageProvider || undefined,
         model: imageProviderDef?.default_model || undefined,
         dynamic_inputs,
@@ -309,8 +312,12 @@ export const ShotInspector: React.FC = () => {
     setVideoError(null);
     setIsGeneratingVid(true);
     try {
+      // 仅当使用 ComfyUI 视频工作流时才走工作流分箱；HTTP 自定义源直接透传 provider 参数
+      const isCustomVideoProvider = !!videoProvider && (videoProvider.startsWith('prov_') || (videoProviderDef as any)?.provider_type === 'http');
+      const isHttpVideoProvider = isCustomVideoProvider || (!!videoProvider && !['comfyui_video',''].includes(videoProvider));
+      const useVideoWorkflow = !!selectedWorkflowId && !isHttpVideoProvider;
       let dynamic_inputs: Record<string,any> | undefined = undefined;
-      if (selectedWorkflowId) {
+      if (useVideoWorkflow) {
         dynamic_inputs = Object.keys(shotDynamicInputs).length ? { ...shotDynamicInputs } : undefined;
         const exposedKeys = new Set(Object.keys(shotDynamicInputs));
         const filtered: Record<string,any> = {};
@@ -319,7 +326,7 @@ export const ShotInspector: React.FC = () => {
         });
         if(Object.keys(filtered).length) dynamic_inputs = { ...(dynamic_inputs||{}), ...filtered };
       } else {
-        const merged: Record<string,any> = { ...shotDynamicInputs };
+        const merged: Record<string,any> = {};
         Object.entries(videoProviderParams).forEach(([k,v])=> { if(v!=='' && v!==null && v!==undefined) merged[k]=v; });
         dynamic_inputs = Object.keys(merged).length ? merged : undefined;
       }
@@ -328,7 +335,7 @@ export const ShotInspector: React.FC = () => {
         prompt,
         duration: Math.round(activeShot.duration) || 5,
         provider: videoProvider,
-        workflow_id: selectedWorkflowId || undefined,
+        workflow_id: useVideoWorkflow ? selectedWorkflowId : undefined,
         dynamic_inputs,
       });
       setVideoSuccess(true);
@@ -336,8 +343,14 @@ export const ShotInspector: React.FC = () => {
       setTimeout(() => setVideoSuccess(false), 3000);
     } catch (e: any) {
       const msg = e?.message || '视频生成失败';
+      const isCustomVideoProvider2 = !!videoProvider && (videoProvider.startsWith('prov_') || (videoProviderDef as any)?.provider_type === 'http');
+      const isHttpVideoProvider2 = isCustomVideoProvider2 || (!!videoProvider && !['comfyui_video',''].includes(videoProvider));
       if(msg.includes('未定义的参数')){
-        setVideoError('检测到未暴露参数（如 fps），已自动忽略。工作流仅支持其暴露的输入，请在“参数与暴露诊断”中查看可填项，或切换为 HTTP 视频源');
+        if(isHttpVideoProvider2){
+          setVideoError('HTTP视频源已自动过滤未暴露参数（如 fps/resolution 不匹配），若仍失败请检查生成源的请求模板与参数');
+        } else {
+          setVideoError('检测到未暴露参数（如 fps），已自动忽略。工作流仅支持其暴露的输入，请在“参数与暴露诊断”中查看可填项，或切换为 HTTP 视频源');
+        }
       } else if(msg.includes('未能提取视频')){
         setVideoError(msg + '（请检查工作流/生成源的响应映射 video_url 路径）');
       } else {

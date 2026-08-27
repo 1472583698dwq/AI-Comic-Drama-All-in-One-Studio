@@ -604,7 +604,15 @@ async def check_videos_health():
 
 @router.get("/videos/status/{task_id}")
 async def get_video_task_status(task_id: str):
-    """查询异步视频生成任务状态"""
+    """查询异步视频生成任务状态（兼容云端与自定义 AutoDL）"""
+    # 优先查自定义 AutoDL 任务
+    try:
+        from app.providers.generic.http_provider import get_custom_video_task
+        custom = get_custom_video_task(task_id)
+        if custom is not None:
+            return custom
+    except Exception:
+        pass
     from app.providers.video.minimax_video import CloudVideoProvider
     return CloudVideoProvider.get_task_status(task_id)
 
