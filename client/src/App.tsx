@@ -13,6 +13,7 @@ import { McpToolsModal } from './components/mcp/McpToolsModal';
 import { SkillStudioModal } from './components/skills/SkillStudioModal';
 import { ConfigView } from './views/ConfigView';
 import { ProjectDashboard } from './views/ProjectDashboard';
+import { ProviderManagerModal } from './components/provider/ProviderManagerModal';
 const CreativeCanvas = React.lazy(()=> import('./components/canvas/CreativeCanvas').then(m=> ({default: m.CreativeCanvas})));
 import { useProjectStore } from './stores/useProjectStore';
 import { useMcpStore } from './stores/useMcpStore';
@@ -25,6 +26,7 @@ export function App() {
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isMcpOpen, setIsMcpOpen] = useState(false);
   const [isSkillsOpen, setIsSkillsOpen] = useState(false);
+  const [isProviderOpen, setIsProviderOpen] = useState(false);
   const [mcpError, setMcpError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -40,6 +42,7 @@ export function App() {
         onOpenMcp={() => setIsMcpOpen(true)}
         onOpenSkills={() => setIsSkillsOpen(true)}
         onOpenConfig={() => useProjectStore.getState().setActiveTab('config')}
+        onOpenProvider={() => setIsProviderOpen(true)}
       />
 
       {/* Api Error Banner */}
@@ -169,6 +172,11 @@ export function App() {
       <SkillStudioModal
         isOpen={isSkillsOpen}
         onClose={() => setIsSkillsOpen(false)}
+      />
+
+      <ProviderManagerModal
+        isOpen={isProviderOpen}
+        onClose={() => setIsProviderOpen(false)}
       />
     </div>
   );

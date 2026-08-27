@@ -45,6 +45,18 @@ export const AgentChatDrawer: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [inputText, setInputText] = useState('');
+  // LangChain 会话记忆：按项目隔离，支持多轮
+  const [sessionId, setSessionId] = useState<string>(() => {
+    try {
+      const stored = localStorage.getItem('agent_session_id');
+      if (stored) return stored;
+      const nid = `sess_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
+      localStorage.setItem('agent_session_id', nid);
+      return nid;
+    } catch { return `sess_${Date.now()}`; }
+  });
+  // 当项目切换时，使用项目级 session 实现上下文隔离
+  const effectiveSessionId = project?.id ? `proj_${project.id}_${sessionId.slice(0,8)}` : sessionId;
   const [messages, setMessages] = useState<Message[]>([
     {
       id: 'm1',
@@ -68,6 +80,7 @@ export const AgentChatDrawer: React.FC = () => {
 
   const wsRef = useRef<WebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const streamingMsgIdRef = useRef<string | null>(null);
 
   // Initialize position to bottom right when first opened
@@ -181,6 +194,10 @@ export const AgentChatDrawer: React.FC = () => {
                   : m
               )
             );
+            // 新增生成源全局刷新
+            if (data.tool_name === 'register_custom_provider' && data.status === 'success') {
+              try { window.dispatchEvent(new Event('provider-list-refresh')); } catch {}
+            }
           } else if (event === 'agent_stream_start') {
             setIsThinking(false);
             const streamId = 'agent-' + Date.now();
@@ -273,6 +290,7 @@ export const AgentChatDrawer: React.FC = () => {
 
     setMessages((prev) => [...prev, userMsg]);
     setInputText('');
+    if (inputRef.current) { inputRef.current.style.height = 'auto'; }
     setIsThinking(true);
 
     const shots = project?.scenes.flatMap((s) => s.shots) || [];
@@ -305,10 +323,13 @@ export const AgentChatDrawer: React.FC = () => {
       workspace: useProjectStore.getState().workspace,
     };
 
-    // 1. Try WebSocket
+    // 1. Try WebSocket (LangChain 流式)
     let ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       ws = connectWs();
+      // 等待一帧确保连接建立
+      await new Promise(r=> setTimeout(r, 120));
+      ws = wsRef.current;
     }
 
     let sentViaWs = false;
@@ -319,6 +340,7 @@ export const AgentChatDrawer: React.FC = () => {
             action: 'agent_prompt',
             prompt: text,
             context: contextPayload,
+            session_id: effectiveSessionId,
           })
         );
         sentViaWs = true;
@@ -327,73 +349,88 @@ export const AgentChatDrawer: React.FC = () => {
       }
     }
 
-    // 2. HTTP Fallback if WebSocket not active
+    // 2. HTTP SSE 真实流式 Fallback (LangChain)
     if (!sentViaWs) {
+      const streamId = 'agent-' + Date.now();
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: streamId,
+          sender: 'agent',
+          text: '',
+          isStreaming: true,
+          time: new Date().toLocaleTimeString(),
+        },
+      ]);
       try {
-        const streamId = 'agent-' + Date.now();
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: streamId,
-            sender: 'agent',
-            text: '',
-            isStreaming: true,
-            time: new Date().toLocaleTimeString(),
-          },
-        ]);
-
-        const res = await apiService.agentChat(text, contextPayload);
-        setIsThinking(false);
-
-        // Record tool executions if any
-        if (res.executed_tools && res.executed_tools.length > 0) {
-          for (const tool of res.executed_tools) {
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: 'tool-' + Math.random(),
-                sender: 'system',
-                text: tool.status === 'success' ? `✓ 工具 ${tool.tool_name} 执行成功` : `✕ 工具 ${tool.tool_name} 失败: ${tool.error}`,
-                toolCall: { toolName: tool.tool_name, status: tool.status === 'success' ? 'completed' : 'error' },
-                time: new Date().toLocaleTimeString(),
-              },
-            ]);
+        // 优先使用 SSE 流式接口
+        await apiService.agentChatStream(text, contextPayload, effectiveSessionId, (event, data)=>{
+          if (event === 'agent_stream_chunk') {
+            setIsThinking(false);
+            setMessages(prev=> prev.map(m=> m.id===streamId ? {...m, text: m.text + (data.delta||'') } : m));
+          } else if (event === 'tool_calling') {
+            setMessages(prev=> [...prev, {
+              id: 'tool-' + Date.now() + Math.random(),
+              sender: 'system',
+              text: `正在调用 MCP 工具: ${data.tool_name}...`,
+              toolCall: { toolName: data.tool_name, status: 'executing' },
+              time: new Date().toLocaleTimeString(),
+            }]);
+          } else if (event === 'tool_result') {
+            setMessages(prev=> prev.map(m=> m.toolCall?.toolName===data.tool_name && m.toolCall?.status==='executing' ? {...m, text: data.status==='success'? `✓ 工具 ${data.tool_name} 执行成功` : `✕ 工具 ${data.tool_name} 失败: ${data.error}`, toolCall: {...m.toolCall!, status: data.status==='success'?'completed':'error'}} : m));
+          } else if (event === 'agent_thinking') {
+            setIsThinking(true);
+          } else if (event === 'agent_response') {
+            setIsThinking(false);
+            setMessages(prev=> prev.map(m=> m.id===streamId ? {...m, text: data.message || m.text, isStreaming:false, suggestedActions: data.suggested_actions} : m));
+          } else if (event === 'error') {
+            setIsThinking(false);
+            setMessages(prev=> [...prev, {id:'err-'+Date.now(), sender:'system', text:'⚠️ '+data.message, time: new Date().toLocaleTimeString()}]);
           }
-        }
-
-        // Simulate streaming typewriter effect for HTTP response
-        const fullText = res.reply || '指令已完成。';
-        let currentText = '';
-        for (let i = 0; i < fullText.length; i += 3) {
-          currentText += fullText.slice(i, i + 3);
+        });
+        setIsThinking(false);
+        // 确保结束状态
+        setMessages(prev=> prev.map(m=> m.id===streamId ? {...m, isStreaming:false} : m));
+      } catch (e: any) {
+        // 回退到非流式
+        try {
+          const res = await apiService.agentChat(text, contextPayload, effectiveSessionId);
+          setIsThinking(false);
+          if (res.executed_tools && res.executed_tools.length > 0) {
+            for (const tool of res.executed_tools) {
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: 'tool-' + Math.random(),
+                  sender: 'system',
+                  text: tool.status === 'success' ? `✓ 工具 ${tool.tool_name} 执行成功` : `✕ 工具 ${tool.tool_name} 失败: ${tool.error}`,
+                  toolCall: { toolName: tool.tool_name, status: tool.status === 'success' ? 'completed' : 'error' },
+                  time: new Date().toLocaleTimeString(),
+                },
+              ]);
+            }
+          }
+          const fullText = res.reply || '指令已完成。';
           setMessages((prev) =>
             prev.map((m) =>
               m.id === streamId
-                ? { ...m, text: currentText }
+                ? { ...m, text: fullText, isStreaming: false, suggestedActions: res.suggested_actions }
                 : m
             )
           );
-          await new Promise((r) => setTimeout(r, 20));
+        } catch (e2:any) {
+          setIsThinking(false);
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: 'err-' + Date.now(),
+              sender: 'system',
+              text: '⚠️ 导演 Agent 响应异常: ' + (e2?.message || '未知错误'),
+              time: new Date().toLocaleTimeString(),
+            },
+          ]);
+          setMessages(prev=> prev.map(m=> m.id===streamId ? {...m, text: m.text || '请求失败', isStreaming:false} : m));
         }
-
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === streamId
-              ? { ...m, text: fullText, isStreaming: false, suggestedActions: res.suggested_actions }
-              : m
-          )
-        );
-      } catch (e: any) {
-        setIsThinking(false);
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: 'err-' + Date.now(),
-            sender: 'system',
-            text: '⚠️ 导演 Agent 响应异常: ' + (e?.message || '未知错误'),
-            time: new Date().toLocaleTimeString(),
-          },
-        ]);
       }
     }
   };
@@ -444,12 +481,34 @@ export const AgentChatDrawer: React.FC = () => {
                   />
                 </div>
                 <div className="text-[9px] text-gray-400">
-                  {wsConnected ? '实时流式响应' : 'HTTP 智能通道'} · 可自由拖拽
+                  LangChain {wsConnected ? '· 实时流式' : '· HTTP SSE'} · 多轮记忆·循环
                 </div>
               </div>
             </div>
 
             <div className="flex items-center space-x-1">
+              <button
+                onClick={async()=>{
+                  try {
+                    await apiService.clearAgentHistory(effectiveSessionId);
+                    setMessages([{
+                      id: 'm1',
+                      sender: 'agent',
+                      text: '已清空对话历史（LangChain 记忆已重置）。你可以开始新话题了。',
+                      time: new Date().toLocaleTimeString(),
+                    }]);
+                    // 同时通知 WS 清空
+                    const ws = wsRef.current;
+                    if (ws && ws.readyState===WebSocket.OPEN) {
+                      ws.send(JSON.stringify({action:'clear_history', session_id: effectiveSessionId}));
+                    }
+                  } catch(e:any){ alert(e.message); }
+                }}
+                className="p-1.5 rounded-lg text-gray-400 hover:text-amber-300 hover:bg-surface-tertiary transition-all"
+                title="清空多轮记忆 (LangChain)"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+              </button>
               <button
                 onClick={() => {
                   if (typeof window !== 'undefined') {
@@ -582,25 +641,44 @@ export const AgentChatDrawer: React.FC = () => {
             ))}
           </div>
 
-          {/* Input Bar */}
-          <div className="p-3 border-t border-border bg-surface flex items-center space-x-2 shrink-0">
-            <input
-              type="text"
+          {/* Input Bar — 多行自适应 */}
+          <div className="p-3 border-t border-border bg-surface flex items-end space-x-2 shrink-0">
+            <textarea
+              ref={inputRef}
               value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-              placeholder="向导演 Agent 下达指令（如：把镜头改成俯视推镜）..."
-              className="flex-1 bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand"
+              onChange={(e) => {
+                setInputText(e.target.value);
+                // auto-resize
+                const el = e.target as HTMLTextAreaElement;
+                el.style.height = 'auto';
+                el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+              }}
+              onInput={(e)=>{
+                const el = e.target as HTMLTextAreaElement;
+                el.style.height = 'auto';
+                el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSendMessage();
+                }
+              }}
+              placeholder="向导演 Agent 下达指令（Shift+Enter 换行，Enter 发送）... 示例：把镜头改成俯视推镜 / 帮我接入这个API：https://..."
+              rows={1}
+              className="flex-1 bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand resize-none overflow-y-auto min-h-[36px] max-h-[120px] leading-relaxed"
+              style={{height: 'auto'}}
             />
             <button
               onClick={() => handleSendMessage()}
               disabled={!inputText.trim() || isThinking}
-              className="p-2.5 rounded-xl bg-gradient-to-r from-brand to-brand-blue text-white disabled:opacity-40 hover:opacity-90 shadow-md shadow-brand/20 transition-all shrink-0"
-              title="发送指令"
+              className="p-2.5 rounded-xl bg-gradient-to-r from-brand to-brand-blue text-white disabled:opacity-40 hover:opacity-90 shadow-md shadow-brand/20 transition-all shrink-0 self-end"
+              title="发送指令 (Enter)"
             >
               <Send className="w-4 h-4" />
             </button>
           </div>
+          <div className="px-3 pb-1 text-[10px] text-gray-500 text-right">Shift+Enter 换行 · 支持多行粘贴长文档</div>
         </div>
       )}
 

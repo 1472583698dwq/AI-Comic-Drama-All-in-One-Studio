@@ -82,6 +82,10 @@ pyinstaller_cmd = [
     "--collect-all", "fastmcp",
     "--collect-all", "pydantic",
     "--collect-all", "httpx",
+    "--collect-all", "langchain",
+    "--collect-all", "langchain_openai",
+    "--collect-all", "langchain_core",
+    "--collect-all", "langgraph",
     os.path.join(ROOT, "launch_desktop_app.py")
 ]
 

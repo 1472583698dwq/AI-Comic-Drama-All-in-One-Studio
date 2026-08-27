@@ -55,6 +55,13 @@ try:
     print("[Main] Canvas routes mounted at /api/v1/canvas")
 except Exception as e:
     print(f"[Main] Canvas routes mount failed: {e}")
+# Provider 管理路由（解耦：每个生成源为独立节点）
+try:
+    from app.api.provider_routes import router as provider_router
+    app.include_router(provider_router, prefix=settings.API_V1_STR)
+    print("[Main] Provider routes mounted at /api/v1/providers")
+except Exception as e:
+    print(f"[Main] Provider routes mount failed: {e}")
 
 # Mount standard MCP protocol server (Streamable HTTP)
 if mcp_http_app:

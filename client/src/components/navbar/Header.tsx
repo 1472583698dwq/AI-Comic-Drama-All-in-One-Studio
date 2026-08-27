@@ -16,7 +16,8 @@ import {
   Library,
   Sun,
   Moon,
-  FolderKanban
+  FolderKanban,
+  Plug
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { useMcpStore } from '../../stores/useMcpStore';
@@ -28,9 +29,10 @@ interface HeaderProps {
   onOpenMcp: () => void;
   onOpenSkills: () => void;
   onOpenConfig: () => void;
+  onOpenProvider?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ onOpenImport, onOpenExport, onOpenMcp, onOpenSkills, onOpenConfig }) => {
+export const Header: React.FC<HeaderProps> = ({ onOpenImport, onOpenExport, onOpenMcp, onOpenSkills, onOpenConfig, onOpenProvider }) => {
   const { 
     project, 
     platformMode, 
@@ -118,6 +120,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenImport, onOpenExport, onOp
 
         {/* 工具组 — 图标化 */}
         <div className="hidden md:flex items-center gap-1">
+          <button onClick={onOpenProvider} className="w-8 h-8 rounded-full bg-surface-secondary border border-border hover:border-brand/40 text-gray-400 hover:text-white flex items-center justify-center" title="自定义生成源 (增删改查)"><Plug className="w-3.5 h-3.5 text-brand" /></button>
           <button onClick={onOpenSkills} className="w-8 h-8 rounded-full bg-surface-secondary border border-border hover:border-accent-orange/40 text-gray-400 hover:text-white flex items-center justify-center" title="技能工坊"><Sparkles className="w-3.5 h-3.5 text-accent-orange" /></button>
           <button onClick={onOpenMcp} className="w-8 h-8 rounded-full bg-surface-secondary border border-border hover:border-brand/40 text-gray-400 hover:text-white flex items-center justify-center relative" title="MCP 工具"><Cpu className="w-3.5 h-3.5 text-accent-green" /><span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-accent-green animate-pulse border-2 border-surface" /></button>
           <button onClick={toggleTheme} className="w-8 h-8 rounded-full bg-surface-secondary border border-border hover:border-border-active text-gray-400 hover:text-white flex items-center justify-center" title="切换主题">{effectiveTheme==='dark' ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5 text-indigo-400" />}</button>

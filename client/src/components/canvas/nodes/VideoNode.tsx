@@ -8,12 +8,17 @@ const API_ORIGIN = window.location.port === '5173' ? 'http://127.0.0.1:8000' : '
 export const VideoNode: React.FC<NodeProps> = ({ data, id }) => {
   const d: any = data;
   const [mode, setMode] = useState(d.mode || 'i2v');
-  const [provider, setProvider] = useState(d.provider || 'comfyui_video');
+  const [provider, setProvider] = useState(d.provider || d.provider_id || 'comfyui_video');
   const [prompt, setPrompt] = useState(d.video_prompt || d.prompt || '');
   const [firstFrame, setFirstFrame] = useState(d.first_frame_url || d.image_url || '');
   const [duration, setDuration] = useState(d.duration || 5);
   const [generating, setGenerating] = useState(false);
   const [videoUrl, setVideoUrl] = useState(d.video_url || '');
+
+  React.useEffect(()=> {
+    const p = (d as any).provider || (d as any).provider_id || (d as any).provider_video;
+    if (p && p !== provider) setProvider(p);
+  }, [d.provider, d.provider_id, d.provider_video]);
 
   const handleGenerate = async () => {
     const p = prompt || d.action_desc || 'cinematic motion';
@@ -21,16 +26,19 @@ export const VideoNode: React.FC<NodeProps> = ({ data, id }) => {
     if (mode==='i2v' && !firstFrame) { alert('I2V 需要首帧图像（连入上游 image）'); return; }
     setGenerating(true);
     try {
+      const effectiveProvider = (d as any).provider || (d as any).provider_id || (d as any).provider_video || provider;
+      const model = (d as any).model;
       const res = await apiService.generateShotVideo({
         prompt: p,
         mode: mode as any,
         first_frame_url: firstFrame || undefined,
         duration,
-        provider,
-      });
+        provider: effectiveProvider,
+        // model透传 via dynamic? 使用 provider 字段已包含，model 额外
+      } as any);
       const url = res.video_url;
       setVideoUrl(url);
-      (d.onUpdate as any)?.(id, { video_url: url, video_prompt: p, mode, provider, duration, first_frame_url: firstFrame });
+      (d.onUpdate as any)?.(id, { video_url: url, video_prompt: p, mode, provider: effectiveProvider, duration, first_frame_url: firstFrame, model });
     } catch(e:any){ alert(e.message); } finally { setGenerating(false); }
   };
 
@@ -44,9 +52,11 @@ export const VideoNode: React.FC<NodeProps> = ({ data, id }) => {
     <div className="w-[340px] bg-surface border border-accent-orange/30 rounded-2xl shadow-xl overflow-hidden">
       <div className="px-3 py-2 bg-gradient-to-r from-orange-500/20 to-red-500/20 border-b border-accent-orange/20 flex items-center gap-1.5">
         <Film className="w-3.5 h-3.5 text-accent-orange"/><span className="text-xs font-bold text-white">生视频 (I2V/R2V/T2V)</span>
+        { (d.provider || d.provider_id || d.provider_video) && <span className="ml-1 text-[9px] px-1 py-0.5 rounded bg-violet-600 text-white font-mono truncate max-w-[80px]">{String(d.provider || d.provider_id || d.provider_video).slice(0,10)}</span>}
         <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-black/30 text-gray-300">{mode.toUpperCase()}</span>
       </div>
       <Handle type="target" position={Position.Left} className="!bg-accent-orange !w-2 !h-2"/>
+      <Handle type="target" position={Position.Top} id="provider" className="!bg-violet-500 !w-3 !h-3 !border-2 !border-white" style={{left:'15%'}} title="接 Provider-Video"/>
       <Handle type="target" position={Position.Top} id="image" className="!bg-brand !w-2 !h-2" style={{left:'30%'}}/>
       <Handle type="source" position={Position.Right} className="!bg-accent-orange !w-2 !h-2"/>
       <Handle type="source" position={Position.Bottom} id="video" className="!bg-accent-green !w-2 !h-2"/>
@@ -56,11 +66,16 @@ export const VideoNode: React.FC<NodeProps> = ({ data, id }) => {
             <button key={m} onClick={()=>{setMode(m); (d.onUpdate as any)?.(id,{mode:m});}} className={`py-1 rounded-lg text-xs border ${mode===m ? 'bg-accent-orange/20 border-accent-orange text-white' : 'bg-surface-secondary border-border text-gray-400'}`}>{m.toUpperCase()}</button>
           ))}
         </div>
-        <select value={provider} onChange={e=>{setProvider(e.target.value); (d.onUpdate as any)?.(id,{provider:e.target.value});}} className="w-full bg-surface-secondary border border-border rounded-xl px-2 py-1.5 text-xs text-white">
-          <option value="comfyui_video">ComfyUI 本地 (SVD/AnimateDiff)</option>
-          <option value="minimax_video">MiniMax 云端</option>
-          <option value="kling">Kling</option>
-        </select>
+        <div className="flex gap-1.5">
+          <select value={provider} onChange={e=>{setProvider(e.target.value); (d.onUpdate as any)?.(id,{provider:e.target.value});}} className="flex-1 bg-surface-secondary border border-border rounded-xl px-2 py-1.5 text-xs text-white">
+            <option value="comfyui_video">ComfyUI 本地 (SVD/AnimateDiff)</option>
+            <option value="minimax_video">MiniMax 云端</option>
+            <option value="kling">Kling</option>
+            {d.provider && !['comfyui_video','minimax_video','kling'].includes(d.provider) && <option value={d.provider}>{d.provider} (连线)</option>}
+          </select>
+          {(d.provider || d.provider_id) && <span className="text-[10px] px-2 py-1 rounded bg-violet-600/20 border border-violet-500/30 text-violet-300 flex items-center">已连线</span>}
+        </div>
+        {(d.provider || d.provider_id) && <div className="text-[11px] text-violet-300 bg-violet-500/10 border border-violet-500/20 rounded px-2 py-1">✓ 已绑定 Provider：{String(d.provider || d.provider_id).slice(0,20)} · 执行时优先使用连线源</div>}
         <textarea value={prompt} onChange={e=>{setPrompt(e.target.value); (d.onUpdate as any)?.(id,{video_prompt:e.target.value});}} placeholder="运动/运镜描述：镜头极速推近，发丝狂舞…" rows={2} className="w-full bg-surface-secondary border border-border rounded-xl p-2 text-xs text-white placeholder-gray-500"/>
         <input value={firstFrame} onChange={e=>{setFirstFrame(e.target.value); (d.onUpdate as any)?.(id,{first_frame_url:e.target.value});}} placeholder="首帧图像 URL (I2V 必选，连线自动填充)" className="w-full bg-surface-secondary border border-border rounded-xl px-2 py-1.5 text-xs text-white placeholder-gray-500 font-mono"/>
         <div className="flex items-center gap-2">

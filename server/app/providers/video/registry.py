@@ -5,12 +5,28 @@ class VideoProviderRegistry:
     def __init__(self):
         self._providers: Dict[str, VideoProvider] = {}
         self._order: List[str] = []
+        self._custom_ids: set = set()
 
-    def register(self, provider: VideoProvider):
+    def register(self, provider: VideoProvider, is_custom: bool = False):
         self._providers[provider.id] = provider
         if provider.id not in self._order:
             self._order.append(provider.id)
-        print(f"[VideoRegistry] Registered provider: {provider.id} ({provider.display_name})")
+        if is_custom:
+            self._custom_ids.add(provider.id)
+        print(f"[VideoRegistry] Registered provider: {provider.id} ({provider.display_name}){' [custom]' if is_custom else ''}")
+
+    def unregister(self, provider_id: str) -> bool:
+        if provider_id in self._providers:
+            del self._providers[provider_id]
+            if provider_id in self._order:
+                self._order.remove(provider_id)
+            self._custom_ids.discard(provider_id)
+            print(f"[VideoRegistry] Unregistered provider: {provider_id}")
+            return True
+        return False
+
+    def is_custom(self, provider_id: str) -> bool:
+        return provider_id in self._custom_ids
 
     def get(self, provider_id: str) -> Optional[VideoProvider]:
         return self._providers.get(provider_id)

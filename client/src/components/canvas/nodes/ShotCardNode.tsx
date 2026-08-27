@@ -11,17 +11,24 @@ export const ShotCardNode: React.FC<NodeProps> = ({ data, id }) => {
   const [generating, setGenerating] = useState(false);
   const [localData, setLocalData] = useState(d);
   const { project } = useProjectStore();
+  // 保持与 d 同步（处理连线注入的 provider）
+  React.useEffect(()=> { setLocalData(d); }, [d.provider, d.provider_id, d.model]);
 
   const handleGenerate = async () => {
     if (!localData.image_prompt?.trim()) { alert('请填写画面提示词'); return; }
     setGenerating(true);
     try {
+      // 解耦：优先使用连线注入的 Provider（d.provider），否则回退
+      const provider = (d as any).provider || (d as any).provider_id || localData.provider || undefined;
+      const model = (d as any).model || localData.model || undefined;
       const res = await apiService.generateShotImage({
         prompt: localData.image_prompt,
         aspect_ratio: project?.aspect_ratio || '9:16',
         style_preset: project?.style_preset,
         workflow_id: localData.workflow_id || undefined,
         dynamic_inputs: localData.dynamic_inputs,
+        provider: provider,
+        model: model,
       });
       const next = { ...localData, image_url: res.image_url };
       setLocalData(next);
@@ -31,15 +38,20 @@ export const ShotCardNode: React.FC<NodeProps> = ({ data, id }) => {
   };
 
   const imgUrl = localData.image_url ? (localData.image_url.startsWith('/') ? API_ORIGIN + localData.image_url : localData.image_url) : '';
+  const providerBadge = d.provider || d.provider_id || localData.provider;
 
   return (
     <div className="w-[300px] bg-surface border border-border rounded-2xl shadow-xl overflow-hidden">
       <div className="px-3 py-2 bg-gradient-to-r from-brand/20 to-accent-pink/20 border-b border-border flex items-center justify-between">
         <span className="text-xs font-bold text-white flex items-center gap-1.5"><Film className="w-3.5 h-3.5 text-brand-light"/> 分镜卡 {localData.shot_index ? `#${localData.shot_index}`: ''}</span>
-        <span className="text-[10px] px-1.5 py-0.5 rounded bg-black/40 text-gray-300">{localData.camera_framing || 'medium'} · {localData.camera_motion || 'push_in'}</span>
+        <span className="flex items-center gap-1">
+          {providerBadge && <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-600 text-white font-mono truncate max-w-[90px]" title={String(providerBadge)}>{String(providerBadge).slice(0,12)}</span>}
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-black/40 text-gray-300">{localData.camera_framing || 'medium'} · {localData.camera_motion || 'push_in'}</span>
+        </span>
       </div>
       <Handle type="target" position={Position.Left} className="!bg-brand !w-2 !h-2" />
       <Handle type="source" position={Position.Right} className="!bg-accent-pink !w-2 !h-2" />
+      <Handle type="target" position={Position.Top} id="provider" className="!bg-violet-500 !w-3 !h-3 !border-2 !border-white" style={{ left: '25%' }} title="接 Provider-Image" />
       <Handle type="target" position={Position.Top} id="ref" className="!bg-amber-400 !w-2 !h-2" style={{ left: '70%' }} />
       <Handle type="source" position={Position.Bottom} id="image" className="!bg-brand !w-2 !h-2" style={{ left: '50%' }} />
 

@@ -3,7 +3,7 @@ import {
   ReactFlow, Background, Controls, MiniMap, useNodesState, useEdgesState, addEdge, Connection, Edge, Node, ReactFlowProvider, useReactFlow
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Search, Sparkles, Upload, Image as ImageIcon, Film, Users, Box, Library, Cpu, BookOpen, X, Save, Download, Wand2 } from 'lucide-react';
+import { Search, Sparkles, Upload, Image as ImageIcon, Film, Users, Box, Library, Cpu, BookOpen, X, Save, Download, Wand2, Plug, Globe, Mic, Video as VideoIcon } from 'lucide-react';
 import { useProjectListStore } from '../../stores/useProjectListStore';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { useCanvasStore } from '../../stores/useCanvasStore';
@@ -16,6 +16,7 @@ import { AssetNode, Director3DNode } from './nodes/AssetNode';
 import { VideoNode } from './nodes/VideoNode';
 import { TTSNode } from './nodes/TTSNode';
 import { TimelineExportNode } from './nodes/TimelineExportNode';
+import { ProviderNode, ProviderImageNode, ProviderVideoNode, ProviderAudioNode } from './nodes/ProviderNode';
 import { WorkflowInspectorModal } from '../workflow/WorkflowInspectorModal';
 
 const nodeTypes: any = {
@@ -28,6 +29,11 @@ const nodeTypes: any = {
   'video': VideoNode,
   'tts': TTSNode,
   'timeline-export': TimelineExportNode,
+  'provider-image': ProviderImageNode,
+  'provider-video': ProviderVideoNode,
+  'provider-audio': ProviderAudioNode,
+  'provider': ProviderNode,
+  'provider-llm': ProviderNode,
 };
 
 let idSeq = 0;
@@ -37,9 +43,12 @@ const NODE_LIBRARY = [
   { type: 'brief', label: '灵感简报', desc: '粘贴小说/策划', icon: BookOpen, color: 'text-amber-400' },
   { type: 'script-split', label: '剧本拆解', desc: 'MiniMax LLM', icon: Sparkles, color: 'text-brand' },
   { type: 'shot-card', label: '分镜卡', desc: '首帧+视频', icon: Film, color: 'text-brand-light' },
-  { type: 'comfy-workflow', label: 'ComfyUI工作流', desc: '动态端口', icon: Cpu, color: 'text-violet-400' },
+  { type: 'comfy-workflow', label: 'ComfyUI工作流', desc: '本地强控', icon: Cpu, color: 'text-violet-400' },
+  { type: 'provider-image', label: '生图源', desc: '多源解耦', icon: Cpu, color: 'text-violet-400' },
+  { type: 'provider-video', label: '视频源', desc: '多源解耦', icon: Film, color: 'text-accent-orange' },
+  { type: 'provider-audio', label: '语音源', desc: '多源解耦', icon: Library, color: 'text-accent-pink' },
   { type: 'video', label: '生视频', desc: 'I2V/R2V/T2V', icon: Film, color: 'text-accent-orange' },
-  { type: 'tts', label: 'TTS配音', desc: 'MiniMax/Eleven', icon: Library, color: 'text-accent-pink' },
+  { type: 'tts', label: 'TTS配音', desc: '文本→语音', icon: Library, color: 'text-accent-pink' },
   { type: 'director3d', label: '3D导演台', desc: '机位计算', icon: Film, color: 'text-accent-orange' },
   { type: 'timeline-export', label: '剪映导出', desc: '多轨草稿', icon: Film, color: 'text-brand' },
   { type: 'asset', label: '素材节点', desc: '从资产库拖入', icon: Library, color: 'text-accent-pink' },
@@ -58,6 +67,7 @@ const InnerCanvas: React.FC = () => {
   const [assetQuery, setAssetQuery] = useState('');
   const [inspectWfId, setInspectWfId] = useState('');
   const [saving, setSaving] = useState(false);
+  const [providerList, setProviderList] = useState<any[]>([]);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const loadedRef = useRef(false);
 
@@ -88,6 +98,11 @@ const InnerCanvas: React.FC = () => {
     });
     apiService.listWorkflows('all').then(r=> setWorkflows(r.workflows||[])).catch(()=>{});
     apiService.listAssets({ project_id: pid || undefined, limit: 20 }).then(r=> setAssets(r.assets||[])).catch(()=>{});
+    apiService.listProviders({}).then(r=> setProviderList(r.providers||[])).catch(()=>{});
+    // 监听 provider 创建事件自动刷新
+    const onProvCreated = ()=> apiService.listProviders({}).then(r=> setProviderList(r.providers||[])).catch(()=>{});
+    window.addEventListener('provider-list-refresh', onProvCreated as any);
+    // 暴露给 ProviderNode 拖拽后刷新
   }, [pid]);
 
   // 自动保存 + 同步到 canvasStore 供 Agent 感知
@@ -170,18 +185,53 @@ const InnerCanvas: React.FC = () => {
     }
   }, [nodes, edges, pid]);
 
-  const onConnect = useCallback((params: Connection)=> setEdges(es=> addEdge({...params, type:'smoothstep', animated:true, style:{stroke:'#7c3aed'}}, es)), []);
+  const onConnect = useCallback((params: Connection)=> {
+    setEdges(es=> addEdge({...params, type:'smoothstep', animated:true, style:{stroke:'#7c3aed'}}, es));
+    // 解耦：若 Provider 节点连入消费节点，自动注入 provider_id 到目标节点
+    setTimeout(()=> {
+      const sourceId = params.source;
+      const targetId = params.target;
+      if (!sourceId || !targetId) return;
+      // 查找源节点类型与 provider 信息
+      // 需在 setNodes 回调中读取最新 nodes
+      setNodes(nds=> {
+        const srcNode = nds.find(n=> n.id===sourceId);
+        const tgtNode = nds.find(n=> n.id===targetId);
+        if (!srcNode || !tgtNode) return nds;
+        const srcType = srcNode.type || '';
+        const isProvider = srcType.startsWith('provider');
+        const isConsumer = ['shot-card','video','tts','comfy-workflow','image','generate-image'].includes(tgtNode.type || '');
+        if (isProvider && isConsumer) {
+          const provId = (srcNode.data as any)?.provider_id || (srcNode.data as any)?.provider || srcNode.id;
+          const model = (srcNode.data as any)?.model || (srcNode.data as any)?.default_model;
+          // 更新目标节点
+          return nds.map(n=> n.id===targetId ? { ...n, data: { ...n.data, provider: provId, provider_id: provId, model: model || n.data?.model, _providerName: (srcNode.data as any)?.definition?.display_name || (srcNode.data as any)?.definition?.name || provId } } : n);
+        }
+        return nds;
+      });
+    }, 0);
+  }, []);
 
   const onDrop = useCallback((e: React.DragEvent)=>{
     e.preventDefault();
     const type = e.dataTransfer.getData('application/canvas-nodetype');
     const assetId = e.dataTransfer.getData('application/canvas-assetid');
-    if (!type && !assetId) return;
+    const providerId = e.dataTransfer.getData('application/provider-id');
+    const providerKind = e.dataTransfer.getData('application/provider-kind') as any;
+    if (!type && !assetId && !providerId) return;
     const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
     if (assetId) {
       const asset = assets.find(a=> a.id===assetId);
       if (!asset) return;
       const node: Node = { id: genId('asset'), type: 'asset', position, data: { ...asset, onUpdate: handleNodeUpdate, onExecute: handleNodeExecute } };
+      setNodes(nds=> [...nds, node]);
+      return;
+    }
+    if (providerId) {
+      const def = providerList.find(p=> p.id===providerId);
+      const kind = providerKind || def?.kind || 'image';
+      const nodeType = kind==='image' ? 'provider-image' : kind==='video' ? 'provider-video' : kind==='audio' ? 'provider-audio' : 'provider-image';
+      const node: Node = { id: genId(nodeType), type: nodeType as any, position, data: { provider_id: providerId, provider: providerId, kind, definition: def, model: def?.default_model || def?.models?.[0] || '', onUpdate: handleNodeUpdate, onExecute: handleNodeExecute } };
       setNodes(nds=> [...nds, node]);
       return;
     }
@@ -191,8 +241,12 @@ const InnerCanvas: React.FC = () => {
     // 默认值
     if (type==='brief') node.data = { ...node.data, brief:'', style_preset:'donghua_xianxia', aspect_ratio:'9:16' };
     if (type==='shot-card') node.data = { ...node.data, image_prompt:'masterpiece, cinematic lighting', action_desc:'', subtitle_text:'' };
+    if (type && type.startsWith('provider')) {
+      const kind = type==='provider-video' ? 'video' : type==='provider-audio' ? 'audio' : 'image';
+      node.data = { ...node.data, kind, provider_id: '', model: '' };
+    }
     setNodes(nds=> [...nds, node]);
-  }, [screenToFlowPosition, assets]);
+  }, [screenToFlowPosition, assets, providerList]);
 
   const handleManualSave = async () => {
     if (!pid) { alert('请先在 项目看板 创建/打开项目'); return; }
@@ -286,6 +340,44 @@ const InnerCanvas: React.FC = () => {
                 </div>
               ))}
               {workflows.length===0 && <div className="text-[11px] text-gray-500 text-center py-4">暂无工作流，去设置里配置目录</div>}
+            </div>
+          </div>
+          <div className="rounded-[14px] bg-surface-secondary border border-border p-3">
+            <div className="text-xs font-bold text-white mb-2 flex items-center gap-1.5">
+              <Plug className="w-3.5 h-3.5 text-brand"/> 生成源 <span className="ml-auto text-[10px] text-gray-500">{providerList.length} 个</span>
+              <button onClick={()=> apiService.listProviders({}).then(r=>setProviderList(r.providers||[]))} className="ml-1 text-[10px] text-brand-light hover:underline">刷新</button>
+            </div>
+            <div className="text-[10px] text-gray-500 mb-2 leading-relaxed">每个生成源为独立节点，可多源并存。拖至画布后连线到分镜卡/视频/TTS。</div>
+            <div className="space-y-1 max-h-[160px] overflow-y-auto pr-1">
+              {providerList.slice(0,20).map((p:any)=> {
+                const kindIcon = p.kind==='image' ? Globe : p.kind==='video' ? VideoIcon : p.kind==='audio' ? Mic : Plug;
+                const KindIcon = kindIcon;
+                return (
+                  <div key={p.id} draggable onDragStart={e=>{
+                    e.dataTransfer.setData('application/provider-id', p.id);
+                    e.dataTransfer.setData('application/provider-kind', p.kind || 'image');
+                  }} className="flex items-center gap-2 p-2 rounded-xl bg-surface border border-transparent hover:border-brand/30 hover:bg-surface-tertiary cursor-grab">
+                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${p.kind==='image' ? 'bg-violet-500/10 border border-violet-500/20' : p.kind==='video' ? 'bg-orange-500/10 border border-orange-500/20' : 'bg-pink-500/10 border border-pink-500/20'}`}><KindIcon className={`w-3.5 h-3.5 ${p.kind==='image' ? 'text-violet-400' : p.kind==='video' ? 'text-orange-400' : 'text-pink-400'}`}/></div>
+                    <div className="min-w-0 flex-1"><div className="text-xs font-medium text-white truncate">{p.display_name || p.name || p.id}</div><div className="text-[10px] text-gray-500 flex items-center gap-1"><span className={`px-1 py-0 rounded text-[9px] ${p.builtin?'bg-brand/20 text-brand-light':'bg-emerald-500/15 text-emerald-400'}`}>{p.builtin?'内置':'自定义'}</span>{p.kind}</div></div>
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${p.enabled===false?'bg-gray-500':'bg-emerald-500'}`}/>
+                  </div>
+                );
+              })}
+              {providerList.length===0 && <div className="text-[11px] text-gray-500 text-center py-4">暂无生成源，请先创建</div>}
+            </div>
+            <div className="mt-2 flex gap-1.5">
+              <button onClick={()=> window.dispatchEvent(new CustomEvent('open-provider-create', {detail:{kind:'image'}}))} className="flex-1 py-1.5 rounded-lg bg-brand text-white text-[11px]">新建</button>
+              <button onClick={()=>{
+                const doc = prompt('粘贴 API 文档/cURL，将调用导演自动接入。\n示例：POST https://api.xxx.com/v1/images/generations ...');
+                if(doc){
+                  const kind = prompt('类型？ image/video/audio', 'image') || 'image';
+                  apiService.importProvider({ kind, doc_text: doc, name: `导入${kind}源` }).then(r=>{
+                    alert(`✓ 已创建 ${r.provider?.id}`);
+                    apiService.listProviders({}).then(x=>setProviderList(x.providers||[]));
+                    window.dispatchEvent(new Event('provider-list-refresh'));
+                  }).catch(e=> alert(e.message));
+                }
+              }} className="flex-1 py-1.5 rounded-lg bg-surface border border-border text-[11px] text-white">导演接入</button>
             </div>
           </div>
           <div className="rounded-[14px] bg-surface-secondary border border-border p-3">

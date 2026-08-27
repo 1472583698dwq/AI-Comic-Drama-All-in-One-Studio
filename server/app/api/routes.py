@@ -1,5 +1,6 @@
 import os
 import json
+import asyncio
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
@@ -20,6 +21,13 @@ from app.skills.engine import skill_engine, SkillDefinition, SkillExecutionResul
 from app.core.config import settings, read_env_file, write_env_file, MANAGED_KEYS
 from pydantic import BaseModel, Field
 import httpx
+# LangChain Agent 引擎（带记忆、循环、流式）
+try:
+    from app.pipelines.agent.langchain_engine import run_agent_with_langchain, clear_session, get_history, SESSION_MEMORY
+    HAS_LANGCHAIN_AGENT = True
+except Exception as e:
+    HAS_LANGCHAIN_AGENT = False
+    print(f"[Agent] LangChain engine not available: {e}")
 
 # 延迟初始化 providers（避免循环导入）
 def get_image_registry():
@@ -722,12 +730,21 @@ AGENT_SYSTEM_PROMPT = """你是「AI漫剧导演 Agent」，运行在 MiniMax AI
 13. director_3d_stage_plan —— 3D导演台相机规划。参数：framing(extreme_close_up/close_up/medium/full/long/bird_eye/low_angle), motion(static/push_in/pull_out/pan_left/pan_right/tilt_up/tilt_down/orbit/shake), pose(stand/fight/look_back/run)
 14. export_jianyin_draft —— 剪映草稿导出。参数：project(完整Project JSON)
 
+**生成源扩展（解耦后每个生成源为独立节点，可多源并存）：**
+15. register_custom_provider —— [核心] 用户提供 API 文档/cURL/OpenAPI 时自动注册新生成源。参数：kind(image/video/audio/llm), name, doc_text, doc_url, curl, openapi_url, api_key, definition(可选完整JSON)。示例：{"kind":"image","name":"我的FLUX","doc_text":"POST https://api.xxx.com/v1/images/generations ...", "api_key":"sk-..."}。导演应自动解析并注册，成功后提示可在画布看到新 Provider 节点。
+16. list_custom_providers —— 列出所有自定义 Provider。参数：kind。可先查询已有。
+17. test_custom_provider —— 测试 Provider 连通性。参数：provider_id
+18. delete_custom_provider —— 删除自定义 Provider。参数：provider_id
+19. generate_video —— 通用视频生成。参数：prompt, mode(i2v/r2v/t2v), first_frame_url, reference_images, duration, provider
+
 **策略指引：**
-- 用户说“生成图片/换图/重绘” → 优先 generate_image，可先 list_assets 查找可复用的 scene/prop 风格锚点
+- 用户说“生成图片/换图/重绘” → 优先 generate_image，可先 list_assets 查找可复用的 scene/prop 风格锚点；若用户指定“用XX生成源/用我的XX模型”，则用对应 provider
 - 用户说“配音/换声线/生成语音” → 优先 generate_voice，根据角色/情绪选 provider 和 voice_id
 - 用户说“找素材/素材库/场景/道具” → 优先 list_assets / get_asset
+- 用户说“接入/添加/注册/扩展 生成源/模型/API/接口”或贴了 API 文档/cURL/OpenAPI → 必须调用 register_custom_provider，自动解析并注册。先用 doc_text/curl/doc_url 透传；若用户给了文档+key 则一并传入 api_key。成功后告知 Provider 节点已出现在画布仓库。
 - 如需确认可用 provider/工作流/音色/素材，先调用对应的 list_* 查询工具再决策
 - 可组合调用：例如“生成战斗画面并配怒吼”可同时调用 generate_image + generate_voice
+- 多生成源：画布中每个 Provider 节点可独立存在，生图/视频/TTS 节点通过连线绑定具体 Provider，不再全局单选
 
 请严格输出 JSON（无 markdown 杂质）：
 {
@@ -739,23 +756,69 @@ AGENT_SYSTEM_PROMPT = """你是「AI漫剧导演 Agent」，运行在 MiniMax AI
 
 @router.websocket("/ws/agent")
 async def websocket_agent_endpoint(websocket: WebSocket):
-    """导演 Agent WebSocket：接收自然语言指令，LLM 决策并真实调用 MCP 工具"""
+    """导演 Agent WebSocket：LangChain 多轮循环 + 记忆 + 真实流式"""
     await websocket.accept()
+    # 会话隔离：使用连接id + 项目id 作为 session
+    session_id = f"ws_{id(websocket)}"
     try:
         while True:
             data_str = await websocket.receive_text()
             data = json.loads(data_str)
 
-            if data.get("action") != "agent_prompt":
+            if data.get("action") not in ("agent_prompt", "clear_history"):
                 await websocket.send_json({"event": "error", "message": f"未知 action: {data.get('action')}"})
+                continue
+
+            if data.get("action") == "clear_history":
+                if HAS_LANGCHAIN_AGENT:
+                    await clear_session(session_id)
+                else:
+                    # 兼容：清空时不做处理
+                    pass
+                await websocket.send_json({"event": "agent_response", "message": "已清空对话历史", "suggested_actions": []})
                 continue
 
             prompt_text = (data.get("prompt") or "").strip()
             context = data.get("context") or {}
+            # 支持前端传入 session_id 实现跨连接记忆
+            if data.get("session_id"):
+                session_id = str(data.get("session_id"))
+            elif context.get("project_id"):
+                session_id = f"proj_{context.get('project_id')}"
+
             if not prompt_text:
                 await websocket.send_json({"event": "error", "message": "指令不能为空"})
                 continue
 
+            # 优先使用 LangChain 引擎（带记忆、循环、流式）
+            if HAS_LANGCHAIN_AGENT:
+                try:
+                    # 发送 thinking 由引擎内部发送，这里先发送一个占位
+                    await websocket.send_json({"event": "agent_thinking", "message": f"正在解析导演指令: 「{prompt_text[:40]}」..."})
+                    # 流式标记：引擎会自行发送 agent_stream_chunk / tool_calling / tool_result
+                    # 先发送 stream_start 占位，引擎内部的 astream 会持续发送 chunk
+                    await websocket.send_json({"event": "agent_stream_start"})
+                    result = await run_agent_with_langchain(
+                        prompt=prompt_text,
+                        context=context,
+                        session_id=session_id,
+                        websocket=websocket,
+                        max_iterations=6,
+                        streaming=True,
+                    )
+                    await websocket.send_json({
+                        "event": "agent_response",
+                        "message": result.get("reply", "指令已执行。"),
+                        "suggested_actions": result.get("suggested_actions") or [],
+                        "executed_tools": result.get("executed_tools") or [],
+                    })
+                except LLMServiceError as e:
+                    await websocket.send_json({"event": "error", "message": str(e)})
+                except Exception as e:
+                    await websocket.send_json({"event": "error", "message": f"Agent 执行失败: {e}"})
+                continue
+
+            # 回退：原有单轮逻辑（无 LangChain 时）
             await websocket.send_json({"event": "agent_thinking", "message": f"正在解析导演指令: 「{prompt_text[:40]}」..."})
 
             try:
@@ -778,7 +841,6 @@ async def websocket_agent_endpoint(websocket: WebSocket):
                 await websocket.send_json({"event": "error", "message": f"Agent 决策失败: {e}"})
                 continue
 
-            # 真实执行 LLM 决策的工具链（扩大到 3 个以支持组合生成）
             for call in (decision.get("tool_calls") or [])[:3]:
                 tool_name = call.get("tool", "")
                 arguments = call.get("arguments") or {}
@@ -880,6 +942,8 @@ class ConfigTestRequest(BaseModel):
 class AgentChatRequest(BaseModel):
     prompt: str
     context: Dict[str, Any] = Field(default_factory=dict)
+    session_id: Optional[str] = Field(default=None, description="会话ID，用于多轮记忆隔离")
+    stream: bool = Field(default=False, description="是否流式返回")
 
 def _is_masked_placeholder(v: str) -> bool:
     return "****" in v
@@ -1117,11 +1181,38 @@ async def test_config_connection(req: ConfigTestRequest):
 
 @router.post("/agent/chat")
 async def http_agent_chat(req: AgentChatRequest):
-    """导演 Agent HTTP 同步问答与决策接口（支持全部生成工具）"""
+    """导演 Agent HTTP 问答 — LangChain 多轮循环 + 记忆（兼容旧接口）"""
     prompt_text = (req.prompt or "").strip()
     if not prompt_text:
         raise HTTPException(status_code=400, detail="指令不能为空")
 
+    session_id = req.session_id or (req.context.get("project_id") if isinstance(req.context, dict) and req.context.get("project_id") else "http_default")
+    # 若请求要求流式，则走 SSE
+    if req.stream:
+        # 复用流式端点逻辑，但此处返回错误提示引导使用 /agent/chat/stream
+        raise HTTPException(status_code=400, detail="请使用 POST /api/v1/agent/chat/stream 获取 SSE 流式响应（stream=true 已废弃）")
+
+    if HAS_LANGCHAIN_AGENT:
+        try:
+            result = await run_agent_with_langchain(
+                prompt=prompt_text,
+                context=req.context or {},
+                session_id=session_id,
+                websocket=None,
+                max_iterations=6,
+                streaming=False,
+            )
+            return {
+                "reply": result.get("reply", "指令已执行。"),
+                "suggested_actions": result.get("suggested_actions") or [],
+                "executed_tools": result.get("executed_tools") or [],
+            }
+        except LLMServiceError as e:
+            raise HTTPException(status_code=503, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Agent 执行失败: {e}")
+
+    # 回退：原单轮逻辑
     try:
         decision = await llm_service.chat_json(
             system_prompt=AGENT_SYSTEM_PROMPT,
@@ -1154,6 +1245,136 @@ async def http_agent_chat(req: AgentChatRequest):
         "suggested_actions": decision.get("suggested_actions") or [],
         "executed_tools": executed_tools,
     }
+
+
+@router.post("/agent/chat/stream")
+async def http_agent_chat_stream(req: AgentChatRequest):
+    """导演 Agent 流式问答 (SSE)：实时推送 agent_stream_chunk / tool_calling / tool_result"""
+    prompt_text = (req.prompt or "").strip()
+    if not prompt_text:
+        raise HTTPException(status_code=400, detail="指令不能为空")
+    session_id = req.session_id or (req.context.get("project_id") if isinstance(req.context, dict) and req.context.get("project_id") else "http_stream")
+
+    async def event_generator():
+        # 辅助发送函数
+        async def send_event(event: str, data: Dict[str, Any]):
+            # SSE 格式：data: json\n\n
+            payload = json.dumps({"event": event, **data}, ensure_ascii=False)
+            yield f"data: {payload}\n\n"
+
+        # 若无 LangChain，回退为模拟流式
+        if not HAS_LANGCHAIN_AGENT:
+            try:
+                decision = await llm_service.chat_json(
+                    system_prompt=AGENT_SYSTEM_PROMPT,
+                    user_prompt=json.dumps({"instruction": prompt_text, "context": req.context or {}}, ensure_ascii=False),
+                    temperature=0.2,
+                )
+                for call in (decision.get("tool_calls") or [])[:3]:
+                    tool_name = call.get("tool", "")
+                    args = call.get("arguments") or {}
+                    yield f"data: {json.dumps({'event':'tool_calling','tool_name':tool_name,'arguments':args}, ensure_ascii=False)}\n\n"
+                    result = await mcp_registry.execute_tool(tool_name, args)
+                    yield f"data: {json.dumps({'event':'tool_result','tool_name':tool_name,'status':result.status,'result':result.result if result.status=='success' else None,'error':result.error}, ensure_ascii=False)}\n\n"
+                reply = decision.get("reply", "指令已执行。")
+                yield f"data: {json.dumps({'event':'agent_stream_start'}, ensure_ascii=False)}\n\n"
+                chunk_size = 6
+                for i in range(0, len(reply), chunk_size):
+                    yield f"data: {json.dumps({'event':'agent_stream_chunk','delta':reply[i:i+chunk_size]}, ensure_ascii=False)}\n\n"
+                    await asyncio.sleep(0.02)
+                yield f"data: {json.dumps({'event':'agent_response','message':reply,'suggested_actions':decision.get('suggested_actions') or []}, ensure_ascii=False)}\n\n"
+                yield "data: [DONE]\n\n"
+            except Exception as e:
+                yield f"data: {json.dumps({'event':'error','message':str(e)}, ensure_ascii=False)}\n\n"
+                yield "data: [DONE]\n\n"
+            return
+
+        # LangChain 流式：通过队列桥接 websocket 风格回调到 SSE
+        queue: asyncio.Queue = asyncio.Queue()
+
+        class SSEBridge:
+            async def send_json(self, data: Dict[str, Any]):
+                await queue.put(data)
+
+        bridge = SSEBridge()
+        # 启动后台任务执行 agent
+        task = asyncio.create_task(run_agent_with_langchain(
+            prompt=prompt_text,
+            context=req.context or {},
+            session_id=session_id,
+            websocket=bridge,  # 复用 websocket 接口（send_json）
+            max_iterations=6,
+            streaming=True,
+        ))
+
+        # 消费者：从队列取事件并转为 SSE
+        try:
+            while True:
+                try:
+                    # 等待队列或任务完成
+                    done, pending = await asyncio.wait(
+                        [asyncio.create_task(queue.get()), task],
+                        return_when=asyncio.FIRST_COMPLETED,
+                        timeout=0.5,
+                    )
+                    # 检查任务是否完成
+                    if task.done():
+                        # 任务结束，排空队列
+                        while not queue.empty():
+                            ev = await queue.get()
+                            yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+                        # 任务结果已通过队列发送了 agent_response，若未发送则补一个
+                        try:
+                            result = task.result()
+                            # 若队列中未有 agent_response，前面 run_agent 已通过 bridge 发送了
+                        except Exception as e:
+                            yield f"data: {json.dumps({'event':'error','message':str(e)}, ensure_ascii=False)}\n\n"
+                        yield "data: [DONE]\n\n"
+                        break
+                    # 有新事件
+                    for d in done:
+                        if d is task:
+                            continue
+                        try:
+                            ev = d.result()
+                            yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+                        except Exception:
+                            pass
+                except asyncio.TimeoutError:
+                    if task.done():
+                        break
+                    continue
+        finally:
+            if not task.done():
+                task.cancel()
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@router.get("/agent/history")
+async def get_agent_history(session_id: str = "http_default"):
+    """获取指定会话的 LangChain 记忆历史"""
+    if not HAS_LANGCHAIN_AGENT:
+        return {"session_id": session_id, "history": [], "has_langchain": False}
+    history = get_history(session_id)
+    # 序列化为简洁格式
+    serialized = []
+    for m in history:
+        try:
+            serialized.append({"type": m.__class__.__name__, "content": getattr(m, "content", str(m))[:2000], "tool_calls": getattr(m, "tool_calls", None)})
+        except Exception:
+            serialized.append({"type": "unknown", "content": str(m)[:500]})
+    return {"session_id": session_id, "history": serialized, "count": len(serialized), "has_langchain": True}
+
+
+@router.post("/agent/clear")
+async def clear_agent_history(body: Dict[str, Any] = {}):
+    """清空指定会话的记忆"""
+    session_id = body.get("session_id") or "http_default"
+    if HAS_LANGCHAIN_AGENT:
+        await clear_session(session_id)
+        return {"status": "cleared", "session_id": session_id}
+    return {"status": "ok", "session_id": session_id, "has_langchain": False}
 
 # ============================================================
 # 系统原生文件夹选择器与资源管理器集成

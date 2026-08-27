@@ -386,13 +386,56 @@ export const apiService = {
     return await res.json();
   },
 
-  // 8. 导演 Agent
-  async agentChat(prompt: string, context?: any): Promise<any> {
+  // 8. 导演 Agent (LangChain 多轮+流式)
+  async agentChat(prompt: string, context?: any, sessionId?: string): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/agent/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, context: context || {} }),
+      body: JSON.stringify({ prompt, context: context || {}, session_id: sessionId || undefined }),
     });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async agentChatStream(prompt: string, context?: any, sessionId?: string, onEvent?: (event: string, data: any)=>void): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/agent/chat/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, context: context || {}, session_id: sessionId || undefined }),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    if (!res.body || !onEvent) return await res.json();
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let final: any = null;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) continue;
+        const dataStr = trimmed.slice(5).trim();
+        if (dataStr === '[DONE]') return final;
+        try {
+          const data = JSON.parse(dataStr);
+          const ev = data.event || 'message';
+          onEvent(ev, data);
+          if (ev === 'agent_response') final = data;
+        } catch {}
+      }
+    }
+    return final;
+  },
+  async getAgentHistory(sessionId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/agent/history?session_id=${encodeURIComponent(sessionId)}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async clearAgentHistory(sessionId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/agent/clear`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ session_id: sessionId }) });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
@@ -582,6 +625,52 @@ export const apiService = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ folder_path: folderPath }),
     });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+
+  // ── Provider 多源解耦 (P 新增) ──
+  async listProviders(params?: { kind?: string; include_builtin?: boolean; scope?: string }): Promise<{ providers: any[]; total: number }> {
+    const qs = new URLSearchParams();
+    if (params?.kind) qs.set('kind', params.kind);
+    if (params?.include_builtin === false) qs.set('include_builtin', 'false');
+    if (params?.scope) qs.set('scope', params.scope);
+    const res = await fetch(`${API_BASE_URL}/providers?${qs.toString()}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async getProvider(providerId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/providers/${encodeURIComponent(providerId)}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async createProvider(payload: { name: string; kind: string; transport: any; auth?: any; mapping?: any; models?: string[]; default_model?: string; api_key?: string; description?: string }): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/providers`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async updateProvider(providerId: string, patch: Record<string, any>): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/providers/${encodeURIComponent(providerId)}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(patch) });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async deleteProvider(providerId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/providers/${encodeURIComponent(providerId)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async testProvider(providerId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/providers/${encodeURIComponent(providerId)}/test`, { method: 'POST' });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async importProvider(payload: { kind: string; name?: string; doc_text?: string; doc_url?: string; curl?: string; openapi_url?: string; api_key?: string; definition?: any }): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/providers/import`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async setProviderApiKey(providerId: string, api_key: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/providers/${encodeURIComponent(providerId)}/api-key`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ api_key }) });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },

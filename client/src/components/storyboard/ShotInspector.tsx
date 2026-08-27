@@ -25,6 +25,7 @@ import { useProjectStore } from '../../stores/useProjectStore';
 import { StoryboardShot, EmotionType } from '../../types';
 import { apiService } from '../../services/api';
 import { WorkflowInspectorModal } from '../workflow/WorkflowInspectorModal';
+import { ProviderPicker, ProviderParamForm } from '../ui/ProviderPicker';
 
 const API_ORIGIN = 'http://127.0.0.1:8000';
 
@@ -46,6 +47,14 @@ export const ShotInspector: React.FC = () => {
   const [isGeneratingVid, setIsGeneratingVid] = useState(false);
   const [videoMode, setVideoMode] = useState<'i2v' | 'r2v' | 't2v'>('i2v');
   const [videoProvider, setVideoProvider] = useState<string>('comfyui_video');
+  const [videoProviderDef, setVideoProviderDef] = useState<any>(null);
+  const [videoProviderParams, setVideoProviderParams] = useState<Record<string,any>>({});
+  const [imageProvider, setImageProvider] = useState<string>('');
+  const [imageProviderDef, setImageProviderDef] = useState<any>(null);
+  const [imageProviderParams, setImageProviderParams] = useState<Record<string,any>>({});
+  const [audioProvider, setAudioProvider] = useState<string>('minimax');
+  const [audioProviderDef, setAudioProviderDef] = useState<any>(null);
+  const [audioProviderParams, setAudioProviderParams] = useState<Record<string,any>>({});
   const [ttsError, setTtsError] = useState<string | null>(null);
   const [regenError, setRegenError] = useState<string | null>(null);
   const [videoError, setVideoError] = useState<string | null>(null);
@@ -113,7 +122,7 @@ export const ShotInspector: React.FC = () => {
     );
   }
 
-  // MiniMax Speech-01 真实 TTS
+  // TTS — 支持全局语音源（MiniMax/ElevenLabs/自定义）
   const handlePlayTTS = async () => {
     const textToSpeak = activeShot.dialogue || activeShot.voiceover || '';
     if (!textToSpeak.trim()) { setTtsError('当前分镜无台词/旁白，无法配音'); return; }
@@ -123,7 +132,9 @@ export const ShotInspector: React.FC = () => {
     try {
       const char = project?.characters.find((c) => c.name === activeShot.speaker_name);
       const voiceId = char?.voice_id || 'male-qn-qingse';
-      const res = await apiService.generateTTS(textToSpeak, voiceId, activeShot.emotion);
+      // 合并语音源动态参数
+      const extraParams: any = { ...audioProviderParams };
+      const res = await apiService.generateTTS(textToSpeak, voiceId, activeShot.emotion, { provider: audioProvider || undefined, ...extraParams });
       const url = res.audio_url?.startsWith('/') ? API_ORIGIN + res.audio_url : res.audio_url;
       if (!res.audio_url) throw new Error('TTS 未返回音频地址');
       updateShot(activeShot.id, { audio_url: res.audio_url, duration: res.duration || activeShot.duration, status: 'completed' });
@@ -162,19 +173,24 @@ export const ShotInspector: React.FC = () => {
     setShotDynamicInputs(prev => ({ ...prev, [key]: charImg }));
   };
 
-  // 真实生图 — 更新该分镜的 image_url
+  // 真实生图 — 更新该分镜的 image_url（支持全局 Provider 动态参数）
   const handleRegenerateImage = async () => {
     if (!activeShot.image_prompt?.trim()) { setRegenError('生图提示词为空'); return; }
     setRegenError(null);
     setIsRegenerating(true);
     updateShot(activeShot.id, { status: 'generating_image' });
     try {
+      const mergedDynamic: Record<string,any> = { ...shotDynamicInputs };
+      // 合并 Provider 动态参数（不固定参数）
+      Object.entries(imageProviderParams).forEach(([k,v])=> { if(v!=='' && v!==null && v!==undefined) mergedDynamic[k]=v; });
       const res = await apiService.generateShotImage({
         prompt: activeShot.image_prompt,
         aspect_ratio: project?.aspect_ratio || '9:16',
         style_preset: project?.style_preset,
         workflow_id: selectedWorkflowId || undefined,
-        dynamic_inputs: Object.keys(shotDynamicInputs).length > 0 ? shotDynamicInputs : undefined,
+        provider: imageProvider || undefined,
+        model: imageProviderDef?.default_model || undefined,
+        dynamic_inputs: Object.keys(mergedDynamic).length > 0 ? mergedDynamic : undefined,
       });
       updateShot(activeShot.id, { image_url: res.image_url, status: 'completed' });
       setPreviewTab('image');
@@ -186,7 +202,7 @@ export const ShotInspector: React.FC = () => {
     }
   };
 
-  // 动态视频生成 (I2V / R2V / T2V)
+  // 动态视频生成 (I2V / R2V / T2V) — 支持全局 Provider
   const handleGenerateVideo = async () => {
     const prompt = activeShot.video_prompt?.trim() || activeShot.action_desc || activeShot.image_prompt;
     if (!prompt) {
@@ -200,13 +216,15 @@ export const ShotInspector: React.FC = () => {
     setVideoError(null);
     setIsGeneratingVid(true);
     try {
+      const mergedDynamic: Record<string,any> = { ...shotDynamicInputs };
+      Object.entries(videoProviderParams).forEach(([k,v])=> { if(v!=='' && v!==null && v!==undefined) mergedDynamic[k]=v; });
       await generateShotVideo(activeShot.id, {
         mode: videoMode,
         prompt,
         duration: Math.round(activeShot.duration) || 5,
         provider: videoProvider,
         workflow_id: selectedWorkflowId || undefined,
-        dynamic_inputs: Object.keys(shotDynamicInputs).length > 0 ? shotDynamicInputs : undefined,
+        dynamic_inputs: Object.keys(mergedDynamic).length > 0 ? mergedDynamic : undefined,
       });
       setVideoSuccess(true);
       setPreviewTab('video');
@@ -413,24 +431,34 @@ export const ShotInspector: React.FC = () => {
             <span>🗣️ 角色台词 / 旁白</span>
             <span className="text-[10px] text-gray-500">MiniMax / 动态TTS</span>
           </label>
-          <div className="space-y-2">
-            <input
-              type="text"
-              value={activeShot.dialogue || activeShot.voiceover || ''}
-              onChange={(e) => {
-                const val = e.target.value;
-                updateShot(activeShot.id, {
-                  dialogue: activeShot.dialogue ? val : '',
-                  voiceover: activeShot.voiceover || !activeShot.dialogue ? val : activeShot.voiceover,
-                  subtitle_text: val,
-                });
-              }}
-              placeholder="输入该分镜的台词或解说旁白..."
-              className="w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand"
-            />
+            <div className="space-y-2">
+              <textarea
+                value={activeShot.dialogue || activeShot.voiceover || ''}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  updateShot(activeShot.id, {
+                    dialogue: activeShot.dialogue ? val : '',
+                    voiceover: activeShot.voiceover || !activeShot.dialogue ? val : activeShot.voiceover,
+                    subtitle_text: val,
+                  });
+                  const el = e.target as HTMLTextAreaElement;
+                  el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,100)+'px';
+                }}
+                onInput={(e)=>{const el=e.target as HTMLTextAreaElement; el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,100)+'px';}}
+                placeholder="输入该分镜的台词或解说旁白（Shift+Enter换行）..."
+                rows={1}
+                className="w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand resize-none overflow-y-auto min-h-[36px] max-h-[100px] leading-relaxed"
+              />
+              {/* 全域语音源（与设置/画布同源） */}
+              <ProviderPicker kind="audio" value={audioProvider} onChange={(pid, def)=> { setAudioProvider(pid); setAudioProviderDef(def||null); }} placeholder="— 选择语音源 —" compact />
+              {audioProviderDef?.params_schema && (
+                <div className="rounded-lg bg-black/20 border border-border p-2">
+                  <ProviderParamForm definition={audioProviderDef} values={audioProviderParams} onChange={setAudioProviderParams} />
+                </div>
+              )}
 
-            {/* Speaker & Emotion Selector */}
-            <div className="flex items-center space-x-2">
+              {/* Speaker & Emotion Selector */}
+              <div className="flex items-center space-x-2">
               <select
                 value={activeShot.speaker_name || project?.characters[0]?.name || ''}
                 onChange={(e) => updateShot(activeShot.id, { speaker_name: e.target.value })}
@@ -481,22 +509,30 @@ export const ShotInspector: React.FC = () => {
         </div>
 
         {/* 3. Image Prompt (首帧静态生图) */}
-        <div className="p-3 rounded-xl bg-surface-secondary/40 border border-border space-y-3">
-          <div className="flex items-center justify-between">
-            <label className="text-xs text-gray-300 font-semibold flex items-center space-x-1">
-              <ImageIcon className="w-3.5 h-3.5 text-accent-green" />
-              <span>首帧提示词 (Image Prompt)</span>
-            </label>
-            <span className="text-[10px] text-accent-green">多Provider生图</span>
-          </div>
+          <div className="p-3 rounded-xl bg-surface-secondary/40 border border-border space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs text-gray-300 font-semibold flex items-center space-x-1">
+                <ImageIcon className="w-3.5 h-3.5 text-accent-green" />
+                <span>首帧提示词 (Image Prompt)</span>
+              </label>
+              <span className="text-[10px] text-accent-green">全域生图源</span>
+            </div>
+            {/* 全域生图源选择（与设置/画布同源） */}
+            <ProviderPicker kind="image" value={imageProvider} onChange={(pid, def)=> { setImageProvider(pid); setImageProviderDef(def||null); }} placeholder="— 选择生图源（空为系统默认） —" />
+            {imageProviderDef?.params_schema && (
+              <div className="rounded-lg bg-black/20 border border-border p-2">
+                <div className="text-[11px] font-semibold text-gray-300 mb-1">该生图源扩展参数（不固定）</div>
+                <ProviderParamForm definition={imageProviderDef} values={imageProviderParams} onChange={setImageProviderParams} />
+              </div>
+            )}
 
-          <textarea
-            value={activeShot.image_prompt}
-            onChange={(e) => updateShot(activeShot.id, { image_prompt: e.target.value })}
-            rows={2}
-            className="w-full bg-surface-secondary border border-border rounded-xl p-2 text-xs font-mono text-gray-300 placeholder-gray-500 focus:outline-none focus:border-brand"
-            placeholder="输入画面首帧提示词..."
-          />
+            <textarea
+              value={activeShot.image_prompt}
+              onChange={(e) => updateShot(activeShot.id, { image_prompt: e.target.value })}
+              rows={2}
+              className="w-full bg-surface-secondary border border-border rounded-xl p-2 text-xs font-mono text-gray-300 placeholder-gray-500 focus:outline-none focus:border-brand"
+              placeholder="输入画面首帧提示词..."
+            />
 
           {/* Workflow Selector & Inspector Trigger */}
           <div className="bg-surface-secondary/70 border border-border rounded-xl p-2.5 space-y-2">
@@ -688,18 +724,14 @@ export const ShotInspector: React.FC = () => {
             ))}
           </div>
 
-          {/* Provider Selection */}
-          <div className="flex items-center space-x-2">
-            <span className="text-[11px] text-gray-400 shrink-0">通道:</span>
-            <select
-              value={videoProvider}
-              onChange={(e) => setVideoProvider(e.target.value)}
-              className="w-full bg-surface-secondary border border-border rounded-lg px-2 py-1 text-xs text-brand-light focus:outline-none focus:border-brand"
-            >
-              <option value="comfyui_video">ComfyUI 本地 (SVD / AnimateDiff / Mock)</option>
-              <option value="minimax_video">MiniMax H3 / 云端视频模型</option>
-            </select>
-          </div>
+          {/* 全域视频源（与设置/画布同源，动态参数） */}
+            <ProviderPicker kind="video" value={videoProvider} onChange={(pid, def)=> { setVideoProvider(pid); setVideoProviderDef(def||null); }} placeholder="— 选择视频源 —" />
+            {videoProviderDef?.params_schema && (
+              <div className="rounded-lg bg-black/20 border border-border p-2">
+                <div className="text-[11px] font-semibold text-gray-300 mb-1">该视频源扩展参数</div>
+                <ProviderParamForm definition={videoProviderDef} values={videoProviderParams} onChange={setVideoProviderParams} />
+              </div>
+            )}
 
           {/* Video Prompt Textarea */}
           <div>

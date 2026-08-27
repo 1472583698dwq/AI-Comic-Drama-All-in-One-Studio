@@ -232,6 +232,35 @@ class MCPServerRegistry:
             asset = mgr.create_asset({"name": name, "category": category, "visual_prompt": visual_prompt, "description": description})
             return asset.model_dump()
 
+        @mcp_app.tool
+        async def register_custom_provider(kind: str = "image", name: str = "", doc_text: str = "", doc_url: str = "", curl: str = "", openapi_url: str = "", api_key: str = "", definition: dict = None) -> dict:
+            """[生成源扩展] 根据文档/cURL/OpenAPI自动注册新 Provider"""
+            res = await mcp_registry.execute_tool("register_custom_provider", {"kind": kind, "name": name, "doc_text": doc_text, "doc_url": doc_url, "curl": curl, "openapi_url": openapi_url, "api_key": api_key, "definition": definition})
+            if res.status == "success":
+                return res.result
+            raise RuntimeError(res.error or "注册失败")
+
+        @mcp_app.tool
+        async def list_custom_providers(kind: str = "") -> dict:
+            res = await mcp_registry.execute_tool("list_custom_providers", {"kind": kind} if kind else {})
+            if res.status == "success":
+                return res.result
+            raise RuntimeError(res.error)
+
+        @mcp_app.tool
+        async def test_custom_provider(provider_id: str) -> dict:
+            res = await mcp_registry.execute_tool("test_custom_provider", {"provider_id": provider_id})
+            if res.status == "success":
+                return res.result
+            raise RuntimeError(res.error)
+
+        @mcp_app.tool
+        async def delete_custom_provider(provider_id: str) -> dict:
+            res = await mcp_registry.execute_tool("delete_custom_provider", {"provider_id": provider_id})
+            if res.status == "success":
+                return res.result
+            raise RuntimeError(res.error)
+
     def _register_default_tools(self):
         # 1. 小说拆解
         self.register_tool(MCPToolDefinition(
@@ -528,6 +557,75 @@ class MCPServerRegistry:
             }
         ))
 
+        # 12. 自定义生成源扩展（导演自扩展核心）
+        self.register_tool(MCPToolDefinition(
+            name="register_custom_provider",
+            description="[生成源扩展] 根据用户提供的 API 文档/cURL/OpenAPI/示例，自动解析并注册一个新的生成源 Provider（image/video/audio）。用户只需粘贴文档或 curl，导演自动生成适配。创建后可在无限画布中作为独立 Provider 节点使用，支持多源并存。",
+            category="ai_generation",
+            icon="Plug",
+            author="Provider Extension",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "kind": {"type": "string", "enum": ["image", "video", "audio", "llm"], "default": "image", "description": "生成源类型"},
+                    "name": {"type": "string", "description": "展示名，如 我的FLUX源"},
+                    "doc_text": {"type": "string", "description": "API 文档文本/示例（可贴 curl、请求/响应示例）"},
+                    "doc_url": {"type": "string", "description": "API 文档 URL（可选，导演会尝试拉取）"},
+                    "curl": {"type": "string", "description": "cURL 示例（可选）"},
+                    "openapi_url": {"type": "string", "description": "OpenAPI/Swagger JSON URL（可选）"},
+                    "api_key": {"type": "string", "description": "API Key（可选，创建后也可单独设置）"},
+                    "definition": {"type": "object", "description": "若已自行构造完整 ProviderDefinition JSON，可直接传入（跳过 LLM 解析）"}
+                },
+                "required": ["kind"]
+            }
+        ))
+        self.register_tool(MCPToolDefinition(
+            name="list_custom_providers",
+            description="[查询] 列出所有自定义生成源 Provider（按 kind 过滤），包含健康状态",
+            category="utility",
+            icon="List",
+            author="Provider Extension",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "kind": {"type": "string", "enum": ["image", "video", "audio", "llm"], "description": "按类型过滤，不填返回全部"}
+                },
+                "required": []
+            }
+        ))
+        self.register_tool(MCPToolDefinition(
+            name="test_custom_provider",
+            description="[查询] 测试指定自定义 Provider 的连通性与配置",
+            category="utility",
+            icon="Activity",
+            author="Provider Extension",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "provider_id": {"type": "string", "description": "Provider ID，如 prov_xxx"}
+                },
+                "required": ["provider_id"]
+            }
+        ))
+        self.register_tool(MCPToolDefinition(
+            name="delete_custom_provider",
+            description="[管理] 删除指定的自定义 Provider（内置不可删）",
+            category="utility",
+            icon="Trash2",
+            author="Provider Extension",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "provider_id": {"type": "string", "description": "Provider ID"}
+                },
+                "required": ["provider_id"]
+            }
+        ))
+
     def register_tool(self, tool: MCPToolDefinition):
         self.tools[tool.name] = tool
 
@@ -695,6 +793,183 @@ class MCPServerRegistry:
                     return MCPToolCallResponse(tool_name=tool_name, status="error", result=None, error="export_jianyin_draft 需要完整Project JSON", execution_time_ms=int((time.time()-start_time)*1000))
                 project = Project.model_validate(project_payload)
                 result = await jianyin_exporter.export_project_to_jianyin_draft_async(project)
+
+            elif tool_name == "register_custom_provider":
+                # 导演自扩展：通过 LLM 解析文档创建 Provider
+                from app.providers.custom.manager import custom_provider_manager
+                kind = arguments.get("kind") or "image"
+                name = arguments.get("name") or f"自定义{kind}源"
+                doc_text = arguments.get("doc_text") or ""
+                doc_url = arguments.get("doc_url") or ""
+                curl = arguments.get("curl") or ""
+                openapi_url = arguments.get("openapi_url") or ""
+                api_key = arguments.get("api_key") or ""
+                definition = arguments.get("definition")
+                if definition and isinstance(definition, dict):
+                    import uuid as _uuid
+                    pid = definition.get("id") or f"prov_{_uuid.uuid4().hex[:8]}"
+                    definition["id"] = pid
+                    definition["kind"] = kind
+                    if not definition.get("name"):
+                        definition["name"] = name
+                    from app.models.provider_definition import ProviderDefinition as _PD
+                    from app.providers.custom.manager import custom_provider_manager as _mgr
+                    pd = _PD.model_validate(definition)
+                    # 保存 api_key
+                    if api_key:
+                        import os, json as _json
+                        from app.core.config import settings as _settings
+                        cfg_path = os.path.join(_settings.STORAGE_DIR, "config_store.json")
+                        data = {}
+                        if os.path.exists(cfg_path):
+                            try:
+                                with open(cfg_path, "r", encoding="utf-8") as f:
+                                    data = _json.load(f)
+                            except Exception:
+                                data = {}
+                        if "custom_providers" not in data:
+                            data["custom_providers"] = {}
+                        data["custom_providers"][pid] = {"api_key": api_key}
+                        data[f"CUSTOM_PROVIDER_{pid}"] = api_key
+                        with open(cfg_path, "w", encoding="utf-8") as f:
+                            _json.dump(data, f, ensure_ascii=False, indent=2)
+                        os.environ[f"CUSTOM_PROVIDER_{pid}"] = api_key
+                        pd.auth.key_env = f"CUSTOM_PROVIDER_{pid}"
+                    saved = _mgr.save_definition(pd)
+                    from app.providers.init_providers import register_single_custom_provider as _reg
+                    _reg(saved)
+                    result = {"status": "success", "provider": saved.to_provider_info(), "mode": "direct_definition"}
+                else:
+                    # 走 LLM 解析路径：复用 provider_routes 的 import 逻辑，内部调用 llm_service
+                    # 拼接 doc
+                    full_doc = doc_text
+                    if curl:
+                        full_doc += f"\n\nCURL:\n{curl}"
+                    if doc_url and not doc_text:
+                        try:
+                            import httpx as _httpx
+                            async with _httpx.AsyncClient(timeout=8.0) as _client:
+                                _r = await _client.get(doc_url, timeout=8.0)
+                                if _r.status_code == 200:
+                                    full_doc = _r.text[:6000]
+                        except Exception:
+                            full_doc += f"\ndoc_url: {doc_url}"
+                    if openapi_url:
+                        try:
+                            import httpx as _httpx2
+                            async with _httpx2.AsyncClient(timeout=8.0) as _client2:
+                                _r2 = await _client2.get(openapi_url, timeout=8.0)
+                                if _r2.status_code == 200:
+                                    full_doc += f"\n\nOpenAPI:\n{_r2.text[:6000]}"
+                        except Exception:
+                            pass
+                    if not full_doc or len(full_doc.strip()) < 10:
+                        raise ValueError("请提供 doc_text / doc_url / curl / openapi_url 或 definition")
+                    from app.pipelines.llm_service import llm_service as _llm
+                    system_prompt = """你是一个 API 集成专家。解析用户提供的生成类 API 文档并输出 ProviderDefinition JSON。
+严格输出 JSON（无 markdown），键：name, description, transport{method,url,headers,timeout}, auth{type,header_name,query_name,prefix}, mapping{request_template{model,prompt,negative_prompt,size,seed}, response_mappings{image_url:data[0].url}}, health_check{url,method}, models, default_model。
+transport.url 必须完整 https；auth.type 区分 bearer/apikey_header/apikey_query/none；request_template 用 {prompt}{negative_prompt}{width}{height}{size}{seed}{model}{api_key} 占位；response_mappings 路径如 data[0].url。"""
+                    user_prompt = f"kind: {kind}\nname_hint: {name}\n\nAPI 文档:\n{full_doc[:5000]}"
+                    parsed = await _llm.chat_json(system_prompt=system_prompt, user_prompt=user_prompt, temperature=0.2)
+                    if not isinstance(parsed, dict):
+                        raise ValueError(f"LLM 返回非对象: {parsed}")
+                    import uuid as _uuid2
+                    pid = f"prov_{_uuid2.uuid4().hex[:8]}"
+                    parsed["id"] = pid
+                    parsed["kind"] = kind
+                    if not parsed.get("name"):
+                        parsed["name"] = name
+                    parsed["provider_type"] = "http"
+                    parsed["scope"] = "global"
+                    parsed["enabled"] = True
+                    parsed["doc_text"] = full_doc[:4000]
+                    parsed["raw_api_doc"] = full_doc[:4000]
+                    if api_key:
+                        parsed.setdefault("auth", {})["key_env"] = f"CUSTOM_PROVIDER_{pid}"
+                    from app.models.provider_definition import ProviderDefinition as _PD2
+                    from app.providers.custom.manager import custom_provider_manager as _mgr2
+                    pd2 = _PD2.model_validate(parsed)
+                    saved2 = _mgr2.save_definition(pd2)
+                    if api_key:
+                        import os, json as _json2
+                        from app.core.config import settings as _settings2
+                        cfg_path2 = os.path.join(_settings2.STORAGE_DIR, "config_store.json")
+                        data2 = {}
+                        if os.path.exists(cfg_path2):
+                            try:
+                                with open(cfg_path2, "r", encoding="utf-8") as f:
+                                    data2 = _json2.load(f)
+                            except Exception:
+                                data2 = {}
+                        if "custom_providers" not in data2:
+                            data2["custom_providers"] = {}
+                        data2["custom_providers"][pid] = {"api_key": api_key}
+                        data2[f"CUSTOM_PROVIDER_{pid}"] = api_key
+                        with open(cfg_path2, "w", encoding="utf-8") as f:
+                            _json2.dump(data2, f, ensure_ascii=False, indent=2)
+                        os.environ[f"CUSTOM_PROVIDER_{pid}"] = api_key
+                    from app.providers.init_providers import register_single_custom_provider as _reg2
+                    _reg2(saved2)
+                    result = {"status": "success", "provider": saved2.to_provider_info(), "mode": "llm_parsed", "llm_raw": parsed}
+
+            elif tool_name == "list_custom_providers":
+                from app.providers.custom.manager import custom_provider_manager as _mgr
+                kind = arguments.get("kind")
+                defs = _mgr.list_definitions(kind=kind)
+                # 附带健康检查（简化：仅 is_configured）
+                result = {"providers": [d.to_provider_info() for d in defs], "total": len(defs)}
+
+            elif tool_name == "test_custom_provider":
+                pid = arguments.get("provider_id") or ""
+                if not pid:
+                    raise ValueError("provider_id 不能为空")
+                from app.providers.custom.manager import custom_provider_manager as _mgr
+                pd = _mgr.get_definition(pid)
+                if not pd:
+                    raise ValueError(f"Provider 不存在: {pid}")
+                from app.providers.generic.http_provider import GenericHttpImageProvider, GenericHttpAudioProvider, GenericHttpVideoProvider
+                prov = None
+                if pd.kind == "image":
+                    prov = GenericHttpImageProvider(pd)
+                elif pd.kind == "audio":
+                    prov = GenericHttpAudioProvider(pd)
+                elif pd.kind == "video":
+                    prov = GenericHttpVideoProvider(pd)
+                else:
+                    prov = GenericHttpImageProvider(pd)
+                ok = await prov.check_health()
+                result = {"provider_id": pid, "ok": ok, "is_configured": prov.is_configured(), "detail": "连通正常" if ok else "未通过（检查 Key/地址）"}
+
+            elif tool_name == "delete_custom_provider":
+                pid = arguments.get("provider_id") or ""
+                if not pid:
+                    raise ValueError("provider_id 不能为空")
+                from app.providers.custom.manager import custom_provider_manager as _mgr
+                from app.providers.init_providers import unregister_single_custom_provider as _unreg
+                pd = _mgr.get_definition(pid)
+                if not pd:
+                    raise ValueError(f"Provider 不存在: {pid}")
+                if pd.builtin:
+                    raise ValueError("内置 Provider 不可删除")
+                kind = pd.kind
+                _mgr.delete_definition(pid)
+                import os, json as _json
+                from app.core.config import settings as _settings
+                cfg_path = os.path.join(_settings.STORAGE_DIR, "config_store.json")
+                if os.path.exists(cfg_path):
+                    try:
+                        with open(cfg_path, "r", encoding="utf-8") as f:
+                            data = _json.load(f)
+                        if "custom_providers" in data and pid in data["custom_providers"]:
+                            data["custom_providers"].pop(pid, None)
+                        data.pop(f"CUSTOM_PROVIDER_{pid}", None)
+                        with open(cfg_path, "w", encoding="utf-8") as f:
+                            _json.dump(data, f, ensure_ascii=False, indent=2)
+                        os.environ.pop(f"CUSTOM_PROVIDER_{pid}", None)
+                    except Exception:
+                        pass
+                _unreg(pid, kind=kind)
+                result = {"status": "deleted", "provider_id": pid}
 
             elif tool_name == "director_3d_stage_plan":
                 framing = arguments.get("framing") or "medium"
