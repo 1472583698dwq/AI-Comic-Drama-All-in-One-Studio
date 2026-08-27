@@ -31,6 +31,9 @@ export function App() {
 
   useEffect(() => {
     fetchTools().catch((e: any) => setMcpError(e?.message || 'MCP 服务连接失败'));
+    const h = () => setIsProviderOpen(true);
+    window.addEventListener('open-provider-manager', h as any);
+    return () => window.removeEventListener('open-provider-manager', h as any);
   }, []);
 
   return (

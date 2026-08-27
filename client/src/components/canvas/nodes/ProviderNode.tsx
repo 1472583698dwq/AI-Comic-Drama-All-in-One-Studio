@@ -124,15 +124,25 @@ export const ProviderNode: React.FC<NodeProps> = ({ data, id, type }) => {
   const Icon = kindMeta.icon;
   const isBuiltin = selectedDef?.builtin;
 
+  // 动态生成输入 Handles：基于 input_schema 的 x-handle 或类型推断
+  const dynamicInputs = selectedDef?.input_schema?.properties ? Object.entries(selectedDef.input_schema.properties).filter(([, def]: any)=> {
+    const h = (def as any)['x-handle'];
+    if (h && ['image','images','reference_images','audio','audios','reference_audios','video','videos','reference_videos'].includes(h)) return true;
+    if ((def as any).type==='array' && (def as any).items?.format==='uri') return true;
+    if ((def as any).format==='uri' && ['image','audio','video'].some(k=> (def as any).description?.toLowerCase().includes(k))) return true;
+    return !!h;
+  }) : [];
+  const hasDynamicHandles = dynamicInputs.length > 0;
+
   return (
-    <div className={`w-[320px] bg-surface border-2 ${kindMeta.border} rounded-2xl shadow-xl overflow-hidden`}>
-      <div className={`px-3 py-2 bg-gradient-to-r ${kindMeta.bg} border-b ${kindMeta.border} flex items-center gap-1.5`}>
-        <div className="w-6 h-6 rounded-lg bg-black/30 border border-white/10 flex items-center justify-center"><Icon className={`w-3.5 h-3.5 ${kindMeta.color}`}/></div>
+    <div className={`w-[340px] bg-[var(--color-surface)] border-2 ${kindMeta.border} rounded-2xl shadow-xl overflow-hidden`}>
+      <div className="px-3 py-2 bg-zinc-900 border-b border-zinc-800 flex items-center gap-1.5">
+        <div className="w-6 h-6 rounded-lg bg-white/10 border border-white/10 flex items-center justify-center"><Icon className={`w-3.5 h-3.5 ${kindMeta.color}`}/></div>
         <span className="text-xs font-bold text-white">{kindMeta.label}节点</span>
-        {selectedDef && <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded bg-black/40 text-white truncate max-w-[110px]">{selectedDef.display_name || selectedDef.name || selectedId}</span>}
+        {selectedDef && <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white truncate max-w-[110px] border border-white/10">{selectedDef.display_name || selectedDef.name || selectedId}</span>}
         <span className="ml-auto flex items-center gap-1">
-          {selectedDef && <span className={`w-2 h-2 rounded-full ${selectedDef.enabled===false ? 'bg-gray-500' : health?.ok ? 'bg-emerald-500' : selectedDef.builtin ? 'bg-brand' : 'bg-amber-500'} animate-pulse`} title={health?.detail || (selectedDef.builtin?'内置':'自定义')}/>}
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-black/30 text-gray-300">{selectedDef?.builtin ? '内置' : selectedDef ? '自定义' : '未绑定'}</span>
+          {selectedDef && <span className={`w-2 h-2 rounded-full ${selectedDef.enabled===false ? 'bg-zinc-500' : health?.ok ? 'bg-emerald-500' : selectedDef.builtin ? 'bg-violet-500' : 'bg-amber-500'} animate-pulse`} title={health?.detail || (selectedDef.builtin?'内置':'自定义')}/>}
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-zinc-300 border border-white/10">{selectedDef?.builtin ? '内置' : selectedDef ? '自定义' : '未绑定'}</span>
         </span>
       </div>
 

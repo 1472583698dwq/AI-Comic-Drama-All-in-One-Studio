@@ -3,13 +3,13 @@ import {
   Settings, KeyRound, Cpu, Sliders, Info, Save, TestTube2,
   Eye, EyeOff, CheckCircle2, XCircle, Loader2, Copy, ExternalLink,
   Bot, Mic, Film, FolderCheck, ArrowLeft, RefreshCw, Sparkles, Layers,
-  Zap, Globe, Database, HelpCircle, Folder, FolderSearch, FolderOpen, Trash2
+  Zap, Globe, Database, HelpCircle, Folder, FolderSearch, FolderOpen, Trash2, Plug, Search, Edit3, Activity
 } from 'lucide-react';
 import { apiService } from '../services/api';
 import { useProjectStore } from '../stores/useProjectStore';
 import { WorkflowInspectorModal } from '../components/workflow/WorkflowInspectorModal';
 
-type TabKey = 'llm' | 'image' | 'voice' | 'video' | 'jianyin' | 'system';
+type TabKey = 'llm' | 'image' | 'voice' | 'video' | 'jianyin' | 'system' | 'providers';
 
 interface TabItem {
   key: TabKey;
@@ -20,6 +20,7 @@ interface TabItem {
 }
 
 const TABS: TabItem[] = [
+  { key: 'providers', label: '自定义生成源', sub: '增删改查 · 全域可见', icon: <Plug className="w-4 h-4" />, badge: '新增' },
   { key: 'llm', label: '大模型与剧本引擎 (LLM)', sub: 'OpenAI / Responses API / DeepSeek / 通义', icon: <Bot className="w-4 h-4" />, badge: '核心' },
   { key: 'image', label: '分镜生图引擎 (Image)', sub: 'ComfyUI / 硅基流动 / 阿里万相', icon: <Cpu className="w-4 h-4" />, badge: '核心' },
   { key: 'voice', label: '角色配音引擎 (TTS)', sub: 'CosyVoice / MiniMax / GPT-SoVITS', icon: <Mic className="w-4 h-4" /> },
@@ -43,6 +44,11 @@ export const ConfigView: React.FC = () => {
   const [workflowList, setWorkflowList] = useState<any[]>([]);
   const [loadingWfs, setLoadingWfs] = useState(false);
   const [inspectingWorkflowId, setInspectingWorkflowId] = useState('');
+  // 自定义生成源（与画布/分镜同源）
+  const [providers, setProviders] = useState<any[]>([]);
+  const [providerFilter, setProviderFilter] = useState<'all'|'image'|'video'|'audio'>('all');
+  const [providerQ, setProviderQ] = useState('');
+  const [editingProvider, setEditingProvider] = useState<any>(null);
 
   const loadWorkflowsList = async () => {
     setLoadingWfs(true);
@@ -53,6 +59,13 @@ export const ConfigView: React.FC = () => {
     } finally {
       setLoadingWfs(false);
     }
+  };
+
+  const loadProviders = async ()=>{
+    try {
+      const res = await apiService.listProviders({ include_builtin: true });
+      setProviders(res.providers || []);
+    } catch {}
   };
 
   const handleDeleteWorkflow = async (wf: any) => {
@@ -126,6 +139,15 @@ export const ConfigView: React.FC = () => {
     if (tab === 'image') {
       loadWorkflowsList();
     }
+    if (tab === 'providers') {
+      loadProviders();
+    }
+  }, [tab]);
+
+  useEffect(()=>{
+    const h = ()=> { if (tab==='providers') loadProviders(); };
+    window.addEventListener('provider-list-refresh', h as any);
+    return ()=> window.removeEventListener('provider-list-refresh', h as any);
   }, [tab]);
 
   const setField = (k: string, v: string) => {
@@ -315,6 +337,69 @@ export const ConfigView: React.FC = () => {
                   <span>{msg.text}</span>
                 </div>
                 <button onClick={() => setMsg(null)} className="text-xs px-2 py-0.5 rounded hover:bg-white/10">✕</button>
+              </div>
+            )}
+
+            {/* TAB 0: 自定义生成源（与画布/分镜同源） */}
+            {tab === 'providers' && (
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-sm font-bold text-white flex items-center gap-2"><Plug className="w-4 h-4 text-brand" /> 自定义生成源 · 全域可用</h2>
+                    <p className="text-xs text-gray-400 mt-1">此处增删改查即全局生效（设置/画布/分镜/时间线/移动端 同源），由导演通过 MCP kind 自动分类。</p>
+                  </div>
+                  <button onClick={()=> window.dispatchEvent(new CustomEvent('open-provider-manager'))} className="px-3 py-1.5 rounded-xl bg-brand text-white text-xs font-bold">打开完整管理</button>
+                </div>
+                <div className="bg-surface rounded-2xl border border-border p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="flex items-center gap-1 p-1 rounded-full bg-surface-secondary border border-border">
+                      {(['all','image','video','audio'] as const).map(k=> (
+                        <button key={k} onClick={()=> setProviderFilter(k)} className={`px-3 py-1 rounded-full text-xs ${providerFilter===k?'bg-brand text-white':'text-gray-400'}`}>{k==='all'?'全部':k==='image'?'生图':k==='video'?'视频':'语音'}</button>
+                      ))}
+                    </div>
+                    <div className="flex-1 relative">
+                      <Search className="w-3.5 h-3.5 text-gray-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                      <input value={providerQ} onChange={e=> setProviderQ(e.target.value)} placeholder="搜索 名称/ID…" className="w-full bg-surface-secondary border border-border rounded-full pl-8 pr-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand"/>
+                    </div>
+                    <button onClick={loadProviders} className="px-3 py-1.5 rounded-full bg-surface-secondary border border-border text-xs text-white hover:border-brand">刷新</button>
+                  </div>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                    {providers.filter(p=> (providerFilter==='all'||p.kind===providerFilter) && (!providerQ || `${p.name||''} ${p.display_name||''} ${p.id}`.toLowerCase().includes(providerQ.toLowerCase()))).map(p=>{
+                      const Icon = p.kind==='image'? Globe : p.kind==='video'? Film : p.kind==='audio'? Mic : Cpu;
+                      return (
+                        <div key={p.id} className={`p-3 rounded-xl border flex flex-col gap-2 ${p.builtin?'bg-surface-secondary/40 border-border':'bg-surface border-brand/20'}`}>
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-white truncate flex items-center gap-1.5"><Icon className="w-3.5 h-3.5" />{p.display_name||p.name||p.id}</span>
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full border ${p.builtin?'bg-surface border-border text-gray-400':'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'}`}>{p.builtin?'内置':'自定义'}</span>
+                          </div>
+                          <div className="text-[10px] font-mono text-gray-500 truncate" title={p.transport?.url}>URL: {p.transport?.url||'—'}</div>
+                          <div className="flex items-center gap-1 text-[10px] text-gray-500"><span className="px-1.5 py-0.5 rounded bg-black/30">{p.kind}</span><span className="ml-auto">{p.models?.length? `${p.models.length} 模型`: '无模型'}</span></div>
+                          <div className="flex items-center gap-1.5 pt-1">
+                            <button onClick={async()=>{ try{ const r=await apiService.testProvider(p.id); alert(r.ok?`✓ ${p.id} 连通`:`✗ ${r.detail}`);}catch(e:any){alert(e.message);} }} className="flex-1 py-1.5 rounded-lg bg-surface-secondary border border-border text-xs text-white flex items-center justify-center gap-1"><Activity className="w-3 h-3"/> 测试</button>
+                            <button onClick={()=> setEditingProvider(p)} className="flex-1 py-1.5 rounded-lg bg-brand/10 border border-brand/20 text-brand-light text-xs flex items-center justify-center gap-1"><Edit3 className="w-3 h-3"/> {p.builtin?'查看':'编辑'}</button>
+                            {!p.builtin && <button onClick={async()=>{ if(confirm(`删除 ${p.id}？`)){ await apiService.deleteProvider(p.id); loadProviders(); window.dispatchEvent(new Event('provider-list-refresh')); } }} className="px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs"><Trash2 className="w-3 h-3"/></button>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {providers.filter(p=> (providerFilter==='all'||p.kind===providerFilter) && (!providerQ || `${p.name||''} ${p.display_name||''} ${p.id}`.toLowerCase().includes(providerQ.toLowerCase()))).length===0 && <div className="text-center py-8 text-sm text-gray-500">暂无匹配的生成源</div>}
+                </div>
+                {editingProvider && (
+                  <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+                    <div className="w-full max-w-xl bg-surface rounded-2xl border border-border p-4 space-y-3 max-h-[80vh] overflow-y-auto">
+                      <div className="flex items-center justify-between"><span className="text-sm font-bold text-white">编辑 {editingProvider.id}</span><button onClick={()=> setEditingProvider(null)} className="p-1 rounded hover:bg-surface-tertiary"><XCircle className="w-4 h-4 text-gray-400"/></button></div>
+                      {['name','kind','description'].map(k=> (
+                        <div key={k}><span className="text-[11px] text-gray-300">{k}</span><input value={editingProvider[k]||''} onChange={e=> setEditingProvider({...editingProvider, [k]: e.target.value})} className="w-full bg-surface-secondary border border-border rounded-lg px-3 py-1.5 text-xs text-white" disabled={editingProvider.builtin}/></div>
+                      ))}
+                      <div><span className="text-[11px] text-gray-300">default_model</span><input value={editingProvider.default_model||''} onChange={e=> setEditingProvider({...editingProvider, default_model:e.target.value})} className="w-full bg-surface-secondary border border-border rounded-lg px-3 py-1.5 text-xs text-white"/></div>
+                      <div className="flex justify-end gap-2 pt-2">
+                        <button onClick={()=> setEditingProvider(null)} className="px-3 py-1.5 rounded-lg bg-surface-secondary border border-border text-xs text-white">取消</button>
+                        {!editingProvider.builtin && <button onClick={async()=>{ try{ const payload:any={...editingProvider}; delete payload.health; await apiService.updateProvider(editingProvider.id, payload); setEditingProvider(null); loadProviders(); window.dispatchEvent(new Event('provider-list-refresh')); }catch(e:any){alert(e.message);} }} className="px-4 py-1.5 rounded-lg bg-brand text-white text-xs font-bold">保存</button>}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
