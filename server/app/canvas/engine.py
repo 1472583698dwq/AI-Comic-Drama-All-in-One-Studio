@@ -298,7 +298,22 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
                 # 将 model 透传至 extra
                 req.extra = {"model": model}
             res = await video_registry.generate(req, provider_id=prov if prov else None)
-            return {"status":"success","video_url": res.video_url, "provider": res.provider, "elapsed_ms": res.elapsed_ms or int((time.time()-start)*1000)}
+            # 处理异步排队（AutoDL）：若仅返回 task_id 则轮询至完成
+            if not getattr(res, 'video_url', None) and getattr(res, 'task_id', None):
+                task_id = res.task_id
+                for _ in range(120):
+                    await asyncio.sleep(3)
+                    try:
+                        from app.providers.generic.http_provider import get_custom_video_task
+                        st = get_custom_video_task(task_id)
+                        if st and st.get("status") in ("SUCCESS", "COMPLETED") and st.get("video_url"):
+                            return {"status":"success","video_url": st["video_url"], "provider": res.provider, "elapsed_ms": int((time.time()-start)*1000), "task_id": task_id}
+                        if st and st.get("status") in ("FAILED", "FAIL", "ERROR"):
+                            return {"status":"error","error": st.get("error") or "视频任务失败"}
+                    except Exception:
+                        pass
+                return {"status":"error","error": f"视频排队超时 task_id={task_id}，请稍后在画布重试或查看 /storage/videos/"}
+            return {"status":"success","video_url": res.video_url, "provider": res.provider, "elapsed_ms": res.elapsed_ms or int((time.time()-start)*1000), "task_id": getattr(res, 'task_id', None)}
         elif ntype in ("tts","audio","voice"):
             text = merged.get("text") or merged.get("dialogue") or merged.get("subtitle_text") or merged.get("brief") or ""
             if not text.strip():

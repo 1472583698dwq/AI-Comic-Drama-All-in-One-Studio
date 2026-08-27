@@ -81,10 +81,29 @@ export const ShotCardNode: React.FC<NodeProps> = ({ data, id }) => {
         {allInputs.length>0 && <div className="text-[10px] text-violet-400 bg-violet-500/10 border border-violet-500/20 rounded-lg px-2 py-1">已接入 {allInputs.map((h:any)=>h.label).join('、')} · 多模态输入就绪</div>}
         <div className="flex gap-1.5">
           <button onClick={handleGenerate} disabled={generating} className="flex-1 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold flex items-center justify-center gap-1 disabled:opacity-40 shadow-md shadow-violet-600/20">{generating ? <RefreshCw className="w-3 h-3 animate-spin"/> : <Sparkles className="w-3 h-3"/>}{generating ? '生成中' : '生成首帧'}</button>
-          <button onClick={()=>{
+          <button onClick={async()=>{
             const prompt = localData.video_prompt || localData.action_desc || localData.image_prompt;
             if(!prompt){ alert('请填写视频运动描述'); return; }
-            apiService.generateShotVideo({ prompt, mode: 'i2v', first_frame_url: localData.image_url, duration: 5 }).then(r=>{ setLocalData((p:any)=>({...p, video_url: r.video_url})); (d.onUpdate as any)?.(id,{video_url:r.video_url}); }).catch(e=>alert(e.message));
+            const provider = (d as any).provider || (d as any).provider_id || localData.provider;
+            try{
+              const res: any = await apiService.generateShotVideo({ prompt, mode: 'i2v', first_frame_url: localData.image_url, duration: 5, provider: provider || undefined });
+              let url = res.video_url;
+              if (!url && res.task_id) {
+                const taskId = res.task_id;
+                // 轮询排队任务
+                for (let i=0;i<120;i++) {
+                  await new Promise(r=> setTimeout(r, 3000));
+                  try{
+                    const st:any = await apiService.getVideoTaskStatus(taskId);
+                    const status=(st.status||"").toString().toUpperCase();
+                    if(status==="SUCCESS"||status==="COMPLETED"){ url=st.video_url||st.videoUrl||(st.results&&st.results[0])||""; if(url) break; }
+                    else if(status==="FAILED"||status==="FAIL") throw new Error(st.error||"任务失败");
+                  }catch(e:any){ if(e?.message?.includes("not_found")) continue; }
+                }
+                if(!url) throw new Error("排队超时");
+              }
+              setLocalData((p:any)=>({...p, video_url: url})); (d.onUpdate as any)?.(id,{video_url:url});
+            }catch(e:any){ alert(e.message); }
           }} className="px-3 py-1.5 rounded-xl bg-orange-500/10 border border-orange-500/30 text-orange-500 hover:bg-orange-500 hover:text-white text-xs flex items-center gap-1 transition-colors"><Play className="w-3 h-3"/> 生视频</button>
         </div>
         {localData.video_url && <div className="text-[10px] text-emerald-500 truncate">✓ 视频已生成</div>}

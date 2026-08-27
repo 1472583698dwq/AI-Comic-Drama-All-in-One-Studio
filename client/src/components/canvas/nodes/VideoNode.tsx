@@ -28,17 +28,38 @@ export const VideoNode: React.FC<NodeProps> = ({ data, id }) => {
     try {
       const effectiveProvider = (d as any).provider || (d as any).provider_id || (d as any).provider_video || provider;
       const model = (d as any).model;
-      const res = await apiService.generateShotVideo({
+      const res: any = await apiService.generateShotVideo({
         prompt: p,
         mode: mode as any,
         first_frame_url: firstFrame || undefined,
         duration,
         provider: effectiveProvider,
-        // model透传 via dynamic? 使用 provider 字段已包含，model 额外
       } as any);
-      const url = res.video_url;
+      let url = res.video_url;
+      // 处理 AutoDL 等异步排队：video_url 为空但返回 task_id 时轮询
+      if (!url && res.task_id) {
+        const taskId = res.task_id;
+        // 提示排队中
+        (d.onUpdate as any)?.(id, { video_url: "", _taskId: taskId, _polling: true });
+        for (let i = 0; i < 120; i++) {
+          await new Promise(r => setTimeout(r, 3000));
+          try {
+            const st: any = await apiService.getVideoTaskStatus(taskId);
+            const status = (st.status || st.state || "").toString().toUpperCase();
+            if (status === "SUCCESS" || status === "COMPLETED") {
+              url = st.video_url || st.videoUrl || (st.results && st.results[0]) || "";
+              if (url) break;
+            } else if (status === "FAILED" || status === "FAIL" || status === "ERROR") {
+              throw new Error(st.error || st.msg || "视频任务失败");
+            }
+          } catch (e: any) {
+            if (e?.message && e.message.includes("not_found")) continue;
+          }
+        }
+        if (!url) throw new Error("视频生成排队超时，请稍后在画布执行结果中查看或重试");
+      }
       setVideoUrl(url);
-      (d.onUpdate as any)?.(id, { video_url: url, video_prompt: p, mode, provider: effectiveProvider, duration, first_frame_url: firstFrame, model });
+      (d.onUpdate as any)?.(id, { video_url: url, video_prompt: p, mode, provider: effectiveProvider, duration, first_frame_url: firstFrame, model, _polling: false });
     } catch(e:any){ alert(e.message); } finally { setGenerating(false); }
   };
 
