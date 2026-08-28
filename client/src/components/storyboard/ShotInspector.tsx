@@ -786,6 +786,19 @@ export const ShotInspector: React.FC = () => {
                             )
                           ) : exp.type==='number' ? (
                             <input type="number" value={val??''} onChange={e=> setShotDynamicInputs(p=>({...p,[key]: parseFloat(e.target.value)||0}))} className="w-full bg-surface-tertiary border border-border rounded-lg px-2 py-1 text-xs text-white"/>
+                          ) : (exp.type==='select' || exp.type==='combo') ? (
+                            <select value={val??''} onChange={e=> setShotDynamicInputs(p=>({...p,[key]: e.target.value}))} className="w-full bg-surface-tertiary border border-border rounded-lg px-2 py-1 text-xs text-white">
+                              <option value="">-- 请选择 --</option>
+                              {(exp.choices||[]).map((c:string)=>(<option key={c} value={c}>{c}</option>))}
+                              {!(exp.choices||[]).includes(val) && val && <option value={val}>{val}</option>}
+                            </select>
+                          ) : exp.type==='boolean' ? (
+                            <label className="flex items-center gap-2 cursor-pointer">
+                              <input type="checkbox" checked={!!val} onChange={e=> setShotDynamicInputs(p=>({...p,[key]: e.target.checked}))} className="w-4 h-4 rounded text-brand bg-surface-tertiary border-border" />
+                              <span className="text-xs text-gray-300">{val?'是':'否'}</span>
+                            </label>
+                          ) : (val && typeof val==='string' && val.length>60) ? (
+                            <textarea value={val??''} onChange={e=> setShotDynamicInputs(p=>({...p,[key]: e.target.value}))} rows={3} placeholder={exp.description||key} className="w-full bg-surface-tertiary border border-border rounded-lg px-2 py-1 text-xs text-white placeholder-gray-500 resize-none"/>
                           ) : (
                             <input type="text" value={val??''} onChange={e=> setShotDynamicInputs(p=>({...p,[key]: e.target.value}))} placeholder={exp.description||key} className="w-full bg-surface-tertiary border border-border rounded-lg px-2 py-1 text-xs text-white placeholder-gray-500"/>
                           )}

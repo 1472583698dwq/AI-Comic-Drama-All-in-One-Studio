@@ -2255,9 +2255,30 @@ class ComfyWorkflowManager:
                         })
 
         current_mapping = (meta.get("mapping") if meta else None) or auto_generate_mapping(analyze_workflow(clean_wf))
-        exposed_inputs = (meta.get("exposed_inputs") if meta else None)
-        if exposed_inputs is None:
-            exposed_inputs = auto_detect_exposed_inputs(clean_wf, current_mapping)
+        saved_exposed = (meta.get("exposed_inputs") if meta else None)
+        fresh_exposed = auto_detect_exposed_inputs(clean_wf, current_mapping)
+        # 若保存的暴露项与新检测不一致（数量差异大或含 undefined 脏数据），则以新检测为准但保留用户已保存的值
+        if saved_exposed is None or len(saved_exposed) == 0:
+            exposed_inputs = fresh_exposed
+        else:
+            has_dirty = any(e.get('param_name')=='undefined' or str(e.get('id','')).endswith('_undefined') for e in saved_exposed)
+            if has_dirty or len(saved_exposed) < len(fresh_exposed) * 0.5:
+                saved_map = {f"{e['node_id']}_{e['param_name']}": e for e in saved_exposed if e.get('param_name')}
+                exposed_inputs = []
+                for fe in fresh_exposed:
+                    key = f"{fe['node_id']}_{fe['param_name']}"
+                    if key in saved_map:
+                        merged = {**fe, **{k:v for k,v in saved_map[key].items() if k in ('label','description','default_value') and v}}
+                        exposed_inputs.append(merged)
+                    else:
+                        exposed_inputs.append(fe)
+                fresh_keys = {f"{e['node_id']}_{e['param_name']}" for e in fresh_exposed}
+                for se in saved_exposed:
+                    key = f"{se['node_id']}_{se['param_name']}"
+                    if key not in fresh_keys and se.get('param_name')!='undefined':
+                        exposed_inputs.append(se)
+            else:
+                exposed_inputs = saved_exposed
 
         return {
             "workflow_id": workflow_id,
