@@ -227,23 +227,36 @@ async def images_health(provider: Optional[str] = None):
 
 @router.post("/images/generate")
 async def generate_image(req: ImageGenerateRequest):
-    """[动态生图] 通过指定Provider生成漫剧分镜图像，返回落盘后的本地图片 URL。支持 provider/workflow_id/model/steps/cfg"""
+    """[动态生图] 通过指定Provider生成漫剧分镜图像，返回落盘后的本地图片 URL。支持 provider/workflow_id/model/独立控件(steps/cfg/resolution/aspect_ratio/fps)"""
     try:
         from app.providers.image.base import ImageGenerateRequest as ImgReq
         reg = get_image_registry()
+        # 收集独立控件透传的额外字段（非标准字段经 extra='allow' 进入 model_extra）
+        extra = {}
+        try:
+            if hasattr(req, 'model_extra') and req.model_extra:
+                extra = dict(req.model_extra)
+            elif hasattr(req, '__pydantic_extra__') and req.__pydantic_extra__:
+                extra = dict(req.__pydantic_extra__)
+        except Exception:
+            extra = {}
         img_req = ImgReq(
             prompt=req.prompt,
             negative_prompt=req.negative_prompt or "",
             aspect_ratio=req.aspect_ratio,
+            resolution=getattr(req, 'resolution', None) or extra.get('resolution'),
             style_preset=req.style_preset,
             seed=req.seed,
             workflow_id=req.workflow_id,
             model=req.model,
             width=req.width,
             height=req.height,
-            steps=req.steps,
-            cfg=req.cfg,
+            steps=req.steps if req.steps is not None else extra.get('steps'),
+            cfg=req.cfg if req.cfg is not None else extra.get('cfg'),
+            fps=getattr(req, 'fps', None) or extra.get('fps'),
+            duration=getattr(req, 'duration', None) or extra.get('duration'),
             dynamic_inputs=req.dynamic_inputs,
+            extra=extra or None,
         )
         prov_id = req.provider
         if req.workflow_id and not prov_id:
@@ -318,7 +331,11 @@ async def list_workflows(source: str = "all"):
     mgr = get_workflow_manager()
     if source not in ("all", "internal", "external"):
         source = "all"
-    workflows = mgr.list_workflows(source=source)
+    import asyncio
+    try:
+        workflows = await asyncio.to_thread(mgr.list_workflows, source)
+    except Exception:
+        workflows = mgr.list_workflows(source=source)
     return {
         "workflows": workflows,
         "source": source,
@@ -618,10 +635,23 @@ async def get_video_task_status(task_id: str):
 
 @router.post("/videos/generate")
 async def generate_video(req: VideoGenerateRequestPayload):
-    """[动态视频生成] 支持图生视频(i2v) / 参考生视频(r2v) / 文生视频(t2v)"""
+    """[动态视频生成] 支持图生视频(i2v) / 参考生视频(r2v) / 文生视频(t2v) + 独立控件(fps/steps/cfg/resolution/aspect_ratio 均为下拉)"""
     try:
         from app.providers.video.base import VideoGenerateRequest as VidReq
         reg = get_video_registry()
+        extra = {}
+        try:
+            if hasattr(req, 'model_extra') and req.model_extra:
+                extra = dict(req.model_extra)
+            elif hasattr(req, '__pydantic_extra__') and req.__pydantic_extra__:
+                extra = dict(req.__pydantic_extra__)
+        except Exception:
+            extra = {}
+        # dynamic_inputs 合并 provider 独立参数的透传（若前端未走 dynamic_inputs 而直接平铺）
+        dyn = dict(req.dynamic_inputs or {})
+        for k in ("fps","steps","cfg","aspect_ratio","resolution"):
+            if k in extra and k not in dyn:
+                dyn[k] = extra[k]
         vid_req = VidReq(
             prompt=req.prompt,
             mode=req.mode or "i2v",
@@ -630,11 +660,14 @@ async def generate_video(req: VideoGenerateRequestPayload):
             reference_images=req.reference_images,
             reference_videos=req.reference_videos,
             duration=req.duration or 5,
-            resolution=req.resolution or "720p",
-            aspect_ratio=req.aspect_ratio or "9:16",
+            resolution=req.resolution or extra.get("resolution") or "720p",
+            aspect_ratio=req.aspect_ratio or extra.get("aspect_ratio") or "9:16",
+            fps=getattr(req, 'fps', None) or extra.get('fps'),
             seed=req.seed,
             provider=req.provider,
             workflow_id=req.workflow_id,
+            dynamic_inputs=dyn or None,
+            extra=extra or None,
         )
         res = await reg.generate(vid_req, provider_id=req.provider)
         return {

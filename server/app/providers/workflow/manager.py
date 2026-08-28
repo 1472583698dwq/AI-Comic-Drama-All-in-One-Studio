@@ -930,6 +930,101 @@ def auto_detect_exposed_inputs(clean_wf: Dict[str, Any], mapping: Optional[Dict[
                             "default_value": str(pval)[:200] if pval else "",
                             "description": f"工作流中 {title} 节点的 {sub_key} 文本，可用于覆盖原始提示词",
                         })
+        # 2.2 探测 KSampler 系采样参数（独立控件：steps/cfg/sampler/scheduler）
+        elif ct in ("KSampler", "KSamplerAdvanced", "SamplerCustom"):
+            for pname in ("steps", "cfg", "sampler_name", "scheduler", "denoise"):
+                if pname in inputs:
+                    pval = inputs.get(pname)
+                    is_linked = isinstance(pval, list) and len(pval) == 2 and isinstance(pval[0], str)
+                    if is_linked:
+                        continue
+                    if pname == "steps":
+                        exposed.append({"id": f"num_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"采样步数 ({title})", "type": "number", "required": False, "default_value": int(pval) if isinstance(pval, (int,float)) else 20, "description": "采样步数 4-60", "min": 4, "max": 60, "step": 1})
+                    elif pname == "cfg":
+                        exposed.append({"id": f"num_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"CFG ({title})", "type": "number", "required": False, "default_value": float(pval) if isinstance(pval, (int,float)) else 7.0, "description": "CFG 1-15", "min": 1, "max": 15, "step": 0.5})
+                    elif pname == "sampler_name":
+                        exposed.append({"id": f"combo_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"采样器 ({title})", "type": "combo", "required": False, "default_value": str(pval) if pval else "euler", "description": "采样器", "options": VALID_SAMPLERS})
+                    elif pname == "scheduler":
+                        exposed.append({"id": f"combo_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"调度器 ({title})", "type": "combo", "required": False, "default_value": str(pval) if pval else "normal", "description": "调度器", "options": VALID_SCHEDULERS})
+                    elif pname == "denoise":
+                        exposed.append({"id": f"num_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"去噪 ({title})", "type": "number", "required": False, "default_value": float(pval) if isinstance(pval, (int,float)) else 1.0, "description": "去噪 0-1", "min": 0, "max": 1, "step": 0.05})
+        # 2.3 探测 EmptyLatentImage 分辨率
+        elif ct == "EmptyLatentImage":
+            for pname in ("width", "height", "batch_size"):
+                if pname in inputs:
+                    pval = inputs.get(pname)
+                    is_linked = isinstance(pval, list) and len(pval) == 2 and isinstance(pval[0], str)
+                    if not is_linked:
+                        if pname in ("width","height"):
+                            exposed.append({"id": f"num_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"{pname} ({title})", "type": "number", "required": False, "default_value": int(pval) if isinstance(pval, (int,float)) else 1024, "description": "分辨率", "min": 256, "max": 2048, "step": 64})
+                        else:
+                            exposed.append({"id": f"num_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"{pname} ({title})", "type": "number", "required": False, "default_value": int(pval) if isinstance(pval, (int,float)) else 1, "description": "", "min": 1, "max": 4, "step": 1})
+        # 2.3.1 探测 VAELoader（模型下拉而非手填）
+        elif ct == "VAELoader":
+            if "vae_name" in inputs:
+                pval = inputs.get("vae_name")
+                is_linked = isinstance(pval, list) and len(pval) == 2 and isinstance(pval[0], str)
+                if not is_linked:
+                    exposed.append({"id": f"combo_{nid}_vae_name", "node_id": str(nid), "param_name": "vae_name", "label": f"VAE模型 ({title})", "type": "combo", "required": False, "default_value": str(pval) if pval else "qwen_image_vae.safetensors", "description": "VAE模型，下拉选择而非手填", "options": []})
+        # 2.3.2 探测 ResolutionSelector（分辨率三件套独立控件，下拉/滑杆而非手填）
+        elif ct == "ResolutionSelector":
+            for pname in ("aspect_ratio", "megapixels", "multiple"):
+                if pname not in inputs:
+                    continue
+                pval = inputs.get(pname)
+                is_linked = isinstance(pval, list) and len(pval) == 2 and isinstance(pval[0], str)
+                if is_linked:
+                    continue
+                if pname == "aspect_ratio":
+                    exposed.append({"id": f"combo_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"画面比例 ({title})", "type": "combo", "required": False, "default_value": str(pval) if pval else "1:1 (Square)", "description": "画面比例 下拉", "options": ["1:1 (Square)","9:16 (Portrait)","16:9 (Landscape)","3:2","4:3","21:9"]})
+                elif pname == "megapixels":
+                    exposed.append({"id": f"num_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"百万像素 ({title})", "type": "number", "required": False, "default_value": float(pval) if isinstance(pval, (int,float)) else 1.0, "description": "百万像素 0.5-4", "min": 0.5, "max": 4, "step": 0.5})
+                elif pname == "multiple":
+                    exposed.append({"id": f"num_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"倍数对齐 ({title})", "type": "number", "required": False, "default_value": int(pval) if isinstance(pval, (int,float)) else 8, "description": "分辨率倍数对齐", "min": 1, "max": 64, "step": 1})
+        # 2.4 探测 Wan 视频系（分辨率/时长/帧率 独立控件，下拉而非手填）
+        elif ct in ("WanImageToVideo", "WanVaceToVideo", "WanFirstMiddleLastFrameToVideo", "CreateVideo", "WanVideoSampler"):
+            for pname in ("width", "height", "resolution", "duration", "length", "num_frames", "frames", "fps", "frame_rate", "steps", "cfg", "seed"):
+                if pname not in inputs:
+                    continue
+                pval = inputs.get(pname)
+                is_linked = isinstance(pval, list) and len(pval) == 2 and isinstance(pval[0], str)
+                if is_linked:
+                    continue
+                if pname in ("resolution",):
+                    exposed.append({"id": f"combo_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"分辨率 ({title})", "type": "combo", "required": False, "default_value": str(pval) if pval else "720p", "description": "分辨率 480p/720p/1080p 下拉", "options": ["480p","720p","1080p"]})
+                elif pname in ("duration",):
+                    exposed.append({"id": f"num_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"时长秒 ({title})", "type": "number", "required": False, "default_value": int(pval) if isinstance(pval, (int,float)) else 5, "description": "时长 3-15 秒", "min": 3, "max": 15, "step": 1})
+                elif pname in ("length", "num_frames", "frames"):
+                    # 帧数按 duration 推导，但仍暴露为独立滑杆
+                    dv = int(pval) if isinstance(pval, (int,float)) else 81
+                    exposed.append({"id": f"num_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"{pname} ({title})", "type": "number", "required": False, "default_value": dv, "description": "帧数 16~241", "min": 16, "max": 241, "step": 1})
+                elif pname in ("fps", "frame_rate"):
+                    exposed.append({"id": f"combo_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"帧率 ({title})", "type": "combo", "required": False, "default_value": str(pval) if pval else "24", "description": "帧率", "options": ["16","24","30"]})
+                elif pname in ("width", "height"):
+                    exposed.append({"id": f"num_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"{pname} ({title})", "type": "number", "required": False, "default_value": int(pval) if isinstance(pval, (int,float)) else 720, "description": "分辨率宽/高", "min": 256, "max": 2048, "step": 64})
+                elif pname == "steps":
+                    exposed.append({"id": f"num_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"步数 ({title})", "type": "number", "required": False, "default_value": int(pval) if isinstance(pval, (int,float)) else 20, "description": "步数 4-60", "min": 4, "max": 60, "step": 1})
+                elif pname == "cfg":
+                    exposed.append({"id": f"num_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"CFG ({title})", "type": "number", "required": False, "default_value": float(pval) if isinstance(pval, (int,float)) else 7.0, "description": "CFG 1-15", "min": 1, "max": 15, "step": 0.5})
+                elif pname == "seed":
+                    exposed.append({"id": f"num_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"随机种子 ({title})", "type": "number", "required": False, "default_value": int(pval) if isinstance(pval, (int,float)) else 0, "description": "种子", "min": 0, "max": 9999999999, "step": 1})
+        # 2.5 兜底：Wan 前缀的其它自定义视频节点（含 resolution/duration 通用暴露）
+        elif ct.lower().startswith("wan"):
+            for pname in ("resolution", "duration", "fps", "width", "height", "length", "frames"):
+                if pname not in inputs:
+                    continue
+                pval = inputs.get(pname)
+                is_linked = isinstance(pval, list) and len(pval) == 2 and isinstance(pval[0], str)
+                if is_linked:
+                    continue
+                if pname == "resolution":
+                    exposed.append({"id": f"combo_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"分辨率 ({title})", "type": "combo", "required": False, "default_value": str(pval) if pval else "720p", "description": "480p/720p/1080p", "options": ["480p","720p","1080p"]})
+                elif pname == "duration":
+                    exposed.append({"id": f"num_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"时长 ({title})", "type": "number", "required": False, "default_value": int(pval) if isinstance(pval, (int,float)) else 5, "description": "3-15秒", "min": 3, "max": 15, "step": 1})
+                elif pname in ("fps",):
+                    exposed.append({"id": f"combo_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"帧率 ({title})", "type": "combo", "required": False, "default_value": str(pval) if pval else "24", "description": "帧率", "options": ["16","24","30"]})
+                else:
+                    exposed.append({"id": f"num_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"{pname} ({title})", "type": "number", "required": False, "default_value": int(pval) if isinstance(pval,(int,float)) else 720, "description": pname, "min": 256, "max": 2048, "step": 64})
         # 3. 通用子图/自定义节点：保持为单节点的子图，其输入即暴露参数
         #    区分输入节点（linked）与参数节点（direct）：即使已链接也暴露，允许用户覆盖外部输入
         else:
@@ -998,6 +1093,40 @@ class ComfyWorkflowManager:
         ext_dir = _get_external_workflows_dir()
         if not ext_dir or not os.path.exists(ext_dir):
             return []
+        # 慢盘保护：网盘/OneDrive 等同步盘可能极慢，限制扫描
+        if any(k in ext_dir for k in ["网盘", "OneDrive", "BaiduNetdisk"]):
+            # 仅扫描顶层 1 层，不递归，且限 50 文件
+            result = []
+            try:
+                for entry in os.scandir(ext_dir):
+                    if entry.is_file() and entry.name.lower().endswith(".json"):
+                        fpath = entry.path
+                        rel = os.path.relpath(fpath, ext_dir)
+                        try:
+                            with open(fpath, "r", encoding="utf-8") as f:
+                                data = __import__("json").load(f)
+                        except Exception as e:
+                            result.append({"id": _external_id_for_path(fpath), "name": os.path.splitext(entry.name)[0], "file_path": fpath, "relative_path": rel, "source": "external", "is_api_format": False, "error": f"JSON解析失败: {e}", "node_count": 0})
+                            continue
+                        ok, msg = is_api_format_workflow(data)
+                        if ok:
+                            analysis = analyze_workflow(data)
+                            result.append({"id": _external_id_for_path(fpath), "name": os.path.splitext(entry.name)[0], "file_path": fpath, "relative_path": rel, "source": "external", "is_api_format": True, "analysis": analysis, "mapping": auto_generate_mapping(analysis), "node_count": len(data), "created_at": os.path.getmtime(fpath), "warnings": [], "auto_converted": False})
+                        elif is_save_format_workflow(data):
+                            try:
+                                converted = convert_save_format_to_api_format(data)
+                                analysis = analyze_workflow(converted)
+                                result.append({"id": _external_id_for_path(fpath), "name": os.path.splitext(entry.name)[0], "file_path": fpath, "relative_path": rel, "source": "external", "is_api_format": True, "analysis": analysis, "mapping": auto_generate_mapping(analysis), "node_count": len(converted), "created_at": os.path.getmtime(fpath), "warnings": [], "auto_converted": True})
+                            except Exception as ce:
+                                result.append({"id": _external_id_for_path(fpath), "name": os.path.splitext(entry.name)[0], "file_path": fpath, "relative_path": rel, "source": "external", "is_api_format": False, "error": f"自动转换失败: {ce}", "node_count": 0, "hint": "请在ComfyUI中打开后 File→Export (API Format) 另存为API格式"})
+                        else:
+                            result.append({"id": _external_id_for_path(fpath), "name": os.path.splitext(entry.name)[0], "file_path": fpath, "relative_path": rel, "source": "external", "is_api_format": False, "error": msg, "node_count": 0, "hint": "不支持的工作流格式"})
+                        if len(result) >= 50:
+                            break
+            except Exception as e:
+                import logging; logging.getLogger(__name__).warning(f"[WorkflowManager] slow dir scan skipped {ext_dir}: {e}")
+                return []
+            return result
         result = []
         for root, _, files in os.walk(ext_dir):
             for fname in files:
@@ -1081,17 +1210,31 @@ class ComfyWorkflowManager:
                     })
         return result
 
+    _list_cache: Optional[List[Dict[str, Any]]] = None
+    _list_cache_ts: float = 0
+    _list_cache_ttl: float = 12.0
+
     def list_workflows(self, source: str = "all") -> List[Dict[str, Any]]:
         """
         source: all | internal | external
         默认 all 会合并内部+外部，外部可直接使用无需导入
+        带 12s 缓存，避免 D:/网盘 等慢盘反复 os.walk 阻塞事件循环
         """
+        # 缓存仅对 all 生效，internal/external 仍实时
+        if source == "all" and self._list_cache is not None and (time.time() - self._list_cache_ts) < self._list_cache_ttl:
+            return self._list_cache
         internal = self.list_internal_workflows() if source in ("all", "internal") else []
-        external = self.list_external_workflows() if source in ("all", "external") else []
-        # 合并并按名称/时间排序，外部优先显示？
+        # 外部目录可能在慢盘，捕获异常并限时
+        try:
+            external = self.list_external_workflows() if source in ("all", "external") else []
+        except Exception as e:
+            logger.warning(f"[WorkflowManager] list_external failed: {e}")
+            external = []
         all_wfs = internal + external
-        # 按 source 和创建时间排序：内部在前或按时间倒序
         all_wfs.sort(key=lambda x: (x.get("source") != "internal", -x.get("created_at", 0)))
+        if source == "all":
+            self._list_cache = all_wfs
+            self._list_cache_ts = time.time()
         return all_wfs
 
     def get_external_dir(self) -> Optional[str]:

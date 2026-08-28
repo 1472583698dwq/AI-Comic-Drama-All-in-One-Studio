@@ -21,11 +21,12 @@ class VideoGenerateRequest:
     duration: int = 5  # 秒，3-15
     resolution: str = "720p"  # 720p | 1080p
     aspect_ratio: str = "9:16"
+    fps: Optional[int] = None
     seed: Optional[int] = None
     workflow_id: Optional[str] = None  # ComfyUI 视频工作流
     provider: Optional[str] = None
     dynamic_inputs: Optional[Dict[str, Any]] = None  # 外部暴露表单动态输入
-    extra: Optional[Dict[str, Any]] = None
+    extra: Optional[Dict[str, Any]] = None  # 独立控件透传（fps/steps/cfg 等）
 
 @dataclass
 class VideoGenerateResult:

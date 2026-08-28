@@ -81,15 +81,15 @@ def run_server_thread():
         import traceback
         safe_log(f"[Server Error] {e}\n{traceback.format_exc()}")
 
-def wait_for_server(timeout: float = 15.0) -> bool:
+def wait_for_server(timeout: float = 30.0) -> bool:
     start = time.time()
     while time.time() - start < timeout:
         try:
-            with urllib.request.urlopen(f"{URL}/api/v1/health", timeout=1.0) as resp:
+            with urllib.request.urlopen(f"{URL}/api/v1/health", timeout=1.5) as resp:
                 if resp.status == 200:
                     return True
         except Exception:
-            time.sleep(0.3)
+            time.sleep(0.4)
     return False
 
 def launch_app_browser_mode():
@@ -137,7 +137,7 @@ def main():
 
     # 2. Wait for server to become healthy
     safe_log("[2/2] 等待服务就绪...")
-    if not wait_for_server(timeout=15.0):
+    if not wait_for_server(timeout=30.0):
         safe_log("[Warning] 服务探测超时，尝试直接呈现窗口...")
 
     safe_log("[Success] 服务已就绪！正在打开原生桌面工作台...")

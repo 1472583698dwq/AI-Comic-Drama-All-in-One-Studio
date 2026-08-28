@@ -9,7 +9,7 @@ import uuid
 
 
 ProviderKind = Literal['image', 'video', 'audio', 'llm']
-ProviderType = Literal['comfyui', 'http', 'local']
+ProviderType = Literal['comfyui', 'http', 'local', 'code']
 ProviderScope = Literal['global', 'project']
 AuthType = Literal['none', 'bearer', 'apikey_header', 'apikey_query', 'basic']
 
@@ -48,12 +48,23 @@ class ProviderHealthCheck(BaseModel):
     test_payload: Optional[Dict[str, Any]] = None
 
 
+# === 代码生成源（取代 JSON 模板） ===
+CodeLanguage = Literal['python', 'javascript']
+
+
+class ProviderCodeConfig(BaseModel):
+    language: CodeLanguage = "python"  # python | javascript
+    code: str = ""  # 完整携程源码，需导出 async def generate(ctx, api) 或 module.exports
+    entry: str = "generate"  # 入口函数名
+    timeout: int = 60  # 单次执行超时秒
+
+
 class ProviderDefinition(BaseModel):
     id: str = Field(default_factory=lambda: f"prov_{uuid.uuid4().hex[:8]}")
     name: str = ""  # 展示名，如 硅基流动 FLUX
     display_name: Optional[str] = None
     kind: ProviderKind = "image"  # image/video/audio/llm
-    provider_type: ProviderType = "http"  # comfyui/http
+    provider_type: ProviderType = "http"  # comfyui/http/code
     description: str = ""
     icon: str = "Zap"
     scope: ProviderScope = "global"
@@ -61,11 +72,19 @@ class ProviderDefinition(BaseModel):
     builtin: bool = False  # 内置不可删
     enabled: bool = True
 
-    # 传输与认证
+    # === 代码生成源（唯一执行方式，JSON 模板已废弃） ===
+    language: CodeLanguage = "python"
+    code: Optional[str] = None  # 完整源码
+    code_entry: str = "generate"
+    code_timeout: int = 60
+
+    # 兼容：旧 JSON 模板（已废弃，仅用于存量迁移，创建新源时忽略）
     transport: ProviderTransport = Field(default_factory=ProviderTransport)
     auth: ProviderAuthConfig = Field(default_factory=ProviderAuthConfig)
     mapping: ProviderMapping = Field(default_factory=ProviderMapping)
     health_check: ProviderHealthCheck = Field(default_factory=ProviderHealthCheck)
+    # 废弃标记
+    legacy_json_mode: bool = False
 
     # 模型与参数 Schema（驱动前端动态表单）
     models: List[str] = Field(default_factory=list)
@@ -95,8 +114,8 @@ class ProviderDefinition(BaseModel):
     def get_display_name(self) -> str:
         return self.display_name or self.name or self.id
 
-    def to_provider_info(self) -> Dict[str, Any]:
-        return {
+    def to_provider_info(self, include_code: bool = True) -> Dict[str, Any]:
+        info: Dict[str, Any] = {
             "id": self.id,
             "name": self.name,
             "display_name": self.get_display_name(),
@@ -120,4 +139,14 @@ class ProviderDefinition(BaseModel):
             "doc_url": self.doc_url,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "language": self.language,
+            "code_entry": self.code_entry,
+            "code_timeout": self.code_timeout,
+            "legacy_json_mode": self.legacy_json_mode,
+            "has_code": bool(self.code),
         }
+        if include_code:
+            info["code"] = self.code or ""
+        else:
+            info["code_preview"] = (self.code[:500] + "...") if self.code and len(self.code) > 500 else (self.code or "")
+        return info

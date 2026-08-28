@@ -70,9 +70,11 @@ class ScriptParseRequest(BaseModel):
     custom_instructions: Optional[str] = None
 
 class ImageGenerateRequest(BaseModel):
+    model_config = {"extra": "allow"}
     prompt: str
     negative_prompt: Optional[str] = None
     aspect_ratio: str = "9:16" # 9:16, 16:9, 1:1
+    resolution: Optional[str] = None  # 480p/720p/1080p 独立下拉
     style_preset: Optional[str] = None
     seed: Optional[int] = None
     provider: Optional[str] = None  # comfyui / siliconflow / dashscope / openai_compat
@@ -82,6 +84,8 @@ class ImageGenerateRequest(BaseModel):
     height: Optional[int] = None
     steps: Optional[int] = None
     cfg: Optional[float] = None
+    fps: Optional[int] = None
+    duration: Optional[int] = None
     dynamic_inputs: Optional[Dict[str, Any]] = None  # 外部暴露表单动态输入 (垫图/额外提示词等)
 
 class Character3ViewsRequest(BaseModel):
@@ -112,6 +116,7 @@ class TTSGenerateRequest(BaseModel):
     ref_text: Optional[str] = None
 
 class VideoGenerateRequestPayload(BaseModel):
+    model_config = {"extra": "allow"}
     shot_id: Optional[str] = None
     prompt: str = ""
     mode: str = "i2v"  # i2v | r2v | t2v
@@ -122,9 +127,13 @@ class VideoGenerateRequestPayload(BaseModel):
     duration: int = 5
     resolution: str = "720p"
     aspect_ratio: str = "9:16"
+    fps: Optional[int] = None
     seed: Optional[int] = None
     provider: Optional[str] = None
     workflow_id: Optional[str] = None
+    dynamic_inputs: Optional[Dict[str, Any]] = None
+    steps: Optional[int] = None
+    cfg: Optional[float] = None
 
 class MCPToolDefinition(BaseModel):
     name: str

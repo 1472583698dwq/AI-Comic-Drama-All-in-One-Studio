@@ -132,6 +132,36 @@ def collect_upstream_data(node_id: str, nodes: List[Dict], edges: List[Dict], re
             if txt and "prompt" not in data:
                 data["prompt"] = txt
             continue
+        if tgt_handle in ("reference", "ref", "reference_image"):
+            url = (src_res.get("image_url") if src_res else None) or (src_res.get("result_url") if src_res else None) or (src_res.get("file_url") if src_res else None)
+            if not url:
+                url = (src_node.get("data", {}) or {}).get("reference") or (src_node.get("data", {}) or {}).get("image") or (src_node.get("data", {}) or {}).get("url")
+            if url:
+                data["reference"] = url
+                data.setdefault("image_url", url)
+                data.setdefault("reference_images", [])
+                if url not in data["reference_images"]:
+                    data["reference_images"].append(url)
+            continue
+        # export 聚合句柄（video/audio）
+        if tgt_handle in ("video","audio"):
+            url = None
+            if tgt_handle=="video":
+                url = (src_res.get("video_url") if src_res else None)
+                if url:
+                    data.setdefault("videos", [])
+                    if url not in data["videos"]:
+                        data["videos"].append(url)
+                    data.setdefault("video_url", url)
+            else:
+                url = (src_res.get("audio_url") if src_res else None)
+                if url:
+                    data.setdefault("audios", [])
+                    if url not in data["audios"]:
+                        data["audios"].append(url)
+                    data.setdefault("audio_url", url)
+            if url:
+                continue
         if tgt_handle == "provider" or tgt_handle == "provider_video" or tgt_handle == "provider_image" or tgt_handle == "provider_audio":
             # 已在上方 Provider 透传处理，此处兜底
             pass
@@ -168,6 +198,34 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
     merged["_upstream"] = upstream
     start = time.time()
     try:
+        # 新 6 核心：prompt 直通
+        if ntype == "prompt":
+            txt = data.get("prompt") or data.get("text") or upstream.get("prompt") or upstream.get("text") or ""
+            # 若上游已有 prompt 且当前为空，则透传上游
+            if not txt.strip() and upstream.get("prompt"):
+                txt = upstream.get("prompt")
+            return {"status":"success","prompt": txt, "text": txt, "elapsed_ms": int((time.time()-start)*1000)}
+        if ntype == "export":
+            # 聚合上游视频/音频/图片，透传即可，真实导出由前端触发 saveProjectContent/ exportJianYing
+            vids = []
+            auds = []
+            imgs = []
+            for k in ["video_url","videos","reference_videos"]:
+                v = upstream.get(k)
+                if isinstance(v, list): vids.extend(v)
+                elif isinstance(v, str) and v: vids.append(v)
+            for k in ["audio_url","audios","reference_audios"]:
+                v = upstream.get(k)
+                if isinstance(v, list): auds.extend(v)
+                elif isinstance(v, str) and v: auds.append(v)
+            for k in ["image_url","images","reference_images"]:
+                v = upstream.get(k)
+                if isinstance(v, list): imgs.extend(v)
+                elif isinstance(v, str) and v: imgs.append(v)
+            # 兼容部分节点 result 中单独的 image_url
+            single_vid = upstream.get("video_url") or merged.get("video_url")
+            if single_vid and single_vid not in vids: vids.append(single_vid)
+            return {"status":"success","videos": vids, "audios": auds, "images": imgs, "prompt": upstream.get("prompt") or merged.get("prompt"), "elapsed_ms": int((time.time()-start)*1000)}
         if ntype in ("provider-image", "provider-video", "provider-audio", "provider", "provider-llm"):
             prov_id = data.get("provider_id") or data.get("providerId") or node.get("id")
             if isinstance(data.get("definition"), dict):
@@ -258,6 +316,22 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
             from app.providers.image.base import ImageGenerateRequest
             prov = merged.get("provider") or merged.get("provider_image") or upstream.get("provider") or upstream.get("provider_image") or data.get("provider") or data.get("provider_id")
             model = merged.get("model") or data.get("model")
+            # 新极简节点：reference / reference_image 注入到 dynamic_inputs
+            dyn = merged.get("dynamic_inputs")
+            if not dyn:
+                ref = merged.get("reference") or merged.get("reference_image") or upstream.get("reference") or upstream.get("image_url") or upstream.get("reference_images")
+                if ref:
+                    if isinstance(ref, list):
+                        dyn = {"reference_images": ref}
+                    else:
+                        dyn = {"reference_images": [ref]}
+                # 兼容 first_frame
+                ff = merged.get("first_frame") or upstream.get("first_frame")
+                if ff and isinstance(ff, str):
+                    dyn = dyn or {}
+                    dyn.setdefault("reference_images", [])
+                    if ff not in dyn["reference_images"]:
+                        dyn["reference_images"].append(ff)
             req = ImageGenerateRequest(
                 prompt=prompt,
                 negative_prompt=merged.get("negative_prompt") or "",
@@ -265,7 +339,7 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
                 style_preset=merged.get("style_preset"),
                 seed=merged.get("seed"),
                 workflow_id=merged.get("workflow_id"),
-                dynamic_inputs=merged.get("dynamic_inputs"),
+                dynamic_inputs=dyn,
                 model=model,
             )
             res = await image_registry.generate(req, provider_id=prov if prov else None)
@@ -283,9 +357,9 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
             res = await image_registry.generate(req, provider_id="comfyui")
             return {"status":"success","image_url": res.image_url, "result_url": res.image_url, "provider": res.provider, "elapsed_ms": res.elapsed_ms or int((time.time()-start)*1000)}
         elif ntype in ("video","video-node"):
-            prompt = merged.get("video_prompt") or merged.get("prompt") or merged.get("action_desc") or "cinematic motion"
+            prompt = merged.get("video_prompt") or merged.get("prompt") or merged.get("action_desc") or upstream.get("prompt") or "cinematic motion"
             mode = merged.get("mode") or "i2v"
-            first_frame = merged.get("image_url") or merged.get("first_frame_url") or upstream.get("image_url")
+            first_frame = merged.get("first_frame") or merged.get("first_frame_url") or merged.get("image_url") or upstream.get("first_frame") or upstream.get("image_url") or upstream.get("reference")
             if mode=="i2v" and not first_frame:
                 return {"status":"error","error":"I2V 模式需要首帧图像（请连入上游 image）"}
             from app.providers.video.registry import video_registry
@@ -315,7 +389,7 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
                 return {"status":"error","error": f"视频排队超时 task_id={task_id}，请稍后在画布重试或查看 /storage/videos/"}
             return {"status":"success","video_url": res.video_url, "provider": res.provider, "elapsed_ms": res.elapsed_ms or int((time.time()-start)*1000), "task_id": getattr(res, 'task_id', None)}
         elif ntype in ("tts","audio","voice"):
-            text = merged.get("text") or merged.get("dialogue") or merged.get("subtitle_text") or merged.get("brief") or ""
+            text = merged.get("text") or merged.get("prompt") or merged.get("dialogue") or merged.get("subtitle_text") or merged.get("brief") or upstream.get("prompt") or upstream.get("text") or ""
             if not text.strip():
                 return {"status":"error","error":"配音文本为空"}
             from app.providers.audio.registry import audio_registry

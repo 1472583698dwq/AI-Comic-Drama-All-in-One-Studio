@@ -644,8 +644,18 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
-  async createProvider(payload: { name: string; kind: string; transport: any; auth?: any; mapping?: any; models?: string[]; default_model?: string; api_key?: string; description?: string }): Promise<any> {
+  async createProvider(payload: { name: string; kind: string; language?: string; code?: string; code_entry?: string; transport?: any; auth?: any; mapping?: any; models?: string[]; default_model?: string; api_key?: string; description?: string; provider_type?: string }): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/providers`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async getCodeTemplate(language: string, kind: string): Promise<{ template: string }> {
+    const res = await fetch(`${API_BASE_URL}/providers/code/templates?language=${encodeURIComponent(language)}&kind=${encodeURIComponent(kind)}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async upgradeProviderToCode(providerId: string, language: string = 'python'): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/providers/${encodeURIComponent(providerId)}/upgrade-to-code`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ language }) });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
@@ -664,7 +674,7 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
-  async importProvider(payload: { kind: string; name?: string; doc_text?: string; doc_url?: string; curl?: string; openapi_url?: string; api_key?: string; definition?: any }): Promise<any> {
+  async importProvider(payload: { kind: string; name?: string; doc_text?: string; doc_url?: string; curl?: string; openapi_url?: string; api_key?: string; definition?: any; language?: string; code?: string }): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/providers/import`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();

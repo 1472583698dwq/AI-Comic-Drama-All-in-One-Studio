@@ -100,22 +100,22 @@ if os.path.exists(ASSETS_DIR):
 
 @app.get("/api/v1/health")
 async def health_check():
+    # 快速健康检查，不阻塞 ComfyUI 探测（避免冷启动 15s 超时）
     try:
         from app.providers.image.registry import image_registry
         from app.providers.audio.registry import audio_registry
-        comfy = image_registry.get("comfyui")
-        comfy_online = await comfy.check_health() if comfy else False
-    except Exception:
-        comfy_online = False
-    return {
-        "status": "healthy",
-        "comfyui_online": comfy_online,
-        "minimax_configured": bool(settings.MINIMAX_API_KEY),
-        "providers": {
-            "image": [p for p in image_registry.list_providers()] if 'image_registry' in locals() else [],
-            "audio": [p for p in audio_registry.list_providers()] if 'audio_registry' in locals() else [],
-        },
-    }
+        # 仅返回已注册数量，不做网络探测
+        return {
+            "status": "healthy",
+            "comfyui_online": False,
+            "minimax_configured": bool(settings.MINIMAX_API_KEY),
+            "providers": {
+                "image": len(image_registry.list_providers()) if 'image_registry' in locals() else 0,
+                "audio": len(audio_registry.list_providers()) if 'audio_registry' in locals() else 0,
+            },
+        }
+    except Exception as e:
+        return {"status": "healthy", "error": str(e)[:200]}
 
 @app.get("/api/status")
 def system_status():

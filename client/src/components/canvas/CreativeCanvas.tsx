@@ -3,7 +3,7 @@ import {
   ReactFlow, Background, Controls, MiniMap, useNodesState, useEdgesState, addEdge, Connection, Edge, Node, ReactFlowProvider, useReactFlow
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Search, Sparkles, Upload, Image as ImageIcon, Film, Users, Box, Library, Cpu, BookOpen, X, Save, Download, Wand2, Plug, Globe, Mic, Video as VideoIcon, Type } from 'lucide-react';
+import { Search, Sparkles, Image as ImageIcon, Film, Box, Library, Cpu, Save, Download, Plug, Globe, Mic, Video as VideoIcon, Type, Plus, Wand2, FileText, Layers, Play, Trash2 } from 'lucide-react';
 import { useProjectListStore } from '../../stores/useProjectListStore';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { useCanvasStore } from '../../stores/useCanvasStore';
@@ -18,18 +18,25 @@ import { TTSNode } from './nodes/TTSNode';
 import { TimelineExportNode } from './nodes/TimelineExportNode';
 import { ProviderNode, ProviderImageNode, ProviderVideoNode, ProviderAudioNode } from './nodes/ProviderNode';
 import { LoadImageNode, LoadImageBatchNode, LoadVideoNode, LoadAudioNode, TextPromptNode } from './nodes/LoaderNodes';
+import { PromptNode, ImageNode, VideoGenNode, AudioNode, Director3DMinimalNode, ExportNode } from './nodes/MinimalNodes';
 import { WorkflowInspectorModal } from '../workflow/WorkflowInspectorModal';
-import { NODE_SPECS, getNodeSpec } from './nodeRegistry';
-import { handleColor } from './utils/dynamicHandles';
+import { getNodeSpec } from './nodeRegistry';
 
 const nodeTypes: any = {
+  // 新 6 核心
+  'prompt': PromptNode,
+  'image': ImageNode,
+  'video': VideoGenNode,
+  'audio': AudioNode,
+  'director3d': Director3DMinimalNode,
+  'export': ExportNode,
+  // 兼容旧
   'shot-card': ShotCardNode,
   'comfy-workflow': ComfyWorkflowNode,
   'brief': BriefNode,
   'script-split': ScriptSplitNode,
   'asset': AssetNode,
-  'director3d': Director3DNode,
-  'video': VideoNode,
+  'video-legacy': VideoNode,
   'tts': TTSNode,
   'timeline-export': TimelineExportNode,
   'provider-image': ProviderImageNode,
@@ -47,24 +54,20 @@ const nodeTypes: any = {
 let idSeq = 0;
 const genId = (p: string) => `${p}_${Date.now()}_${++idSeq}`;
 
-const NODE_LIBRARY = [
-  { type: 'brief', label: '灵感简报', desc: '粘贴小说/策划', icon: BookOpen, color: 'text-amber-400' },
-  { type: 'script-split', label: '剧本拆解', desc: 'MiniMax LLM', icon: Sparkles, color: 'text-brand' },
-  { type: 'text-prompt', label: '文本提示词', desc:'提示词源', icon: Type as any, color:'text-sky-400' },
-  { type: 'load-image', label: '加载图像', desc:'单张参考', icon: ImageIcon, color:'text-violet-400' },
-  { type: 'load-image-batch', label:'批量图像', desc:'多张参考', icon: ImageIcon, color:'text-violet-400' },
-  { type: 'load-video', label:'加载视频', desc:'参考视频', icon: Film, color:'text-orange-400' },
-  { type: 'load-audio', label:'加载音频', desc:'参考音频', icon: Library, color:'text-pink-400' },
-  { type: 'shot-card', label: '分镜卡', desc: '首帧+视频', icon: Film, color: 'text-brand-light' },
-  { type: 'comfy-workflow', label: 'ComfyUI工作流', desc: '本地强控', icon: Cpu, color: 'text-violet-400' },
-  { type: 'provider-image', label: '生图源', desc: '多源解耦', icon: Cpu, color: 'text-violet-400' },
-  { type: 'provider-video', label: '视频源', desc: '多源解耦', icon: Film, color: 'text-accent-orange' },
-  { type: 'provider-audio', label: '语音源', desc: '多源解耦', icon: Library, color: 'text-accent-pink' },
-  { type: 'video', label: '生视频', desc: 'I2V/R2V/T2V', icon: Film, color: 'text-accent-orange' },
-  { type: 'tts', label: 'TTS配音', desc: '文本→语音', icon: Library, color: 'text-accent-pink' },
-  { type: 'director3d', label: '3D导演台', desc: '机位计算', icon: Film, color: 'text-accent-orange' },
-  { type: 'timeline-export', label: '剪映导出', desc: '多轨草稿', icon: Film, color: 'text-brand' },
-  { type: 'asset', label: '素材节点', desc: '从资产库拖入', icon: Library, color: 'text-accent-pink' },
+// 仅 6 核心展示
+const CORE_LIBRARY = [
+  { type: 'prompt', label: '提示词', desc: '文本描述', icon: Type, color: 'text-sky-600' },
+  { type: 'image', label: '生成图片', desc: '文生图/垫图', icon: ImageIcon, color: 'text-violet-600' },
+  { type: 'video', label: '生成视频', desc: 'I2V/R2V', icon: Film, color: 'text-orange-600' },
+  { type: 'audio', label: '生成音频', desc: 'TTS 配音', icon: Mic, color: 'text-pink-600' },
+  { type: 'director3d', label: '3D导演台', desc: '机位编排', icon: Box, color: 'text-amber-600' },
+  { type: 'export', label: '导出', desc: '剪映草稿', icon: Download, color: 'text-emerald-600' },
+];
+
+const TEMPLATES = [
+  { id:'t1', label:'文生图 → 图生视频', desc:'提示词 → 图片 → 视频', nodes:['prompt','image','video'] },
+  { id:'t2', label:'完整漫剧', desc:'提示词 → 图片 → 视频 → 音频 → 导出', nodes:['prompt','image','video','audio','export'] },
+  { id:'t3', label:'单图转视频', desc:'图片 → 视频', nodes:['image','video'] },
 ];
 
 const InnerCanvas: React.FC = () => {
@@ -75,52 +78,49 @@ const InnerCanvas: React.FC = () => {
   const { screenToFlowPosition, getViewport } = useReactFlow();
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
-  const [workflows, setWorkflows] = useState<any[]>([]);
   const [assets, setAssets] = useState<any[]>([]);
   const [assetQuery, setAssetQuery] = useState('');
   const [inspectWfId, setInspectWfId] = useState('');
   const [saving, setSaving] = useState(false);
-  const [providerList, setProviderList] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [bottomPrompt, setBottomPrompt] = useState('');
   const wrapperRef = useRef<HTMLDivElement>(null);
   const loadedRef = useRef(false);
+  const pidRef = useRef<string|null>(null);
 
-  // 监听全局打开 WorkflowInspector 事件
   useEffect(() => {
     const h = (e: any) => setInspectWfId(e.detail?.workflowId || '');
     window.addEventListener('open-workflow-inspector', h as any);
     return () => window.removeEventListener('open-workflow-inspector', h as any);
   }, []);
 
-  // 加载画布快照
+  // 加载 - 带超时与重置，防止一直加载
   useEffect(() => {
-    if (!pid || loadedRef.current) return;
+    if (!pid) { setIsLoading(false); return; }
+    // pid 切换时重置
+    if (pidRef.current !== pid) {
+      pidRef.current = pid;
+      loadedRef.current = false;
+      setIsLoading(true);
+    }
+    if (loadedRef.current) { setIsLoading(false); return; }
     loadedRef.current = true;
+    setIsLoading(true);
+    const timer = setTimeout(()=> setIsLoading(false), 3000);
     loadCanvas().then(snap => {
-      if (snap && snap.nodes) {
-        // 兼容 tldraw / reactflow 两种快照
-        if (Array.isArray(snap.nodes)) {
-          // 为老数据补 onUpdate 绑定（通过 nodeTypes 注入）
-          const withHandlers = snap.nodes.map((n:any)=> ({...n, data:{...n.data, onUpdate: handleNodeUpdate, onExecute: handleNodeExecute}}));
-          setNodes(withHandlers);
-        }
+      if (snap && Array.isArray(snap.nodes)) {
+        const withHandlers = snap.nodes.map((n:any)=> ({...n, data:{...n.data, onUpdate: handleNodeUpdate, onExecute: handleNodeExecute}}));
+        setNodes(withHandlers);
         if (Array.isArray(snap.edges)) setEdges(snap.edges);
-        if (snap.viewport) { /* 可恢复视口 */ }
-      } else if (snap && snap.store) {
-        // tldraw 快照忽略
       }
-    });
-    apiService.listWorkflows('all').then(r=> setWorkflows(r.workflows||[])).catch(()=>{});
-    apiService.listAssets({ project_id: pid || undefined, limit: 20 }).then(r=> setAssets(r.assets||[])).catch(()=>{});
-    apiService.listProviders({}).then(r=> setProviderList(r.providers||[])).catch(()=>{});
-    // 监听 provider 创建事件自动刷新
-    const onProvCreated = ()=> apiService.listProviders({}).then(r=> setProviderList(r.providers||[])).catch(()=>{});
-    window.addEventListener('provider-list-refresh', onProvCreated as any);
-    // 暴露给 ProviderNode 拖拽后刷新
+      clearTimeout(timer);
+      setIsLoading(false);
+    }).catch((e)=>{ console.warn('[Canvas] load failed', e); clearTimeout(timer); setIsLoading(false); });
+    apiService.listAssets({ project_id: pid || undefined, limit: 24 }).then(r=> setAssets(r.assets||[])).catch(()=>{});
+    return ()=> clearTimeout(timer);
   }, [pid]);
 
-  // 自动保存 + 同步到 canvasStore 供 Agent 感知 + 视口持久化（P5）
   const histRef = useRef<{nodes:any[],edges:any[]}[]>([]);
-  // 历史栈（P5）：50 步
   useEffect(() => {
     if (!pid || !loadedRef.current) return;
     histRef.current.push({nodes: JSON.parse(JSON.stringify(nodes)), edges: JSON.parse(JSON.stringify(edges))});
@@ -145,74 +145,64 @@ const InnerCanvas: React.FC = () => {
     if (!pid || !loadedRef.current) return;
     let vp:any = {};
     try{ vp = getViewport(); } catch{}
-    const snap = { nodes, edges, viewport: vp, updated_at: new Date().toISOString() };
+    const snap = { nodes, edges, viewport: vp, updated_at: new Date().toISOString(), version: 2 };
     debouncedSave(snap);
     try { useCanvasStore.getState().setFromFlow(nodes as any, edges as any); } catch {}
   }, [nodes, edges]);
 
+  // 单端点逐步执行：每个节点独立可点，执行后结果自动流向下游（覆盖传统全流程）
   const handleNodeUpdate = useCallback((nodeId: string, patch: any) => {
-    setNodes(nds=> nds.map(n=> n.id===nodeId ? { ...n, data: { ...n.data, ...patch, onUpdate: handleNodeUpdate, onExecute: handleNodeExecute } } : n));
-  }, []);
-
-  const [executing, setExecuting] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const handleBatchExecute = async (mode: 'selected'|'all') => {
-    const targets = mode==='selected' ? selectedIds : undefined;
-    if (mode==='selected' && !targets?.length) { alert('请先在画布中选中节点（Ctrl+点击）'); return; }
-    setExecuting(true);
-    try {
-      const payload = { nodes: nodes.map(n=> ({ id:n.id, type:n.type, position:n.position, data:n.data })), edges, target_ids: targets, project_id: pid };
-      const res = await fetch(`${window.location.port==='5173' ? 'http://127.0.0.1:8000' : ''}/api/v1/canvas/execute`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)}).then(r=>r.json());
-      if (res.status==='success') {
-        const results = res.results || {};
-        setNodes(nds=> nds.map(n=> results[n.id] ? { ...n, data:{...n.data, ...results[n.id], _lastResult: results[n.id]}} : n));
-        alert(`批量执行完成：${res.order?.length||0} 节点`);
-      } else alert(res.detail || '执行失败');
-    } catch(e:any){ alert(e.message); } finally { setExecuting(false); }
-  };
+    setNodes(nds=> {
+      // 先更新源节点
+      let next = nds.map(n=> n.id===nodeId ? { ...n, data: { ...n.data, ...patch, onUpdate: handleNodeUpdate, onExecute: handleNodeExecute } } : n);
+      // 若 patch 含可传播字段，则同步到下游节点的 _upstream 与直连字段
+      const propagatable = patch.image_url || patch.result_url || patch.video_url || patch.audio_url || patch.prompt || patch.text || patch.reference || patch.first_frame;
+      if (propagatable) {
+        const downstreamEdges = edges.filter(e=> e.source===nodeId);
+        for(const e of downstreamEdges){
+          const tgtIdx = next.findIndex(n=> n.id===e.target);
+          if(tgtIdx===-1) continue;
+          const tgt = next[tgtIdx];
+          const srcData = next.find(n=> n.id===nodeId)?.data as any;
+          const patchDown:any = { _upstream: { ...((tgt.data as any)._upstream||{}) } };
+          // 按句柄精确映射
+          const th = (e as any).targetHandle || '';
+          if(patch.image_url || patch.result_url){
+            const url = patch.image_url || patch.result_url || srcData?.image_url;
+            if(th==='first_frame' || th==='image' || th==='reference' || tgt.type==='video'){
+              patchDown.first_frame = url; patchDown.image_url = url; patchDown.reference = url;
+            }
+            patchDown.image_url = url;
+            patchDown._upstream.image_url = url;
+            patchDown._upstream.reference = url;
+          }
+          if(patch.video_url){
+            patchDown.video_url = patch.video_url;
+            patchDown._upstream.video_url = patch.video_url;
+          }
+          if(patch.audio_url){
+            patchDown.audio_url = patch.audio_url;
+            patchDown._upstream.audio_url = patch.audio_url;
+          }
+          if(patch.prompt || patch.text){
+            const txt = patch.prompt || patch.text || srcData?.prompt;
+            if(th==='prompt' || th==='text' || tgt.type==='image' || tgt.type==='video' || tgt.type==='audio' || tgt.type==='prompt'){
+              patchDown.prompt = txt; patchDown.text = txt;
+            }
+            patchDown._upstream.prompt = txt; patchDown._upstream.text = txt;
+          }
+          // 合并
+          next[tgtIdx] = { ...tgt, data: { ...tgt.data, ...patchDown, onUpdate: handleNodeUpdate, onExecute: handleNodeExecute, _upstream: patchDown._upstream } } as any;
+        }
+      }
+      return next;
+    });
+  }, [edges]);
 
   const handleNodeExecute = useCallback(async (nodeId: string) => {
     const node = nodes.find(n=> n.id===nodeId);
     if (!node) return;
-    if (node.type === 'script-split') {
-      // 找上游 brief
-      const incoming = edges.filter(e=> e.target===nodeId);
-      let briefText = '';
-      let style_preset = 'donghua_xianxia';
-      let aspect_ratio = '9:16';
-      for (const e of incoming) {
-        const src = nodes.find(n=> n.id===e.source);
-        if (src && src.type==='brief') { briefText = (src.data as any).brief || ''; style_preset = (src.data as any).style_preset || style_preset; aspect_ratio = (src.data as any).aspect_ratio || aspect_ratio; }
-      }
-      if (!briefText.trim()) { handleNodeUpdate(nodeId,{error:'请先在上游 简报节点 填写小说内容并连线'}); return; }
-      handleNodeUpdate(nodeId,{loading:true, error:undefined});
-      try {
-        const proj = await apiService.parseScript(briefText, style_preset, aspect_ratio);
-        handleNodeUpdate(nodeId,{loading:false, result: proj});
-        // 自动生成分镜卡节点阵列
-        const shots = proj.scenes.flatMap(s=> s.shots).slice(0,8);
-        const baseX = node.position.x + 360;
-        let y = node.position.y - 100;
-        const newNodes: Node[] = shots.map((s:any, i:number)=> ({
-          id: genId('shot'),
-          type: 'shot-card',
-          position: { x: baseX + (i%3)*320, y: y + Math.floor(i/3)*360 },
-          data: {
-            shot_index: s.shot_index, action_desc: s.action_desc, image_prompt: s.image_prompt, subtitle_text: s.subtitle_text, dialogue: s.dialogue,
-            camera_framing: s.camera_framing, camera_motion: s.camera_motion, emotion: s.emotion, duration: s.duration,
-            onUpdate: handleNodeUpdate, onExecute: handleNodeExecute,
-          }
-        }));
-        setNodes(nds=> [...nds, ...newNodes]);
-        // 连线
-        const newEdges: Edge[] = newNodes.map(n=> ({ id: `e_${nodeId}_${n.id}`, source: nodeId, target: n.id, type:'smoothstep', animated:true }));
-        setEdges(es=> [...es, ...newEdges]);
-        // 同步将拆解结果保存到项目内容
-        if (pid) {
-          try { await apiService.saveProjectContent(pid, proj); useProjectStore.getState().setProject(proj as any); } catch {}
-        }
-      } catch (e:any) { handleNodeUpdate(nodeId,{loading:false, error: e.message}); }
-    } else if (node.type==='director3d') {
+    if (node.type==='director3d') {
       const d:any = node.data;
       try {
         const res = await apiService.callMcpTool('director_3d_stage_plan', { framing: d.framing||'medium', motion: d.motion||'push_in', pose: 'stand' });
@@ -220,12 +210,10 @@ const InnerCanvas: React.FC = () => {
         handleNodeUpdate(nodeId,{ minimax_camera_prompt: r.minimax_camera_prompt || JSON.stringify(r).slice(0,120), ...r });
       } catch(e:any){ handleNodeUpdate(nodeId,{error:e.message}); }
     }
-  }, [nodes, edges, pid]);
+  }, [nodes]);
 
-  // P2: 边校验 + 标签 + Provider 透传
   const isValidConnection: any = useCallback((connection:any)=>{
     const c: Connection = connection;
-    // 基于 NodeSpec 校验类型兼容
     const src = nodes.find(n=> n.id===c.source);
     const tgt = nodes.find(n=> n.id===c.target);
     if(!src || !tgt) return true;
@@ -235,24 +223,17 @@ const InnerCanvas: React.FC = () => {
     const srcOut = srcSpec.outputs.find(h=> h.id===c.sourceHandle) || srcSpec.outputs[0];
     const tgtIn = tgtSpec.inputs.find(h=> h.id===c.targetHandle) || tgtSpec.inputs[0];
     if(!srcOut || !tgtIn) return true;
-    // 允许 text→text, image→image, video→video, audio→audio, 宽松：text 可连所有 prompt 类
     if(srcOut.type===tgtIn.type) return true;
     if(tgtIn.type==='text' && srcOut.type==='text') return true;
-    // provider 型输出可连任意含 provider 的输入
-    if(srcOut.id==='provider' && tgtIn.id==='provider') return true;
     return srcOut.type===tgtIn.type;
   }, [nodes]);
 
   const onConnect = useCallback((params: Connection)=> {
-    // 校验
     if(!isValidConnection(params)){
-      alert('连线类型不匹配：请检查输出/输入类型（image/audio/video/text/provider）');
+      alert('连线类型不匹配');
       return;
     }
-    const srcHandle = params.sourceHandle || 'provider';
-    const tgtHandle = params.targetHandle || 'provider';
-    const label = `${srcHandle} → ${tgtHandle}`;
-    setEdges(es=> addEdge({...params, type:'smoothstep', animated:true, label, data:{mapping:`${srcHandle}->${tgtHandle}`}} as any, es as any));
+    setEdges(es=> addEdge({...params, type:'smoothstep', animated:true } as any, es as any));
     setTimeout(()=> {
       const sourceId = params.source;
       const targetId = params.target;
@@ -261,268 +242,344 @@ const InnerCanvas: React.FC = () => {
         const srcNode = nds.find(n=> n.id===sourceId);
         const tgtNode = nds.find(n=> n.id===targetId);
         if (!srcNode || !tgtNode) return nds;
+        // 注入 _upstream 便于节点即时预览
+        const srcData:any = srcNode.data;
+        const patch:any = {};
+        // 推断类型
         const srcType = srcNode.type || '';
-        const tgtType = tgtNode.type || '';
-        const isProvider = srcType.startsWith('provider');
-        const isLoad = srcType.startsWith('load-') || srcType==='text-prompt';
-        // Provider 注入
-        if (isProvider) {
-          const provId = (srcNode.data as any)?.provider_id || (srcNode.data as any)?.provider || srcNode.id;
-          const model = (srcNode.data as any)?.model || (srcNode.data as any)?.default_model;
-          const def = (srcNode.data as any)?.definition;
-          const params = (srcNode.data as any)?.default_params || (srcNode.data as any)?.params;
-          return nds.map(n=> n.id===targetId ? { ...n, data: { ...n.data, provider: provId, provider_id: provId, model: model || n.data?.model, definition: def || n.data?.definition, provider_params: params || n.data?.provider_params, _providerName: def?.display_name || def?.name || provId } } : n);
+        if(['prompt','text-prompt','brief'].includes(srcType)){
+          patch.prompt = srcData.prompt || srcData.text || srcData.brief || '';
+          patch.text = patch.prompt;
         }
-        // Load* / TextPrompt 注入对应字段
-        if (isLoad) {
-          const srcData:any = srcNode.data;
-          const patch:any = {};
-          if(srcType==='load-image') patch.first_frame = srcData.image || srcData.url;
-          if(srcType==='load-image-batch') patch.reference_images = srcData.images || srcData.image_list;
-          if(srcType==='load-video') patch.video = srcData.video || srcData.url;
-          if(srcType==='load-audio') patch.audio = srcData.audio || srcData.url;
-          if(srcType==='text-prompt') patch.prompt = srcData.prompt || srcData.text;
-          // 兼容 r2v 的 reference_images 为 image[] 类型
-          if(params.targetHandle==='reference_images' && srcType==='load-image') patch.reference_images = [srcData.image || srcData.url];
-          if(params.targetHandle==='reference_images' && srcType==='load-image-batch') patch.reference_images = srcData.images;
-          if(params.targetHandle==='first_frame' && srcType==='load-image') patch.first_frame = srcData.image;
-          if(params.targetHandle==='prompt' && srcType==='text-prompt') patch.prompt = srcData.prompt;
-          if(params.targetHandle==='text' && srcType==='text-prompt') patch.text = srcData.prompt;
-          if(Object.keys(patch).length) {
-            return nds.map(n=> n.id===targetId ? { ...n, data: {...n.data, ...patch, _upstream: {...(n.data as any)._upstream, ...patch} } } : n);
+        if(['image','shot-card','comfy-workflow','load-image'].includes(srcType)){
+          const url = srcData.image_url || srcData.result_url || srcData.image || srcData.url || srcData.file_url;
+          if(url){
+            if(params.targetHandle==='first_frame' || (tgtNode.type==='video' && !patch.first_frame)) patch.first_frame = url;
+            patch.image_url = url;
+            patch.reference = url;
           }
         }
-        // 通用：记录上游数据
-        return nds.map(n=> n.id===targetId ? { ...n, data: {...n.data, _upstream: {...(n.data as any)._upstream, _connectedFrom: sourceId, _lastHandle: `${srcHandle}→${tgtHandle}`}}} : n);
+        if(srcType==='video' && srcData.video_url) patch.video_url = srcData.video_url;
+        if(['audio','tts'].includes(srcType) && srcData.audio_url) patch.audio_url = srcData.audio_url;
+        if(Object.keys(patch).length){
+          return nds.map(n=> n.id===targetId ? { ...n, data:{...n.data, ...patch, _upstream:{...(n.data as any)._upstream, ...patch}}} : n);
+        }
+        return nds;
       });
     }, 0);
   }, [isValidConnection]);
+
+  const createNode = (type:string, position:{x:number,y:number}) => {
+    const node: Node = { id: genId(type), type: type as any, position, data: { onUpdate: handleNodeUpdate, onExecute: handleNodeExecute } };
+    if(type==='prompt') node.data = {...node.data, prompt: bottomPrompt || '' };
+    if(type==='image') node.data = {...node.data, prompt: '', engine_type:'auto' };
+    if(type==='video') node.data = {...node.data, prompt:'', mode:'i2v', duration:5, engine_type:'auto' };
+    if(type==='audio') node.data = {...node.data, text:'', engine_type:'auto' };
+    if(type==='director3d') node.data = {...node.data, framing:'medium', motion:'push_in' };
+    if(type==='export') node.data = {...node.data };
+    return node;
+  };
+
+  const addTemplate = (tpl:any) => {
+    const baseX = 120;
+    const baseY = 80;
+    const newNodes: Node[] = tpl.nodes.map((t:string, i:number)=> createNode(t, { x: baseX, y: baseY + i*360 }));
+    const newEdges: Edge[] = [];
+    for(let i=1;i<newNodes.length;i++){
+      const prev = newNodes[i-1];
+      const cur = newNodes[i];
+      // 自动连线：根据类型推断 handle
+      let sh='prompt', th='prompt';
+      if(prev.type==='prompt' && cur.type==='image'){ sh='prompt'; th='prompt'; }
+      else if(prev.type==='image' && cur.type==='video'){ sh='image'; th='first_frame'; }
+      else if(prev.type==='video' && cur.type==='audio'){ sh='video'; th='video'; }
+      else if(prev.type==='audio' && cur.type==='export'){ sh='audio'; th='audio'; }
+      else if(prev.type==='prompt' && cur.type==='video'){ sh='prompt'; th='prompt'; }
+      else if(prev.type==='video' && cur.type==='export'){ sh='video'; th='video'; }
+      else { sh = (prev.type as any); th = 'prompt'; }
+      newEdges.push({ id:`e_${prev.id}_${cur.id}`, source:prev.id, target:cur.id, sourceHandle:sh, targetHandle:th, type:'smoothstep', animated:true } as any);
+    }
+    setNodes(nds=> [...nds, ...newNodes]);
+    setEdges(es=> [...es, ...newEdges]);
+    if(tpl.nodes.includes('prompt') && bottomPrompt){
+      // 将底部输入同步到首个 prompt
+      setTimeout(()=> {
+        const firstPrompt = newNodes.find(n=> n.type==='prompt');
+        if(firstPrompt) handleNodeUpdate(firstPrompt.id, { prompt: bottomPrompt, text: bottomPrompt });
+      }, 100);
+    }
+  };
+
+  // 监听节点 + 菜单
+  useEffect(()=>{
+    const onAdd = (e:any)=>{
+      const { sourceId, nextType } = e.detail;
+      const src = nodes.find(n=> n.id===sourceId);
+      const pos = src ? { x: src.position.x, y: src.position.y + 340 } : { x: 120, y: 120 + nodes.length*340 };
+      const node = createNode(nextType, pos);
+      setNodes(nds=> [...nds, node]);
+      if(src){
+        const edge: Edge = { id:`e_${sourceId}_${node.id}`, source:sourceId, target:node.id, type:'smoothstep', animated:true } as any;
+        // 智能 handle
+        if(src.type==='prompt' && nextType==='image') { (edge as any).sourceHandle='prompt'; (edge as any).targetHandle='prompt'; }
+        if(src.type==='image' && nextType==='video') { (edge as any).sourceHandle='image'; (edge as any).targetHandle='first_frame'; }
+        if(src.type==='video' && nextType==='export') { (edge as any).sourceHandle='video'; (edge as any).targetHandle='video'; }
+        if(src.type==='audio' && nextType==='export') { (edge as any).sourceHandle='audio'; (edge as any).targetHandle='audio'; }
+        setEdges(es=> [...es, edge]);
+      }
+    };
+    window.addEventListener('canvas-add-node', onAdd as any);
+    return ()=> window.removeEventListener('canvas-add-node', onAdd as any);
+  }, [nodes]);
+
+  // 导出为分镜
+  useEffect(()=>{
+    const h = async ()=>{
+      if(!pid){ alert('请先打开项目'); return; }
+      // 收集所有 image/video 节点按 y 排序
+      const gens = nodes.filter(n=> ['image','video','prompt'].includes(n.type as string));
+      if(gens.length===0){ alert('画布为空，无法导出'); return; }
+      const sorted = [...gens].sort((a,b)=> a.position.y - b.position.y);
+      const shots = sorted.filter(n=> n.type==='image' || n.type==='video').map((n,i)=>{
+        const d:any=n.data;
+        return {
+          id:`shot-${Date.now()}-${i}`, shot_index:i+1, scene_index:1,
+          camera_framing:'medium', camera_motion:'push_in',
+          action_desc: d.prompt || d.image_prompt || '', dialogue: d.text || '',
+          image_prompt: d.prompt || '', image_url: d.image_url || d.result_url, video_url: d.video_url,
+          duration: d.duration || 5, subtitle_text: d.prompt || '', status:'ready'
+        };
+      });
+      if(shots.length===0) shots.push({ id:`shot-${Date.now()}`, shot_index:1, scene_index:1, camera_framing:'medium', camera_motion:'push_in', action_desc: bottomPrompt || '空', dialogue:'', image_prompt: bottomPrompt||'', duration:5, subtitle_text: bottomPrompt||'', status:'ready'} as any);
+      const projContent:any = { id: pid, title: project?.title||'画布项目', original_novel:'', style_preset: project?.style_preset||'donghua_xianxia', aspect_ratio:'9:16', characters: project?.characters||[], scenes:[{ id:'scene-1', scene_index:1, title:'场景1', location:'', time_of_day:'day', atmosphere:'epic', shots }], created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+      try{ await apiService.saveProjectContent(pid, projContent); useProjectStore.getState().setProject(projContent); alert(`已导出 ${shots.length} 镜到项目`);}catch(e:any){ alert(e.message); }
+    };
+    window.addEventListener('canvas-export-shots', h as any);
+    return ()=> window.removeEventListener('canvas-export-shots', h as any);
+  }, [nodes, pid, project, bottomPrompt]);
 
   const onDrop = useCallback((e: React.DragEvent)=>{
     e.preventDefault();
     const type = e.dataTransfer.getData('application/canvas-nodetype');
     const assetId = e.dataTransfer.getData('application/canvas-assetid');
-    const providerId = e.dataTransfer.getData('application/provider-id');
-    const providerKind = e.dataTransfer.getData('application/provider-kind') as any;
-    if (!type && !assetId && !providerId) return;
+    const assetUrl = e.dataTransfer.getData('text/plain');
+    if (!type && !assetId && !assetUrl) return;
     const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
     if (assetId) {
       const asset = assets.find(a=> a.id===assetId);
       if (!asset) return;
-      const node: Node = { id: genId('asset'), type: 'asset', position, data: { ...asset, onUpdate: handleNodeUpdate, onExecute: handleNodeExecute } };
+      // 拖素材到画布：创建一个 image 节点并带入 reference
+      const node = createNode('image', position);
+      const url = asset.thumb_url || asset.file_url;
+      const abs = url?.startsWith('/')? `http://127.0.0.1:8000${url}`: url;
+      node.data = { ...node.data, reference: abs || url, image_url: abs || url };
       setNodes(nds=> [...nds, node]);
       return;
     }
-    if (providerId) {
-      const def = providerList.find(p=> p.id===providerId);
-      const kind = providerKind || def?.kind || 'image';
-      const nodeType = kind==='image' ? 'provider-image' : kind==='video' ? 'provider-video' : kind==='audio' ? 'provider-audio' : 'provider-image';
-      const node: Node = { id: genId(nodeType), type: nodeType as any, position, data: { provider_id: providerId, provider: providerId, kind, definition: def, model: def?.default_model || def?.models?.[0] || '', onUpdate: handleNodeUpdate, onExecute: handleNodeExecute } };
+    if(type){
+      const node = createNode(type, position);
       setNodes(nds=> [...nds, node]);
-      return;
     }
-    const lib = NODE_LIBRARY.find(n=> n.type===type);
-    if (!lib) return;
-    const node: Node = { id: genId(type), type: type as any, position, data: { onUpdate: handleNodeUpdate, onExecute: handleNodeExecute } };
-    // 默认值
-    if (type==='brief') node.data = { ...node.data, brief:'', style_preset:'donghua_xianxia', aspect_ratio:'9:16' };
-    if (type==='shot-card') node.data = { ...node.data, image_prompt:'masterpiece, cinematic lighting', action_desc:'', subtitle_text:'' };
-    if (type==='text-prompt') node.data = { ...node.data, prompt:'' };
-    if (type==='load-image') node.data = { ...node.data, image:'' };
-    if (type==='load-image-batch') node.data = { ...node.data, images:[] };
-    if (type==='load-video') node.data = { ...node.data, video:'' };
-    if (type==='load-audio') node.data = { ...node.data, audio:'' };
-    if (type && type.startsWith('provider')) {
-      const kind = type==='provider-video' ? 'video' : type==='provider-audio' ? 'audio' : 'image';
-      node.data = { ...node.data, kind, provider_id: '', model: '' };
-    }
-    setNodes(nds=> [...nds, node]);
-  }, [screenToFlowPosition, assets, providerList]);
+  }, [screenToFlowPosition, assets]);
 
   const handleManualSave = async () => {
     if (!pid) { alert('请先在 项目看板 创建/打开项目'); return; }
     setSaving(true);
-    try { await apiService.saveProjectCanvas(pid, { nodes, edges }); alert('画布已保存'); } catch(e:any){ alert(e.message);} finally{ setSaving(false); }
-  };
-
-  const handleExportToShots = async () => {
-    if (!pid) { alert('请先打开项目'); return; }
-    const shotNodes = nodes.filter(n=> n.type==='shot-card');
-    if (shotNodes.length===0) { alert('画布中无分镜卡节点'); return; }
-    // 按 x 排序转 shots
-    const sorted = [...shotNodes].sort((a,b)=> a.position.x - b.position.x);
-    const shots = sorted.map((n,i)=> {
-      const d:any = n.data;
-      return {
-        id: `shot-${Date.now()}-${i}`,
-        shot_index: i+1,
-        scene_index: 1,
-        camera_framing: d.camera_framing || 'medium',
-        camera_motion: d.camera_motion || 'push_in',
-        action_desc: d.action_desc || '',
-        speaker_name: '',
-        dialogue: d.dialogue || '',
-        voiceover: '',
-        emotion: d.emotion || 'neutral',
-        image_prompt: d.image_prompt || '',
-        image_url: d.image_url || undefined,
-        video_url: d.video_url || undefined,
-        duration: 3.5,
-        subtitle_text: d.subtitle_text || d.action_desc || '',
-        status: 'ready',
-      };
-    });
-    const projContent: any = {
-      id: pid,
-      title: project?.title || '画布项目',
-      original_novel: '',
-      style_preset: project?.style_preset || 'donghua_xianxia',
-      aspect_ratio: project?.aspect_ratio || '9:16',
-      characters: project?.characters || [],
-      scenes: [{ id:'scene-1', scene_index:1, title:'场景 1', location:'', time_of_day:'day', atmosphere:'epic', shots }],
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-    try { await apiService.saveProjectContent(pid, projContent); useProjectStore.getState().setProject(projContent); alert(`已导出 ${shots.length} 镜到项目，可前往 漫剧制作→分镜工作台 查看`); } catch(e:any){ alert(e.message); }
+    try { await apiService.saveProjectCanvas(pid, { nodes, edges, version:2 }); alert('画布已保存'); } catch(e:any){ alert(e.message);} finally{ setSaving(false); }
   };
 
   const onDragOver = (e: React.DragEvent)=> { e.preventDefault(); e.dataTransfer.dropEffect='move'; };
 
   if (!pid) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center bg-background p-8 text-center space-y-3">
-        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-brand to-accent-pink flex items-center justify-center text-xl">📁</div>
-        <p className="text-sm text-white font-semibold">请先在「漫剧制作 → 项目看板」创建或打开项目</p>
-        <p className="text-xs text-gray-500">画布按项目隔离持久化，未选择项目时不会保存</p>
-        <button onClick={()=> useProjectStore.getState().setActiveTab('projects')} className="px-4 py-2 rounded-xl bg-brand text-white text-xs">前往项目看板</button>
+      <div className="flex-1 flex flex-col items-center justify-center bg-[#fbfbf9] p-8 text-center space-y-3">
+        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500 to-pink-500 flex items-center justify-center text-xl">📁</div>
+        <p className="text-sm text-zinc-900 font-semibold">请先在「漫剧制作 → 项目看板」创建或打开项目</p>
+        <p className="text-xs text-zinc-500">画布按项目隔离持久化</p>
+        <button onClick={()=> useProjectStore.getState().setActiveTab('projects')} className="px-4 py-2 rounded-xl bg-zinc-900 text-white text-xs">前往项目看板</button>
       </div>
     );
   }
 
+  const isEmpty = nodes.length===0;
+
   return (
-    <div data-theme="dark" className="flex-1 flex overflow-hidden bg-[#0a0a0f]">
-      {/* 左侧节点仓库 — 280px，卡片化、留白、层级 */}
-      <div className="w-[300px] bg-surface border-r border-border flex flex-col shrink-0">
-        <div className="h-12 px-4 border-b border-border flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-lg bg-brand/10 border border-brand/20 flex items-center justify-center"><Library className="w-3.5 h-3.5 text-brand" /></div>
-            <span className="text-xs font-bold tracking-tight text-white">节点仓库</span>
-          </div>
-          <span className="text-[10px] px-2 py-1 rounded-full bg-surface-secondary border border-border text-gray-400">拖拽</span>
+    <div className="flex-1 flex overflow-hidden bg-[#fbfbf9]">
+      {/* 左侧：极简工具栏 */}
+      <div className="w-[280px] bg-white border-r border-zinc-200 flex flex-col shrink-0">
+        <div className="h-12 px-4 border-b border-zinc-100 flex items-center gap-2 shrink-0">
+          <div className="w-7 h-7 rounded-lg bg-zinc-900 flex items-center justify-center"><Layers className="w-3.5 h-3.5 text-white"/></div>
+          <span className="text-sm font-bold text-zinc-900">工作流</span>
+          <span className="ml-auto text-[10px] px-2 py-1 rounded-full bg-zinc-100 border border-zinc-200 text-zinc-600">6 节点</span>
         </div>
         <div className="p-3 space-y-4 flex-1 overflow-y-auto">
-          <div className="grid grid-cols-2 gap-2">
-            {NODE_LIBRARY.map(n=> (
-              <div key={n.type} draggable onDragStart={e=> e.dataTransfer.setData('application/canvas-nodetype', n.type)} className="flex flex-col gap-1.5 p-3 rounded-[14px] bg-surface-secondary border border-border hover:border-brand/30 hover:bg-surface-tertiary hover:shadow-md hover:shadow-brand/5 cursor-grab active:cursor-grabbing transition-all">
-                <n.icon className={`w-4 h-4 ${n.color}`}/><div><div className="text-xs font-bold text-white leading-none">{n.label}</div><div className="text-[10px] text-gray-500 leading-none mt-1">{n.desc}</div></div>
-              </div>
-            ))}
+          {/* 模板 */}
+          <div>
+            <div className="text-xs font-bold text-zinc-900 mb-2">一键模板</div>
+            <div className="space-y-2">
+              {TEMPLATES.map(t=>(
+                <button key={t.id} onClick={()=> addTemplate(t)} className="w-full text-left p-3 rounded-2xl border border-zinc-200 bg-zinc-50 hover:border-violet-300 hover:bg-white hover:shadow-sm transition-all">
+                  <div className="text-sm font-semibold text-zinc-900">{t.label}</div>
+                  <div className="text-xs text-zinc-500">{t.desc}</div>
+                  <div className="mt-1.5 flex gap-1">{t.nodes.map((n,i)=> <span key={i} className="w-6 h-6 rounded-full bg-white border border-zinc-200 flex items-center justify-center text-[10px]">{n[0].toUpperCase()}</span>)}</div>
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="rounded-[14px] bg-surface-secondary border border-border p-3">
-            <div className="text-xs font-bold text-white mb-2 flex items-center gap-1.5"><Cpu className="w-3.5 h-3.5 text-violet-400"/> ComfyUI 工作流 <span className="ml-auto text-[10px] text-gray-500">{workflows.length} 个</span></div>
-            <div className="space-y-1 max-h-[160px] overflow-y-auto pr-1">
-              {workflows.slice(0,10).map((w:any)=>(
-                <div key={w.id} draggable onDragStart={e=>{
-                  e.dataTransfer.setData('application/canvas-nodetype','comfy-workflow');
-                  (window as any).__dragWorkflowId = w.id;
-                }} className="flex items-center gap-2 p-2 rounded-xl bg-surface border border-transparent hover:border-violet-500/30 hover:bg-surface-tertiary cursor-grab">
-                  <div className="w-7 h-7 rounded-lg bg-violet-500/10 border border-violet-500/20 flex items-center justify-center shrink-0"><Cpu className="w-3.5 h-3.5 text-violet-400"/></div>
-                  <div className="min-w-0"><div className="text-xs font-medium text-white truncate">{w.name||w.id}</div><div className="text-[10px] text-gray-500">{w.source==='external'?'外部': '内部'} · {w.node_count}节点</div></div>
+          {/* 6 节点 */}
+          <div>
+            <div className="text-xs font-bold text-zinc-900 mb-2">基础节点</div>
+            <div className="grid grid-cols-2 gap-2">
+              {CORE_LIBRARY.map(n=> (
+                <div key={n.type} draggable onDragStart={e=> e.dataTransfer.setData('application/canvas-nodetype', n.type)} className="flex flex-col gap-2 p-3 rounded-2xl bg-white border border-zinc-200 hover:border-zinc-300 hover:shadow-sm cursor-grab active:cursor-grabbing transition-all">
+                  <n.icon className={`w-5 h-5 ${n.color}`}/><div><div className="text-sm font-semibold text-zinc-900 leading-none">{n.label}</div><div className="text-[11px] text-zinc-500 mt-1">{n.desc}</div></div>
                 </div>
               ))}
-              {workflows.length===0 && <div className="text-[11px] text-gray-500 text-center py-4">暂无工作流，去设置里配置目录</div>}
             </div>
+            <div className="mt-2 text-[11px] text-zinc-500 leading-relaxed bg-amber-50 border border-amber-200 rounded-xl p-2.5">💡 每个节点内部可切换 <b>API / ComfyUI</b> 引擎，参考图可从右侧素材拖入或在节点内上传。</div>
           </div>
-          <div className="rounded-[14px] bg-surface-secondary border border-border p-3">
-            <div className="text-xs font-bold text-white mb-2 flex items-center gap-1.5">
-              <Plug className="w-3.5 h-3.5 text-brand"/> 生成源 <span className="ml-auto text-[10px] text-gray-500">{providerList.length} 个</span>
-              <button onClick={()=> apiService.listProviders({}).then(r=>setProviderList(r.providers||[]))} className="ml-1 text-[10px] text-brand-light hover:underline">刷新</button>
+          {/* 素材 */}
+          <div className="rounded-2xl border border-zinc-200 bg-white p-3">
+            <div className="text-xs font-bold text-zinc-900 mb-2 flex items-center gap-1.5"><Library className="w-3.5 h-3.5 text-violet-600"/> 素材库 <span className="ml-auto text-[10px] text-zinc-500">{assets.length} 个</span></div>
+            <div className="flex gap-1.5 mb-2">
+              <div className="flex-1 flex items-center gap-1.5 rounded-full bg-zinc-50 border border-zinc-200 px-3 py-1.5 focus-within:border-violet-300 focus-within:bg-white">
+                <Search className="w-3 h-3 text-zinc-400 shrink-0" />
+                <input value={assetQuery} onChange={e=>setAssetQuery(e.target.value)} onKeyDown={e=>e.key==='Enter' && apiService.listAssets({project_id: pid, q: assetQuery}).then(r=>setAssets(r.assets||[]))} placeholder="搜索…" className="flex-1 bg-transparent text-sm placeholder-zinc-400 focus:outline-none min-w-0"/>
+              </div>
+              <button onClick={()=> apiService.listAssets({project_id: pid, q: assetQuery}).then(r=>setAssets(r.assets||[]))} className="w-8 h-8 rounded-full bg-zinc-900 text-white flex items-center justify-center shrink-0 hover:bg-black"><Search className="w-3 h-3"/></button>
             </div>
-            <div className="text-[10px] text-gray-500 mb-2 leading-relaxed">每个生成源为独立节点，可多源并存。拖至画布后连线到分镜卡/视频/TTS。</div>
-            <div className="space-y-1 max-h-[160px] overflow-y-auto pr-1">
-              {providerList.slice(0,20).map((p:any)=> {
-                const kindIcon = p.kind==='image' ? Globe : p.kind==='video' ? VideoIcon : p.kind==='audio' ? Mic : Plug;
-                const KindIcon = kindIcon;
+            <div className="grid grid-cols-2 gap-2 max-h-[200px] overflow-y-auto pr-1">
+              {assets.map((a:any)=>{
+                const url = a.thumb_url || a.file_url;
+                const abs = url?.startsWith('/')? `http://127.0.0.1:8000${url}`: url;
                 return (
-                  <div key={p.id} draggable onDragStart={e=>{
-                    e.dataTransfer.setData('application/provider-id', p.id);
-                    e.dataTransfer.setData('application/provider-kind', p.kind || 'image');
-                  }} className="flex items-center gap-2 p-2 rounded-xl bg-surface border border-transparent hover:border-brand/30 hover:bg-surface-tertiary cursor-grab">
-                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${p.kind==='image' ? 'bg-violet-500/10 border border-violet-500/20' : p.kind==='video' ? 'bg-orange-500/10 border border-orange-500/20' : 'bg-pink-500/10 border border-pink-500/20'}`}><KindIcon className={`w-3.5 h-3.5 ${p.kind==='image' ? 'text-violet-400' : p.kind==='video' ? 'text-orange-400' : 'text-pink-400'}`}/></div>
-                    <div className="min-w-0 flex-1"><div className="text-xs font-medium text-white truncate">{p.display_name || p.name || p.id}</div><div className="text-[10px] text-gray-500 flex items-center gap-1"><span className={`px-1 py-0 rounded text-[9px] ${p.builtin?'bg-brand/20 text-brand-light':'bg-emerald-500/15 text-emerald-400'}`}>{p.builtin?'内置':'自定义'}</span>{p.kind}</div></div>
-                    <span className={`w-2 h-2 rounded-full shrink-0 ${p.enabled===false?'bg-gray-500':'bg-emerald-500'}`}/>
+                  <div key={a.id} draggable onDragStart={e=> { e.dataTransfer.setData('application/canvas-assetid', a.id); e.dataTransfer.setData('text/plain', abs||url);}} className="group bg-zinc-50 border border-zinc-200 rounded-xl overflow-hidden cursor-grab hover:border-violet-300 hover:shadow-sm transition-all">
+                    <div className="aspect-square bg-white flex items-center justify-center overflow-hidden">{abs ? <img src={abs} alt="" className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform"/> : <ImageIcon className="w-5 h-5 text-zinc-300"/>}</div>
+                    <div className="p-2"><div className="text-xs font-medium truncate">{a.name}</div><div className="text-[10px] text-zinc-500">{a.category}</div></div>
                   </div>
                 );
               })}
-              {providerList.length===0 && <div className="text-[11px] text-gray-500 text-center py-4">暂无生成源，请先创建</div>}
-            </div>
-            <div className="mt-2 flex gap-1.5">
-              <button onClick={()=> window.dispatchEvent(new CustomEvent('open-provider-create', {detail:{kind:'image'}}))} className="flex-1 py-1.5 rounded-lg bg-brand text-white text-[11px]">新建</button>
-              <button onClick={()=>{
-                const doc = prompt('粘贴 API 文档/cURL，将调用导演自动接入。\n示例：POST https://api.xxx.com/v1/images/generations ...');
-                if(doc){
-                  const kind = prompt('类型？ image/video/audio', 'image') || 'image';
-                  apiService.importProvider({ kind, doc_text: doc, name: `导入${kind}源` }).then(r=>{
-                    alert(`✓ 已创建 ${r.provider?.id}`);
-                    apiService.listProviders({}).then(x=>setProviderList(x.providers||[]));
-                    window.dispatchEvent(new Event('provider-list-refresh'));
-                  }).catch(e=> alert(e.message));
-                }
-              }} className="flex-1 py-1.5 rounded-lg bg-surface border border-border text-[11px] text-white">导演接入</button>
-            </div>
-          </div>
-          <div className="rounded-[14px] bg-surface-secondary border border-border p-3">
-            <div className="text-xs font-bold text-white mb-2 flex items-center gap-1.5"><Library className="w-3.5 h-3.5 text-accent-pink"/> 素材 <span className="ml-auto text-[10px] text-gray-500">{assets.length} 个</span></div>
-            <div className="flex gap-1.5 mb-2">
-              <div className="flex-1 flex items-center gap-1.5 rounded-full bg-surface border border-border px-2.5 py-1 focus-within:border-brand/40">
-                <Search className="w-3 h-3 text-gray-500 shrink-0" />
-                <input value={assetQuery} onChange={e=>setAssetQuery(e.target.value)} onKeyDown={e=>e.key==='Enter' && apiService.listAssets({project_id: pid, q: assetQuery}).then(r=>setAssets(r.assets||[]))} placeholder="搜索…" className="flex-1 bg-transparent text-xs text-white placeholder-gray-500 focus:outline-none min-w-0"/>
-              </div>
-              <button onClick={()=> apiService.listAssets({project_id: pid, q: assetQuery}).then(r=>setAssets(r.assets||[]))} className="w-7 h-7 rounded-full bg-brand text-white flex items-center justify-center shrink-0"><Search className="w-3 h-3"/></button>
-            </div>
-            <div className="grid grid-cols-2 gap-2 max-h-[180px] overflow-y-auto pr-1">
-              {assets.map((a:any)=>(
-                <div key={a.id} draggable onDragStart={e=> e.dataTransfer.setData('application/canvas-assetid', a.id)} className="group bg-surface border border-border rounded-xl overflow-hidden cursor-grab hover:border-brand/30 hover:shadow-md transition-all">
-                  <div className="aspect-square bg-black/40 flex items-center justify-center overflow-hidden">{a.thumb_url||a.file_url ? <img src={(a.thumb_url||a.file_url).startsWith('/')? (window.location.port==='5173'?'http://127.0.0.1:8000':'')+(a.thumb_url||a.file_url) : (a.thumb_url||a.file_url)} alt="" className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform"/> : <ImageIcon className="w-4 h-4 text-gray-500"/>}</div>
-                  <div className="p-2"><div className="text-[11px] font-medium text-white truncate">{a.name}</div><div className="text-[10px] text-gray-500">{a.category}</div></div>
-                </div>
-              ))}
-              {assets.length===0 && <div className="col-span-2 text-[11px] text-gray-500 text-center py-6">无素材，先导入或生成</div>}
+              {assets.length===0 && <div className="col-span-2 text-xs text-zinc-400 text-center py-6">暂无素材，拖入或生成后自动出现</div>}
             </div>
           </div>
         </div>
-        <div className="p-3 border-t border-border space-y-2 bg-surface-secondary/50">
-          <button onClick={handleManualSave} disabled={saving} className="w-full py-2.5 rounded-full bg-brand text-white text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-40 shadow-md shadow-brand/10"><Save className="w-3.5 h-3.5"/>{saving?'保存中': '保存画布'}</button>
-          <button onClick={handleExportToShots} className="w-full py-2.5 rounded-full bg-white dark:bg-white text-surface dark:text-surface text-xs font-bold flex items-center justify-center gap-1.5 border border-border "><Download className="w-3.5 h-3.5"/> 导出为分镜</button>
-          <p className="text-[10px] text-gray-500 text-center leading-relaxed">选中节点后「执行选中」批量生成<br/>自动保存已开启</p>
+        <div className="p-3 border-t border-zinc-100 space-y-2 bg-zinc-50/50">
+          <button onClick={handleManualSave} disabled={saving} className="w-full py-2.5 rounded-xl bg-zinc-900 text-white text-sm font-bold flex items-center justify-center gap-1.5 disabled:opacity-40 hover:bg-black"><Save className="w-4 h-4"/>{saving?'保存中': '保存画布'}</button>
+          <button onClick={()=> window.dispatchEvent(new CustomEvent('canvas-export-shots'))} className="w-full py-2.5 rounded-xl bg-white border border-zinc-200 text-sm font-bold flex items-center justify-center gap-1.5 hover:bg-zinc-50"><Download className="w-4 h-4"/> 导出为分镜</button>
         </div>
       </div>
 
-      {/* 画布 — 工具带 + 画布 */}
-      <div ref={wrapperRef} className="flex-1 relative bg-[#08080B] flex flex-col min-w-0" onDrop={onDrop} onDragOver={onDragOver}>
-        <div className="h-10 px-3 border-b border-border bg-surface/80 backdrop-blur flex items-center gap-2 shrink-0">
-          <div className="flex items-center gap-2 text-xs">
-            <span className="w-2 h-2 rounded-full bg-accent-green animate-pulse" />
-            <span className="text-gray-300">项目</span><span className="font-mono text-white">{pid.slice(0,8)}</span><span className="text-gray-500 hidden sm:inline">· 自动保存 · 拖拽连线 · 框选</span>
+      {/* 中间画布 */}
+      <div ref={wrapperRef} className="flex-1 relative bg-[#fbfbf9] flex flex-col min-w-0" onDrop={onDrop} onDragOver={onDragOver}>
+        <div className="h-11 px-3 border-b border-zinc-200 bg-white flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="text-zinc-600">项目</span><span className="font-mono text-zinc-900 text-xs">{pid.slice(0,8)}</span><span className="text-zinc-400 hidden sm:inline text-xs">· 点卡片右侧 + 串行 · 拖素材到节点</span>
           </div>
           <div className="flex-1" />
           <div className="flex items-center gap-1.5">
-            <button onClick={()=> setNodes(nds=> nds.map((n,i)=> ({...n, position:{ x: 80 + (i%4)*360, y: 80 + Math.floor(i/4)*320 }})))} className="hidden sm:inline px-3 py-1 rounded-full bg-surface-secondary border border-border text-xs text-white hover:border-border-active">自动排布</button>
-            <button onClick={()=> handleBatchExecute('selected')} disabled={executing || selectedIds.length===0} className="px-3.5 py-1.5 rounded-full bg-violet-600 text-white text-xs font-bold disabled:opacity-40">{executing?'执行中':`执行选中${selectedIds.length?` · ${selectedIds.length}`:''}`}</button>
-            <button onClick={()=> handleBatchExecute('all')} disabled={executing || nodes.length===0} className="px-3.5 py-1.5 rounded-full bg-brand text-white text-xs font-bold disabled:opacity-40">执行全画布</button>
-            <button onClick={()=> { if(confirm('清空画布？')){ setNodes([]); setEdges([]); } }} className="w-8 h-8 rounded-full bg-surface-secondary border border-border text-gray-400 hover:text-red-400 flex items-center justify-center" title="清空">×</button>
+            <span className="hidden sm:inline px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs">● 单点执行 · 结果自动流向下游</span>
+            <button onClick={()=> setNodes(nds=> nds.map((n,i)=> ({...n, position:{ x: 120, y: 80 + i*380 }})))} className="px-3 py-1.5 rounded-full bg-white border border-zinc-200 text-xs font-medium hover:bg-zinc-50">竖向排布</button>
+            <button onClick={()=> { if(confirm('清空画布？')){ setNodes([]); setEdges([]); } }} className="w-8 h-8 rounded-full bg-white border border-zinc-200 text-zinc-500 hover:text-red-500 flex items-center justify-center" title="清空">×</button>
           </div>
         </div>
         <div className="flex-1 relative">
-          <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} isValidConnection={isValidConnection} nodeTypes={nodeTypes} onSelectionChange={({nodes:sel})=> setSelectedIds(sel.map(n=>n.id))} deleteKeyCode="Delete" fitView className="bg-[#08080B]">
-            <Background color="#1a1a2e" gap={20}/>
-            <Controls className="!bg-surface !border-border" />
-            <MiniMap className="!bg-surface !border-border" nodeColor={(n:any)=> n.type==='shot-card' ? '#7c3aed' : n.type==='comfy-workflow' ? '#8b5cf6' : String(n.type||'').startsWith('load-') ? '#10b981' : n.type==='text-prompt' ? '#0ea5e9' : '#333'} />
-          </ReactFlow>
+          {isLoading ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center p-8 gap-4">
+              <div className="w-8 h-8 border-2 border-zinc-300 border-t-violet-600 rounded-full animate-spin"/>
+              <div className="text-sm text-zinc-500">画布加载中…</div>
+              <button onClick={()=> setIsLoading(false)} className="text-xs text-violet-600 hover:underline">跳过等待，直接显示</button>
+            </div>
+          ) : isEmpty ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center p-8 gap-6 overflow-y-auto">
+              <div className="w-full max-w-[720px] bg-white border border-zinc-200 rounded-[24px] shadow-sm p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-9 h-9 rounded-xl bg-zinc-900 flex items-center justify-center"><Wand2 className="w-5 h-5 text-white"/></div>
+                  <div><div className="text-[15px] font-bold text-zinc-900">从一个想法开始</div><div className="text-xs text-zinc-500">选择模板或直接在下方输入提示词，一键生成线性工作流</div></div>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  {TEMPLATES.map(t=>(
+                    <button key={t.id} onClick={()=> addTemplate(t)} className="p-4 rounded-2xl border-2 border-zinc-200 bg-zinc-50 hover:border-violet-400 hover:bg-white text-left group">
+                      <div className="w-8 h-8 rounded-xl bg-white border border-zinc-200 flex items-center justify-center mb-2 group-hover:border-violet-200"><Layers className="w-4 h-4 text-zinc-700"/></div>
+                      <div className="text-sm font-bold text-zinc-900">{t.label}</div>
+                      <div className="text-xs text-zinc-500 mt-1">{t.desc}</div>
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-4 flex items-center gap-2 text-xs text-zinc-500"><div className="h-px flex-1 bg-zinc-200"/><span>或</span><div className="h-px flex-1 bg-zinc-200"/></div>
+                <div className="mt-4 flex gap-2">
+                  {CORE_LIBRARY.slice(0,4).map(n=> (
+                    <button key={n.type} onClick={()=> setNodes([createNode(n.type, {x:200, y:120})])} className="flex-1 py-2.5 rounded-xl bg-white border border-zinc-200 text-sm font-medium hover:border-zinc-300 flex flex-col items-center gap-1">
+                      <n.icon className={`w-5 h-5 ${n.color}`}/>{n.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="text-xs text-zinc-500">💡 每个节点内可切换 API / ComfyUI，参考图从素材库拖入即可</div>
+            </div>
+          ) : (
+            <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} isValidConnection={isValidConnection} nodeTypes={nodeTypes} deleteKeyCode="Delete" fitView className="bg-[#fbfbf9]">
+              <Background color="#e5e7eb" gap={20} size={1}/>
+              <Controls className="!bg-white !border-zinc-200 !rounded-xl shadow-sm" />
+              <MiniMap className="!bg-white !border-zinc-200" nodeColor={(n:any)=> n.type==='image' ? '#7c3aed' : n.type==='video' ? '#f97316' : n.type==='audio' ? '#ec4899' : n.type==='prompt' ? '#0ea5e9' : '#111'} />
+            </ReactFlow>
+          )}
+        </div>
+        {/* 底部输入条（复刻图1） */}
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-[min(720px,92%)] bg-white border border-zinc-200 rounded-[20px] shadow-xl p-3 flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <button onClick={()=> {
+              const rect = wrapperRef.current?.getBoundingClientRect();
+              const pos = { x: 200, y: 80 + nodes.length*380 };
+              const n = createNode('prompt', pos);
+              setNodes(nds=> [...nds, n]);
+            }} className="w-8 h-8 rounded-full bg-zinc-900 text-white flex items-center justify-center hover:bg-black"><Plus className="w-4 h-4"/></button>
+            <input value={bottomPrompt} onChange={e=>setBottomPrompt(e.target.value)} onKeyDown={e=>{
+              if(e.key==='Enter' && !e.shiftKey){
+                e.preventDefault();
+                if(!bottomPrompt.trim()) return;
+                if(isEmpty){
+                  const tpl = TEMPLATES[1];
+                  addTemplate(tpl);
+                  setTimeout(()=> {
+                    const first = nodes.find(n=> n.type==='prompt');
+                    if(!first){
+                      // 新模板已含 prompt，更新它
+                      setNodes(nds=> nds.map(n=> n.type==='prompt' && !n.data.prompt ? {...n, data:{...n.data, prompt: bottomPrompt, text: bottomPrompt}} : n));
+                    }
+                  }, 200);
+                } else {
+                  const last = nodes[nodes.length-1];
+                  const pos = last ? { x: last.position.x, y: last.position.y + 380 } : { x: 200, y: 120 };
+                  const n = createNode('prompt', pos);
+                  n.data = {...n.data, prompt: bottomPrompt, text: bottomPrompt};
+                  setNodes(nds=> [...nds, n]);
+                  if(last){
+                    setEdges(es=> [...es, { id:`e_${last.id}_${n.id}`, source:last.id, target:n.id, type:'smoothstep', animated:true } as any]);
+                  }
+                }
+                setBottomPrompt('');
+              }
+            }} placeholder="描述你想要生成的内容…（回车创建提示词节点，Shift+回车换行）" className="flex-1 bg-transparent text-sm placeholder:text-zinc-400 focus:outline-none"/>
+            <span className="text-xs text-zinc-400">{bottomPrompt.length} / 7500</span>
+            <button onClick={()=>{
+              if(!bottomPrompt.trim()) return;
+              const pos = { x: 200, y: 80 + nodes.length*380 };
+              const n = createNode('prompt', pos);
+              n.data = {...n.data, prompt: bottomPrompt, text: bottomPrompt};
+              setNodes(nds=> [...nds, n]);
+              setBottomPrompt('');
+            }} className="w-8 h-8 rounded-full bg-zinc-900 text-white flex items-center justify-center hover:bg-black"><span className="text-sm">↗</span></button>
+          </div>
+          <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">
+            <span className="px-2 py-1 rounded-full bg-zinc-100 border border-zinc-200">拖素材到节点</span>
+            <span className="px-2 py-1 rounded-full bg-zinc-100 border border-zinc-200">点卡片右侧 + 串行</span>
+            <span className="ml-auto flex items-center gap-1"><Film className="w-3 h-3"/> 支持图片/视频/音频</span>
+          </div>
         </div>
       </div>
 
-      {inspectWfId && <WorkflowInspectorModal workflowId={inspectWfId} isOpen={!!inspectWfId} onClose={()=>setInspectWfId('')} onSaved={()=>{ /* 刷新暴露输入 */ }} /> }
+      {inspectWfId && <WorkflowInspectorModal workflowId={inspectWfId} isOpen={!!inspectWfId} onClose={()=>setInspectWfId('')} onSaved={()=>{}} /> }
     </div>
   );
 };

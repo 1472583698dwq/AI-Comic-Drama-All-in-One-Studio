@@ -242,9 +242,11 @@ class MCPServerRegistry:
             return asset.model_dump()
 
         @mcp_app.tool
-        async def register_custom_provider(kind: str = "image", name: str = "", doc_text: str = "", doc_url: str = "", curl: str = "", openapi_url: str = "", api_key: str = "", definition: dict = None) -> dict:
-            """[生成源扩展] 根据文档/cURL/OpenAPI自动注册新 Provider"""
-            res = await mcp_registry.execute_tool("register_custom_provider", {"kind": kind, "name": name, "doc_text": doc_text, "doc_url": doc_url, "curl": curl, "openapi_url": openapi_url, "api_key": api_key, "definition": definition})
+        async def register_custom_provider(kind: str = "image", name: str = "", language: str = "python", code: str = "", doc_text: str = "", doc_url: str = "", curl: str = "", openapi_url: str = "", api_key: str = "", definition: dict = None) -> dict:
+            """[生成源扩展-代码模式] 支持 python/javascript 携程源码直接注册，或据文档自动生成代码"""
+            payload = {"kind": kind, "name": name, "language": language, "doc_text": doc_text, "doc_url": doc_url, "curl": curl, "openapi_url": openapi_url, "api_key": api_key, "definition": definition}
+            if code: payload["code"] = code
+            res = await mcp_registry.execute_tool("register_custom_provider", payload)
             if res.status == "success":
                 return res.result
             raise RuntimeError(res.error or "注册失败")
@@ -266,6 +268,33 @@ class MCPServerRegistry:
         @mcp_app.tool
         async def delete_custom_provider(provider_id: str) -> dict:
             res = await mcp_registry.execute_tool("delete_custom_provider", {"provider_id": provider_id})
+            if res.status == "success":
+                return res.result
+            raise RuntimeError(res.error)
+
+        @mcp_app.tool
+        async def update_custom_provider(provider_id: str, language: str = "", code: str = "", name: str = "", description: str = "") -> dict:
+            """[生成源升级] 编辑已有 Provider 代码"""
+            payload = {"provider_id": provider_id}
+            if language: payload["language"] = language
+            if code: payload["code"] = code
+            if name: payload["name"] = name
+            if description: payload["description"] = description
+            res = await mcp_registry.execute_tool("update_custom_provider", payload)
+            if res.status == "success":
+                return res.result
+            raise RuntimeError(res.error)
+
+        @mcp_app.tool
+        async def get_provider_code(provider_id: str) -> dict:
+            res = await mcp_registry.execute_tool("get_provider_code", {"provider_id": provider_id})
+            if res.status == "success":
+                return res.result
+            raise RuntimeError(res.error)
+
+        @mcp_app.tool
+        async def upgrade_provider_to_code(provider_id: str, language: str = "python") -> dict:
+            res = await mcp_registry.execute_tool("upgrade_provider_to_code", {"provider_id": provider_id, "language": language})
             if res.status == "success":
                 return res.result
             raise RuntimeError(res.error)
@@ -569,7 +598,7 @@ class MCPServerRegistry:
         # 12. 自定义生成源扩展（导演自扩展核心）
         self.register_tool(MCPToolDefinition(
             name="register_custom_provider",
-            description="[生成源扩展] 根据用户提供的 API 文档/cURL/OpenAPI/示例，自动解析并注册一个新的生成源 Provider（image/video/audio）。用户只需粘贴文档或 curl，导演自动生成适配。创建后可在无限画布中作为独立 Provider 节点使用，支持多源并存。",
+            description="[生成源扩展-代码模式] 根据 API 文档/cURL/OpenAPI/示例或直接提供的 python/javascript 携程源码，注册新的生成源 Provider（image/video/audio）。支持 python/javascript 双语言，导演自动生成可轮询、可签名等任意逻辑的携程代码。创建后可在无限画布作为独立节点使用。",
             category="ai_generation",
             icon="Plug",
             author="Provider Extension",
@@ -579,12 +608,15 @@ class MCPServerRegistry:
                 "properties": {
                     "kind": {"type": "string", "enum": ["image", "video", "audio", "llm"], "default": "image", "description": "生成源类型"},
                     "name": {"type": "string", "description": "展示名，如 我的FLUX源"},
+                    "language": {"type": "string", "enum": ["python", "javascript"], "default": "python", "description": "代码语言"},
+                    "code": {"type": "string", "description": "完整携程源码（async def generate(ctx, api)），若提供则直接使用不再走 LLM"},
+                    "code_entry": {"type": "string", "default": "generate", "description": "入口函数名"},
                     "doc_text": {"type": "string", "description": "API 文档文本/示例（可贴 curl、请求/响应示例）"},
-                    "doc_url": {"type": "string", "description": "API 文档 URL（可选，导演会尝试拉取）"},
+                    "doc_url": {"type": "string", "description": "API 文档 URL（可选）"},
                     "curl": {"type": "string", "description": "cURL 示例（可选）"},
-                    "openapi_url": {"type": "string", "description": "OpenAPI/Swagger JSON URL（可选）"},
-                    "api_key": {"type": "string", "description": "API Key（可选，创建后也可单独设置）"},
-                    "definition": {"type": "object", "description": "若已自行构造完整 ProviderDefinition JSON，可直接传入（跳过 LLM 解析）"}
+                    "openapi_url": {"type": "string", "description": "OpenAPI JSON URL（可选）"},
+                    "api_key": {"type": "string", "description": "API Key（可选）"},
+                    "definition": {"type": "object", "description": "若已自行构造完整 ProviderDefinition JSON，可直接传入"}
                 },
                 "required": ["kind"]
             }
@@ -630,6 +662,60 @@ class MCPServerRegistry:
                 "type": "object",
                 "properties": {
                     "provider_id": {"type": "string", "description": "Provider ID"}
+                },
+                "required": ["provider_id"]
+            }
+        ))
+        self.register_tool(MCPToolDefinition(
+            name="update_custom_provider",
+            description="[生成源升级] 编辑/升级已有 Provider 的代码（python/javascript 携程）。支持增量 patch：可只传 code/language/description/models 等，导演可据此修复或增强已有源。",
+            category="ai_generation",
+            icon="Edit",
+            author="Provider Extension",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "provider_id": {"type": "string", "description": "要编辑的 Provider ID"},
+                    "name": {"type": "string", "description": "新展示名（可选）"},
+                    "description": {"type": "string", "description": "新描述（可选）"},
+                    "language": {"type": "string", "enum": ["python", "javascript"], "description": "语言"},
+                    "code": {"type": "string", "description": "完整携程源码（async def generate(ctx, api)）"},
+                    "code_entry": {"type": "string", "description": "入口函数名，默认 generate"},
+                    "models": {"type": "array", "items": {"type": "string"}, "description": "模型列表（可选）"},
+                    "default_model": {"type": "string"},
+                    "doc_text": {"type": "string", "description": "补充文档（可选，用于 LLM 辅助重写）"},
+                },
+                "required": ["provider_id"]
+            }
+        ))
+        self.register_tool(MCPToolDefinition(
+            name="get_provider_code",
+            description="[查询] 获取指定 Provider 的完整代码与元信息，供导演审查后升级",
+            category="utility",
+            icon="FileCode",
+            author="Provider Extension",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "provider_id": {"type": "string", "description": "Provider ID"}
+                },
+                "required": ["provider_id"]
+            }
+        ))
+        self.register_tool(MCPToolDefinition(
+            name="upgrade_provider_to_code",
+            description="[迁移] 将存量 JSON 模板 Provider 一键升级为代码模式（自动迁移 transport/mapping 为 python 模板）",
+            category="utility",
+            icon="ArrowUp",
+            author="Provider Extension",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "provider_id": {"type": "string", "description": "Provider ID"},
+                    "language": {"type": "string", "enum": ["python", "javascript"], "default": "python"}
                 },
                 "required": ["provider_id"]
             }
@@ -851,53 +937,140 @@ class MCPServerRegistry:
                 result = await jianyin_exporter.export_project_to_jianyin_draft_async(project)
 
             elif tool_name == "register_custom_provider":
-                # 导演自扩展：通过 LLM 解析文档创建 Provider
                 from app.providers.custom.manager import custom_provider_manager
                 kind = arguments.get("kind") or "image"
                 name = arguments.get("name") or f"自定义{kind}源"
+                language = arguments.get("language") or "python"
+                if language == "js":
+                    language = "javascript"
+                code = arguments.get("code")
                 doc_text = arguments.get("doc_text") or ""
                 doc_url = arguments.get("doc_url") or ""
                 curl = arguments.get("curl") or ""
                 openapi_url = arguments.get("openapi_url") or ""
                 api_key = arguments.get("api_key") or ""
                 definition = arguments.get("definition")
-                if definition and isinstance(definition, dict):
+                # 分支1：直接提供 code（导演编辑后回写或用户粘贴）
+                if code and isinstance(code, str) and len(code.strip()) > 20:
+                    import uuid as _uuid0
+                    pid0 = f"prov_{_uuid0.uuid4().hex[:8]}"
+                    data0 = {
+                        "id": pid0,
+                        "name": name,
+                        "kind": kind,
+                        "provider_type": "code",
+                        "language": language if language in ("python","javascript") else "python",
+                        "code": code,
+                        "code_entry": arguments.get("code_entry") or "generate",
+                        "description": f"由导演直接提供代码（{language}）",
+                        "scope": "global",
+                        "enabled": True,
+                    }
+                    if doc_text:
+                        data0["doc_text"] = doc_text[:4000]
+                    # 语法检查
+                    if data0["language"] == "python":
+                        try:
+                            import ast
+                            ast.parse(data0["code"])
+                        except SyntaxError as se:
+                            raise ValueError(f"Python 语法错误: {se}")
+                    from app.models.provider_definition import ProviderDefinition as _PD0
+                    _pd0 = _PD0.model_validate(data0)
+                    if not _pd0.input_schema:
+                        from app.api.provider_routes import _default_input_schema
+                        _pd0.input_schema = _default_input_schema(kind)
+                    if not _pd0.output_schema:
+                        from app.api.provider_routes import _default_output_schema
+                        _pd0.output_schema = _default_output_schema(kind)
+                    from app.providers.custom.manager import custom_provider_manager as _mgr0
+                    saved0 = _mgr0.save_definition(_pd0)
+                    if api_key:
+                        import os, json as _json0
+                        from app.core.config import settings as _settings0
+                        cfg0 = os.path.join(_settings0.STORAGE_DIR, "config_store.json")
+                        d0 = {}
+                        if os.path.exists(cfg0):
+                            try:
+                                with open(cfg0, "r", encoding="utf-8") as f:
+                                    d0 = _json0.load(f)
+                            except: d0={}
+                        if "custom_providers" not in d0: d0["custom_providers"]={}
+                        d0["custom_providers"][pid0]={"api_key": api_key}
+                        d0[f"CUSTOM_PROVIDER_{pid0}"]=api_key
+                        with open(cfg0, "w", encoding="utf-8") as f:
+                            _json0.dump(d0,f,ensure_ascii=False,indent=2)
+                        import os as _os0
+                        _os0.environ[f"CUSTOM_PROVIDER_{pid0}"]=api_key
+                        saved0.auth.key_env = f"CUSTOM_PROVIDER_{pid0}"
+                        _mgr0.save_definition(saved0)
+                    from app.providers.init_providers import register_single_custom_provider as _reg0
+                    _reg0(saved0)
+                    result = {"status": "success", "provider": saved0.to_provider_info(), "mode": "direct_code", "language": language}
+                elif definition and isinstance(definition, dict):
+                    # 分支2：直接提供完整 definition（含 code）
                     import uuid as _uuid
                     pid = definition.get("id") or f"prov_{_uuid.uuid4().hex[:8]}"
                     definition["id"] = pid
                     definition["kind"] = kind
                     if not definition.get("name"):
                         definition["name"] = name
-                    from app.models.provider_definition import ProviderDefinition as _PD
-                    from app.providers.custom.manager import custom_provider_manager as _mgr
-                    pd = _PD.model_validate(definition)
-                    # 保存 api_key
-                    if api_key:
-                        import os, json as _json
-                        from app.core.config import settings as _settings
-                        cfg_path = os.path.join(_settings.STORAGE_DIR, "config_store.json")
-                        data = {}
-                        if os.path.exists(cfg_path):
-                            try:
-                                with open(cfg_path, "r", encoding="utf-8") as f:
-                                    data = _json.load(f)
-                            except Exception:
-                                data = {}
-                        if "custom_providers" not in data:
-                            data["custom_providers"] = {}
-                        data["custom_providers"][pid] = {"api_key": api_key}
-                        data[f"CUSTOM_PROVIDER_{pid}"] = api_key
-                        with open(cfg_path, "w", encoding="utf-8") as f:
-                            _json.dump(data, f, ensure_ascii=False, indent=2)
-                        os.environ[f"CUSTOM_PROVIDER_{pid}"] = api_key
-                        pd.auth.key_env = f"CUSTOM_PROVIDER_{pid}"
-                    saved = _mgr.save_definition(pd)
-                    from app.providers.init_providers import register_single_custom_provider as _reg
-                    _reg(saved)
-                    result = {"status": "success", "provider": saved.to_provider_info(), "mode": "direct_definition"}
+                    # 若 definition 已含 code 则直接使用，否则走后续 LLM
+                    if definition.get("code"):
+                        from app.models.provider_definition import ProviderDefinition as _PD
+                        pd = _PD.model_validate(definition)
+                        if api_key:
+                            import os, json as _json
+                            from app.core.config import settings as _settings
+                            cfg_path = os.path.join(_settings.STORAGE_DIR, "config_store.json")
+                            data = {}
+                            if os.path.exists(cfg_path):
+                                try:
+                                    with open(cfg_path, "r", encoding="utf-8") as f:
+                                        data = _json.load(f)
+                                except: data = {}
+                            if "custom_providers" not in data:
+                                data["custom_providers"] = {}
+                            data["custom_providers"][pid] = {"api_key": api_key}
+                            data[f"CUSTOM_PROVIDER_{pid}"] = api_key
+                            with open(cfg_path, "w", encoding="utf-8") as f:
+                                _json.dump(data, f, ensure_ascii=False, indent=2)
+                            os.environ[f"CUSTOM_PROVIDER_{pid}"] = api_key
+                            pd.auth.key_env = f"CUSTOM_PROVIDER_{pid}"
+                        from app.providers.custom.manager import custom_provider_manager as _mgr
+                        saved = _mgr.save_definition(pd)
+                        from app.providers.init_providers import register_single_custom_provider as _reg
+                        _reg(saved)
+                        result = {"status": "success", "provider": saved.to_provider_info(), "mode": "direct_definition"}
+                    else:
+                        # definition 无 code，走 JSON 兼容路径（已废弃，仅迁移）
+                        from app.models.provider_definition import ProviderDefinition as _PD
+                        pd = _PD.model_validate(definition)
+                        saved = custom_provider_manager.save_definition(pd)
+                        if api_key:
+                            import os, json as _json
+                            from app.core.config import settings as _settings
+                            cfg_path = os.path.join(_settings.STORAGE_DIR, "config_store.json")
+                            data = {}
+                            if os.path.exists(cfg_path):
+                                try:
+                                    with open(cfg_path, "r", encoding="utf-8") as f:
+                                        data = _json.load(f)
+                                except: data = {}
+                            if "custom_providers" not in data:
+                                data["custom_providers"] = {}
+                            data["custom_providers"][pid] = {"api_key": api_key}
+                            data[f"CUSTOM_PROVIDER_{pid}"] = api_key
+                            with open(cfg_path, "w", encoding="utf-8") as f:
+                                _json.dump(data, f, ensure_ascii=False, indent=2)
+                            os.environ[f"CUSTOM_PROVIDER_{pid}"] = api_key
+                            pd.auth.key_env = f"CUSTOM_PROVIDER_{pid}"
+                            custom_provider_manager.save_definition(pd)
+                        from app.providers.init_providers import register_single_custom_provider as _reg
+                        _reg(saved)
+                        result = {"status": "success", "provider": saved.to_provider_info(), "mode": "direct_definition"}
                 else:
-                    # 走 LLM 解析路径：复用 provider_routes 的 import 逻辑，内部调用 llm_service
-                    # 拼接 doc
+                    # 分支3：据文档 LLM 生成代码
                     full_doc = doc_text
                     if curl:
                         full_doc += f"\n\nCURL:\n{curl}"
@@ -920,49 +1093,61 @@ class MCPServerRegistry:
                         except Exception:
                             pass
                     if not full_doc or len(full_doc.strip()) < 10:
-                        raise ValueError("请提供 doc_text / doc_url / curl / openapi_url 或 definition")
+                        raise ValueError("请提供 doc_text / doc_url / curl / openapi_url 或 code/definition")
                     from app.pipelines.llm_service import llm_service as _llm
-                    system_prompt = """你是一个 API 集成专家。解析用户提供的生成类 API 文档并输出 ProviderDefinition JSON。
-严格输出 JSON（无 markdown），键：name, description, transport{method,url,headers,timeout}, auth{type,header_name,query_name,prefix}, mapping{request_template{model,prompt,negative_prompt,size,seed}, response_mappings{image_url:data[0].url}}, health_check{url,method}, models, default_model, input_schema{properties{prompt:x-handle:text, reference_images:array uri x-handle:image}}, output_schema{properties{image_url:x-handle:image}}。
-transport.url 必须完整 https；auth.type 区分 bearer/apikey_header/apikey_query/none；request_template 用 {prompt}{negative_prompt}{width}{height}{size}{seed}{model}{api_key} 占位；response_mappings 路径如 data[0].url。
-input_schema 必须含 x-handle：image→image, video→video, audio→audio, text→text；video 需 prompt:text + first_frame:image + reference_images:image[]，image 需 prompt:text + reference_images:image[]。
-output_schema 需对应 kind：image→image_url x-handle:image, video→video_url x-handle:video, audio→audio_url x-handle:audio。"""
-                    user_prompt = f"kind: {kind}\nname_hint: {name}\n\nAPI 文档:\n{full_doc[:5000]}"
-                    parsed = await _llm.chat_json(system_prompt=system_prompt, user_prompt=user_prompt, temperature=0.2)
-                    if not isinstance(parsed, dict):
-                        raise ValueError(f"LLM 返回非对象: {parsed}")
+                    system_prompt = f"""你是生成源代码专家。用户提供了 {kind} 类 API 文档（{language}），请直接生成可执行的携程源码。
+要求：
+- 输出 {language} 代码，入口为 async def generate(ctx, api)（python）或 async function generate(ctx, api)（javascript）
+- ctx 含 prompt/width/height/size/seed/model/style_preset/api_key/reference_images/first_frame_url/duration/text/voice_id/emotion 等，api 含 httpx/asyncio/json/re/time/uuid/download(api.download(url,prefix)->(storage_url,local_path))
+- 必须包含完整请求、鉴权、payload、轮询（视频类用 while+sleep）、错误处理
+- 成功返回 {{"image_url": url}} / {{"video_url": url}} / {{"audio_url": url}}，轮询场景可先返回 task_id 再由框架接管
+- 仅输出代码，不要 markdown、不要解释
+"""
+                    user_prompt = f"kind: {kind}\nlanguage: {language}\nname_hint: {name}\n\nAPI 文档:\n{full_doc[:5000]}"
+                    try:
+                        code_text = await _llm.chat_completion(
+                            messages=[{"role":"system","content":system_prompt},{"role":"user","content":user_prompt}],
+                            temperature=0.2
+                        )
+                    except Exception:
+                        code_text = await _llm.chat_json(system_prompt=system_prompt, user_prompt=user_prompt, temperature=0.2)
+                        if isinstance(code_text, dict):
+                            code_text = code_text.get("code") or str(code_text)
+                    import re as _re2
+                    code_text = _re2.sub(r"^```[a-z]*\n", "", code_text.strip())
+                    code_text = _re2.sub(r"\n```$", "", code_text.strip())
+                    if len(code_text) < 50:
+                        raise ValueError("LLM 生成代码过短")
                     import uuid as _uuid2
                     pid = f"prov_{_uuid2.uuid4().hex[:8]}"
-                    parsed["id"] = pid
-                    # 智能纠正 kind：若 LLM 误判 image 但 doc 含 video 特征则纠正
-                    _inf = _infer_kind_from_doc(full_doc, parsed.get("transport", {}).get("url","") if isinstance(parsed.get("transport"), dict) else "")
-                    if _inf and _inf != kind and kind in (None, "", "image") and _inf == "video":
-                        kind = _inf
-                    parsed["kind"] = kind
-                    if not parsed.get("name"):
-                        parsed["name"] = name
-                    parsed["provider_type"] = "http"
-                    parsed["scope"] = "global"
-                    parsed["enabled"] = True
-                    parsed["doc_text"] = full_doc[:4000]
-                    parsed["raw_api_doc"] = full_doc[:4000]
+                    parsed = {
+                        "id": pid,
+                        "name": name or f"自定义{kind}源",
+                        "kind": kind,
+                        "provider_type": "code",
+                        "language": language,
+                        "code": code_text,
+                        "code_entry": "generate",
+                        "description": f"由导演从文档自动生成（{language}）",
+                        "scope": "global",
+                        "enabled": True,
+                        "doc_text": full_doc[:4000],
+                        "raw_api_doc": full_doc[:4000],
+                    }
                     if api_key:
-                        parsed.setdefault("auth", {})["key_env"] = f"CUSTOM_PROVIDER_{pid}"
-                    # 兜底输入输出 Schema（含 x-handle 供画布连线）
-                    if not parsed.get("input_schema") or not parsed["input_schema"].get("properties"):
-                        if kind == "image":
-                            parsed["input_schema"] = {"type":"object","properties":{"prompt":{"type":"string","x-handle":"text"},"reference_images":{"type":"array","items":{"type":"string","format":"uri"},"x-handle":"image"}},"required":["prompt"]}
-                        elif kind == "video":
-                            parsed["input_schema"] = {"type":"object","properties":{"prompt":{"type":"string","x-handle":"text"},"first_frame":{"type":"string","format":"uri","x-handle":"image"},"reference_images":{"type":"array","items":{"type":"string","format":"uri"},"x-handle":"image"}},"required":["prompt"]}
-                        elif kind == "audio":
-                            parsed["input_schema"] = {"type":"object","properties":{"text":{"type":"string","x-handle":"text"}},"required":["text"]}
-                    if not parsed.get("output_schema") or not parsed["output_schema"].get("properties"):
-                        if kind == "image":
-                            parsed["output_schema"] = {"type":"object","properties":{"image_url":{"type":"string","format":"uri","x-handle":"image"}}}
-                        elif kind == "video":
-                            parsed["output_schema"] = {"type":"object","properties":{"video_url":{"type":"string","format":"uri","x-handle":"video"}}}
-                        elif kind == "audio":
-                            parsed["output_schema"] = {"type":"object","properties":{"audio_url":{"type":"string","format":"uri","x-handle":"audio"}}}
+                        parsed["auth"] = {"type": "bearer", "key_env": f"CUSTOM_PROVIDER_{pid}", "prefix": "Bearer "}
+                    if kind == "image":
+                        parsed["input_schema"] = {"type":"object","properties":{"prompt":{"type":"string","x-handle":"text"},"reference_images":{"type":"array","items":{"type":"string","format":"uri"},"x-handle":"image"}},"required":["prompt"]}
+                    elif kind == "video":
+                        parsed["input_schema"] = {"type":"object","properties":{"prompt":{"type":"string","x-handle":"text"},"first_frame":{"type":"string","format":"uri","x-handle":"image"},"reference_images":{"type":"array","items":{"type":"string","format":"uri"},"x-handle":"image"}},"required":["prompt"]}
+                    elif kind == "audio":
+                        parsed["input_schema"] = {"type":"object","properties":{"text":{"type":"string","x-handle":"text"}},"required":["text"]}
+                    if kind == "image":
+                        parsed["output_schema"] = {"type":"object","properties":{"image_url":{"type":"string","format":"uri","x-handle":"image"}}}
+                    elif kind == "video":
+                        parsed["output_schema"] = {"type":"object","properties":{"video_url":{"type":"string","format":"uri","x-handle":"video"}}}
+                    elif kind == "audio":
+                        parsed["output_schema"] = {"type":"object","properties":{"audio_url":{"type":"string","format":"uri","x-handle":"audio"}}}
                     from app.models.provider_definition import ProviderDefinition as _PD2
                     from app.providers.custom.manager import custom_provider_manager as _mgr2
                     pd2 = _PD2.model_validate(parsed)
@@ -976,8 +1161,7 @@ output_schema 需对应 kind：image→image_url x-handle:image, video→video_u
                             try:
                                 with open(cfg_path2, "r", encoding="utf-8") as f:
                                     data2 = _json2.load(f)
-                            except Exception:
-                                data2 = {}
+                            except: data2 = {}
                         if "custom_providers" not in data2:
                             data2["custom_providers"] = {}
                         data2["custom_providers"][pid] = {"api_key": api_key}
@@ -987,7 +1171,7 @@ output_schema 需对应 kind：image→image_url x-handle:image, video→video_u
                         os.environ[f"CUSTOM_PROVIDER_{pid}"] = api_key
                     from app.providers.init_providers import register_single_custom_provider as _reg2
                     _reg2(saved2)
-                    result = {"status": "success", "provider": saved2.to_provider_info(), "mode": "llm_parsed", "llm_raw": parsed}
+                    result = {"status": "success", "provider": saved2.to_provider_info(), "mode": "llm_code", "code": code_text}
 
             elif tool_name == "list_custom_providers":
                 from app.providers.custom.manager import custom_provider_manager as _mgr
@@ -1004,18 +1188,30 @@ output_schema 需对应 kind：image→image_url x-handle:image, video→video_u
                 pd = _mgr.get_definition(pid)
                 if not pd:
                     raise ValueError(f"Provider 不存在: {pid}")
-                from app.providers.generic.http_provider import GenericHttpImageProvider, GenericHttpAudioProvider, GenericHttpVideoProvider
+                # 优先代码 provider
                 prov = None
-                if pd.kind == "image":
-                    prov = GenericHttpImageProvider(pd)
-                elif pd.kind == "audio":
-                    prov = GenericHttpAudioProvider(pd)
-                elif pd.kind == "video":
-                    prov = GenericHttpVideoProvider(pd)
+                if pd.code and not pd.legacy_json_mode:
+                    from app.providers.generic.code_provider import GenericCodeImageProvider, GenericCodeAudioProvider, GenericCodeVideoProvider
+                    if pd.kind == "image":
+                        prov = GenericCodeImageProvider(pd)
+                    elif pd.kind == "audio":
+                        prov = GenericCodeAudioProvider(pd)
+                    elif pd.kind == "video":
+                        prov = GenericCodeVideoProvider(pd)
+                    else:
+                        prov = GenericCodeImageProvider(pd)
                 else:
-                    prov = GenericHttpImageProvider(pd)
+                    from app.providers.generic.http_provider import GenericHttpImageProvider, GenericHttpAudioProvider, GenericHttpVideoProvider
+                    if pd.kind == "image":
+                        prov = GenericHttpImageProvider(pd)
+                    elif pd.kind == "audio":
+                        prov = GenericHttpAudioProvider(pd)
+                    elif pd.kind == "video":
+                        prov = GenericHttpVideoProvider(pd)
+                    else:
+                        prov = GenericHttpImageProvider(pd)
                 ok = await prov.check_health()
-                result = {"provider_id": pid, "ok": ok, "is_configured": prov.is_configured(), "detail": "连通正常" if ok else "未通过（检查 Key/地址）"}
+                result = {"provider_id": pid, "ok": ok, "is_configured": prov.is_configured(), "detail": "连通正常" if ok else "未通过（检查 Key/地址/代码）"}
 
             elif tool_name == "delete_custom_provider":
                 pid = arguments.get("provider_id") or ""
@@ -1047,6 +1243,77 @@ output_schema 需对应 kind：image→image_url x-handle:image, video→video_u
                         pass
                 _unreg(pid, kind=kind)
                 result = {"status": "deleted", "provider_id": pid}
+
+            elif tool_name == "update_custom_provider":
+                pid = arguments.get("provider_id") or ""
+                if not pid:
+                    raise ValueError("provider_id 不能为空")
+                from app.providers.custom.manager import custom_provider_manager as _mgr
+                pd = _mgr.get_definition(pid)
+                if not pd:
+                    raise ValueError(f"Provider 不存在: {pid}")
+                if pd.builtin:
+                    raise ValueError("内置 Provider 不可编辑")
+                # 允许更新的字段
+                for field in ["name","description","language","code","code_entry","models","default_model","doc_text"]:
+                    if field in arguments and arguments[field] is not None:
+                        setattr(pd, field, arguments[field])
+                # 语法检查
+                if pd.language == "python" and pd.code:
+                    try:
+                        import ast
+                        ast.parse(pd.code)
+                    except SyntaxError as se:
+                        raise ValueError(f"Python 语法错误: {se}")
+                pd.touch()
+                from app.api.provider_routes import _default_input_schema, _default_output_schema
+                if not pd.input_schema:
+                    pd.input_schema = _default_input_schema(pd.kind)
+                if not pd.output_schema:
+                    pd.output_schema = _default_output_schema(pd.kind)
+                saved = _mgr.save_definition(pd)
+                from app.providers.init_providers import unregister_single_custom_provider, register_single_custom_provider
+                unregister_single_custom_provider(pid, kind=pd.kind)
+                register_single_custom_provider(saved)
+                result = {"status": "updated", "provider": saved.to_provider_info()}
+
+            elif tool_name == "get_provider_code":
+                pid = arguments.get("provider_id") or ""
+                if not pid:
+                    raise ValueError("provider_id 不能为空")
+                from app.providers.custom.manager import custom_provider_manager as _mgr
+                pd = _mgr.get_definition(pid)
+                if not pd:
+                    raise ValueError(f"Provider 不存在: {pid}")
+                result = {"provider_id": pid, "language": pd.language, "code": pd.code or "", "code_entry": pd.code_entry, "kind": pd.kind, "name": pd.name, "description": pd.description}
+
+            elif tool_name == "upgrade_provider_to_code":
+                pid = arguments.get("provider_id") or ""
+                lang = arguments.get("language") or "python"
+                if not pid:
+                    raise ValueError("provider_id 不能为空")
+                from app.providers.custom.manager import custom_provider_manager as _mgr
+                pd = _mgr.get_definition(pid)
+                if not pd:
+                    raise ValueError(f"Provider 不存在: {pid}")
+                if pd.code and not pd.legacy_json_mode:
+                    result = {"status": "already_code", "provider": pd.to_provider_info()}
+                else:
+                    # 根据旧 transport 生成模板代码
+                    url = pd.transport.url or "https://api.example.com/v1/generate"
+                    from app.api.provider_routes import CODE_TEMPLATES
+                    tmpl = CODE_TEMPLATES.get((lang, pd.kind)) or CODE_TEMPLATES.get(("python", pd.kind)) or ""
+                    code = tmpl.replace("https://api.example.com/v1/images/generations", url).replace("https://api.example.com/v1/videos/generations", url).replace("https://api.example.com/v1/audio/speech", url)
+                    pd.language = lang
+                    pd.code = code
+                    pd.code_entry = "generate"
+                    pd.legacy_json_mode = False
+                    pd.provider_type = "code"
+                    saved = _mgr.save_definition(pd)
+                    from app.providers.init_providers import unregister_single_custom_provider, register_single_custom_provider
+                    unregister_single_custom_provider(pid, kind=pd.kind)
+                    register_single_custom_provider(saved)
+                    result = {"status": "upgraded", "provider": saved.to_provider_info()}
 
             elif tool_name in ("canvas_query","canvas_create_node","canvas_update_node","canvas_connect","canvas_execute"):
                 # 画布工具为前端透传型：返回指令由前端 ReactFlow 执行，Agent 仅需感知与编排

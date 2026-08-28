@@ -12,16 +12,19 @@ class ImageGenerateRequest:
     prompt: str
     negative_prompt: str = ""
     aspect_ratio: str = "9:16"  # 9:16, 16:9, 1:1
+    resolution: Optional[str] = None  # 480p/720p/1080p 独立下拉
     style_preset: Optional[str] = None
     seed: Optional[int] = None
     width: Optional[int] = None
     height: Optional[int] = None
     steps: Optional[int] = None
     cfg: Optional[float] = None
+    fps: Optional[int] = None
+    duration: Optional[int] = None
     workflow_id: Optional[str] = None  # 仅ComfyUI工作流模式使用
     model: Optional[str] = None  # 覆盖默认模型
     dynamic_inputs: Optional[Dict[str, Any]] = None  # 外部暴露表单动态节点输入 (垫图/额外提示词等)
-    extra: Optional[Dict[str, Any]] = None  # 透传扩展参数
+    extra: Optional[Dict[str, Any]] = None  # 透传扩展参数（独立控件透传）
 
 
 @dataclass
