@@ -1025,27 +1025,45 @@ def auto_detect_exposed_inputs(clean_wf: Dict[str, Any], mapping: Optional[Dict[
                     exposed.append({"id": f"combo_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"帧率 ({title})", "type": "combo", "required": False, "default_value": str(pval) if pval else "24", "description": "帧率", "options": ["16","24","30"]})
                 else:
                     exposed.append({"id": f"num_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"{pname} ({title})", "type": "number", "required": False, "default_value": int(pval) if isinstance(pval,(int,float)) else 720, "description": pname, "min": 256, "max": 2048, "step": 64})
-        # 3. 通用子图/自定义节点：保持为单节点的子图，其输入即暴露参数
-        #    区分输入节点（linked）与参数节点（direct）：即使已链接也暴露，允许用户覆盖外部输入
+        # 3. 通用：暴露所有未链接的可编辑参数（而非仅用户选择暴露的），确保全部参数均有独立控件
         else:
-            # 仅对疑似子图或未在白名单的自定义节点进行通用暴露，避免过度暴露
-            if any(h in ct.lower() for h in ("video", "wan", "hunyuan", "cogvideo", "mochi")) or ct not in ALLOWED_CLASS_TYPES:
-                for pname, pval in inputs.items():
-                    is_linked = isinstance(pval, list) and len(pval) == 2 and isinstance(pval[0], str)
-                    # 仅暴露关键可编辑输入，避免噪音
-                    if pname in ("prompt", "text", "negative_prompt", "image", "reference_image", "first_frame", "last_frame", "start_image", "value", "string"):
-                        ptype = "image" if any(k in pname.lower() for k in ("image", "frame")) else "text"
-                        # 对于子图，即使已链接也暴露，允许覆盖
-                        exposed.append({
-                            "id": f"exp_{nid}_{pname}",
-                            "node_id": str(nid),
-                            "param_name": pname,
-                            "label": f"{pname} ({title})",
-                            "type": ptype,
-                            "required": False,
-                            "default_value": "" if is_linked else (str(pval)[:200] if isinstance(pval, str) else ""),
-                            "description": f"子图节点 {title} 的 {pname} 输入（{'已链接外部' if is_linked else '直连参数'}，可覆盖）",
-                        })
+            for pname, pval in inputs.items():
+                is_linked = isinstance(pval, list) and len(pval) == 2 and isinstance(pval[0], str)
+                if is_linked:
+                    continue
+                if pval is None:
+                    continue
+                # 仅处理原始可编辑类型（字符串/数值/布尔），跳过已链接的句柄
+                if isinstance(pval, bool):
+                    ptype = "boolean"
+                    default = pval
+                elif isinstance(pval, (int, float)):
+                    ptype = "number"
+                    default = pval
+                elif isinstance(pval, str):
+                    # 图像类参数按名称推断为 image，其余为 text
+                    if any(k in pname.lower() for k in ("image", "frame", "video", "audio", "mask")):
+                        ptype = "image"
+                    elif pval.endswith((".safetensors", ".ckpt", ".pth", ".bin", ".pt")) or "vae" in pname.lower() or "ckpt" in pname.lower() or "lora" in pname.lower() or "unet" in pname.lower():
+                        ptype = "combo"
+                    else:
+                        ptype = "text"
+                    default = pval[:500] if len(pval) > 500 else pval
+                else:
+                    continue
+                # 长文本截断
+                if isinstance(default, str) and len(default) > 200 and ptype == "text":
+                    default = default[:200]
+                exposed.append({
+                    "id": f"exp_{nid}_{pname}",
+                    "node_id": str(nid),
+                    "param_name": pname,
+                    "label": f"{pname} ({title})",
+                    "type": ptype,
+                    "required": False,
+                    "default_value": default,
+                    "description": f"{title} 的 {pname} 参数",
+                })
 
     return exposed
 

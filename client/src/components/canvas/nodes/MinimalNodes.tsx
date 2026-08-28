@@ -150,7 +150,7 @@ export const ImageNode: React.FC<NodeProps> = ({ data, id }) => {
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState(d.image_url || d.result_url || '');
   const [showPicker, setShowPicker] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(true);
   const [dynamicInputs, setDynamicInputs] = useState(d.dynamic_inputs || {});
   const [exposed, setExposed] = useState<any[]>([]);
   const [providerSchema, setProviderSchema] = useState<any>(null);
@@ -214,10 +214,10 @@ export const ImageNode: React.FC<NodeProps> = ({ data, id }) => {
   }, [engine, providerId, providers]);
 
   const persist = (patch:any)=> (d.onUpdate as any)?.(id, patch);
-  const isReady = !!prompt.trim() && (engine!=='provider' || !!providerId) && (engine!=='comfy' || !!workflowId);
+  const isReady = (engine!=='provider' || !!providerId) && (engine!=='comfy' || !!workflowId);
 
   const handleGenerate = async ()=>{
-    if(!prompt.trim()){ alert('请填写提示词'); return; }
+    if(!prompt.trim() && !providerParams.prompt && !Object.values(dynamicInputs).some(v=> typeof v==='string' && v.trim())){ /* 提示词可来自上游或独立控件，不强制 */ }
     setGenerating(true);
     try{
       const prov = engine==='provider' ? providerId : engine==='auto' ? undefined : undefined;
@@ -281,45 +281,8 @@ export const ImageNode: React.FC<NodeProps> = ({ data, id }) => {
       <Handle type="target" position={Position.Left} id="prompt" className="!bg-sky-500 !w-3 !h-3 !border-2 !border-white" style={{top:'28%'}}/>
       <Handle type="target" position={Position.Left} id="reference" className="!bg-violet-500 !w-3 !h-3 !border-2 !border-white" style={{top:'54%'}}/>
       <Handle type="source" position={Position.Right} id="image" className="!bg-violet-500 !w-3 !h-3 !border-2 !border-white"/>
-      {/* 提示词 */}
-      <textarea value={prompt} onChange={e=>{setPrompt(e.target.value); persist({prompt:e.target.value, image_prompt:e.target.value});}} placeholder="画面提示词（可连入上游提示词自动填充）" rows={3} className="w-full bg-zinc-50 border border-zinc-200 rounded-xl p-2.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-violet-400 focus:bg-white resize-none"/>
-      {/* 参考图 */}
-      <div className="space-y-1.5">
-        <div className="flex items-center justify-between"><span className="text-xs font-medium text-zinc-700">参考图</span><span className="text-[11px] text-zinc-500">可选 · 拖拽/上传/素材库</span></div>
-        {ref ? (
-          <div className="relative rounded-xl overflow-hidden border border-zinc-200 bg-zinc-50 h-28">
-            <img src={absRef} alt="" className="w-full h-full object-cover"/>
-            <button onClick={()=>{setRef(''); persist({reference:''});}} className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/60 text-white flex items-center justify-center text-xs">×</button>
-          </div>
-        ) : (
-          <div
-            onDragOver={e=>{e.preventDefault(); e.currentTarget.classList.add('border-violet-400','bg-violet-50');}}
-            onDragLeave={e=>{e.currentTarget.classList.remove('border-violet-400','bg-violet-50');}}
-            onDrop={e=>{
-              e.preventDefault(); e.currentTarget.classList.remove('border-violet-400','bg-violet-50');
-              const url = e.dataTransfer.getData('text/plain') || e.dataTransfer.getData('text/uri-list');
-              // Asset 拖拽会带 asset id，但我们也支持 url
-              if(url){ setRef(url); persist({reference:url}); }
-            }}
-            className="h-28 rounded-xl border-2 border-dashed border-zinc-300 bg-zinc-50 flex flex-col items-center justify-center gap-1.5 hover:border-violet-300 hover:bg-white cursor-pointer"
-            onClick={()=> setShowPicker(true)}
-          >
-            <div className="w-8 h-8 rounded-full bg-white border border-zinc-200 flex items-center justify-center"><Upload className="w-4 h-4 text-zinc-500"/></div>
-            <span className="text-xs text-zinc-600 font-medium">点击选择 / 拖拽素材到此处</span>
-            <span className="text-[11px] text-zinc-400">支持从右侧素材库拖入</span>
-          </div>
-        )}
-        <div className="flex gap-1.5">
-          <label className="flex-1 py-1.5 rounded-xl bg-zinc-900 text-white text-xs font-medium flex items-center justify-center gap-1 cursor-pointer hover:bg-black">
-            <Upload className="w-3 h-3"/> 本地上传
-            <input type="file" accept="image/*" className="hidden" onChange={e=>{
-              const f=e.target.files?.[0]; if(!f) return;
-              const reader=new FileReader(); reader.onload=()=>{ const v=reader.result as string; setRef(v); persist({reference:v}); }; reader.readAsDataURL(f);
-            }}/>
-          </label>
-          <button onClick={()=> setShowPicker(true)} className="flex-1 py-1.5 rounded-xl bg-white border border-zinc-200 text-xs font-medium flex items-center justify-center gap-1 hover:border-zinc-300"><Library className="w-3 h-3"/> 素材库</button>
-        </div>
-      </div>
+      {/* 提示词/参考图已移除：全部来自生成源内部（上游连线或独立控件），不再使用预制模板参数 */}
+      {/* 参考图已移除：由上游连线或工作流/生成源独立控件提供 */}
       {/* 引擎选择 */}
       <div className="space-y-1.5">
         <div className="flex items-center justify-between"><span className="text-xs font-medium text-zinc-700">内部操作</span><button onClick={()=> setShowAdvanced(v=>!v)} className="text-[11px] text-violet-600 flex items-center gap-1">{showAdvanced?'收起':'高级'}<ChevronDown className={`w-3 h-3 transition-transform ${showAdvanced?'rotate-180':''}`}/></button></div>
@@ -369,7 +332,7 @@ export const ImageNode: React.FC<NodeProps> = ({ data, id }) => {
             {workflows.map((w:any)=> <option key={w.id} value={w.id}>{w.name||w.id} · {w.node_count}节点</option>)}
           </select>
         )}
-        {showAdvanced && engine==='comfy' && exposed.length>0 && (
+        {engine==='comfy' && exposed.length>0 && (
           <div className="space-y-2 p-2.5 rounded-xl bg-zinc-50 border border-zinc-200">
             <div className="text-xs font-semibold text-zinc-700">工作流参数</div>
             {exposed.map((ex:any)=>{
@@ -426,7 +389,7 @@ export const VideoGenNode: React.FC<NodeProps> = ({ data, id }) => {
   const [generating, setGenerating] = useState(false);
   const [videoUrl, setVideoUrl] = useState(d.video_url || '');
   const [showPicker, setShowPicker] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(true);
   const [dynamicInputs, setDynamicInputs] = useState(d.dynamic_inputs || {});
   const [exposed, setExposed] = useState<any[]>([]);
   const [providerSchema, setProviderSchema] = useState<any>(null);
@@ -484,11 +447,11 @@ export const VideoGenNode: React.FC<NodeProps> = ({ data, id }) => {
   }, [engine, providerId, providers]);
 
   const persist = (p:any)=> (d.onUpdate as any)?.(id, p);
-  const isReady = !!prompt.trim() && (mode!=='i2v' || !!firstFrame) && (engine!=='provider' || !!providerId) && (engine!=='comfy' || !!workflowId);
+  const isReady = (engine!=='provider' || !!providerId) && (engine!=='comfy' || !!workflowId);
 
   const handleGenerate = async ()=>{
-    if(!prompt.trim()){ alert('请填写运动描述'); return; }
-    if(mode==='i2v' && !firstFrame){ alert('I2V 需要首帧图片（可连入上游图片或从素材库选择）'); return; }
+    if(!prompt.trim() && !providerParams.prompt && !Object.values(dynamicInputs).some(v=> typeof v==='string' && v.trim())){ /* 运动描述可来自上游或独立控件 */ }
+    if(mode==='i2v' && !firstFrame && !Object.values(dynamicInputs).some(v=> typeof v==='string' && v.startsWith('data:'))){ /* 首帧可来自上游或独立控件 */ }
     setGenerating(true);
     try{
       const prov = engine==='provider'? providerId : engine==='auto'? (providerId || undefined) : undefined;
@@ -528,24 +491,8 @@ export const VideoGenNode: React.FC<NodeProps> = ({ data, id }) => {
       <Handle type="target" position={Position.Left} id="prompt" className="!bg-sky-500 !w-3 !h-3 !border-2 !border-white" style={{top:'28%'}}/>
       <Handle type="target" position={Position.Left} id="first_frame" className="!bg-violet-500 !w-3 !h-3 !border-2 !border-white" style={{top:'52%'}}/>
       <Handle type="source" position={Position.Right} id="video" className="!bg-orange-500 !w-3 !h-3 !border-2 !border-white"/>
-      <textarea value={prompt} onChange={e=>{setPrompt(e.target.value); persist({prompt:e.target.value, video_prompt:e.target.value});}} placeholder="运动/运镜描述（可连入上游提示词）" rows={2} className="w-full bg-zinc-50 border border-zinc-200 rounded-xl p-2.5 text-sm placeholder:text-zinc-400 focus:outline-none focus:border-orange-300 focus:bg-white resize-none"/>
-      {/* 首帧 */}
-      <div className="space-y-1.5">
-        <div className="flex items-center justify-between"><span className="text-xs font-medium text-zinc-700">首帧 / 参考</span><span className="text-[11px] text-zinc-500">{mode.toUpperCase()}</span></div>
-        {firstFrame ? (
-          <div className="relative rounded-xl overflow-hidden border border-zinc-200 h-24 bg-zinc-50"><img src={absFirst} alt="" className="w-full h-full object-cover"/><button onClick={()=>{setFirstFrame(''); persist({first_frame:'', first_frame_url:''});}} className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/60 text-white flex items-center justify-center text-xs">×</button></div>
-        ) : (
-          <div onClick={()=> setShowPicker(true)} className="h-24 rounded-xl border-2 border-dashed border-zinc-300 bg-zinc-50 flex flex-col items-center justify-center gap-1 hover:border-orange-300 hover:bg-white cursor-pointer">
-            <ImageIcon className="w-6 h-6 text-zinc-400"/><span className="text-xs text-zinc-600">点击选择首帧 / 拖入素材</span>
-          </div>
-        )}
-        <div className="flex gap-1.5">
-          <button onClick={()=> setShowPicker(true)} className="flex-1 py-1.5 rounded-xl bg-white border border-zinc-200 text-xs flex items-center justify-center gap-1 hover:border-zinc-300"><Library className="w-3 h-3"/> 素材库</button>
-          <label className="flex-1 py-1.5 rounded-xl bg-zinc-900 text-white text-xs flex items-center justify-center gap-1 cursor-pointer hover:bg-black"><Upload className="w-3 h-3"/> 上传
-            <input type="file" accept="image/*" className="hidden" onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ const v=r.result as string; setFirstFrame(v); persist({first_frame:v, first_frame_url:v});}; r.readAsDataURL(f);}}/>
-          </label>
-        </div>
-      </div>
+      {/* 运动描述已移除：由上游或生成源内部提供 */}
+      {/* 首帧/参考已移除：由上游连线或独立控件提供 */}
       <div className="grid grid-cols-3 gap-1.5">
         {(['i2v','r2v','t2v'] as const).map(m=> <button key={m} onClick={()=>{setMode(m); persist({mode:m});}} className={`py-1.5 rounded-xl text-xs font-medium border ${mode===m?'bg-orange-500 text-white border-orange-500':'bg-white text-zinc-700 border-zinc-200'}`}>{m.toUpperCase()}</button>)}
       </div>
@@ -583,7 +530,7 @@ export const VideoGenNode: React.FC<NodeProps> = ({ data, id }) => {
           </div>
         )}
         {engine==='comfy' && <select value={workflowId} onChange={e=>{setWorkflowId(e.target.value); persist({workflow_id:e.target.value});}} className="w-full bg-white border border-zinc-200 rounded-xl px-2.5 py-2 text-sm"><option value="">选择工作流</option>{workflows.map((w:any)=> <option key={w.id} value={w.id}>{w.name||w.id}</option>)}</select>}
-        {showAdvanced && engine==='comfy' && exposed.length>0 && (
+        {engine==='comfy' && exposed.length>0 && (
           <div className="space-y-2 p-2.5 rounded-xl bg-zinc-50 border border-zinc-200">
             <div className="text-xs font-semibold text-zinc-700">工作流参数（独立控件 + 别名）</div>
             {exposed.map((ex:any)=>{
@@ -615,9 +562,7 @@ export const VideoGenNode: React.FC<NodeProps> = ({ data, id }) => {
         )}
       </div>
       {!showAdvanced && (
-        <div className="flex items-center gap-2 text-xs">
-          <span className="text-zinc-600">时长</span><input type="range" min={3} max={15} value={duration} onChange={e=>{setDuration(Number(e.target.value)); persist({duration:Number(e.target.value)});}} className="flex-1 accent-orange-500"/><span className="font-mono text-orange-600">{duration}s</span>
-        </div>
+        {/* 时长已移除：由生成源独立控件提供 */}
       )}
       <div className={`text-[11px] px-2 py-1 rounded-full border text-center ${isReady ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-amber-50 border-amber-200 text-amber-700'}`}>{isReady ? '● 就绪 · 执行后自动流向下游' : '○ 待上游首帧/提示词'}</div>
       {absVideo && <video src={absVideo} controls className="w-full rounded-xl border border-zinc-200 max-h-[160px] bg-black"/>}
@@ -685,9 +630,9 @@ export const AudioNode: React.FC<NodeProps> = ({ data, id }) => {
   }, [engine, providerId, providers]);
 
   const persist = (p:any)=> (d.onUpdate as any)?.(id, p);
-  const isReady = !!text.trim();
+  const isReady = true; // 文本可来自上游或独立控件
   const handleGenerate = async ()=>{
-    if(!text.trim()){ alert('请输入文本'); return; }
+    if(!text.trim() && !providerParams.text && !providerParams.prompt){ /* 文本可来自上游 */ }
     setGenerating(true);
     try{
       const prov = engine==='auto'? undefined : providerId;
@@ -706,7 +651,7 @@ export const AudioNode: React.FC<NodeProps> = ({ data, id }) => {
     <Shell id={id} data={d} icon={Mic} label="生成音频" desc="TTS 配音" color="text-pink-600">
       <Handle type="target" position={Position.Left} id="text" className="!bg-sky-500 !w-3 !h-3 !border-2 !border-white" style={{top:'30%'}}/>
       <Handle type="source" position={Position.Right} id="audio" className="!bg-pink-500 !w-3 !h-3 !border-2 !border-white"/>
-      <textarea value={text} onChange={e=>{setText(e.target.value); persist({text:e.target.value, prompt:e.target.value});}} placeholder="输入台词/旁白（可连入上游提示词）" rows={3} className="w-full bg-zinc-50 border border-zinc-200 rounded-xl p-2.5 text-sm placeholder:text-zinc-400 focus:outline-none focus:border-pink-300 focus:bg-white resize-none"/>
+      {/* 文本已移除：由上游连线或生成源内部提供 */}
       <div className="grid grid-cols-2 gap-1.5">
         {[{k:'auto',l:'自动'},{k:'provider',l:'API'}].map(o=> <button key={o.k} onClick={()=>{setEngine(o.k); persist({engine_type:o.k});}} className={`py-1.5 rounded-xl text-xs border ${engine===o.k?'bg-pink-500 text-white border-pink-500':'bg-white border-zinc-200 text-zinc-700'}`}>{o.l}</button>)}
       </div>
