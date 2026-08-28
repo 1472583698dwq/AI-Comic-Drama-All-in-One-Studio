@@ -1286,7 +1286,23 @@ class ComfyWorkflowManager:
             logger.warning(f"[WorkflowManager] list_external failed: {e}")
             external = []
         all_wfs = internal + external
-        all_wfs.sort(key=lambda x: (x.get("source") != "internal", -x.get("created_at", 0)))
+        # 去重：同一 id 的工作流（外部直读 vs 已导入内部）优先保留内部（已保存的配置），避免出现两个
+        seen = {}
+        deduped = []
+        for wf in all_wfs:
+            wid = wf.get("id")
+            if wid not in seen:
+                seen[wid] = wf
+                deduped.append(wf)
+            else:
+                existing = seen[wid]
+                # 已有同 id，保留内部优先（已保存的配置）
+                if existing.get("source") != "internal" and wf.get("source") == "internal":
+                    idx = deduped.index(existing)
+                    deduped[idx] = wf
+                    seen[wid] = wf
+        deduped.sort(key=lambda x: (x.get("source") != "internal", -x.get("created_at", 0)))
+        all_wfs = deduped
         if source == "all":
             self._list_cache = all_wfs
             self._list_cache_ts = time.time()
@@ -2294,13 +2310,14 @@ class ComfyWorkflowManager:
         current_mapping = (meta.get("mapping") if meta else None) or auto_generate_mapping(analyze_workflow(clean_wf))
         saved_exposed = (meta.get("exposed_inputs") if meta else None)
         fresh_exposed = auto_detect_exposed_inputs(clean_wf, current_mapping)
-        # 若保存的暴露项与新检测不一致（数量差异大或含 undefined 脏数据），则以新检测为准但保留用户已保存的值
+        # 白名单：若用户已保存暴露项且无脏数据，则尊重用户选择的白名单；仅当无保存或含 undefined 脏数据时才用新检测
         if saved_exposed is None or len(saved_exposed) == 0:
             exposed_inputs = fresh_exposed
         else:
             has_dirty = any(e.get('param_name')=='undefined' or str(e.get('id','')).endswith('_undefined') for e in saved_exposed)
-            if has_dirty or len(saved_exposed) < len(fresh_exposed) * 0.5:
-                saved_map = {f"{e['node_id']}_{e['param_name']}": e for e in saved_exposed if e.get('param_name')}
+            if has_dirty:
+                # 脏数据时以新检测为准，但保留用户已保存的 label/description
+                saved_map = {f"{e['node_id']}_{e['param_name']}": e for e in saved_exposed if e.get('param_name') and e.get('param_name')!='undefined'}
                 exposed_inputs = []
                 for fe in fresh_exposed:
                     key = f"{fe['node_id']}_{fe['param_name']}"
@@ -2309,11 +2326,6 @@ class ComfyWorkflowManager:
                         exposed_inputs.append(merged)
                     else:
                         exposed_inputs.append(fe)
-                fresh_keys = {f"{e['node_id']}_{e['param_name']}" for e in fresh_exposed}
-                for se in saved_exposed:
-                    key = f"{se['node_id']}_{se['param_name']}"
-                    if key not in fresh_keys and se.get('param_name')!='undefined':
-                        exposed_inputs.append(se)
             else:
                 exposed_inputs = saved_exposed
 
@@ -2341,9 +2353,23 @@ class ComfyWorkflowManager:
         """
         保存工作流的标准槽位映射、指定节点参数覆写与外部暴露输入项
         """
-        meta = self.get_meta(workflow_id)
-        if not meta:
-            raise FileNotFoundError(f"工作流不存在: {workflow_id}")
+        # 若为外部工作流且要求自动导入为内部，则先导入
+        if workflow_id.startswith("ext_") and auto_import_if_ext:
+            try:
+                imported = self.import_external_workflow(workflow_id)
+                workflow_id = imported["id"]
+                meta = self.get_meta(workflow_id)
+                if not meta:
+                    meta = imported
+            except Exception as e:
+                # 导入失败则回退到原 id 直接保存
+                meta = self.get_meta(workflow_id)
+                if not meta:
+                    raise FileNotFoundError(f"工作流不存在: {workflow_id}")
+        else:
+            meta = self.get_meta(workflow_id)
+            if not meta:
+                raise FileNotFoundError(f"工作流不存在: {workflow_id}")
 
         if mapping is not None:
             meta["mapping"] = mapping
@@ -2357,6 +2383,9 @@ class ComfyWorkflowManager:
         with open(_meta_path(workflow_id), "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)
 
+        # 清除列表缓存，确保下次 list_workflows 能看到更新
+        self._list_cache = None
+        self._list_cache_ts = 0
         return meta
 
     async def validate_workflow_against_comfyui(self, workflow_id: str) -> Dict[str, Any]:

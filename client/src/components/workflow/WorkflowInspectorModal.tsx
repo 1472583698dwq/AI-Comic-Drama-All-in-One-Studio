@@ -73,7 +73,7 @@ interface Props {
   workflowId: string;
   isOpen: boolean;
   onClose: () => void;
-  onSaved?: () => void;
+  onSaved?: (newId?: string) => void;
   onDeleted?: (deletedId: string) => void;
 }
 
@@ -270,14 +270,19 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
   const handleSave = async () => {
     setSaving(true);
     try {
-      await apiService.saveWorkflowOverrides(workflowId, {
+      const res:any = await apiService.saveWorkflowOverrides(workflowId, {
         mapping,
         node_overrides: nodeOverrides,
         exposed_inputs: exposedInputs,
         auto_import_if_ext: true,
       });
-      alert('🎉 工作流参数、槽位映射与外部表单暴露项已成功保存！');
-      onSaved?.();
+      const newId = res?.meta?.id || res?.id || workflowId;
+      if (newId !== workflowId) {
+        alert(`🎉 已自动导入为内部工作流 ${newId} 并保存！原外部工作流配置已覆盖。`);
+      } else {
+        alert('🎉 工作流参数、槽位映射与外部表单暴露项已成功保存并覆盖！');
+      }
+      onSaved?.(newId as any);
       onClose();
     } catch (e: any) {
       alert(`保存失败: ${e.message || e}`);
