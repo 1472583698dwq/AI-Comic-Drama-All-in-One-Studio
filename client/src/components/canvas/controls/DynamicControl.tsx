@@ -7,7 +7,7 @@ export type ControlSpec = {
   param_name: string;
   label: string;
   alias?: string;
-  type: 'text' | 'number' | 'combo' | 'image' | 'audio' | 'boolean';
+  type: 'text' | 'number' | 'combo' | 'image' | 'audio' | 'video' | 'boolean';
   component?: string;
   required?: boolean;
   default_value?: any;
@@ -26,7 +26,10 @@ export const DynamicControl: React.FC<{
 }> = ({ spec, value, onChange, onAliasChange }) => {
   const label = spec.alias || spec.label || spec.param_name;
   const desc = spec.description || '';
+  const isMedia = spec.type==='image' || spec.type==='audio' || spec.type==='video';
   const isImage = spec.type==='image';
+  const isAudio = spec.type==='audio';
+  const isVideo = spec.type==='video';
   const isCombo = spec.type==='combo' || (spec.options && spec.options.length>0);
   const isNumber = spec.type==='number';
   const isBool = spec.type==='boolean';
@@ -41,14 +44,23 @@ export const DynamicControl: React.FC<{
         }} className="text-[10px] text-violet-600 hover:underline shrink-0">✎ 别名</button>}
       </div>
       {desc && <div className="text-[10px] text-zinc-500 leading-tight line-clamp-2">{desc}</div>}
-      {isImage ? (
+      {isMedia ? (
         <label className="flex items-center gap-2 p-2 rounded-xl border border-dashed border-zinc-300 bg-zinc-50 hover:bg-white hover:border-violet-300 cursor-pointer">
           <div className="w-8 h-8 rounded bg-white border border-zinc-200 flex items-center justify-center shrink-0 overflow-hidden">
-            {value ? <img src={value} alt="" className="w-full h-full object-cover"/> : <ImageIcon className="w-4 h-4 text-zinc-400"/>}
+            {value ? (
+              isImage ? <img src={value} alt="" className="w-full h-full object-cover"/> :
+              isAudio ? <span className="text-[10px] font-mono truncate px-1">{String(value).slice(0,12)}…</span> :
+              <span className="text-[10px]">🎬</span>
+            ) : (
+              isImage ? <ImageIcon className="w-4 h-4 text-zinc-400"/> :
+              isAudio ? <span className="text-xs">🎵</span> :
+              <span className="text-xs">🎬</span>
+            )}
           </div>
-          <span className="text-xs text-zinc-600 truncate flex-1">{value ? '已选择 · 点击更换' : '点击上传 / 拖拽素材'}</span>
-          <input type="file" accept="image/*,audio/*" className="hidden" onChange={e=>{
+          <span className="text-xs text-zinc-600 truncate flex-1">{value ? `已选择${isAudio?'音频':isVideo?'视频':'图片'} · 点击更换` : `点击上传${isAudio?'音频':isVideo?'视频':'图片'} / 拖拽素材 · 弹出文件系统`}</span>
+          <input type="file" accept={isImage ? "image/*" : isAudio ? "audio/*" : "video/*"} className="hidden" onChange={e=>{
             const f=e.target.files?.[0]; if(!f) return;
+            // 弹出文件系统后读取为 DataURL，自动映射到对应句柄（image/audio/video）
             const reader=new FileReader(); reader.onload=()=> onChange(reader.result as string); reader.readAsDataURL(f);
           }} />
         </label>

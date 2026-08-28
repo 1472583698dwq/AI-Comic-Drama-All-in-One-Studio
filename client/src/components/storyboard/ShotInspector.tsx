@@ -769,18 +769,18 @@ export const ShotInspector: React.FC = () => {
                           }}
                         >
                           <div className="flex items-center justify-between"><span className="text-xs text-white">{exp.label || exp.param_name}</span><span className="text-[9px] font-mono text-gray-500">#{exp.node_id}</span></div>
-                          {exp.type==='image' ? (
+                          {(exp.type==='image' || exp.type==='audio' || exp.type==='video') ? (
                             val ? (
                               <div className="flex items-center gap-2">
-                                <img src={val.startsWith('/')?API_ORIGIN+val:val} alt="" className="w-16 h-16 rounded-lg object-cover border border-border"/>
+                                {exp.type==='image' ? <img src={val.startsWith('/')?API_ORIGIN+val:val} alt="" className="w-16 h-16 rounded-lg object-cover border border-border"/> : exp.type==='audio' ? <span className="text-xs font-mono truncate max-w-[120px]">{String(val).slice(0,32)}…</span> : <span className="text-xs">🎬 {String(val).slice(0,20)}</span>}
                                 <button onClick={()=> setShotDynamicInputs(p=> ({...p, [key]: ''}))} className="px-2 py-1 rounded bg-red-500/20 text-red-400 text-xs">移除</button>
                               </div>
                             ) : (
                               <div className="flex flex-wrap gap-1">
-                                <button onClick={()=> handleInjectCurrentCharacter(key)} className="px-2 py-1 rounded bg-brand/20 border border-brand/30 text-[11px] text-brand-light flex items-center gap-1"><UserCheck className="w-3 h-3"/> 注入角色</button>
-                                <label className="px-2 py-1 rounded bg-surface-tertiary border border-border text-xs cursor-pointer flex items-center gap-1"><Upload className="w-3 h-3"/> 上传<input type="file" accept="image/*" className="hidden" onChange={e=>{ const f=e.target.files?.[0]; if(f) handleUploadImageForInput(key,f); }}/></label>
-                                {projectAssets.filter(a=>a.file_url||a.thumb_url||a.image_url).slice(0,3).map(a=>(
-                                  <button key={a.id} onClick={()=> setShotDynamicInputs(p=> ({...p,[key]: a.file_url||a.thumb_url||a.image_url}))} className="w-8 h-8 rounded border border-border overflow-hidden"><img src={getMediaUrl(a.file_url||a.thumb_url||a.image_url)} alt="" className="w-full h-full object-cover"/></button>
+                                {exp.type==='image' && <button onClick={()=> handleInjectCurrentCharacter(key)} className="px-2 py-1 rounded bg-brand/20 border border-brand/30 text-[11px] text-brand-light flex items-center gap-1"><UserCheck className="w-3 h-3"/> 注入角色</button>}
+                                <label className="px-2 py-1 rounded bg-surface-tertiary border border-border text-xs cursor-pointer flex items-center gap-1"><Upload className="w-3 h-3"/> 上传{exp.type==='audio'?'音频':exp.type==='video'?'视频':'图片'}<input type="file" accept={exp.type==='image'?'image/*':exp.type==='audio'?'audio/*':'video/*'} className="hidden" onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; if(exp.type==='image') handleUploadImageForInput(key,f); else { const r=new FileReader(); r.onload=()=> setShotDynamicInputs(p=>({...p,[key]: r.result as string})); r.readAsDataURL(f); } }}/></label>
+                                {projectAssets.filter(a=> exp.type==='image' ? (a.file_url||a.thumb_url||a.image_url) : exp.type==='audio' ? (a.file_url?.endsWith('.mp3')||a.file_url?.endsWith('.wav')) : (a.file_url?.endsWith('.mp4')||a.file_url?.endsWith('.mov'))).slice(0,3).map(a=>(
+                                  <button key={a.id} onClick={()=> setShotDynamicInputs(p=> ({...p,[key]: a.file_url||a.thumb_url||a.image_url||a.file_url}))} className="w-8 h-8 rounded border border-border overflow-hidden">{exp.type==='image' ? <img src={getMediaUrl(a.file_url||a.thumb_url||a.image_url)} alt="" className="w-full h-full object-cover"/> : <span className="text-[10px]">{exp.type}</span>}</button>
                                 ))}
                               </div>
                             )

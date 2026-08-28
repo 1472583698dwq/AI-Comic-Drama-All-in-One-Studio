@@ -26,7 +26,7 @@ export interface ExposedInput {
   node_id: string;
   param_name: string;
   label: string;
-  type: 'image' | 'text' | 'number' | 'select';
+  type: 'image' | 'text' | 'number' | 'select' | 'audio' | 'video';
   required?: boolean;
   default_value?: any;
   description?: string;
@@ -201,7 +201,33 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
             label: `参考垫图 (${node.title})`,
             type: 'image',
             required: false,
-            description: '支持上传角色立绘、构图草图或姿态参考图',
+            description: '支持上传角色立绘、构图草图或姿态参考图，弹出文件系统',
+          });
+        }
+      } else if (node.class_type.includes('LoadAudio') || node.class_type.includes('AudioLoad')) {
+        const p = node.parameters.find(x => x.name === 'audio' || x.name === 'reference_audio');
+        if (p && !p.is_linked) {
+          detected.push({
+            id: `aud_${node.node_id}`,
+            node_id: String(node.node_id),
+            param_name: p.name,
+            label: `参考音频 (${node.title})`,
+            type: 'audio',
+            required: false,
+            description: '支持上传参考音频，弹出文件系统',
+          });
+        }
+      } else if (node.class_type.includes('LoadVideo') || node.class_type.includes('VideoLoad') || node.class_type.includes('VHS_LoadVideo')) {
+        const p = node.parameters.find(x => x.name === 'video' || x.name === 'image');
+        if (p && !p.is_linked) {
+          detected.push({
+            id: `vid_${node.node_id}`,
+            node_id: String(node.node_id),
+            param_name: p.name,
+            label: `参考视频 (${node.title})`,
+            type: 'video',
+            required: false,
+            description: '支持上传参考视频，弹出文件系统',
           });
         }
       } else if (
@@ -740,6 +766,12 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                                 <div className="text-[11px] text-gray-400 font-mono italic">
                                   该参数由上游节点插槽实时输出提供
                                 </div>
+                              ) : param.type === 'IMAGE' || param.type === 'AUDIO' || param.type === 'VIDEO' || param.name.toLowerCase().includes('image') || param.name.toLowerCase().includes('audio') || param.name.toLowerCase().includes('video') || param.name.toLowerCase().includes('frame') ? (
+                                <label className="flex items-center gap-2 p-2 rounded-lg border border-dashed border-white/20 bg-black/20 hover:bg-black/30 cursor-pointer">
+                                  <span className="text-xs">{param.type==='AUDIO' ? '🎵' : param.type==='VIDEO' ? '🎬' : '🖼️'}</span>
+                                  <span className="text-xs text-gray-300 truncate flex-1">{currentValue ? `已选择${param.type==='AUDIO'?'音频':param.type==='VIDEO'?'视频':'图片'} · 点击更换` : `点击上传${param.type==='AUDIO'?'音频':param.type==='VIDEO'?'视频':'图片'} · 弹出文件系统`}</span>
+                                  <input type="file" accept={param.type==='AUDIO' ? 'audio/*' : param.type==='VIDEO' ? 'video/*' : 'image/*'} className="hidden" onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; const r=new FileReader(); r.onload=()=> handleParamChange(node.node_id, param.name, r.result as string); r.readAsDataURL(f); }} />
+                                </label>
                               ) : param.choices && param.choices.length > 0 ? (
                                 <select
                                   value={currentValue || ''}
@@ -894,6 +926,8 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                             className="mt-1 w-full bg-[#12141a] border border-white/15 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500"
                           >
                             <option value="image">🖼️ 图片上传器 (Image Uploader)</option>
+                            <option value="audio">🎵 音频上传器 (Audio Uploader)</option>
+                            <option value="video">🎬 视频上传器 (Video Uploader)</option>
                             <option value="text">📝 多行/单行文本输入 (Text Prompt)</option>
                             <option value="number">🔢 数值调节滑块 (Number)</option>
                             <option value="select">📋 下拉单选 (Dropdown Select)</option>

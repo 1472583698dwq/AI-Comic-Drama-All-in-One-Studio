@@ -872,7 +872,7 @@ def auto_detect_exposed_inputs(clean_wf: Dict[str, Any], mapping: Optional[Dict[
         title = node.get("_meta", {}).get("title") or ct
         inputs = node.get("inputs", {})
 
-        # 1. 探测图片输入 (LoadImage / LoadImageMask)
+        # 1. 探测图片/音频/视频输入 (LoadImage / LoadAudio / LoadVideo)
         if ct in ("LoadImage", "LoadImageMask", "LoadImageForInpaint", "ImageLoad"):
             pval = inputs.get("image")
             is_linked = isinstance(pval, list) and len(pval) == 2 and isinstance(pval[0], str)
@@ -885,7 +885,37 @@ def auto_detect_exposed_inputs(clean_wf: Dict[str, Any], mapping: Optional[Dict[
                     "type": "image",
                     "required": False,
                     "default_value": pval if isinstance(pval, str) else "",
-                    "description": "支持上传角色立绘、构图草图或姿态参考图",
+                    "description": "支持上传角色立绘、构图草图或姿态参考图，弹出文件系统",
+                })
+        elif ct in ("LoadAudio", "LoadAudio2", "AudioLoad"):
+            pval = inputs.get("audio") or inputs.get("reference_audio")
+            pname = "audio" if "audio" in inputs else "reference_audio"
+            is_linked = isinstance(pval, list) and len(pval) == 2 and isinstance(pval[0], str)
+            if not is_linked:
+                exposed.append({
+                    "id": f"aud_{nid}",
+                    "node_id": str(nid),
+                    "param_name": pname,
+                    "label": f"参考音频 ({title})",
+                    "type": "audio",
+                    "required": False,
+                    "default_value": pval if isinstance(pval, str) else "",
+                    "description": "支持上传参考音频，弹出文件系统",
+                })
+        elif ct in ("LoadVideo", "VHS_LoadVideo", "VideoLoad"):
+            pval = inputs.get("video") or inputs.get("image")
+            pname = "video" if "video" in inputs else "image"
+            is_linked = isinstance(pval, list) and len(pval) == 2 and isinstance(pval[0], str)
+            if not is_linked:
+                exposed.append({
+                    "id": f"vid_{nid}",
+                    "node_id": str(nid),
+                    "param_name": pname,
+                    "label": f"参考视频 ({title})",
+                    "type": "video",
+                    "required": False,
+                    "default_value": pval if isinstance(pval, str) else "",
+                    "description": "支持上传参考视频，弹出文件系统",
                 })
 
         # 2. 探测独立文本提示词 (CLIPTextEncode / TextString / Primitive)
@@ -1043,7 +1073,14 @@ def auto_detect_exposed_inputs(clean_wf: Dict[str, Any], mapping: Optional[Dict[
                 elif isinstance(pval, str):
                     # 图像类参数按名称推断为 image，其余为 text
                     if any(k in pname.lower() for k in ("image", "frame", "video", "audio", "mask")):
-                        ptype = "image"
+                        if "image" in pname.lower() or "frame" in pname.lower():
+                            ptype = "image"
+                        elif "audio" in pname.lower():
+                            ptype = "audio"
+                        elif "video" in pname.lower():
+                            ptype = "video"
+                        else:
+                            ptype = "image"
                     elif pval.endswith((".safetensors", ".ckpt", ".pth", ".bin", ".pt")) or "vae" in pname.lower() or "ckpt" in pname.lower() or "lora" in pname.lower() or "unet" in pname.lower():
                         ptype = "combo"
                     else:
