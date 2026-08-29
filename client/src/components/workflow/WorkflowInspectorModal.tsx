@@ -230,6 +230,23 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
             description: '支持上传参考视频，弹出文件系统',
           });
         }
+      } else if (node.class_type.includes('VAELoader') || node.class_type.includes('LoraLoader') || node.class_type.includes('CheckpointLoader') || node.class_type.includes('UNETLoader')) {
+        for (const cand of ['vae_name','lora_name','ckpt_name','unet_name']) {
+          const p = node.parameters.find(x => x.name === cand);
+          if (p && !p.is_linked) {
+            const isClip = cand.includes('ckpt')||cand.includes('unet');
+            detected.push({
+              id: `combo_${node.node_id}_${cand}`,
+              node_id: String(node.node_id),
+              param_name: cand,
+              label: `${cand} (${node.title})`,
+              type: 'select',
+              required: false,
+              default_value: p.value||'',
+              description: `${cand} 下拉选择，原白名单选择项恢复`,
+            });
+          }
+        }
       } else if (
         (node.class_type.includes('CLIPTextEncode') || node.class_type.includes('TextString')) &&
         String(node.node_id) !== String(promptNode) &&

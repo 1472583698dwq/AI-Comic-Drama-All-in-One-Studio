@@ -989,13 +989,63 @@ def auto_detect_exposed_inputs(clean_wf: Dict[str, Any], mapping: Optional[Dict[
                             exposed.append({"id": f"num_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"{pname} ({title})", "type": "number", "required": False, "default_value": int(pval) if isinstance(pval, (int,float)) else 1024, "description": "分辨率", "min": 256, "max": 2048, "step": 64})
                         else:
                             exposed.append({"id": f"num_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"{pname} ({title})", "type": "number", "required": False, "default_value": int(pval) if isinstance(pval, (int,float)) else 1, "description": "", "min": 1, "max": 4, "step": 1})
-        # 2.3.1 探测 VAELoader（模型下拉而非手填）
+        # 2.3.1 探测 VAELoader/LoraLoader/CheckpointLoader（模型下拉而非手填，原白名单选择项恢复）
         elif ct == "VAELoader":
             if "vae_name" in inputs:
                 pval = inputs.get("vae_name")
                 is_linked = isinstance(pval, list) and len(pval) == 2 and isinstance(pval[0], str)
                 if not is_linked:
-                    exposed.append({"id": f"combo_{nid}_vae_name", "node_id": str(nid), "param_name": "vae_name", "label": f"VAE模型 ({title})", "type": "combo", "required": False, "default_value": str(pval) if pval else "qwen_image_vae.safetensors", "description": "VAE模型，下拉选择而非手填", "options": []})
+                    # 尝试从 ComfyUI object_info 获取可用 VAE 列表作为下拉选项
+                    vae_choices = []
+                    try:
+                        oi = _fetch_object_info() or {}
+                        vae_choices = oi.get("VAELoader", {}).get("input", {}).get("required", {}).get("vae_name", [[]])[0] or []
+                    except Exception:
+                        vae_choices = []
+                    # 兜底：至少包含当前值
+                    if pval and pval not in vae_choices:
+                        vae_choices = [str(pval)] + vae_choices
+                    exposed.append({"id": f"combo_{nid}_vae_name", "node_id": str(nid), "param_name": "vae_name", "label": f"VAE模型 ({title})", "type": "combo", "required": False, "default_value": str(pval) if pval else "qwen_image_vae.safetensors", "description": "VAE模型，下拉选择而非手填", "options": vae_choices[:50]})
+        elif ct in ("LoraLoader", "LoraLoaderModelOnly"):
+            for pname in ("lora_name", "strength_model", "strength_clip"):
+                if pname not in inputs:
+                    continue
+                pval = inputs.get(pname)
+                is_linked = isinstance(pval, list) and len(pval) == 2 and isinstance(pval[0], str)
+                if is_linked:
+                    continue
+                if pname == "lora_name":
+                    lora_choices = []
+                    try:
+                        oi = _fetch_object_info() or {}
+                        lora_choices = oi.get("LoraLoader", {}).get("input", {}).get("required", {}).get("lora_name", [[]])[0] or []
+                    except Exception:
+                        lora_choices = []
+                    if pval and pval not in lora_choices:
+                        lora_choices = [str(pval)] + lora_choices
+                    exposed.append({"id": f"combo_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"LoRA模型 ({title})", "type": "combo", "required": False, "default_value": str(pval) if pval else "", "description": "LoRA模型，下拉选择", "options": lora_choices[:50]})
+                elif pname == "strength_model":
+                    exposed.append({"id": f"num_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"LoRA强度-模型 ({title})", "type": "number", "required": False, "default_value": float(pval) if isinstance(pval, (int,float)) else 0.8, "description": "0-2", "min": 0, "max": 2, "step": 0.05})
+                elif pname == "strength_clip":
+                    exposed.append({"id": f"num_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"LoRA强度-CLIP ({title})", "type": "number", "required": False, "default_value": float(pval) if isinstance(pval, (int,float)) else 0.8, "description": "0-2", "min": 0, "max": 2, "step": 0.05})
+        elif ct in ("CheckpointLoaderSimple", "CheckpointLoader", "UNETLoader"):
+            ckpt_key = "ckpt_name" if "ckpt_name" in inputs else "unet_name" if "unet_name" in inputs else None
+            if ckpt_key:
+                pval = inputs.get(ckpt_key)
+                is_linked = isinstance(pval, list) and len(pval) == 2 and isinstance(pval[0], str)
+                if not is_linked:
+                    ckpt_choices = []
+                    try:
+                        oi = _fetch_object_info() or {}
+                        if ckpt_key == "ckpt_name":
+                            ckpt_choices = oi.get("CheckpointLoaderSimple", {}).get("input", {}).get("required", {}).get("ckpt_name", [[]])[0] or []
+                        else:
+                            ckpt_choices = oi.get("UNETLoader", {}).get("input", {}).get("required", {}).get("unet_name", [[]])[0] or []
+                    except Exception:
+                        ckpt_choices = []
+                    if pval and pval not in ckpt_choices:
+                        ckpt_choices = [str(pval)] + ckpt_choices
+                    exposed.append({"id": f"combo_{nid}_{ckpt_key}", "node_id": str(nid), "param_name": ckpt_key, "label": f"底模 ({title})", "type": "combo", "required": False, "default_value": str(pval) if pval else "", "description": "底模/UNet，下拉选择", "options": ckpt_choices[:50]})
         # 2.3.2 探测 ResolutionSelector（分辨率三件套独立控件，下拉/滑杆而非手填）
         elif ct == "ResolutionSelector":
             for pname in ("aspect_ratio", "megapixels", "multiple"):
@@ -2310,24 +2360,49 @@ class ComfyWorkflowManager:
         current_mapping = (meta.get("mapping") if meta else None) or auto_generate_mapping(analyze_workflow(clean_wf))
         saved_exposed = (meta.get("exposed_inputs") if meta else None)
         fresh_exposed = auto_detect_exposed_inputs(clean_wf, current_mapping)
-        # 白名单：若用户已保存暴露项且无脏数据，则尊重用户选择的白名单；仅当无保存或含 undefined 脏数据时才用新检测
+        # 白名单与全量：始终以 fresh 34 为基准，确保下拉/数值等独立控件类型正确；已保存的白名单仅用于保留用户自定义 label/别名/default_value
         if saved_exposed is None or len(saved_exposed) == 0:
             exposed_inputs = fresh_exposed
         else:
             has_dirty = any(e.get('param_name')=='undefined' or str(e.get('id','')).endswith('_undefined') for e in saved_exposed)
-            if has_dirty:
-                # 脏数据时以新检测为准，但保留用户已保存的 label/description
+            # 若含脏数据或类型不匹配（如 aspect_ratio 存为 text 但 fresh 为 combo），则以 fresh 为准
+            need_merge = has_dirty or any(
+                any(se.get('node_id')==fe['node_id'] and se.get('param_name')==fe['param_name'] and se.get('type')!=fe.get('type') for se in saved_exposed)
+                for fe in fresh_exposed
+            )
+            if has_dirty or need_merge or len(saved_exposed) < 4:
                 saved_map = {f"{e['node_id']}_{e['param_name']}": e for e in saved_exposed if e.get('param_name') and e.get('param_name')!='undefined'}
                 exposed_inputs = []
                 for fe in fresh_exposed:
                     key = f"{fe['node_id']}_{fe['param_name']}"
                     if key in saved_map:
-                        merged = {**fe, **{k:v for k,v in saved_map[key].items() if k in ('label','description','default_value') and v}}
+                        # 保留用户 label/别名/description/default_value，但 type/options 以 fresh 为准（确保下拉恢复）
+                        merged = {**fe, **{k:v for k,v in saved_map[key].items() if k in ('label','description','default_value') and v not in (None, '')}}
+                        # 保留 alias
+                        if 'alias' in saved_map[key]:
+                            merged['alias'] = saved_map[key]['alias']
                         exposed_inputs.append(merged)
                     else:
                         exposed_inputs.append(fe)
+                # 保留保存中但新检测未覆盖的用户手动添加项
+                fresh_keys = {f"{e['node_id']}_{e['param_name']}" for e in fresh_exposed}
+                for se in saved_exposed:
+                    key = f"{se['node_id']}_{se['param_name']}"
+                    if key not in fresh_keys and se.get('param_name')!='undefined':
+                        exposed_inputs.append(se)
             else:
-                exposed_inputs = saved_exposed
+                # 已保存的白名单有效，但需修正类型/选项为 fresh 的正确值（确保 aspect_ratio 为 combo 而非 text）
+                type_fix_map = {f"{e['node_id']}_{e['param_name']}": e for e in fresh_exposed}
+                exposed_inputs = []
+                for se in saved_exposed:
+                    key = f"{se['node_id']}_{se['param_name']}"
+                    if key in type_fix_map:
+                        fe = type_fix_map[key]
+                        # 以 fresh 的 type/options 为准，保留用户的 label/default_value
+                        merged = {**se, "type": fe.get("type", se.get("type")), "options": fe.get("options", se.get("options"))}
+                        exposed_inputs.append(merged)
+                    else:
+                        exposed_inputs.append(se)
 
         return {
             "workflow_id": workflow_id,
