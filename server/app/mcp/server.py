@@ -733,12 +733,12 @@ class MCPServerRegistry:
         ))
         self.register_tool(MCPToolDefinition(
             name="canvas_create_node",
-            description="[画布] 创建节点，type 需为 nodeRegistry 中的合法类型",
+            description="[画布] 创建节点，type 需为 nodeRegistry 中的合法类型；project_id 不传则使用当前项目",
             category="workflow",
             icon="Plus",
             author="Canvas Engine",
             is_enabled=True,
-            input_schema={"type":"object","properties":{"type":{"type":"string","description":"节点类型，如 shot-card/provider-image/load-image/text-prompt/video/tts"},"position":{"type":"object","description":"{x,y}"},"params":{"type":"object"}},"required":["type"]}
+            input_schema={"type":"object","properties":{"type":{"type":"string","description":"节点类型，如 prompt/image/video/audio/director3d/export/shot-card/comfy-workflow/brief/load-image/text-prompt"},"position":{"type":"object","description":"{x,y} 可选"},"params":{"type":"object","description":"节点初始 data"},"project_id":{"type":"string","description":"归属项目ID，不传则使用上下文项目"}},"required":["type"]}
         ))
         self.register_tool(MCPToolDefinition(
             name="canvas_update_node",
@@ -747,7 +747,7 @@ class MCPServerRegistry:
             icon="Edit",
             author="Canvas Engine",
             is_enabled=True,
-            input_schema={"type":"object","properties":{"node_id":{"type":"string"},"patch":{"type":"object"}},"required":["node_id","patch"]}
+            input_schema={"type":"object","properties":{"node_id":{"type":"string"},"patch":{"type":"object"},"project_id":{"type":"string"}},"required":["node_id","patch"]}
         ))
         self.register_tool(MCPToolDefinition(
             name="canvas_connect",
@@ -756,7 +756,7 @@ class MCPServerRegistry:
             icon="Link",
             author="Canvas Engine",
             is_enabled=True,
-            input_schema={"type":"object","properties":{"source":{"type":"string"},"sourceHandle":{"type":"string"},"target":{"type":"string"},"targetHandle":{"type":"string"}},"required":["source","target"]}
+            input_schema={"type":"object","properties":{"source":{"type":"string"},"sourceHandle":{"type":"string"},"target":{"type":"string"},"targetHandle":{"type":"string"},"project_id":{"type":"string"}},"required":["source","target"]}
         ))
         self.register_tool(MCPToolDefinition(
             name="canvas_execute",
@@ -950,125 +950,49 @@ class MCPServerRegistry:
                 openapi_url = arguments.get("openapi_url") or ""
                 api_key = arguments.get("api_key") or ""
                 definition = arguments.get("definition")
-                # 分支1：直接提供 code（导演编辑后回写或用户粘贴）
+                # 分支1：直接提供 code（导演编辑后回写或用户粘贴）—— 统一创建入口
                 if code and isinstance(code, str) and len(code.strip()) > 20:
-                    import uuid as _uuid0
-                    pid0 = f"prov_{_uuid0.uuid4().hex[:8]}"
-                    data0 = {
-                        "id": pid0,
-                        "name": name,
-                        "kind": kind,
-                        "provider_type": "code",
-                        "language": language if language in ("python","javascript") else "python",
-                        "code": code,
-                        "code_entry": arguments.get("code_entry") or "generate",
-                        "description": f"由导演直接提供代码（{language}）",
-                        "scope": "global",
-                        "enabled": True,
-                    }
-                    if doc_text:
-                        data0["doc_text"] = doc_text[:4000]
-                    # 语法检查
-                    if data0["language"] == "python":
-                        try:
-                            import ast
-                            ast.parse(data0["code"])
-                        except SyntaxError as se:
-                            raise ValueError(f"Python 语法错误: {se}")
-                    from app.models.provider_definition import ProviderDefinition as _PD0
-                    _pd0 = _PD0.model_validate(data0)
-                    if not _pd0.input_schema:
-                        from app.api.provider_routes import _default_input_schema
-                        _pd0.input_schema = _default_input_schema(kind)
-                    if not _pd0.output_schema:
-                        from app.api.provider_routes import _default_output_schema
-                        _pd0.output_schema = _default_output_schema(kind)
-                    from app.providers.custom.manager import custom_provider_manager as _mgr0
-                    saved0 = _mgr0.save_definition(_pd0)
-                    if api_key:
-                        import os, json as _json0
-                        from app.core.config import settings as _settings0
-                        cfg0 = os.path.join(_settings0.STORAGE_DIR, "config_store.json")
-                        d0 = {}
-                        if os.path.exists(cfg0):
-                            try:
-                                with open(cfg0, "r", encoding="utf-8") as f:
-                                    d0 = _json0.load(f)
-                            except: d0={}
-                        if "custom_providers" not in d0: d0["custom_providers"]={}
-                        d0["custom_providers"][pid0]={"api_key": api_key}
-                        d0[f"CUSTOM_PROVIDER_{pid0}"]=api_key
-                        with open(cfg0, "w", encoding="utf-8") as f:
-                            _json0.dump(d0,f,ensure_ascii=False,indent=2)
-                        import os as _os0
-                        _os0.environ[f"CUSTOM_PROVIDER_{pid0}"]=api_key
-                        saved0.auth.key_env = f"CUSTOM_PROVIDER_{pid0}"
-                        _mgr0.save_definition(saved0)
-                    from app.providers.init_providers import register_single_custom_provider as _reg0
-                    _reg0(saved0)
-                    result = {"status": "success", "provider": saved0.to_provider_info(), "mode": "direct_code", "language": language}
+                    from app.api.provider_routes import create_code_source as _ccs
+                    _created = _ccs(
+                        name=name, kind=kind, code=code,
+                        language=language if language in ("python", "javascript") else "python",
+                        code_entry=arguments.get("code_entry"),
+                        description=f"由导演直接提供代码（{language}）",
+                        api_key=api_key or None,
+                        doc_text=doc_text, doc_url=doc_url,
+                    )
+                    result = {"status": "success" if _created["compile_check"].get("ok") else "compile_failed",
+                              "provider": _created["provider"], "mode": "direct_code",
+                              "language": _created["provider"].get("language"),
+                              "compile_check": _created["compile_check"],
+                              **({"hint": "代码未通过沙箱编译体检，请根据 compile_check.error 修正后重新提交"} if not _created["compile_check"].get("ok") else {})}
                 elif definition and isinstance(definition, dict):
-                    # 分支2：直接提供完整 definition（含 code）
-                    import uuid as _uuid
-                    pid = definition.get("id") or f"prov_{_uuid.uuid4().hex[:8]}"
-                    definition["id"] = pid
+                    # 分支2：直接提供完整 definition —— 统一创建入口（schema 规整/超时/保存/注册/Key/体检）
                     definition["kind"] = kind
                     if not definition.get("name"):
                         definition["name"] = name
-                    # 若 definition 已含 code 则直接使用，否则走后续 LLM
-                    if definition.get("code"):
-                        from app.models.provider_definition import ProviderDefinition as _PD
-                        pd = _PD.model_validate(definition)
-                        if api_key:
-                            import os, json as _json
-                            from app.core.config import settings as _settings
-                            cfg_path = os.path.join(_settings.STORAGE_DIR, "config_store.json")
-                            data = {}
-                            if os.path.exists(cfg_path):
-                                try:
-                                    with open(cfg_path, "r", encoding="utf-8") as f:
-                                        data = _json.load(f)
-                                except: data = {}
-                            if "custom_providers" not in data:
-                                data["custom_providers"] = {}
-                            data["custom_providers"][pid] = {"api_key": api_key}
-                            data[f"CUSTOM_PROVIDER_{pid}"] = api_key
-                            with open(cfg_path, "w", encoding="utf-8") as f:
-                                _json.dump(data, f, ensure_ascii=False, indent=2)
-                            os.environ[f"CUSTOM_PROVIDER_{pid}"] = api_key
-                            pd.auth.key_env = f"CUSTOM_PROVIDER_{pid}"
-                        from app.providers.custom.manager import custom_provider_manager as _mgr
-                        saved = _mgr.save_definition(pd)
-                        from app.providers.init_providers import register_single_custom_provider as _reg
-                        _reg(saved)
-                        result = {"status": "success", "provider": saved.to_provider_info(), "mode": "direct_definition"}
-                    else:
-                        # definition 无 code，走 JSON 兼容路径（已废弃，仅迁移）
-                        from app.models.provider_definition import ProviderDefinition as _PD
-                        pd = _PD.model_validate(definition)
-                        saved = custom_provider_manager.save_definition(pd)
-                        if api_key:
-                            import os, json as _json
-                            from app.core.config import settings as _settings
-                            cfg_path = os.path.join(_settings.STORAGE_DIR, "config_store.json")
-                            data = {}
-                            if os.path.exists(cfg_path):
-                                try:
-                                    with open(cfg_path, "r", encoding="utf-8") as f:
-                                        data = _json.load(f)
-                                except: data = {}
-                            if "custom_providers" not in data:
-                                data["custom_providers"] = {}
-                            data["custom_providers"][pid] = {"api_key": api_key}
-                            data[f"CUSTOM_PROVIDER_{pid}"] = api_key
-                            with open(cfg_path, "w", encoding="utf-8") as f:
-                                _json.dump(data, f, ensure_ascii=False, indent=2)
-                            os.environ[f"CUSTOM_PROVIDER_{pid}"] = api_key
-                            pd.auth.key_env = f"CUSTOM_PROVIDER_{pid}"
-                            custom_provider_manager.save_definition(pd)
-                        from app.providers.init_providers import register_single_custom_provider as _reg
-                        _reg(saved)
-                        result = {"status": "success", "provider": saved.to_provider_info(), "mode": "direct_definition"}
+                    from app.api.provider_routes import create_code_source as _ccs
+                    _created = _ccs(
+                        name=definition.get("name") or name,
+                        kind=kind,
+                        code=definition.get("code") or "",
+                        language=definition.get("language") or language or "python",
+                        code_entry=definition.get("code_entry"),
+                        description=definition.get("description") or "由导演提供完整定义",
+                        api_key=api_key or None,
+                        doc_text=definition.get("doc_text") or doc_text or "",
+                        doc_url=definition.get("doc_url") or doc_url or "",
+                        params_schema=definition.get("params_schema"),
+                        input_schema=definition.get("input_schema"),
+                        output_schema=definition.get("output_schema"),
+                        models=definition.get("models"),
+                        default_model=definition.get("default_model"),
+                        provider_id=definition.get("id"),
+                    )
+                    result = {"status": "success" if _created["compile_check"].get("ok") else "compile_failed",
+                              "provider": _created["provider"], "mode": "direct_definition",
+                              "compile_check": _created["compile_check"],
+                              **({"hint": "代码未通过沙箱编译体检，请根据 compile_check.error 修正后重新提交"} if not _created["compile_check"].get("ok") else {})}
                 else:
                     # 分支3：据文档 LLM 生成代码
                     full_doc = doc_text
@@ -1095,15 +1019,9 @@ class MCPServerRegistry:
                     if not full_doc or len(full_doc.strip()) < 10:
                         raise ValueError("请提供 doc_text / doc_url / curl / openapi_url 或 code/definition")
                     from app.pipelines.llm_service import llm_service as _llm
-                    system_prompt = f"""你是生成源代码专家。用户提供了 {kind} 类 API 文档（{language}），请直接生成可执行的携程源码。
-要求：
-- 输出 {language} 代码，入口为 async def generate(ctx, api)（python）或 async function generate(ctx, api)（javascript）
-- ctx 含 prompt/width/height/size/seed/model/style_preset/api_key/reference_images/first_frame_url/duration/text/voice_id/emotion 等，api 含 httpx/asyncio/json/re/time/uuid/download(api.download(url,prefix)->(storage_url,local_path))
-- 必须包含完整请求、鉴权、payload、轮询（视频类用 while+sleep）、错误处理
-- 成功返回 {{"image_url": url}} / {{"video_url": url}} / {{"audio_url": url}}，轮询场景可先返回 task_id 再由框架接管
-- 仅输出代码，不要 markdown、不要解释
-"""
-                    user_prompt = f"kind: {kind}\nlanguage: {language}\nname_hint: {name}\n\nAPI 文档:\n{full_doc[:5000]}"
+                    from app.api.provider_routes import code_gen_system_prompt as _cgsp, create_code_source as _ccs
+                    system_prompt = _cgsp(kind, language)
+                    user_prompt = "kind: " + kind + "\nlanguage: " + language + "\nname_hint: " + (name or "") + "\n\nAPI 文档:\n" + full_doc[:5000]
                     try:
                         code_text = await _llm.chat_completion(
                             messages=[{"role":"system","content":system_prompt},{"role":"user","content":user_prompt}],
@@ -1113,65 +1031,27 @@ class MCPServerRegistry:
                         code_text = await _llm.chat_json(system_prompt=system_prompt, user_prompt=user_prompt, temperature=0.2)
                         if isinstance(code_text, dict):
                             code_text = code_text.get("code") or str(code_text)
-                    import re as _re2
-                    code_text = _re2.sub(r"^```[a-z]*\n", "", code_text.strip())
-                    code_text = _re2.sub(r"\n```$", "", code_text.strip())
-                    if len(code_text) < 50:
-                        raise ValueError("LLM 生成代码过短")
-                    import uuid as _uuid2
-                    pid = f"prov_{_uuid2.uuid4().hex[:8]}"
-                    parsed = {
-                        "id": pid,
-                        "name": name or f"自定义{kind}源",
-                        "kind": kind,
-                        "provider_type": "code",
-                        "language": language,
-                        "code": code_text,
-                        "code_entry": "generate",
-                        "description": f"由导演从文档自动生成（{language}）",
-                        "scope": "global",
-                        "enabled": True,
-                        "doc_text": full_doc[:4000],
-                        "raw_api_doc": full_doc[:4000],
-                    }
-                    if api_key:
-                        parsed["auth"] = {"type": "bearer", "key_env": f"CUSTOM_PROVIDER_{pid}", "prefix": "Bearer "}
-                    if kind == "image":
-                        parsed["input_schema"] = {"type":"object","properties":{"prompt":{"type":"string","x-handle":"text"},"reference_images":{"type":"array","items":{"type":"string","format":"uri"},"x-handle":"image"}},"required":["prompt"]}
-                    elif kind == "video":
-                        parsed["input_schema"] = {"type":"object","properties":{"prompt":{"type":"string","x-handle":"text"},"first_frame":{"type":"string","format":"uri","x-handle":"image"},"reference_images":{"type":"array","items":{"type":"string","format":"uri"},"x-handle":"image"}},"required":["prompt"]}
-                    elif kind == "audio":
-                        parsed["input_schema"] = {"type":"object","properties":{"text":{"type":"string","x-handle":"text"}},"required":["text"]}
-                    if kind == "image":
-                        parsed["output_schema"] = {"type":"object","properties":{"image_url":{"type":"string","format":"uri","x-handle":"image"}}}
-                    elif kind == "video":
-                        parsed["output_schema"] = {"type":"object","properties":{"video_url":{"type":"string","format":"uri","x-handle":"video"}}}
-                    elif kind == "audio":
-                        parsed["output_schema"] = {"type":"object","properties":{"audio_url":{"type":"string","format":"uri","x-handle":"audio"}}}
-                    from app.models.provider_definition import ProviderDefinition as _PD2
-                    from app.providers.custom.manager import custom_provider_manager as _mgr2
-                    pd2 = _PD2.model_validate(parsed)
-                    saved2 = _mgr2.save_definition(pd2)
-                    if api_key:
-                        import os, json as _json2
-                        from app.core.config import settings as _settings2
-                        cfg_path2 = os.path.join(_settings2.STORAGE_DIR, "config_store.json")
-                        data2 = {}
-                        if os.path.exists(cfg_path2):
-                            try:
-                                with open(cfg_path2, "r", encoding="utf-8") as f:
-                                    data2 = _json2.load(f)
-                            except: data2 = {}
-                        if "custom_providers" not in data2:
-                            data2["custom_providers"] = {}
-                        data2["custom_providers"][pid] = {"api_key": api_key}
-                        data2[f"CUSTOM_PROVIDER_{pid}"] = api_key
-                        with open(cfg_path2, "w", encoding="utf-8") as f:
-                            _json2.dump(data2, f, ensure_ascii=False, indent=2)
-                        os.environ[f"CUSTOM_PROVIDER_{pid}"] = api_key
-                    from app.providers.init_providers import register_single_custom_provider as _reg2
-                    _reg2(saved2)
-                    result = {"status": "success", "provider": saved2.to_provider_info(), "mode": "llm_code", "code": code_text}
+                    # 统一创建入口：代码清洗/schema 规整/超时/保存注册/Key/沙箱体检 一条龙
+                    _created = _ccs(
+                        name=name or f"自定义{kind}源", kind=kind, code=code_text, language=language,
+                        description=f"由导演从文档自动生成（{language}）",
+                        api_key=api_key or None, doc_text=full_doc, doc_url=doc_url or "",
+                    )
+                    result = {"status": "success" if _created["compile_check"].get("ok") else "compile_failed",
+                              "provider": _created["provider"], "mode": "llm_code", "code": _created["code"],
+                              "compile_check": _created["compile_check"],
+                              **({"hint": "生成的代码未通过沙箱编译体检，请根据 compile_check.error 修正后调用 update_custom_provider 重新提交"} if not _created["compile_check"].get("ok") else {})}
+                    # 创建即体检（零配额）：结果回传给导演 Agent，坏代码当场自我修正而不是等生成时炸
+                    try:
+                        from app.providers.generic.code_provider import compile_check_code as _ccc
+                        _cc = _ccc(saved2.language or "python", saved2.code or "", saved2.code_entry or "generate")
+                        result["compile_check"] = _cc
+                        if not _cc.get("ok"):
+                            result["status"] = "compile_failed"
+                            result["hint"] = "生成的代码未通过沙箱编译体检，请根据 error 修正后调用 update_custom_provider 重新提交"
+                            print(f"[MCP] register_custom_provider 体检未通过 {pid}: {_cc.get('error')}")
+                    except Exception as _cce:
+                        print(f"[MCP] 体检执行异常: {_cce}")
 
             elif tool_name == "list_custom_providers":
                 from app.providers.custom.manager import custom_provider_manager as _mgr
@@ -1316,9 +1196,162 @@ class MCPServerRegistry:
                     result = {"status": "upgraded", "provider": saved.to_provider_info()}
 
             elif tool_name in ("canvas_query","canvas_create_node","canvas_update_node","canvas_connect","canvas_execute"):
-                # 画布工具为前端透传型：返回指令由前端 ReactFlow 执行，Agent 仅需感知与编排
-                # 此处仅回显指令，前端监听 tool_calls 落盘
-                result = {"tool": tool_name, "arguments": arguments, "hint": "前端画布将执行此指令", "directive": True}
+                # 画布工具：真实持久化到 storage/projects/{id}/canvas.json，前端通过轮询/事件同步
+                from app.providers.project.manager import project_manager as _pm
+                # 尝试从参数或上下文获取 project_id
+                pid = arguments.get("project_id")
+                if not pid and isinstance(project_context, dict):
+                    pid = project_context.get("id") or project_context.get("project_id")
+                if not pid:
+                    # 回退：取最近项目的 canvas（用于 dev 无 project 上下文时）
+                    try:
+                        lst = _pm.list_projects()
+                        if lst:
+                            pid = lst[0].get("id")
+                    except Exception:
+                        pid = None
+                if tool_name == "canvas_query":
+                    if not pid:
+                        result = {"nodes": [], "edges": [], "summary": "暂无项目，无法查询画布"}
+                    else:
+                        snap = _pm.get_canvas(pid)
+                        if not snap:
+                            result = {"project_id": pid, "nodes": [], "edges": [], "summary": "画布为空"}
+                        else:
+                            nodes = snap.get("nodes") or []
+                            edges = snap.get("edges") or []
+                            # 压缩摘要
+                            lines = [f"画布共 {len(nodes)} 节点 {len(edges)} 连线"]
+                            for n in nodes[:10]:
+                                d = n.get("data") or {}
+                                title = (d.get("prompt") or d.get("text") or d.get("brief") or d.get("name") or "")[:24]
+                                lines.append(f"- [{n.get('type')}] {n.get('id')} @({int(n.get('position',{}).get('x',0))},{int(n.get('position',{}).get('y',0))}) {title}")
+                            if len(nodes) > 10:
+                                lines.append(f"… 还有 {len(nodes)-10} 节点")
+                            result = {"project_id": pid, "nodes": nodes, "edges": edges, "summary": "\n".join(lines)}
+                elif tool_name == "canvas_create_node":
+                    if not pid:
+                        raise ValueError("canvas_create_node 需要 project_id（或在上下文中提供 project）")
+                    ntype = arguments.get("type")
+                    if not ntype:
+                        raise ValueError("type 不能为空")
+                    pos = arguments.get("position") or {}
+                    # 兼容 position 为字符串
+                    if isinstance(pos, str):
+                        try:
+                            import json as _js
+                            pos = _js.loads(pos)
+                        except Exception:
+                            pos = {}
+                    x = int(pos.get("x", 120 + (len((_pm.get_canvas(pid) or {}).get("nodes") or []) * 40) % 600))
+                    y = int(pos.get("y", 80 + len((_pm.get_canvas(pid) or {}).get("nodes") or []) * 120))
+                    params = arguments.get("params") or {}
+                    if isinstance(params, str):
+                        try:
+                            import json as _js2
+                            params = _js2.loads(params)
+                        except Exception:
+                            params = {}
+                    snap = _pm.get_canvas(pid) or {"nodes": [], "edges": [], "version": 2}
+                    nodes = snap.get("nodes") or []
+                    # 生成唯一 id
+                    import time as _time, random as _rnd
+                    nid = f"{ntype}_{int(_time.time()*1000)%100000}_{_rnd.randint(100,999)}"
+                    # 避免 id 冲突
+                    existing_ids = {n.get("id") for n in nodes}
+                    while nid in existing_ids:
+                        nid = f"{ntype}_{int(_time.time()*1000)%100000}_{_rnd.randint(100,999)}"
+                    new_node = {"id": nid, "type": ntype, "position": {"x": x, "y": y}, "data": dict(params or {})}
+                    # 确保 data 有基本字段
+                    if ntype == "prompt" and not new_node["data"].get("prompt"):
+                        new_node["data"]["prompt"] = params.get("prompt") or ""
+                    nodes.append(new_node)
+                    snap["nodes"] = nodes
+                    snap["edges"] = snap.get("edges") or []
+                    snap["updated_at"] = _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime())
+                    _pm.save_canvas(pid, snap)
+                    result = {"status": "created", "project_id": pid, "node": new_node, "total_nodes": len(nodes)}
+                elif tool_name == "canvas_update_node":
+                    if not pid:
+                        raise ValueError("canvas_update_node 需要 project_id")
+                    nid = arguments.get("node_id")
+                    patch = arguments.get("patch") or {}
+                    if isinstance(patch, str):
+                        try:
+                            import json as _js3
+                            patch = _js3.loads(patch)
+                        except Exception:
+                            patch = {}
+                    snap = _pm.get_canvas(pid)
+                    if not snap:
+                        raise ValueError(f"项目 {pid} 画布不存在")
+                    nodes = snap.get("nodes") or []
+                    found = False
+                    for n in nodes:
+                        if n.get("id") == nid:
+                            d = n.get("data") or {}
+                            d.update(patch or {})
+                            n["data"] = d
+                            found = True
+                            break
+                    if not found:
+                        raise ValueError(f"节点不存在: {nid}")
+                    snap["nodes"] = nodes
+                    import time as _time2
+                    snap["updated_at"] = _time2.strftime("%Y-%m-%dT%H:%M:%SZ", _time2.gmtime())
+                    _pm.save_canvas(pid, snap)
+                    result = {"status": "updated", "project_id": pid, "node_id": nid, "patch": patch}
+                elif tool_name == "canvas_connect":
+                    if not pid:
+                        raise ValueError("canvas_connect 需要 project_id")
+                    src = arguments.get("source")
+                    tgt = arguments.get("target")
+                    if not src or not tgt:
+                        raise ValueError("source/target 不能为空")
+                    sh = arguments.get("sourceHandle") or arguments.get("source_handle") or ""
+                    th = arguments.get("targetHandle") or arguments.get("target_handle") or ""
+                    snap = _pm.get_canvas(pid)
+                    if not snap:
+                        raise ValueError(f"项目 {pid} 画布不存在")
+                    edges = snap.get("edges") or []
+                    # 去重：同源同目标同柄不再重复
+                    for e in edges:
+                        if e.get("source")==src and e.get("target")==tgt and (e.get("sourceHandle") or "")==(sh or "") and (e.get("targetHandle") or "")==(th or ""):
+                            result = {"status": "already_connected", "project_id": pid, "edge": e}
+                            break
+                    else:
+                        import time as _time3, uuid as _uuid
+                        eid = f"e_{src}_{tgt}_{int(_time3.time()*1000)%10000}"
+                        new_edge = {"id": eid, "source": src, "target": tgt, "sourceHandle": sh, "targetHandle": th, "type": "smoothstep", "animated": True}
+                        # 清理空柄
+                        if not sh:
+                            new_edge.pop("sourceHandle", None)
+                        if not th:
+                            new_edge.pop("targetHandle", None)
+                        edges.append(new_edge)
+                        snap["edges"] = edges
+                        snap["updated_at"] = _time3.strftime("%Y-%m-%dT%H:%M:%SZ", _time3.gmtime())
+                        _pm.save_canvas(pid, snap)
+                        result = {"status": "connected", "project_id": pid, "edge": new_edge, "total_edges": len(edges)}
+                elif tool_name == "canvas_execute":
+                    # 执行画布 DAG（复用 engine，支持按 project_id 加载或按参数直传）
+                    from app.canvas.engine import canvas_engine as _engine
+                    # 优先使用前端传入的 nodes/edges，否则从存储加载
+                    nodes = arguments.get("nodes")
+                    edges = arguments.get("edges")
+                    tgt_ids = arguments.get("target_ids") or arguments.get("targetIds")
+                    if (not nodes or not edges) and pid:
+                        snap = _pm.get_canvas(pid)
+                        if snap:
+                            nodes = snap.get("nodes") or nodes
+                            edges = snap.get("edges") or edges
+                    if not nodes:
+                        raise ValueError("画布为空，无法执行")
+                    exec_res = await _engine.execute_dag(nodes or [], edges or [], project_id=pid, target_ids=tgt_ids)
+                    # 将结果写回节点 data 便于前端展示（可选）
+                    result = {"project_id": pid, "executed": True, "order": exec_res.get("order"), "results": exec_res.get("results")}
+                else:
+                    result = {"tool": tool_name, "arguments": arguments, "hint": "前端画布将执行此指令", "directive": True}
 
             elif tool_name == "director_3d_stage_plan":
                 framing = arguments.get("framing") or "medium"

@@ -109,3 +109,20 @@ body {
 input[type="range"] {
   accent-color: #7C3AED;
 }
+
+/* Canvas select/option high contrast fix */
+select, select option {
+  color: var(--color-text-main);
+  background-color: var(--color-surface);
+}
+select option:checked, select option:hover {
+  background-color: var(--color-surface-tertiary);
+  color: var(--color-text-main);
+}
+/* Ensure canvas inputs follow theme */
+input, textarea, select {
+  color: var(--color-text-main);
+}
+input::placeholder, textarea::placeholder {
+  color: var(--color-text-muted);
+}

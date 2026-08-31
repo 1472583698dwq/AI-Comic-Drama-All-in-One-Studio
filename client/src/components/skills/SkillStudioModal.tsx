@@ -10,8 +10,13 @@ import {
   Flame, 
   ShieldCheck, 
   Film,
-  Play
+  Play,
+  Upload,
+  Trash2,
+  RefreshCw as RefreshIcon,
+  Download
 } from 'lucide-react';
+import { apiService } from '../../services/api';
 import { useSkillStore } from '../../stores/useSkillStore';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { SkillDefinition } from '../../types';
@@ -29,12 +34,57 @@ export const SkillStudioModal: React.FC<SkillStudioModalProps> = ({ isOpen, onCl
   const activeShot = shots.find((s) => s.id === activeShotId) || shots[0];
 
   const [promptOverride, setPromptOverride] = useState('');
+  const [showImport, setShowImport] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importContent, setImportContent] = useState('');
+  const [importName, setImportName] = useState('');
+  const [importing, setImporting] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
       fetchSkills();
     }
   }, [isOpen]);
+
+  const handleImport = async () => {
+    if (!importFile && !importContent.trim()) {
+      alert('请选择 SKILL.md/.zip 文件或粘贴内容');
+      return;
+    }
+    setImporting(true);
+    try {
+      const res = await apiService.importSkill(importFile || undefined, importContent || undefined, importName || undefined);
+      alert(`已导入技能: ${res.skill?.name || importName}`);
+      setShowImport(false);
+      setImportFile(null);
+      setImportContent('');
+      setImportName('');
+      await fetchSkills();
+    } catch (e: any) {
+      alert('导入失败: ' + (e?.message || String(e)));
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const handleDelete = async (skillName: string) => {
+    if (!confirm(`确定删除技能 "${skillName}"？此操作将删除文件系统中的 SKILL.md`)) return;
+    try {
+      await apiService.deleteSkill(skillName);
+      await fetchSkills();
+    } catch (e: any) {
+      alert('删除失败: ' + (e?.message || String(e)));
+    }
+  };
+
+  const handleReload = async () => {
+    try {
+      await apiService.reloadSkills();
+      await fetchSkills();
+    } catch (e: any) {
+      alert('重载失败: ' + (e?.message || String(e)));
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -82,12 +132,27 @@ export const SkillStudioModal: React.FC<SkillStudioModalProps> = ({ isOpen, onCl
             </div>
           </div>
 
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-surface-tertiary transition-all"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={handleReload}
+              className="px-3 py-1.5 rounded-lg bg-surface-secondary border border-border text-xs text-gray-300 hover:text-white hover:border-brand flex items-center gap-1.5"
+              title="重载所有 Skills"
+            >
+              <RefreshIcon className="w-3.5 h-3.5" /> 重载
+            </button>
+            <button
+              onClick={() => setShowImport(true)}
+              className="px-3 py-1.5 rounded-lg bg-brand text-white text-xs font-bold hover:bg-brand-light flex items-center gap-1.5 shadow-md"
+            >
+              <Upload className="w-3.5 h-3.5" /> 导入 Skill
+            </button>
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-surface-tertiary transition-all"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Content Body */}
@@ -100,13 +165,23 @@ export const SkillStudioModal: React.FC<SkillStudioModalProps> = ({ isOpen, onCl
                 <div
                   key={skill.name}
                   onClick={() => setSelectedSkill(skill)}
-                  className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
+                  className={`p-3.5 rounded-xl border cursor-pointer transition-all relative group ${
                     isSelected
                       ? 'bg-surface-tertiary border-accent-orange glow-border'
                       : 'bg-surface-secondary/70 border-border hover:border-border-active'
                   }`}
                 >
-                  <div className="flex items-center space-x-2 mb-1.5">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDelete(skill.name);
+                    }}
+                    className="absolute top-2 right-2 p-1 rounded-lg bg-black/40 text-gray-400 hover:text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all"
+                    title="删除此 Skill"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                  <div className="flex items-center space-x-2 mb-1.5 pr-6">
                     <div className="p-1.5 rounded-lg bg-black/40 border border-white/5">
                       {getSkillIcon(skill.category)}
                     </div>
@@ -138,7 +213,16 @@ export const SkillStudioModal: React.FC<SkillStudioModalProps> = ({ isOpen, onCl
                       <h3 className="text-sm font-bold text-white">{selectedSkill.name}</h3>
                       <span className="text-[10px] text-gray-400">v{selectedSkill.version}</span>
                     </div>
-                    <span className="text-[10px] text-gray-500">作者: {selectedSkill.author}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-gray-500">作者: {selectedSkill.author}</span>
+                      <button
+                        onClick={() => handleDelete(selectedSkill.name)}
+                        className="p-1 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 hover:text-red-300 border border-red-500/20"
+                        title="删除此 Skill"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
                   </div>
                   <p className="text-xs text-gray-300 leading-relaxed">{selectedSkill.description}</p>
                 </div>
@@ -197,6 +281,73 @@ export const SkillStudioModal: React.FC<SkillStudioModalProps> = ({ isOpen, onCl
           </div>
         </div>
       </div>
+
+      {/* Import Skill Modal */}
+      {showImport && (
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowImport(false)}>
+          <div className="bg-surface border border-border rounded-2xl w-full max-w-lg p-5 space-y-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Upload className="w-4 h-4 text-brand" /> 导入 Skill
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-brand/20 text-brand-light border border-brand/30">SKILL.md / .zip</span>
+              </h3>
+              <button onClick={() => setShowImport(false)} className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-surface-tertiary">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-gray-300">上传文件（.md 或 .zip）</label>
+                <input
+                  type="file"
+                  accept=".md,.zip"
+                  onChange={(e) => setImportFile(e.target.files?.[0] || null)}
+                  className="mt-1 w-full text-xs text-gray-300 file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-brand file:text-white file:text-xs file:font-bold hover:file:bg-brand-light"
+                />
+                {importFile && <div className="text-[11px] text-gray-400 mt-1">已选: {importFile.name} ({(importFile.size / 1024).toFixed(1)} KB)</div>}
+              </div>
+
+              <div className="text-center text-[11px] text-gray-500">— 或 —</div>
+
+              <div>
+                <label className="text-xs font-semibold text-gray-300">粘贴 SKILL.md 内容</label>
+                <textarea
+                  value={importContent}
+                  onChange={(e) => setImportContent(e.target.value)}
+                  placeholder={`---\nname: my-awesome-skill\ndescription: 描述\nversion: 1.0.0\ncategory: general\ntools:\n  - generate_image\n---\n\n# 技能说明\n...`}
+                  rows={8}
+                  className="mt-1 w-full bg-black/40 border border-border rounded-xl p-3 text-xs font-mono text-white placeholder-gray-500 focus:outline-none focus:border-brand resize-none"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-gray-300">自定义技能名（可选，留空则从文件解析）</label>
+                <input
+                  value={importName}
+                  onChange={(e) => setImportName(e.target.value)}
+                  placeholder="如: my-skill-name"
+                  className="mt-1 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowImport(false)} className="px-4 py-2 rounded-xl bg-surface-secondary border border-border text-xs text-gray-300 hover:text-white">
+                取消
+              </button>
+              <button
+                onClick={handleImport}
+                disabled={importing || (!importFile && !importContent.trim())}
+                className="px-5 py-2 rounded-xl bg-brand text-white text-xs font-bold hover:bg-brand-light disabled:opacity-40 flex items-center gap-1.5"
+              >
+                {importing ? <RefreshIcon className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                <span>{importing ? '导入中...' : '确认导入'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

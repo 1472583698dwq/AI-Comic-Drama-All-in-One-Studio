@@ -194,6 +194,88 @@ class SkillEngine:
             else:
                 msg = f"【剪映多轨自动精修技能】执行失败: {res_export.error}"
 
+        elif skill.category == "prompt_optimization":
+            # 通用提示词润色：调用 LLM 对 user_prompt / original_prompt 进行增强
+            original = (context.get("original_prompt") or context.get("prompt") or user_prompt or context.get("text") or "").strip()
+            if not original:
+                original = user_prompt.strip() if user_prompt else ""
+            if not original:
+                return SkillExecutionResult(
+                    skill_name=skill_name,
+                    status="error",
+                    execution_time_ms=int((time.time() - start_time) * 1000),
+                    tool_calls=tool_calls_trace,
+                    result_message="提示词为空，无法润色"
+                )
+            # 根据 skill 名称选择润色指令
+            polish_instructions = {
+                "prompt-cinematic-boost": "将以下画面描述润色为电影级英文提示词，追加 cinematic lighting, volumetric lighting, ultra detailed, 8k, masterpiece, depth of field, film grain, rule of thirds 等标签，保持原意，仅返回润色后的英文提示词：",
+                "prompt-detail-enhancer": "将以下提示词补充丰富的细节（服饰、材质、环境、天气、光源），追加 intricate details, ultra sharp, highly detailed, 4k, octane render 等标签，仅返回润色后的英文提示词：",
+                "prompt-anime-optimizer": "将以下描述转换为适配二次元/国漫模型的提示词，自动追加 anime style / guofeng, xianxia 等风格标签与负向 low quality, blurry, deformed，仅返回润色后的提示词：",
+                "dialogue-emotion-polish": "将以下对白台词润色得更具情绪张力，调整标点与语气词，并判断最合适的配音情绪（neutral/intense/sorrow/excited/whispering/fearful），以 JSON 返回 {\"polished_text\": \"...\", \"suggested_emotion\": \"...\"}：",
+                "prompt-master-optimizer": "智能判断以下文本为画面描述或对白，若为画面则按电影感+细节增强，若为台词则按情绪润色，仅返回润色后的文本（若为台词可附情绪）：",
+            }
+            instruction = polish_instructions.get(skill_name) or f"请润色以下提示词，参考技能说明：{skill.instructions[:500]} 仅返回润色后的文本："
+            try:
+                from app.pipelines.llm_service import llm_service
+                import asyncio as _asyncio
+                # 优先使用 chat_completion 直接润色（15s 超时，超时则 fallback）
+                llm_prompt = f"{instruction}\n\n原文：{original}\n\n润色后："
+                # 使用技能自身的 instructions 作为系统提示
+                system_prompt = f"你是专业的提示词润色助手。{skill.instructions[:800]}"
+                try:
+                    polished = await _asyncio.wait_for(
+                        llm_service.chat_completion(
+                            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": llm_prompt}],
+                            temperature=0.7,
+                        ),
+                        timeout=15.0,
+                    )
+                except _asyncio.TimeoutError:
+                    raise RuntimeError("LLM 润色超时（15s），已回退到本地增强")
+                # 清理思维标签与多余引号
+                from app.pipelines.llm_service import strip_think_tags
+                polished = strip_think_tags(polished).strip().strip('"').strip("'").strip()
+                # dialogue 特殊处理：尝试解析 JSON
+                if skill_name == "dialogue-emotion-polish":
+                    import json as _js
+                    try:
+                        # 尝试提取 JSON
+                        import re as _re
+                        m = _re.search(r"\{[^}]*polished_text[^}]*\}", polished, re.DOTALL)
+                        if m:
+                            j = _js.loads(m.group(0))
+                            polished_text = j.get("polished_text") or j.get("text") or polished
+                            emotion = j.get("suggested_emotion") or "neutral"
+                            modified_data.update({"polished_prompt": polished_text.strip(), "polished_text": polished_text.strip(), "suggested_emotion": emotion, "original_prompt": original})
+                            msg = f"已通过【{skill.description}】润色完成，建议情绪：{emotion}"
+                        else:
+                            modified_data.update({"polished_prompt": polished, "polished_text": polished, "original_prompt": original})
+                            msg = f"已通过【{skill.description}】润色完成"
+                    except Exception:
+                        modified_data.update({"polished_prompt": polished, "polished_text": polished, "original_prompt": original})
+                        msg = f"已通过【{skill.description}】润色完成"
+                else:
+                    # 画面提示词：去除可能的中文解释，仅保留英文提示词主体
+                    # 若 LLM 返回了中文解释，尝试提取英文部分
+                    if any("\u4e00" <= c <= "\u9fff" for c in polished[:20]):
+                        # 包含中文，前 20 字有中文，可能是解释，尝试取最后一行英文
+                        lines = [l.strip() for l in polished.split("\n") if l.strip()]
+                        # 找最长的英文行
+                        eng_lines = [l for l in lines if len([c for c in l if "\u4e00" <= c <= "\u9fff"]) < len(l) * 0.3]
+                        if eng_lines:
+                            polished = max(eng_lines, key=len)
+                    modified_data.update({"polished_prompt": polished, "original_prompt": original})
+                    msg = f"已通过【{skill.description}】润色完成"
+                # 记录工具调用
+                tool_calls_trace.append({"tool": "llm_polish", "status": "success", "result": {"polished": polished}})
+            except Exception as e:
+                # LLM 失败回退：简单追加后缀
+                fallback = original + ", cinematic lighting, ultra detailed, masterpiece" if "prompt" in skill_name else original + "！"
+                modified_data.update({"polished_prompt": fallback, "original_prompt": original})
+                tool_calls_trace.append({"tool": "llm_polish", "status": "error", "result": str(e)})
+                msg = f"润色服务暂不可用，已返回增强后缀版本：{str(e)[:80]}"
+
         else:
             msg = f"Skill '{skill_name}' 指令已载入 Agent 运行时并完成执行。"
 

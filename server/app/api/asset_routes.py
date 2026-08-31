@@ -38,6 +38,8 @@ async def batch_create_assets(
     category: str = Form("other"),
     tags: Optional[str] = Form(None),
     visual_prompt: Optional[str] = Form(None),
+    project_id: Optional[str] = Form(None),
+    scope: str = Form("project"),
     files: List[UploadFile] = File(...),
 ):
     tag_list = []
@@ -61,6 +63,8 @@ async def batch_create_assets(
                 continue
             fname = uf.filename or "upload.png"
             base_name = os.path.splitext(fname)[0] or "素材"
+            eff_scope = scope if scope in ("project","global") else "project"
+            eff_proj = None if eff_scope=="global" else project_id
             data = {
                 "name": base_name,
                 "category": category,
@@ -68,6 +72,8 @@ async def batch_create_assets(
                 "tags": tag_list,
                 "visual_prompt": visual_prompt or "",
                 "source": "upload",
+                "project_id": eff_proj,
+                "scope": eff_scope,
             }
             asset = asset_manager.create_asset(data, file_bytes=data_bytes, filename=fname)
             created.append(asset.model_dump())

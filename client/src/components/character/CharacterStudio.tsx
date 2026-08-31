@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { apiService } from '../../services/api';
+import { AiPolishButton } from '../ui/AiPolishButton';
 
 export const CharacterStudio: React.FC = () => {
   const { project, updateCharacter } = useProjectStore();
@@ -194,9 +195,12 @@ export const CharacterStudio: React.FC = () => {
         {/* Character Prompts & Voice Configuration */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="bg-surface p-4 rounded-2xl border border-border space-y-2">
-            <label className="text-xs font-semibold text-white block">
-              ✨ 视觉一致性提示词 (Visual Prompt)
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-white block">
+                ✨ 视觉一致性提示词 (Visual Prompt)
+              </label>
+              <AiPolishButton value={selectedChar.visual_prompt} onPolish={(v: any) => updateCharacter(selectedChar.id, { visual_prompt: v })} contextType="prompt" size="xs" />
+            </div>
             <textarea
               value={selectedChar.visual_prompt}
               onChange={(e) => updateCharacter(selectedChar.id, { visual_prompt: e.target.value })}

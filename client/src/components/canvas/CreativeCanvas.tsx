@@ -5,6 +5,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import { Search, Sparkles, Image as ImageIcon, Film, Box, Library, Cpu, Save, Download, Plug, Globe, Mic, Video as VideoIcon, Type, Plus, Wand2, FileText, Layers, Play, Trash2 } from 'lucide-react';
 import { useProjectListStore } from '../../stores/useProjectListStore';
+import { useThemeStore } from '../../stores/useThemeStore';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { useCanvasStore } from '../../stores/useCanvasStore';
 import { apiService } from '../../services/api';
@@ -73,7 +74,9 @@ const TEMPLATES = [
 const InnerCanvas: React.FC = () => {
   const { project } = useProjectStore();
   const { activeProjectId } = useProjectListStore();
+  const { effectiveTheme } = useThemeStore();
   const pid = activeProjectId || project?.id || null;
+  const isLight = effectiveTheme === 'light';
   const { loadCanvas, debouncedSave } = useCanvasSync(pid);
   const { screenToFlowPosition, getViewport } = useReactFlow();
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
@@ -87,6 +90,8 @@ const InnerCanvas: React.FC = () => {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const loadedRef = useRef(false);
   const pidRef = useRef<string|null>(null);
+  const [mousePos, setMousePos] = useState<{x:number,y:number}|null>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   useEffect(() => {
     const h = (e: any) => setInspectWfId(e.detail?.workflowId || '');
@@ -117,7 +122,9 @@ const InnerCanvas: React.FC = () => {
       setIsLoading(false);
     }).catch((e)=>{ console.warn('[Canvas] load failed', e); clearTimeout(timer); setIsLoading(false); });
     apiService.listAssets({ project_id: pid || undefined, limit: 24 }).then(r=> setAssets(r.assets||[])).catch(()=>{});
-    return ()=> clearTimeout(timer);
+    const onAssetRefresh = () => apiService.listAssets({ project_id: pid || undefined, limit: 24 }).then(r=> setAssets(r.assets||[])).catch(()=>{});
+    window.addEventListener('asset-refresh', onAssetRefresh as any);
+    return ()=> { clearTimeout(timer); window.removeEventListener('asset-refresh', onAssetRefresh as any); };
   }, [pid]);
 
   const histRef = useRef<{nodes:any[],edges:any[]}[]>([]);
@@ -390,13 +397,80 @@ const InnerCanvas: React.FC = () => {
 
   const onDragOver = (e: React.DragEvent)=> { e.preventDefault(); e.dataTransfer.dropEffect='move'; };
 
+  // 鼠标高可见性：跟随光晕 + 抓取态
+  useEffect(()=>{
+    const el = wrapperRef.current;
+    if(!el) return;
+    const onMove = (e: MouseEvent)=> {
+      const rect = el.getBoundingClientRect();
+      setMousePos({x: e.clientX - rect.left, y: e.clientY - rect.top});
+    };
+    const onDown = ()=> setIsDragging(true);
+    const onUp = ()=> setIsDragging(false);
+    el.addEventListener('mousemove', onMove);
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('mouseup', onUp);
+    return ()=> { el.removeEventListener('mousemove', onMove); window.removeEventListener('mousedown', onDown); window.removeEventListener('mouseup', onUp); };
+  }, []);
+
+  // Agent 画布联动：监听导演 Agent 的 canvas 工具结果，实时同步（全流程参与）
+  useEffect(()=>{
+    const onAgentCanvas = (e: any)=>{
+      const { tool, status, result } = e.detail || {};
+      if (status !== 'success' || !result) return;
+      if (['canvas_create_node','canvas_update_node','canvas_connect','canvas_query'].includes(tool)) {
+        if (!pid) return;
+        apiService.getProjectCanvas(pid).then(snap=>{
+          const canvas = (snap as any)?.canvas || snap;
+          if (canvas && Array.isArray(canvas.nodes)) {
+            const withHandlers = canvas.nodes.map((n:any)=> ({...n, data:{...n.data, onUpdate: handleNodeUpdate, onExecute: handleNodeExecute}}));
+            setNodes(withHandlers);
+            if (Array.isArray(canvas.edges)) setEdges(canvas.edges);
+          }
+        }).catch(()=>{});
+      }
+      if (tool === 'canvas_execute' && result?.results) {
+        const resMap: any = result.results || {};
+        setNodes(nds=> nds.map(n=>{
+          const r = resMap[n.id];
+          if (!r || r.status !== 'success') return n;
+          const patch: any = {};
+          if (r.image_url) patch.image_url = r.image_url;
+          if (r.result_url) patch.result_url = r.result_url;
+          if (r.video_url) patch.video_url = r.video_url;
+          if (r.audio_url) patch.audio_url = r.audio_url;
+          if (r.prompt) patch.prompt = r.prompt;
+          if (Object.keys(patch).length) return { ...n, data: {...n.data, ...patch, onUpdate: handleNodeUpdate, onExecute: handleNodeExecute}};
+          return n;
+        }));
+      }
+    };
+    const onAgentCanvasUpdated = ()=>{
+      if (!pid) return;
+      apiService.getProjectCanvas(pid).then(snap=>{
+        const canvas = (snap as any)?.canvas || snap;
+        if (canvas && Array.isArray(canvas.nodes)) {
+          const withHandlers = canvas.nodes.map((n:any)=> ({...n, data:{...n.data, onUpdate: handleNodeUpdate, onExecute: handleNodeExecute}}));
+          setNodes(withHandlers);
+          if (Array.isArray(canvas.edges)) setEdges(canvas.edges);
+        }
+      }).catch(()=>{});
+    };
+    window.addEventListener('agent-canvas-tool' as any, onAgentCanvas);
+    window.addEventListener('agent-canvas-updated' as any, onAgentCanvasUpdated);
+    return ()=> {
+      window.removeEventListener('agent-canvas-tool' as any, onAgentCanvas);
+      window.removeEventListener('agent-canvas-updated' as any, onAgentCanvasUpdated);
+    };
+  }, [pid, handleNodeUpdate, handleNodeExecute]);
+
   if (!pid) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center bg-[#fbfbf9] p-8 text-center space-y-3">
-        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500 to-pink-500 flex items-center justify-center text-xl">📁</div>
-        <p className="text-sm text-zinc-900 font-semibold">请先在「漫剧制作 → 项目看板」创建或打开项目</p>
-        <p className="text-xs text-zinc-500">画布按项目隔离持久化</p>
-        <button onClick={()=> useProjectStore.getState().setActiveTab('projects')} className="px-4 py-2 rounded-xl bg-zinc-900 text-white text-xs">前往项目看板</button>
+      <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-3" style={{background: isLight ? "#E8ECF1" : "#08080B"}}>
+        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-brand to-accent-pink flex items-center justify-center text-xl shadow-lg shadow-brand/20">📁</div>
+        <p className="text-sm [color:var(--color-text-main)] font-semibold">请先在「漫剧制作 → 项目看板」创建或打开项目</p>
+        <p className="text-xs text-gray-400">画布按项目隔离持久化</p>
+        <button onClick={()=> useProjectStore.getState().setActiveTab('projects')} className="px-4 py-2 rounded-xl bg-brand text-white text-xs font-bold hover:bg-brand-light shadow-md">前往项目看板</button>
       </div>
     );
   }
@@ -404,136 +478,140 @@ const InnerCanvas: React.FC = () => {
   const isEmpty = nodes.length===0;
 
   return (
-    <div className="flex-1 flex overflow-hidden bg-[#fbfbf9]">
-      {/* 左侧：极简工具栏 */}
-      <div className="w-[280px] bg-white border-r border-zinc-200 flex flex-col shrink-0">
-        <div className="h-12 px-4 border-b border-zinc-100 flex items-center gap-2 shrink-0">
-          <div className="w-7 h-7 rounded-lg bg-zinc-900 flex items-center justify-center"><Layers className="w-3.5 h-3.5 text-white"/></div>
-          <span className="text-sm font-bold text-zinc-900">工作流</span>
-          <span className="ml-auto text-[10px] px-2 py-1 rounded-full bg-zinc-100 border border-zinc-200 text-zinc-600">6 节点</span>
+    <div className="flex-1 flex overflow-hidden" style={{background: isLight ? "#E8ECF1" : "#08080B", cursor: 'default'}}>
+      {/* 左侧：极简工具栏 — 暗色工业风 */}
+      <div className="w-[280px] bg-surface border-r border-border flex flex-col shrink-0">
+        <div className="h-12 px-4 border-b border-border flex items-center gap-2 shrink-0">
+          <div className="w-7 h-7 rounded-lg bg-brand/10 border border-brand/20 flex items-center justify-center"><Layers className="w-3.5 h-3.5 text-brand"/></div>
+          <span className="text-sm font-bold" style={{color: "var(--color-text-main)"}}>工作流</span>
+          <span className="ml-auto text-[10px] px-2 py-1 rounded-full bg-surface-secondary border border-border text-gray-400">6 节点</span>
         </div>
         <div className="p-3 space-y-4 flex-1 overflow-y-auto">
           {/* 模板 */}
           <div>
-            <div className="text-xs font-bold text-zinc-900 mb-2">一键模板</div>
+            <div className="text-xs font-bold mb-2" style={{color: "var(--color-text-main)"}}>一键模板</div>
             <div className="space-y-2">
               {TEMPLATES.map(t=>(
-                <button key={t.id} onClick={()=> addTemplate(t)} className="w-full text-left p-3 rounded-2xl border border-zinc-200 bg-zinc-50 hover:border-violet-300 hover:bg-white hover:shadow-sm transition-all">
-                  <div className="text-sm font-semibold text-zinc-900">{t.label}</div>
-                  <div className="text-xs text-zinc-500">{t.desc}</div>
-                  <div className="mt-1.5 flex gap-1">{t.nodes.map((n,i)=> <span key={i} className="w-6 h-6 rounded-full bg-white border border-zinc-200 flex items-center justify-center text-[10px]">{n[0].toUpperCase()}</span>)}</div>
+                <button key={t.id} onClick={()=> addTemplate(t)} className="w-full text-left p-3 rounded-2xl border border-border bg-surface-secondary hover:border-brand/40 hover:bg-surface-tertiary hover:shadow-md transition-all">
+                  <div className="text-sm font-semibold" style={{color: "var(--color-text-main)"}}>{t.label}</div>
+                  <div className="text-xs text-gray-400">{t.desc}</div>
+                  <div className="mt-1.5 flex gap-1">{t.nodes.map((n,i)=> <span key={i} className="w-6 h-6 rounded-full bg-surface border border-border flex items-center justify-center text-[10px] text-gray-300">{n[0].toUpperCase()}</span>)}</div>
                 </button>
               ))}
             </div>
           </div>
           {/* 6 节点 */}
           <div>
-            <div className="text-xs font-bold text-zinc-900 mb-2">基础节点</div>
+            <div className="text-xs font-bold mb-2" style={{color: "var(--color-text-main)"}}>基础节点</div>
             <div className="grid grid-cols-2 gap-2">
               {CORE_LIBRARY.map(n=> (
-                <div key={n.type} draggable onDragStart={e=> e.dataTransfer.setData('application/canvas-nodetype', n.type)} className="flex flex-col gap-2 p-3 rounded-2xl bg-white border border-zinc-200 hover:border-zinc-300 hover:shadow-sm cursor-grab active:cursor-grabbing transition-all">
-                  <n.icon className={`w-5 h-5 ${n.color}`}/><div><div className="text-sm font-semibold text-zinc-900 leading-none">{n.label}</div><div className="text-[11px] text-zinc-500 mt-1">{n.desc}</div></div>
+                <div key={n.type} draggable onDragStart={e=> e.dataTransfer.setData('application/canvas-nodetype', n.type)} className="flex flex-col gap-2 p-3 rounded-2xl bg-surface-secondary border border-border hover:border-brand/30 hover:bg-surface-tertiary hover:shadow-md cursor-grab active:cursor-grabbing transition-all">
+                  <n.icon className={`w-5 h-5 ${n.color}`}/><div><div className="text-sm font-semibold [color:var(--color-text-main)] leading-none">{n.label}</div><div className="text-[11px] text-gray-400 mt-1">{n.desc}</div></div>
                 </div>
               ))}
             </div>
-            <div className="mt-2 text-[11px] text-zinc-500 leading-relaxed bg-amber-50 border border-amber-200 rounded-xl p-2.5">💡 每个节点内部可切换 <b>API / ComfyUI</b> 引擎，参考图可从右侧素材拖入或在节点内上传。</div>
+            <div className="mt-2 text-[11px] text-gray-400 leading-relaxed bg-amber-500/10 border border-amber-500/20 rounded-xl p-2.5">💡 每个节点内部可切换 <b>API / ComfyUI</b> 引擎，参考图可从素材库拖入或在节点内上传。</div>
           </div>
           {/* 素材 */}
-          <div className="rounded-2xl border border-zinc-200 bg-white p-3">
-            <div className="text-xs font-bold text-zinc-900 mb-2 flex items-center gap-1.5"><Library className="w-3.5 h-3.5 text-violet-600"/> 素材库 <span className="ml-auto text-[10px] text-zinc-500">{assets.length} 个</span></div>
+          <div className="rounded-2xl border border-border bg-surface p-3">
+            <div className="text-xs font-bold [color:var(--color-text-main)] mb-2 flex items-center gap-1.5"><Library className="w-3.5 h-3.5 text-brand"/> 素材库 <span className="ml-auto text-[10px] text-gray-400">{assets.length} 个</span></div>
             <div className="flex gap-1.5 mb-2">
-              <div className="flex-1 flex items-center gap-1.5 rounded-full bg-zinc-50 border border-zinc-200 px-3 py-1.5 focus-within:border-violet-300 focus-within:bg-white">
-                <Search className="w-3 h-3 text-zinc-400 shrink-0" />
-                <input value={assetQuery} onChange={e=>setAssetQuery(e.target.value)} onKeyDown={e=>e.key==='Enter' && apiService.listAssets({project_id: pid, q: assetQuery}).then(r=>setAssets(r.assets||[]))} placeholder="搜索…" className="flex-1 bg-transparent text-sm placeholder-zinc-400 focus:outline-none min-w-0"/>
+              <div className="flex-1 flex items-center gap-1.5 rounded-full bg-surface-secondary border border-border px-3 py-1.5 focus-within:border-brand/40 focus-within:bg-surface-tertiary">
+                <Search className="w-3 h-3 text-gray-500 shrink-0" />
+                <input value={assetQuery} onChange={e=>setAssetQuery(e.target.value)} onKeyDown={e=>e.key==='Enter' && apiService.listAssets({project_id: pid, q: assetQuery}).then(r=>setAssets(r.assets||[]))} placeholder="搜索…" className="flex-1 bg-transparent text-sm [color:var(--color-text-main)] placeholder-gray-500 focus:outline-none min-w-0"/>
               </div>
-              <button onClick={()=> apiService.listAssets({project_id: pid, q: assetQuery}).then(r=>setAssets(r.assets||[]))} className="w-8 h-8 rounded-full bg-zinc-900 text-white flex items-center justify-center shrink-0 hover:bg-black"><Search className="w-3 h-3"/></button>
+              <button onClick={()=> apiService.listAssets({project_id: pid, q: assetQuery}).then(r=>setAssets(r.assets||[]))} className="w-8 h-8 rounded-full bg-brand text-white flex items-center justify-center shrink-0 hover:bg-brand-light"><Search className="w-3 h-3"/></button>
             </div>
             <div className="grid grid-cols-2 gap-2 max-h-[200px] overflow-y-auto pr-1">
               {assets.map((a:any)=>{
                 const url = a.thumb_url || a.file_url;
                 const abs = url?.startsWith('/')? `http://127.0.0.1:8000${url}`: url;
                 return (
-                  <div key={a.id} draggable onDragStart={e=> { e.dataTransfer.setData('application/canvas-assetid', a.id); e.dataTransfer.setData('text/plain', abs||url);}} className="group bg-zinc-50 border border-zinc-200 rounded-xl overflow-hidden cursor-grab hover:border-violet-300 hover:shadow-sm transition-all">
-                    <div className="aspect-square bg-white flex items-center justify-center overflow-hidden">{abs ? <img src={abs} alt="" className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform"/> : <ImageIcon className="w-5 h-5 text-zinc-300"/>}</div>
-                    <div className="p-2"><div className="text-xs font-medium truncate">{a.name}</div><div className="text-[10px] text-zinc-500">{a.category}</div></div>
+                  <div key={a.id} draggable onDragStart={e=> { e.dataTransfer.setData('application/canvas-assetid', a.id); e.dataTransfer.setData('text/plain', abs||url);}} className="group bg-surface-secondary border border-border rounded-xl overflow-hidden cursor-grab hover:border-brand/30 hover:shadow-md transition-all">
+                    <div className="aspect-square bg-black/40 flex items-center justify-center overflow-hidden">{abs ? <img src={abs} alt="" className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform"/> : <ImageIcon className="w-5 h-5 text-gray-600"/>}</div>
+                    <div className="p-2"><div className="text-xs font-medium truncate [color:var(--color-text-main)]">{a.name}</div><div className="text-[10px] text-gray-400">{a.category}</div></div>
                   </div>
                 );
               })}
-              {assets.length===0 && <div className="col-span-2 text-xs text-zinc-400 text-center py-6">暂无素材，拖入或生成后自动出现</div>}
+              {assets.length===0 && <div className="col-span-2 text-xs text-gray-500 text-center py-6">暂无素材，拖入或生成后自动出现</div>}
             </div>
           </div>
         </div>
-        <div className="p-3 border-t border-zinc-100 space-y-2 bg-zinc-50/50">
-          <button onClick={handleManualSave} disabled={saving} className="w-full py-2.5 rounded-xl bg-zinc-900 text-white text-sm font-bold flex items-center justify-center gap-1.5 disabled:opacity-40 hover:bg-black"><Save className="w-4 h-4"/>{saving?'保存中': '保存画布'}</button>
-          <button onClick={()=> window.dispatchEvent(new CustomEvent('canvas-export-shots'))} className="w-full py-2.5 rounded-xl bg-white border border-zinc-200 text-sm font-bold flex items-center justify-center gap-1.5 hover:bg-zinc-50"><Download className="w-4 h-4"/> 导出为分镜</button>
+        <div className="p-3 border-t border-border space-y-2 bg-surface-secondary/50">
+          <button onClick={handleManualSave} disabled={saving} className="w-full py-2.5 rounded-xl bg-brand text-white text-sm font-bold flex items-center justify-center gap-1.5 disabled:opacity-40 hover:bg-brand-light shadow-md shadow-brand/20"><Save className="w-4 h-4"/>{saving?'保存中': '保存画布'}</button>
+          <button onClick={()=> window.dispatchEvent(new CustomEvent('canvas-export-shots'))} className="w-full py-2.5 rounded-xl bg-surface-secondary border border-border text-sm font-bold [color:var(--color-text-main)] flex items-center justify-center gap-1.5 hover:bg-surface-tertiary hover:border-border-active"><Download className="w-4 h-4"/> 导出为分镜</button>
         </div>
       </div>
 
-      {/* 中间画布 */}
-      <div ref={wrapperRef} className="flex-1 relative bg-[#fbfbf9] flex flex-col min-w-0" onDrop={onDrop} onDragOver={onDragOver}>
-        <div className="h-11 px-3 border-b border-zinc-200 bg-white flex items-center gap-2 shrink-0">
+      {/* 中间画布 — 暗色画布区，鼠标高对比 */}
+      <div ref={wrapperRef} className="flex-1 relative flex flex-col min-w-0" style={{background: isLight ? "#E8ECF1" : "#08080B"}} onDrop={onDrop} onDragOver={onDragOver}>
+        <div className="h-11 px-3 border-b border-border bg-surface flex items-center gap-2 shrink-0">
           <div className="flex items-center gap-2 text-sm">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-zinc-600">项目</span><span className="font-mono text-zinc-900 text-xs">{pid.slice(0,8)}</span><span className="text-zinc-400 hidden sm:inline text-xs">· 点卡片右侧 + 串行 · 拖素材到节点</span>
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow shadow-emerald-500/30" />
+            <span className="text-gray-400">项目</span><span className="font-mono [color:var(--color-text-main)] text-xs">{pid.slice(0,8)}</span><span className="text-gray-500 hidden sm:inline text-xs">· 点卡片右侧 + 串行 · 拖素材到节点</span>
           </div>
           <div className="flex-1" />
           <div className="flex items-center gap-1.5">
-            <span className="hidden sm:inline px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs">● 单点执行 · 结果自动流向下游</span>
-            <button onClick={()=> setNodes(nds=> nds.map((n,i)=> ({...n, position:{ x: 120, y: 80 + i*380 }})))} className="px-3 py-1.5 rounded-full bg-white border border-zinc-200 text-xs font-medium hover:bg-zinc-50">竖向排布</button>
-            <button onClick={()=> { if(confirm('清空画布？')){ setNodes([]); setEdges([]); } }} className="w-8 h-8 rounded-full bg-white border border-zinc-200 text-zinc-500 hover:text-red-500 flex items-center justify-center" title="清空">×</button>
+            <span className="hidden sm:inline px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs">● 单点执行 · 结果自动流向下游</span>
+            <button onClick={()=> setNodes(nds=> nds.map((n,i)=> ({...n, position:{ x: 120, y: 80 + i*380 }})))} className="px-3 py-1.5 rounded-full bg-surface-secondary border border-border text-xs font-medium [color:var(--color-text-main)] hover:bg-surface-tertiary hover:border-border-active">竖向排布</button>
+            <button onClick={()=> { if(confirm('清空画布？')){ setNodes([]); setEdges([]); } }} className="w-8 h-8 rounded-full bg-surface-secondary border border-border text-gray-400 hover:text-red-400 hover:border-red-500/30 flex items-center justify-center" title="清空">×</button>
           </div>
         </div>
         <div className="flex-1 relative">
           {isLoading ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center p-8 gap-4">
-              <div className="w-8 h-8 border-2 border-zinc-300 border-t-violet-600 rounded-full animate-spin"/>
-              <div className="text-sm text-zinc-500">画布加载中…</div>
-              <button onClick={()=> setIsLoading(false)} className="text-xs text-violet-600 hover:underline">跳过等待，直接显示</button>
+            <div className="absolute inset-0 flex flex-col items-center justify-center p-8 gap-4" style={{background: isLight ? "#E8ECF1" : "#08080B"}}>
+              <div className="w-8 h-8 border-2 border-zinc-700 border-t-brand rounded-full animate-spin"/>
+              <div className="text-sm text-gray-400">画布加载中…</div>
+              <button onClick={()=> setIsLoading(false)} className="text-xs text-brand hover:underline">跳过等待，直接显示</button>
             </div>
           ) : isEmpty ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center p-8 gap-6 overflow-y-auto">
-              <div className="w-full max-w-[720px] bg-white border border-zinc-200 rounded-[24px] shadow-sm p-6">
+            <div className="absolute inset-0 flex flex-col items-center justify-center p-8 gap-6 overflow-y-auto" style={{background: isLight ? "#E8ECF1" : "#08080B"}}>
+              <div className="w-full max-w-[720px] bg-surface border border-border rounded-[24px] shadow-xl p-6">
                 <div className="flex items-center gap-3 mb-4">
-                  <div className="w-9 h-9 rounded-xl bg-zinc-900 flex items-center justify-center"><Wand2 className="w-5 h-5 text-white"/></div>
-                  <div><div className="text-[15px] font-bold text-zinc-900">从一个想法开始</div><div className="text-xs text-zinc-500">选择模板或直接在下方输入提示词，一键生成线性工作流</div></div>
+                  <div className="w-9 h-9 rounded-xl bg-brand flex items-center justify-center shadow-md shadow-brand/20"><Wand2 className="w-5 h-5 text-white"/></div>
+                  <div><div className="text-[15px] font-bold [color:var(--color-text-main)]">从一个想法开始</div><div className="text-xs text-gray-400">选择模板或直接在下方输入提示词，一键生成线性工作流</div></div>
                 </div>
                 <div className="grid grid-cols-3 gap-3">
                   {TEMPLATES.map(t=>(
-                    <button key={t.id} onClick={()=> addTemplate(t)} className="p-4 rounded-2xl border-2 border-zinc-200 bg-zinc-50 hover:border-violet-400 hover:bg-white text-left group">
-                      <div className="w-8 h-8 rounded-xl bg-white border border-zinc-200 flex items-center justify-center mb-2 group-hover:border-violet-200"><Layers className="w-4 h-4 text-zinc-700"/></div>
-                      <div className="text-sm font-bold text-zinc-900">{t.label}</div>
-                      <div className="text-xs text-zinc-500 mt-1">{t.desc}</div>
+                    <button key={t.id} onClick={()=> addTemplate(t)} className="p-4 rounded-2xl border-2 border-border bg-surface-secondary hover:border-brand/40 hover:bg-surface-tertiary text-left group">
+                      <div className="w-8 h-8 rounded-xl bg-surface border border-border flex items-center justify-center mb-2 group-hover:border-brand/20"><Layers className="w-4 h-4 text-gray-300"/></div>
+                      <div className="text-sm font-bold [color:var(--color-text-main)]">{t.label}</div>
+                      <div className="text-xs text-gray-400 mt-1">{t.desc}</div>
                     </button>
                   ))}
                 </div>
-                <div className="mt-4 flex items-center gap-2 text-xs text-zinc-500"><div className="h-px flex-1 bg-zinc-200"/><span>或</span><div className="h-px flex-1 bg-zinc-200"/></div>
+                <div className="mt-4 flex items-center gap-2 text-xs text-gray-500"><div className="h-px flex-1 bg-border"/><span>或</span><div className="h-px flex-1 bg-border"/></div>
                 <div className="mt-4 flex gap-2">
                   {CORE_LIBRARY.slice(0,4).map(n=> (
-                    <button key={n.type} onClick={()=> setNodes([createNode(n.type, {x:200, y:120})])} className="flex-1 py-2.5 rounded-xl bg-white border border-zinc-200 text-sm font-medium hover:border-zinc-300 flex flex-col items-center gap-1">
-                      <n.icon className={`w-5 h-5 ${n.color}`}/>{n.label}
+                    <button key={n.type} onClick={()=> setNodes([createNode(n.type, {x:200, y:120})])} className="flex-1 py-2.5 rounded-xl bg-surface-secondary border border-border text-sm font-medium [color:var(--color-text-main)] hover:border-brand/30 hover:bg-surface-tertiary flex flex-col items-center gap-1">
+                      <n.icon className={`w-5 h-5 ${n.color}`}/><span style={{color: "var(--color-text-main)"}}>{n.label}</span>
                     </button>
                   ))}
                 </div>
               </div>
-              <div className="text-xs text-zinc-500">💡 每个节点内可切换 API / ComfyUI，参考图从素材库拖入即可</div>
+              <div className="text-xs text-gray-500">💡 每个节点内可切换 API / ComfyUI，参考图从素材库拖入即可</div>
             </div>
           ) : (
-            <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} isValidConnection={isValidConnection} nodeTypes={nodeTypes} deleteKeyCode="Delete" fitView className="bg-[#fbfbf9]">
-              <Background color="#e5e7eb" gap={20} size={1}/>
-              <Controls className="!bg-white !border-zinc-200 !rounded-xl shadow-sm" />
-              <MiniMap className="!bg-white !border-zinc-200" nodeColor={(n:any)=> n.type==='image' ? '#7c3aed' : n.type==='video' ? '#f97316' : n.type==='audio' ? '#ec4899' : n.type==='prompt' ? '#0ea5e9' : '#111'} />
+            <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} isValidConnection={isValidConnection} nodeTypes={nodeTypes} deleteKeyCode="Delete" fitView className="" style={{background: isLight ? "#E8ECF1" : "#08080B", cursor: isDragging ? "grabbing" : "crosshair"}}>
+              <Background color={isLight ? "#CBD5E1" : "#1E1E2A"} gap={20} size={1}/>
+              <Controls className="!bg-surface !border-border !rounded-xl shadow-lg ![color:var(--color-text-main)] [&_button]:!bg-surface [&_button]:!border-border [&_button]:![color:var(--color-text-main)] hover:[&_button]:!bg-surface-secondary" />
+              <MiniMap className="!bg-surface !border-border" maskColor="rgba(10,10,12,0.8)" nodeColor={(n:any)=> n.type==='image' ? '#7C3AED' : n.type==='video' ? '#F97316' : n.type==='audio' ? '#EC4899' : n.type==='prompt' ? '#06B6D4' : '#3F3F50'} />
             </ReactFlow>
           )}
+          {/* 鼠标高可见光晕（暗底高对比） */}
+          {mousePos && !isEmpty && !isLoading && (
+            <div className="pointer-events-none absolute w-7 h-7 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-brand/70 bg-brand/15 shadow-lg shadow-brand/30 hidden lg:block" style={{left: mousePos.x, top: mousePos.y}} />
+          )}
         </div>
-        {/* 底部输入条（复刻图1） */}
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-[min(720px,92%)] bg-white border border-zinc-200 rounded-[20px] shadow-xl p-3 flex flex-col gap-2">
+        {/* 底部输入条 — 暗色 */}
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-[min(720px,92%)] bg-surface border border-border rounded-[20px] shadow-2xl shadow-black/40 p-3 flex flex-col gap-2">
           <div className="flex items-center gap-2">
             <button onClick={()=> {
               const rect = wrapperRef.current?.getBoundingClientRect();
               const pos = { x: 200, y: 80 + nodes.length*380 };
               const n = createNode('prompt', pos);
               setNodes(nds=> [...nds, n]);
-            }} className="w-8 h-8 rounded-full bg-zinc-900 text-white flex items-center justify-center hover:bg-black"><Plus className="w-4 h-4"/></button>
+            }} className="w-8 h-8 rounded-full bg-brand text-white flex items-center justify-center hover:bg-brand-light shadow-md"><Plus className="w-4 h-4"/></button>
             <input value={bottomPrompt} onChange={e=>setBottomPrompt(e.target.value)} onKeyDown={e=>{
               if(e.key==='Enter' && !e.shiftKey){
                 e.preventDefault();
@@ -560,8 +638,8 @@ const InnerCanvas: React.FC = () => {
                 }
                 setBottomPrompt('');
               }
-            }} placeholder="描述你想要生成的内容…（回车创建提示词节点，Shift+回车换行）" className="flex-1 bg-transparent text-sm placeholder:text-zinc-400 focus:outline-none"/>
-            <span className="text-xs text-zinc-400">{bottomPrompt.length} / 7500</span>
+            }} placeholder="描述你想要生成的内容…（回车创建提示词节点，Shift+回车换行）" className="flex-1 bg-transparent text-sm [color:var(--color-text-main)] placeholder:text-gray-500 focus:outline-none"/>
+            <span className="text-xs text-gray-500">{bottomPrompt.length} / 7500</span>
             <button onClick={()=>{
               if(!bottomPrompt.trim()) return;
               const pos = { x: 200, y: 80 + nodes.length*380 };
@@ -569,12 +647,12 @@ const InnerCanvas: React.FC = () => {
               n.data = {...n.data, prompt: bottomPrompt, text: bottomPrompt};
               setNodes(nds=> [...nds, n]);
               setBottomPrompt('');
-            }} className="w-8 h-8 rounded-full bg-zinc-900 text-white flex items-center justify-center hover:bg-black"><span className="text-sm">↗</span></button>
+            }} className="w-8 h-8 rounded-full bg-brand text-white flex items-center justify-center hover:bg-brand-light shadow-md"><span className="text-sm">↗</span></button>
           </div>
-          <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">
-            <span className="px-2 py-1 rounded-full bg-zinc-100 border border-zinc-200">拖素材到节点</span>
-            <span className="px-2 py-1 rounded-full bg-zinc-100 border border-zinc-200">点卡片右侧 + 串行</span>
-            <span className="ml-auto flex items-center gap-1"><Film className="w-3 h-3"/> 支持图片/视频/音频</span>
+          <div className="flex items-center gap-1.5 text-[11px] text-gray-500">
+            <span className="px-2 py-1 rounded-full bg-surface-secondary border border-border text-gray-400">拖素材到节点</span>
+            <span className="px-2 py-1 rounded-full bg-surface-secondary border border-border text-gray-400">点卡片右侧 + 串行</span>
+            <span className="ml-auto flex items-center gap-1 text-gray-400"><Film className="w-3 h-3"/> 支持图片/视频/音频</span>
           </div>
         </div>
       </div>

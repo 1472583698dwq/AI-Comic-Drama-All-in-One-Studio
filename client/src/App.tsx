@@ -14,6 +14,7 @@ import { SkillStudioModal } from './components/skills/SkillStudioModal';
 import { ConfigView } from './views/ConfigView';
 import { ProjectDashboard } from './views/ProjectDashboard';
 import { ProviderManagerModal } from './components/provider/ProviderManagerModal';
+import { GlobalAiPolish } from './components/ui/GlobalAiPolish';
 const CreativeCanvas = React.lazy(()=> import('./components/canvas/CreativeCanvas').then(m=> ({default: m.CreativeCanvas})));
 import { useProjectStore } from './stores/useProjectStore';
 import { useMcpStore } from './stores/useMcpStore';
@@ -155,6 +156,9 @@ export function App() {
 
       {/* 3. Floating Multi-Modal Director Agent */}
       <AgentChatDrawer />
+
+      {/* 3.1 Global AI Polish (covers all textareas) */}
+      <GlobalAiPolish />
 
       {/* 4. Global Modals */}
       <ScriptImportView

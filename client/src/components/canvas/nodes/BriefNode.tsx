@@ -1,6 +1,7 @@
 import React from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 import { BookOpen, Sparkles } from 'lucide-react';
+import { AiPolishButton } from '../../ui/AiPolishButton';
 
 export const BriefNode: React.FC<NodeProps> = ({ data, id }) => {
   const d:any = data;
@@ -13,6 +14,9 @@ export const BriefNode: React.FC<NodeProps> = ({ data, id }) => {
       <Handle type="source" position={Position.Right} className="!bg-amber-400 !w-2 !h-2"/>
       <Handle type="source" position={Position.Bottom} className="!bg-brand !w-2 !h-2" id="brief"/>
       <div className="p-3 space-y-2">
+        <div className="flex justify-end">
+          <AiPolishButton value={d.brief || ''} onPolish={(v: any) => (d.onUpdate as any)?.(id, { brief: v })} contextType="general" size="xs" label="AI 润色简报" />
+        </div>
         <textarea value={d.brief || ''} onChange={e=> (d.onUpdate as any)?.(id,{brief:e.target.value})} placeholder="粘贴小说/策划简报… 将连到 剧本拆解节点" rows={5} className="w-full bg-[#24242F] border border-[#2A2A32] rounded-xl p-2.5 text-xs text-white placeholder-gray-500 leading-relaxed focus:outline-none focus:border-brand"/>
         <div className="flex gap-1.5">
           <select value={d.style_preset || 'donghua_xianxia'} onChange={e=> (d.onUpdate as any)?.(id,{style_preset:e.target.value})} className="flex-1 bg-[#24242F] border border-[#2A2A32] rounded-xl px-2 py-1 text-xs text-white">

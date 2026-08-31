@@ -4,6 +4,7 @@ import { Type, Image as ImageIcon, Video as VideoIcon, Mic, Box, Download, Plus,
 import { apiService } from '../../../services/api';
 import { useProjectStore } from '../../../stores/useProjectStore';
 import { DynamicControl } from '../controls/DynamicControl';
+import { AiPolishButton } from '../../ui/AiPolishButton';
 
 const API_ORIGIN = typeof window !== 'undefined' && window.location.port === '5173' ? 'http://127.0.0.1:8000' : '';
 // 全局缓存，避免每个节点重复请求导致并发风暴
@@ -34,7 +35,106 @@ function emitAddNext(sourceId: string, pos?: {x:number,y:number}) {
   window.dispatchEvent(new CustomEvent('canvas-add-next', { detail: { sourceId, pos } }));
 }
 
-// 共用：素材选择器弹窗
+// 共用：按生成源 input_schema 渲染"输入映射"控件（去模板后 prompt/首帧等输入由源声明驱动）。
+// prompt/text/首帧图 绑定节点既有状态（上游连线仍可覆盖），其余 text/number/enum 字段写入 dynamic_inputs 透传 ctx。
+// 数组类（reference_images 等）为连线句柄，不在此渲染。
+export const ProviderInputControls: React.FC<{
+  inputSchema: any;
+  values: Record<string, any>;
+  promptValue?: string; onPrompt?: (v: string) => void;
+  textValue?: string; onText?: (v: string) => void;
+  frameValue?: string; onFrame?: (v: string) => void;
+  onChange: (k: string, v: any) => void;
+}> = ({ inputSchema, values, promptValue, onPrompt, textValue, onText, frameValue, onFrame, onChange }) => {
+  if (!inputSchema?.properties) return null;
+  const rows = Object.entries(inputSchema.properties as any).filter(([k, v]: any) => {
+    if (Array.isArray((v as any).type) || (v as any).type === 'array') return false; // 数组=连线句柄
+    const handle = (v as any)['x-handle'] || '';
+    if (handle === 'image' || handle === 'video' || handle === 'audio') return !!onFrame && !handle.includes('[]');
+    return ['text', 'number', 'integer', 'string'].includes((v as any).type) || handle === 'text' || handle === 'number';
+  });
+  if (rows.length === 0) return null;
+  return (
+    <div className="space-y-2 p-2.5 rounded-xl bg-brand/10 border border-brand/20">
+      <div className="text-xs font-semibold text-brand-light">生成源输入映射</div>
+      {rows.map(([k, v]: any) => {
+        const handle = v['x-handle'] || '';
+        const desc = v.description || k;
+        if (handle === 'image' || handle === 'video' || handle === 'audio') {
+          const val = (k === 'first_frame' || k === 'image') ? (frameValue ?? '') : (values[k] ?? '');
+          return (
+            <div key={k} className="space-y-1">
+              <div className="text-[11px] font-medium text-gray-300" title={desc}>{v.title || k} <span className="text-gray-500 font-normal">· {k}</span></div>
+              <label className="flex items-center gap-2 p-2 rounded-xl border border-dashed border-border bg-surface-secondary hover:border-brand/40 cursor-pointer">
+                {val && val.startsWith('data:') ? <img src={val} alt="" className="w-8 h-8 rounded object-cover border border-border"/> : null}
+                <span className="text-xs text-gray-400 truncate flex-1">{val ? `已设置 · 点击更换` : `点击上传（弹出文件系统）`}</span>
+                <input type="file" accept={handle === 'audio' ? 'audio/*' : handle === 'video' ? 'video/*' : 'image/*'} className="hidden" onChange={e => {
+                  const f = e.target.files?.[0]; if (!f) return;
+                  const reader = new FileReader(); reader.onload = () => {
+                    const url = reader.result as string;
+                    if (k === 'first_frame' || k === 'image') { onFrame?.(url); } else { onChange(k, url); }
+                  }; reader.readAsDataURL(f);
+                }}/>
+              </label>
+            </div>
+          );
+        }
+        if (k === 'prompt' && onPrompt) {
+          return (
+            <div key={k} className="space-y-1">
+              <div className="text-[11px] font-medium text-gray-300 flex items-center justify-between" title={desc}>
+                <span>{v.title || '提示词'} <span className="text-gray-500 font-normal">· {k}</span></span>
+                <AiPolishButton value={promptValue ?? ''} onPolish={(v: any)=> onPrompt(v)} contextType="prompt" size="xs" />
+              </div>
+              <textarea rows={2} value={promptValue ?? ''} onChange={e => onPrompt(e.target.value)} placeholder={desc} className="w-full bg-surface-secondary border border-border rounded-xl p-2 text-sm [color:var(--color-text-main)] placeholder:text-gray-500 focus:outline-none focus:border-brand resize-none"/>
+            </div>
+          );
+        }
+        if (k === 'text' && onText) {
+          return (
+            <div key={k} className="space-y-1">
+              <div className="text-[11px] font-medium text-gray-300 flex items-center justify-between" title={desc}>
+                <span>{v.title || '台词/文本'} <span className="text-gray-500 font-normal">· {k}</span></span>
+                <AiPolishButton value={textValue ?? ''} onPolish={(v: any)=> onText(v)} contextType="dialogue" size="xs" />
+              </div>
+              <textarea rows={2} value={textValue ?? ''} onChange={e => onText(e.target.value)} placeholder={desc} className="w-full bg-surface-secondary border border-border rounded-xl p-2 text-sm [color:var(--color-text-main)] placeholder:text-gray-500 focus:outline-none focus:border-brand resize-none"/>
+            </div>
+          );
+        }
+        if (v.type === 'integer' || v.type === 'number') {
+          return (
+            <div key={k} className="space-y-1">
+              <div className="text-[11px] font-medium text-gray-300" title={desc}>{v.title || k} <span className="text-gray-500 font-normal">· {k}</span></div>
+              <input type="number" value={values[k] ?? v.default ?? ''} onChange={e => onChange(k, v.type === 'integer' ? (parseInt(e.target.value) || 0) : (parseFloat(e.target.value) || 0))} className="w-full bg-surface-secondary border border-border rounded-xl px-2.5 py-1.5 text-sm [color:var(--color-text-main)]"/>
+            </div>
+          );
+        }
+        if (v.enum) {
+          return (
+            <div key={k} className="space-y-1">
+              <div className="text-[11px] font-medium text-gray-300" title={desc}>{v.title || k} <span className="text-gray-500 font-normal">· {k}</span></div>
+              <select value={values[k] ?? v.default ?? ''} onChange={e => onChange(k, e.target.value)} className="w-full bg-surface-secondary border border-border rounded-xl px-2.5 py-1.5 text-sm [color:var(--color-text-main)]">
+                <option value="">— 选择 —</option>
+                {v.enum.map((o: any) => <option key={String(o)} value={String(o)}>{String(o)}</option>)}
+              </select>
+            </div>
+          );
+        }
+        return (
+          <div key={k} className="space-y-1">
+            <div className="text-[11px] font-medium text-gray-300 flex items-center justify-between" title={desc}>
+              <span>{v.title || k} <span className="text-gray-500 font-normal">· {k}</span></span>
+              {(k.toLowerCase().includes('prompt') || k.toLowerCase().includes('text') || v.title?.toString().toLowerCase().includes('提示')) && <AiPolishButton value={String(values[k] ?? '')} onPolish={(v: any)=> onChange(k, v)} contextType={k.toLowerCase().includes('prompt') ? 'prompt' : 'general'} size="xs" />}
+            </div>
+            <input type="text" value={values[k] ?? v.default ?? ''} onChange={e => onChange(k, e.target.value)} placeholder={desc} className="w-full bg-surface-secondary border border-border rounded-xl px-2.5 py-1.5 text-sm [color:var(--color-text-main)]"/>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+// 共用：素材选择器弹窗 — 暗色
 const AssetPicker: React.FC<{ onPick: (url:string)=>void, onClose:()=>void, kind?: 'image'|'video'|'audio'}> = ({ onPick, onClose, kind }) => {
   const [assets, setAssets] = useState<any[]>([]);
   const [q, setQ] = useState('');
@@ -42,32 +142,32 @@ const AssetPicker: React.FC<{ onPick: (url:string)=>void, onClose:()=>void, kind
     apiService.listAssets({ limit: 24, q: q || undefined }).then(r=> setAssets(r.assets||[])).catch(()=>{});
   }, [q]);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl w-[720px] max-h-[80vh] overflow-hidden shadow-2xl flex flex-col" onClick={e=>e.stopPropagation()}>
-        <div className="px-4 py-3 border-b border-zinc-200 flex items-center gap-2">
-          <Library className="w-4 h-4 text-violet-500"/><span className="text-sm font-bold">选择素材</span>
-          <input value={q} onChange={e=>setQ(e.target.value)} placeholder="搜索素材…" className="ml-auto flex-1 max-w-[240px] bg-zinc-100 border border-zinc-200 rounded-full px-3 py-1.5 text-sm focus:outline-none focus:border-violet-400"/>
-          <button onClick={onClose} className="ml-2 w-8 h-8 rounded-full bg-zinc-100 flex items-center justify-center hover:bg-zinc-200">×</button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-surface border border-border rounded-2xl w-[720px] max-h-[80vh] overflow-hidden shadow-2xl flex flex-col" onClick={e=>e.stopPropagation()}>
+        <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+          <Library className="w-4 h-4 text-brand"/><span className="text-sm font-bold [color:var(--color-text-main)]">选择素材</span>
+          <input value={q} onChange={e=>setQ(e.target.value)} placeholder="搜索素材…" className="ml-auto flex-1 max-w-[240px] bg-surface-secondary border border-border rounded-full px-3 py-1.5 text-sm [color:var(--color-text-main)] placeholder:text-gray-500 focus:outline-none focus:border-brand"/>
+          <button onClick={onClose} className="ml-2 w-8 h-8 rounded-full bg-surface-secondary border border-border flex items-center justify-center hover:bg-surface-tertiary text-gray-400 hover:[color:var(--color-text-main)]">×</button>
         </div>
-        <div className="flex-1 overflow-y-auto p-4 grid grid-cols-4 gap-3">
+        <div className="flex-1 overflow-y-auto p-4 grid grid-cols-4 gap-3 bg-background">
           {assets.map((a:any)=>{
             const url = a.thumb_url || a.file_url;
             const abs = url?.startsWith('/') ? API_ORIGIN+url : url;
             return (
-              <button key={a.id} onClick={()=> { onPick(abs||url); onClose(); }} className="group border border-zinc-200 rounded-xl overflow-hidden hover:border-violet-400 hover:shadow-md text-left bg-white">
-                <div className="aspect-square bg-zinc-50 flex items-center justify-center overflow-hidden">{abs ? <img src={abs} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform"/> : <ImageIcon className="w-6 h-6 text-zinc-300"/>}</div>
-                <div className="p-2"><div className="text-xs font-medium truncate">{a.name}</div><div className="text-[10px] text-zinc-500">{a.category}</div></div>
+              <button key={a.id} onClick={()=> { onPick(abs||url); onClose(); }} className="group border border-border rounded-xl overflow-hidden hover:border-brand hover:shadow-md text-left bg-surface-secondary">
+                <div className="aspect-square bg-black/40 flex items-center justify-center overflow-hidden">{abs ? <img src={abs} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform"/> : <ImageIcon className="w-6 h-6 text-gray-600"/>}</div>
+                <div className="p-2"><div className="text-xs font-medium truncate [color:var(--color-text-main)]">{a.name}</div><div className="text-[10px] text-gray-400">{a.category}</div></div>
               </button>
             );
           })}
-          {assets.length===0 && <div className="col-span-4 text-center text-sm text-zinc-400 py-12">暂无素材</div>}
+          {assets.length===0 && <div className="col-span-4 text-center text-sm text-gray-500 py-12">暂无素材</div>}
         </div>
       </div>
     </div>
   );
 };
 
-// 壳
+// 壳 — 暗色工业风（与系统一致，鼠标高对比）
 const Shell: React.FC<{ icon: any, label: string, desc?: string, color: string, children: React.ReactNode, id:string, data:any, handles?: React.ReactNode }> = ({ icon:Icon, label, desc, color, children, id, data, handles }) => {
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -77,11 +177,11 @@ const Shell: React.FC<{ icon: any, label: string, desc?: string, color: string, 
     return ()=> document.removeEventListener('mousedown', h);
   }, [showMenu]);
   return (
-    <div className="w-[360px] bg-white border border-zinc-200 rounded-[20px] shadow-[0_8px_24px_rgba(0,0,0,0.08)] overflow-visible relative group">
-      <div className="px-3.5 py-2.5 flex items-center gap-2 border-b border-zinc-100">
-        <div className={`w-7 h-7 rounded-full flex items-center justify-center ${color} bg-zinc-50 border border-zinc-200`}><Icon className="w-3.5 h-3.5"/></div>
-        <div><div className="text-[13px] font-bold text-zinc-900 leading-none">{label}</div>{desc && <div className="text-[11px] text-zinc-500 leading-none mt-0.5">{desc}</div>}</div>
-        <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full bg-zinc-100 border border-zinc-200 text-zinc-500">#{id.slice(-4)}</span>
+    <div className="w-[360px] bg-surface border border-border rounded-[20px] shadow-xl shadow-black/30 overflow-visible relative group hover:border-border-active transition-colors" style={{cursor: 'default'}}>
+      <div className="px-3.5 py-2.5 flex items-center gap-2 border-b border-border">
+        <div className={`w-7 h-7 rounded-full flex items-center justify-center ${color} bg-surface-secondary border border-border`}><Icon className="w-3.5 h-3.5"/></div>
+        <div><div className="text-[13px] font-bold leading-none" style={{color: "var(--color-text-main)"}}>{label}</div>{desc && <div className="text-[11px] text-gray-400 leading-none mt-0.5">{desc}</div>}</div>
+        <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full bg-surface-secondary border border-border text-gray-400">#{id.slice(-4)}</span>
       </div>
       {handles}
       <div className="p-3 space-y-3">
@@ -90,14 +190,14 @@ const Shell: React.FC<{ icon: any, label: string, desc?: string, color: string, 
       {/* 右侧 + 添加下游 */}
       <button
         onClick={()=> setShowMenu(v=>!v)}
-        className="absolute -right-3 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-white border border-zinc-300 shadow-md flex items-center justify-center hover:border-violet-400 hover:text-violet-600 hover:shadow-violet-100 transition-all z-20"
+        className="absolute -right-3 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-surface border border-border shadow-lg flex items-center justify-center [color:var(--color-text-main)] hover:border-brand hover:text-brand hover:shadow-brand/20 transition-all z-20"
         title="添加下一步"
       >
         <Plus className="w-3.5 h-3.5"/>
       </button>
       {showMenu && (
-        <div ref={menuRef} className="absolute -right-2 top-[52%] translate-x-full z-30 w-[180px] bg-white border border-zinc-200 rounded-2xl shadow-xl overflow-hidden py-1">
-          <div className="px-3 py-1.5 text-[11px] font-semibold text-zinc-500">添加下一步</div>
+        <div ref={menuRef} className="absolute -right-2 top-[52%] translate-x-full z-30 w-[180px] bg-surface border border-border rounded-2xl shadow-2xl overflow-hidden py-1">
+          <div className="px-3 py-1.5 text-[11px] font-semibold text-gray-400">添加下一步</div>
           {[
             {type:'prompt', label:'提示词', icon:Type},
             {type:'image', label:'生成图片', icon:ImageIcon},
@@ -106,8 +206,8 @@ const Shell: React.FC<{ icon: any, label: string, desc?: string, color: string, 
             {type:'director3d', label:'3D导演台', icon:Box},
             {type:'export', label:'导出', icon:Download},
           ].map(it=> (
-            <button key={it.type} onClick={()=> { setShowMenu(false); window.dispatchEvent(new CustomEvent('canvas-add-node', { detail:{ sourceId:id, nextType: it.type }})); }} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-violet-50 text-zinc-700 text-sm">
-              <it.icon className="w-3.5 h-3.5 text-zinc-400"/>{it.label}
+            <button key={it.type} onClick={()=> { setShowMenu(false); window.dispatchEvent(new CustomEvent('canvas-add-node', { detail:{ sourceId:id, nextType: it.type }})); }} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-brand/10 text-gray-300 hover:[color:var(--color-text-main)] text-sm">
+              <it.icon className="w-3.5 h-3.5 text-gray-500"/>{it.label}
             </button>
           ))}
         </div>
@@ -127,10 +227,13 @@ export const PromptNode: React.FC<NodeProps> = ({ data, id }) => {
     <Shell id={id} data={d} icon={Type} label="提示词" desc="描述画面/运动" color="text-sky-600">
       <Handle type="source" position={Position.Right} id="prompt" className="!bg-sky-500 !w-3 !h-3 !border-2 !border-white !right-[-6px]" />
       <Handle type="target" position={Position.Left} id="prompt_in" className="!bg-sky-500 !w-2 !h-2 !border-2 !border-white opacity-0" />
-      <textarea value={text} onChange={e=>onChange(e.target.value)} placeholder="例如：赛博朋克少女站在雨夜霓虹街道，电影感，THE DAY..." rows={4} className="w-full bg-zinc-50 border border-zinc-200 rounded-xl p-3 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-violet-400 focus:bg-white resize-none leading-relaxed"/>
-      <div className="flex items-center justify-between text-[11px] text-zinc-500">
+      <textarea value={text} onChange={e=>onChange(e.target.value)} placeholder="例如：赛博朋克少女站在雨夜霓虹街道，电影感，THE DAY..." rows={4} className="w-full bg-surface-secondary border border-border rounded-xl p-3 text-sm [color:var(--color-text-main)] placeholder:text-gray-500 focus:outline-none focus:border-violet-400 focus:bg-surface resize-none leading-relaxed"/>
+      <div className="flex items-center justify-between text-[11px] text-gray-400">
         <span>{text.length} 字 · 将作为下游提示词输入</span>
-        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"/>
+        <div className="flex items-center gap-1.5">
+          <AiPolishButton value={text} onPolish={(v: any)=> onChange(v)} contextType="prompt" size="xs" />
+          <span className="w-2 h-2 rounded-full bg-emerald-500/100 animate-pulse"/>
+        </div>
       </div>
     </Shell>
   );
@@ -154,6 +257,7 @@ export const ImageNode: React.FC<NodeProps> = ({ data, id }) => {
   const [dynamicInputs, setDynamicInputs] = useState(d.dynamic_inputs || {});
   const [exposed, setExposed] = useState<any[]>([]);
   const [providerSchema, setProviderSchema] = useState<any>(null);
+  const [providerInputSchema, setProviderInputSchema] = useState<any>(null);
   const [providerParams, setProviderParams] = useState<Record<string,any>>(d.provider_params || {});
 
   useEffect(()=> {
@@ -202,14 +306,17 @@ export const ImageNode: React.FC<NodeProps> = ({ data, id }) => {
           if(providerParams[k]===undefined && (v as any).default!==undefined) defaults[k]=(v as any).default;
         }
         if(Object.keys(defaults).length) setProviderParams(prev=> ({...defaults, ...prev}));
+        setProviderInputSchema(p.input_schema || null);
       } else if(providerId){
         apiService.getProvider(providerId).then(r=>{
           const s = r.provider?.params_schema || r.raw?.params_schema;
           if(s) setProviderSchema(s);
+          setProviderInputSchema(r.provider?.input_schema || r.raw?.input_schema || null);
         }).catch(()=>{});
       }
     } else {
       setProviderSchema(null);
+      setProviderInputSchema(null);
     }
   }, [engine, providerId, providers]);
 
@@ -285,25 +392,25 @@ export const ImageNode: React.FC<NodeProps> = ({ data, id }) => {
       {/* 参考图已移除：由上游连线或工作流/生成源独立控件提供 */}
       {/* 引擎选择 */}
       <div className="space-y-1.5">
-        <div className="flex items-center justify-between"><span className="text-xs font-medium text-zinc-700">内部操作</span><button onClick={()=> setShowAdvanced(v=>!v)} className="text-[11px] text-violet-600 flex items-center gap-1">{showAdvanced?'收起':'高级'}<ChevronDown className={`w-3 h-3 transition-transform ${showAdvanced?'rotate-180':''}`}/></button></div>
+        <div className="flex items-center justify-between"><span className="text-xs font-medium text-gray-300">内部操作</span><button onClick={()=> setShowAdvanced(v=>!v)} className="text-[11px] text-violet-600 flex items-center gap-1">{showAdvanced?'收起':'高级'}<ChevronDown className={`w-3 h-3 transition-transform ${showAdvanced?'rotate-180':''}`}/></button></div>
         <div className="grid grid-cols-3 gap-1.5">
           {[
             {k:'auto', label:'自动'},
             {k:'provider', label:'API'},
             {k:'comfy', label:'ComfyUI'},
           ].map(o=>(
-            <button key={o.k} onClick={()=>{setEngine(o.k); persist({engine_type:o.k});}} className={`py-1.5 rounded-xl text-xs font-medium border ${engine===o.k?'bg-violet-600 text-white border-violet-600 shadow':'bg-white text-zinc-700 border-zinc-200 hover:border-zinc-300'}`}>{o.label}</button>
+            <button key={o.k} onClick={()=>{setEngine(o.k); persist({engine_type:o.k});}} className={`py-1.5 rounded-xl text-xs font-medium border ${engine===o.k?'bg-violet-600 [color:var(--color-text-main)] border-violet-600 shadow':'bg-surface text-gray-300 border-border hover:border-border'}`}>{o.label}</button>
           ))}
         </div>
         {engine==='provider' && (
-          <select value={providerId} onChange={e=>{setProviderId(e.target.value); persist({provider:e.target.value, provider_id:e.target.value});}} className="w-full bg-white border border-zinc-200 rounded-xl px-2.5 py-2 text-sm text-zinc-900 focus:outline-none focus:border-violet-400">
+          <select value={providerId} onChange={e=>{setProviderId(e.target.value); persist({provider:e.target.value, provider_id:e.target.value});}} className="w-full bg-surface border border-border rounded-xl px-2.5 py-2 text-sm [color:var(--color-text-main)] focus:outline-none focus:border-violet-400">
             <option value="">选择生成源</option>
             {providers.map((p:any)=> <option key={p.id} value={p.id}>{p.display_name||p.name} · {p.kind}</option>)}
           </select>
         )}
         {engine==='provider' && providerSchema?.properties && (
-          <div className="space-y-2 p-2.5 rounded-xl bg-violet-50/50 border border-violet-200">
-            <div className="text-xs font-semibold text-violet-700">生成源独立参数</div>
+          <div className="space-y-2 p-2.5 rounded-xl bg-brand/10 border border-brand/20">
+            <div className="text-xs font-semibold text-brand-light">生成源独立参数</div>
             {Object.entries(providerSchema.properties as any).map(([pname, pdef]:any)=>{
               const spec: any = {
                 id: pname,
@@ -327,14 +434,14 @@ export const ImageNode: React.FC<NodeProps> = ({ data, id }) => {
           </div>
         )}
         {engine==='comfy' && (
-          <select value={workflowId} onChange={e=>{setWorkflowId(e.target.value); persist({workflow_id:e.target.value});}} className="w-full bg-white border border-zinc-200 rounded-xl px-2.5 py-2 text-sm text-zinc-900">
+          <select value={workflowId} onChange={e=>{setWorkflowId(e.target.value); persist({workflow_id:e.target.value});}} className="w-full bg-surface border border-border rounded-xl px-2.5 py-2 text-sm [color:var(--color-text-main)]">
             <option value="">选择 ComfyUI 工作流</option>
             {workflows.map((w:any)=> <option key={w.id} value={w.id}>{w.name||w.id} · {w.node_count}节点</option>)}
           </select>
         )}
         {engine==='comfy' && exposed.length>0 && (
-          <div className="space-y-2 p-2.5 rounded-xl bg-zinc-50 border border-zinc-200">
-            <div className="text-xs font-semibold text-zinc-700">工作流参数</div>
+          <div className="space-y-2 p-2.5 rounded-xl bg-surface-secondary border border-border">
+            <div className="text-xs font-semibold text-gray-300">工作流参数</div>
             {exposed.map((ex:any)=>{
               const key = ex.id||ex.node_id;
               const val = dynamicInputs[key];
@@ -345,11 +452,11 @@ export const ImageNode: React.FC<NodeProps> = ({ data, id }) => {
                   param_name: ex.param_name,
                   label: ex.label || ex.param_name,
                   alias: (ex as any).alias || ex.label,
-                  type: ex.type==='image' ? 'image' : ex.type==='number' ? 'number' : ex.type==='combo' ? 'combo' : ex.type==='boolean' ? 'boolean' : 'text',
+                  type: ex.type==='image' ? 'image' : ex.type==='audio' ? 'audio' : ex.type==='video' ? 'video' : ex.type==='number' ? 'number' : (ex.type==='combo'||ex.type==='select') ? 'combo' : ex.type==='boolean' ? 'boolean' : 'text',
                   required: ex.required,
                   default_value: ex.default_value,
                   description: ex.description,
-                  options: ex.options,
+                  options: ex.options || ex.choices,
                   min: ex.min,
                   max: ex.max,
                   step: ex.step,
@@ -363,10 +470,16 @@ export const ImageNode: React.FC<NodeProps> = ({ data, id }) => {
           </div>
         )}
       </div>
-      <div className={`text-[11px] px-2 py-1 rounded-full border text-center ${isReady ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-amber-50 border-amber-200 text-amber-700'}`}>{isReady ? '● 就绪 · 执行后自动流向下游' : '○ 待输入提示词/上游'}</div>
+        {engine==='provider' && (
+          <ProviderInputControls inputSchema={providerInputSchema} values={dynamicInputs}
+            promptValue={prompt} onPrompt={(v)=>{setPrompt(v); persist({prompt:v, image_prompt:v});}}
+            frameValue={ref} onFrame={(v)=>{setRef(v); persist({reference:v});}}
+            onChange={(k,v)=>{ const n={...dynamicInputs,[k]:v}; setDynamicInputs(n); persist({dynamic_inputs:n}); }}/>
+        )}
+      <div className={`text-[11px] px-2 py-1 rounded-full border text-center ${isReady ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-amber-500/10 border-amber-500/20 text-amber-300'}`}>{isReady ? '● 就绪 · 执行后自动流向下游' : '○ 待输入提示词/上游'}</div>
       {/* 结果 */}
-      {absResult && <div className="rounded-xl overflow-hidden border border-zinc-200"><img src={absResult} alt="" className="w-full"/></div>}
-      <button onClick={handleGenerate} disabled={generating} className="w-full py-2.5 rounded-xl bg-zinc-900 text-white text-sm font-bold flex items-center justify-center gap-1.5 hover:bg-black disabled:opacity-40">
+      {absResult && <div className="rounded-xl overflow-hidden border border-border"><img src={absResult} alt="" className="w-full"/></div>}
+      <button onClick={handleGenerate} disabled={generating} className="w-full py-2.5 rounded-xl bg-brand text-white text-sm font-bold flex items-center justify-center gap-1.5 hover:bg-brand-light disabled:opacity-40">
         {generating ? <><div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin"/> 生成中…</>: <><Sparkles className="w-4 h-4"/> 生成图片</>}
       </button>
       {showPicker && <AssetPicker onPick={(url)=>{setRef(url); persist({reference:url});}} onClose={()=>setShowPicker(false)} kind="image"/>}
@@ -393,6 +506,7 @@ export const VideoGenNode: React.FC<NodeProps> = ({ data, id }) => {
   const [dynamicInputs, setDynamicInputs] = useState(d.dynamic_inputs || {});
   const [exposed, setExposed] = useState<any[]>([]);
   const [providerSchema, setProviderSchema] = useState<any>(null);
+  const [providerInputSchema, setProviderInputSchema] = useState<any>(null);
   const [providerParams, setProviderParams] = useState<Record<string,any>>(d.provider_params || {});
 
   useEffect(()=> {
@@ -435,14 +549,17 @@ export const VideoGenNode: React.FC<NodeProps> = ({ data, id }) => {
           if(providerParams[k]===undefined && (v as any).default!==undefined) defaults[k]=(v as any).default;
         }
         if(Object.keys(defaults).length) setProviderParams(prev=> ({...defaults, ...prev}));
+        setProviderInputSchema(p.input_schema || null);
       } else if(providerId){
         apiService.getProvider(providerId).then(r=>{
           const s = r.provider?.params_schema || r.raw?.params_schema;
           if(s) setProviderSchema(s);
+          setProviderInputSchema(r.provider?.input_schema || r.raw?.input_schema || null);
         }).catch(()=>{});
       }
     } else {
       setProviderSchema(null);
+      setProviderInputSchema(null);
     }
   }, [engine, providerId, providers]);
 
@@ -494,17 +611,17 @@ export const VideoGenNode: React.FC<NodeProps> = ({ data, id }) => {
       {/* 运动描述已移除：由上游或生成源内部提供 */}
       {/* 首帧/参考已移除：由上游连线或独立控件提供 */}
       <div className="grid grid-cols-3 gap-1.5">
-        {(['i2v','r2v','t2v'] as const).map(m=> <button key={m} onClick={()=>{setMode(m); persist({mode:m});}} className={`py-1.5 rounded-xl text-xs font-medium border ${mode===m?'bg-orange-500 text-white border-orange-500':'bg-white text-zinc-700 border-zinc-200'}`}>{m.toUpperCase()}</button>)}
+        {(['i2v','r2v','t2v'] as const).map(m=> <button key={m} onClick={()=>{setMode(m); persist({mode:m});}} className={`py-1.5 rounded-xl text-xs font-medium border ${mode===m?'bg-orange-500 [color:var(--color-text-main)] border-orange-500':'bg-surface text-gray-300 border-border'}`}>{m.toUpperCase()}</button>)}
       </div>
       <div className="space-y-1.5">
-        <div className="flex items-center justify-between"><span className="text-xs font-medium text-zinc-700">内部操作</span><button onClick={()=> setShowAdvanced(v=>!v)} className="text-[11px] text-orange-600 flex items-center gap-1">{showAdvanced?'收起':'高级'}<ChevronDown className={`w-3 h-3 transition-transform ${showAdvanced?'rotate-180':''}`}/></button></div>
+        <div className="flex items-center justify-between"><span className="text-xs font-medium text-gray-300">内部操作</span><button onClick={()=> setShowAdvanced(v=>!v)} className="text-[11px] text-orange-600 flex items-center gap-1">{showAdvanced?'收起':'高级'}<ChevronDown className={`w-3 h-3 transition-transform ${showAdvanced?'rotate-180':''}`}/></button></div>
         <div className="grid grid-cols-3 gap-1.5">
-          {[{k:'auto',l:'自动'},{k:'provider',l:'API'},{k:'comfy',l:'ComfyUI'}].map(o=> <button key={o.k} onClick={()=>{setEngine(o.k); persist({engine_type:o.k});}} className={`py-1.5 rounded-xl text-xs border ${engine===o.k?'bg-zinc-900 text-white border-zinc-900':'bg-white border-zinc-200 text-zinc-700'}`}>{o.l}</button>)}
+          {[{k:'auto',l:'自动'},{k:'provider',l:'API'},{k:'comfy',l:'ComfyUI'}].map(o=> <button key={o.k} onClick={()=>{setEngine(o.k); persist({engine_type:o.k});}} className={`py-1.5 rounded-xl text-xs border ${engine===o.k?'bg-brand text-white border-zinc-900':'bg-surface border-border text-gray-300'}`}>{o.l}</button>)}
         </div>
-        {engine==='provider' && <select value={providerId} onChange={e=>{setProviderId(e.target.value); persist({provider:e.target.value, provider_id:e.target.value});}} className="w-full bg-white border border-zinc-200 rounded-xl px-2.5 py-2 text-sm"><option value="">自动 / 选择视频源</option>{providers.map((p:any)=> <option key={p.id} value={p.id}>{p.display_name||p.name}</option>)}</select>}
+        {engine==='provider' && <select value={providerId} onChange={e=>{setProviderId(e.target.value); persist({provider:e.target.value, provider_id:e.target.value});}} className="w-full bg-surface border border-border rounded-xl px-2.5 py-2 text-sm"><option value="">自动 / 选择视频源</option>{providers.map((p:any)=> <option key={p.id} value={p.id}>{p.display_name||p.name}</option>)}</select>}
         {engine==='provider' && providerSchema?.properties && (
-          <div className="space-y-2 p-2.5 rounded-xl bg-orange-50/50 border border-orange-200">
-            <div className="text-xs font-semibold text-orange-700">生成源独立参数</div>
+          <div className="space-y-2 p-2.5 rounded-xl bg-orange-500/10 border border-orange-500/20">
+            <div className="text-xs font-semibold text-orange-300">生成源独立参数</div>
             {Object.entries(providerSchema.properties as any).map(([pname, pdef]:any)=>{
               const spec: any = {
                 id: pname,
@@ -529,10 +646,10 @@ export const VideoGenNode: React.FC<NodeProps> = ({ data, id }) => {
             })}
           </div>
         )}
-        {engine==='comfy' && <select value={workflowId} onChange={e=>{setWorkflowId(e.target.value); persist({workflow_id:e.target.value});}} className="w-full bg-white border border-zinc-200 rounded-xl px-2.5 py-2 text-sm"><option value="">选择工作流</option>{workflows.map((w:any)=> <option key={w.id} value={w.id}>{w.name||w.id}</option>)}</select>}
+        {engine==='comfy' && <select value={workflowId} onChange={e=>{setWorkflowId(e.target.value); persist({workflow_id:e.target.value});}} className="w-full bg-surface border border-border rounded-xl px-2.5 py-2 text-sm"><option value="">选择工作流</option>{workflows.map((w:any)=> <option key={w.id} value={w.id}>{w.name||w.id}</option>)}</select>}
         {engine==='comfy' && exposed.length>0 && (
-          <div className="space-y-2 p-2.5 rounded-xl bg-zinc-50 border border-zinc-200">
-            <div className="text-xs font-semibold text-zinc-700">工作流参数（独立控件 + 别名）</div>
+          <div className="space-y-2 p-2.5 rounded-xl bg-surface-secondary border border-border">
+            <div className="text-xs font-semibold text-gray-300">工作流参数（独立控件 + 别名）</div>
             {exposed.map((ex:any)=>{
               const key = ex.id||ex.node_id;
               const val = dynamicInputs[key];
@@ -543,11 +660,11 @@ export const VideoGenNode: React.FC<NodeProps> = ({ data, id }) => {
                   param_name: ex.param_name,
                   label: ex.label || ex.param_name,
                   alias: (ex as any).alias || ex.label,
-                  type: ex.type==='image' ? 'image' : ex.type==='number' ? 'number' : ex.type==='combo' ? 'combo' : ex.type==='boolean' ? 'boolean' : 'text',
+                  type: ex.type==='image' ? 'image' : ex.type==='audio' ? 'audio' : ex.type==='video' ? 'video' : ex.type==='number' ? 'number' : (ex.type==='combo'||ex.type==='select') ? 'combo' : ex.type==='boolean' ? 'boolean' : 'text',
                   required: ex.required,
                   default_value: ex.default_value,
                   description: ex.description,
-                  options: ex.options,
+                  options: ex.options || ex.choices,
                   min: ex.min,
                   max: ex.max,
                   step: ex.step,
@@ -564,9 +681,15 @@ export const VideoGenNode: React.FC<NodeProps> = ({ data, id }) => {
       {!showAdvanced && (
         {/* 时长已移除：由生成源独立控件提供 */}
       )}
-      <div className={`text-[11px] px-2 py-1 rounded-full border text-center ${isReady ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-amber-50 border-amber-200 text-amber-700'}`}>{isReady ? '● 就绪 · 执行后自动流向下游' : '○ 待上游首帧/提示词'}</div>
-      {absVideo && <video src={absVideo} controls className="w-full rounded-xl border border-zinc-200 max-h-[160px] bg-black"/>}
-      <button onClick={handleGenerate} disabled={generating} className="w-full py-2.5 rounded-xl bg-zinc-900 text-white text-sm font-bold flex items-center justify-center gap-1.5 hover:bg-black disabled:opacity-40">{generating? <><div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin"/> 生成中…</>: <><Play className="w-4 h-4"/> 生成视频</>}</button>
+        {engine==='provider' && (
+          <ProviderInputControls inputSchema={providerInputSchema} values={dynamicInputs}
+            promptValue={prompt} onPrompt={(v)=>{setPrompt(v); persist({prompt:v, video_prompt:v});}}
+            frameValue={firstFrame} onFrame={(v)=>{setFirstFrame(v); persist({first_frame:v, first_frame_url:v});}}
+            onChange={(k,v)=>{ const n={...dynamicInputs,[k]:v}; setDynamicInputs(n); persist({dynamic_inputs:n}); }}/>
+        )}
+      <div className={`text-[11px] px-2 py-1 rounded-full border text-center ${isReady ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-amber-500/10 border-amber-500/20 text-amber-300'}`}>{isReady ? '● 就绪 · 执行后自动流向下游' : '○ 待上游首帧/提示词'}</div>
+      {absVideo && <video src={absVideo} controls className="w-full rounded-xl border border-border max-h-[160px] bg-black"/>}
+      <button onClick={handleGenerate} disabled={generating} className="w-full py-2.5 rounded-xl bg-brand text-white text-sm font-bold flex items-center justify-center gap-1.5 hover:bg-brand-light disabled:opacity-40">{generating? <><div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin"/> 生成中…</>: <><Play className="w-4 h-4"/> 生成视频</>}</button>
       {showPicker && <AssetPicker onPick={(url)=>{setFirstFrame(url); persist({first_frame:url, first_frame_url:url});}} onClose={()=> setShowPicker(false)} kind="image"/>}
     </Shell>
   );
@@ -586,7 +709,9 @@ export const AudioNode: React.FC<NodeProps> = ({ data, id }) => {
   const [audioUrl, setAudioUrl] = useState(d.audio_url || '');
   const [audioEl, setAudioEl] = useState<HTMLAudioElement|null>(null);
   const [providerSchema, setProviderSchema] = useState<any>(null);
+  const [providerInputSchema, setProviderInputSchema] = useState<any>(null);
   const [providerParams, setProviderParams] = useState<Record<string,any>>(d.provider_params || {});
+  const [dynamicInputs, setDynamicInputs] = useState<Record<string,any>>(d.dynamic_inputs || {});
 
   useEffect(()=>{
     apiService.listProviders({ kind:'audio', include_builtin:true }).then(r=> setProviders(r.providers||[])).catch(()=>{});
@@ -623,9 +748,11 @@ export const AudioNode: React.FC<NodeProps> = ({ data, id }) => {
     } else if(engine==='auto' && providerId){
       const p = providers.find((x:any)=> x.id===providerId);
       if(p?.params_schema?.properties) setProviderSchema(p.params_schema);
+      setProviderInputSchema(p?.input_schema || null);
     } else {
       // auto 无独立 provider 时仍可展示通用 audio 参数（speed/pitch/volume）
       setProviderSchema(null);
+      setProviderInputSchema(null);
     }
   }, [engine, providerId, providers]);
 
@@ -636,9 +763,9 @@ export const AudioNode: React.FC<NodeProps> = ({ data, id }) => {
     setGenerating(true);
     try{
       const prov = engine==='auto'? undefined : providerId;
-      const res = await apiService.generateTTS(text, voiceId, emotion, { provider: prov, ...providerParams });
+      const res = await apiService.generateTTS(text, voiceId, emotion, { provider: prov, ...providerParams, ...dynamicInputs });
       setAudioUrl(res.audio_url);
-      persist({ text, prompt:text, audio_url: res.audio_url, voice_id: voiceId, emotion, provider: prov||providerId, provider_id: prov||providerId, engine_type: engine, provider_params: providerParams });
+      persist({ text, prompt:text, audio_url: res.audio_url, voice_id: voiceId, emotion, provider: prov||providerId, provider_id: prov||providerId, engine_type: engine, provider_params: providerParams, dynamic_inputs: dynamicInputs });
     }catch(e:any){ alert(e.message); } finally{ setGenerating(false); }
   };
   const handlePlay = ()=>{
@@ -653,21 +780,21 @@ export const AudioNode: React.FC<NodeProps> = ({ data, id }) => {
       <Handle type="source" position={Position.Right} id="audio" className="!bg-pink-500 !w-3 !h-3 !border-2 !border-white"/>
       {/* 文本已移除：由上游连线或生成源内部提供 */}
       <div className="grid grid-cols-2 gap-1.5">
-        {[{k:'auto',l:'自动'},{k:'provider',l:'API'}].map(o=> <button key={o.k} onClick={()=>{setEngine(o.k); persist({engine_type:o.k});}} className={`py-1.5 rounded-xl text-xs border ${engine===o.k?'bg-pink-500 text-white border-pink-500':'bg-white border-zinc-200 text-zinc-700'}`}>{o.l}</button>)}
+        {[{k:'auto',l:'自动'},{k:'provider',l:'API'}].map(o=> <button key={o.k} onClick={()=>{setEngine(o.k); persist({engine_type:o.k});}} className={`py-1.5 rounded-xl text-xs border ${engine===o.k?'bg-pink-500 [color:var(--color-text-main)] border-pink-500':'bg-surface border-border text-gray-300'}`}>{o.l}</button>)}
       </div>
-      <select value={providerId} onChange={e=>{setProviderId(e.target.value); persist({provider:e.target.value, provider_id:e.target.value});}} className="w-full bg-white border border-zinc-200 rounded-xl px-2.5 py-2 text-sm">
+      <select value={providerId} onChange={e=>{setProviderId(e.target.value); persist({provider:e.target.value, provider_id:e.target.value});}} className="w-full bg-surface border border-border rounded-xl px-2.5 py-2 text-sm">
         {providers.length? providers.map((p:any)=><option key={p.id} value={p.id}>{p.display_name||p.name}</option>) : <><option value="minimax">MiniMax</option><option value="elevenlabs">ElevenLabs</option></>}
         {!providers.find(p=>p.id===providerId) && providerId && <option value={providerId}>{providerId}</option>}
       </select>
-      <select value={voiceId} onChange={e=>{setVoiceId(e.target.value); persist({voice_id:e.target.value});}} className="w-full bg-white border border-zinc-200 rounded-xl px-2.5 py-2 text-sm">
+      <select value={voiceId} onChange={e=>{setVoiceId(e.target.value); persist({voice_id:e.target.value});}} className="w-full bg-surface border border-border rounded-xl px-2.5 py-2 text-sm">
         {voices.length? voices.map((v:any)=> <option key={v.voice_id||v.id} value={v.voice_id||v.id}>{v.voice_name||v.name||v.voice_id}</option>) : <option value={voiceId}>{voiceId}</option>}
       </select>
-      <select value={emotion} onChange={e=>{setEmotion(e.target.value); persist({emotion:e.target.value});}} className="w-full bg-white border border-zinc-200 rounded-xl px-2.5 py-2 text-sm">
+      <select value={emotion} onChange={e=>{setEmotion(e.target.value); persist({emotion:e.target.value});}} className="w-full bg-surface border border-border rounded-xl px-2.5 py-2 text-sm">
         <option value="neutral">平静</option><option value="intense">怒吼</option><option value="sorrow">悲痛</option><option value="excited">兴奋</option><option value="whispering">低语</option>
       </select>
       {providerSchema?.properties && (
-        <div className="space-y-2 p-2.5 rounded-xl bg-pink-50/50 border border-pink-200">
-          <div className="text-xs font-semibold text-pink-700">生成源独立参数</div>
+        <div className="space-y-2 p-2.5 rounded-xl bg-pink-500/10 border border-pink-500/20">
+          <div className="text-xs font-semibold text-pink-300">生成源独立参数</div>
           {Object.entries(providerSchema.properties as any).map(([pname, pdef]:any)=>{
             if(['speed','pitch','volume'].includes(pname) && false) return null;
             const spec: any = {
@@ -692,9 +819,14 @@ export const AudioNode: React.FC<NodeProps> = ({ data, id }) => {
           })}
         </div>
       )}
-      <div className={`text-[11px] px-2 py-1 rounded-full border text-center ${isReady ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-amber-50 border-amber-200 text-amber-700'}`}>{isReady ? '● 就绪 · 执行后自动流向下游' : '○ 待输入文本/上游'}</div>
-      <button onClick={handleGenerate} disabled={generating} className="w-full py-2.5 rounded-xl bg-zinc-900 text-white text-sm font-bold flex items-center justify-center gap-1.5 hover:bg-black disabled:opacity-40">{generating? <><div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin"/> 生成中…</>: <><Volume2 className="w-4 h-4"/> 生成配音</>}</button>
-      {audioUrl && <button onClick={handlePlay} className="w-full py-2 rounded-xl bg-white border border-zinc-200 text-sm flex items-center justify-center gap-1.5 hover:bg-zinc-50"><Play className="w-3.5 h-3.5"/>{audioEl?'暂停':'试听'}</button>}
+        {engine==='provider' && (
+          <ProviderInputControls inputSchema={providerInputSchema} values={dynamicInputs}
+            textValue={text} onText={(v)=>{setText(v); persist({text:v, prompt:v});}}
+            onChange={(k,v)=>{ const n={...dynamicInputs,[k]:v}; setDynamicInputs(n); persist({dynamic_inputs:n}); }}/>
+        )}
+      <div className={`text-[11px] px-2 py-1 rounded-full border text-center ${isReady ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-amber-500/10 border-amber-500/20 text-amber-300'}`}>{isReady ? '● 就绪 · 执行后自动流向下游' : '○ 待输入文本/上游'}</div>
+      <button onClick={handleGenerate} disabled={generating} className="w-full py-2.5 rounded-xl bg-brand text-white text-sm font-bold flex items-center justify-center gap-1.5 hover:bg-brand-light disabled:opacity-40">{generating? <><div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin"/> 生成中…</>: <><Volume2 className="w-4 h-4"/> 生成配音</>}</button>
+      {audioUrl && <button onClick={handlePlay} className="w-full py-2 rounded-xl bg-surface border border-border text-sm flex items-center justify-center gap-1.5 hover:bg-surface-secondary"><Play className="w-3.5 h-3.5"/>{audioEl?'暂停':'试听'}</button>}
     </Shell>
   );
 };
@@ -709,18 +841,18 @@ export const Director3DMinimalNode: React.FC<NodeProps> = ({ data, id }) => {
   return (
     <Shell id={id} data={d} icon={Box} label="3D导演台" desc="机位 / 运镜编排" color="text-amber-600">
       <Handle type="target" position={Position.Left} id="prompt" className="!bg-sky-500 !w-3 !h-3 !border-2 !border-white" style={{top:'30%'}}/>
-      <Handle type="source" position={Position.Right} id="camera_prompt" className="!bg-amber-500 !w-3 !h-3 !border-2 !border-white"/>
+      <Handle type="source" position={Position.Right} id="camera_prompt" className="!bg-amber-500/100 !w-3 !h-3 !border-2 !border-white"/>
       <div className="grid grid-cols-2 gap-1.5">
-        <select value={framing} onChange={e=>{setFraming(e.target.value); persist({framing:e.target.value});}} className="bg-white border border-zinc-200 rounded-xl px-2.5 py-2 text-sm">
+        <select value={framing} onChange={e=>{setFraming(e.target.value); persist({framing:e.target.value});}} className="bg-surface border border-border rounded-xl px-2.5 py-2 text-sm">
           <option value="extreme_close_up">大特写</option><option value="close_up">特写</option><option value="medium">中景</option><option value="full">全景</option><option value="long">远景</option><option value="bird_eye">鸟瞰</option><option value="low_angle">仰角</option>
         </select>
-        <select value={motion} onChange={e=>{setMotion(e.target.value); persist({motion:e.target.value});}} className="bg-white border border-zinc-200 rounded-xl px-2.5 py-2 text-sm">
+        <select value={motion} onChange={e=>{setMotion(e.target.value); persist({motion:e.target.value});}} className="bg-surface border border-border rounded-xl px-2.5 py-2 text-sm">
           <option value="static">固定</option><option value="push_in">推镜</option><option value="pull_out">拉镜</option><option value="orbit">环绕</option><option value="pan_left">左摇</option><option value="pan_right">右摇</option>
         </select>
       </div>
-      <label className="flex items-center gap-2 text-xs text-zinc-700">焦距 {focal}mm<input type="range" min={16} max={135} value={focal} onChange={e=>{setFocal(Number(e.target.value)); persist({focal_length_mm:Number(e.target.value)});}} className="flex-1 accent-amber-500"/></label>
-      <div className="rounded-xl bg-amber-50 border border-amber-200 p-2.5 font-mono text-xs text-amber-800 break-words">{d.minimax_camera_prompt || `[Camera: ${framing} · ${motion} · ${focal}mm]`}</div>
-      <button onClick={()=> (d.onExecute as any)?.(id)} className="w-full py-2 rounded-xl bg-amber-500 text-white text-sm font-bold hover:bg-amber-600">计算机位</button>
+      <label className="flex items-center gap-2 text-xs text-gray-300">焦距 {focal}mm<input type="range" min={16} max={135} value={focal} onChange={e=>{setFocal(Number(e.target.value)); persist({focal_length_mm:Number(e.target.value)});}} className="flex-1 accent-amber-500"/></label>
+      <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 p-2.5 font-mono text-xs text-amber-800 break-words">{d.minimax_camera_prompt || `[Camera: ${framing} · ${motion} · ${focal}mm]`}</div>
+      <button onClick={()=> (d.onExecute as any)?.(id)} className="w-full py-2 rounded-xl bg-amber-500/100 [color:var(--color-text-main)] text-sm font-bold hover:bg-amber-600">计算机位</button>
     </Shell>
   );
 };
@@ -755,10 +887,10 @@ export const ExportNode: React.FC<NodeProps> = ({ data, id }) => {
     <Shell id={id} data={d} icon={Download} label="导出" desc="成片 / 剪映草稿" color="text-emerald-600">
       <Handle type="target" position={Position.Left} id="video" className="!bg-orange-500 !w-3 !h-3 !border-2 !border-white" style={{top:'32%'}}/>
       <Handle type="target" position={Position.Left} id="audio" className="!bg-pink-500 !w-3 !h-3 !border-2 !border-white" style={{top:'58%'}}/>
-      <textarea value={desc} onChange={e=>{setDesc(e.target.value); (d.onUpdate as any)?.(id,{export_desc:e.target.value});}} placeholder="导出备注（可选）" rows={2} className="w-full bg-zinc-50 border border-zinc-200 rounded-xl p-2.5 text-sm placeholder:text-zinc-400 focus:outline-none focus:border-emerald-300"/>
-      <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-2.5 text-xs text-emerald-800 leading-relaxed">将自动聚合上游 <b>视频+音频</b> 生成剪映草稿，可携带时间线。若无视频，将导出项目结构。</div>
-      <button onClick={handleExport} className="w-full py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-bold flex items-center justify-center gap-1.5 hover:bg-emerald-700"><Download className="w-4 h-4"/> 导出剪映草稿</button>
-      <button onClick={()=> window.dispatchEvent(new CustomEvent('canvas-export-shots'))} className="w-full py-2 rounded-xl bg-white border border-zinc-200 text-sm font-medium hover:bg-zinc-50">导出为分镜到项目</button>
+      <textarea value={desc} onChange={e=>{setDesc(e.target.value); (d.onUpdate as any)?.(id,{export_desc:e.target.value});}} placeholder="导出备注（可选）" rows={2} className="w-full bg-surface-secondary border border-border rounded-xl p-2.5 text-sm placeholder:text-gray-500 focus:outline-none focus:border-emerald-300"/>
+      <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/20 p-2.5 text-xs text-emerald-800 leading-relaxed">将自动聚合上游 <b>视频+音频</b> 生成剪映草稿，可携带时间线。若无视频，将导出项目结构。</div>
+      <button onClick={handleExport} className="w-full py-2.5 rounded-xl bg-emerald-600 [color:var(--color-text-main)] text-sm font-bold flex items-center justify-center gap-1.5 hover:bg-emerald-700"><Download className="w-4 h-4"/> 导出剪映草稿</button>
+      <button onClick={()=> window.dispatchEvent(new CustomEvent('canvas-export-shots'))} className="w-full py-2 rounded-xl bg-surface border border-border text-sm font-medium hover:bg-surface-secondary">导出为分镜到项目</button>
     </Shell>
   );
 };

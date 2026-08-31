@@ -85,6 +85,127 @@ async def execute_skill(req: SkillExecuteRequest):
     """执行指定 Skill 并自动触发其声明的 MCP 工具链与系统能力"""
     return await skill_engine.execute_skill(req.skill_name, req.context, req.user_prompt)
 
+@router.post("/skills/import")
+async def import_skill(
+    file: UploadFile = File(None),
+    content: str = Form(None),
+    name_overwrite: str = Form(None),
+):
+    """导入 Skill：支持上传 SKILL.md / .zip 或直接粘贴内容"""
+    import os, re, zipfile, io, yaml
+    from app.skills.engine import SKILLS_ROOT_DIR
+
+    raw_content = None
+    filename = ""
+
+    if file and file.filename:
+        filename = file.filename.lower()
+        data = await file.read()
+        if not data or len(data) == 0:
+            raise HTTPException(status_code=400, detail="上传文件为空")
+        if filename.endswith(".zip"):
+            # 解压 zip，寻找 SKILL.md
+            try:
+                with zipfile.ZipFile(io.BytesIO(data)) as zf:
+                    # 寻找 SKILL.md
+                    skill_md_name = None
+                    for n in zf.namelist():
+                        if n.endswith("SKILL.md") or n.endswith(".skill.md"):
+                            skill_md_name = n
+                            break
+                    if not skill_md_name:
+                        raise ValueError("zip 包内未找到 SKILL.md")
+                    raw_content = zf.read(skill_md_name).decode("utf-8")
+                    filename = skill_md_name
+            except zipfile.BadZipFile as e:
+                raise HTTPException(status_code=400, detail=f"zip 解析失败: {e}")
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=str(e))
+        elif filename.endswith(".md"):
+            try:
+                raw_content = data.decode("utf-8")
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"文件解码失败: {e}")
+        else:
+            raise HTTPException(status_code=400, detail="仅支持 .md 或 .zip 文件")
+    elif content and content.strip():
+        raw_content = content.strip()
+        filename = "pasted_skill.md"
+    else:
+        raise HTTPException(status_code=400, detail="请上传 SKILL.md/.zip 文件或粘贴 SKILL.md 内容")
+
+    # 校验 frontmatter
+    if not raw_content or not raw_content.strip().startswith("---"):
+        raise HTTPException(status_code=400, detail="SKILL.md 需以 YAML frontmatter (---) 开头")
+    m = re.match(r"^---\s*\n(.*?)\n---\s*\n(.*)$", raw_content, re.DOTALL)
+    if not m:
+        raise HTTPException(status_code=400, detail="SKILL.md frontmatter 解析失败，需为 --- 包裹的 YAML")
+    try:
+        meta = yaml.safe_load(m.group(1)) or {}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"YAML 解析失败: {e}")
+    skill_name = (name_overwrite or meta.get("name") or "").strip()
+    if not skill_name:
+        # 尝试从文件名推断
+        skill_name = os.path.splitext(os.path.basename(filename))[0] if filename else "imported-skill"
+        skill_name = re.sub(r"[^a-zA-Z0-9_-]", "-", skill_name).strip("-") or "imported-skill"
+    # 规范化
+    skill_name = re.sub(r"[^a-zA-Z0-9_-]", "-", skill_name)
+    if not skill_name:
+        raise HTTPException(status_code=400, detail="技能名称无效")
+
+    # 保存到 skills/{name}/SKILL.md
+    dest_dir = os.path.join(SKILLS_ROOT_DIR, skill_name)
+    os.makedirs(dest_dir, exist_ok=True)
+    dest_path = os.path.join(dest_dir, "SKILL.md")
+    # 若已存在，覆盖
+    with open(dest_path, "w", encoding="utf-8") as f:
+        f.write(raw_content)
+
+    # 重载
+    try:
+        skill_engine.reload_skills()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"重载失败: {e}")
+
+    imported = skill_engine.get_skill(skill_name)
+    if not imported:
+        raise HTTPException(status_code=500, detail="导入后未找到技能，请检查 SKILL.md 格式")
+
+    return {"status": "imported", "skill": imported.model_dump(), "total": len(skill_engine.list_skills())}
+
+@router.delete("/skills/{skill_name}")
+async def delete_skill(skill_name: str):
+    """删除指定 Skill（仅删除文件系统）"""
+    import os, shutil
+    from app.skills.engine import SKILLS_ROOT_DIR
+    skill = skill_engine.get_skill(skill_name)
+    if not skill:
+        raise HTTPException(status_code=404, detail=f"Skill 不存在: {skill_name}")
+    # 防止误删内置关键技能？允许删除所有，由用户负责
+    dest_dir = os.path.join(SKILLS_ROOT_DIR, skill_name)
+    if os.path.exists(dest_dir):
+        try:
+            shutil.rmtree(dest_dir)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"删除失败: {e}")
+    else:
+        # 可能是单文件
+        fp = skill.file_path
+        if fp and os.path.exists(fp):
+            try:
+                os.remove(fp)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"删除失败: {e}")
+    skill_engine.reload_skills()
+    return {"status": "deleted", "skill_name": skill_name}
+
+@router.post("/skills/reload")
+async def reload_skills():
+    """重载所有 Skills"""
+    skill_engine.reload_skills()
+    return {"status": "reloaded", "total": len(skill_engine.list_skills()), "skills": [s.model_dump() for s in skill_engine.list_skills()]}
+
 # ============================================================
 # 剧本拆解（真实 MiniMax LLM）
 # ============================================================
@@ -743,7 +864,7 @@ async def pipeline_full_run(req: PipelineRunRequest):
 # 导演 Agent 实时通道（真 LLM 决策，暴露全部生成能力）
 # ============================================================
 
-AGENT_SYSTEM_PROMPT = """你是「AI漫剧导演 Agent」，运行在 MiniMax AI漫剧 Studio 中。
+AGENT_SYSTEM_PROMPT_BODY = """你是「AI漫剧导演 Agent」，运行在 MiniMax AI漫剧 Studio 中。
 用户会用自然语言向你下达导演指令。你可以调用以下 MCP 工具（已全部动态注册，所有生成能力均对你开放）：
 
 **图片生成（动态Provider）：**
@@ -795,6 +916,16 @@ AGENT_SYSTEM_PROMPT = """你是「AI漫剧导演 Agent」，运行在 MiniMax AI
 - 多生成源：画布中每个 Provider 节点可独立存在，生图/视频/TTS 节点通过连线绑定具体 Provider，不再全局单选
 - 用户说“画布/无限画布/连线/节点/批量生成/参考图/用工作流/让画布执行” → 优先 canvas_query 感知画布，再用 canvas_create_node/canvas_connect 编排，最后 canvas_execute 触发。参考图场景必须创建 load-image/load-image-batch 并连到 video.reference_images 或 comfy-workflow 的 image 输入
 
+**多轮执行策略（循环模式专用）：**
+- 把用户目标拆解为步骤清单，逐轮执行：每轮基于上一轮工具结果决定下一个动作
+- 只有当所有步骤都完成、或确认无法继续时，才停止调用工具并输出最终总结
+- 严禁在目标未完成时提前汇报；每轮自问："用户的目标全部达成了吗？还有哪一步没做？"
+- 工具返回 error 时，分析原因并尝试修正参数重试，或改用其它工具达成同一目标
+- 单轮可并行调用多个相互独立的工具以提高效率（按需而定，无硬性上限）"""
+
+# 单轮 JSON 兜底模式（llm_service.chat_json，无 LangChain/ainvoke 失败时）使用的提示词：保留 JSON 输出约束
+AGENT_SYSTEM_PROMPT = AGENT_SYSTEM_PROMPT_BODY + """
+
 请严格输出 JSON（无 markdown 杂质）：
 {
   "reply": "给用户的简短中文回复",
@@ -802,6 +933,9 @@ AGENT_SYSTEM_PROMPT = """你是「AI漫剧导演 Agent」，运行在 MiniMax AI
   "suggested_actions": ["建议用户下一步的中文操作"]
 }
 不需要调用工具时 tool_calls 为空数组。最多调用 2 个工具。"""
+
+# LangChain 多轮循环模式使用的提示词：原生 tool calling，多步持续执行不再被 JSON 约束压制
+AGENT_LOOP_SYSTEM_PROMPT = AGENT_SYSTEM_PROMPT_BODY
 
 @router.websocket("/ws/agent")
 async def websocket_agent_endpoint(websocket: WebSocket):
@@ -852,7 +986,6 @@ async def websocket_agent_endpoint(websocket: WebSocket):
                         context=context,
                         session_id=session_id,
                         websocket=websocket,
-                        max_iterations=6,
                         streaming=True,
                     )
                     await websocket.send_json({
@@ -1248,7 +1381,6 @@ async def http_agent_chat(req: AgentChatRequest):
                 context=req.context or {},
                 session_id=session_id,
                 websocket=None,
-                max_iterations=6,
                 streaming=False,
             )
             return {
@@ -1352,7 +1484,6 @@ async def http_agent_chat_stream(req: AgentChatRequest):
             context=req.context or {},
             session_id=session_id,
             websocket=bridge,  # 复用 websocket 接口（send_json）
-            max_iterations=6,
             streaming=True,
         ))
 

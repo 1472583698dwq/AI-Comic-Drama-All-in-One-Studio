@@ -1,5 +1,6 @@
 import React from 'react';
 import { Upload, Image as ImageIcon } from 'lucide-react';
+import { AiPolishButton } from '../../ui/AiPolishButton';
 
 export type ControlSpec = {
   id: string;
@@ -31,41 +32,45 @@ export const DynamicControl: React.FC<{
   const isAudio = spec.type==='audio';
   const isVideo = spec.type==='video';
   const isCombo = spec.type==='combo' || (spec.options && spec.options.length>0);
+  // 下拉选项并入当前值，避免已保存的值不在枚举中时显示为空
+  const rawOptions = (spec.options||[]).map(o=>String(o));
+  const strVal = value==null||value==='' ? '' : String(value);
+  const comboOptions = strVal && !rawOptions.includes(strVal) ? [strVal, ...rawOptions] : rawOptions;
   const isNumber = spec.type==='number';
   const isBool = spec.type==='boolean';
 
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] font-medium text-zinc-700 truncate" title={desc}>{label} <span className="text-zinc-400 font-normal">· {spec.param_name}</span> {spec.required && <span className="text-red-500">*</span>}</span>
+        <span className="text-[11px] font-medium text-gray-300 truncate" title={desc}>{label} <span className="text-gray-500 font-normal">· {spec.param_name}</span> {spec.required && <span className="text-red-500">*</span>}</span>
         {onAliasChange && <button onClick={()=>{
           const nv = prompt('重命名/注释（显示名）', label);
           if(nv && nv!==label) onAliasChange(nv);
-        }} className="text-[10px] text-violet-600 hover:underline shrink-0">✎ 别名</button>}
+        }} className="text-[10px] text-brand hover:underline shrink-0">✎ 别名</button>}
       </div>
-      {desc && <div className="text-[10px] text-zinc-500 leading-tight line-clamp-2">{desc}</div>}
+      {desc && <div className="text-[10px] text-gray-500 leading-tight line-clamp-2">{desc}</div>}
       {isMedia ? (
-        <label className="flex items-center gap-2 p-2 rounded-xl border border-dashed border-zinc-300 bg-zinc-50 hover:bg-white hover:border-violet-300 cursor-pointer">
-          <div className="w-8 h-8 rounded bg-white border border-zinc-200 flex items-center justify-center shrink-0 overflow-hidden">
+        <label className="flex items-center gap-2 p-2 rounded-xl border border-dashed border-border bg-surface-secondary hover:bg-surface-secondary hover:border-brand/40 cursor-pointer">
+          <div className="w-8 h-8 rounded bg-surface-secondary border border-border flex items-center justify-center shrink-0 overflow-hidden">
             {value ? (
               isImage ? <img src={value} alt="" className="w-full h-full object-cover"/> :
               isAudio ? <span className="text-[10px] font-mono truncate px-1">{String(value).slice(0,12)}…</span> :
               <span className="text-[10px]">🎬</span>
             ) : (
-              isImage ? <ImageIcon className="w-4 h-4 text-zinc-400"/> :
+              isImage ? <ImageIcon className="w-4 h-4 text-gray-500"/> :
               isAudio ? <span className="text-xs">🎵</span> :
               <span className="text-xs">🎬</span>
             )}
           </div>
-          <span className="text-xs text-zinc-600 truncate flex-1">{value ? `已选择${isAudio?'音频':isVideo?'视频':'图片'} · 点击更换` : `点击上传${isAudio?'音频':isVideo?'视频':'图片'} / 拖拽素材 · 弹出文件系统`}</span>
+          <span className="text-xs text-gray-400 truncate flex-1">{value ? `已选择${isAudio?'音频':isVideo?'视频':'图片'} · 点击更换` : `点击上传${isAudio?'音频':isVideo?'视频':'图片'} / 拖拽素材 · 弹出文件系统`}</span>
           <input type="file" accept={isImage ? "image/*" : isAudio ? "audio/*" : "video/*"} className="hidden" onChange={e=>{
             const f=e.target.files?.[0]; if(!f) return;
             // 弹出文件系统后读取为 DataURL，自动映射到对应句柄（image/audio/video）
             const reader=new FileReader(); reader.onload=()=> onChange(reader.result as string); reader.readAsDataURL(f);
           }} />
         </label>
-      ) : isCombo ? (
-        <select value={value ?? spec.default_value ?? ''} onChange={e=>{
+      ) : isCombo && comboOptions.length>0 ? (
+        <select value={strVal || String(spec.default_value ?? '')} onChange={e=>{
           const v=e.target.value;
           // 保留数字类型
           if(spec.type==='number'){
@@ -74,22 +79,32 @@ export const DynamicControl: React.FC<{
           } else {
             onChange(v);
           }
-        }} className="w-full bg-white border border-zinc-200 rounded-xl px-2.5 py-1.5 text-sm text-zinc-900">
+        }} className="w-full bg-surface-secondary border border-border rounded-xl px-2.5 py-1.5 text-sm [color:var(--color-text-main)]">
           <option value="">{spec.required?'请选择':'自动'}</option>
-          {(spec.options||[]).map(o=> <option key={o} value={o}>{o}</option>)}
+          {comboOptions.map(o=> <option key={o} value={o}>{o}</option>)}
         </select>
+      ) : isCombo ? (
+        // combo 无可选选项（如 ComfyUI 离线拿不到枚举）时退化为可编辑文本，避免空下拉无法输入
+        <input type="text" value={value ?? ''} onChange={e=> onChange(e.target.value)} placeholder={spec.description||''} className="w-full bg-surface-secondary border border-border rounded-xl px-2.5 py-1.5 text-sm [color:var(--color-text-main)]"/>
       ) : isNumber ? (
         <div className="flex items-center gap-2">
-          <input type="range" min={spec.min??0} max={spec.max??100} step={spec.step??1} value={value ?? spec.default_value ?? 0} onChange={e=> onChange(Number(e.target.value))} className="flex-1 accent-violet-600"/>
-          <input type="number" value={value ?? spec.default_value ?? ''} onChange={e=> onChange(e.target.value===''? '' : Number(e.target.value))} className="w-20 bg-white border border-zinc-200 rounded-lg px-2 py-1 text-sm text-zinc-900"/>
+          <input type="range" min={spec.min??0} max={spec.max??100} step={spec.step??1} value={value ?? spec.default_value ?? 0} onChange={e=> onChange(Number(e.target.value))} className="flex-1 accent-brand"/>
+          <input type="number" value={value ?? spec.default_value ?? ''} onChange={e=> onChange(e.target.value===''? '' : Number(e.target.value))} className="w-20 bg-surface-secondary border border-border rounded-lg px-2 py-1 text-sm [color:var(--color-text-main)]"/>
         </div>
       ) : isBool ? (
         <label className="flex items-center gap-2 cursor-pointer">
           <input type="checkbox" checked={!!value} onChange={e=> onChange(e.target.checked)} className="rounded"/>
-          <span className="text-xs text-zinc-700">{value ? '是' : '否'}</span>
+          <span className="text-xs text-gray-300">{value ? '是' : '否'}</span>
         </label>
       ) : (
-        <textarea value={value ?? ''} onChange={e=> onChange(e.target.value)} placeholder={spec.description||''} rows={spec.param_name==='prompt' || spec.param_name==='text' ? 2 : 1} className="w-full bg-white border border-zinc-200 rounded-xl p-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-violet-400 resize-none"/>
+        <div className="space-y-1.5">
+          {(spec.param_name === 'prompt' || spec.param_name === 'text' || spec.param_name === 'image_prompt' || (spec.label && String(spec.label).includes('提示'))) && (
+            <div className="flex justify-end">
+              <AiPolishButton value={String(value ?? '')} onPolish={(v: any) => onChange(v)} contextType={spec.param_name === 'text' ? 'dialogue' : 'prompt'} size="xs" />
+            </div>
+          )}
+          <textarea value={value ?? ''} onChange={e=> onChange(e.target.value)} placeholder={spec.description||''} rows={spec.param_name==='prompt' || spec.param_name==='text' ? 2 : 1} className="w-full bg-surface-secondary border border-border rounded-xl p-2 text-sm [color:var(--color-text-main)] placeholder:text-gray-500 focus:outline-none focus:border-brand resize-none"/>
+        </div>
       )}
     </div>
   );

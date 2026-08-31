@@ -15,7 +15,7 @@ import httpx
 from app.core.config import settings
 from .base import ImageProvider, ImageGenerateRequest, ImageGenerateResult
 import copy
-from ..workflow.manager import workflow_manager, upload_image_to_comfyui
+from ..workflow.manager import workflow_manager, upload_image_to_comfyui, OUTPUT_NODE_CLASSES
 
 STYLE_SUFFIX = {
     "donghua_xianxia": "chinese donghua anime style, xianxia fantasy, cinematic lighting, ethereal atmosphere, highly detailed illustration, masterpiece, best quality",
@@ -135,7 +135,7 @@ class ComfyUIProvider(ImageProvider):
             },
         }
 
-    async def _poll_for_output(self, client: httpx.AsyncClient, prompt_id: str, timeout_seconds: int) -> Dict[str, Any]:
+    async def _poll_for_output(self, client: httpx.AsyncClient, prompt_id: str, timeout_seconds: int, workflow: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         deadline = time.time() + timeout_seconds
         while time.time() < deadline:
             await asyncio.sleep(1.2)
@@ -175,7 +175,18 @@ class ComfyUIProvider(ImageProvider):
                     print(f"[ComfyUI] 未捕获图像，完整 outputs: {_json.dumps(outputs, ensure_ascii=False)[:800]}")
                 except Exception:
                     pass
-                raise RuntimeError(f"ComfyUI 工作流已完成，但未捕获到图像输出 (已生成输出节点: {node_keys})，请确认工作流中包含有效且连通的 SaveImage/PreviewImage 节点。若工作流仅含 PreviewAny，请在 ComfyUI 中将 PreviewAny 替换为 SaveImage 或 PreviewImage 后重新导出")
+                # 剪枝诊断：提交的工作流里含输出节点但未出现在 outputs，通常是某参数值不在
+                # ComfyUI 枚举内（旧版硬编码预设值），ComfyUI 校验失败后把整条分支软剪枝
+                hint = ""
+                if workflow:
+                    missing_savers = [
+                        f"#{nid}({node.get('class_type')})"
+                        for nid, node in workflow.items()
+                        if isinstance(node, dict) and node.get("class_type") in OUTPUT_NODE_CLASSES and str(nid) not in node_keys
+                    ]
+                    if missing_savers:
+                        hint = f"检测到输出节点 {', '.join(missing_savers)} 未被执行——通常是某下拉参数值不在 ComfyUI 枚举内（例如分辨率/比例选了旧版预设值），请在生成面板把该参数改选为下拉中的有效项后重试。"
+                raise RuntimeError(f"ComfyUI 工作流已完成，但未捕获到图像输出 (已生成输出节点: {node_keys})。{hint} 若工作流仅含 PreviewAny，请在 ComfyUI 中将 PreviewAny 替换为 SaveImage 或 PreviewImage 后重新导出")
         raise TimeoutError(f"ComfyUI 生图超时（>{timeout_seconds}s），任务可能仍在队列中: {prompt_id}")
 
     async def _download_image(self, client: httpx.AsyncClient, image_meta: Dict[str, Any]) -> bytes:
@@ -189,8 +200,9 @@ class ComfyUIProvider(ImageProvider):
         return view_resp.content
 
     async def generate(self, req: ImageGenerateRequest) -> ImageGenerateResult:
-        if not req.prompt or not req.prompt.strip():
-            raise ValueError("生图提示词不能为空")
+        # 去模板后提示词的合法来源包括上游连线/工作流暴露项（如"输入提示词"参数），
+        # 自定义工作流路径不再强制 req.prompt 非空（注入层对空 prompt 自动跳过）；
+        # 仅内置简易工作流（无 workflow_id）仍要求提示词，见下方 builtin 分支。
 
         # 归一化尺寸
         if req.width and req.height:
@@ -281,7 +293,9 @@ class ComfyUIProvider(ImageProvider):
                 workflow = injected
                 checkpoint_name = checkpoint_to_inject or settings.COMFYUI_CHECKPOINT or "custom-workflow"
             else:
-                # 内置简易工作流
+                # 内置简易工作流（无自定义 workflow）：提示词是唯一画面来源，必须非空
+                if not req.prompt or not req.prompt.strip():
+                    raise ValueError("生图提示词不能为空（内置简易工作流需要提示词，或改为选择自定义工作流并使用其暴露的提示词参数）")
                 checkpoint = await self._resolve_checkpoint(client)
                 checkpoint_name = checkpoint
                 positive = req.prompt.strip()
@@ -327,7 +341,7 @@ class ComfyUIProvider(ImageProvider):
                 raise RuntimeError(f"ComfyUI 提交失败 HTTP {submit_resp.status_code}: {detail}")
 
             prompt_id = submit_resp.json()["prompt_id"]
-            image_meta = await self._poll_for_output(client, prompt_id, timeout_seconds)
+            image_meta = await self._poll_for_output(client, prompt_id, timeout_seconds, workflow)
             image_bytes = await self._download_image(client, image_meta)
 
         filename = f"gen_{int(time.time())}_{uuidlib.uuid4().hex[:8]}.png"

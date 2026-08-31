@@ -8,6 +8,9 @@ interface ParameterItem {
   is_linked: boolean;
   link_source?: any;
   choices?: string[];
+  min?: number;
+  max?: number;
+  step?: number;
 }
 
 interface NodeItem {
@@ -26,11 +29,16 @@ export interface ExposedInput {
   node_id: string;
   param_name: string;
   label: string;
-  type: 'image' | 'text' | 'number' | 'select' | 'audio' | 'video';
+  alias?: string;
+  type: 'image' | 'text' | 'number' | 'select' | 'combo' | 'boolean' | 'audio' | 'video';
   required?: boolean;
   default_value?: any;
   description?: string;
   choices?: string[];
+  options?: string[];
+  min?: number;
+  max?: number;
+  step?: number;
 }
 
 export interface SubgraphItem {
@@ -103,7 +111,8 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
         setData(res.data);
         setMapping(res.data.mapping || {});
         setNodeOverrides(res.data.node_overrides || {});
-        setExposedInputs(res.data.exposed_inputs || []);
+        // 旧数据归一化：历史保存的 select 统一转为 combo（保留下拉语义），保存后即固化
+        setExposedInputs((res.data.exposed_inputs || []).map((e: any) => (e.type === 'select' ? { ...e, type: 'combo' } : e)));
       }
     } catch (e: any) {
       alert(`解析工作流失败: ${e.message || e}`);
@@ -161,8 +170,11 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
         defaultLabel = `参考垫图 (${node.title})`;
       } else if (param.type === 'INT' || param.type === 'FLOAT') {
         type = 'number';
-      } else if (param.choices && param.choices.length > 0) {
-        type = 'select';
+      } else if (param.type === 'BOOLEAN') {
+        type = 'boolean';
+      } else if (param.type === 'COMBO' || (param.choices && param.choices.length > 0)) {
+        // 原工作流中的下拉选择参数：暴露后保持下拉（combo），不再退化为手填文本
+        type = 'combo';
       } else if (param.name === 'text' || param.name === 'prompt') {
         type = 'text';
         defaultLabel = `提示词/触发词 (${node.title})`;
@@ -178,6 +190,10 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
         default_value: param.value || '',
         description: `对应节点 #${node.node_id} (${node.class_type}) 的 ${param.name} 参数`,
         choices: param.choices,
+        options: param.choices,
+        min: param.min,
+        max: param.max,
+        step: param.step,
       };
 
       setExposedInputs(prev => [...prev, newExposed]);
@@ -234,16 +250,17 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
         for (const cand of ['vae_name','lora_name','ckpt_name','unet_name']) {
           const p = node.parameters.find(x => x.name === cand);
           if (p && !p.is_linked) {
-            const isClip = cand.includes('ckpt')||cand.includes('unet');
             detected.push({
               id: `combo_${node.node_id}_${cand}`,
               node_id: String(node.node_id),
               param_name: cand,
               label: `${cand} (${node.title})`,
-              type: 'select',
+              type: 'combo',
               required: false,
               default_value: p.value||'',
               description: `${cand} 下拉选择，原白名单选择项恢复`,
+              options: p.choices,
+              choices: p.choices,
             });
           }
         }
@@ -669,17 +686,33 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                                 </div>
 
                                 <div className="flex items-center gap-2">
-                                  <input
-                                    type="text"
-                                    value={currentVal ?? ''}
-                                    onChange={(e) => handleParamChange(p.node_id, p.param_name, e.target.value)}
-                                    placeholder="参数值..."
-                                    className="flex-1 bg-surface-secondary border border-border rounded-lg px-2 py-1 text-xs text-white"
-                                  />
+                                  {p.choices && (p.choices as string[]).length > 0 ? (
+                                    <select
+                                      value={String(currentVal ?? '')}
+                                      onChange={(e) => handleParamChange(p.node_id, p.param_name, e.target.value)}
+                                      className="flex-1 bg-[#12141a] border border-white/15 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-accent-blue"
+                                    >
+                                      <option value="">-- 请选择 --</option>
+                                      {(p.choices as string[]).map((c: string) => (
+                                        <option key={c} value={c}>{c}</option>
+                                      ))}
+                                      {String(currentVal ?? '') && !(p.choices as string[]).includes(String(currentVal)) && (
+                                        <option value={String(currentVal)}>{String(currentVal)}</option>
+                                      )}
+                                    </select>
+                                  ) : (
+                                    <input
+                                      type="text"
+                                      value={currentVal ?? ''}
+                                      onChange={(e) => handleParamChange(p.node_id, p.param_name, e.target.value)}
+                                      placeholder="参数值..."
+                                      className="flex-1 bg-surface-secondary border border-border rounded-lg px-2 py-1 text-xs text-white"
+                                    />
+                                  )}
                                   {matchingNode && (
                                     <button
                                       type="button"
-                                      onClick={() => toggleExposeParam(matchingNode, p as any)}
+                                      onClick={() => toggleExposeParam(matchingNode, { name: p.param_name, type: p.type, value: p.value, choices: p.choices } as any)}
                                       className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition ${
                                         exposed
                                           ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
@@ -901,12 +934,17 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                       className="bg-[#181b24] border border-white/10 rounded-xl p-4 transition hover:border-amber-500/30 space-y-3"
                     >
                       <div className="flex items-center justify-between border-b border-white/5 pb-2.5">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 font-bold">
                             #{exp.node_id} · {exp.param_name}
                           </span>
+                          {(exp.alias && exp.alias !== exp.label) && (
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-violet-500/15 text-violet-300 border border-violet-500/30 font-semibold">
+                              ✏️ 别名: {exp.alias}
+                            </span>
+                          )}
                           <span className="text-xs font-medium text-gray-400">
-                            类型: <span className="text-gray-200 font-semibold">{exp.type === 'image' ? '🖼️ 图片上传 (LoadImage)' : exp.type === 'text' ? '📝 文本输入 (Text)' : exp.type === 'number' ? '🔢 数值 (Number)' : '📋 下拉选择'}</span>
+                            类型: <span className="text-gray-200 font-semibold">{exp.type === 'image' ? '🖼️ 图片上传 (LoadImage)' : exp.type === 'audio' ? '🎵 音频上传' : exp.type === 'video' ? '🎬 视频上传' : exp.type === 'text' ? '📝 文本输入 (Text)' : exp.type === 'number' ? '🔢 数值 (Number)' : exp.type === 'boolean' ? '🔘 布尔开关' : '📋 下拉选择 (Combo)'}</span>
                           </span>
                         </div>
                         <button
@@ -919,6 +957,22 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                        <div>
+                          <label className="text-[11px] text-gray-400 font-medium">✏️ 别名 / 注释 (Alias)</label>
+                          <input
+                            type="text"
+                            value={exp.alias || ''}
+                            onChange={e => {
+                              const val = e.target.value;
+                              setExposedInputs(prev =>
+                                prev.map((item, i) => (i === idx ? { ...item, alias: val } : item))
+                              );
+                            }}
+                            placeholder="如：主角脸型LoRA（仅改显示名，不影响注入）"
+                            className="mt-1 w-full bg-[#12141a] border border-violet-500/30 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-violet-400"
+                          />
+                        </div>
+
                         <div>
                           <label className="text-[11px] text-gray-400 font-medium">外部表单显示名称 (Label) *</label>
                           <input
@@ -952,26 +1006,47 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                             <option value="video">🎬 视频上传器 (Video Uploader)</option>
                             <option value="text">📝 多行/单行文本输入 (Text Prompt)</option>
                             <option value="number">🔢 数值调节滑块 (Number)</option>
-                            <option value="select">📋 下拉单选 (Dropdown Select)</option>
+                            <option value="combo">📋 下拉单选 · 保留原生选项 (Combo)</option>
+                            <option value="boolean">🔘 布尔开关 (Boolean)</option>
                           </select>
                         </div>
+                      </div>
 
+                      <div>
+                        <label className="text-[11px] text-gray-400 font-medium">用户引导提示 (Description)</label>
+                        <input
+                          type="text"
+                          value={exp.description || ''}
+                          onChange={e => {
+                            const val = e.target.value;
+                            setExposedInputs(prev =>
+                              prev.map((item, i) => (i === idx ? { ...item, description: val } : item))
+                            );
+                          }}
+                          placeholder="如：请上传人物正脸立绘"
+                          className="mt-1 w-full bg-[#12141a] border border-white/15 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                        />
+                      </div>
+
+                      {(exp.type === 'select' || exp.type === 'combo') && (
                         <div>
-                          <label className="text-[11px] text-gray-400 font-medium">用户引导提示 (Description)</label>
-                          <input
-                            type="text"
-                            value={exp.description || ''}
+                          <label className="text-[11px] text-gray-400 font-medium">
+                            📋 下拉选项（每行一个；留空则自动使用工作流原生选项 / ComfyUI 实时枚举）
+                          </label>
+                          <textarea
+                            rows={3}
+                            value={(exp.options || exp.choices || []).join('\n')}
                             onChange={e => {
-                              const val = e.target.value;
+                              const opts = e.target.value.split('\n').map(s => s.trim()).filter(Boolean);
                               setExposedInputs(prev =>
-                                prev.map((item, i) => (i === idx ? { ...item, description: val } : item))
+                                prev.map((item, i) => (i === idx ? { ...item, options: opts, choices: opts } : item))
                               );
                             }}
-                            placeholder="如：请上传人物正脸立绘"
-                            className="mt-1 w-full bg-[#12141a] border border-white/15 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                            placeholder={'如：\n1:1 (Square)\n9:16 (Portrait)\n16:9 (Landscape)'}
+                            className="mt-1 w-full bg-[#12141a] border border-white/15 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-amber-500 resize-none"
                           />
                         </div>
-                      </div>
+                      )}
                     </div>
                   ))}
                 </div>

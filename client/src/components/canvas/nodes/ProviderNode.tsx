@@ -147,12 +147,12 @@ export const ProviderNode: React.FC<NodeProps> = ({ data, id, type }) => {
   return (
     <div className={`w-[340px] bg-[#1A1A22] border-2 ${kindMeta.border} rounded-2xl shadow-xl overflow-hidden`}>
       <div className="px-3 py-2 bg-[#121216] border-b border-[#2A2A32] flex items-center gap-1.5">
-        <div className="w-6 h-6 rounded-lg bg-white/10 border border-white/10 flex items-center justify-center"><Icon className={`w-3.5 h-3.5 ${kindMeta.color}`}/></div>
+        <div className="w-6 h-6 rounded-lg bg-surface/10 border border-white/10 flex items-center justify-center"><Icon className={`w-3.5 h-3.5 ${kindMeta.color}`}/></div>
         <span className="text-xs font-bold text-white">{kindMeta.label}节点</span>
-        {selectedDef && <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white truncate max-w-[110px] border border-white/10">{selectedDef.display_name || selectedDef.name || selectedId}</span>}
+        {selectedDef && <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded bg-surface/10 text-white truncate max-w-[110px] border border-white/10">{selectedDef.display_name || selectedDef.name || selectedId}</span>}
         <span className="ml-auto flex items-center gap-1">
-          {selectedDef && <span className={`w-2 h-2 rounded-full ${selectedDef.enabled===false ? 'bg-zinc-500' : health?.ok ? 'bg-emerald-500' : selectedDef.builtin ? 'bg-violet-500' : 'bg-amber-500'} animate-pulse`} title={health?.detail || (selectedDef.builtin?'内置':'自定义')}/>}
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-zinc-300 border border-white/10">{selectedDef?.builtin ? '内置' : selectedDef ? '自定义' : '未绑定'}</span>
+          {selectedDef && <span className={`w-2 h-2 rounded-full ${selectedDef.enabled===false ? 'bg-surface-secondary0' : health?.ok ? 'bg-emerald-500/100' : selectedDef.builtin ? 'bg-violet-500' : 'bg-amber-500'} animate-pulse`} title={health?.detail || (selectedDef.builtin?'内置':'自定义')}/>}
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface/10 text-zinc-300 border border-white/10">{selectedDef?.builtin ? '内置' : selectedDef ? '自定义' : '未绑定'}</span>
         </span>
       </div>
 
@@ -303,7 +303,7 @@ export const ProviderNode: React.FC<NodeProps> = ({ data, id, type }) => {
                 }
               }} className="px-2.5 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 flex items-center gap-1 text-xs"><Trash2 className="w-3 h-3"/>删</button>}
             </div>
-            {health && <div className={`text-[11px] px-2 py-1 rounded-lg border ${health.ok ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-amber-500/10 border-amber-500/30 text-amber-300'}`}>{health.detail || (health.ok?'正常':'异常')}</div>}
+            {health && <div className={`text-[11px] px-2 py-1 rounded-lg border ${health.ok ? 'bg-emerald-500/100/10 border-emerald-500/30 text-emerald-300' : 'bg-amber-500/10 border-amber-500/30 text-amber-300'}`}>{health.detail || (health.ok?'正常':'异常')}</div>}
           </div>
         )}
 

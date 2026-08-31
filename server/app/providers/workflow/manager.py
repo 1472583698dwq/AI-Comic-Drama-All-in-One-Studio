@@ -256,6 +256,117 @@ def _fetch_object_info(timeout: float = 3.0) -> Optional[Dict[str, Any]]:
     return None
 
 
+# 视为图像输出的节点类型（用于输出捕获与剪枝诊断）
+OUTPUT_NODE_CLASSES = {
+    "SaveImage", "PreviewImage", "SaveImageWebsocket",
+    "VHS_VideoCombine", "SaveAnimatedWEBP", "VideoCombine", "SaveAnimatedPNG",
+    "SaveAudio", "ImageSave", "SaveImageAdvanced",
+}
+
+
+def _combo_choices_from_oi(ct: str, pname: str, current: Any = None) -> Optional[List[str]]:
+    """
+    从 ComfyUI object_info 取某节点某参数的真实下拉枚举。
+    兼容两种 schema：旧式 (choices_list, {...}) 与新式 ("COMBO", {"options": [...], ...})。
+    ComfyUI 离线或参数无枚举时返回 None（调用方回退到内置预设）。
+    """
+    oi = _fetch_object_info()
+    if not oi:
+        return None
+    try:
+        node_spec = oi.get(ct, {}).get("input", {})
+        spec = {**node_spec.get("required", {}), **node_spec.get("optional", {})}.get(pname)
+        if not isinstance(spec, (list, tuple)) or len(spec) == 0:
+            return None
+        choices: List[str] = []
+        if isinstance(spec[0], (list, tuple)):
+            choices = [str(x) for x in spec[0]]
+        elif isinstance(spec[0], str) and len(spec) > 1 and isinstance(spec[1], dict) and isinstance(spec[1].get("options"), list):
+            choices = [str(x) for x in spec[1]["options"]]
+        if not choices:
+            return None
+        choices = choices[:80]
+        if current is not None and str(current) not in choices:
+            choices = [str(current)] + choices
+        return choices
+    except Exception:
+        return None
+
+
+def _set_input_guarded(wf: Dict[str, Any], nid: str, pname: str, val: Any) -> None:
+    """
+    带枚举护栏的参数写入：值不在 ComfyUI 真实枚举内时拒绝写入。
+    背景：新版 ComfyUI 对非法 combo 值不报错，而是把整条输出分支软剪枝（状态仍 success），
+    表现为"工作流已完成但未捕获到图像输出"。离线（拿不到 object_info）时不拦截。
+    """
+    node = wf.get(str(nid))
+    if not isinstance(node, dict):
+        return
+    valid = _combo_choices_from_oi(str(node.get("class_type", "")), pname)
+    if valid is not None and str(val) not in valid:
+        print(f"[Workflow] 已拦截非法枚举注入: #{nid} {node.get('class_type')}.{pname} = {val!r}（不在 ComfyUI 枚举内，避免输出分支被剪枝）")
+        return
+    node.setdefault("inputs", {})[pname] = val
+
+
+def _apply_dynamic_inputs(wf: Dict[str, Any], dynamic_inputs: Optional[Dict[str, Any]]) -> None:
+    """
+    将暴露项动态输入写入工作流（图像/视频注入共用）。
+    支持前缀：exp_/combo_/num_ → "{nid}_{param}"（nid 可含冒号的子图复合 id）、
+    img_/txt_/aud_/vid_ → "{nid}"（txt 写入节点已有文本参数，不伪造不存在的键）、
+    或 key 直接为节点 id（按 image/audio/video/text/value 顺序择写）。
+    所有写入均走 _set_input_guarded 枚举护栏。
+    """
+    if not dynamic_inputs or not isinstance(dynamic_inputs, dict):
+        return
+
+    def _nid_param(rest: str) -> Optional[tuple]:
+        for existing_nid in wf.keys():
+            if rest.startswith(f"{existing_nid}_"):
+                pname = rest[len(f"{existing_nid}_"):]
+                if pname and pname != "undefined":
+                    return existing_nid, pname
+                return None
+        return None
+
+    for k, val in dynamic_inputs.items():
+        if val is None or val == "":
+            continue
+        ks = str(k)
+        if isinstance(val, dict):
+            if ks in wf:
+                for pk, pv in val.items():
+                    if pv is not None:
+                        _set_input_guarded(wf, ks, pk, pv)
+            continue
+        if ks.startswith(("exp_", "combo_", "num_")):
+            parsed = _nid_param(ks.split("_", 1)[1]) if "_" in ks else None
+            if parsed:
+                _set_input_guarded(wf, parsed[0], parsed[1], val)
+        elif ks.startswith(("img_", "txt_", "aud_", "vid_")):
+            prefix, target_nid = ks.split("_", 1)
+            node = wf.get(target_nid)
+            if not isinstance(node, dict):
+                continue
+            n_inps = node.setdefault("inputs", {})
+            if prefix == "img":
+                _set_input_guarded(wf, target_nid, "image", val)
+            elif prefix == "aud":
+                target = "audio" if "audio" in n_inps else "reference_audio" if "reference_audio" in n_inps else "audio"
+                _set_input_guarded(wf, target_nid, target, val)
+            elif prefix == "vid":
+                target = "video" if "video" in n_inps else "image" if "image" in n_inps else "video"
+                _set_input_guarded(wf, target_nid, target, val)
+            else:  # txt：优先写入节点已有的文本参数（PrimitiveString* 用 value，CLIPTextEncode 用 text）
+                target = next((c for c in ("value", "text", "string") if c in n_inps), "text")
+                _set_input_guarded(wf, target_nid, target, val)
+        elif ks in wf:
+            n_inps = wf[ks].setdefault("inputs", {})
+            target = next((c for c in ("image", "audio", "video", "text", "string", "value") if c in n_inps), None)
+            if target:
+                _set_input_guarded(wf, ks, target, val)
+
+
 COMMON_WIDGET_ORDER: Dict[str, List[str]] = {
     "CheckpointLoaderSimple": ["ckpt_name"],
     "CheckpointLoader": ["ckpt_name"],
@@ -973,9 +1084,9 @@ def auto_detect_exposed_inputs(clean_wf: Dict[str, Any], mapping: Optional[Dict[
                     elif pname == "cfg":
                         exposed.append({"id": f"num_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"CFG ({title})", "type": "number", "required": False, "default_value": float(pval) if isinstance(pval, (int,float)) else 7.0, "description": "CFG 1-15", "min": 1, "max": 15, "step": 0.5})
                     elif pname == "sampler_name":
-                        exposed.append({"id": f"combo_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"采样器 ({title})", "type": "combo", "required": False, "default_value": str(pval) if pval else "euler", "description": "采样器", "options": VALID_SAMPLERS})
+                        exposed.append({"id": f"combo_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"采样器 ({title})", "type": "combo", "required": False, "default_value": str(pval) if pval else "euler", "description": "采样器", "options": _combo_choices_from_oi(ct, pname, pval) or VALID_SAMPLERS})
                     elif pname == "scheduler":
-                        exposed.append({"id": f"combo_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"调度器 ({title})", "type": "combo", "required": False, "default_value": str(pval) if pval else "normal", "description": "调度器", "options": VALID_SCHEDULERS})
+                        exposed.append({"id": f"combo_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"调度器 ({title})", "type": "combo", "required": False, "default_value": str(pval) if pval else "normal", "description": "调度器", "options": _combo_choices_from_oi(ct, pname, pval) or VALID_SCHEDULERS})
                     elif pname == "denoise":
                         exposed.append({"id": f"num_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"去噪 ({title})", "type": "number", "required": False, "default_value": float(pval) if isinstance(pval, (int,float)) else 1.0, "description": "去噪 0-1", "min": 0, "max": 1, "step": 0.05})
         # 2.3 探测 EmptyLatentImage 分辨率
@@ -995,16 +1106,8 @@ def auto_detect_exposed_inputs(clean_wf: Dict[str, Any], mapping: Optional[Dict[
                 pval = inputs.get("vae_name")
                 is_linked = isinstance(pval, list) and len(pval) == 2 and isinstance(pval[0], str)
                 if not is_linked:
-                    # 尝试从 ComfyUI object_info 获取可用 VAE 列表作为下拉选项
-                    vae_choices = []
-                    try:
-                        oi = _fetch_object_info() or {}
-                        vae_choices = oi.get("VAELoader", {}).get("input", {}).get("required", {}).get("vae_name", [[]])[0] or []
-                    except Exception:
-                        vae_choices = []
-                    # 兜底：至少包含当前值
-                    if pval and pval not in vae_choices:
-                        vae_choices = [str(pval)] + vae_choices
+                    # 优先 ComfyUI object_info 真实枚举，离线时兜底当前值
+                    vae_choices = _combo_choices_from_oi(ct, "vae_name", pval) or ([str(pval)] if pval else [])
                     exposed.append({"id": f"combo_{nid}_vae_name", "node_id": str(nid), "param_name": "vae_name", "label": f"VAE模型 ({title})", "type": "combo", "required": False, "default_value": str(pval) if pval else "qwen_image_vae.safetensors", "description": "VAE模型，下拉选择而非手填", "options": vae_choices[:50]})
         elif ct in ("LoraLoader", "LoraLoaderModelOnly"):
             for pname in ("lora_name", "strength_model", "strength_clip"):
@@ -1015,14 +1118,7 @@ def auto_detect_exposed_inputs(clean_wf: Dict[str, Any], mapping: Optional[Dict[
                 if is_linked:
                     continue
                 if pname == "lora_name":
-                    lora_choices = []
-                    try:
-                        oi = _fetch_object_info() or {}
-                        lora_choices = oi.get("LoraLoader", {}).get("input", {}).get("required", {}).get("lora_name", [[]])[0] or []
-                    except Exception:
-                        lora_choices = []
-                    if pval and pval not in lora_choices:
-                        lora_choices = [str(pval)] + lora_choices
+                    lora_choices = _combo_choices_from_oi(ct, "lora_name", pval) or ([str(pval)] if pval else [])
                     exposed.append({"id": f"combo_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"LoRA模型 ({title})", "type": "combo", "required": False, "default_value": str(pval) if pval else "", "description": "LoRA模型，下拉选择", "options": lora_choices[:50]})
                 elif pname == "strength_model":
                     exposed.append({"id": f"num_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"LoRA强度-模型 ({title})", "type": "number", "required": False, "default_value": float(pval) if isinstance(pval, (int,float)) else 0.8, "description": "0-2", "min": 0, "max": 2, "step": 0.05})
@@ -1034,17 +1130,7 @@ def auto_detect_exposed_inputs(clean_wf: Dict[str, Any], mapping: Optional[Dict[
                 pval = inputs.get(ckpt_key)
                 is_linked = isinstance(pval, list) and len(pval) == 2 and isinstance(pval[0], str)
                 if not is_linked:
-                    ckpt_choices = []
-                    try:
-                        oi = _fetch_object_info() or {}
-                        if ckpt_key == "ckpt_name":
-                            ckpt_choices = oi.get("CheckpointLoaderSimple", {}).get("input", {}).get("required", {}).get("ckpt_name", [[]])[0] or []
-                        else:
-                            ckpt_choices = oi.get("UNETLoader", {}).get("input", {}).get("required", {}).get("unet_name", [[]])[0] or []
-                    except Exception:
-                        ckpt_choices = []
-                    if pval and pval not in ckpt_choices:
-                        ckpt_choices = [str(pval)] + ckpt_choices
+                    ckpt_choices = _combo_choices_from_oi(ct, ckpt_key, pval) or ([str(pval)] if pval else [])
                     exposed.append({"id": f"combo_{nid}_{ckpt_key}", "node_id": str(nid), "param_name": ckpt_key, "label": f"底模 ({title})", "type": "combo", "required": False, "default_value": str(pval) if pval else "", "description": "底模/UNet，下拉选择", "options": ckpt_choices[:50]})
         # 2.3.2 探测 ResolutionSelector（分辨率三件套独立控件，下拉/滑杆而非手填）
         elif ct == "ResolutionSelector":
@@ -1056,7 +1142,10 @@ def auto_detect_exposed_inputs(clean_wf: Dict[str, Any], mapping: Optional[Dict[
                 if is_linked:
                     continue
                 if pname == "aspect_ratio":
-                    exposed.append({"id": f"combo_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"画面比例 ({title})", "type": "combo", "required": False, "default_value": str(pval) if pval else "1:1 (Square)", "description": "画面比例 下拉", "options": ["1:1 (Square)","9:16 (Portrait)","16:9 (Landscape)","3:2","4:3","21:9"]})
+                    # 枚举必须与 ComfyUI object_info 一致（如 "9:16 (Portrait Widescreen)"），
+                    # 硬编码错值会被 ComfyUI 校验拒绝并软剪枝整条图像分支（表现为执行完成但无图）
+                    ar_choices = _combo_choices_from_oi(ct, pname, pval) or ["1:1 (Square)", "9:16 (Portrait Widescreen)", "16:9 (Widescreen)", "3:2 (Photo)", "4:3 (Standard)", "21:9 (Ultrawide)"]
+                    exposed.append({"id": f"combo_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"画面比例 ({title})", "type": "combo", "required": False, "default_value": str(pval) if pval else "1:1 (Square)", "description": "画面比例 下拉", "options": ar_choices})
                 elif pname == "megapixels":
                     exposed.append({"id": f"num_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"百万像素 ({title})", "type": "number", "required": False, "default_value": float(pval) if isinstance(pval, (int,float)) else 1.0, "description": "百万像素 0.5-4", "min": 0.5, "max": 4, "step": 0.5})
                 elif pname == "multiple":
@@ -1071,7 +1160,8 @@ def auto_detect_exposed_inputs(clean_wf: Dict[str, Any], mapping: Optional[Dict[
                 if is_linked:
                     continue
                 if pname in ("resolution",):
-                    exposed.append({"id": f"combo_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"分辨率 ({title})", "type": "combo", "required": False, "default_value": str(pval) if pval else "720p", "description": "分辨率 480p/720p/1080p 下拉", "options": ["480p","720p","1080p"]})
+                    res_choices = _combo_choices_from_oi(ct, pname, pval) or ["480p", "720p", "1080p"]
+                    exposed.append({"id": f"combo_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"分辨率 ({title})", "type": "combo", "required": False, "default_value": str(pval) if pval else "720p", "description": "分辨率 480p/720p/1080p 下拉", "options": res_choices})
                 elif pname in ("duration",):
                     exposed.append({"id": f"num_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"时长秒 ({title})", "type": "number", "required": False, "default_value": int(pval) if isinstance(pval, (int,float)) else 5, "description": "时长 3-15 秒", "min": 3, "max": 15, "step": 1})
                 elif pname in ("length", "num_frames", "frames"):
@@ -1079,7 +1169,8 @@ def auto_detect_exposed_inputs(clean_wf: Dict[str, Any], mapping: Optional[Dict[
                     dv = int(pval) if isinstance(pval, (int,float)) else 81
                     exposed.append({"id": f"num_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"{pname} ({title})", "type": "number", "required": False, "default_value": dv, "description": "帧数 16~241", "min": 16, "max": 241, "step": 1})
                 elif pname in ("fps", "frame_rate"):
-                    exposed.append({"id": f"combo_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"帧率 ({title})", "type": "combo", "required": False, "default_value": str(pval) if pval else "24", "description": "帧率", "options": ["16","24","30"]})
+                    fps_choices = _combo_choices_from_oi(ct, pname, pval) or ["16", "24", "30"]
+                    exposed.append({"id": f"combo_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"帧率 ({title})", "type": "combo", "required": False, "default_value": str(pval) if pval else "24", "description": "帧率", "options": fps_choices})
                 elif pname in ("width", "height"):
                     exposed.append({"id": f"num_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"{pname} ({title})", "type": "number", "required": False, "default_value": int(pval) if isinstance(pval, (int,float)) else 720, "description": "分辨率宽/高", "min": 256, "max": 2048, "step": 64})
                 elif pname == "steps":
@@ -1098,11 +1189,13 @@ def auto_detect_exposed_inputs(clean_wf: Dict[str, Any], mapping: Optional[Dict[
                 if is_linked:
                     continue
                 if pname == "resolution":
-                    exposed.append({"id": f"combo_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"分辨率 ({title})", "type": "combo", "required": False, "default_value": str(pval) if pval else "720p", "description": "480p/720p/1080p", "options": ["480p","720p","1080p"]})
+                    res_choices = _combo_choices_from_oi(ct, pname, pval) or ["480p", "720p", "1080p"]
+                    exposed.append({"id": f"combo_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"分辨率 ({title})", "type": "combo", "required": False, "default_value": str(pval) if pval else "720p", "description": "480p/720p/1080p", "options": res_choices})
                 elif pname == "duration":
                     exposed.append({"id": f"num_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"时长 ({title})", "type": "number", "required": False, "default_value": int(pval) if isinstance(pval, (int,float)) else 5, "description": "3-15秒", "min": 3, "max": 15, "step": 1})
                 elif pname in ("fps",):
-                    exposed.append({"id": f"combo_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"帧率 ({title})", "type": "combo", "required": False, "default_value": str(pval) if pval else "24", "description": "帧率", "options": ["16","24","30"]})
+                    fps_choices = _combo_choices_from_oi(ct, pname, pval) or ["16", "24", "30"]
+                    exposed.append({"id": f"combo_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"帧率 ({title})", "type": "combo", "required": False, "default_value": str(pval) if pval else "24", "description": "帧率", "options": fps_choices})
                 else:
                     exposed.append({"id": f"num_{nid}_{pname}", "node_id": str(nid), "param_name": pname, "label": f"{pname} ({title})", "type": "number", "required": False, "default_value": int(pval) if isinstance(pval,(int,float)) else 720, "description": pname, "min": 256, "max": 2048, "step": 64})
         # 3. 通用：暴露所有未链接的可编辑参数（而非仅用户选择暴露的），确保全部参数均有独立控件
@@ -1113,7 +1206,7 @@ def auto_detect_exposed_inputs(clean_wf: Dict[str, Any], mapping: Optional[Dict[
                     continue
                 if pval is None:
                     continue
-                # 仅处理原始可编辑类型（字符串/数值/布尔），跳过已链接的句柄
+                options: Optional[List[str]] = None
                 if isinstance(pval, bool):
                     ptype = "boolean"
                     default = pval
@@ -1121,8 +1214,13 @@ def auto_detect_exposed_inputs(clean_wf: Dict[str, Any], mapping: Optional[Dict[
                     ptype = "number"
                     default = pval
                 elif isinstance(pval, str):
-                    # 图像类参数按名称推断为 image，其余为 text
-                    if any(k in pname.lower() for k in ("image", "frame", "video", "audio", "mask")):
+                    # 优先以 object_info 判定 COMBO（新旧两种 schema：list 或 "COMBO"+options），原工作流的下拉选择项暴露后仍为下拉
+                    combo_choices = _combo_choices_from_oi(ct, pname, pval)
+                    if combo_choices:
+                        ptype = "combo"
+                        default = pval
+                        options = combo_choices
+                    elif any(k in pname.lower() for k in ("image", "frame", "video", "audio", "mask")):
                         if "image" in pname.lower() or "frame" in pname.lower():
                             ptype = "image"
                         elif "audio" in pname.lower():
@@ -1131,17 +1229,21 @@ def auto_detect_exposed_inputs(clean_wf: Dict[str, Any], mapping: Optional[Dict[
                             ptype = "video"
                         else:
                             ptype = "image"
+                        default = pval
                     elif pval.endswith((".safetensors", ".ckpt", ".pth", ".bin", ".pt")) or "vae" in pname.lower() or "ckpt" in pname.lower() or "lora" in pname.lower() or "unet" in pname.lower():
                         ptype = "combo"
+                        default = pval
                     else:
                         ptype = "text"
-                    default = pval[:500] if len(pval) > 500 else pval
+                        default = pval
+                    if isinstance(default, str) and len(default) > 500:
+                        default = default[:500]
                 else:
                     continue
                 # 长文本截断
                 if isinstance(default, str) and len(default) > 200 and ptype == "text":
                     default = default[:200]
-                exposed.append({
+                item = {
                     "id": f"exp_{nid}_{pname}",
                     "node_id": str(nid),
                     "param_name": pname,
@@ -1150,7 +1252,10 @@ def auto_detect_exposed_inputs(clean_wf: Dict[str, Any], mapping: Optional[Dict[
                     "required": False,
                     "default_value": default,
                     "description": f"{title} 的 {pname} 参数",
-                })
+                }
+                if options:
+                    item["options"] = options
+                exposed.append(item)
 
     return exposed
 
@@ -1646,14 +1751,13 @@ class ComfyWorkflowManager:
         # 1. 先进行智能节点清洗，剥离注释与悬空孤立节点（节俭模式用非激进清理）
         wf = self.sanitize_workflow(copy.deepcopy(workflow), aggressive=False)
 
-        # 2. 应用用户自定义节点参数覆写
+        # 2. 应用用户自定义节点参数覆写（带枚举护栏）
         if node_overrides:
             for nid, overrides in node_overrides.items():
                 if str(nid) in wf and isinstance(overrides, dict):
-                    node_inputs = wf[str(nid)].setdefault("inputs", {})
                     for k, v in overrides.items():
                         if v is not None:
-                            node_inputs[k] = v
+                            _set_input_guarded(wf, str(nid), k, v)
 
         # 3. 外部动态输入延后至最后处理（确保暴露输入最终生效，见步骤 7）
 
@@ -1816,57 +1920,8 @@ class ComfyWorkflowManager:
                         n["inputs"]["steps"] = int(params["steps"])
                     if params.get("cfg") is not None and "cfg" in n["inputs"] and not isinstance(n["inputs"]["cfg"], list):
                         n["inputs"]["cfg"] = float(params["cfg"])
-        # 7. 最后应用外部动态输入（暴露输入优先，确保用户在画布/素材库中对提示词/垫图的修改最终生效）
-        if dynamic_inputs and isinstance(dynamic_inputs, dict):
-            for k, val in dynamic_inputs.items():
-                if val is None or val == "":
-                    continue
-                if isinstance(val, dict):
-                    if str(k) in wf:
-                        node_inputs = wf[str(k)].setdefault("inputs", {})
-                        for param_k, param_v in val.items():
-                            if param_v is not None:
-                                node_inputs[param_k] = param_v
-                elif str(k).startswith("exp_"):
-                    exp_rest = str(k)[len("exp_"):]
-                    found = False
-                    for existing_nid in wf.keys():
-                        if exp_rest.startswith(f"{existing_nid}_"):
-                            pname = exp_rest[len(f"{existing_nid}_"):]
-                            if pname and pname != "undefined":
-                                wf[existing_nid].setdefault("inputs", {})[pname] = val
-                            found = True
-                            break
-                    if not found and "_" in exp_rest:
-                        parts = exp_rest.rsplit("_", 1)
-                        if parts[0] in wf and parts[1] and parts[1] != "undefined":
-                            wf[parts[0]].setdefault("inputs", {})[parts[1]] = val
-                elif str(k).startswith("img_") or str(k).startswith("txt_"):
-                    try:
-                        prefix, target_nid = str(k).split("_", 1)
-                    except ValueError:
-                        continue
-                    if target_nid in wf:
-                        n_inps = wf[target_nid].setdefault("inputs", {})
-                        if prefix == "img":
-                            n_inps["image"] = val
-                        elif prefix == "txt":
-                            if "text" in n_inps:
-                                n_inps["text"] = val
-                            elif "string" in n_inps:
-                                n_inps["string"] = val
-                            else:
-                                n_inps["text"] = val
-                elif str(k) in wf:
-                    n_inps = wf[str(k)].setdefault("inputs", {})
-                    if "image" in n_inps:
-                        n_inps["image"] = val
-                    elif "text" in n_inps:
-                        n_inps["text"] = val
-                    elif "string" in n_inps:
-                        n_inps["string"] = val
-                    elif "value" in n_inps:
-                        n_inps["value"] = val
+        # 7. 最后应用外部动态输入（暴露输入优先；带枚举护栏与 combo_/num_/aud_/vid_ 解析）
+        _apply_dynamic_inputs(wf, dynamic_inputs)
         return wf
 
     def inject_video_params(
@@ -1909,44 +1964,10 @@ class ComfyWorkflowManager:
                                 v = _cli_converter._wrap_widget_value(v)
                                 if isinstance(v, dict) and "__value__" in v:
                                     v = v["__value__"]
-                            wf[str(nid)]["inputs"][k] = v
+                            _set_input_guarded(wf, str(nid), k, v)
 
-        # 2. 动态输入（若提供，已在上层完成上传，此处直接覆盖）
-        if dynamic_inputs and isinstance(dynamic_inputs, dict):
-            for k, val in dynamic_inputs.items():
-                if val is None or val == "":
-                    continue
-                if isinstance(val, dict) and str(k) in wf:
-                    for pk, pv in val.items():
-                        if pv is not None:
-                            wf[str(k)]["inputs"][pk] = pv
-                elif str(k).startswith("exp_"):
-                    exp_rest = str(k)[len("exp_"):]
-                    for nid in wf.keys():
-                        if exp_rest.startswith(f"{nid}_"):
-                            pname = exp_rest[len(f"{nid}_"):]
-                            if pname and pname != "undefined":
-                                wf[nid]["inputs"][pname] = val
-                            break
-                elif str(k).startswith("img_") or str(k).startswith("txt_"):
-                    try:
-                        prefix, target_nid = str(k).split("_", 1)
-                        if target_nid in wf:
-                            if prefix == "img":
-                                wf[target_nid]["inputs"]["image"] = val
-                            elif prefix == "txt":
-                                wf[target_nid]["inputs"]["text" if "text" in wf[target_nid]["inputs"] else "string"] = val
-                    except ValueError:
-                        pass
-                elif str(k) in wf:
-                    # 直接覆盖，智能判断
-                    inp = wf[str(k)]["inputs"]
-                    if "image" in inp:
-                        inp["image"] = val
-                    elif "text" in inp:
-                        inp["text"] = val
-                    elif "string" in inp:
-                        inp["string"] = val
+        # 2. 动态输入（若提供，已在上层完成上传；统一走带枚举护栏的解析）
+        _apply_dynamic_inputs(wf, dynamic_inputs)
 
         # 3. Prompt 注入（视频运动描述）
         if params.get("prompt"):
@@ -2255,6 +2276,7 @@ class ComfyWorkflowManager:
                 spec = all_spec.get(pname, [])
                 ptype = "STRING"
                 choices = []
+                widget_meta = {}
                 if isinstance(spec, (list, tuple)) and len(spec) > 0:
                     t_info = spec[0]
                     if isinstance(t_info, list):
@@ -2262,6 +2284,11 @@ class ComfyWorkflowManager:
                         choices = t_info
                     elif isinstance(t_info, str):
                         ptype = t_info
+                        # 新式 COMBO schema：("COMBO", {"options": [...]}) —— ResolutionSelector 等新内置节点
+                        if t_info == "COMBO" and len(spec) > 1 and isinstance(spec[1], dict) and isinstance(spec[1].get("options"), list):
+                            choices = [str(x) for x in spec[1]["options"]]
+                    if len(spec) > 1 and isinstance(spec[1], dict):
+                        widget_meta = spec[1]
                 else:
                     if isinstance(pval, bool):
                         ptype = "BOOLEAN"
@@ -2308,6 +2335,9 @@ class ComfyWorkflowManager:
                     "is_linked": is_linked,
                     "link_source": pval if is_linked else None,
                     "choices": choices,
+                    "min": widget_meta.get("min"),
+                    "max": widget_meta.get("max"),
+                    "step": widget_meta.get("step", widget_meta.get("round")),
                 })
 
             nid_str = str(nid)
@@ -2372,15 +2402,25 @@ class ComfyWorkflowManager:
             )
             if has_dirty or need_merge or len(saved_exposed) < 4:
                 saved_map = {f"{e['node_id']}_{e['param_name']}": e for e in saved_exposed if e.get('param_name') and e.get('param_name')!='undefined'}
+                # 用户自定义元数据白名单：label/别名/描述/默认值 保留用户编辑，type 以 fresh 为准
+                keep_user_keys = ('label', 'alias', 'description', 'default_value', 'required')
                 exposed_inputs = []
                 for fe in fresh_exposed:
                     key = f"{fe['node_id']}_{fe['param_name']}"
                     if key in saved_map:
-                        # 保留用户 label/别名/description/default_value，但 type/options 以 fresh 为准（确保下拉恢复）
-                        merged = {**fe, **{k:v for k,v in saved_map[key].items() if k in ('label','description','default_value') and v not in (None, '')}}
-                        # 保留 alias
-                        if 'alias' in saved_map[key]:
-                            merged['alias'] = saved_map[key]['alias']
+                        se = saved_map[key]
+                        merged = {**fe}
+                        for k in keep_user_keys:
+                            v = se.get(k)
+                            if v not in (None, ''):
+                                merged[k] = v
+                        # 下拉选项：fresh（ComfyUI 真实枚举）优先在前，历史硬编码错值/用户自定义去重追加在后
+                        fresh_opts = [str(o) for o in (fe.get('options') or fe.get('choices') or [])]
+                        user_opts = [str(o) for o in (se.get('options') or se.get('choices') or []) if o not in fresh_opts]
+                        opts = list(dict.fromkeys(fresh_opts + user_opts))
+                        if opts:
+                            merged['options'] = opts
+                            merged['choices'] = opts
                         exposed_inputs.append(merged)
                     else:
                         exposed_inputs.append(fe)
@@ -2391,15 +2431,25 @@ class ComfyWorkflowManager:
                     if key not in fresh_keys and se.get('param_name')!='undefined':
                         exposed_inputs.append(se)
             else:
-                # 已保存的白名单有效，但需修正类型/选项为 fresh 的正确值（确保 aspect_ratio 为 combo 而非 text）
+                # 已保存的白名单有效：type 始终以 fresh 为准（确保 combo 下拉不退化为手填）
                 type_fix_map = {f"{e['node_id']}_{e['param_name']}": e for e in fresh_exposed}
                 exposed_inputs = []
                 for se in saved_exposed:
                     key = f"{se['node_id']}_{se['param_name']}"
                     if key in type_fix_map:
                         fe = type_fix_map[key]
-                        # 以 fresh 的 type/options 为准，保留用户的 label/default_value
-                        merged = {**se, "type": fe.get("type", se.get("type")), "options": fe.get("options", se.get("options"))}
+                        merged = {**se, "type": fe.get("type", se.get("type"))}
+                        # 下拉选项：fresh（ComfyUI 真实枚举）优先在前，用户自定义去重追加在后（历史错值不再遮蔽真实枚举）
+                        fresh_opts = [str(o) for o in (fe.get("options") or fe.get("choices") or [])]
+                        user_opts = [str(o) for o in (se.get("options") or se.get("choices") or []) if o not in fresh_opts]
+                        opts = list(dict.fromkeys(fresh_opts + user_opts))
+                        if opts:
+                            merged["options"] = opts
+                            merged["choices"] = opts
+                        # 数值滑杆范围以 fresh 为准
+                        for mk in ("min", "max", "step"):
+                            if fe.get(mk) is not None:
+                                merged[mk] = fe[mk]
                         exposed_inputs.append(merged)
                     else:
                         exposed_inputs.append(se)

@@ -110,6 +110,12 @@ export const ComfyWorkflowNode: React.FC<NodeProps> = ({ data, id }) => {
                     </div>
                   ) : exp.type==='number' ? (
                     <input type="number" value={val ?? ''} onChange={e=> handleDynamicChange(key, parseFloat(e.target.value)||0)} className="w-full bg-[#2A2A32] border border-[#2A2A32] rounded-lg px-2 py-1 text-xs text-white"/>
+                  ) : (exp.type==='select' || exp.type==='combo') ? (
+                    <select value={String(val ?? exp.default_value ?? '')} onChange={e=> handleDynamicChange(key, e.target.value)} className="w-full bg-[#2A2A32] border border-[#2A2A32] rounded-lg px-2 py-1 text-xs text-white">
+                      <option value="">-- 请选择 --</option>
+                      {(exp.options||exp.choices||[]).map((c:string)=>(<option key={c} value={c}>{c}</option>))}
+                      {String(val ?? '') && !(exp.options||exp.choices||[]).includes(String(val)) && <option value={String(val)}>{String(val)}</option>}
+                    </select>
                   ) : (
                     <input type="text" value={val ?? ''} onChange={e=> handleDynamicChange(key, e.target.value)} placeholder={exp.description || ''} className="w-full bg-[#2A2A32] border border-[#2A2A32] rounded-lg px-2 py-1 text-xs text-white placeholder-gray-500"/>
                   )}

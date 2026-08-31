@@ -255,7 +255,146 @@ def _sanitize_for_frontend(pd: ProviderDefinition) -> Dict[str, Any]:
     info = pd.to_provider_info(include_code=True)
     if info.get("code") and len(info["code"]) > 8000:
         info["code_preview"] = info["code"][:8000] + "\n... (truncated, full code via GET /providers/{id})"
+    # 存量自定义源缺 schema 时在读取路径兜底（唯一规则入口 resolve_params_schema，不落盘），
+    # 否则 params_schema=null 导致分镜/画布渲染不出独立控件、参数无法透传
+    try:
+        info["params_schema"] = resolve_params_schema(pd.code, pd.kind, info.get("params_schema"))
+        if not info.get("input_schema") or not info["input_schema"].get("properties"):
+            info["input_schema"] = _default_input_schema(pd.kind)
+        if not info.get("output_schema") or not info["output_schema"].get("properties"):
+            info["output_schema"] = _default_output_schema(pd.kind)
+    except Exception:
+        pass
     return info
+
+def _extract_params_schema_from_code(code_text: str) -> Optional[Dict[str, Any]]:
+    """
+    从生成代码尾部的 `# PARAMS_SCHEMA: {...}` / `// PARAMS_SCHEMA: {...}` 单行注释解析该源自己的独立参数 schema。
+    目的：AI 生成源时带上 API 真实枚举（如 "480p竖"），避免通用默认枚举（"480p"）与实际 API 不符导致请求被拒。
+    """
+    if not code_text:
+        return None
+    m = re.search(r"(?:#|//)\s*PARAMS_SCHEMA:\s*(\{.*)", code_text, re.MULTILINE)
+    if not m:
+        return None
+    try:
+        parsed = json.loads(m.group(1).strip())
+        if isinstance(parsed, dict) and parsed.get("properties"):
+            return parsed
+    except Exception:
+        pass
+    return None
+
+
+def resolve_params_schema(code: str, kind: str, explicit: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    params_schema 单点解析（全系统唯一规则）：
+    显式声明 > 代码内 PARAMS_SCHEMA 注释 > kind 通用默认。
+    创建/升级/导入/MCP/读取兜底 一律走这里，杜绝多处规则不一致。
+    """
+    if explicit and explicit.get("properties"):
+        return explicit
+    extracted = _extract_params_schema_from_code(code or "")
+    if extracted:
+        return extracted
+    return _default_params_schema(kind)
+
+
+def code_gen_system_prompt(kind: str, language: str, tmpl: str = "") -> str:
+    """LLM 生成源代码的单一提示词源（MCP register_custom_provider 与 /providers/import 共用）。"""
+    lang_label = "javascript" if language in ("javascript", "js", "node") else "python"
+    return f"""你是生成源代码专家。用户提供了 {kind} 类 API 文档（{lang_label}），请直接生成可执行的携程源码。
+要求：
+- 输出 {lang_label} 代码，入口为 async def generate(ctx, api)（python）或 async function generate(ctx, api)（javascript）
+- ctx 含 prompt/width/height/size/seed/model/style_preset/api_key/reference_images/first_frame_url/duration/resolution/aspect_ratio/fps/text/voice_id/emotion 等，api 含 httpx/asyncio/json/re/time/uuid/download(api.download(url,prefix)->(storage_url,local_path))；python 沙箱可 import 第三方库（aiohttp/requests/httpx）与 raise 异常
+- 防御式解析（必须）：响应一律用 .get() 链取值；业务码非成功、data 缺失或为 null 时，必须 raise RuntimeError 并把服务端 code/msg/原始响应前300字符带出来，严禁对可能为 None 的值做 [] 下标取值
+- 列表结果元素可能是对象（取其中的 url 字段）也可能是字符串，两种都兼容
+- 必须包含完整请求、鉴权、payload、轮询（视频类用 while/for+sleep 并设最大轮询次数）、错误处理
+- 成功返回 {{"image_url": url}} / {{"video_url": url}} / {{"audio_url": url}}，轮询场景可先返回 task_id 再由框架接管
+- 若该 API 有自己的参数枚举（分辨率档位/比例/时长档等），必须在代码最后一行追加单行注释（一行合法 JSON）：
+  # PARAMS_SCHEMA: {{"type":"object","properties":{{"resolution":{{"type":"string","title":"分辨率","enum":["...真实枚举..."],"default":"...","description":"..."}}}}}}
+  框架会把它解析为该源的独立参数控件；没有自定义枚举则省略此行
+- 仅输出代码，不要 markdown、不要解释
+模板参考：
+{tmpl[:2000]}
+"""
+
+
+def create_code_source(
+    *,
+    name: str,
+    kind: str,
+    code: str,
+    language: str = "python",
+    code_entry: Optional[str] = None,
+    description: str = "",
+    scope: str = "global",
+    project_id: Optional[str] = None,
+    api_key: Optional[str] = None,
+    doc_text: str = "",
+    doc_url: str = "",
+    params_schema: Optional[Dict[str, Any]] = None,
+    input_schema: Optional[Dict[str, Any]] = None,
+    output_schema: Optional[Dict[str, Any]] = None,
+    models: Optional[list] = None,
+    default_model: Optional[str] = None,
+    code_timeout: Optional[int] = None,
+    provider_id: Optional[str] = None,
+    icon: str = "Zap",
+) -> Dict[str, Any]:
+    """
+    动态生成源统一创建入口（MCP 直建/带定义/文档 LLM 生成、/providers/import 共用）：
+    代码清洗（去 markdown 围栏）→ schema 规整（resolve_params_schema 单点）→ 超时策略 → 保存注册 → Key 落盘 → 沙箱体检。
+    返回 {"id", "provider": info, "compile_check": {...}}；体检失败不回滚，由调用方决定提示/重试。
+    """
+    import uuid as _uuid
+    import re as _re
+    from app.models.provider_definition import ProviderDefinition
+    from app.providers.custom.manager import custom_provider_manager
+    from app.providers.generic.code_provider import compile_check_code
+
+    # 清理 markdown 包裹
+    code = _re.sub(r"^```[a-z]*\n", "", (code or "").strip())
+    code = _re.sub(r"\n```$", "", code.strip())
+    if len(code) < 20:
+        raise ValueError("代码内容过短")
+
+    pid = provider_id or f"prov_{_uuid.uuid4().hex[:8]}"
+    lang = "javascript" if language in ("javascript", "js", "node") else "python"
+    data: Dict[str, Any] = {
+        "id": pid, "name": name or f"自定义{kind}源", "kind": kind,
+        "provider_type": "code", "language": lang, "code": code,
+        "code_entry": code_entry or "generate",
+        "code_timeout": code_timeout or (600 if kind == "video" else 120),
+        "description": description or "动态代码生成源", "icon": icon,
+        "scope": scope or "global", "enabled": True,
+        "doc_text": (doc_text or "")[:4000], "raw_api_doc": (doc_text or "")[:4000],
+    }
+    if doc_url:
+        data["doc_url"] = doc_url
+    if models:
+        data["models"] = models
+    if default_model:
+        data["default_model"] = default_model
+    if api_key:
+        data["auth"] = {"type": "bearer", "key_env": f"CUSTOM_PROVIDER_{pid}", "prefix": "Bearer "}
+    pd = ProviderDefinition.model_validate(data)
+    # schema 规整：唯一规则入口
+    pd.params_schema = resolve_params_schema(pd.code, pd.kind, params_schema)
+    pd.input_schema = input_schema if (input_schema and input_schema.get("properties")) else _default_input_schema(pd.kind)
+    pd.output_schema = output_schema if (output_schema and output_schema.get("properties")) else _default_output_schema(pd.kind)
+    saved = custom_provider_manager.save_definition(pd)
+    if api_key:
+        _save_api_key(saved.id, api_key)
+        os.environ[f"CUSTOM_PROVIDER_{saved.id}"] = api_key
+    from app.providers.init_providers import register_single_custom_provider
+    register_single_custom_provider(saved)
+    # 创建即体检（零配额）：结果回传调用方（Agent 闭环）
+    cc = compile_check_code(saved.language or "python", saved.code or "", saved.code_entry or "generate")
+    if not cc.get("ok"):
+        print(f"[ProviderRoutes] 新建源 {saved.id} 体检未通过: {cc.get('error')}")
+    return {"id": saved.id, "provider": _sanitize_for_frontend(saved), "compile_check": cc, "code": code}
+
 
 def _infer_kind_from_doc(doc: str, url: str = "") -> Optional[str]:
     low = f"{doc or ''} {url or ''}".lower()
@@ -606,6 +745,7 @@ async def test_provider(provider_id: str, body: Optional[Dict[str, Any]] = Body(
     pd = custom_provider_manager.get_definition(provider_id)
     prov = None
     kind = None
+    compile_check = None
     if pd:
         kind = pd.kind
         try:
@@ -620,6 +760,14 @@ async def test_provider(provider_id: str, body: Optional[Dict[str, Any]] = Body(
                 prov = GenericCodeImageProvider(pd)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"创建 Provider 实例失败: {e}")
+        # 免费深度体检先行：沙箱编译+入口定位（零配额），坏代码快速失败并给出确切原因
+        if pd.code:
+            from app.providers.generic.code_provider import compile_check_code
+            cc = compile_check_code(pd.language or "python", pd.code, pd.code_entry or "generate")
+            compile_check = cc
+            if not cc.get("ok"):
+                return {"provider_id": provider_id, "ok": False, "is_configured": True, "kind": kind,
+                        "detail": f"代码体检未通过: {cc.get('error')}", "compile_check": cc}
         # 兼容：若仍是 legacy JSON 且无 code，尝试用 http_provider
         if not pd.code and pd.legacy_json_mode:
             try:
@@ -649,7 +797,10 @@ async def test_provider(provider_id: str, body: Optional[Dict[str, Any]] = Body(
     try:
         ok = await prov.check_health()
         is_configured = prov.is_configured() if hasattr(prov, "is_configured") else True
-        return {"provider_id": provider_id, "ok": ok, "is_configured": is_configured, "kind": kind or getattr(prov, "kind", "unknown"), "detail": "连通正常" if ok else "检测未通过（检查代码/ Key/地址）"}
+        resp = {"provider_id": provider_id, "ok": ok, "is_configured": is_configured, "kind": kind or getattr(prov, "kind", "unknown"), "detail": "连通正常" if ok else "检测未通过（检查代码/ Key/地址）"}
+        if compile_check is not None:
+            resp["compile_check"] = compile_check
+        return resp
     except Exception as e:
         return {"provider_id": provider_id, "ok": False, "detail": f"检测异常: {e}"}
 
@@ -733,64 +884,33 @@ async def import_provider_from_doc(req: ProviderImportRequest):
         lang = (req.language or "python").lower()
         if lang == "js": lang = "javascript"
         tmpl = CODE_TEMPLATES.get((lang, req.kind)) or CODE_TEMPLATES.get(("python", req.kind)) or ""
-        system_prompt = f"""你是生成源代码专家。用户提供了 {req.kind} 类 API 文档，请直接生成可执行的 {lang} 携程源码。
-要求：
-- 输出 {lang} 代码，入口为 async def generate(ctx, api)（python）或 async function generate(ctx, api)（js）
-- ctx 含 prompt/width/height/size/seed/model/api_key/reference_images/first_frame_url/duration/text/voice_id 等，api 含 httpx/asyncio/json/re/time/uuid/download(api.download(url,prefix)->(storage_url,local_path))
-- 必须包含完整请求头、鉴权（Bearer / X-API-Key）、payload 构造、错误处理
-- 轮询任务需用 async sleep 循环，成功返回 {{"image_url": url}} / {{"video_url": url}} / {{"audio_url": url}}
-- 仅输出代码，不要 markdown、不要解释
-模板参考：
-{tmpl[:2000]}
-"""
+        system_prompt = code_gen_system_prompt(req.kind, lang, tmpl)
         user_prompt = f"kind: {req.kind}\nlanguage: {lang}\nname_hint: {req.name or ''}\n\nAPI 文档:\n{doc_content[:6000]}"
         code_text = await llm_service.chat_completion(
             messages=[{"role":"system","content":system_prompt},{"role":"user","content":user_prompt}],
             temperature=0.2
         )
-        # 清理 markdown 包裹
-        code_text = re.sub(r"^```[a-z]*\n", "", code_text.strip())
-        code_text = re.sub(r"\n```$", "", code_text.strip())
-        if len(code_text) < 50:
+        if len((code_text or "").strip()) < 50:
             raise ValueError("LLM 生成代码过短")
         inferred = _infer_kind_from_doc(doc_content, "")
         final_kind = req.kind
         if inferred and inferred != req.kind and req.kind in (None, "", "image") and inferred == "video":
             final_kind = inferred
-        import uuid
-        pid = f"prov_{uuid.uuid4().hex[:8]}"
-        data: Dict[str, Any] = {
-            "id": pid,
-            "name": req.name or f"自定义{final_kind}源",
-            "kind": final_kind,
-            "provider_type": "code",
-            "language": lang,
-            "code": code_text,
-            "code_entry": "generate",
-            "code_timeout": 60,
-            "description": f"由导演从文档自动生成（{lang}）",
-            "scope": "global",
-            "enabled": True,
-            "doc_text": doc_content[:4000],
-            "raw_api_doc": doc_content[:4000],
-        }
-        if req.doc_url:
-            data["doc_url"] = req.doc_url
-        if req.api_key:
-            data["auth"] = {"type": "bearer", "key_env": f"CUSTOM_PROVIDER_{pid}", "prefix": "Bearer "}
-        pd = ProviderDefinition.model_validate(data)
-        if not pd.params_schema or not pd.params_schema.get("properties"):
-            pd.params_schema = _default_params_schema(pd.kind)
-        if not pd.input_schema or not pd.input_schema.get("properties"):
-            pd.input_schema = _default_input_schema(pd.kind)
-        if not pd.output_schema or not pd.output_schema.get("properties"):
-            pd.output_schema = _default_output_schema(pd.kind)
-        saved = custom_provider_manager.save_definition(pd)
-        if req.api_key:
-            _save_api_key(saved.id, req.api_key)
-        from app.providers.init_providers import register_single_custom_provider
-        register_single_custom_provider(saved)
-        return {"status": "success", "provider": _sanitize_for_frontend(saved), "mode": "llm_code", "code": code_text}
+        # 统一创建入口：schema 规整/超时策略/保存注册/Key 落盘/沙箱体检 一条龙
+        created = create_code_source(
+            name=req.name or f"自定义{final_kind}源",
+            kind=final_kind,
+            code=code_text,
+            language=lang,
+            description=f"由导演从文档自动生成（{lang}）",
+            api_key=req.api_key,
+            doc_text=doc_content,
+            doc_url=req.doc_url or "",
+        )
+        return {"status": "success" if created["compile_check"].get("ok") else "compile_failed",
+                "provider": created["provider"], "mode": "llm_code", "code": created["code"],
+                "compile_check": created["compile_check"],
+                **({"hint": "生成的代码未通过沙箱编译体检，请根据 compile_check.error 修正后重试"} if not created["compile_check"].get("ok") else {})}
     except HTTPException:
         raise
     except Exception as e:

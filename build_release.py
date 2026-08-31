@@ -82,6 +82,8 @@ pyinstaller_cmd = [
     "--collect-all", "fastmcp",
     "--collect-all", "pydantic",
     "--collect-all", "httpx",
+    "--collect-all", "aiohttp",
+    "--collect-all", "requests",
     "--collect-all", "langchain",
     "--collect-all", "langchain_openai",
     "--collect-all", "langchain_core",

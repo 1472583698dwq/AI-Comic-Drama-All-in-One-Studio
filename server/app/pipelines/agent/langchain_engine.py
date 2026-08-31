@@ -325,13 +325,15 @@ async def run_agent_with_langchain(
     context: Dict[str, Any],
     session_id: str = "default",
     websocket=None,
-    max_iterations: int = 6,
+    max_iterations: Optional[int] = None,
     streaming: bool = True,
 ) -> Dict[str, Any]:
     """
     使用 LangChain 进行多轮循环执行
     - session_id 用于记忆隔离（按项目或用户）
     - websocket 用于流式推送（若提供）
+    - max_iterations: 可选轮次上限；默认 None=无上限（直到模型不再调用工具）。
+      防失控双保险：绝对安全上限 200 轮 + 连续 3 轮完全相同的工具调用判定卡死自动收尾
     返回 {"reply": str, "tool_calls": [], "suggested_actions": []}
     """
     # 取历史
@@ -382,10 +384,11 @@ async def run_agent_with_langchain(
 
         # 准备消息
         messages: List[BaseMessage] = []
-        # 系统提示
-        from app.api.routes import AGENT_SYSTEM_PROMPT
-        system_extra = "\n\n你是具备多轮记忆的导演 Agent，可进行多轮工具调用（最多6轮），请基于历史与工具结果持续推理。"
-        messages.append(SystemMessage(content=AGENT_SYSTEM_PROMPT + system_extra))
+        # 系统提示：循环模式使用 LOOP 版（原生 tool calling + 多步持续执行策略），
+        # 不带"严格输出 JSON/最多 2 个工具"的单轮兜底约束（历史bug：该约束导致模型一轮工具后就 JSON 总结收工）
+        from app.api.routes import AGENT_LOOP_SYSTEM_PROMPT
+        system_extra = "\n\n你是具备多轮记忆的导演 Agent，可进行多轮工具调用且无固定轮次上限——持续执行直到用户目标全部完成，请基于历史与工具结果持续推理。"
+        messages.append(SystemMessage(content=AGENT_LOOP_SYSTEM_PROMPT + system_extra))
         # 历史
         for h in history:
             messages.append(h)
@@ -402,38 +405,41 @@ async def run_agent_with_langchain(
             except Exception:
                 pass
 
-        # 循环执行 — 采用 ainvoke 获取工具决策，流式仅用于最终回复，避免 raw JSON 污染
-        for iteration in range(max_iterations):
+        # 循环执行 — 无固定轮次上限：直到模型不再调用工具（目标完成）才结束。
+        # 防失控双保险：① 连续 3 轮完全相同的工具调用（同名同参）判定卡死自动收尾；② 绝对安全上限 200 轮
+        iteration = 0
+        stall_sig = None
+        stall_count = 0
+        safety_cap = 200
+        while True:
+            iteration += 1
+            if max_iterations and iteration > max_iterations:
+                full_reply = content if 'content' in locals() else ""
+                break
+            if iteration > safety_cap:
+                full_reply = (content if 'content' in locals() else "") + "\n\n（已达到单次任务安全轮次上限 200，任务未完成可让我继续。）"
+                break
             content = ""
             tool_calls: List[Dict[str, Any]] = []
-            try:
-                # 统一使用非流式获取决策（兼容 Studio JSON 与 OpenAI function calling）
-                result = await llm_with_tools.ainvoke(messages)
-                content = result.content if hasattr(result, "content") else str(result)
-                tool_calls = getattr(result, "tool_calls", None) or []
-                # 处理 LangChain 可能将 tool_calls 放在 additional_kwargs
-                if not tool_calls and hasattr(result, "additional_kwargs"):
-                    ak = getattr(result, "additional_kwargs", {}) or {}
-                    if isinstance(ak, dict) and "tool_calls" in ak and ak["tool_calls"]:
-                        for tc in ak["tool_calls"]:
-                            fn = tc.get("function", {}) if isinstance(tc, dict) else {}
-                            tool_calls.append({"name": fn.get("name") or tc.get("name") or "", "args": json.loads(fn.get("arguments") or "{}") if isinstance(fn.get("arguments"), str) else fn.get("arguments") or {}, "id": tc.get("id") or f"call_{iteration}"})
-                # JSON 兼容：若仍无 tool_calls 但 content 包含 JSON，尝试解析
-                if not tool_calls and content:
-                    try:
-                        parsed = extract_json_from_text(content)
-                        if isinstance(parsed, dict) and "tool_calls" in parsed and parsed["tool_calls"]:
-                            for tc in parsed["tool_calls"]:
-                                tool_calls.append({"name": tc.get("tool") or tc.get("name") or "", "args": tc.get("arguments") or {}, "id": f"call_{iteration}_{len(tool_calls)}"})
-                            if parsed.get("reply"):
-                                content = parsed.get("reply") or ""
-                    except Exception:
-                        pass
-            except Exception as e:
-                print(f"[LangChainAgent] ainvoke failed: {e}, fallback to llm_service")
+            result = None
+            last_err: Optional[Exception] = None
+            # ainvoke 双重试：代理/网络抖动时先重试而非直接跌落单轮兜底（单轮兜底无循环，是"一步即停"的历史根因之一）
+            for _attempt in range(2):
                 try:
+                    # 统一使用非流式获取决策（兼容 Studio JSON 与 OpenAI function calling）
+                    result = await llm_with_tools.ainvoke(messages)
+                    break
+                except Exception as _e:
+                    last_err = _e
+                    result = None
+                    print(f"[LangChainAgent] ainvoke failed (attempt {_attempt + 1}/2): {_e}")
+                    await asyncio.sleep(0.8)
+            if result is None:
+                print(f"[LangChainAgent] ainvoke 重试仍失败: {last_err}，fallback to llm_service 单轮")
+                try:
+                    from app.api.routes import AGENT_SYSTEM_PROMPT as _JSON_PROMPT
                     decision = await llm_service.chat_json(
-                        system_prompt=AGENT_SYSTEM_PROMPT,
+                        system_prompt=_JSON_PROMPT,
                         user_prompt=json.dumps({"instruction": prompt, "context": context, "history": [m.content for m in history[-6:]]}, ensure_ascii=False),
                         temperature=0.2,
                     )
@@ -459,6 +465,31 @@ async def run_agent_with_langchain(
                     return {"reply": reply, "tool_calls": decision.get("tool_calls") or [], "suggested_actions": decision.get("suggested_actions") or [], "executed_tools": decision.get("tool_calls") or []}
                 except Exception as e3:
                     raise e3
+            # 解析决策（解析异常不触发单轮兜底，下一轮重试即可）
+            try:
+                content = result.content if hasattr(result, "content") else str(result)
+                tool_calls = getattr(result, "tool_calls", None) or []
+                # 处理 LangChain 可能将 tool_calls 放在 additional_kwargs
+                if not tool_calls and hasattr(result, "additional_kwargs"):
+                    ak = getattr(result, "additional_kwargs", {}) or {}
+                    if isinstance(ak, dict) and "tool_calls" in ak and ak["tool_calls"]:
+                        for tc in ak["tool_calls"]:
+                            fn = tc.get("function", {}) if isinstance(tc, dict) else {}
+                            tool_calls.append({"name": fn.get("name") or tc.get("name") or "", "args": json.loads(fn.get("arguments") or "{}") if isinstance(fn.get("arguments"), str) else fn.get("arguments") or {}, "id": tc.get("id") or f"call_{iteration}"})
+                # JSON 兼容：若仍无 tool_calls 但 content 包含 JSON，尝试解析
+                if not tool_calls and content:
+                    try:
+                        parsed = extract_json_from_text(content)
+                        if isinstance(parsed, dict) and "tool_calls" in parsed and parsed["tool_calls"]:
+                            for tc in parsed["tool_calls"]:
+                                tool_calls.append({"name": tc.get("tool") or tc.get("name") or "", "args": tc.get("arguments") or {}, "id": f"call_{iteration}_{len(tool_calls)}"})
+                            if parsed.get("reply"):
+                                content = parsed.get("reply") or ""
+                    except Exception:
+                        pass
+            except Exception as _pe:
+                print(f"[LangChainAgent] 决策解析异常: {_pe}")
+                content, tool_calls = str(result), []
 
             # 处理工具调用 — 先流式推送思考过程（P 思考展示）
             if tool_calls:
@@ -471,6 +502,20 @@ async def run_agent_with_langchain(
                         await websocket.send_json({"event": "agent_thinking_end"})
                     except Exception:
                         pass
+                # 卡死检测：连续 3 轮完全相同的工具调用（同名同参）判定为空转，自动收尾
+                _sig = json.dumps(
+                    [[tc.get("name") or tc.get("tool") or "", json.dumps(tc.get("args") or tc.get("arguments") or {}, ensure_ascii=False, sort_keys=True, default=str)] for tc in tool_calls],
+                    ensure_ascii=False,
+                )
+                if _sig == stall_sig:
+                    stall_count += 1
+                else:
+                    stall_sig = _sig
+                    stall_count = 1
+                if stall_count >= 3:
+                    full_reply = (content or "") + "\n\n（检测到连续相同的工具调用，已自动停止以避免空转；可调整指令后让我继续。）"
+                    messages.append(AIMessage(content=full_reply))
+                    break
                 # 通知前端开始工具调用
                 # 先将 AIMessage 加入历史
                 messages.append(AIMessage(content=content or "", tool_calls=tool_calls))
@@ -524,9 +569,6 @@ async def run_agent_with_langchain(
                 # 加入历史
                 messages.append(AIMessage(content=full_reply))
                 break
-        else:
-            # 达到最大迭代仍未结束，取最后 content
-            full_reply = content if 'content' in locals() else ""
 
         # 去除 think 标签
         full_reply = strip_think_tags(full_reply) if full_reply else "指令已执行。"

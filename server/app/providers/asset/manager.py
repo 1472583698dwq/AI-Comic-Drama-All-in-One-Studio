@@ -60,13 +60,23 @@ class AssetManager:
             if not asset:
                 continue
             # 兼容旧数据：无 scope 视为 project，无 shared_to 视为 []
+            _mutated = False
             if not getattr(asset, "scope", None):
                 asset.scope = "global" if not asset.project_id else "project"
+                _mutated = True
             # 旧数据迁移：project 作用域但 project_id 为空 视为全局（磁盘默认 scope=project 导致旧全局资产被误判）
             if getattr(asset, "scope", "project") == "project" and not asset.project_id:
                 asset.scope = "global"
+                _mutated = True
             if not getattr(asset, "shared_to", None):
                 asset.shared_to = []
+                # shared_to 缺失不算脏，不强行写盘以保持静默
+            # 脏数据落盘矫正（避免下次仍为 project/null）
+            if _mutated:
+                try:
+                    _save_asset(asset)
+                except Exception:
+                    pass
             # 过滤
             if category and asset.category != category:
                 continue

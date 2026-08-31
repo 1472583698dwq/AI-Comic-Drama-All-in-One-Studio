@@ -26,6 +26,7 @@ import { StoryboardShot, EmotionType } from '../../types';
 import { apiService } from '../../services/api';
 import { WorkflowInspectorModal } from '../workflow/WorkflowInspectorModal';
 import { ProviderPicker, ProviderParamForm } from '../ui/ProviderPicker';
+import { AiPolishButton } from '../ui/AiPolishButton';
 
 const API_ORIGIN = 'http://127.0.0.1:8000';
 
@@ -77,10 +78,26 @@ export const ShotInspector: React.FC = () => {
   const shots: StoryboardShot[] = project?.scenes.flatMap((s) => s.shots) || [];
   const activeShot = shots.find((s) => s.id === activeShotId) || shots[0];
 
-  // Load workflows & project assets
+  // Load workflows & project assets（支持项目隔离与全局刷新）
   useEffect(() => {
     loadWorkflowsAndAssets();
-  }, []);
+    const onAssetRefresh = () => loadWorkflowsAndAssets();
+    const onAssetApplied = (e: any) => {
+      // 资源库“应用到镜头”后，若命中当前分镜可触发轻提示
+      if (e.detail?.shotId === activeShot?.id) loadWorkflowsAndAssets();
+    };
+    window.addEventListener('asset-refresh', onAssetRefresh as any);
+    window.addEventListener('asset-applied', onAssetApplied as any);
+    return () => {
+      window.removeEventListener('asset-refresh', onAssetRefresh as any);
+      window.removeEventListener('asset-applied', onAssetApplied as any);
+    };
+  }, [activeShot?.id]);
+
+  // 项目切换时刷新资产（按项目可见性）
+  useEffect(() => {
+    loadWorkflowsAndAssets();
+  }, [project?.id]);
 
   const loadWorkflowsAndAssets = async () => {
     try {
@@ -88,7 +105,8 @@ export const ShotInspector: React.FC = () => {
       setWorkflows(wfRes?.workflows || []);
     } catch (_) {}
     try {
-      const assetRes = await apiService.listAssets({ page: 1, limit: 100 });
+      const pid = project?.id || (useProjectStore.getState() as any).activeProjectId || undefined;
+      const assetRes = await apiService.listAssets({ project_id: pid, page: 1, limit: 100, scope: undefined });
       setProjectAssets(assetRes?.assets || []);
     } catch (_) {}
   };
@@ -412,6 +430,31 @@ export const ShotInspector: React.FC = () => {
     setTimeout(()=> setQueue(q=> q.filter(j=> !ids.includes(j.id))), 4000);
   };
 
+  const [savingAsset, setSavingAsset] = useState(false);
+
+  const handleSaveShotToAsset = async (kind: 'image'|'video') => {
+    const url = kind==='image' ? activeShot.image_url : activeShot.video_url;
+    if (!url) { alert(kind==='image' ? '暂无首帧可保存' : '暂无视频可保存'); return; }
+    if (!project) { alert('请先打开项目'); return; }
+    setSavingAsset(true);
+    try {
+      const fd = new FormData();
+      const safeName = `${project.title}-镜头${activeShot.shot_index}-${kind}`;
+      fd.append('name', safeName);
+      fd.append('category', kind==='image' ? 'scene' : 'other');
+      fd.append('description', activeShot.action_desc || activeShot.image_prompt || '');
+      fd.append('visual_prompt', activeShot.image_prompt || activeShot.action_desc || safeName);
+      fd.append('file_url', url);
+      fd.append('scope', 'project');
+      fd.append('project_id', project.id);
+      fd.append('tags', kind);
+      // @ts-ignore apiService.createAsset 接收 FormData
+      await apiService.createAsset(fd);
+      try { window.dispatchEvent(new CustomEvent('asset-refresh')); } catch {}
+      alert(`已保存到素材库（项目）`);
+    } catch (e:any) { alert(e.message || '保存失败'); } finally { setSavingAsset(false); }
+  };
+
   const getMediaUrl = (url?: string | null) => {
     if (!url) return '';
     return url.startsWith('/') ? API_ORIGIN + url : url;
@@ -612,6 +655,26 @@ export const ShotInspector: React.FC = () => {
             >
               <RefreshCw className={`w-4 h-4 text-brand-light ${isRegenerating ? 'animate-spin' : ''}`} />
             </button>
+            {activeShot.image_url && (
+              <button
+                onClick={()=> handleSaveShotToAsset('image')}
+                disabled={savingAsset}
+                className="p-2 rounded-xl bg-black/70 hover:bg-emerald-600 text-white backdrop-blur-md border border-white/10 transition-all shadow-md disabled:opacity-40"
+                title="保存首帧到素材库（项目）"
+              >
+                <ImageIcon className="w-4 h-4" />
+              </button>
+            )}
+            {activeShot.video_url && previewTab==='video' && (
+              <button
+                onClick={()=> handleSaveShotToAsset('video')}
+                disabled={savingAsset}
+                className="p-2 rounded-xl bg-black/70 hover:bg-emerald-600 text-white backdrop-blur-md border border-white/10 transition-all shadow-md disabled:opacity-40"
+                title="保存视频到素材库（项目）"
+              >
+                <Film className="w-4 h-4" />
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -666,7 +729,24 @@ export const ShotInspector: React.FC = () => {
             <div className="p-2.5 rounded-xl bg-pink-500/5 border border-pink-500/20 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-pink-300">角色台词 / 旁白</span>
-                <span className={`w-2 h-2 rounded-full ${healthMap[audioProvider]?.ok ? 'bg-emerald-500' : healthMap[audioProvider]?.ok===false ? 'bg-amber-500' : 'bg-zinc-600'}`} title={healthMap[audioProvider]?.detail || '未检测'} />
+                <div className="flex items-center gap-1.5">
+                  <AiPolishButton
+                    value={activeShot.dialogue || activeShot.voiceover || ''}
+                    onPolish={(v, meta) => {
+                      const polished = v;
+                      const emo = (meta as any)?.suggested_emotion;
+                      updateShot(activeShot.id, {
+                        dialogue: activeShot.dialogue ? polished : '',
+                        voiceover: activeShot.voiceover || !activeShot.dialogue ? polished : activeShot.voiceover,
+                        subtitle_text: polished,
+                        ...(emo ? { emotion: emo } : {}),
+                      } as any);
+                    }}
+                    contextType="dialogue"
+                    size="xs"
+                  />
+                  <span className={`w-2 h-2 rounded-full ${healthMap[audioProvider]?.ok ? 'bg-emerald-500' : healthMap[audioProvider]?.ok===false ? 'bg-amber-500' : 'bg-zinc-600'}`} title={healthMap[audioProvider]?.detail || '未检测'} />
+                </div>
               </div>
               <textarea
                 value={activeShot.dialogue || activeShot.voiceover || ''}
@@ -720,13 +800,19 @@ export const ShotInspector: React.FC = () => {
         {inspectorTab==='visual' && (
           <div className="space-y-3">
             <div>
-              <label className="text-xs font-semibold text-gray-300 flex items-center gap-1"><Paintbrush className="w-3 h-3 text-violet-400"/> 画面动作</label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-gray-300 flex items-center gap-1"><Paintbrush className="w-3 h-3 text-violet-400"/> 画面动作</label>
+                <AiPolishButton value={activeShot.action_desc} onPolish={(v: any) => updateShot(activeShot.id, { action_desc: v })} contextType="prompt" size="xs" />
+              </div>
               <textarea value={activeShot.action_desc} onChange={(e) => updateShot(activeShot.id, { action_desc: e.target.value })} rows={2} className="mt-1 w-full bg-surface-secondary border border-border rounded-xl p-2.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand"/>
             </div>
             <div className="p-3 rounded-xl bg-violet-500/5 border border-violet-500/20 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-violet-300 flex items-center gap-1"><ImageIcon className="w-3.5 h-3.5"/> 首帧提示词</span>
-                <span className={`w-2 h-2 rounded-full ${healthMap[imageProvider]?.ok ? 'bg-emerald-500' : healthMap[imageProvider]?.ok===false ? 'bg-amber-500' : 'bg-zinc-600'}`} title={healthMap[imageProvider]?.detail || '未检测'} />
+                <div className="flex items-center gap-1.5">
+                  <AiPolishButton value={activeShot.image_prompt} onPolish={(v: any) => updateShot(activeShot.id, { image_prompt: v })} contextType="prompt" size="xs" />
+                  <span className={`w-2 h-2 rounded-full ${healthMap[imageProvider]?.ok ? 'bg-emerald-500' : healthMap[imageProvider]?.ok===false ? 'bg-amber-500' : 'bg-zinc-600'}`} title={healthMap[imageProvider]?.detail || '未检测'} />
+                </div>
               </div>
               <ProviderPicker kind="image" value={imageProvider} onChange={(pid, def)=> {
                 setImageProvider(pid); setImageProviderDef(def||null);
@@ -768,7 +854,7 @@ export const ShotInspector: React.FC = () => {
                             if(url) setShotDynamicInputs(p=> ({...p, [key]: url}));
                           }}
                         >
-                          <div className="flex items-center justify-between"><span className="text-xs text-white">{exp.label || exp.param_name}</span><span className="text-[9px] font-mono text-gray-500">#{exp.node_id}</span></div>
+                          <div className="flex items-center justify-between"><span className="text-xs text-white">{exp.alias || exp.label || exp.param_name}</span><span className="text-[9px] font-mono text-gray-500">#{exp.node_id}</span></div>
                           {(exp.type==='image' || exp.type==='audio' || exp.type==='video') ? (
                             val ? (
                               <div className="flex items-center gap-2">
@@ -789,8 +875,8 @@ export const ShotInspector: React.FC = () => {
                           ) : (exp.type==='select' || exp.type==='combo') ? (
                             <select value={val??''} onChange={e=> setShotDynamicInputs(p=>({...p,[key]: e.target.value}))} className="w-full bg-surface-tertiary border border-border rounded-lg px-2 py-1 text-xs text-white">
                               <option value="">-- 请选择 --</option>
-                              {(exp.choices||[]).map((c:string)=>(<option key={c} value={c}>{c}</option>))}
-                              {!(exp.choices||[]).includes(val) && val && <option value={val}>{val}</option>}
+                              {(exp.options||exp.choices||[]).map((c:string)=>(<option key={c} value={c}>{c}</option>))}
+                              {!(exp.options||exp.choices||[]).includes(val) && val && <option value={val}>{val}</option>}
                             </select>
                           ) : exp.type==='boolean' ? (
                             <label className="flex items-center gap-2 cursor-pointer">
@@ -867,6 +953,10 @@ export const ShotInspector: React.FC = () => {
                 }} />
               </div>
             )}
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-orange-300">运镜/运动</span>
+              <AiPolishButton value={activeShot.video_prompt||''} onPolish={(v: any)=> updateShot(activeShot.id, {video_prompt: v})} contextType="prompt" size="xs" />
+            </div>
             <textarea value={activeShot.video_prompt||''} onChange={e=> updateShot(activeShot.id, {video_prompt: e.target.value})} placeholder="运镜/运动描述..." rows={2} className="w-full bg-surface-secondary border border-border rounded-xl p-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-orange-500"/>
             <div className="grid grid-cols-2 gap-1">
               {[

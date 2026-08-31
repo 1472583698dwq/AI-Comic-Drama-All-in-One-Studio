@@ -20,11 +20,11 @@ export const LoadImageNode: React.FC<NodeProps> = ({ data, id })=>{
   };
   return (
     <div className="w-[260px] bg-[#1A1A22] border-2 border-violet-500/30 rounded-2xl shadow-xl overflow-hidden">
-      <div className="px-3 py-2 bg-zinc-900 border-b border-zinc-800 flex items-center gap-1.5">
+      <div className="px-3 py-2 bg-brand border-b border-zinc-800 flex items-center gap-1.5">
         <ImageIcon className="w-3.5 h-3.5 text-violet-400"/><span className="text-xs font-bold text-white">加载图像</span>
         <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-300 border border-violet-500/30">image</span>
       </div>
-      <Handle type="target" position={Position.Left} id="asset" className="!bg-zinc-500 !w-2 !h-2" style={{visibility:'hidden'}}/>
+      <Handle type="target" position={Position.Left} id="asset" className="!bg-surface-secondary0 !w-2 !h-2" style={{visibility:'hidden'}}/>
       <Handle type="source" position={Position.Right} id="image" className="!bg-violet-500 !w-3 !h-3 !border-2 !border-white" style={{top:'50%'}}/>
       <div className="p-3 space-y-2">
         {url ? (
@@ -61,7 +61,7 @@ export const LoadImageBatchNode: React.FC<NodeProps> = ({ data, id })=>{
   const removeAt = (i:number)=> sync(urls.filter((_,idx)=> idx!==i));
   return (
     <div className="w-[300px] bg-[#1A1A22] border-2 border-violet-500/30 rounded-2xl shadow-xl overflow-hidden">
-      <div className="px-3 py-2 bg-zinc-900 border-b border-zinc-800 flex items-center gap-1.5">
+      <div className="px-3 py-2 bg-brand border-b border-zinc-800 flex items-center gap-1.5">
         <ImageIcon className="w-3.5 h-3.5 text-violet-400"/><span className="text-xs font-bold text-white">批量加载图像</span>
         <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-300 border border-violet-500/30">{urls.length} 张</span>
       </div>
@@ -98,7 +98,7 @@ export const LoadVideoNode: React.FC<NodeProps> = ({ data, id })=>{
   const sync=(v:string)=>{ setUrl(v); (d.onUpdate as any)?.(id,{video:v, url:v}); };
   return (
     <div className="w-[260px] bg-[#1A1A22] border-2 border-orange-500/30 rounded-2xl shadow-xl overflow-hidden">
-      <div className="px-3 py-2 bg-zinc-900 border-b border-zinc-800 flex items-center gap-1.5"><Video className="w-3.5 h-3.5 text-orange-400"/><span className="text-xs font-bold text-white">加载视频</span></div>
+      <div className="px-3 py-2 bg-brand border-b border-zinc-800 flex items-center gap-1.5"><Video className="w-3.5 h-3.5 text-orange-400"/><span className="text-xs font-bold text-white">加载视频</span></div>
       <Handle type="source" position={Position.Right} id="video" className="!bg-orange-500 !w-3 !h-3 !border-2 !border-white"/>
       <div className="p-3 space-y-2">
         {url ? <video src={getUrl(url)} controls className="w-full h-28 rounded-xl bg-black object-cover"/> : <div className="h-20 flex items-center justify-center text-xs text-gray-500 border-2 border-dashed border-[#2A2A32] rounded-xl">暂无视频</div>}
@@ -114,7 +114,7 @@ export const LoadAudioNode: React.FC<NodeProps> = ({ data, id })=>{
   const sync=(v:string)=>{ setUrl(v); (d.onUpdate as any)?.(id,{audio:v, url:v}); };
   return (
     <div className="w-[260px] bg-[#1A1A22] border-2 border-pink-500/30 rounded-2xl shadow-xl overflow-hidden">
-      <div className="px-3 py-2 bg-zinc-900 border-b border-zinc-800 flex items-center gap-1.5"><Music className="w-3.5 h-3.5 text-pink-400"/><span className="text-xs font-bold text-white">加载音频</span></div>
+      <div className="px-3 py-2 bg-brand border-b border-zinc-800 flex items-center gap-1.5"><Music className="w-3.5 h-3.5 text-pink-400"/><span className="text-xs font-bold text-white">加载音频</span></div>
       <Handle type="source" position={Position.Right} id="audio" className="!bg-pink-500 !w-3 !h-3 !border-2 !border-white"/>
       <div className="p-3 space-y-2">
         {url ? <audio src={getUrl(url)} controls className="w-full"/> : <div className="h-12 flex items-center justify-center text-xs text-gray-500 border-2 border-dashed border-[#2A2A32] rounded-xl">暂无音频</div>}
@@ -130,7 +130,7 @@ export const TextPromptNode: React.FC<NodeProps> = ({ data, id })=>{
   const sync=(v:string)=>{ setPrompt(v); (d.onUpdate as any)?.(id,{prompt:v, text:v}); };
   return (
     <div className="w-[300px] bg-[#1A1A22] border-2 border-sky-500/30 rounded-2xl shadow-xl overflow-hidden">
-      <div className="px-3 py-2 bg-zinc-900 border-b border-zinc-800 flex items-center gap-1.5"><Type className="w-3.5 h-3.5 text-sky-400"/><span className="text-xs font-bold text-white">文本提示词</span></div>
+      <div className="px-3 py-2 bg-brand border-b border-zinc-800 flex items-center gap-1.5"><Type className="w-3.5 h-3.5 text-sky-400"/><span className="text-xs font-bold text-white">文本提示词</span></div>
       <Handle type="source" position={Position.Right} id="prompt" className="!bg-sky-500 !w-3 !h-3 !border-2 !border-white"/>
       <Handle type="source" position={Position.Bottom} id="text" className="!bg-sky-500 !w-3 !h-3 !border-2 !border-white"/>
       <div className="p-3">

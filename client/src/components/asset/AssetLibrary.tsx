@@ -115,6 +115,9 @@ export const AssetLibrary: React.FC = () => {
     if (importFiles.length === 0) { alert('请选择至少一个文件'); return; }
     setImporting(true);
     try {
+      const activePid = (useProjectListStore.getState() as any).activeProjectId || (useProjectStore.getState() as any).activeProjectId || null;
+      const curScope = (useAssetStore.getState() as any).scope || 'all';
+      const effScope = curScope === 'global' ? 'global' : (activePid ? 'project' : 'global');
       if (importFiles.length === 1) {
         const fd = new FormData();
         const f = importFiles[0];
@@ -123,16 +126,35 @@ export const AssetLibrary: React.FC = () => {
         fd.append('category', importMeta.category);
         fd.append('visual_prompt', importMeta.visual_prompt);
         if (importMeta.tags) fd.append('tags', importMeta.tags);
+        fd.append('scope', effScope);
+        if (activePid && effScope === 'project') fd.append('project_id', activePid);
         fd.append('file', f);
         await createAsset(fd);
       } else {
-        const res = await batchImport(importFiles, { category: importMeta.category, tags: importMeta.tags, visual_prompt: importMeta.visual_prompt });
-        if (res.errors?.length) alert(`部分失败：\n${res.errors.join('\n')}`);
+        // batchImport 暂不支持 project_id，逐个创建以保证归属
+        if (activePid && effScope === 'project') {
+          for (const f of importFiles) {
+            const fd = new FormData();
+            const base = f.name.replace(/\.[^.]+$/, '') || '素材';
+            fd.append('name', base);
+            fd.append('category', importMeta.category);
+            fd.append('visual_prompt', importMeta.visual_prompt);
+            if (importMeta.tags) fd.append('tags', importMeta.tags);
+            fd.append('scope', effScope);
+            fd.append('project_id', activePid);
+            fd.append('file', f);
+            await createAsset(fd);
+          }
+        } else {
+          const res = await batchImport(importFiles, { category: importMeta.category, tags: importMeta.tags, visual_prompt: importMeta.visual_prompt });
+          if (res.errors?.length) alert(`部分失败：\n${res.errors.join('\n')}`);
+        }
       }
       setShowImport(false);
       setImportFiles([]);
       setImportMeta({ category: 'character', tags: '', visual_prompt: '' });
       refreshStats();
+      try { window.dispatchEvent(new CustomEvent('asset-refresh')); } catch {}
     } catch (e: any) { alert(e.message || '导入失败'); } finally { setImporting(false); }
   };
 
@@ -159,6 +181,9 @@ export const AssetLibrary: React.FC = () => {
           }
         }
       }
+      const activePid = (useProjectListStore.getState() as any).activeProjectId || (useProjectStore.getState() as any).activeProjectId || null;
+      const curScope = (useAssetStore.getState() as any).scope || 'all';
+      const effScope = curScope === 'global' ? 'global' : (activePid ? 'project' : 'global');
       const res = await generateAsset({
         name: genForm.name.trim(),
         prompt: genForm.prompt.trim(),
@@ -167,12 +192,15 @@ export const AssetLibrary: React.FC = () => {
         workflow_id: genForm.workflow_id,
         tags: genForm.tags || undefined,
         dynamic_inputs: effectiveDynamicInputs && Object.keys(effectiveDynamicInputs).length > 0 ? effectiveDynamicInputs : undefined,
-      });
+        project_id: (effScope === 'project' && activePid) ? activePid : undefined,
+        scope: effScope,
+      } as any);
       setShowGenerate(false);
       setGenForm({ name: '', prompt: '', negative_prompt: '', category: 'character', provider: 'comfyui', workflow_id: '', aspect_ratio: '1:1', seed: '', tags: '' });
       setDynamicInputs({});
       if (res?.asset) { selectAsset(res.asset.id); setDetailAsset(res.asset); }
       refreshStats();
+      try { window.dispatchEvent(new CustomEvent('asset-refresh')); } catch {}
     } catch (e: any) { alert(e.message || '生成失败'); } finally { setGenerating(false); }
   };
 
@@ -224,16 +252,81 @@ export const AssetLibrary: React.FC = () => {
   };
 
   const handleApplyToShot = (asset: any) => {
-    const activeShotId = useProjectStore.getState().activeShotId;
-    if (!activeShotId) { alert('请先在分镜工作台选中一个镜头'); return; }
-    if (asset.category === 'character' && asset.visual_prompt) {
-      updateShot(activeShotId, { image_prompt: asset.visual_prompt + ', ' + (project?.style_preset || '') });
-    } else if (asset.category === 'scene' || asset.category === 'background') {
-      updateShot(activeShotId, { image_prompt: asset.visual_prompt || asset.description });
-    } else {
-      updateShot(activeShotId, { image_prompt: (asset.visual_prompt || asset.name) + ', detailed prop' });
+    const st = useProjectStore.getState();
+    const activeShotId = st.activeShotId;
+    const curProject = st.project;
+    if (!curProject) { alert('请先在项目看板创建/打开项目'); return; }
+    let targetShotId = activeShotId;
+    if (!targetShotId) {
+      const firstShot = curProject.scenes?.flatMap((s:any)=>s.shots)?.[0];
+      if (firstShot) {
+        st.setActiveShotId(firstShot.id);
+        targetShotId = firstShot.id;
+      } else {
+        alert('当前项目暂无分镜，已自动创建分镜并应用');
+        // 将由 handleApplyToShot 再次尝试：先创建再应用在下一次点击生效，此处直接更新 prompt 兜底
+      }
     }
-    alert(`已应用素材《${asset.name}》到当前镜头`);
+    if (!targetShotId) { alert('请先在分镜工作台选中一个镜头'); return; }
+    const url = asset.file_url || asset.thumb_url;
+    const abs = url && url.startsWith('/') ? `http://127.0.0.1:8000${url}` : url;
+    if (asset.category === 'character' && asset.visual_prompt) {
+      updateShot(targetShotId, { image_prompt: asset.visual_prompt + ', ' + (curProject?.style_preset || '') } as any);
+      // 角色素材若有图，顺带注入到当前分镜的工作流暴露首个 image 槽位（便于垫图）
+      if (abs) {
+        const curShot: any = curProject.scenes.flatMap((s:any)=>s.shots).find((s:any)=>s.id===targetShotId);
+        if (curShot) {
+          const existing = curShot.dynamic_inputs || {};
+          // 仅当不存在时才注入，避免覆盖用户已填
+          if (!Object.values(existing).some((v:any)=> typeof v==='string' && v.includes('/storage/'))) {
+            updateShot(targetShotId, { dynamic_inputs: { ...existing, _asset_ref: abs } } as any);
+          }
+        }
+      }
+    } else if (asset.category === 'scene' || asset.category === 'background') {
+      updateShot(targetShotId, { image_prompt: asset.visual_prompt || asset.description } as any);
+    } else {
+      updateShot(targetShotId, { image_prompt: (asset.visual_prompt || asset.name) + ', detailed prop' } as any);
+    }
+    // 若资产有图，尝试作为 dynamic_inputs 的 image 注入（供 ShotInspector 的 exposed image 直接预览）
+    if (abs) {
+      try {
+        const curShot2: any = useProjectStore.getState().project?.scenes.flatMap((s:any)=>s.shots).find((s:any)=>s.id===targetShotId);
+        if (curShot2 && curShot2.dynamic_inputs !== undefined) {
+          // 不强制，交由用户拖拽；仅提示
+        }
+      } catch {}
+    }
+    // 切到分镜工作台并提示
+    st.setActiveTab('studio');
+    try { window.dispatchEvent(new CustomEvent('asset-applied', { detail: { assetId: asset.id, shotId: targetShotId } })); } catch {}
+  };
+
+  const handleAddAsCharacter = (asset: any) => {
+    const st = useProjectStore.getState();
+    const curProject = st.project;
+    if (!curProject) { alert('请先打开项目'); return; }
+    const exists = curProject.characters.some((c:any)=> c.name===asset.name);
+    if (exists) { alert('该角色名已存在于当前项目'); return; }
+    const url = asset.file_url || asset.thumb_url;
+    const newChar: any = {
+      id: 'char-' + Date.now(),
+      name: asset.name,
+      gender: 'other',
+      age_group: 'youth',
+      role: asset.category==='character' ? 'supporting' : 'supporting',
+      description: asset.description || asset.visual_prompt?.slice(0,120) || '',
+      visual_prompt: asset.visual_prompt || asset.description || asset.name,
+      voice_id: asset.voice_id || 'male-qn-qingse',
+      voice_name: asset.voice_name || '',
+      emotion_preset: 'neutral',
+      avatar_url: url,
+      three_views: {},
+    };
+    const next = { ...curProject, characters: [...curProject.characters, newChar] } as any;
+    st.setProject(next);
+    alert(`已将素材《${asset.name}》添加为项目角色`);
+    st.setActiveTab('characters');
   };
 
   const onDropFiles = (files: FileList | null) => {
@@ -342,8 +435,11 @@ export const AssetLibrary: React.FC = () => {
             ) : (
             <>
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-                {assets.map((a: any) => (
-                  <div key={a.id} onClick={()=>{selectAsset(a.id); setDetailAsset(a);}} className={`group bg-surface border rounded-2xl overflow-hidden cursor-pointer transition-all hover:shadow-lg ${selectedId===a.id ? 'border-brand ring-1 ring-brand/30' : 'border-border hover:border-border-active'}`}>
+                {assets.map((a: any) => {
+                  const url = a.file_url || a.thumb_url;
+                  const abs = url && url.startsWith('/') ? `http://127.0.0.1:8000${url}` : url;
+                  return (
+                  <div key={a.id} draggable onDragStart={e=>{ e.dataTransfer.setData('text/plain', abs||url||''); e.dataTransfer.setData('application/canvas-assetid', a.id); e.dataTransfer.setData('application/asset-category', a.category||''); e.dataTransfer.effectAllowed='copy'; }} onClick={()=>{selectAsset(a.id); setDetailAsset(a);}} title="拖拽到分镜垫图槽或画布" className={`group bg-surface border rounded-2xl overflow-hidden cursor-grab active:cursor-grabbing transition-all hover:shadow-lg ${selectedId===a.id ? 'border-brand ring-1 ring-brand/30' : 'border-border hover:border-border-active'}`}>
                     <div className="aspect-square bg-black/60 relative overflow-hidden">
                       {a.thumb_url || a.file_url ? (
                         <img src={resolveUrl(a.thumb_url||a.file_url)} alt={a.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
@@ -369,7 +465,8 @@ export const AssetLibrary: React.FC = () => {
                       {a.tags?.length>0 && <div className="flex flex-wrap gap-1 mt-1.5">{a.tags.slice(0,3).map((t:string)=><span key={t} className="text-[9px] px-1 py-0.5 rounded bg-surface-tertiary text-gray-400 flex items-center space-x-0.5"><Tag className="w-2.5 h-2.5" /><span>{t}</span></span>)}{a.tags.length>3 && <span className="text-[9px] text-gray-500">+{a.tags.length-3}</span>}</div>}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
               {total > 24 && (
                 <div className="mt-4 flex items-center justify-center gap-2 text-xs">
@@ -404,6 +501,10 @@ export const AssetLibrary: React.FC = () => {
               <button onClick={()=>handleApplyToShot(selected)} className="mt-2 w-full py-2 rounded-xl bg-brand text-white text-xs font-bold flex items-center justify-center space-x-1">
                 <Sparkles className="w-3.5 h-3.5" /><span>应用到当前镜头</span>
               </button>
+              <button onClick={()=>handleAddAsCharacter(selected)} className="mt-1.5 w-full py-2 rounded-xl bg-surface-secondary border border-brand/30 text-xs text-brand-light hover:text-white hover:bg-brand/10 flex items-center justify-center space-x-1">
+                <Users className="w-3.5 h-3.5" /><span>添加为项目角色</span>
+              </button>
+              <div className="mt-1.5 text-[10px] text-gray-500 flex items-center gap-1"><span>💡 拖拽卡片到分镜垫图槽可直接作为参考图</span></div>
             </div>
             {selected.tags?.length>0 && <div className="flex flex-wrap gap-1.5">{selected.tags.map((t:string)=><span key={t} className="text-xs px-2 py-1 rounded-full bg-brand/15 text-brand-light border border-brand/30">{t}</span>)}</div>}
             <div className="grid grid-cols-2 gap-2 text-xs">

@@ -212,6 +212,14 @@ export const AgentChatDrawer: React.FC = () => {
             if (data.tool_name === 'register_custom_provider' && data.status === 'success') {
               try { window.dispatchEvent(new Event('provider-list-refresh')); } catch {}
             }
+            // 画布工具：前端透传执行与同步（Agent 全流程参与）
+            if (data.tool_name && String(data.tool_name).startsWith('canvas_')) {
+              try {
+                window.dispatchEvent(new CustomEvent('agent-canvas-tool', { detail: { tool: data.tool_name, status: data.status, result: data.result, error: data.error } }));
+                // 触发画布重载（持久化已在后端完成，前端拉取最新快照）
+                window.dispatchEvent(new CustomEvent('agent-canvas-updated', { detail: { tool: data.tool_name } }));
+              } catch {}
+            }
           } else if (event === 'agent_stream_start') {
             setIsThinking(false);
             const streamId = 'agent-' + Date.now();
@@ -321,7 +329,9 @@ export const AgentChatDrawer: React.FC = () => {
       if (cn.length > 0) canvas_summary = cs;
     } catch {}
     const contextPayload = {
+      project_id: project?.id,
       project_title: project?.title,
+      project: project || null,
       active_shot: activeShot
         ? {
             id: activeShot.id,
@@ -395,6 +405,9 @@ export const AgentChatDrawer: React.FC = () => {
             }]);
           } else if (event === 'tool_result') {
             setMessages(prev=> prev.map(m=> m.toolCall?.toolName===data.tool_name && m.toolCall?.status==='executing' ? {...m, text: data.status==='success'? `✓ 工具 ${data.tool_name} 执行成功` : `✕ 工具 ${data.tool_name} 失败: ${data.error}`, toolCall: {...m.toolCall!, status: data.status==='success'?'completed':'error'}} : m));
+            if (data.tool_name && String(data.tool_name).startsWith('canvas_')) {
+              try { window.dispatchEvent(new CustomEvent('agent-canvas-tool', { detail: { tool: data.tool_name, status: data.status, result: data.result } })); window.dispatchEvent(new CustomEvent('agent-canvas-updated', { detail: { tool: data.tool_name } })); } catch {}
+            }
           } else if (event === 'agent_thinking') {
             setIsThinking(true);
           } else if (event === 'agent_response') {
@@ -425,6 +438,9 @@ export const AgentChatDrawer: React.FC = () => {
                   time: new Date().toLocaleTimeString(),
                 },
               ]);
+              if (String(tool.tool_name).startsWith('canvas_')) {
+                try { window.dispatchEvent(new CustomEvent('agent-canvas-tool', { detail: { tool: tool.tool_name, status: tool.status, result: tool.result } })); window.dispatchEvent(new CustomEvent('agent-canvas-updated', { detail: { tool: tool.tool_name } })); } catch {}
+              }
             }
           }
           const fullText = res.reply || '指令已完成。';
