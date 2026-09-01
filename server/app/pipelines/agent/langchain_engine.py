@@ -293,8 +293,9 @@ def _mcp_to_langchain_tools() -> List[Any]:
 def _build_prompt_template():
     if not HAS_LANGCHAIN:
         return None
-    # 复用现有的 AGENT_SYSTEM_PROMPT，但增加记忆占位
-    from app.api.routes import AGENT_SYSTEM_PROMPT as BASE_PROMPT
+    # 复用动态生成的 AGENT_SYSTEM_PROMPT（含实时 provider_* 工具清单），增加记忆占位
+    from app.api.routes import get_agent_system_prompt
+    BASE_PROMPT = get_agent_system_prompt()
     # 增加记忆与循环指引
     extra = """
 你是一个具备多轮记忆与工具循环能力的导演 Agent。
@@ -350,10 +351,10 @@ async def run_agent_with_langchain(
     # 若 LangChain 不可用，回退到原 llm_service 单轮
     if not HAS_LANGCHAIN or not HAS_OPENAI and not settings.OPENAI_API_KEY and not settings.MINIMAX_API_KEY:
         # 简单回退：直接调用 llm_service
-        from app.api.routes import AGENT_SYSTEM_PROMPT
+        from app.api.routes import get_agent_system_prompt
         try:
             decision = await llm_service.chat_json(
-                system_prompt=AGENT_SYSTEM_PROMPT,
+                system_prompt=get_agent_system_prompt(),
                 user_prompt=json.dumps({"instruction": prompt, "context": context}, ensure_ascii=False),
                 temperature=0.2,
             )
@@ -386,9 +387,9 @@ async def run_agent_with_langchain(
         messages: List[BaseMessage] = []
         # 系统提示：循环模式使用 LOOP 版（原生 tool calling + 多步持续执行策略），
         # 不带"严格输出 JSON/最多 2 个工具"的单轮兜底约束（历史bug：该约束导致模型一轮工具后就 JSON 总结收工）
-        from app.api.routes import AGENT_LOOP_SYSTEM_PROMPT
+        from app.api.routes import get_agent_system_prompt
         system_extra = "\n\n你是具备多轮记忆的导演 Agent，可进行多轮工具调用且无固定轮次上限——持续执行直到用户目标全部完成，请基于历史与工具结果持续推理。"
-        messages.append(SystemMessage(content=AGENT_LOOP_SYSTEM_PROMPT + system_extra))
+        messages.append(SystemMessage(content=get_agent_system_prompt(loop=True) + system_extra))
         # 历史
         for h in history:
             messages.append(h)
@@ -437,9 +438,9 @@ async def run_agent_with_langchain(
             if result is None:
                 print(f"[LangChainAgent] ainvoke 重试仍失败: {last_err}，fallback to llm_service 单轮")
                 try:
-                    from app.api.routes import AGENT_SYSTEM_PROMPT as _JSON_PROMPT
+                    from app.api.routes import get_agent_system_prompt as _gap
                     decision = await llm_service.chat_json(
-                        system_prompt=_JSON_PROMPT,
+                        system_prompt=_gap(),
                         user_prompt=json.dumps({"instruction": prompt, "context": context, "history": [m.content for m in history[-6:]]}, ensure_ascii=False),
                         temperature=0.2,
                     )
@@ -600,9 +601,9 @@ async def run_agent_with_langchain(
         traceback.print_exc()
         # 回退
         try:
-            from app.api.routes import AGENT_SYSTEM_PROMPT as _PROMPT
+            from app.api.routes import get_agent_system_prompt as _gap
             decision = await llm_service.chat_json(
-                system_prompt=_PROMPT,
+                system_prompt=_gap(),
                 user_prompt=json.dumps({"instruction": prompt, "context": context}, ensure_ascii=False),
                 temperature=0.2,
             )

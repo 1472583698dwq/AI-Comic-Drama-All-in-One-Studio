@@ -309,6 +309,80 @@ def _set_input_guarded(wf: Dict[str, Any], nid: str, pname: str, val: Any) -> No
     node.setdefault("inputs", {})[pname] = val
 
 
+def _is_link(v: Any) -> bool:
+    return isinstance(v, list) and len(v) == 2 and isinstance(v[0], str) and isinstance(v[1], int)
+
+
+def _writable_text_source(nid: str, node: Dict[str, Any]) -> Optional[Tuple[str, str, str]]:
+    """节点自身是否为可写文本源：返回 (输入键, 标题, class_type)"""
+    ct = str(node.get("class_type", ""))
+    inputs = node.get("inputs", {}) or {}
+    title = str((node.get("_meta") or {}).get("title", "") or "")
+    if ct in ("PrimitiveStringMultiline", "PrimitiveString", "PrimitiveNode", "StringLiteral", "TextString", "String", "CR Text", "CR Text Input"):
+        if isinstance(inputs.get("value"), str):
+            return ("value", title or ct, ct)
+    if ct in ("TextGenerate", "WanVideoTextEncode", "LongCLIPTextEncode") and isinstance(inputs.get("prompt"), str):
+        return ("prompt", title or ct, ct)
+    if ct in ("CLIPTextEncode", "CLIPTextEncodeSDXL", "CLIPTextEncodeFlux"):
+        if isinstance(inputs.get("text"), str):
+            return ("text", title or ct, ct)
+    return None
+
+
+def _find_writable_prompt_target(wf: Dict[str, Any], start_ids: Optional[List[str]] = None, max_depth: int = 8) -> Optional[Tuple[str, str]]:
+    """
+    沿连线(BFS)追溯 prompt_node 上游,找到真正可写的文本源节点
+    (Switch/Concat/TextEncode 链路的源头通常才是用户提示词入口)。
+    找不到链路源时,回落全局扫描未连线文本节点,按标题含 user/prompt/提示词 优先。
+    返回 (node_id, input_key) 或 None。
+    """
+    from collections import deque
+    start = [str(s) for s in (start_ids or []) if s]
+    cands: List[Tuple[str, str, str, str]] = []
+    seen = set()
+    q = deque([(s, 0) for s in start])
+    while q:
+        nid, depth = q.popleft()
+        if nid in seen or depth > max_depth or nid not in wf:
+            continue
+        seen.add(nid)
+        node = wf[nid]
+        if nid not in start:
+            w = _writable_text_source(nid, node)
+            if w:
+                cands.append((nid, w[0], w[1], w[2]))
+                continue
+        for v in (node.get("inputs") or {}).values():
+            if _is_link(v):
+                q.append((str(v[0]), depth + 1))
+    if not cands:
+        # 全局扫描:未被 mapping 起点链覆盖的孤立可写文本节点
+        for nid, node in wf.items():
+            if str(nid) in seen:
+                continue
+            w = _writable_text_source(str(nid), node)
+            if w:
+                cands.append((str(nid), w[0], w[1], w[2]))
+    if not cands:
+        return None
+
+    def _score(c: Tuple[str, str, str, str]) -> int:
+        title = (c[2] or "").lower()
+        s = 0
+        if "user" in title or "用户" in c[2]:
+            s -= 10
+        if "prompt" in title or "提示词" in c[2]:
+            s -= 5
+        if c[1] == "value":
+            s -= 2
+        if c[3] == "PrimitiveStringMultiline":
+            s -= 1
+        return s
+
+    cands.sort(key=_score)
+    return (cands[0][0], cands[0][1])
+
+
 def _apply_dynamic_inputs(wf: Dict[str, Any], dynamic_inputs: Optional[Dict[str, Any]]) -> None:
     """
     将暴露项动态输入写入工作流（图像/视频注入共用）。
@@ -1596,6 +1670,11 @@ class ComfyWorkflowManager:
         }
         with open(_meta_path(workflow_id), "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)
+        # 同步为独立生成源 Provider（每工作流一源）
+        try:
+            sync_workflow_provider(workflow_id)
+        except Exception:
+            pass
         return meta
 
     def import_external_workflow(self, external_id: str, new_name: Optional[str] = None) -> Dict[str, Any]:
@@ -1633,6 +1712,11 @@ class ComfyWorkflowManager:
             os.remove(jp)
         if os.path.exists(mp):
             os.remove(mp)
+        # 同步删除对应 Provider
+        try:
+            remove_workflow_provider(workflow_id)
+        except Exception:
+            pass
 
     def sanitize_workflow(self, workflow: Dict[str, Any], aggressive: bool = False) -> Dict[str, Any]:
         """
@@ -1794,22 +1878,32 @@ class ComfyWorkflowManager:
                     injected_prompt = True
 
             if not injected_prompt and not is_api_frugally:
-                # 全量模式才回退扫描：优先检查 PrimitiveStringMultiline 等
+                # 全量模式：优先用户提示词 Primitive（按标题/内容打分，系统提示词排后）
+                cands = []
                 for nid, node in wf.items():
-                    if node.get("class_type") in ("PrimitiveStringMultiline", "PrimitiveNode", "CR Text", "StringLiteral"):
-                        val_inp = node.get("inputs", {}).get("value")
-                        if val_inp is not None and not (isinstance(val_inp, list) and len(val_inp) == 2):
-                            node["inputs"]["value"] = prompt_text
-                            injected_prompt = True
-                            break
+                    if node.get("class_type") in ("PrimitiveStringMultiline", "PrimitiveNode", "CR Text", "StringLiteral", "PrimitiveString"):
+                        if "value" in node.get("inputs", {}) and not isinstance(node["inputs"]["value"], list):
+                            cands.append((str(nid), node))
+                if cands:
+                    def _t_score(item):
+                        title = str((item[1].get("_meta") or {}).get("title", "") or "")
+                        val = str(item[1].get("inputs", {}).get("value", "") or "")
+                        s = 0
+                        if "user" in title.lower() or "用户" in title: s -= 10
+                        if "prompt" in title.lower() or "提示词" in title: s -= 5
+                        if "prompt engineer" in val.lower() or "Think step by step" in val: s += 20
+                        return s
+                    cands.sort(key=_t_score)
+                    cands[0][1]["inputs"]["value"] = prompt_text
+                    injected_prompt = True
                 if not injected_prompt:
-                    for nid, node in wf.items():
-                        if node.get("class_type") in ("CLIPTextEncode", "CLIPTextEncodeSDXL", "CLIPTextEncodeFlux"):
-                            txt_inp = node.get("inputs", {}).get("text")
-                            if txt_inp is not None and not (isinstance(txt_inp, list) and len(txt_inp) == 2):
-                                node["inputs"]["text"] = prompt_text
-                                injected_prompt = True
-                                break
+                        for nid, node in wf.items():
+                            if node.get("class_type") in ("CLIPTextEncode", "CLIPTextEncodeSDXL", "CLIPTextEncodeFlux"):
+                                txt_inp = node.get("inputs", {}).get("text")
+                                if txt_inp is not None and not (isinstance(txt_inp, list) and len(txt_inp) == 2):
+                                    node["inputs"]["text"] = prompt_text
+                                    injected_prompt = True
+                                    break
             elif not injected_prompt and is_api_frugally:
                 # 智能节俭回退：API 工作流未配置 prompt_node 但仅有唯一未连线的文本节点时，仍注入
                 candidates = [ (nid, n) for nid, n in wf.items() if n.get("class_type") in ("CLIPTextEncode", "CLIPTextEncodeSDXL", "CLIPTextEncodeFlux") and "text" in n.get("inputs", {}) and not isinstance(n["inputs"]["text"], list) ]
@@ -1822,6 +1916,18 @@ class ComfyWorkflowManager:
                     if len(cand2) == 1:
                         cand2[0][1]["inputs"]["value"] = prompt_text
                         injected_prompt = True
+            if not injected_prompt:
+                # 链路追溯兜底：prompt_node 的 text 是连线(经 Switch/Concat/TextGenerate)时,
+                # BFS 找到真正的可写文本源头(通常是 PrimitiveStringMultiline value / TextGenerate prompt),
+                # 否则工作流将以其内置默认画面文本运行(表现为"输入的提示词没有效果")
+                tgt = _find_writable_prompt_target(wf, start_ids=([str(pn)] if pn else None))
+                if tgt and tgt[0] in wf:
+                    tid, tkey = tgt
+                    wf[tid].setdefault("inputs", {})[tkey] = prompt_text
+                    injected_prompt = True
+                    print(f"[Workflow] prompt 已沿连线追溯注入源节点 #{tid} ({tkey})")
+                else:
+                    print("[Workflow] 未找到可写文本源节点, prompt 未注入(工作流将以默认文本运行)")
         if "negative_prompt" in params:
             nn = mapping.get("negative_node")
             if nn and str(nn) in wf and "text" in wf[str(nn)].get("inputs", {}):
@@ -2009,11 +2115,32 @@ class ComfyWorkflowManager:
                             injected = True
                             break
                 if not injected:
+                    cands2 = []
                     for nid, node in wf.items():
-                        if node.get("class_type") in ("PrimitiveStringMultiline", "StringLiteral"):
+                        if node.get("class_type") in ("PrimitiveStringMultiline", "StringLiteral", "PrimitiveString", "PrimitiveNode"):
                             if "value" in node.get("inputs", {}) and not isinstance(node["inputs"]["value"], list):
-                                node["inputs"]["value"] = prompt_text
-                                break
+                                cands2.append((str(nid), node))
+                    if cands2:
+                        def _t2_score(item):
+                            title = str((item[1].get("_meta") or {}).get("title", "") or "")
+                            val = str(item[1].get("inputs", {}).get("value", "") or "")
+                            s = 0
+                            if "user" in title.lower() or "用户" in title: s -= 10
+                            if "prompt" in title.lower() or "提示词" in title: s -= 5
+                            if "prompt engineer" in val.lower() or "Think step by step" in val: s += 20
+                            return s
+                        cands2.sort(key=_t2_score)
+                        cands2[0][1]["inputs"]["value"] = prompt_text
+                        injected = True
+            if not injected:
+                tgt = _find_writable_prompt_target(wf, start_ids=([str(mapping.get("prompt_node"))] if mapping.get("prompt_node") else None))
+                if not tgt:
+                    tgt = _find_writable_prompt_target(wf, start_ids=None)
+                if tgt and tgt[0] in wf:
+                    tid, tkey = tgt
+                    wf[tid].setdefault("inputs", {})[tkey] = prompt_text
+                    injected = True
+                    print(f"[Workflow] video prompt 已沿连线追溯注入源节点 #{tid} ({tkey})")
 
         if params.get("negative_prompt") and not is_api_frugally:
             nn = mapping.get("negative_node")
@@ -2511,6 +2638,11 @@ class ComfyWorkflowManager:
         # 清除列表缓存，确保下次 list_workflows 能看到更新
         self._list_cache = None
         self._list_cache_ts = 0
+        # 同步 Provider 输入/参数 Schema（exposed 变更）
+        try:
+            sync_workflow_provider(workflow_id)
+        except Exception:
+            pass
         return meta
 
     async def validate_workflow_against_comfyui(self, workflow_id: str) -> Dict[str, Any]:
@@ -2740,3 +2872,211 @@ class ComfyWorkflowManager:
 
 
 workflow_manager = ComfyWorkflowManager()
+
+
+# ========== 每条工作流独立抽象为生成源 Provider ==========
+def _workflow_provider_id(workflow_id: str) -> str:
+    # 稳定映射：内部 wf_xxx 保持原样，外部 ext_xxx 转为 wf_xxx
+    if workflow_id.startswith("wf_"):
+        return f"comfyui_{workflow_id}"
+    if workflow_id.startswith("ext_"):
+        return f"comfyui_{workflow_id}"
+    return f"comfyui_wf_{workflow_id}"
+
+
+def _detect_workflow_kind(workflow: Dict[str, Any], meta: Optional[Dict[str, Any]] = None) -> str:
+    # 依据节点类型判定 image/video
+    video_hints = ("VHS_", "VideoCombine", "SaveAnimated", "Wan", "AnimateDiff", "Video", "CreateVideo")
+    for node in workflow.values():
+        if not isinstance(node, dict):
+            continue
+        ct = str(node.get("class_type", ""))
+        if any(h in ct for h in video_hints):
+            return "video"
+    # meta 中若含 video 字样亦判 video
+    if meta and any("video" in str(v).lower() for v in [meta.get("name",""), meta.get("description","")]):
+        return "video"
+    return "image"
+
+
+def _build_provider_schemas_from_workflow(workflow: Dict[str, Any], meta: Optional[Dict[str, Any]] = None):
+    """标准化：所有工作流 Provider 统一用标准 x-handle 输入（prompt/reference_images...），内部再映射到具体节点"""
+    kind = _detect_workflow_kind(workflow, meta)
+    try:
+        exposed = auto_detect_exposed_inputs(workflow, (meta or {}).get("mapping"))
+    except Exception:
+        exposed = []
+    # 标准化输入：节点Agent按 prompt/reference_images/first_frame 等标准句柄调用
+    if kind == "video":
+        input_props = {
+            "prompt": {"type":"string","description":"运动/提示词","x-handle":"text"},
+            "first_frame": {"type":"string","format":"uri","description":"首帧","x-handle":"image"},
+            "last_frame": {"type":"string","format":"uri","description":"尾帧","x-handle":"image"},
+            "reference_images": {"type":"array","items":{"type":"string","format":"uri"},"description":"参考图组","x-handle":"image"},
+        }
+        input_required = ["prompt"]
+    elif kind == "image":
+        input_props = {
+            "prompt": {"type":"string","description":"画面提示词","x-handle":"text"},
+            "reference_images": {"type":"array","items":{"type":"string","format":"uri"},"description":"参考图/垫图","x-handle":"image"},
+        }
+        input_required = ["prompt"]
+    else:
+        input_props = {"prompt": {"type":"string","description":"提示词","x-handle":"text"}}
+        input_required = ["prompt"]
+    # 参数：从 exposed 提取通用采样参数，映射到标准 key
+    params_props: Dict[str, Any] = {}
+    for exp in exposed:
+        if exp.get("type") in ("number","combo","boolean"):
+            pname = str(exp.get("param_name",""))
+            low = pname.lower()
+            std_key = None
+            if "steps" in low: std_key = "steps"
+            elif low == "cfg": std_key = "cfg"
+            elif "seed" in low: std_key = "seed"
+            elif "sampler" in low: std_key = "sampler_name"
+            elif "scheduler" in low: std_key = "scheduler"
+            elif "width" in low: std_key = "width"
+            elif "height" in low: std_key = "height"
+            elif "duration" in low: std_key = "duration"
+            elif "resolution" in low: std_key = "resolution"
+            elif "fps" in low or "frame_rate" in low: std_key = "fps"
+            else: std_key = f"{exp.get('node_id')}_{pname}"
+            if std_key in params_props:
+                continue
+            if exp.get("type") == "number":
+                prop: Dict[str, Any] = {"type":"integer" if exp.get("step")==1 or isinstance(exp.get("default_value"), int) else "number","description":exp.get("label",""),"default":exp.get("default_value")}
+                if exp.get("min") is not None: prop["minimum"]=exp["min"]
+                if exp.get("max") is not None: prop["maximum"]=exp["max"]
+                if exp.get("step") is not None: prop["step"]=exp["step"]
+                params_props[std_key]=prop
+            elif exp.get("type")=="combo":
+                opts=exp.get("options") or exp.get("choices") or []
+                params_props[std_key]={"type":"string","enum": opts[:30] if opts else [str(exp.get("default_value",""))], "default":exp.get("default_value"),"description":exp.get("label","")}
+            elif exp.get("type")=="boolean":
+                params_props[std_key]={"type":"boolean","default":bool(exp.get("default_value",False)),"description":exp.get("label","")}
+    if not params_props:
+        params_props = {"seed":{"type":"integer","default":0},"steps":{"type":"integer","default":20,"minimum":4,"maximum":60},"cfg":{"type":"number","default":7.0}}
+    input_schema = {"type":"object","properties": input_props, "required": input_required}
+    params_schema = {"type":"object","properties": params_props}
+    if kind=="video":
+        output_schema={"type":"object","properties":{"video_url":{"type":"string","format":"uri","x-handle":"video"}},"required":["video_url"]}
+    else:
+        output_schema={"type":"object","properties":{"image_url":{"type":"string","format":"uri","x-handle":"image"}},"required":["image_url"]}
+    return kind, input_schema, params_schema, output_schema, exposed
+
+
+def sync_workflow_provider(workflow_id: str):
+    """将单条工作流同步为独立 Provider（comfyui_<id>），仅内部已导出工作流可成为生成源"""
+    try:
+        # 仅内部工作流可成为独立生成源，外部直读需先“导出为内部”才能在画布作为生成源
+        if workflow_id.startswith("ext_"):
+            return None
+        wf, meta = workflow_manager.get_workflow_with_meta(workflow_id)
+        if not wf:
+            return None
+        if not meta or meta.get("source") != "internal":
+            return None
+        # 外部未导入的工作流也允许同步为只读 Provider（直接读外部文件）
+        kind, input_schema, params_schema, output_schema, exposed = _build_provider_schemas_from_workflow(wf, meta)
+        # 计算 hash 用于变更检测
+        content_hash = hashlib.md5(json.dumps(wf, sort_keys=True).encode("utf-8")).hexdigest()[:8]
+        pid = _workflow_provider_id(workflow_id)
+        # 构造 ProviderDefinition
+        from app.models.provider_definition import ProviderDefinition
+        from app.providers.custom.manager import custom_provider_manager
+        existing = custom_provider_manager.get_definition(pid)
+        # 若已存在且 hash 与 exposed 均未变则跳过（减少无谓重建）
+        if existing and getattr(existing, "workflow_hash", None) == content_hash and existing.workflow_id == workflow_id:
+            if getattr(existing, "workflow_exposed", None) == exposed:
+                return existing
+        name = (meta or {}).get("name") or workflow_id
+        desc = (meta or {}).get("description") or f"ComfyUI 工作流 {workflow_id} 抽象的独立生成源"
+        # 模型列表尝试从 ckpt 节点提取
+        models: List[str] = []
+        try:
+            analysis = (meta or {}).get("analysis") or analyze_workflow(wf)
+            for ckpt in (analysis.get("checkpoints") or []):
+                if ckpt.get("ckpt"):
+                    models.append(str(ckpt["ckpt"]))
+        except Exception:
+            pass
+        data: Dict[str, Any] = {
+            "id": pid,
+            "name": f"ComfyUI {name}",
+            "display_name": f"ComfyUI·{name}",
+            "kind": kind,
+            "provider_type": "comfyui",
+            "description": desc,
+            "icon": "Workflow",
+            "scope": "global",
+            "builtin": False,
+            "enabled": True,
+            "workflow_id": workflow_id,
+            "workflow_hash": content_hash,
+            "workflow_exposed": exposed,
+            "models": models[:5],
+            "default_model": models[0] if models else None,
+            "params_schema": params_schema,
+            "default_params": {},
+            "input_schema": input_schema,
+            "output_schema": output_schema,
+            "language": "python",
+            "code": None,
+            "code_entry": "generate",
+        }
+        pd = ProviderDefinition.model_validate(data)
+        saved = custom_provider_manager.save_definition(pd)
+        # 热注册到 Registry + MCP
+        try:
+            from app.providers.init_providers import register_single_custom_provider
+            register_single_custom_provider(saved)
+        except Exception as e:
+            print(f"[WorkflowProvider] hot register failed {pid}: {e}")
+        # MCP 刷新已在 register_single 内完成
+        return saved
+    except Exception as e:
+        print(f"[WorkflowProvider] sync {workflow_id} failed: {e}")
+        return None
+
+
+def sync_all_workflow_providers():
+    """启动时仅同步已导出的内部工作流为独立生成源（外部直读不自动成源）"""
+    try:
+        all_wfs = workflow_manager.list_workflows(source="internal")
+        cnt = 0
+        for wf_meta in all_wfs:
+            wid = wf_meta.get("id")
+            if not wid:
+                continue
+            if sync_workflow_provider(wid):
+                cnt += 1
+        print(f"[WorkflowProvider] 已同步 {cnt}/{len(all_wfs)} 条内部工作流为独立生成源（外部需先导出）")
+    except Exception as e:
+        print(f"[WorkflowProvider] sync_all failed: {e}")
+
+
+def remove_workflow_provider(workflow_id: str):
+    """删除工作流时同步删除对应 Provider"""
+    try:
+        pid = _workflow_provider_id(workflow_id)
+        from app.providers.custom.manager import custom_provider_manager
+        from app.providers.init_providers import unregister_single_custom_provider
+        # 推断 kind
+        kind = "image"
+        try:
+            wf, meta = workflow_manager.get_workflow_with_meta(workflow_id)
+            if wf:
+                kind, _, _, _ = _build_provider_schemas_from_workflow(wf, meta)
+        except Exception:
+            pass
+        # 尝试从已有 definition 取 kind
+        existing = custom_provider_manager.get_definition(pid)
+        if existing:
+            kind = getattr(existing, "kind", kind)
+        custom_provider_manager.delete_definition(pid)
+        unregister_single_custom_provider(pid, kind=kind)
+        print(f"[WorkflowProvider] 已删除 {pid}")
+    except Exception as e:
+        # 不存在则忽略
+        pass

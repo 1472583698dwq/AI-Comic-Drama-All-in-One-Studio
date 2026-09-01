@@ -10,9 +10,6 @@ interface ThemeState {
 }
 
 const getSystemTheme = (): 'dark' | 'light' => {
-  if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
-    return 'light';
-  }
   return 'dark';
 };
 
@@ -32,7 +29,7 @@ const applyThemeToDOM = (effective: 'dark' | 'light') => {
 
 const savedTheme = (typeof localStorage !== 'undefined' ? localStorage.getItem('ai_manju_theme') : null) as ThemeMode | null;
 const initialTheme: ThemeMode = savedTheme || 'dark';
-const initialEffective = initialTheme === 'system' ? getSystemTheme() : initialTheme;
+const initialEffective: 'dark' | 'light' = initialTheme === 'light' ? 'light' : 'dark';
 applyThemeToDOM(initialEffective);
 
 export const useThemeStore = create<ThemeState>((set, get) => {

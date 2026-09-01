@@ -82,12 +82,13 @@ export const Header: React.FC<HeaderProps> = ({ onOpenImport, onOpenExport, onOp
             <div className="flex items-center rounded-full bg-surface-secondary border border-border p-1 gap-1">
               {[
                 { id:'projects', label:'项目', icon: FolderKanban, color:'text-brand' },
+                { id:'characters', label:'角色', icon: Users, color:'text-accent-pink' },
                 { id:'studio', label:'分镜', icon: Layers, color:'text-brand-light' },
                 { id:'director3d', label:'3D', icon: Compass, color:'text-accent-orange' },
                 { id:'timeline', label:'剪辑', icon: Video, color:'text-brand-blue' },
-                { id:'assets', label:'素材', icon: Library, color:'text-accent-pink' },
+                { id:'assets', label:'素材', icon: Library, color:'text-brand-blue' },
               ].map(t=>{
-                const active = activeTab===t.id || (t.id==='assets' && activeTab==='characters');
+                const active = activeTab===t.id;
                 return (
                   <button key={t.id} onClick={() => setActiveTab(t.id as any)} className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all ${active ? 'bg-surface text-white shadow-sm border border-border-active' : 'text-gray-500 hover:text-gray-200'}`}>
                     <t.icon className={`w-3.5 h-3.5 ${t.color}`} /><span>{t.label}</span>

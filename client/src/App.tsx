@@ -32,6 +32,7 @@ export function App() {
 
   useEffect(() => {
     fetchTools().catch((e: any) => setMcpError(e?.message || 'MCP 服务连接失败'));
+    useProjectStore.getState().loadActiveProject();
     const h = () => setIsProviderOpen(true);
     window.addEventListener('open-provider-manager', h as any);
     return () => window.removeEventListener('open-provider-manager', h as any);
@@ -109,8 +110,15 @@ export function App() {
             </div>
           )}
 
-           {/* Asset Library - Global, accessible without project */}
-          {(activeTab === 'assets' || activeTab === 'characters') && (
+          {/* Character Studio - Project Character Management & Turnaround Matrix */}
+          {activeTab === 'characters' && (
+            <main className="flex-1 flex flex-col overflow-hidden relative">
+              <CharacterStudio />
+            </main>
+          )}
+
+          {/* Asset Library - Global & Project Media Asset Center */}
+          {activeTab === 'assets' && (
             <main className="flex-1 flex flex-col overflow-hidden relative">
               <AssetLibrary />
             </main>
@@ -128,7 +136,7 @@ export function App() {
                     {activeTab === 'director3d' && <Director3DStage />}
                     {activeTab === 'timeline' && (
                       <div className="flex-1 flex flex-col">
-                        <div className="flex-1 flex items-center justify-center bg-[#07070A]">
+                        <div className="flex-1 flex items-center justify-center bg-surface">
                           <ShotInspector />
                         </div>
                       </div>
@@ -142,13 +150,6 @@ export function App() {
                 /* Mobile App Card-Flow View (Xiaoyunque Style) — same component, real API */
                 <MobileCardFlow onOpenExport={() => setIsExportOpen(true)} />
               )}
-            </main>
-          )}
-
-          {/* Keep legacy CharacterStudio accessible via characters tab when project exists and not assets */}
-          {project && activeTab === 'characters' && false && (
-            <main className="flex-1 flex flex-col overflow-hidden relative">
-              <CharacterStudio />
             </main>
           )}
         </>

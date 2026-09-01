@@ -1,896 +1,538 @@
-import React, { useEffect, useState, useRef } from 'react';
+// -*- coding: utf-8 -*-
+/**
+ * 智能体节点定义 (Minimal Content-First Agent Nodes)
+ * 深度绑定动态生成源 (ProviderDefinition)、无表单纯净视觉与一键衍生拉线
+ */
+import React, { useState, useRef, useEffect } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
-import { Type, Image as ImageIcon, Video as VideoIcon, Mic, Box, Download, Plus, Upload, Library, Sparkles, Play, Volume2, Settings, ChevronDown, FileText, Layers } from 'lucide-react';
-import { apiService } from '../../../services/api';
-import { useProjectStore } from '../../../stores/useProjectStore';
-import { DynamicControl } from '../controls/DynamicControl';
-import { AiPolishButton } from '../../ui/AiPolishButton';
+import {
+  Type,
+  Image as ImageIcon,
+  Video as VideoIcon,
+  Mic,
+  Box,
+  Download,
+  Plus,
+  Play,
+  Pause,
+  Copy,
+  Sparkles,
+  Volume2,
+  Film,
+  Clapperboard,
+  FileText,
+  ArrowUp,
+  Edit3
+} from 'lucide-react';
+import { useCanvasStore } from '../../../stores/useCanvasStore';
+import { HIGH_LEVEL_AGENT_SKILLS } from '../providerSkills';
 
 const API_ORIGIN = typeof window !== 'undefined' && window.location.port === '5173' ? 'http://127.0.0.1:8000' : '';
-// 全局缓存，避免每个节点重复请求导致并发风暴
-let _wfCache: any[] | null = null;
-let _wfCacheTime = 0;
-const getWorkflowsCached = async () => {
-  if(_wfCache && Date.now() - _wfCacheTime < 15000) return _wfCache;
-  try{
-    const r = await apiService.listWorkflows('all');
-    _wfCache = r.workflows||[];
-    _wfCacheTime = Date.now();
-    return _wfCache;
-  } catch{ return []; }
-};
-let _provCache: Record<string, any[]> = {};
-const getProvidersCached = async (kind:string) => {
-  if(_provCache[kind] && Date.now() - (_provCache[kind] as any)._ts < 15000) return _provCache[kind];
-  try{
-    const r = await apiService.listProviders({ kind: kind as any, include_builtin:true });
-    _provCache[kind] = r.providers||[];
-    (_provCache[kind] as any)._ts = Date.now();
-    return _provCache[kind];
-  } catch{ return []; }
-};
 
-// 共用：请求在下游添加节点
-function emitAddNext(sourceId: string, pos?: {x:number,y:number}) {
-  window.dispatchEvent(new CustomEvent('canvas-add-next', { detail: { sourceId, pos } }));
-}
-
-// 共用：按生成源 input_schema 渲染"输入映射"控件（去模板后 prompt/首帧等输入由源声明驱动）。
-// prompt/text/首帧图 绑定节点既有状态（上游连线仍可覆盖），其余 text/number/enum 字段写入 dynamic_inputs 透传 ctx。
-// 数组类（reference_images 等）为连线句柄，不在此渲染。
-export const ProviderInputControls: React.FC<{
-  inputSchema: any;
-  values: Record<string, any>;
-  promptValue?: string; onPrompt?: (v: string) => void;
-  textValue?: string; onText?: (v: string) => void;
-  frameValue?: string; onFrame?: (v: string) => void;
-  onChange: (k: string, v: any) => void;
-}> = ({ inputSchema, values, promptValue, onPrompt, textValue, onText, frameValue, onFrame, onChange }) => {
-  if (!inputSchema?.properties) return null;
-  const rows = Object.entries(inputSchema.properties as any).filter(([k, v]: any) => {
-    if (Array.isArray((v as any).type) || (v as any).type === 'array') return false; // 数组=连线句柄
-    const handle = (v as any)['x-handle'] || '';
-    if (handle === 'image' || handle === 'video' || handle === 'audio') return !!onFrame && !handle.includes('[]');
-    return ['text', 'number', 'integer', 'string'].includes((v as any).type) || handle === 'text' || handle === 'number';
-  });
-  if (rows.length === 0) return null;
-  return (
-    <div className="space-y-2 p-2.5 rounded-xl bg-brand/10 border border-brand/20">
-      <div className="text-xs font-semibold text-brand-light">生成源输入映射</div>
-      {rows.map(([k, v]: any) => {
-        const handle = v['x-handle'] || '';
-        const desc = v.description || k;
-        if (handle === 'image' || handle === 'video' || handle === 'audio') {
-          const val = (k === 'first_frame' || k === 'image') ? (frameValue ?? '') : (values[k] ?? '');
-          return (
-            <div key={k} className="space-y-1">
-              <div className="text-[11px] font-medium text-gray-300" title={desc}>{v.title || k} <span className="text-gray-500 font-normal">· {k}</span></div>
-              <label className="flex items-center gap-2 p-2 rounded-xl border border-dashed border-border bg-surface-secondary hover:border-brand/40 cursor-pointer">
-                {val && val.startsWith('data:') ? <img src={val} alt="" className="w-8 h-8 rounded object-cover border border-border"/> : null}
-                <span className="text-xs text-gray-400 truncate flex-1">{val ? `已设置 · 点击更换` : `点击上传（弹出文件系统）`}</span>
-                <input type="file" accept={handle === 'audio' ? 'audio/*' : handle === 'video' ? 'video/*' : 'image/*'} className="hidden" onChange={e => {
-                  const f = e.target.files?.[0]; if (!f) return;
-                  const reader = new FileReader(); reader.onload = () => {
-                    const url = reader.result as string;
-                    if (k === 'first_frame' || k === 'image') { onFrame?.(url); } else { onChange(k, url); }
-                  }; reader.readAsDataURL(f);
-                }}/>
-              </label>
-            </div>
-          );
-        }
-        if (k === 'prompt' && onPrompt) {
-          return (
-            <div key={k} className="space-y-1">
-              <div className="text-[11px] font-medium text-gray-300 flex items-center justify-between" title={desc}>
-                <span>{v.title || '提示词'} <span className="text-gray-500 font-normal">· {k}</span></span>
-                <AiPolishButton value={promptValue ?? ''} onPolish={(v: any)=> onPrompt(v)} contextType="prompt" size="xs" />
-              </div>
-              <textarea rows={2} value={promptValue ?? ''} onChange={e => onPrompt(e.target.value)} placeholder={desc} className="w-full bg-surface-secondary border border-border rounded-xl p-2 text-sm [color:var(--color-text-main)] placeholder:text-gray-500 focus:outline-none focus:border-brand resize-none"/>
-            </div>
-          );
-        }
-        if (k === 'text' && onText) {
-          return (
-            <div key={k} className="space-y-1">
-              <div className="text-[11px] font-medium text-gray-300 flex items-center justify-between" title={desc}>
-                <span>{v.title || '台词/文本'} <span className="text-gray-500 font-normal">· {k}</span></span>
-                <AiPolishButton value={textValue ?? ''} onPolish={(v: any)=> onText(v)} contextType="dialogue" size="xs" />
-              </div>
-              <textarea rows={2} value={textValue ?? ''} onChange={e => onText(e.target.value)} placeholder={desc} className="w-full bg-surface-secondary border border-border rounded-xl p-2 text-sm [color:var(--color-text-main)] placeholder:text-gray-500 focus:outline-none focus:border-brand resize-none"/>
-            </div>
-          );
-        }
-        if (v.type === 'integer' || v.type === 'number') {
-          return (
-            <div key={k} className="space-y-1">
-              <div className="text-[11px] font-medium text-gray-300" title={desc}>{v.title || k} <span className="text-gray-500 font-normal">· {k}</span></div>
-              <input type="number" value={values[k] ?? v.default ?? ''} onChange={e => onChange(k, v.type === 'integer' ? (parseInt(e.target.value) || 0) : (parseFloat(e.target.value) || 0))} className="w-full bg-surface-secondary border border-border rounded-xl px-2.5 py-1.5 text-sm [color:var(--color-text-main)]"/>
-            </div>
-          );
-        }
-        if (v.enum) {
-          return (
-            <div key={k} className="space-y-1">
-              <div className="text-[11px] font-medium text-gray-300" title={desc}>{v.title || k} <span className="text-gray-500 font-normal">· {k}</span></div>
-              <select value={values[k] ?? v.default ?? ''} onChange={e => onChange(k, e.target.value)} className="w-full bg-surface-secondary border border-border rounded-xl px-2.5 py-1.5 text-sm [color:var(--color-text-main)]">
-                <option value="">— 选择 —</option>
-                {v.enum.map((o: any) => <option key={String(o)} value={String(o)}>{String(o)}</option>)}
-              </select>
-            </div>
-          );
-        }
-        return (
-          <div key={k} className="space-y-1">
-            <div className="text-[11px] font-medium text-gray-300 flex items-center justify-between" title={desc}>
-              <span>{v.title || k} <span className="text-gray-500 font-normal">· {k}</span></span>
-              {(k.toLowerCase().includes('prompt') || k.toLowerCase().includes('text') || v.title?.toString().toLowerCase().includes('提示')) && <AiPolishButton value={String(values[k] ?? '')} onPolish={(v: any)=> onChange(k, v)} contextType={k.toLowerCase().includes('prompt') ? 'prompt' : 'general'} size="xs" />}
-            </div>
-            <input type="text" value={values[k] ?? v.default ?? ''} onChange={e => onChange(k, e.target.value)} placeholder={desc} className="w-full bg-surface-secondary border border-border rounded-xl px-2.5 py-1.5 text-sm [color:var(--color-text-main)]"/>
-          </div>
-        );
-      })}
-    </div>
-  );
-};
-
-// 共用：素材选择器弹窗 — 暗色
-const AssetPicker: React.FC<{ onPick: (url:string)=>void, onClose:()=>void, kind?: 'image'|'video'|'audio'}> = ({ onPick, onClose, kind }) => {
-  const [assets, setAssets] = useState<any[]>([]);
-  const [q, setQ] = useState('');
-  useEffect(()=> {
-    apiService.listAssets({ limit: 24, q: q || undefined }).then(r=> setAssets(r.assets||[])).catch(()=>{});
-  }, [q]);
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-surface border border-border rounded-2xl w-[720px] max-h-[80vh] overflow-hidden shadow-2xl flex flex-col" onClick={e=>e.stopPropagation()}>
-        <div className="px-4 py-3 border-b border-border flex items-center gap-2">
-          <Library className="w-4 h-4 text-brand"/><span className="text-sm font-bold [color:var(--color-text-main)]">选择素材</span>
-          <input value={q} onChange={e=>setQ(e.target.value)} placeholder="搜索素材…" className="ml-auto flex-1 max-w-[240px] bg-surface-secondary border border-border rounded-full px-3 py-1.5 text-sm [color:var(--color-text-main)] placeholder:text-gray-500 focus:outline-none focus:border-brand"/>
-          <button onClick={onClose} className="ml-2 w-8 h-8 rounded-full bg-surface-secondary border border-border flex items-center justify-center hover:bg-surface-tertiary text-gray-400 hover:[color:var(--color-text-main)]">×</button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-4 grid grid-cols-4 gap-3 bg-background">
-          {assets.map((a:any)=>{
-            const url = a.thumb_url || a.file_url;
-            const abs = url?.startsWith('/') ? API_ORIGIN+url : url;
-            return (
-              <button key={a.id} onClick={()=> { onPick(abs||url); onClose(); }} className="group border border-border rounded-xl overflow-hidden hover:border-brand hover:shadow-md text-left bg-surface-secondary">
-                <div className="aspect-square bg-black/40 flex items-center justify-center overflow-hidden">{abs ? <img src={abs} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform"/> : <ImageIcon className="w-6 h-6 text-gray-600"/>}</div>
-                <div className="p-2"><div className="text-xs font-medium truncate [color:var(--color-text-main)]">{a.name}</div><div className="text-[10px] text-gray-400">{a.category}</div></div>
-              </button>
-            );
-          })}
-          {assets.length===0 && <div className="col-span-4 text-center text-sm text-gray-500 py-12">暂无素材</div>}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// 壳 — 暗色工业风（与系统一致，鼠标高对比）
-const Shell: React.FC<{ icon: any, label: string, desc?: string, color: string, children: React.ReactNode, id:string, data:any, handles?: React.ReactNode }> = ({ icon:Icon, label, desc, color, children, id, data, handles }) => {
-  const [showMenu, setShowMenu] = useState(false);
+// 统一的 Agent 卡片外壳
+const AgentShell: React.FC<{
+  id: string;
+  selected?: boolean;
+  icon: any;
+  label: string;
+  providerBadge?: string;
+  topActions?: React.ReactNode;
+  children: React.ReactNode;
+  handles?: React.ReactNode;
+}> = ({ id, selected, icon: Icon, label, providerBadge, topActions, children, handles }) => {
+  const { setSelectedNodeId } = useCanvasStore();
+  const [showAddMenu, setShowAddMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  useEffect(()=>{
-    const h = (e:any)=> { if(menuRef.current && !menuRef.current.contains(e.target)) setShowMenu(false); };
-    if(showMenu) document.addEventListener('mousedown', h);
-    return ()=> document.removeEventListener('mousedown', h);
-  }, [showMenu]);
+
+  useEffect(() => {
+    const h = (e: any) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setShowAddMenu(false);
+    };
+    if (showAddMenu) document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [showAddMenu]);
+
   return (
-    <div className="w-[360px] bg-surface border border-border rounded-[20px] shadow-xl shadow-black/30 overflow-visible relative group hover:border-border-active transition-colors" style={{cursor: 'default'}}>
-      <div className="px-3.5 py-2.5 flex items-center gap-2 border-b border-border">
-        <div className={`w-7 h-7 rounded-full flex items-center justify-center ${color} bg-surface-secondary border border-border`}><Icon className="w-3.5 h-3.5"/></div>
-        <div><div className="text-[13px] font-bold leading-none" style={{color: "var(--color-text-main)"}}>{label}</div>{desc && <div className="text-[11px] text-gray-400 leading-none mt-0.5">{desc}</div>}</div>
-        <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full bg-surface-secondary border border-border text-gray-400">#{id.slice(-4)}</span>
+    <div
+      onClick={() => setSelectedNodeId(id)}
+      className={`w-[360px] bg-[#141419] rounded-3xl border-2 transition-all duration-200 relative group select-none shadow-xl ${
+        selected
+          ? 'border-violet-500 ring-4 ring-violet-500/20 shadow-2xl shadow-violet-500/20'
+          : 'border-white/10 hover:border-violet-500/40 shadow-black/40'
+      }`}
+    >
+      {/* 顶部悬浮动作条 */}
+      {selected && (
+        <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-[#1c1d24] border border-white/15 rounded-full px-3 py-1 flex items-center gap-2 shadow-lg z-30 animate-in fade-in zoom-in-95 duration-150 backdrop-blur-md">
+          {topActions || (
+            <>
+              <span className="text-[11px] font-semibold text-violet-400 flex items-center gap-1">
+                <Icon className="w-3 h-3" /> {label}
+              </span>
+              <div className="w-px h-3 bg-white/15" />
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  window.dispatchEvent(new CustomEvent('canvas-duplicate-node', { detail: { nodeId: id } }));
+                }}
+                className="text-[11px] text-white/60 hover:text-white flex items-center gap-1 transition-colors"
+                title="复制节点"
+              >
+                <Copy className="w-3 h-3" /> 复制
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* 卡片头部 */}
+      <div className="px-4 py-3 flex items-center gap-2.5 border-b border-white/10">
+        <div className="w-6 h-6 rounded-lg bg-white/5 flex items-center justify-center text-violet-400">
+          <Icon className="w-3.5 h-3.5" />
+        </div>
+        <span className="text-xs font-bold text-white/95">{label}</span>
+        {providerBadge && (
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/15 border border-violet-500/30 text-violet-300 font-mono truncate max-w-[120px]">
+            {providerBadge}
+          </span>
+        )}
+        <span className="ml-auto text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/5 text-white/40 border border-white/10">
+          #{id.slice(-4)}
+        </span>
       </div>
+
+      {/* 句柄 */}
       {handles}
-      <div className="p-3 space-y-3">
+
+      {/* 内容主体 */}
+      <div className="p-4 flex flex-col items-center justify-center min-h-[200px]">
         {children}
       </div>
-      {/* 右侧 + 添加下游 */}
+
+      {/* 右侧 + 快速拉线衍生手柄 */}
       <button
-        onClick={()=> setShowMenu(v=>!v)}
-        className="absolute -right-3 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-surface border border-border shadow-lg flex items-center justify-center [color:var(--color-text-main)] hover:border-brand hover:text-brand hover:shadow-brand/20 transition-all z-20"
-        title="添加下一步"
+        onClick={(e) => {
+          e.stopPropagation();
+          setShowAddMenu((v) => !v);
+        }}
+        className="absolute -right-3.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-[#1c1d24] border border-white/20 shadow-lg flex items-center justify-center text-white/60 hover:text-white hover:border-violet-500 hover:scale-110 transition-all z-20"
+        title="向右衍生新节点"
       >
-        <Plus className="w-3.5 h-3.5"/>
+        <Plus className="w-4 h-4" />
       </button>
-      {showMenu && (
-        <div ref={menuRef} className="absolute -right-2 top-[52%] translate-x-full z-30 w-[180px] bg-surface border border-border rounded-2xl shadow-2xl overflow-hidden py-1">
-          <div className="px-3 py-1.5 text-[11px] font-semibold text-gray-400">添加下一步</div>
-          {[
-            {type:'prompt', label:'提示词', icon:Type},
-            {type:'image', label:'生成图片', icon:ImageIcon},
-            {type:'video', label:'生成视频', icon:VideoIcon},
-            {type:'audio', label:'生成音频', icon:Mic},
-            {type:'director3d', label:'3D导演台', icon:Box},
-            {type:'export', label:'导出', icon:Download},
-          ].map(it=> (
-            <button key={it.type} onClick={()=> { setShowMenu(false); window.dispatchEvent(new CustomEvent('canvas-add-node', { detail:{ sourceId:id, nextType: it.type }})); }} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-brand/10 text-gray-300 hover:[color:var(--color-text-main)] text-sm">
-              <it.icon className="w-3.5 h-3.5 text-gray-500"/>{it.label}
-            </button>
-          ))}
+
+      {/* 衍生菜单 */}
+      {showAddMenu && (
+        <div
+          ref={menuRef}
+          className="absolute left-[370px] top-1/2 -translate-y-1/2 w-48 bg-[#1c1d24] border border-white/15 rounded-2xl p-1.5 shadow-2xl z-40 flex flex-col gap-1 animate-in fade-in slide-in-from-left-2 duration-150"
+        >
+          <div className="px-2.5 py-1 text-[10px] font-bold text-white/40 uppercase tracking-wider">衍生连接下游</div>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              window.dispatchEvent(new CustomEvent('canvas-add-node', { detail: { sourceId: id, nextType: 'prompt' } }));
+              setShowAddMenu(false);
+            }}
+            className="w-full px-2.5 py-1.5 rounded-xl text-left text-xs text-white/90 hover:bg-white/10 flex items-center gap-2 transition-colors"
+          >
+            <Type className="w-3.5 h-3.5 text-cyan-400" />
+            <span>剧本 / Prompt 节点</span>
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              window.dispatchEvent(new CustomEvent('canvas-add-node', { detail: { sourceId: id, nextType: 'image' } }));
+              setShowAddMenu(false);
+            }}
+            className="w-full px-2.5 py-1.5 rounded-xl text-left text-xs text-white/90 hover:bg-white/10 flex items-center gap-2 transition-colors"
+          >
+            <ImageIcon className="w-3.5 h-3.5 text-violet-400" />
+            <span>生图 Agent 节点</span>
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              window.dispatchEvent(new CustomEvent('canvas-add-node', { detail: { sourceId: id, nextType: 'video' } }));
+              setShowAddMenu(false);
+            }}
+            className="w-full px-2.5 py-1.5 rounded-xl text-left text-xs text-white/90 hover:bg-white/10 flex items-center gap-2 transition-colors"
+          >
+            <VideoIcon className="w-3.5 h-3.5 text-orange-400" />
+            <span>视频 Agent 节点</span>
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              window.dispatchEvent(new CustomEvent('canvas-add-node', { detail: { sourceId: id, nextType: 'audio' } }));
+              setShowAddMenu(false);
+            }}
+            className="w-full px-2.5 py-1.5 rounded-xl text-left text-xs text-white/90 hover:bg-white/10 flex items-center gap-2 transition-colors"
+          >
+            <Mic className="w-3.5 h-3.5 text-pink-400" />
+            <span>配音 Agent 节点</span>
+          </button>
         </div>
       )}
     </div>
   );
 };
 
-// 1. 提示词节点
-export const PromptNode: React.FC<NodeProps> = ({ data, id }) => {
-  const d:any = data;
-  const [text, setText] = useState(d.prompt || d.text || '');
-  useEffect(()=> { if(d.prompt && d.prompt!==text) setText(d.prompt); }, [d.prompt]);
-  useEffect(()=> { if(d.text && d.text!==text) setText(d.text); }, [d.text]);
-  const onChange = (v:string)=> { setText(v); (d.onUpdate as any)?.(id, { prompt: v, text: v }); };
+// 1. 文本 / 剧本策划 Agent 节点 - 节点内编辑 + 技能 + 生成（经全局 handleNodeExecute 的 prompt 分支）
+export const PromptNode: React.FC<NodeProps> = ({ id, data, selected }) => {
+  const d: any = data;
+  const content = d.text || d.prompt || '';
+  const { updateNodeData } = useCanvasStore();
+  const [generating, setGenerating] = useState(false);
+  const st: any = d.agent_state;
+
+  const run = async () => {
+    if (!d.onExecute) return;
+    setGenerating(true);
+    try {
+      await (d.onExecute as any)(id);
+    } catch {
+      /* handleNodeExecute 内部已 alert */
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   return (
-    <Shell id={id} data={d} icon={Type} label="提示词" desc="描述画面/运动" color="text-sky-600">
-      <Handle type="source" position={Position.Right} id="prompt" className="!bg-sky-500 !w-3 !h-3 !border-2 !border-white !right-[-6px]" />
-      <Handle type="target" position={Position.Left} id="prompt_in" className="!bg-sky-500 !w-2 !h-2 !border-2 !border-white opacity-0" />
-      <textarea value={text} onChange={e=>onChange(e.target.value)} placeholder="例如：赛博朋克少女站在雨夜霓虹街道，电影感，THE DAY..." rows={4} className="w-full bg-surface-secondary border border-border rounded-xl p-3 text-sm [color:var(--color-text-main)] placeholder:text-gray-500 focus:outline-none focus:border-violet-400 focus:bg-surface resize-none leading-relaxed"/>
-      <div className="flex items-center justify-between text-[11px] text-gray-400">
-        <span>{text.length} 字 · 将作为下游提示词输入</span>
-        <div className="flex items-center gap-1.5">
-          <AiPolishButton value={text} onPolish={(v: any)=> onChange(v)} contextType="prompt" size="xs" />
-          <span className="w-2 h-2 rounded-full bg-emerald-500/100 animate-pulse"/>
-        </div>
+    <AgentShell
+      id={id}
+      selected={selected}
+      icon={Type}
+      label="剧本 / Prompt Agent"
+      providerBadge={d.provider || 'LLM Agent'}
+      handles={
+        <>
+          <Handle type="target" position={Position.Left} id="prompt_in" className="!w-3 !h-3 !bg-cyan-500 !border-2 !border-[#141419]" />
+          <Handle type="source" position={Position.Right} id="prompt" className="!w-3 !h-3 !bg-cyan-500 !border-2 !border-[#141419]" />
+        </>
+      }
+    >
+      <div className="w-full flex flex-col gap-2" onClick={(e) => e.stopPropagation()}>
+        {selected ? (
+          <textarea
+            value={content}
+            onChange={(e) => updateNodeData(id, { text: e.target.value, prompt: e.target.value })}
+            placeholder="输入故事创意 / 小说段落 / 分镜描述，点击下方技能触发拆解、扩写…"
+            rows={content ? 6 : 3}
+            className="w-full max-h-48 bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white/90 placeholder-white/40 focus:outline-none focus:border-cyan-500 resize-y leading-relaxed select-text"
+          />
+        ) : content ? (
+          <div className="w-full max-h-48 overflow-y-auto p-3.5 rounded-2xl bg-black/40 border border-white/10 text-xs text-white/90 whitespace-pre-wrap leading-relaxed select-text font-sans">
+            {content}
+          </div>
+        ) : (
+          <div className="w-full flex flex-col items-center justify-center py-4 px-2 text-center">
+            <div className="w-10 h-10 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 mb-3">
+              <Clapperboard className="w-5 h-5" />
+            </div>
+            <span className="text-xs font-bold text-white/90 mb-1">剧本与分镜创作</span>
+            <span className="text-[11px] text-white/40">点击卡片激活编辑，或选择技能</span>
+          </div>
+        )}
+        <div className="text-[10px] text-white/40 text-right">{content.length} 字符</div>
+
+        {selected && (
+          <>
+            <div className="flex flex-wrap items-center justify-center gap-1.5">
+              {HIGH_LEVEL_AGENT_SKILLS.map((skill) => (
+                <button
+                  key={skill.id}
+                  onClick={() => updateNodeData(id, { skill_id: skill.id })}
+                  className={`px-2.5 py-1 rounded-full text-[10px] font-medium border transition-all flex items-center gap-1 ${d.skill_id === skill.id ? 'bg-cyan-600 text-white border-cyan-500' : 'bg-white/5 hover:bg-cyan-600/30 border-white/10 text-white/70'}`}
+                >
+                  <Sparkles className="w-2.5 h-2.5 text-cyan-400" />
+                  {skill.name}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={run}
+              disabled={generating || !content.trim()}
+              className="w-full py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 disabled:bg-white/10 text-white text-xs font-bold flex items-center justify-center gap-1.5"
+            >
+              {generating ? (<><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> Agent 处理中…</>) : (<>技能执行 <ArrowUp className="w-3 h-3" /></>)}
+            </button>
+            {st?.status === 'failed' && <span className="text-[10px] text-red-400 line-clamp-2" title={st.error}>✗ {st.error}</span>}
+          </>
+        )}
       </div>
-    </Shell>
+    </AgentShell>
   );
 };
 
-// 2. 生成图片节点
-export const ImageNode: React.FC<NodeProps> = ({ data, id }) => {
-  const d:any = data;
-  const { project } = useProjectStore();
-  const [prompt, setPrompt] = useState(d.prompt || d.image_prompt || '');
-  const [ref, setRef] = useState(d.reference || d.reference_image || d.first_frame || '');
-  const [engine, setEngine] = useState(d.engine_type || 'auto'); // auto | provider | comfy
-  const [providerId, setProviderId] = useState(d.provider || d.provider_id || '');
-  const [workflowId, setWorkflowId] = useState(d.workflow_id || '');
-  const [providers, setProviders] = useState<any[]>([]);
-  const [workflows, setWorkflows] = useState<any[]>([]);
-  const [generating, setGenerating] = useState(false);
-  const [result, setResult] = useState(d.image_url || d.result_url || '');
-  const [showPicker, setShowPicker] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(true);
-  const [dynamicInputs, setDynamicInputs] = useState(d.dynamic_inputs || {});
-  const [exposed, setExposed] = useState<any[]>([]);
-  const [providerSchema, setProviderSchema] = useState<any>(null);
-  const [providerInputSchema, setProviderInputSchema] = useState<any>(null);
-  const [providerParams, setProviderParams] = useState<Record<string,any>>(d.provider_params || {});
-
-  useEffect(()=> {
-    getProvidersCached('image').then(r=> setProviders(r as any)).catch(()=>{});
-  }, []);
-  useEffect(()=>{
-    if(engine==='comfy'){
-      getWorkflowsCached().then(r=> setWorkflows(r as any)).catch(()=>{});
-    }
-  }, [engine]);
-
-  useEffect(()=> {
-    if(engine==='comfy' && workflowId){
-      apiService.inspectWorkflow(workflowId).then(r=>{
-        const ex = r?.data?.exposed_inputs || r?.exposed_inputs || [];
-        setExposed(ex);
-      }).catch(()=> setExposed([]));
-    } else setExposed([]);
-  }, [engine, workflowId]);
-
-  // 上游注入（逐步执行：下游自动回填）
-  useEffect(()=>{
-    const upPrompt = d._upstream?.prompt || d._upstream?.text || d._upstream?.image_prompt;
-    if(upPrompt && upPrompt!==prompt) setPrompt(upPrompt);
-    const upImg = d._upstream?.image_url || d._upstream?.image || d._upstream?.file_url || d._upstream?.reference;
-    if(upImg && upImg!==ref) setRef(upImg);
-  }, [d._upstream]);
-  // 下游传播后的直连字段同步
-  useEffect(()=>{ if(d.prompt!==undefined && d.prompt!==prompt) setPrompt(d.prompt); }, [d.prompt]);
-  useEffect(()=>{ if(d.reference!==undefined && d.reference!==ref) setRef(d.reference); }, [d.reference]);
-  useEffect(()=>{ if((d.image_url||d.result_url) && (d.image_url||d.result_url)!==result) setResult(d.image_url||d.result_url); }, [d.image_url, d.result_url]);
-  // 监听生成源新增后刷新下拉
-  useEffect(()=>{
-    const h=()=> apiService.listProviders({ kind:'image', include_builtin:true }).then(r=> setProviders(r.providers||[])).catch(()=>{});
-    window.addEventListener('provider-list-refresh', h as any);
-    return ()=> window.removeEventListener('provider-list-refresh', h as any);
-  }, []);
-  useEffect(()=>{
-    if(engine==='provider' && providerId){
-      const p = providers.find((x:any)=> x.id===providerId);
-      if(p?.params_schema?.properties){
-        setProviderSchema(p.params_schema);
-        // 初始化默认值
-        const defaults: Record<string,any> = {};
-        for(const [k,v] of Object.entries(p.params_schema.properties as any)){
-          if(providerParams[k]===undefined && (v as any).default!==undefined) defaults[k]=(v as any).default;
-        }
-        if(Object.keys(defaults).length) setProviderParams(prev=> ({...defaults, ...prev}));
-        setProviderInputSchema(p.input_schema || null);
-      } else if(providerId){
-        apiService.getProvider(providerId).then(r=>{
-          const s = r.provider?.params_schema || r.raw?.params_schema;
-          if(s) setProviderSchema(s);
-          setProviderInputSchema(r.provider?.input_schema || r.raw?.input_schema || null);
-        }).catch(()=>{});
-      }
-    } else {
-      setProviderSchema(null);
-      setProviderInputSchema(null);
-    }
-  }, [engine, providerId, providers]);
-
-  const persist = (patch:any)=> (d.onUpdate as any)?.(id, patch);
-  const isReady = (engine!=='provider' || !!providerId) && (engine!=='comfy' || !!workflowId);
-
-  const handleGenerate = async ()=>{
-    if(!prompt.trim() && !providerParams.prompt && !Object.values(dynamicInputs).some(v=> typeof v==='string' && v.trim())){ /* 提示词可来自上游或独立控件，不强制 */ }
-    setGenerating(true);
-    try{
-      const prov = engine==='provider' ? providerId : engine==='auto' ? undefined : undefined;
-      const wf = engine==='comfy' ? workflowId : undefined;
-      if(engine==='comfy' && !wf){ alert('请选择 ComfyUI 工作流'); setGenerating(false); return; }
-      if(engine==='provider' && !prov){ alert('请选择生成源'); setGenerating(false); return; }
-      // ComfyUI: 将参考图注入到首个暴露的 image 输入（img_*），否则用通用 reference_image
-      let dyn = { ...dynamicInputs };
-      if(engine==='comfy' && ref){
-        const firstImg = exposed.find((ex:any)=> ex.type==='image');
-        if(firstImg){
-          const key = firstImg.id || firstImg.node_id;
-          if(!dyn[key]) dyn[key] = ref;
-        } else if(!dyn['reference_image'] && Object.keys(dyn).length===0){
-          dyn['reference_image'] = ref;
-        }
-      } else if(ref && Object.keys(dyn).length===0){
-        dyn = { reference_image: ref };
-      }
-      const hasDyn = Object.keys(dyn).length>0;
-      const res = await apiService.generateShotImage({
-        prompt,
-        aspect_ratio: project?.aspect_ratio || '9:16',
-        style_preset: project?.style_preset,
-        provider: prov,
-        workflow_id: wf,
-        dynamic_inputs: hasDyn ? dyn : undefined,
-        ...providerParams,
-      } as any);
-      // 兼容后端返回 prompt_id 轮询（ComfyUI 超时场景）
-      let url = (res as any).image_url || (res as any).local_path;
-      if(!url && (res as any).prompt_id){
-        // 轮询 ComfyUI history（最多 90s）
-        for(let i=0;i<45;i++){
-          await new Promise(r=> setTimeout(r, 2000));
-          try{
-            // 通过再次查询工作流状态或直接重试生成（简化：等待后再次查询最近生成）
-            // 此处简化为等待后端落盘后通过轮询 generated 目录（实际由后端 _poll_for_output 已处理，此分支仅兜底）
-            break;
-          }catch{}
-        }
-      }
-      if(!url) throw new Error((res as any).detail || 'ComfyUI 未返回图像，请检查 ComfyUI 是否运行、工作流是否含 SaveImage 且 COMFYUI_SERVER_URL 配置正确');
-      setResult(url);
-      persist({ prompt, image_prompt: prompt, reference: ref, image_url: url, result_url: url, engine_type: engine, provider: prov, provider_id: prov, workflow_id: wf, dynamic_inputs: dyn });
-    }catch(e:any){
-      const msg = e?.message || String(e);
-      if(msg.includes('ComfyUI')){
-        alert(`ComfyUI 生成失败:\n${msg}\n\n请检查：\n1. ComfyUI 已启动 (http://127.0.0.1:8188)\n2. 工作流含 SaveImage/PreviewImage 且已导出为 API Format\n3. 参考图已正确上传`);
-      } else {
-        alert(msg);
-      }
-    } finally{ setGenerating(false); }
-  };
-
-  const absResult = result ? (result.startsWith('/')? API_ORIGIN+result : result) : '';
-  const absRef = ref ? (ref.startsWith('/')? API_ORIGIN+ref : ref) : ref;
-
+// 2. 概念分镜生图 Agent 节点 - Per-Node Agent：节点内选源/挂插槽/输Prompt/生成
+export const ImageNode: React.FC<NodeProps> = ({ id, data, selected }) => {
+  const d: any = data;
+  const imgUrl = d.image_url || d.result_url || d.url;
+  const st: any = d.agent_state;
   return (
-    <Shell id={id} data={d} icon={ImageIcon} label="生成图片" desc="文生图 / 垫图生成" color="text-violet-600">
-      <Handle type="target" position={Position.Left} id="prompt" className="!bg-sky-500 !w-3 !h-3 !border-2 !border-white" style={{top:'28%'}}/>
-      <Handle type="target" position={Position.Left} id="reference" className="!bg-violet-500 !w-3 !h-3 !border-2 !border-white" style={{top:'54%'}}/>
-      <Handle type="source" position={Position.Right} id="image" className="!bg-violet-500 !w-3 !h-3 !border-2 !border-white"/>
-      {/* 提示词/参考图已移除：全部来自生成源内部（上游连线或独立控件），不再使用预制模板参数 */}
-      {/* 参考图已移除：由上游连线或工作流/生成源独立控件提供 */}
-      {/* 引擎选择 */}
-      <div className="space-y-1.5">
-        <div className="flex items-center justify-between"><span className="text-xs font-medium text-gray-300">内部操作</span><button onClick={()=> setShowAdvanced(v=>!v)} className="text-[11px] text-violet-600 flex items-center gap-1">{showAdvanced?'收起':'高级'}<ChevronDown className={`w-3 h-3 transition-transform ${showAdvanced?'rotate-180':''}`}/></button></div>
-        <div className="grid grid-cols-3 gap-1.5">
-          {[
-            {k:'auto', label:'自动'},
-            {k:'provider', label:'API'},
-            {k:'comfy', label:'ComfyUI'},
-          ].map(o=>(
-            <button key={o.k} onClick={()=>{setEngine(o.k); persist({engine_type:o.k});}} className={`py-1.5 rounded-xl text-xs font-medium border ${engine===o.k?'bg-violet-600 [color:var(--color-text-main)] border-violet-600 shadow':'bg-surface text-gray-300 border-border hover:border-border'}`}>{o.label}</button>
-          ))}
+    <AgentShell
+      id={id}
+      selected={selected}
+      icon={ImageIcon}
+      label="分镜生图 Agent"
+      providerBadge={d.provider ? `${(d.provider || '').replace(/^comfyui_/, '')}${d.model ? ':' + d.model : ''}` : '待绑定生成源'}
+      handles={
+        <>
+          <Handle type="target" position={Position.Left} id="prompt" className="!w-3 !h-3 !bg-cyan-500 !border-2 !border-[#141419]" style={{ top: '30%' }} />
+          <Handle type="target" position={Position.Left} id="reference" className="!w-3 !h-3 !bg-violet-500 !border-2 !border-[#141419]" style={{ top: '50%' }} />
+          <Handle type="target" position={Position.Left} id="reference_images" className="!w-3 !h-3 !bg-violet-400 !border-2 !border-[#141419]" style={{ top: '70%' }} />
+          <Handle type="source" position={Position.Right} id="image" className="!w-3 !h-3 !bg-violet-500 !border-2 !border-[#141419]" />
+        </>
+      }
+    >
+      {imgUrl ? (
+        <div className="w-full aspect-[9/16] max-h-[300px] rounded-2xl overflow-hidden bg-black/60 border border-white/10 relative group">
+          <img src={imgUrl} alt="生成的画面" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+          <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-black/60 text-[9px] font-mono text-violet-300 border border-violet-500/30">{d.skill_id || 'text_to_image'} · {d.provider || 'auto'}</div>
+          {st?.status === 'running' && (
+            <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-2">
+              <div className="w-7 h-7 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
+              <span className="text-[11px] text-violet-200">Agent 生成中…</span>
+            </div>
+          )}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-3">
+            <span className="text-[11px] text-white/90 line-clamp-2">{d.prompt || '已生成分镜图像'}</span>
+          </div>
         </div>
-        {engine==='provider' && (
-          <select value={providerId} onChange={e=>{setProviderId(e.target.value); persist({provider:e.target.value, provider_id:e.target.value});}} className="w-full bg-surface border border-border rounded-xl px-2.5 py-2 text-sm [color:var(--color-text-main)] focus:outline-none focus:border-violet-400">
-            <option value="">选择生成源</option>
-            {providers.map((p:any)=> <option key={p.id} value={p.id}>{p.display_name||p.name} · {p.kind}</option>)}
-          </select>
-        )}
-        {engine==='provider' && providerSchema?.properties && (
-          <div className="space-y-2 p-2.5 rounded-xl bg-brand/10 border border-brand/20">
-            <div className="text-xs font-semibold text-brand-light">生成源独立参数</div>
-            {Object.entries(providerSchema.properties as any).map(([pname, pdef]:any)=>{
-              const spec: any = {
-                id: pname,
-                param_name: pname,
-                label: (pdef as any).title || pname,
-                type: (pdef as any).enum ? 'combo' : (pdef as any).type==='integer' || (pdef as any).type==='number' ? 'number' : (pdef as any).type==='boolean' ? 'boolean' : 'text',
-                description: (pdef as any).description,
-                options: (pdef as any).enum,
-                default_value: (pdef as any).default,
-                min: (pdef as any).minimum,
-                max: (pdef as any).maximum,
-              };
-              return (
-                <DynamicControl key={pname} spec={spec} value={providerParams[pname] ?? (pdef as any).default} onChange={v=>{
-                  const n={...providerParams, [pname]: v};
-                  setProviderParams(n);
-                  persist({ provider_params: n });
-                }} />
-              );
-            })}
-          </div>
-        )}
-        {engine==='comfy' && (
-          <select value={workflowId} onChange={e=>{setWorkflowId(e.target.value); persist({workflow_id:e.target.value});}} className="w-full bg-surface border border-border rounded-xl px-2.5 py-2 text-sm [color:var(--color-text-main)]">
-            <option value="">选择 ComfyUI 工作流</option>
-            {workflows.map((w:any)=> <option key={w.id} value={w.id}>{w.name||w.id} · {w.node_count}节点</option>)}
-          </select>
-        )}
-        {engine==='comfy' && exposed.length>0 && (
-          <div className="space-y-2 p-2.5 rounded-xl bg-surface-secondary border border-border">
-            <div className="text-xs font-semibold text-gray-300">工作流参数</div>
-            {exposed.map((ex:any)=>{
-              const key = ex.id||ex.node_id;
-              const val = dynamicInputs[key];
-              return (
-                <DynamicControl key={key} spec={{
-                  id: key,
-                  node_id: ex.node_id,
-                  param_name: ex.param_name,
-                  label: ex.label || ex.param_name,
-                  alias: (ex as any).alias || ex.label,
-                  type: ex.type==='image' ? 'image' : ex.type==='audio' ? 'audio' : ex.type==='video' ? 'video' : ex.type==='number' ? 'number' : (ex.type==='combo'||ex.type==='select') ? 'combo' : ex.type==='boolean' ? 'boolean' : 'text',
-                  required: ex.required,
-                  default_value: ex.default_value,
-                  description: ex.description,
-                  options: ex.options || ex.choices,
-                  min: ex.min,
-                  max: ex.max,
-                  step: ex.step,
-                }} value={val ?? ex.default_value} onChange={v=>{ const n={...dynamicInputs, [key]: v}; setDynamicInputs(n); persist({dynamic_inputs:n}); }} onAliasChange={alias=>{
-                  const newExposed = exposed.map((e:any)=> e.id===key ? {...e, label: alias, alias} : e);
-                  setExposed(newExposed);
-                  apiService.saveWorkflowOverrides(workflowId, { exposed_inputs: newExposed }).catch(()=>{});
-                }} />
-              );
-            })}
-          </div>
-        )}
-      </div>
-        {engine==='provider' && (
-          <ProviderInputControls inputSchema={providerInputSchema} values={dynamicInputs}
-            promptValue={prompt} onPrompt={(v)=>{setPrompt(v); persist({prompt:v, image_prompt:v});}}
-            frameValue={ref} onFrame={(v)=>{setRef(v); persist({reference:v});}}
-            onChange={(k,v)=>{ const n={...dynamicInputs,[k]:v}; setDynamicInputs(n); persist({dynamic_inputs:n}); }}/>
-        )}
-      <div className={`text-[11px] px-2 py-1 rounded-full border text-center ${isReady ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-amber-500/10 border-amber-500/20 text-amber-300'}`}>{isReady ? '● 就绪 · 执行后自动流向下游' : '○ 待输入提示词/上游'}</div>
-      {/* 结果 */}
-      {absResult && <div className="rounded-xl overflow-hidden border border-border"><img src={absResult} alt="" className="w-full"/></div>}
-      <button onClick={handleGenerate} disabled={generating} className="w-full py-2.5 rounded-xl bg-brand text-white text-sm font-bold flex items-center justify-center gap-1.5 hover:bg-brand-light disabled:opacity-40">
-        {generating ? <><div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin"/> 生成中…</>: <><Sparkles className="w-4 h-4"/> 生成图片</>}
-      </button>
-      {showPicker && <AssetPicker onPick={(url)=>{setRef(url); persist({reference:url});}} onClose={()=>setShowPicker(false)} kind="image"/>}
-    </Shell>
-  );
-};
-
-// 3. 生成视频（独立控件 + ComfyUI 动态 + provider 独立参数）
-export const VideoGenNode: React.FC<NodeProps> = ({ data, id }) => {
-  const d:any = data;
-  const [prompt, setPrompt] = useState(d.prompt || d.video_prompt || '');
-  const [firstFrame, setFirstFrame] = useState(d.first_frame || d.first_frame_url || d.image_url || '');
-  const [engine, setEngine] = useState(d.engine_type || 'auto');
-  const [providerId, setProviderId] = useState(d.provider || d.provider_id || '');
-  const [workflowId, setWorkflowId] = useState(d.workflow_id || '');
-  const [mode, setMode] = useState(d.mode || 'i2v');
-  const [duration, setDuration] = useState(d.duration || 5);
-  const [providers, setProviders] = useState<any[]>([]);
-  const [workflows, setWorkflows] = useState<any[]>([]);
-  const [generating, setGenerating] = useState(false);
-  const [videoUrl, setVideoUrl] = useState(d.video_url || '');
-  const [showPicker, setShowPicker] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(true);
-  const [dynamicInputs, setDynamicInputs] = useState(d.dynamic_inputs || {});
-  const [exposed, setExposed] = useState<any[]>([]);
-  const [providerSchema, setProviderSchema] = useState<any>(null);
-  const [providerInputSchema, setProviderInputSchema] = useState<any>(null);
-  const [providerParams, setProviderParams] = useState<Record<string,any>>(d.provider_params || {});
-
-  useEffect(()=> {
-    getProvidersCached('video').then(r=> setProviders(r as any)).catch(()=>{});
-  }, []);
-  useEffect(()=>{
-    if(engine==='comfy'){
-      getWorkflowsCached().then(r=> setWorkflows(r as any)).catch(()=>{});
-    }
-  }, [engine]);
-  useEffect(()=>{
-    if(engine==='comfy' && workflowId){
-      apiService.inspectWorkflow(workflowId).then(r=>{
-        const ex = r?.data?.exposed_inputs || r?.exposed_inputs || [];
-        setExposed(ex);
-      }).catch(()=> setExposed([]));
-    } else setExposed([]);
-  }, [engine, workflowId]);
-  useEffect(()=>{
-    const upPrompt = d._upstream?.prompt || d._upstream?.text;
-    if(upPrompt && upPrompt!==prompt) setPrompt(upPrompt);
-    const upImg = d._upstream?.image_url || d._upstream?.image || d._upstream?.file_url || d._upstream?.reference;
-    if(upImg && upImg!==firstFrame) setFirstFrame(upImg);
-  }, [d._upstream]);
-  useEffect(()=>{ if(d.prompt!==undefined && d.prompt!==prompt) setPrompt(d.prompt); }, [d.prompt]);
-  useEffect(()=>{ if((d.first_frame||d.first_frame_url||d.image_url) && (d.first_frame||d.first_frame_url||d.image_url)!==firstFrame) setFirstFrame(d.first_frame||d.first_frame_url||d.image_url); }, [d.first_frame, d.first_frame_url, d.image_url]);
-  useEffect(()=>{ if(d.video_url && d.video_url!==videoUrl) setVideoUrl(d.video_url); }, [d.video_url]);
-  useEffect(()=>{
-    const h=()=> apiService.listProviders({ kind:'video', include_builtin:true }).then(r=> setProviders(r.providers||[])).catch(()=>{});
-    window.addEventListener('provider-list-refresh', h as any);
-    return ()=> window.removeEventListener('provider-list-refresh', h as any);
-  }, []);
-  useEffect(()=>{
-    if(engine==='provider' && providerId){
-      const p = providers.find((x:any)=> x.id===providerId);
-      if(p?.params_schema?.properties){
-        setProviderSchema(p.params_schema);
-        const defaults: Record<string,any> = {};
-        for(const [k,v] of Object.entries(p.params_schema.properties as any)){
-          if(providerParams[k]===undefined && (v as any).default!==undefined) defaults[k]=(v as any).default;
-        }
-        if(Object.keys(defaults).length) setProviderParams(prev=> ({...defaults, ...prev}));
-        setProviderInputSchema(p.input_schema || null);
-      } else if(providerId){
-        apiService.getProvider(providerId).then(r=>{
-          const s = r.provider?.params_schema || r.raw?.params_schema;
-          if(s) setProviderSchema(s);
-          setProviderInputSchema(r.provider?.input_schema || r.raw?.input_schema || null);
-        }).catch(()=>{});
-      }
-    } else {
-      setProviderSchema(null);
-      setProviderInputSchema(null);
-    }
-  }, [engine, providerId, providers]);
-
-  const persist = (p:any)=> (d.onUpdate as any)?.(id, p);
-  const isReady = (engine!=='provider' || !!providerId) && (engine!=='comfy' || !!workflowId);
-
-  const handleGenerate = async ()=>{
-    if(!prompt.trim() && !providerParams.prompt && !Object.values(dynamicInputs).some(v=> typeof v==='string' && v.trim())){ /* 运动描述可来自上游或独立控件 */ }
-    if(mode==='i2v' && !firstFrame && !Object.values(dynamicInputs).some(v=> typeof v==='string' && v.startsWith('data:'))){ /* 首帧可来自上游或独立控件 */ }
-    setGenerating(true);
-    try{
-      const prov = engine==='provider'? providerId : engine==='auto'? (providerId || undefined) : undefined;
-      const wf = engine==='comfy'? workflowId : undefined;
-      let dyn = { ...dynamicInputs };
-      if(engine==='comfy' && firstFrame){
-        const firstImg = exposed.find((ex:any)=> ex.type==='image');
-        if(firstImg){
-          const key = firstImg.id || firstImg.node_id;
-          if(!dyn[key]) dyn[key] = firstFrame;
-        }
-      }
-      const hasDyn = Object.keys(dyn).length>0;
-      const res:any = await apiService.generateShotVideo({ prompt, mode: mode as any, first_frame_url: firstFrame || undefined, duration, provider: prov, workflow_id: wf, dynamic_inputs: hasDyn ? dyn : undefined, ...providerParams } as any);
-      let url = res.video_url;
-      if(!url && res.task_id){
-        for(let i=0;i<120;i++){
-          await new Promise(r=> setTimeout(r,3000));
-          try{
-            const st:any = await apiService.getVideoTaskStatus(res.task_id);
-            const s=(st.status||'').toString().toUpperCase();
-            if(s==="SUCCESS"||s==="COMPLETED"){ url=st.video_url||st.videoUrl||st.results?.[0]||""; if(url) break; }
-            if(s==="FAILED"||s==="FAIL") throw new Error(st.error||"任务失败");
-          }catch{}
-        }
-      }
-      setVideoUrl(url);
-      persist({ prompt, video_prompt:prompt, first_frame:firstFrame, first_frame_url:firstFrame, video_url:url, mode, duration, engine_type:engine, provider:prov, provider_id:prov, workflow_id:wf, dynamic_inputs: dyn, provider_params: providerParams });
-    }catch(e:any){ alert(e.message); } finally{ setGenerating(false); }
-  };
-
-  const absFirst = firstFrame ? (firstFrame.startsWith('/')? API_ORIGIN+firstFrame : firstFrame) : '';
-  const absVideo = videoUrl ? (videoUrl.startsWith('/')? API_ORIGIN+videoUrl : videoUrl) : '';
-
-  return (
-    <Shell id={id} data={d} icon={VideoIcon} label="生成视频" desc="I2V / R2V / T2V" color="text-orange-600">
-      <Handle type="target" position={Position.Left} id="prompt" className="!bg-sky-500 !w-3 !h-3 !border-2 !border-white" style={{top:'28%'}}/>
-      <Handle type="target" position={Position.Left} id="first_frame" className="!bg-violet-500 !w-3 !h-3 !border-2 !border-white" style={{top:'52%'}}/>
-      <Handle type="source" position={Position.Right} id="video" className="!bg-orange-500 !w-3 !h-3 !border-2 !border-white"/>
-      {/* 运动描述已移除：由上游或生成源内部提供 */}
-      {/* 首帧/参考已移除：由上游连线或独立控件提供 */}
-      <div className="grid grid-cols-3 gap-1.5">
-        {(['i2v','r2v','t2v'] as const).map(m=> <button key={m} onClick={()=>{setMode(m); persist({mode:m});}} className={`py-1.5 rounded-xl text-xs font-medium border ${mode===m?'bg-orange-500 [color:var(--color-text-main)] border-orange-500':'bg-surface text-gray-300 border-border'}`}>{m.toUpperCase()}</button>)}
-      </div>
-      <div className="space-y-1.5">
-        <div className="flex items-center justify-between"><span className="text-xs font-medium text-gray-300">内部操作</span><button onClick={()=> setShowAdvanced(v=>!v)} className="text-[11px] text-orange-600 flex items-center gap-1">{showAdvanced?'收起':'高级'}<ChevronDown className={`w-3 h-3 transition-transform ${showAdvanced?'rotate-180':''}`}/></button></div>
-        <div className="grid grid-cols-3 gap-1.5">
-          {[{k:'auto',l:'自动'},{k:'provider',l:'API'},{k:'comfy',l:'ComfyUI'}].map(o=> <button key={o.k} onClick={()=>{setEngine(o.k); persist({engine_type:o.k});}} className={`py-1.5 rounded-xl text-xs border ${engine===o.k?'bg-brand text-white border-zinc-900':'bg-surface border-border text-gray-300'}`}>{o.l}</button>)}
-        </div>
-        {engine==='provider' && <select value={providerId} onChange={e=>{setProviderId(e.target.value); persist({provider:e.target.value, provider_id:e.target.value});}} className="w-full bg-surface border border-border rounded-xl px-2.5 py-2 text-sm"><option value="">自动 / 选择视频源</option>{providers.map((p:any)=> <option key={p.id} value={p.id}>{p.display_name||p.name}</option>)}</select>}
-        {engine==='provider' && providerSchema?.properties && (
-          <div className="space-y-2 p-2.5 rounded-xl bg-orange-500/10 border border-orange-500/20">
-            <div className="text-xs font-semibold text-orange-300">生成源独立参数</div>
-            {Object.entries(providerSchema.properties as any).map(([pname, pdef]:any)=>{
-              const spec: any = {
-                id: pname,
-                param_name: pname,
-                label: (pdef as any).title || pname,
-                type: (pdef as any).enum ? 'combo' : (pdef as any).type==='integer' || (pdef as any).type==='number' ? 'number' : (pdef as any).type==='boolean' ? 'boolean' : 'text',
-                description: (pdef as any).description,
-                options: (pdef as any).enum?.map((x:any)=> String(x)),
-                default_value: (pdef as any).default,
-                min: (pdef as any).minimum,
-                max: (pdef as any).maximum,
-                step: (pdef as any).step,
-              };
-              return (
-                <DynamicControl key={pname} spec={spec} value={providerParams[pname] ?? (pdef as any).default} onChange={v=>{
-                  const n={...providerParams, [pname]: v};
-                  setProviderParams(n);
-                  persist({ provider_params: n });
-                  if(pname==='duration' && typeof v==='number'){ setDuration(v); persist({duration:v}); }
-                }} />
-              );
-            })}
-          </div>
-        )}
-        {engine==='comfy' && <select value={workflowId} onChange={e=>{setWorkflowId(e.target.value); persist({workflow_id:e.target.value});}} className="w-full bg-surface border border-border rounded-xl px-2.5 py-2 text-sm"><option value="">选择工作流</option>{workflows.map((w:any)=> <option key={w.id} value={w.id}>{w.name||w.id}</option>)}</select>}
-        {engine==='comfy' && exposed.length>0 && (
-          <div className="space-y-2 p-2.5 rounded-xl bg-surface-secondary border border-border">
-            <div className="text-xs font-semibold text-gray-300">工作流参数（独立控件 + 别名）</div>
-            {exposed.map((ex:any)=>{
-              const key = ex.id||ex.node_id;
-              const val = dynamicInputs[key];
-              return (
-                <DynamicControl key={key} spec={{
-                  id: key,
-                  node_id: ex.node_id,
-                  param_name: ex.param_name,
-                  label: ex.label || ex.param_name,
-                  alias: (ex as any).alias || ex.label,
-                  type: ex.type==='image' ? 'image' : ex.type==='audio' ? 'audio' : ex.type==='video' ? 'video' : ex.type==='number' ? 'number' : (ex.type==='combo'||ex.type==='select') ? 'combo' : ex.type==='boolean' ? 'boolean' : 'text',
-                  required: ex.required,
-                  default_value: ex.default_value,
-                  description: ex.description,
-                  options: ex.options || ex.choices,
-                  min: ex.min,
-                  max: ex.max,
-                  step: ex.step,
-                }} value={val ?? ex.default_value} onChange={v=>{ const n={...dynamicInputs, [key]: v}; setDynamicInputs(n); persist({dynamic_inputs:n}); }} onAliasChange={alias=>{
-                  const newExposed = exposed.map((e:any)=> e.id===key ? {...e, label: alias, alias} : e);
-                  setExposed(newExposed);
-                  apiService.saveWorkflowOverrides(workflowId, { exposed_inputs: newExposed }).catch(()=>{});
-                }} />
-              );
-            })}
-          </div>
-        )}
-      </div>
-      {!showAdvanced && (
-        {/* 时长已移除：由生成源独立控件提供 */}
-      )}
-        {engine==='provider' && (
-          <ProviderInputControls inputSchema={providerInputSchema} values={dynamicInputs}
-            promptValue={prompt} onPrompt={(v)=>{setPrompt(v); persist({prompt:v, video_prompt:v});}}
-            frameValue={firstFrame} onFrame={(v)=>{setFirstFrame(v); persist({first_frame:v, first_frame_url:v});}}
-            onChange={(k,v)=>{ const n={...dynamicInputs,[k]:v}; setDynamicInputs(n); persist({dynamic_inputs:n}); }}/>
-        )}
-      <div className={`text-[11px] px-2 py-1 rounded-full border text-center ${isReady ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-amber-500/10 border-amber-500/20 text-amber-300'}`}>{isReady ? '● 就绪 · 执行后自动流向下游' : '○ 待上游首帧/提示词'}</div>
-      {absVideo && <video src={absVideo} controls className="w-full rounded-xl border border-border max-h-[160px] bg-black"/>}
-      <button onClick={handleGenerate} disabled={generating} className="w-full py-2.5 rounded-xl bg-brand text-white text-sm font-bold flex items-center justify-center gap-1.5 hover:bg-brand-light disabled:opacity-40">{generating? <><div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin"/> 生成中…</>: <><Play className="w-4 h-4"/> 生成视频</>}</button>
-      {showPicker && <AssetPicker onPick={(url)=>{setFirstFrame(url); persist({first_frame:url, first_frame_url:url});}} onClose={()=> setShowPicker(false)} kind="image"/>}
-    </Shell>
-  );
-};
-
-// 4. 生成音频（独立控件 + provider 独立参数）
-export const AudioNode: React.FC<NodeProps> = ({ data, id }) => {
-  const d:any = data;
-  const [text, setText] = useState(d.text || d.prompt || '');
-  const [engine, setEngine] = useState(d.engine_type || 'auto');
-  const [providerId, setProviderId] = useState(d.provider || d.provider_id || 'minimax');
-  const [voiceId, setVoiceId] = useState(d.voice_id || 'male-qn-qingse');
-  const [emotion, setEmotion] = useState(d.emotion || 'neutral');
-  const [voices, setVoices] = useState<any[]>([]);
-  const [providers, setProviders] = useState<any[]>([]);
-  const [generating, setGenerating] = useState(false);
-  const [audioUrl, setAudioUrl] = useState(d.audio_url || '');
-  const [audioEl, setAudioEl] = useState<HTMLAudioElement|null>(null);
-  const [providerSchema, setProviderSchema] = useState<any>(null);
-  const [providerInputSchema, setProviderInputSchema] = useState<any>(null);
-  const [providerParams, setProviderParams] = useState<Record<string,any>>(d.provider_params || {});
-  const [dynamicInputs, setDynamicInputs] = useState<Record<string,any>>(d.dynamic_inputs || {});
-
-  useEffect(()=>{
-    apiService.listProviders({ kind:'audio', include_builtin:true }).then(r=> setProviders(r.providers||[])).catch(()=>{});
-  }, []);
-  useEffect(()=>{ apiService.listTtsVoices(providerId).then(r=> setVoices(r.voices||[])).catch(()=>{}); }, [providerId]);
-  useEffect(()=>{
-    const up = d._upstream?.prompt || d._upstream?.text || d._upstream?.dialogue;
-    if(up && up!==text) setText(up);
-  }, [d._upstream]);
-  useEffect(()=>{ if(d.text!==undefined && d.text!==text) setText(d.text); }, [d.text]);
-  useEffect(()=>{ if(d.prompt!==undefined && d.prompt!==text) setText(d.prompt); }, [d.prompt]);
-  useEffect(()=>{ if(d.audio_url && d.audio_url!==audioUrl) setAudioUrl(d.audio_url); }, [d.audio_url]);
-  useEffect(()=>{
-    const h=()=> apiService.listProviders({ kind:'audio', include_builtin:true }).then(r=> setProviders(r.providers||[])).catch(()=>{});
-    window.addEventListener('provider-list-refresh', h as any);
-    return ()=> window.removeEventListener('provider-list-refresh', h as any);
-  }, []);
-  useEffect(()=>{
-    if(engine==='provider' && providerId){
-      const p = providers.find((x:any)=> x.id===providerId);
-      if(p?.params_schema?.properties){
-        setProviderSchema(p.params_schema);
-        const defaults: Record<string,any> = {};
-        for(const [k,v] of Object.entries(p.params_schema.properties as any)){
-          if(providerParams[k]===undefined && (v as any).default!==undefined) defaults[k]=(v as any).default;
-        }
-        if(Object.keys(defaults).length) setProviderParams(prev=> ({...defaults, ...prev}));
-      } else if(providerId){
-        apiService.getProvider(providerId).then(r=>{
-          const s = r.provider?.params_schema || r.raw?.params_schema;
-          if(s) setProviderSchema(s);
-        }).catch(()=>{});
-      }
-    } else if(engine==='auto' && providerId){
-      const p = providers.find((x:any)=> x.id===providerId);
-      if(p?.params_schema?.properties) setProviderSchema(p.params_schema);
-      setProviderInputSchema(p?.input_schema || null);
-    } else {
-      // auto 无独立 provider 时仍可展示通用 audio 参数（speed/pitch/volume）
-      setProviderSchema(null);
-      setProviderInputSchema(null);
-    }
-  }, [engine, providerId, providers]);
-
-  const persist = (p:any)=> (d.onUpdate as any)?.(id, p);
-  const isReady = true; // 文本可来自上游或独立控件
-  const handleGenerate = async ()=>{
-    if(!text.trim() && !providerParams.text && !providerParams.prompt){ /* 文本可来自上游 */ }
-    setGenerating(true);
-    try{
-      const prov = engine==='auto'? undefined : providerId;
-      const res = await apiService.generateTTS(text, voiceId, emotion, { provider: prov, ...providerParams, ...dynamicInputs });
-      setAudioUrl(res.audio_url);
-      persist({ text, prompt:text, audio_url: res.audio_url, voice_id: voiceId, emotion, provider: prov||providerId, provider_id: prov||providerId, engine_type: engine, provider_params: providerParams, dynamic_inputs: dynamicInputs });
-    }catch(e:any){ alert(e.message); } finally{ setGenerating(false); }
-  };
-  const handlePlay = ()=>{
-    if(!audioUrl) return;
-    if(audioEl){ audioEl.pause(); setAudioEl(null); return; }
-    const url = audioUrl.startsWith('/')? API_ORIGIN+audioUrl : audioUrl;
-    const a = new Audio(url); setAudioEl(a); a.onended=()=> setAudioEl(null); a.play().catch(()=>{});
-  };
-  return (
-    <Shell id={id} data={d} icon={Mic} label="生成音频" desc="TTS 配音" color="text-pink-600">
-      <Handle type="target" position={Position.Left} id="text" className="!bg-sky-500 !w-3 !h-3 !border-2 !border-white" style={{top:'30%'}}/>
-      <Handle type="source" position={Position.Right} id="audio" className="!bg-pink-500 !w-3 !h-3 !border-2 !border-white"/>
-      {/* 文本已移除：由上游连线或生成源内部提供 */}
-      <div className="grid grid-cols-2 gap-1.5">
-        {[{k:'auto',l:'自动'},{k:'provider',l:'API'}].map(o=> <button key={o.k} onClick={()=>{setEngine(o.k); persist({engine_type:o.k});}} className={`py-1.5 rounded-xl text-xs border ${engine===o.k?'bg-pink-500 [color:var(--color-text-main)] border-pink-500':'bg-surface border-border text-gray-300'}`}>{o.l}</button>)}
-      </div>
-      <select value={providerId} onChange={e=>{setProviderId(e.target.value); persist({provider:e.target.value, provider_id:e.target.value});}} className="w-full bg-surface border border-border rounded-xl px-2.5 py-2 text-sm">
-        {providers.length? providers.map((p:any)=><option key={p.id} value={p.id}>{p.display_name||p.name}</option>) : <><option value="minimax">MiniMax</option><option value="elevenlabs">ElevenLabs</option></>}
-        {!providers.find(p=>p.id===providerId) && providerId && <option value={providerId}>{providerId}</option>}
-      </select>
-      <select value={voiceId} onChange={e=>{setVoiceId(e.target.value); persist({voice_id:e.target.value});}} className="w-full bg-surface border border-border rounded-xl px-2.5 py-2 text-sm">
-        {voices.length? voices.map((v:any)=> <option key={v.voice_id||v.id} value={v.voice_id||v.id}>{v.voice_name||v.name||v.voice_id}</option>) : <option value={voiceId}>{voiceId}</option>}
-      </select>
-      <select value={emotion} onChange={e=>{setEmotion(e.target.value); persist({emotion:e.target.value});}} className="w-full bg-surface border border-border rounded-xl px-2.5 py-2 text-sm">
-        <option value="neutral">平静</option><option value="intense">怒吼</option><option value="sorrow">悲痛</option><option value="excited">兴奋</option><option value="whispering">低语</option>
-      </select>
-      {providerSchema?.properties && (
-        <div className="space-y-2 p-2.5 rounded-xl bg-pink-500/10 border border-pink-500/20">
-          <div className="text-xs font-semibold text-pink-300">生成源独立参数</div>
-          {Object.entries(providerSchema.properties as any).map(([pname, pdef]:any)=>{
-            if(['speed','pitch','volume'].includes(pname) && false) return null;
-            const spec: any = {
-              id: pname,
-              param_name: pname,
-              label: (pdef as any).title || pname,
-              type: (pdef as any).enum ? 'combo' : (pdef as any).type==='integer' || (pdef as any).type==='number' ? 'number' : (pdef as any).type==='boolean' ? 'boolean' : 'text',
-              description: (pdef as any).description,
-              options: (pdef as any).enum?.map((x:any)=> String(x)),
-              default_value: (pdef as any).default,
-              min: (pdef as any).minimum,
-              max: (pdef as any).maximum,
-              step: (pdef as any).step,
-            };
-            return (
-              <DynamicControl key={pname} spec={spec} value={providerParams[pname] ?? (pdef as any).default} onChange={v=>{
-                const n={...providerParams, [pname]: v};
-                setProviderParams(n);
-                persist({ provider_params: n });
-              }} />
-            );
-          })}
+      ) : (
+        <div className="w-full aspect-[9/16] max-h-[220px] rounded-2xl border-2 border-dashed border-white/15 bg-black/20 flex flex-col items-center justify-center p-4 text-center">
+          <ImageIcon className="w-8 h-8 text-violet-400/50 mb-2" />
+          <span className="text-xs font-bold text-white/80">待生成画面</span>
+          {st?.status === 'failed' && <span className="text-[10px] text-red-400 mt-1 line-clamp-2" title={st.error}>✗ {st.error}</span>}
         </div>
       )}
-        {engine==='provider' && (
-          <ProviderInputControls inputSchema={providerInputSchema} values={dynamicInputs}
-            textValue={text} onText={(v)=>{setText(v); persist({text:v, prompt:v});}}
-            onChange={(k,v)=>{ const n={...dynamicInputs,[k]:v}; setDynamicInputs(n); persist({dynamic_inputs:n}); }}/>
-        )}
-      <div className={`text-[11px] px-2 py-1 rounded-full border text-center ${isReady ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-amber-500/10 border-amber-500/20 text-amber-300'}`}>{isReady ? '● 就绪 · 执行后自动流向下游' : '○ 待输入文本/上游'}</div>
-      <button onClick={handleGenerate} disabled={generating} className="w-full py-2.5 rounded-xl bg-brand text-white text-sm font-bold flex items-center justify-center gap-1.5 hover:bg-brand-light disabled:opacity-40">{generating? <><div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin"/> 生成中…</>: <><Volume2 className="w-4 h-4"/> 生成配音</>}</button>
-      {audioUrl && <button onClick={handlePlay} className="w-full py-2 rounded-xl bg-surface border border-border text-sm flex items-center justify-center gap-1.5 hover:bg-surface-secondary"><Play className="w-3.5 h-3.5"/>{audioEl?'暂停':'试听'}</button>}
-    </Shell>
+      {/* 控制台已下沉至底部栏：点此节点时底部自动切换为该节点的 Agent 控制台 */}
+    </AgentShell>
   );
 };
 
-// 5. 3D导演台（轻量白卡）
-export const Director3DMinimalNode: React.FC<NodeProps> = ({ data, id }) => {
-  const d:any = data;
-  const [framing, setFraming] = useState(d.framing || 'medium');
-  const [motion, setMotion] = useState(d.motion || 'push_in');
-  const [focal, setFocal] = useState(d.focal_length_mm || 35);
-  const persist = (p:any)=> (d.onUpdate as any)?.(id, p);
-  return (
-    <Shell id={id} data={d} icon={Box} label="3D导演台" desc="机位 / 运镜编排" color="text-amber-600">
-      <Handle type="target" position={Position.Left} id="prompt" className="!bg-sky-500 !w-3 !h-3 !border-2 !border-white" style={{top:'30%'}}/>
-      <Handle type="source" position={Position.Right} id="camera_prompt" className="!bg-amber-500/100 !w-3 !h-3 !border-2 !border-white"/>
-      <div className="grid grid-cols-2 gap-1.5">
-        <select value={framing} onChange={e=>{setFraming(e.target.value); persist({framing:e.target.value});}} className="bg-surface border border-border rounded-xl px-2.5 py-2 text-sm">
-          <option value="extreme_close_up">大特写</option><option value="close_up">特写</option><option value="medium">中景</option><option value="full">全景</option><option value="long">远景</option><option value="bird_eye">鸟瞰</option><option value="low_angle">仰角</option>
-        </select>
-        <select value={motion} onChange={e=>{setMotion(e.target.value); persist({motion:e.target.value});}} className="bg-surface border border-border rounded-xl px-2.5 py-2 text-sm">
-          <option value="static">固定</option><option value="push_in">推镜</option><option value="pull_out">拉镜</option><option value="orbit">环绕</option><option value="pan_left">左摇</option><option value="pan_right">右摇</option>
-        </select>
-      </div>
-      <label className="flex items-center gap-2 text-xs text-gray-300">焦距 {focal}mm<input type="range" min={16} max={135} value={focal} onChange={e=>{setFocal(Number(e.target.value)); persist({focal_length_mm:Number(e.target.value)});}} className="flex-1 accent-amber-500"/></label>
-      <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 p-2.5 font-mono text-xs text-amber-800 break-words">{d.minimax_camera_prompt || `[Camera: ${framing} · ${motion} · ${focal}mm]`}</div>
-      <button onClick={()=> (d.onExecute as any)?.(id)} className="w-full py-2 rounded-xl bg-amber-500/100 [color:var(--color-text-main)] text-sm font-bold hover:bg-amber-600">计算机位</button>
-    </Shell>
-  );
-};
-
-// 6. 导出节点
-export const ExportNode: React.FC<NodeProps> = ({ data, id }) => {
-  const d:any = data;
-  const [desc, setDesc] = useState(d.export_desc || '');
-  const project = useProjectStore(s=> s.project);
-  const pid = project?.id;
-  const handleExport = async ()=>{
-    if(!pid){ alert('请先在项目看板打开项目'); return; }
-    // 收集上游 videos/audios
-    const ups = (d._upstream || {}) as any;
-    // 简易：提示前往漫剧制作导出
-    const videos = ups.videos || (ups.video_url ? [ups.video_url] : []);
-    const audios = ups.audios || (ups.audio_url ? [ups.audio_url] : []);
-    try{
-      // 若有工程数据则直接导出草稿
-      const proj = (window as any).__lastProject || project;
-      if(proj && (videos.length||audios.length)){
-        const res = await apiService.exportJianYingDraft(proj);
-        alert(`已导出剪映草稿：${res.draft_path||'完成'}  视频${videos.length} 音频${audios.length}`);
-      } else {
-        // 兜底：创建一个最小项目并导出
-        await apiService.exportJianYingDraft({ id: pid, title: project?.title||'导出', scenes: [{ id:'s1', scene_index:1, title:'场景1', shots:[]}]} as any);
-        alert('已触发导出，请在 漫剧制作→导出 查看');
-      }
-    }catch(e:any){ alert(e.message); }
+// 3. 动态导演视频 Agent 节点 - Per-Node Agent：首尾帧/参考插槽 + 节点内选源生成（含异步轮询）
+export const VideoGenNode: React.FC<NodeProps> = ({ id, data, selected }) => {
+  const d: any = data;
+  const vidUrl = d.video_url || d.result_url;
+  const st: any = d.agent_state;
+  const [isPlaying, setIsPlaying] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const togglePlay = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!videoRef.current) return;
+    if (isPlaying) { videoRef.current.pause(); setIsPlaying(false); } else { videoRef.current.play(); setIsPlaying(true); }
   };
   return (
-    <Shell id={id} data={d} icon={Download} label="导出" desc="成片 / 剪映草稿" color="text-emerald-600">
-      <Handle type="target" position={Position.Left} id="video" className="!bg-orange-500 !w-3 !h-3 !border-2 !border-white" style={{top:'32%'}}/>
-      <Handle type="target" position={Position.Left} id="audio" className="!bg-pink-500 !w-3 !h-3 !border-2 !border-white" style={{top:'58%'}}/>
-      <textarea value={desc} onChange={e=>{setDesc(e.target.value); (d.onUpdate as any)?.(id,{export_desc:e.target.value});}} placeholder="导出备注（可选）" rows={2} className="w-full bg-surface-secondary border border-border rounded-xl p-2.5 text-sm placeholder:text-gray-500 focus:outline-none focus:border-emerald-300"/>
-      <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/20 p-2.5 text-xs text-emerald-800 leading-relaxed">将自动聚合上游 <b>视频+音频</b> 生成剪映草稿，可携带时间线。若无视频，将导出项目结构。</div>
-      <button onClick={handleExport} className="w-full py-2.5 rounded-xl bg-emerald-600 [color:var(--color-text-main)] text-sm font-bold flex items-center justify-center gap-1.5 hover:bg-emerald-700"><Download className="w-4 h-4"/> 导出剪映草稿</button>
-      <button onClick={()=> window.dispatchEvent(new CustomEvent('canvas-export-shots'))} className="w-full py-2 rounded-xl bg-surface border border-border text-sm font-medium hover:bg-surface-secondary">导出为分镜到项目</button>
-    </Shell>
+    <AgentShell
+      id={id}
+      selected={selected}
+      icon={VideoIcon}
+      label="动态导演视频 Agent"
+      providerBadge={d.provider ? `${(d.provider || '').replace(/^comfyui_/, '')}${d.model ? ':' + d.model : ''}` : '待绑定视频源'}
+      handles={
+        <>
+          <Handle type="target" position={Position.Left} id="first_frame" className="!w-3 !h-3 !bg-orange-500 !border-2 !border-[#141419]" style={{ top: '25%' }} />
+          <Handle type="target" position={Position.Left} id="last_frame" className="!w-3 !h-3 !bg-orange-400 !border-2 !border-[#141419]" style={{ top: '40%' }} />
+          <Handle type="target" position={Position.Left} id="reference_images" className="!w-3 !h-3 !bg-amber-500 !border-2 !border-[#141419]" style={{ top: '55%' }} />
+          <Handle type="target" position={Position.Left} id="prompt" className="!w-3 !h-3 !bg-cyan-500 !border-2 !border-[#141419]" style={{ top: '75%' }} />
+          <Handle type="source" position={Position.Right} id="video" className="!w-3 !h-3 !bg-orange-500 !border-2 !border-[#141419]" />
+        </>
+      }
+    >
+      {vidUrl ? (
+        <div className="w-full aspect-[9/16] max-h-[300px] rounded-2xl overflow-hidden bg-black/80 border border-white/10 relative group flex items-center justify-center">
+          <video ref={videoRef} src={vidUrl} loop playsInline onEnded={() => setIsPlaying(false)} className="w-full h-full object-cover" />
+          <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-black/60 text-[9px] font-mono text-orange-300 border border-orange-500/30">{d.skill_id || 'video'} · {d.provider || 'auto'}</div>
+          {st?.status === 'running' && (
+            <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-2">
+              <div className="w-7 h-7 border-2 border-orange-400 border-t-transparent rounded-full animate-spin" />
+              <span className="text-[11px] text-orange-200">Agent 生成中（异步排队）…</span>
+            </div>
+          )}
+          <button onClick={togglePlay} className="absolute w-12 h-12 rounded-full bg-black/60 backdrop-blur-md border border-white/20 text-white flex items-center justify-center group-hover:scale-110 transition-transform shadow-xl">
+            {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-0.5" />}
+          </button>
+        </div>
+      ) : (
+        <div className="w-full aspect-[9/16] max-h-[220px] rounded-2xl border-2 border-dashed border-white/15 bg-black/20 flex flex-col items-center justify-center p-4 text-center">
+          <Film className="w-8 h-8 text-orange-400/50 mb-2" />
+          <span className="text-xs font-bold text-white/80">待生成镜头视频</span>
+          <div className="mt-2 flex flex-wrap gap-1 justify-center">
+            {(d.first_frame || d.first_frame_url) && <span className="px-2 py-0.5 rounded-full bg-orange-500/10 border border-orange-500/30 text-[10px] text-orange-300 font-mono">✓ 首帧</span>}
+            {(d.last_frame || d.last_frame_url) && <span className="px-2 py-0.5 rounded-full bg-orange-500/10 border border-orange-500/30 text-[10px] text-orange-300 font-mono">✓ 尾帧</span>}
+            {Array.isArray(d.reference_images) && d.reference_images.length > 0 && <span className="px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-[10px] text-amber-300 font-mono">✓ {d.reference_images.length} 参考</span>}
+          </div>
+          {st?.status === 'failed' && <span className="text-[10px] text-red-400 mt-2 line-clamp-2" title={st.error}>✗ {st.error}</span>}
+        </div>
+      )}
+      {/* 控制台已下沉至底部栏 */}
+    </AgentShell>
+  );
+};
+
+// 4. 声音总监配音 Agent 节点 - Per-Node Agent：节点内选语音源/台词/克隆参考
+export const AudioNode: React.FC<NodeProps> = ({ id, data, selected }) => {
+  const d: any = data;
+  const audioUrl = d.audio_url || d.result_url;
+  const st: any = d.agent_state;
+  const [isPlaying, setIsPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const togglePlay = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!audioRef.current) return;
+    if (isPlaying) { audioRef.current.pause(); setIsPlaying(false); } else { audioRef.current.play(); setIsPlaying(true); }
+  };
+  return (
+    <AgentShell
+      id={id}
+      selected={selected}
+      icon={Mic}
+      label="配音 / 声音 Agent"
+      providerBadge={d.provider ? `${d.provider}${d.model ? ':' + d.model : ''}` : '待绑定语音源'}
+      handles={
+        <>
+          <Handle type="target" position={Position.Left} id="prompt" className="!w-3 !h-3 !bg-cyan-500 !border-2 !border-[#141419]" style={{ top: '35%' }} />
+          <Handle type="target" position={Position.Left} id="ref_audio" className="!w-3 !h-3 !bg-pink-500 !border-2 !border-[#141419]" style={{ top: '65%' }} />
+          <Handle type="source" position={Position.Right} id="audio" className="!w-3 !h-3 !bg-pink-500 !border-2 !border-[#141419]" />
+        </>
+      }
+    >
+      <div className="w-full flex flex-col items-center justify-center p-3 gap-3">
+        {d.text && (
+          <div className="w-full p-2.5 rounded-xl bg-black/40 border border-white/10 text-xs text-white/90 line-clamp-3">
+            “{d.text}”
+          </div>
+        )}
+        {audioUrl ? (
+          <div className="w-full flex items-center gap-3 p-3 rounded-2xl bg-pink-950/20 border border-pink-500/30">
+            <button onClick={togglePlay} className="w-10 h-10 rounded-full bg-pink-600 text-white flex items-center justify-center shadow-lg hover:scale-105 transition-transform">
+              {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
+            </button>
+            <div className="flex flex-col flex-1 min-w-0">
+              <span className="text-xs font-bold text-pink-200">角色配音音频</span>
+              <span className="text-[10px] text-pink-300/60 font-mono truncate">{audioUrl.split('/').pop()}</span>
+              <span className="text-[9px] text-pink-300/40">{d.skill_id || 'tts_voice'} · {d.voice_id || 'male-qn-qingse'}</span>
+            </div>
+            <audio ref={audioRef} src={audioUrl} onEnded={() => setIsPlaying(false)} className="hidden" />
+          </div>
+        ) : (
+          <div className="flex flex-col items-center text-center py-3">
+            <Volume2 className="w-8 h-8 text-pink-400/40 mb-1" />
+            <span className="text-xs font-bold text-white/80">待合成角色对白</span>
+            {st?.status === 'failed' && <span className="text-[10px] text-red-400 mt-1 line-clamp-2" title={st.error}>✗ {st.error}</span>}
+          </div>
+        )}
+      </div>
+      {/* 控制台已下沉至底部栏 */}
+    </AgentShell>
+  );
+};
+
+// 5. 3D 导演机位规划 Agent 节点 - Agent 容器：节点内景别/运镜选择 + MCP director_3d_stage_plan 执行
+export const Director3DMinimalNode: React.FC<NodeProps> = ({ id, data, selected }) => {
+  const d: any = data;
+  const { updateNodeData } = useCanvasStore();
+  const [running, setRunning] = useState(false);
+  const run = async () => {
+    if (!d.onExecute) return;
+    setRunning(true);
+    try { await (d.onExecute as any)(id); } finally { setRunning(false); }
+  };
+  return (
+    <AgentShell
+      id={id}
+      selected={selected}
+      icon={Box}
+      label="3D 导演机位 Agent"
+      providerBadge={d.skill_id || 'MCP: director_3d_stage_plan'}
+      handles={
+        <>
+          <Handle type="target" position={Position.Left} id="prompt" className="!w-3 !h-3 !bg-cyan-500 !border-2 !border-[#141419]" style={{top:'50%'}} />
+          <Handle type="source" position={Position.Right} id="camera_prompt" className="!w-3 !h-3 !bg-blue-500 !border-2 !border-[#141419]" />
+        </>
+      }
+    >
+      <div className="w-full flex flex-col gap-2 p-1" onClick={(e) => e.stopPropagation()}>
+        <div className="grid grid-cols-2 gap-2 text-[11px]">
+          {selected ? (
+            <>
+              <label className="flex flex-col gap-1 p-2 rounded-xl bg-black/40 border border-white/10">
+                <span className="text-white/40 text-[9px]">景别</span>
+                <select value={d.framing || 'close_up'} onChange={(e) => updateNodeData(id, { framing: e.target.value })} className="bg-black/50 border border-white/10 rounded-lg px-1.5 py-1 text-[11px] text-cyan-300 focus:outline-none focus:border-cyan-500">
+                  {[['extreme_close_up','大特写'],['close_up','特写'],['medium','中景'],['full','全景'],['long','远景'],['bird_eye','鸟瞰'],['low_angle','仰视'],['over_shoulder','过肩']].map(([v,l])=>(<option key={v} value={v}>{l}</option>))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 p-2 rounded-xl bg-black/40 border border-white/10">
+                <span className="text-white/40 text-[9px]">运镜</span>
+                <select value={d.motion || 'push_in'} onChange={(e) => updateNodeData(id, { motion: e.target.value })} className="bg-black/50 border border-white/10 rounded-lg px-1.5 py-1 text-[11px] text-orange-300 focus:outline-none focus:border-orange-500">
+                  {[['static','固定'],['push_in','推入'],['pull_out','拉出'],['pan_left','左摇'],['pan_right','右摇'],['tilt_up','上摇'],['orbit','环绕'],['dolly_zoom','眩晕'],['fast_push_shake','冲击震颤']].map(([v,l])=>(<option key={v} value={v}>{l}</option>))}
+                </select>
+              </label>
+            </>
+          ) : (
+            <>
+              <div className="p-2 rounded-xl bg-black/40 border border-white/10 flex flex-col">
+                <span className="text-white/40 text-[9px]">景别</span>
+                <span className="font-bold text-cyan-300">{d.framing || 'close_up'}</span>
+              </div>
+              <div className="p-2 rounded-xl bg-black/40 border border-white/10 flex flex-col">
+                <span className="text-white/40 text-[9px]">运镜</span>
+                <span className="font-bold text-orange-300">{d.motion || 'push_in'}</span>
+              </div>
+            </>
+          )}
+        </div>
+        {d.minimax_camera_prompt && (
+          <div className="p-2.5 rounded-xl bg-blue-950/20 border border-blue-500/30 text-[10px] text-blue-200 font-mono line-clamp-3">
+            运镜 Prompt: {d.minimax_camera_prompt}
+          </div>
+        )}
+        {selected && (
+          <button onClick={run} disabled={running} className="w-full py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold">
+            {running ? '机位计算中…' : '生成机位 Prompt ↑'}
+          </button>
+        )}
+        <div className="text-[9px] text-white/30 text-center">MCP 工具 · director_3d_stage_plan</div>
+      </div>
+    </AgentShell>
+  );
+};
+
+// 6. 剪辑合成导出 Agent 节点
+export const ExportNode: React.FC<NodeProps> = ({ id, data, selected }) => {
+  const d: any = data;
+  return (
+    <AgentShell
+      id={id}
+      selected={selected}
+      icon={Download}
+      label="剪辑合成导出 Agent"
+      providerBadge="剪映 Draft"
+      handles={
+        <>
+          <Handle type="target" position={Position.Left} id="video" className="!w-3 !h-3 !bg-orange-500 !border-2 !border-[#141419]" style={{ top: '35%' }} />
+          <Handle type="target" position={Position.Left} id="audio" className="!w-3 !h-3 !bg-pink-500 !border-2 !border-[#141419]" style={{ top: '65%' }} />
+        </>
+      }
+    >
+      <div className="w-full flex flex-col items-center justify-center p-4 text-center gap-3">
+        <Download className="w-8 h-8 text-violet-400" />
+        <span className="text-xs font-bold text-white/90">剪映草稿一键生成</span>
+        <span className="text-[10px] text-white/40 max-w-[200px]">
+          自动聚合上游所有镜头的视频轨、音频轨与台词字幕
+        </span>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            window.dispatchEvent(new CustomEvent('open-export-modal'));
+          }}
+          className="w-full py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold shadow-lg shadow-violet-600/30 transition-all"
+        >
+          配置导出选项
+        </button>
+      </div>
+    </AgentShell>
   );
 };

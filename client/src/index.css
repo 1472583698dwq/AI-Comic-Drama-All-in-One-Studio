@@ -48,6 +48,75 @@
   --color-text-muted: #64748B;
 }
 
+/* Explicit Utility Classes to guarantee surface & border styling */
+.bg-surface {
+  background-color: var(--color-surface) !important;
+}
+.bg-surface-secondary {
+  background-color: var(--color-surface-secondary) !important;
+}
+.bg-surface-tertiary {
+  background-color: var(--color-surface-tertiary) !important;
+}
+.bg-surface-hover {
+  background-color: var(--color-surface-hover) !important;
+}
+.border-border {
+  border-color: var(--color-border) !important;
+}
+.border-border-subtle {
+  border-color: var(--color-border-subtle) !important;
+}
+.border-border-active {
+  border-color: var(--color-border-active) !important;
+}
+
+/* ReactFlow Theme & Node Reset (prevents white node container leak) */
+.react-flow {
+  --xy-node-background-color: var(--color-surface);
+  --xy-node-border-color: var(--color-border);
+  --xy-node-color: var(--color-text-main);
+  --xy-edge-stroke: var(--color-border-active);
+  --xy-handle-background-color: var(--color-surface-secondary);
+  --xy-handle-border-color: var(--color-surface);
+}
+
+.react-flow__node,
+.react-flow__node-default,
+.react-flow__node-input,
+.react-flow__node-output,
+.react-flow__node-group,
+.react-flow__node-prompt,
+.react-flow__node-image,
+.react-flow__node-video,
+.react-flow__node-audio,
+.react-flow__node-director3d,
+.react-flow__node-export,
+.react-flow__node-shot-card,
+.react-flow__node-brief,
+.react-flow__node-script-split,
+.react-flow__node-asset,
+.react-flow__node-tts,
+.react-flow__node-provider,
+.react-flow__node-provider-image,
+.react-flow__node-provider-video,
+.react-flow__node-provider-audio,
+.react-flow__node-provider-llm,
+.react-flow__node-load-image,
+.react-flow__node-load-image-batch,
+.react-flow__node-load-video,
+.react-flow__node-load-audio,
+.react-flow__node-text-prompt,
+.react-flow__node-comfy-workflow,
+.react-flow__node-timeline-export {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+  color: var(--color-text-main) !important;
+}
+
 body {
   background-color: var(--color-background);
   color: var(--color-text-main, #F3F4F6);

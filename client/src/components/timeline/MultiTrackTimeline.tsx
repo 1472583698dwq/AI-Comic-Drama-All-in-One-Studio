@@ -92,14 +92,14 @@ export const MultiTrackTimeline: React.FC = () => {
   };
 
   return (
-    <div className="h-72 bg-surface border-t border-border flex flex-col select-none text-xs">
+    <div className="h-72 bg-surface border-t border-border flex flex-col select-none text-xs [color:var(--color-text-main)]">
       {/* 1. Control Toolbar */}
-      <div className="h-10 px-4 border-b border-border flex items-center justify-between bg-surface-secondary/80">
+      <div className="h-10 px-4 border-b border-border flex items-center justify-between bg-surface-secondary">
         <div className="flex items-center space-x-3">
           {/* Transport Controls */}
           <button
             onClick={() => setCurrentTime(0)}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-surface-tertiary transition-all"
+            className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-tertiary transition-all"
             title="回到开头"
           >
             <RotateCcw className="w-3.5 h-3.5" />
@@ -114,10 +114,19 @@ export const MultiTrackTimeline: React.FC = () => {
           </button>
 
           {/* Timecode */}
-          <div className="font-mono text-xs bg-black/40 px-2.5 py-1 rounded border border-border">
-            <span className="text-brand-light font-bold">{formatTime(currentTime)}</span>
-            <span className="text-gray-500 mx-1">/</span>
-            <span className="text-gray-400">{formatTime(totalDuration)}</span>
+          <div className="font-mono text-xs bg-surface px-2.5 py-1 rounded border border-border flex items-center gap-2 shadow-sm">
+            <div>
+              <span className="text-brand font-bold">{formatTime(currentTime)}</span>
+              <span className="[color:var(--color-text-muted)] mx-1">/</span>
+              <span className="[color:var(--color-text-secondary)]">{formatTime(totalDuration)}</span>
+            </div>
+            <button
+              onClick={() => useProjectStore.getState().autoFitAllDurations()}
+              className="px-2 py-0.5 rounded bg-brand/20 hover:bg-brand/30 border border-brand/30 text-brand text-[10px] font-bold flex items-center gap-1 transition-all"
+              title="根据全剧所有镜头的配音/台词长度自动智能吸附对齐时长"
+            >
+              <Sparkles className="w-3 h-3 text-brand" /> 全剧时长自适应
+            </button>
           </div>
         </div>
 
@@ -125,7 +134,7 @@ export const MultiTrackTimeline: React.FC = () => {
         <div className="flex items-center space-x-2">
           <button
             onClick={() => setZoom(Math.max(30, zoom - 15))}
-            className="p-1 rounded text-gray-400 hover:text-white"
+            className="p-1 rounded [color:var(--color-text-muted)] hover:[color:var(--color-text-main)]"
           >
             <ZoomOut className="w-3.5 h-3.5" />
           </button>
@@ -135,11 +144,11 @@ export const MultiTrackTimeline: React.FC = () => {
             max="150"
             value={zoom}
             onChange={(e) => setZoom(Number(e.target.value))}
-            className="w-24 h-1 bg-surface-tertiary rounded-lg appearance-none cursor-pointer"
+            className="w-24 h-1 bg-surface-tertiary rounded-lg appearance-none cursor-pointer accent-brand"
           />
           <button
             onClick={() => setZoom(Math.min(150, zoom + 15))}
-            className="p-1 rounded text-gray-400 hover:text-white"
+            className="p-1 rounded [color:var(--color-text-muted)] hover:[color:var(--color-text-main)]"
           >
             <ZoomIn className="w-3.5 h-3.5" />
           </button>
@@ -150,7 +159,7 @@ export const MultiTrackTimeline: React.FC = () => {
       <div 
         ref={timelineRef}
         onClick={handleTimelineClick}
-        className="flex-1 overflow-x-auto overflow-y-hidden relative bg-[#09090C] custom-scrollbar"
+        className="flex-1 overflow-x-auto overflow-y-hidden relative bg-surface-secondary/40 custom-scrollbar"
       >
         {/* Track Content Area */}
         <div 
@@ -158,15 +167,15 @@ export const MultiTrackTimeline: React.FC = () => {
           style={{ width: `${Math.max(800, totalDuration * zoom + 300)}px` }}
         >
           {/* Top Time Ruler */}
-          <div className="h-6 border-b border-border/80 pl-44 flex items-center relative bg-surface/50">
+          <div className="h-6 border-b border-border pl-44 flex items-center relative bg-surface-secondary/80">
             {Array.from({ length: Math.ceil(totalDuration) + 3 }).map((_, sec) => (
               <div
                 key={sec}
-                className="absolute text-[10px] text-gray-500 font-mono flex flex-col items-center"
+                className="absolute text-[10px] [color:var(--color-text-muted)] font-mono flex flex-col items-center"
                 style={{ left: `${sec * zoom + 180}px` }}
               >
                 <span>{sec}s</span>
-                <span className="h-1.5 w-[1px] bg-border-active mt-0.5" />
+                <span className="h-1.5 w-[1px] bg-border mt-0.5" />
               </div>
             ))}
           </div>
@@ -180,12 +189,12 @@ export const MultiTrackTimeline: React.FC = () => {
           </div>
 
           {/* Tracks List */}
-          <div className="divide-y divide-border/40">
+          <div className="divide-y divide-border">
             {/* Track 1: 🎬 视频分镜画面轨 */}
-            <div className="h-14 flex items-center hover:bg-white/[0.01]">
-              <div className="w-44 flex-shrink-0 px-3 flex items-center space-x-2 border-r border-border/60 bg-surface/80">
-                <Film className="w-3.5 h-3.5 text-brand-light" />
-                <span className="text-gray-300 font-medium truncate">主分镜画面轨</span>
+            <div className="h-14 flex items-center hover:bg-surface-hover/30">
+              <div className="w-44 flex-shrink-0 px-3 flex items-center space-x-2 border-r border-border bg-surface">
+                <Film className="w-3.5 h-3.5 text-brand" />
+                <span className="[color:var(--color-text-main)] font-semibold truncate">主分镜画面轨</span>
               </div>
               <div className="flex-1 h-full relative py-1">
                 {renderShotTrack(shots, zoom, activeShotId, setActiveShotId)}
@@ -193,10 +202,10 @@ export const MultiTrackTimeline: React.FC = () => {
             </div>
 
             {/* Track 2: 🎙️ 角色对白配音轨 */}
-            <div className="h-12 flex items-center hover:bg-white/[0.01]">
-              <div className="w-44 flex-shrink-0 px-3 flex items-center space-x-2 border-r border-border/60 bg-surface/80">
+            <div className="h-12 flex items-center hover:bg-surface-hover/30">
+              <div className="w-44 flex-shrink-0 px-3 flex items-center space-x-2 border-r border-border bg-surface">
                 <Mic className="w-3.5 h-3.5 text-accent-pink" />
-                <span className="text-gray-300 font-medium truncate">角色对白配音</span>
+                <span className="[color:var(--color-text-main)] font-semibold truncate">角色对白配音</span>
               </div>
               <div className="flex-1 h-full relative py-1">
                 {renderDialogueTrack(shots, zoom, activeShotId)}
@@ -204,10 +213,10 @@ export const MultiTrackTimeline: React.FC = () => {
             </div>
 
             {/* Track 3: 📢 史诗旁白解说轨 */}
-            <div className="h-11 flex items-center hover:bg-white/[0.01]">
-              <div className="w-44 flex-shrink-0 px-3 flex items-center space-x-2 border-r border-border/60 bg-surface/80">
+            <div className="h-11 flex items-center hover:bg-surface-hover/30">
+              <div className="w-44 flex-shrink-0 px-3 flex items-center space-x-2 border-r border-border bg-surface">
                 <Volume2 className="w-3.5 h-3.5 text-brand-blue" />
-                <span className="text-gray-300 font-medium truncate">史诗旁白解说</span>
+                <span className="[color:var(--color-text-main)] font-semibold truncate">史诗旁白解说</span>
               </div>
               <div className="flex-1 h-full relative py-1">
                 {renderVoiceoverTrack(shots, zoom)}
@@ -215,10 +224,10 @@ export const MultiTrackTimeline: React.FC = () => {
             </div>
 
             {/* Track 4: 💬 动态花字字幕轨 */}
-            <div className="h-10 flex items-center hover:bg-white/[0.01]">
-              <div className="w-44 flex-shrink-0 px-3 flex items-center space-x-2 border-r border-border/60 bg-surface/80">
+            <div className="h-10 flex items-center hover:bg-surface-hover/30">
+              <div className="w-44 flex-shrink-0 px-3 flex items-center space-x-2 border-r border-border bg-surface">
                 <Type className="w-3.5 h-3.5 text-accent-green" />
-                <span className="text-gray-300 font-medium truncate">动态漫剧字幕</span>
+                <span className="[color:var(--color-text-main)] font-semibold truncate">动态漫剧字幕</span>
               </div>
               <div className="flex-1 h-full relative py-1">
                 {renderSubtitleTrack(shots, zoom)}
@@ -226,10 +235,10 @@ export const MultiTrackTimeline: React.FC = () => {
             </div>
 
             {/* Track 5: 🎵 BGM & 音效轨 */}
-            <div className="h-10 flex items-center hover:bg-white/[0.01]">
-              <div className="w-44 flex-shrink-0 px-3 flex items-center space-x-2 border-r border-border/60 bg-surface/80">
+            <div className="h-10 flex items-center hover:bg-surface-hover/30">
+              <div className="w-44 flex-shrink-0 px-3 flex items-center space-x-2 border-r border-border bg-surface">
                 <Music className="w-3.5 h-3.5 text-accent-orange" />
-                <span className="text-gray-300 font-medium truncate">BGM 氛围原声</span>
+                <span className="[color:var(--color-text-main)] font-semibold truncate">BGM 氛围原声</span>
               </div>
               <div className="flex-1 h-full relative py-1">
                 <div
@@ -271,28 +280,28 @@ function renderShotTrack(
           e.stopPropagation();
           setActiveShotId(shot.id);
         }}
-        className={`absolute h-12 rounded-lg overflow-hidden border cursor-pointer transition-all flex items-center ${
+        className={`absolute h-12 rounded-lg overflow-hidden border cursor-pointer transition-all flex items-center shadow-sm ${
           isActive
-            ? 'border-brand bg-brand/25 ring-2 ring-brand/50 z-10'
-            : 'border-border bg-surface-tertiary hover:border-border-active'
+            ? 'border-brand bg-brand/20 ring-2 ring-brand/50 z-10'
+            : 'border-border bg-surface hover:border-brand/50'
         }`}
         style={{ left: `${left}px`, width: `${width - 4}px` }}
       >
         {shot.image_url && (
           <img 
-            src={shot.image_url} 
+            src={shot.image_url.startsWith('/') ? 'http://127.0.0.1:8000' + shot.image_url : shot.image_url} 
             alt={`Shot ${shot.shot_index}`} 
-            className="w-12 h-full object-cover rounded-l opacity-80"
+            className="w-12 h-full object-cover rounded-l opacity-90" 
           />
         )}
         <div className="p-1.5 truncate flex-1 flex flex-col justify-center">
           <div className="flex items-center space-x-1">
-            <span className="font-bold text-[10px] text-white">#{shot.shot_index}</span>
-            <span className="text-[9px] px-1 rounded bg-black/40 text-brand-light font-mono">
+            <span className="font-bold text-[10px] [color:var(--color-text-main)]">#{shot.shot_index}</span>
+            <span className="text-[9px] px-1 rounded bg-surface-secondary border border-border text-brand font-mono">
               {shot.duration}s
             </span>
           </div>
-          <p className="text-[9px] text-gray-400 truncate">{shot.action_desc}</p>
+          <p className="text-[9px] [color:var(--color-text-muted)] truncate">{shot.action_desc || shot.image_prompt}</p>
         </div>
       </div>
     );

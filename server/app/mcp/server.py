@@ -142,6 +142,11 @@ class MCPServerRegistry:
     def __init__(self):
         self.tools: Dict[str, MCPToolDefinition] = {}
         self._register_default_tools()
+        # 动态 Provider→MCP Tool 统一暴露（异构参数即工具输入）
+        try:
+            self._register_provider_dynamic_tools()
+        except Exception as e:
+            print(f"[MCP] provider dynamic tools init failed: {e}")
         if HAS_FASTMCP and mcp_app:
             self._setup_fastmcp_tools()
 
@@ -767,6 +772,173 @@ class MCPServerRegistry:
             is_enabled=True,
             input_schema={"type":"object","properties":{"target_ids":{"type":"array","items":{"type":"string"}},"project_id":{"type":"string"}},"required":[]}
         ))
+        self.register_tool(MCPToolDefinition(
+            name="canvas_dispatch_skill",
+            description="[画布] 针对画布指定节点调度特定 Agent 技能（如 script_generation / proposal_generation / prompt_expansion / first_last_frame / all_round_reference / text_to_image / tts_voice）并执行",
+            category="workflow",
+            icon="Zap",
+            author="Canvas Engine",
+            is_enabled=True,
+            input_schema={
+                "type":"object",
+                "properties":{
+                    "skill_id":{"type":"string","description":"技能ID：script_generation, proposal_generation, prompt_expansion, first_last_frame, all_round_reference, text_to_image, tts_voice"},
+                    "prompt":{"type":"string","description":"提示词或文本内容"},
+                    "node_id":{"type":"string","description":"目标节点ID（若不填则自动创建对应节点）"},
+                    "first_frame_url":{"type":"string","description":"首帧图URL"},
+                    "last_frame_url":{"type":"string","description":"尾帧图URL"},
+                    "reference_images":{"type":"array","items":{"type":"string"},"description":"参考图URL列表"},
+                    "project_id":{"type":"string","description":"归属项目ID"}
+                },
+                "required":["skill_id"]
+            }
+        ))
+        self.register_tool(MCPToolDefinition(
+            name="canvas_query_assets",
+            description="[画布] 查询当前画布上所有已生成的资源池（图片、首尾帧、视频、配音），用于在下游节点中作为参考或首帧挂载",
+            category="workflow",
+            icon="Folder",
+            author="Canvas Engine",
+            is_enabled=True,
+            input_schema={"type":"object","properties":{"project_id":{"type":"string"}},"required":[]}
+        ))
+
+    # ========== 动态 Provider→MCP 统一：异构参数即工具输入，节点Agent按 Tool 调度 ==========
+    def _provider_to_tool(self, provider_id: str, kind: str, definition=None, provider_obj=None) -> MCPToolDefinition:
+        """将单个 ProviderDefinition/Provider实例转为 MCP Tool，输入= input_schema + params_schema + model"""
+        try:
+            # 优先用 Definition 的真实 schema，否则用 kind 默认
+            input_props = {}
+            input_req = []
+            params_props = {}
+            params_req = []
+            models: List[str] = []
+            default_model: Optional[str] = None
+            display_name = provider_id
+            description = ""
+            if definition is not None:
+                # 自定义 ProviderDefinition
+                display_name = getattr(definition, 'get_display_name', lambda: provider_id)() if hasattr(definition, 'get_display_name') else getattr(definition, 'name', provider_id)
+                description = getattr(definition, 'description', '') or f"{kind} 生成源 {provider_id}"
+                if getattr(definition, 'input_schema', None) and getattr(definition.input_schema, 'get', None):
+                    input_props = (definition.input_schema.get('properties') or {}) if isinstance(definition.input_schema, dict) else getattr(definition.input_schema, 'properties', {}) or {}
+                    input_req = (definition.input_schema.get('required') or []) if isinstance(definition.input_schema, dict) else getattr(definition.input_schema, 'required', []) or []
+                elif isinstance(getattr(definition, 'input_schema', None), dict):
+                    input_props = definition.input_schema.get('properties', {}) or {}
+                    input_req = definition.input_schema.get('required', []) or []
+                if getattr(definition, 'params_schema', None):
+                    ps = definition.params_schema
+                    if isinstance(ps, dict):
+                        params_props = ps.get('properties', {}) or {}
+                        params_req = ps.get('required', []) or []
+                models = getattr(definition, 'models', []) or []
+                default_model = getattr(definition, 'default_model', None)
+            elif provider_obj is not None:
+                try:
+                    cap = provider_obj.get_capabilities() if hasattr(provider_obj, 'get_capabilities') else {}
+                    display_name = getattr(provider_obj, 'display_name', provider_id)
+                    description = getattr(provider_obj, 'description', '') or f"内置 {kind} 源 {provider_id}"
+                    models = cap.get('models', []) or []
+                except Exception:
+                    pass
+            # kind 兜底默认
+            if not input_props:
+                if kind == 'image':
+                    input_props = {
+                        "prompt": {"type":"string","description":"画面提示词","x-handle":"text"},
+                        "reference_images": {"type":"array","items":{"type":"string","format":"uri"},"description":"参考图","x-handle":"image"},
+                    }
+                    input_req = ["prompt"]
+                elif kind == 'video':
+                    input_props = {
+                        "prompt": {"type":"string","description":"运动描述","x-handle":"text"},
+                        "first_frame": {"type":"string","format":"uri","description":"首帧","x-handle":"image"},
+                        "reference_images": {"type":"array","items":{"type":"string","format":"uri"},"description":"参考集","x-handle":"image"},
+                    }
+                    input_req = ["prompt"]
+                elif kind == 'audio':
+                    input_props = {"text": {"type":"string","description":"合成文本","x-handle":"text"}}
+                    input_req = ["text"]
+            if not params_props:
+                if kind == 'image':
+                    params_props = {"aspect_ratio":{"type":"string","enum":["9:16","16:9","1:1"],"default":"9:16"},"resolution":{"type":"string","enum":["768P","2K"],"default":"768P"},"steps":{"type":"integer","default":20}}
+                elif kind == 'video':
+                    params_props = {"aspect_ratio":{"type":"string","enum":["9:16","16:9","1:1"],"default":"9:16"},"resolution":{"type":"string","enum":["768P","2K"],"default":"768P"},"duration":{"type":"integer","default":5},"hasSound":{"type":"boolean","default":False}}
+            # 合并为 Tool 输入
+            merged_props: Dict[str, Any] = {}
+            merged_props.update(input_props)
+            # params 覆盖合并（避免 prompt 重复）
+            for k,v in params_props.items():
+                if k not in merged_props:
+                    merged_props[k] = v
+            if models:
+                merged_props["model"] = {"type":"string","enum":models, "default": default_model or (models[0] if models else ""), "description":"模型选择"}
+            # required 合并
+            merged_req = list(dict.fromkeys(list(input_req) + list(params_req)))
+            # 保证 prompt/text 必填
+            if kind=='image' and 'prompt' not in merged_req and 'prompt' in merged_props:
+                merged_req.append('prompt')
+            if kind=='audio' and 'text' not in merged_req and 'text' in merged_props:
+                merged_req.append('text')
+            tool_name = f"provider_{provider_id}"
+            return MCPToolDefinition(
+                name=tool_name,
+                description=f"[Provider:{kind}] {display_name} · {description[:80]} · 动态参数由该源 params_schema 决定，节点Agent按此Tool调度",
+                category="ai_generation",
+                icon="Zap" if kind=="image" else "Film" if kind=="video" else "Mic",
+                author=f"Provider:{provider_id}",
+                is_enabled=True,
+                input_schema={"type":"object","properties": merged_props, "required": merged_req}
+            )
+        except Exception as e:
+            print(f"[MCP] provider_to_tool failed {provider_id}: {e}")
+            return MCPToolDefinition(name=f"provider_{provider_id}", description=f"Provider {provider_id}", category="ai_generation", icon="Zap", author="Provider", is_enabled=True, input_schema={"type":"object","properties":{"prompt":{"type":"string"}},"required":["prompt"]})
+
+    def _register_provider_dynamic_tools(self):
+        """扫描所有 ProviderRegistry，将每个生成源注册为独立 MCP Tool（用户选源 → 节点Agent调对应Tool）"""
+        # 清理旧的 provider_ 工具
+        for k in list(self.tools.keys()):
+            if k.startswith("provider_"):
+                del self.tools[k]
+        try:
+            from app.providers.image.registry import image_registry
+            from app.providers.video.registry import video_registry
+            from app.providers.audio.registry import audio_registry
+            # 确保已初始化
+            if not image_registry.list_ids():
+                try:
+                    from app.providers.init_providers import init_all_providers
+                    init_all_providers()
+                except Exception:
+                    pass
+            for kind, reg in [("image", image_registry), ("video", video_registry), ("audio", audio_registry)]:
+                for pid in reg.list_ids():
+                    try:
+                        prov_obj = reg.get(pid)
+                        definition = None
+                        # 自定义源取 Definition
+                        if reg.is_custom(pid):
+                            try:
+                                from app.providers.custom.manager import custom_provider_manager
+                                definition = custom_provider_manager.get_definition(pid)
+                            except Exception:
+                                pass
+                        if definition is None and hasattr(prov_obj, 'definition'):
+                            definition = getattr(prov_obj, 'definition', None)
+                        tool = self._provider_to_tool(pid, kind, definition=definition, provider_obj=prov_obj)
+                        self.register_tool(tool)
+                    except Exception as e:
+                        print(f"[MCP] register provider tool {pid} failed: {e}")
+            print(f"[MCP] 已注册 {len([k for k in self.tools if k.startswith('provider_')])} 个 Provider 动态 Tool")
+        except Exception as e:
+            print(f"[MCP] _register_provider_dynamic_tools error: {e}")
+
+    def refresh_provider_tools(self):
+        """供 provider_routes 热注册后调用，刷新 MCP 工具列表"""
+        try:
+            self._register_provider_dynamic_tools()
+        except Exception as e:
+            print(f"[MCP] refresh_provider_tools failed: {e}")
 
     def register_tool(self, tool: MCPToolDefinition):
         self.tools[tool.name] = tool
@@ -785,7 +957,137 @@ class MCPServerRegistry:
             return MCPToolCallResponse(tool_name=tool_name, status="error", result=None, error=f"MCP Tool '{tool_name}' not found", execution_time_ms=0)
         try:
             result = None
-            if tool_name == "split_novel_script":
+            # 动态 Provider Tool 统一调度：节点Agent按 Tool 调度，参数即该源 params_schema 异构输入
+            if tool_name.startswith("provider_"):
+                provider_id = tool_name[len("provider_"):]
+                # 按三表探测 kind
+                kind = None
+                prov_obj = None
+                try:
+                    from app.providers.image.registry import image_registry as _ir
+                    from app.providers.video.registry import video_registry as _vr
+                    from app.providers.audio.registry import audio_registry as _ar
+                    if _ir.get(provider_id) is not None:
+                        kind = "image"
+                    elif _vr.get(provider_id) is not None:
+                        kind = "video"
+                    elif _ar.get(provider_id) is not None:
+                        kind = "audio"
+                    else:
+                        # 自定义但尚未注册到内存，尝试从持久化加载 definition 推断 kind
+                        try:
+                            from app.providers.custom.manager import custom_provider_manager as _cm
+                            d = _cm.get_definition(provider_id)
+                            if d:
+                                kind = getattr(d, 'kind', 'image')
+                        except Exception:
+                            kind = "image"
+                except Exception:
+                    kind = "image"
+                if kind == "image":
+                    from app.providers.image.base import ImageGenerateRequest
+                    reg = _lazy_image_registry()
+                    # 将异构参数透传：prompt + 常见字段显式，其余进 dynamic_inputs/extra
+                    prompt = arguments.get("prompt") or arguments.get("text") or ""
+                    # 收集 reference 类
+                    dyn = {}
+                    for k in ("reference_images","reference","first_frame","last_frame","first_frame_url","last_frame_url"):
+                        if arguments.get(k) is not None:
+                            dyn[k] = arguments.get(k)
+                    # 其余 params_schema 异构参数全部进 dynamic_inputs
+                    for k,v in arguments.items():
+                        if k not in ("prompt","text","reference_images","reference","first_frame","last_frame","model","workflow_id","aspect_ratio","resolution","steps","cfg","seed","style_preset","negative_prompt"):
+                            if v not in (None,"") and k not in dyn:
+                                dyn[k] = v
+                    req = ImageGenerateRequest(
+                        prompt=prompt,
+                        negative_prompt=arguments.get("negative_prompt") or "",
+                        aspect_ratio=arguments.get("aspect_ratio") or "9:16",
+                        resolution=arguments.get("resolution"),
+                        style_preset=arguments.get("style_preset"),
+                        seed=arguments.get("seed"),
+                        width=arguments.get("width"),
+                        height=arguments.get("height"),
+                        steps=arguments.get("steps"),
+                        cfg=arguments.get("cfg"),
+                        workflow_id=arguments.get("workflow_id"),
+                        model=arguments.get("model"),
+                        dynamic_inputs=dyn if dyn else None,
+                        extra={k: arguments.get(k) for k in ("aspect_ratio","resolution","steps","cfg","model") if arguments.get(k) not in (None,"")},
+                    )
+                    # 热注册保障
+                    try:
+                        from app.canvas.engine import _ensure_provider_registered as _ens
+                        _ens(provider_id, "image")
+                    except Exception:
+                        pass
+                    res = await reg.generate(req, provider_id=provider_id)
+                    result = {"image_url": res.image_url, "local_path": res.local_path, "provider": res.provider, "engine": res.engine, "seed": res.seed, "width": res.width, "height": res.height}
+                elif kind == "video":
+                    from app.providers.video.base import VideoGenerateRequest
+                    reg = _lazy_video_registry()
+                    prompt = arguments.get("prompt") or ""
+                    req = VideoGenerateRequest(
+                        prompt=prompt,
+                        mode=arguments.get("mode") or "i2v",
+                        first_frame_url=arguments.get("first_frame") or arguments.get("first_frame_url"),
+                        last_frame_url=arguments.get("last_frame") or arguments.get("last_frame_url"),
+                        reference_images=arguments.get("reference_images"),
+                        duration=int(arguments.get("duration") or 5),
+                        resolution=arguments.get("resolution") or "768P",
+                        aspect_ratio=arguments.get("aspect_ratio") or "9:16",
+                        fps=arguments.get("fps"),
+                        provider=provider_id,
+                        dynamic_inputs={k: v for k,v in arguments.items() if k not in ("prompt","mode","first_frame","first_frame_url","last_frame","last_frame_url","reference_images","duration","resolution","aspect_ratio","fps","model") and v not in (None,"")},
+                        extra={k: arguments.get(k) for k in ("model","duration","resolution","aspect_ratio","fps") if arguments.get(k) not in (None,"")},
+                    )
+                    try:
+                        from app.canvas.engine import _ensure_provider_registered as _ens2
+                        _ens2(provider_id, "video")
+                    except Exception:
+                        pass
+                    res = await reg.generate(req, provider_id=provider_id)
+                    result = {"video_url": res.video_url, "local_path": res.local_path, "provider": res.provider, "engine": res.engine, "duration": res.duration, "task_id": res.task_id}
+                    # 异步排队型 provider：仅返回 task_id 时轮询至出片，保证节点Agent/DAG 拿到终态 URL
+                    if not res.video_url and res.task_id:
+                        import asyncio as _aio
+                        for _ in range(120):
+                            await _aio.sleep(3)
+                            try:
+                                from app.providers.generic.http_provider import get_custom_video_task
+                                st = get_custom_video_task(res.task_id)
+                                if st and st.get("status") in ("SUCCESS", "COMPLETED") and st.get("video_url"):
+                                    result["video_url"] = st["video_url"]
+                                    break
+                                if st and st.get("status") in ("FAILED", "FAIL", "ERROR"):
+                                    raise RuntimeError(st.get("error") or "视频任务失败")
+                            except RuntimeError:
+                                raise
+                            except Exception:
+                                pass
+                elif kind == "audio":
+                    from app.providers.audio.base import AudioGenerateRequest
+                    reg = _lazy_audio_registry()
+                    req = AudioGenerateRequest(
+                        text=arguments.get("text") or arguments.get("prompt") or "",
+                        voice_id=arguments.get("voice_id") or "male-qn-qingse",
+                        emotion=arguments.get("emotion") or "neutral",
+                        speed=float(arguments.get("speed") or 1.0),
+                        pitch=float(arguments.get("pitch") or 0.0),
+                        ref_audio_path=arguments.get("ref_audio") or arguments.get("ref_audio_path"),
+                        model=arguments.get("model"),
+                        extra={k: arguments.get(k) for k in ("voice_id","emotion","speed","pitch","model","ref_audio","ref_audio_path") if arguments.get(k) not in (None,"")},
+                    )
+                    try:
+                        from app.canvas.engine import _ensure_provider_registered as _ens3
+                        _ens3(provider_id, "audio")
+                    except Exception:
+                        pass
+                    res = await reg.generate(req, provider_id=provider_id)
+                    result = {"audio_url": res.audio_url, "local_path": res.local_path, "provider": res.provider, "engine": res.engine, "duration": res.duration}
+                else:
+                    raise ValueError(f"未知 Provider kind for {provider_id}")
+            elif tool_name == "split_novel_script":
                 text = arguments.get("novel_text", "")
                 style = arguments.get("style_preset", "donghua_xianxia")
                 ratio = arguments.get("aspect_ratio", "9:16")
@@ -1041,17 +1343,6 @@ class MCPServerRegistry:
                               "provider": _created["provider"], "mode": "llm_code", "code": _created["code"],
                               "compile_check": _created["compile_check"],
                               **({"hint": "生成的代码未通过沙箱编译体检，请根据 compile_check.error 修正后调用 update_custom_provider 重新提交"} if not _created["compile_check"].get("ok") else {})}
-                    # 创建即体检（零配额）：结果回传给导演 Agent，坏代码当场自我修正而不是等生成时炸
-                    try:
-                        from app.providers.generic.code_provider import compile_check_code as _ccc
-                        _cc = _ccc(saved2.language or "python", saved2.code or "", saved2.code_entry or "generate")
-                        result["compile_check"] = _cc
-                        if not _cc.get("ok"):
-                            result["status"] = "compile_failed"
-                            result["hint"] = "生成的代码未通过沙箱编译体检，请根据 error 修正后调用 update_custom_provider 重新提交"
-                            print(f"[MCP] register_custom_provider 体检未通过 {pid}: {_cc.get('error')}")
-                    except Exception as _cce:
-                        print(f"[MCP] 体检执行异常: {_cce}")
 
             elif tool_name == "list_custom_providers":
                 from app.providers.custom.manager import custom_provider_manager as _mgr
@@ -1195,7 +1486,7 @@ class MCPServerRegistry:
                     register_single_custom_provider(saved)
                     result = {"status": "upgraded", "provider": saved.to_provider_info()}
 
-            elif tool_name in ("canvas_query","canvas_create_node","canvas_update_node","canvas_connect","canvas_execute"):
+            elif tool_name in ("canvas_query","canvas_create_node","canvas_update_node","canvas_connect","canvas_execute","canvas_dispatch_skill","canvas_query_assets"):
                 # 画布工具：真实持久化到 storage/projects/{id}/canvas.json，前端通过轮询/事件同步
                 from app.providers.project.manager import project_manager as _pm
                 # 尝试从参数或上下文获取 project_id
@@ -1229,6 +1520,112 @@ class MCPServerRegistry:
                             if len(nodes) > 10:
                                 lines.append(f"… 还有 {len(nodes)-10} 节点")
                             result = {"project_id": pid, "nodes": nodes, "edges": edges, "summary": "\n".join(lines)}
+                elif tool_name == "canvas_query_assets":
+                    if not pid:
+                        result = {"assets": [], "summary": "暂无项目"}
+                    else:
+                        snap = _pm.get_canvas(pid) or {}
+                        nodes = snap.get("nodes") or []
+                        assets_list = []
+                        seen_u = set()
+                        for n in nodes:
+                            d = n.get("data") or {}
+                            candidates = [
+                                {"url": d.get("image_url") or d.get("result_url"), "type": "image", "label": "图像", "node_id": n.get("id")},
+                                {"url": d.get("first_frame") or d.get("first_frame_url"), "type": "image", "label": "首帧", "node_id": n.get("id")},
+                                {"url": d.get("last_frame") or d.get("last_frame_url"), "type": "image", "label": "尾帧", "node_id": n.get("id")},
+                                {"url": d.get("reference") or d.get("reference_image"), "type": "image", "label": "参考图", "node_id": n.get("id")},
+                                {"url": d.get("video_url"), "type": "video", "label": "视频", "node_id": n.get("id")},
+                                {"url": d.get("audio_url"), "type": "audio", "label": "音频", "node_id": n.get("id")},
+                            ]
+                            # 展开 reference_images 数组（多图垫图）
+                            if isinstance(d.get("reference_images"), list):
+                                for idx, u in enumerate(d.get("reference_images")):
+                                    if u and isinstance(u, str) and u.strip() and u.strip() not in seen_u:
+                                        seen_u.add(u.strip())
+                                        assets_list.append({"url": u.strip(), "type": "image", "label": f"参考图{idx+1}", "node_id": n.get("id")})
+                            for c in candidates:
+                                u = c["url"]
+                                if u and isinstance(u, str) and u.strip() and u not in seen_u:
+                                    seen_u.add(u)
+                                    assets_list.append(c)
+                        result = {"project_id": pid, "total_assets": len(assets_list), "assets": assets_list}
+                elif tool_name == "canvas_dispatch_skill":
+                    if not pid:
+                        raise ValueError("canvas_dispatch_skill 需要 project_id")
+                    skill_id = arguments.get("skill_id")
+                    prompt = arguments.get("prompt") or ""
+                    nid = arguments.get("node_id")
+                    snap = _pm.get_canvas(pid) or {"nodes": [], "edges": [], "version": 2}
+                    nodes = snap.get("nodes") or []
+                    
+                    # Agent 节点类型推断（与前端 getSkillsForKind 对齐）
+                    if "video" in skill_id or skill_id in ("first_last_frame", "all_round_reference", "text_to_video", "image_reference_video"):
+                        ntype = "video"
+                    elif "image" in skill_id or skill_id in ("text_to_image", "image_reference", "character_consistency", "image_character_consistency"):
+                        ntype = "image"
+                    elif "audio" in skill_id or skill_id in ("tts_voice", "audio_clone", "character_voice"):
+                        ntype = "audio"
+                    elif skill_id in ("camera_plan", "director_plan"):
+                        ntype = "director3d"
+                    else:
+                        ntype = "prompt"
+                    
+                    target_node = None
+                    if nid:
+                        for n in nodes:
+                            if n.get("id") == nid:
+                                target_node = n
+                                break
+                    if not target_node:
+                        import time as _t, random as _r
+                        nid = f"{ntype}_{int(_t.time()*1000)%100000}_{_r.randint(100,999)}"
+                        target_node = {
+                            "id": nid,
+                            "type": ntype,
+                            "position": {"x": 120 + len(nodes) * 40, "y": 120 + len(nodes) * 40},
+                            "data": {}
+                        }
+                        nodes.append(target_node)
+                    
+                    d = target_node.get("data") or {}
+                    d["skill_id"] = skill_id
+                    if prompt:
+                        d["prompt"] = prompt
+                        d["text"] = prompt
+                        d["image_prompt"] = prompt
+                        d["video_prompt"] = prompt
+                    if arguments.get("first_frame_url"):
+                        d["first_frame"] = arguments["first_frame_url"]
+                        d["first_frame_url"] = arguments["first_frame_url"]
+                    if arguments.get("last_frame_url"):
+                        d["last_frame"] = arguments["last_frame_url"]
+                        d["last_frame_url"] = arguments["last_frame_url"]
+                    if arguments.get("reference_images"):
+                        d["reference_images"] = arguments["reference_images"]
+                    target_node["data"] = d
+                    
+                    from app.canvas.engine import canvas_engine as _engine
+                    res = await _engine.execute_dag(nodes, snap.get("edges") or [], project_id=pid, target_ids=[nid])
+                    node_res = (res.get("results") or {}).get(nid) or {}
+                    
+                    if node_res.get("status") == "success":
+                        for k in ("image_url", "video_url", "audio_url", "prompt", "text", "script_data"):
+                            if node_res.get(k):
+                                d[k] = node_res[k]
+                        target_node["data"] = d
+                    
+                    snap["nodes"] = nodes
+                    import time as _t4
+                    snap["updated_at"] = _t4.strftime("%Y-%m-%dT%H:%M:%SZ", _t4.gmtime())
+                    _pm.save_canvas(pid, snap)
+                    result = {
+                        "status": "success",
+                        "skill_id": skill_id,
+                        "node_id": nid,
+                        "result": node_res,
+                        "project_id": pid
+                    }
                 elif tool_name == "canvas_create_node":
                     if not pid:
                         raise ValueError("canvas_create_node 需要 project_id（或在上下文中提供 project）")
@@ -1236,7 +1633,6 @@ class MCPServerRegistry:
                     if not ntype:
                         raise ValueError("type 不能为空")
                     pos = arguments.get("position") or {}
-                    # 兼容 position 为字符串
                     if isinstance(pos, str):
                         try:
                             import json as _js
@@ -1254,15 +1650,12 @@ class MCPServerRegistry:
                             params = {}
                     snap = _pm.get_canvas(pid) or {"nodes": [], "edges": [], "version": 2}
                     nodes = snap.get("nodes") or []
-                    # 生成唯一 id
                     import time as _time, random as _rnd
                     nid = f"{ntype}_{int(_time.time()*1000)%100000}_{_rnd.randint(100,999)}"
-                    # 避免 id 冲突
                     existing_ids = {n.get("id") for n in nodes}
                     while nid in existing_ids:
                         nid = f"{ntype}_{int(_time.time()*1000)%100000}_{_rnd.randint(100,999)}"
                     new_node = {"id": nid, "type": ntype, "position": {"x": x, "y": y}, "data": dict(params or {})}
-                    # 确保 data 有基本字段
                     if ntype == "prompt" and not new_node["data"].get("prompt"):
                         new_node["data"]["prompt"] = params.get("prompt") or ""
                     nodes.append(new_node)
@@ -1314,7 +1707,6 @@ class MCPServerRegistry:
                     if not snap:
                         raise ValueError(f"项目 {pid} 画布不存在")
                     edges = snap.get("edges") or []
-                    # 去重：同源同目标同柄不再重复
                     for e in edges:
                         if e.get("source")==src and e.get("target")==tgt and (e.get("sourceHandle") or "")==(sh or "") and (e.get("targetHandle") or "")==(th or ""):
                             result = {"status": "already_connected", "project_id": pid, "edge": e}
@@ -1323,7 +1715,6 @@ class MCPServerRegistry:
                         import time as _time3, uuid as _uuid
                         eid = f"e_{src}_{tgt}_{int(_time3.time()*1000)%10000}"
                         new_edge = {"id": eid, "source": src, "target": tgt, "sourceHandle": sh, "targetHandle": th, "type": "smoothstep", "animated": True}
-                        # 清理空柄
                         if not sh:
                             new_edge.pop("sourceHandle", None)
                         if not th:
@@ -1334,9 +1725,7 @@ class MCPServerRegistry:
                         _pm.save_canvas(pid, snap)
                         result = {"status": "connected", "project_id": pid, "edge": new_edge, "total_edges": len(edges)}
                 elif tool_name == "canvas_execute":
-                    # 执行画布 DAG（复用 engine，支持按 project_id 加载或按参数直传）
                     from app.canvas.engine import canvas_engine as _engine
-                    # 优先使用前端传入的 nodes/edges，否则从存储加载
                     nodes = arguments.get("nodes")
                     edges = arguments.get("edges")
                     tgt_ids = arguments.get("target_ids") or arguments.get("targetIds")
@@ -1348,7 +1737,6 @@ class MCPServerRegistry:
                     if not nodes:
                         raise ValueError("画布为空，无法执行")
                     exec_res = await _engine.execute_dag(nodes or [], edges or [], project_id=pid, target_ids=tgt_ids)
-                    # 将结果写回节点 data 便于前端展示（可选）
                     result = {"project_id": pid, "executed": True, "order": exec_res.get("order"), "results": exec_res.get("results")}
                 else:
                     result = {"tool": tool_name, "arguments": arguments, "hint": "前端画布将执行此指令", "directive": True}

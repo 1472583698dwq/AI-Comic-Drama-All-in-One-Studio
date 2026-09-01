@@ -47,28 +47,29 @@ export const TimelineExportNode: React.FC<NodeProps> = ({ data, id }) => {
   };
 
   return (
-    <div className="w-[360px] bg-[#1A1A22] border-2 border-brand/40 rounded-2xl shadow-xl overflow-hidden">
-      <div className="px-3 py-2 bg-gradient-to-r from-brand to-violet-600 border-b border-brand/30 flex items-center gap-1.5">
-        <Film className="w-3.5 h-3.5 text-white"/><span className="text-xs font-bold text-white">时间线 / 剪映导出</span>
-        <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-black/30 text-white">Jianying Draft</span>
+    <div className="w-[360px] bg-surface border border-border rounded-2xl shadow-xl overflow-hidden">
+      <div className="px-3 py-2.5 bg-surface border-b border-border flex items-center gap-1.5">
+        <div className="w-6 h-6 rounded-lg bg-surface-secondary border border-border flex items-center justify-center"><Film className="w-3.5 h-3.5 text-emerald-500"/></div>
+        <span className="text-xs font-bold [color:var(--color-text-main)]">时间线 / 剪映导出</span>
+        <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-surface-secondary border border-border [color:var(--color-text-muted)] font-mono">Jianying Draft</span>
       </div>
-      <Handle type="target" position={Position.Left} className="!bg-brand !w-2 !h-2"/>
-      <Handle type="target" position={Position.Top} id="shots" className="!bg-accent-pink !w-2 !h-2" style={{left:'30%'}}/>
+      <Handle type="target" position={Position.Left} className="!bg-brand !w-3 !h-3 !border-2 !border-surface"/>
+      <Handle type="target" position={Position.Top} id="shots" className="!bg-pink-500 !w-3 !h-3 !border-2 !border-surface" style={{left:'30%'}}/>
       <div className="p-3 space-y-2">
-        <p className="text-[11px] text-gray-400 leading-relaxed">聚合上游分镜的 <b>画面/视频</b>、<b>配音</b>、<b>字幕</b> 一键生成剪映官方草稿（pyJianYingDraft 多轨）。</p>
-        {error && <div className="text-[11px] text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg p-2 flex gap-1.5"><AlertCircle className="w-3.5 h-3.5 shrink-0"/>{error}</div>}
+        <p className="text-[11px] [color:var(--color-text-secondary)] leading-relaxed">聚合上游分镜的 <b>画面/视频</b>、<b>配音</b>、<b>字幕</b> 一键生成剪映官方草稿（pyJianYingDraft 多轨）。</p>
+        {error && <div className="text-[11px] text-red-500 bg-red-500/10 border border-red-500/30 rounded-lg p-2 flex gap-1.5"><AlertCircle className="w-3.5 h-3.5 shrink-0"/>{error}</div>}
         {result && (
-          <div className="bg-accent-green/10 border border-accent-green/30 rounded-xl p-2.5 space-y-1 text-xs">
-            <div className="text-accent-green font-bold flex items-center gap-1"><Clock className="w-3 h-3"/> 导出成功 · {result.total_shots} 镜 · {result.duration_seconds}s</div>
-            <div className="text-gray-300">草稿目录：<span className="font-mono text-[11px] break-all">{result.export_dir}</span></div>
-            {result.jianyin_native_path && <div className="text-accent-green">已同步至剪映本地：{result.jianyin_native_path}</div>}
-            {result.warnings?.length>0 && <div className="text-amber-300 text-[11px]">⚠️ {result.warnings.slice(0,2).join('； ')}</div>}
+          <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-2.5 space-y-1 text-xs">
+            <div className="text-emerald-600 dark:text-emerald-300 font-bold flex items-center gap-1"><Clock className="w-3 h-3"/> 导出成功 · {result.total_shots} 镜 · {result.duration_seconds}s</div>
+            <div className="[color:var(--color-text-secondary)]">草稿目录：<span className="font-mono text-[11px] break-all">{result.export_dir}</span></div>
+            {result.jianyin_native_path && <div className="text-emerald-600 dark:text-emerald-300 font-medium">已同步至剪映本地：{result.jianyin_native_path}</div>}
+            {result.warnings?.length>0 && <div className="text-amber-600 dark:text-amber-400 text-[11px]">⚠️ {result.warnings.slice(0,2).join('； ')}</div>}
           </div>
         )}
-        <button onClick={handleExport} disabled={exporting} className="w-full py-2 rounded-xl bg-gradient-to-r from-brand to-violet-600 text-white text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-40">
+        <button onClick={handleExport} disabled={exporting} className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-40 shadow-sm transition-colors">
           {exporting ? <><div className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin"/> 导出中…</> : <><Download className="w-3.5 h-3.5"/> 一键导出剪映草稿</>}
         </button>
-        <p className="text-[10px] text-gray-500 text-center">需已配置剪映草稿目录（设置→JIANYIN_DRAFT_PATH）才可在剪映客户端直接打开</p>
+        <p className="text-[10px] [color:var(--color-text-muted)] text-center">需已配置剪映草稿目录（设置→JIANYIN_DRAFT_PATH）才可在剪映客户端直接打开</p>
       </div>
     </div>
   );

@@ -27,8 +27,8 @@ _TASK_STORE: Dict[str, Dict[str, Any]] = {}
 
 class CloudVideoProvider(VideoProvider):
     id = "minimax_video"
-    display_name = "云端视频 (MiniMax H3 / Kling)"
-    description = "MiniMax H3 / 快手可灵云端视频模型，支持参考生视频 (R2V) 与图生视频 (I2V)"
+    display_name = "云端视频 (MiniMax / Kling)"
+    description = "MiniMax / 快手可灵等云端视频模型，支持参考生视频 (R2V) 与图生视频 (I2V)"
     icon = "CloudLightning"
 
     def is_configured(self) -> bool:
@@ -48,7 +48,7 @@ class CloudVideoProvider(VideoProvider):
             )
         started = time.time()
 
-        # 优先 MiniMax H3
+        # 优先 MiniMax 视频 API
         if getattr(settings, "MINIMAX_API_KEY", ""):
             try:
                 return await self._generate_minimax(req, started)
@@ -74,15 +74,27 @@ class CloudVideoProvider(VideoProvider):
         }
         content = [{"type": "text", "text": req.prompt}]
 
+        last_frame_url = req.last_frame_url or (req.dynamic_inputs.get("last_frame_url") if isinstance(req.dynamic_inputs, dict) else None)
         if req.mode == "i2v" and req.first_frame_url:
             img_url = req.first_frame_url
             if img_url.startswith("/"):
                 img_url = f"http://127.0.0.1:8000{img_url}"
             content.append({"type": "image_url", "image_url": {"url": img_url}, "role": "first_frame"})
+            if last_frame_url:
+                last_u = last_frame_url if not last_frame_url.startswith("/") else f"http://127.0.0.1:8000{last_frame_url}"
+                content.append({"type": "image_url", "image_url": {"url": last_u}, "role": "last_frame"})
         elif req.mode == "r2v" and req.reference_images:
             for img in req.reference_images[:9]:
                 u = img if not img.startswith("/") else f"http://127.0.0.1:8000{img}"
                 content.append({"type": "image_url", "image_url": {"url": u}, "role": "reference_image"})
+        elif last_frame_url and req.first_frame_url:
+            # 兼容模式未设为 i2v 但传入了首尾帧
+            img_url = req.first_frame_url
+            if img_url.startswith("/"):
+                img_url = f"http://127.0.0.1:8000{img_url}"
+            content.append({"type": "image_url", "image_url": {"url": img_url}, "role": "first_frame"})
+            last_u = last_frame_url if not last_frame_url.startswith("/") else f"http://127.0.0.1:8000{last_frame_url}"
+            content.append({"type": "image_url", "image_url": {"url": last_u}, "role": "last_frame"})
 
         payload = {
             "model": getattr(settings, "VIDEO_MODEL", "video-01") or "video-01",

@@ -1,8 +1,12 @@
+# -*- coding: utf-8 -*-
+"""
+Canvas API Routes - 画布 DAG 执行与动态技能调度
+"""
 from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from app.canvas.engine import canvas_engine
+from app.canvas.engine import canvas_engine, execute_node, collect_upstream_data
 
 router = APIRouter()
 
@@ -11,6 +15,109 @@ class CanvasExecuteRequest(BaseModel):
     edges: List[Dict[str, Any]]
     target_ids: Optional[List[str]] = None
     project_id: Optional[str] = None
+
+class CanvasNodeExecuteRequest(BaseModel):
+    node: Dict[str, Any]
+    upstream: Optional[Dict[str, Any]] = None
+    project_id: Optional[str] = None
+    custom_data: Optional[Dict[str, Any]] = None
+
+class CanvasSkillDispatchRequest(BaseModel):
+    skill_id: str
+    prompt: Optional[str] = ""
+    node_id: Optional[str] = None
+    provider_id: Optional[str] = None
+    model: Optional[str] = None
+    first_frame_url: Optional[str] = None
+    last_frame_url: Optional[str] = None
+    reference_images: Optional[List[str]] = None
+    project_id: Optional[str] = None
+    dynamic_inputs: Optional[Dict[str, Any]] = None
+
+class CanvasAgentGenerateRequest(BaseModel):
+    node_type: str  # image / video / audio
+    idea: str
+    provider_id: Optional[str] = ""   # 空=Agent 自动选源
+    slots: Optional[Dict[str, Any]] = None
+    params: Optional[Dict[str, Any]] = None  # 用户在高级面板覆写的异构参数（如 aspect_ratio/resolution/steps 等）
+    extra_hint: Optional[str] = ""
+
+
+@router.post("/canvas/agent/generate")
+async def canvas_agent_generate(req: CanvasAgentGenerateRequest):
+    """
+    节点 Agent 一体化执行：用户自然语言需求 → LLM 规划(选skill/选源/转prompt/组参数)
+    → 调用 provider_* Tool(含异步轮询) → 返回 plan + 结果 URL。LLM 不可用时规则降级。
+    """
+    node_type = (req.node_type or "").lower()
+    if node_type not in ("image", "video", "audio"):
+        raise HTTPException(status_code=400, detail="node_type 需为 image/video/audio")
+    if not (req.idea or "").strip():
+        raise HTTPException(status_code=400, detail="idea 不能为空")
+    from app.canvas.agent_plan import plan_node_agent
+    from app.mcp.server import mcp_registry
+
+    slots = req.slots or {}
+    plan = await plan_node_agent(node_type, req.idea.strip(), (req.provider_id or "").strip(), slots, req.extra_hint or "")
+    pid = plan.get("provider_id") or ""
+    if not pid:
+        raise HTTPException(status_code=500, detail=f"无可用 {node_type} 生成源，请先注册生成源")
+
+    final_prompt = (plan.get("prompt") or req.idea).strip()
+    args: Dict[str, Any] = {"prompt": final_prompt, "text": final_prompt}
+    if plan.get("model"):
+        args["model"] = plan["model"]
+    if slots.get("first_frame"):
+        args["first_frame"] = slots["first_frame"]
+    if slots.get("last_frame"):
+        args["last_frame"] = slots["last_frame"]
+    refs = slots.get("reference_images") or ([slots["reference"]] if slots.get("reference") else None)
+    if refs:
+        args["reference_images"] = refs
+    if slots.get("ref_audio"):
+        args["ref_audio"] = slots["ref_audio"]
+    # Agent 规划的参数为初值，用户在高级面板覆写的异构参数优先
+    merged_params: Dict[str, Any] = {**(plan.get("params") or {})}
+    if req.params:
+        for k, v in req.params.items():
+            if v not in (None, "", {}):
+                merged_params[k] = v
+    args.update({k: v for k, v in merged_params.items() if v not in (None, "", {})})
+    # 同步回 plan 便于前端回显
+    plan["params"] = merged_params
+    plan["params_source"] = "user_override" if req.params else "agent"
+    if node_type == "video":
+        if args.get("first_frame") or args.get("last_frame"):
+            args.setdefault("mode", "i2v")
+        elif refs:
+            args.setdefault("mode", "r2v")
+        else:
+            args.setdefault("mode", "t2v")
+    args = {k: v for k, v in args.items() if v not in (None, "", [])}
+
+    res = await mcp_registry.execute_tool(f"provider_{pid}", args)
+    if res.status != "success":
+        return {"status": "error", "plan": {**plan, "final_args": args}, "error": res.error or "生成失败"}
+    # 视频异步 task 兜底轮询（provider_ 分支内部已有轮询，这里处理仍返回 task_id 的旧源）
+    result = res.result or {}
+    if node_type == "video" and not result.get("video_url") and result.get("task_id"):
+        import asyncio
+        from app.providers.generic.http_provider import get_custom_video_task
+        for _ in range(140):
+            await asyncio.sleep(3)
+            try:
+                st = get_custom_video_task(result["task_id"])
+                if st and st.get("status") in ("SUCCESS", "COMPLETED") and st.get("video_url"):
+                    result["video_url"] = st["video_url"]
+                    break
+                if st and st.get("status") in ("FAILED", "FAIL", "ERROR"):
+                    return {"status": "error", "plan": {**plan, "final_args": args}, "error": st.get("error") or "视频任务失败"}
+            except RuntimeError:
+                raise
+            except Exception:
+                pass
+    return {"status": "success", "plan": {**plan, "final_args": args}, "result": result, "elapsed_ms": res.execution_time_ms}
+
 
 @router.post("/canvas/execute")
 async def execute_canvas(req: CanvasExecuteRequest):
@@ -22,9 +129,61 @@ async def execute_canvas(req: CanvasExecuteRequest):
         raise HTTPException(status_code=400, detail="nodes 为空")
     try:
         result = await canvas_engine.execute_dag(req.nodes, req.edges, project_id=req.project_id, target_ids=req.target_ids)
-        return {"status":"success", **result}
+        return {"status": "success", **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"画布执行失败: {e}")
+
+
+@router.post("/canvas/node/execute")
+async def execute_canvas_single_node(req: CanvasNodeExecuteRequest):
+    """
+    单节点独立执行接口（带动态参数注入与上游数据）
+    """
+    try:
+        node = dict(req.node)
+        if req.custom_data:
+            node_data = dict(node.get("data") or {})
+            node_data.update(req.custom_data)
+            node["data"] = node_data
+        upstream = dict(req.upstream or {})
+        result = await execute_node(node, upstream, project_id=req.project_id)
+        return {"status": "success", "node_id": node.get("id"), "result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"节点执行失败: {e}")
+
+
+@router.post("/canvas/dispatch-skill")
+async def dispatch_canvas_skill(req: CanvasSkillDispatchRequest):
+    """
+    技能与动态 Provider 调度入口
+    """
+    from app.mcp.server import mcp_registry
+    res = await mcp_registry.execute_tool("canvas_dispatch_skill", {
+        "skill_id": req.skill_id,
+        "prompt": req.prompt,
+        "node_id": req.node_id,
+        "first_frame_url": req.first_frame_url,
+        "last_frame_url": req.last_frame_url,
+        "reference_images": req.reference_images,
+        "project_id": req.project_id,
+    })
+    if res.status == "success":
+        return {"status": "success", **res.result}
+    else:
+        raise HTTPException(status_code=500, detail=res.error or "技能调度失败")
+
+
+@router.get("/canvas/assets")
+async def query_canvas_assets(project_id: Optional[str] = Query(None)):
+    """
+    查询画布已生成的资产池
+    """
+    from app.mcp.server import mcp_registry
+    res = await mcp_registry.execute_tool("canvas_query_assets", {"project_id": project_id})
+    if res.status == "success":
+        return res.result
+    return {"assets": [], "total_assets": 0}
+
 
 @router.post("/projects/{project_id}/canvas/execute")
 async def execute_project_canvas(project_id: str, body: Dict[str, Any]):
@@ -32,7 +191,6 @@ async def execute_project_canvas(project_id: str, body: Dict[str, Any]):
     nodes = body.get("nodes")
     edges = body.get("edges")
     target_ids = body.get("target_ids")
-    # 若未传则尝试从存储加载
     if not nodes or not edges:
         from app.providers.project.manager import project_manager
         snap = project_manager.get_canvas(project_id)
@@ -44,6 +202,6 @@ async def execute_project_canvas(project_id: str, body: Dict[str, Any]):
         raise HTTPException(status_code=400, detail="画布节点为空")
     try:
         result = await canvas_engine.execute_dag(nodes, edges, project_id=project_id, target_ids=target_ids)
-        return {"status":"success", "project_id": project_id, **result}
+        return {"status": "success", "project_id": project_id, **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"画布执行失败: {e}")

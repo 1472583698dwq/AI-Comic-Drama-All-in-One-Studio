@@ -38,8 +38,8 @@ export function handlesFromSchema(schema: any): HandleDef[] {
 }
 
 export const handleColor: Record<HandleDef['type'], string> = {
-  image: '!bg-violet-500 !border-white',
-  video: '!bg-orange-500 !border-white',
-  audio: '!bg-pink-500 !border-white',
-  text: '!bg-sky-500 !border-white',
+  image: '!bg-violet-500 !border-surface',
+  video: '!bg-orange-500 !border-surface',
+  audio: '!bg-pink-500 !border-surface',
+  text: '!bg-sky-500 !border-surface',
 };

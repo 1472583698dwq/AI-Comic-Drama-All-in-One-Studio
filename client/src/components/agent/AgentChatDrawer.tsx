@@ -5,15 +5,18 @@ import {
   Bot, 
   User, 
   CheckCircle2, 
-  Cpu, 
   X, 
   Maximize2,
   Minimize2,
   RefreshCw,
   ChevronDown,
+  ChevronUp,
   Film,
   GripHorizontal,
-  Move
+  Wand2,
+  Lightbulb,
+  Cpu,
+  ArrowUpRight
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { useCanvasStore } from '../../stores/useCanvasStore';
@@ -26,14 +29,21 @@ const WS_URL = isDev
       ? `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/v1/ws/agent`
       : 'ws://127.0.0.1:8000/api/v1/ws/agent');
 
-interface Message {
+export interface ToolCallItem {
+  id: string;
+  name: string;
+  status: 'executing' | 'completed' | 'error';
+  result?: any;
+  error?: string;
+}
+
+export interface Message {
   id: string;
   sender: 'user' | 'agent' | 'system';
   text: string;
-  toolCall?: {
-    toolName: string;
-    status: 'executing' | 'completed' | 'error';
-  };
+  thinking?: string;
+  isThinkingStreaming?: boolean;
+  toolCalls?: ToolCallItem[];
   suggestedActions?: string[];
   time: string;
   isStreaming?: boolean;
@@ -45,6 +55,9 @@ export const AgentChatDrawer: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [inputText, setInputText] = useState('');
+  const [wsConnected, setWsConnected] = useState(false);
+  const [expandedThinkingIds, setExpandedThinkingIds] = useState<Record<string, boolean>>({});
+
   // LangChain 会话记忆：按项目隔离，支持多轮
   const [sessionId, setSessionId] = useState<string>(() => {
     try {
@@ -55,94 +68,214 @@ export const AgentChatDrawer: React.FC = () => {
       return nid;
     } catch { return `sess_${Date.now()}`; }
   });
-  // 当项目切换时，使用项目级 session 实现上下文隔离
   const effectiveSessionId = project?.id ? `proj_${project.id}_${sessionId.slice(0,8)}` : sessionId;
+
   const [messages, setMessages] = useState<Message[]>([
     {
-      id: 'm1',
+      id: 'm-welcome',
       sender: 'agent',
-      text: '你好！我是你的 AI 漫剧导演 Agent。你可以通过自然语言指挥我深度拆解小说、调整 3D 运镜轨迹、调用生图引擎重绘、生成角色配音或导出剪映工程。',
+      text: '你好！我是你的 AI 漫剧导演 Agent。\n我可以为你深度拆解小说文本、实时规划 3D 电影级运镜、联动 ComfyUI 生图与视频生成、合成角色音色并一键导出剪映工程。',
       suggestedActions: [
-        '为当前镜头规划 3D 特写运镜',
-        '将当前台词情绪调整为激动',
-        '检查当前分镜提示词并优化',
+        '为当前镜头规划 3D 电影特写推镜',
+        '将当前分镜台词情绪调整为激烈对峙',
+        '一键全要素合成当前镜头提示词',
+        '生成全片角色配音并对齐时长',
       ],
-      time: '刚刚',
+      time: '系统就绪',
     },
   ]);
-  const [isThinking, setIsThinking] = useState(false);
-  const [thinkingText, setThinkingText] = useState("");
-  const [isThinkingStreaming, setIsThinkingStreaming] = useState(false);
-  const [showThinking, setShowThinking] = useState(true);
-  const [wsConnected, setWsConnected] = useState(false);
 
-  // Position & Dragging State
-  const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
-  const dragOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [isThinking, setIsThinking] = useState(false);
+
+  // Floating Button Drag Position State
+  const [btnPos, setBtnPos] = useState<{ x: number; y: number }>(() => {
+    try {
+      const saved = localStorage.getItem('agent_float_btn_pos');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return {
+      x: typeof window !== 'undefined' ? window.innerWidth - 170 : 1200,
+      y: typeof window !== 'undefined' ? window.innerHeight - 70 : 800,
+    };
+  });
+
+  const [isBtnDragging, setIsBtnDragging] = useState(false);
+  const btnDragRef = useRef<{ startX: number; startY: number; origX: number; origY: number; hasMoved: boolean }>({
+    startX: 0,
+    startY: 0,
+    origX: 0,
+    origY: 0,
+    hasMoved: false,
+  });
+
+  // Dialog Window Drag Position State
+  const [dialogPos, setDialogPos] = useState<{ x: number; y: number } | null>(null);
+  const [isDialogDragging, setIsDialogDragging] = useState(false);
+  const dialogDragRef = useRef<{ startX: number; startY: number; origX: number; origY: number }>({
+    startX: 0,
+    startY: 0,
+    origX: 0,
+    origY: 0,
+  });
 
   const wsRef = useRef<WebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const streamingMsgIdRef = useRef<string | null>(null);
+  const currentStreamingIdRef = useRef<string | null>(null);
 
-  // Initialize position to bottom right when first opened
+  // Initialize dialog position when opened
   useEffect(() => {
-    if (isOpen && position === null && typeof window !== 'undefined') {
-      const w = isExpanded ? 520 : 384;
-      const h = isExpanded ? 640 : 500;
-      setPosition({
-        x: Math.max(20, window.innerWidth - w - 24),
-        y: Math.max(20, window.innerHeight - h - 30),
-      });
+    if (isOpen && dialogPos === null && typeof window !== 'undefined') {
+      const w = isExpanded ? 540 : 400;
+      const h = isExpanded ? 660 : 520;
+      const targetX = Math.max(16, Math.min(window.innerWidth - w - 16, btnPos.x - w + 140));
+      const targetY = Math.max(16, Math.min(window.innerHeight - h - 16, btnPos.y - h));
+      setDialogPos({ x: targetX, y: targetY });
     }
-  }, [isOpen, isExpanded, position]);
+  }, [isOpen, isExpanded, dialogPos, btnPos]);
 
-  // Dragging event listeners
+  // Window bounds check on resize
+  useEffect(() => {
+    const handleResize = () => {
+      if (typeof window === 'undefined') return;
+      setBtnPos((prev) => ({
+        x: Math.max(10, Math.min(window.innerWidth - 170, prev.x)),
+        y: Math.max(10, Math.min(window.innerHeight - 65, prev.y)),
+      }));
+      if (dialogPos) {
+        const w = isExpanded ? 540 : 400;
+        const h = isExpanded ? 660 : 520;
+        setDialogPos((prev) =>
+          prev
+            ? {
+                x: Math.max(10, Math.min(window.innerWidth - w - 10, prev.x)),
+                y: Math.max(10, Math.min(window.innerHeight - h - 10, prev.y)),
+              }
+            : null
+        );
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [dialogPos, isExpanded]);
+
+  // Floating Button Drag Handlers
+  const handleBtnMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsBtnDragging(true);
+    btnDragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      origX: btnPos.x,
+      origY: btnPos.y,
+      hasMoved: false,
+    };
+  };
+
+  const handleBtnTouchStart = (e: React.TouchEvent) => {
+    if (!e.touches[0]) return;
+    const t = e.touches[0];
+    setIsBtnDragging(true);
+    btnDragRef.current = {
+      startX: t.clientX,
+      startY: t.clientY,
+      origX: btnPos.x,
+      origY: btnPos.y,
+      hasMoved: false,
+    };
+  };
+
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
-      if (!isDragging) return;
-      const w = isExpanded ? 520 : 384;
-      const h = isExpanded ? 640 : 500;
-      const newX = Math.max(10, Math.min(window.innerWidth - w - 10, e.clientX - dragOffsetRef.current.x));
-      const newY = Math.max(10, Math.min(window.innerHeight - h - 10, e.clientY - dragOffsetRef.current.y));
-      setPosition({ x: newX, y: newY });
+      if (!isBtnDragging) return;
+      const dx = e.clientX - btnDragRef.current.startX;
+      const dy = e.clientY - btnDragRef.current.startY;
+      if (Math.hypot(dx, dy) > 4) {
+        btnDragRef.current.hasMoved = true;
+      }
+      const nextX = Math.max(10, Math.min(window.innerWidth - 170, btnDragRef.current.origX + dx));
+      const nextY = Math.max(10, Math.min(window.innerHeight - 65, btnDragRef.current.origY + dy));
+      setBtnPos({ x: nextX, y: nextY });
     };
 
     const onTouchMove = (e: TouchEvent) => {
-      if (!isDragging || !e.touches[0]) return;
-      const touch = e.touches[0];
-      const w = isExpanded ? 520 : 384;
-      const h = isExpanded ? 640 : 500;
-      const newX = Math.max(10, Math.min(window.innerWidth - w - 10, touch.clientX - dragOffsetRef.current.x));
-      const newY = Math.max(10, Math.min(window.innerHeight - h - 10, touch.clientY - dragOffsetRef.current.y));
-      setPosition({ x: newX, y: newY });
+      if (!isBtnDragging || !e.touches[0]) return;
+      const t = e.touches[0];
+      const dx = t.clientX - btnDragRef.current.startX;
+      const dy = t.clientY - btnDragRef.current.startY;
+      if (Math.hypot(dx, dy) > 4) {
+        btnDragRef.current.hasMoved = true;
+      }
+      const nextX = Math.max(10, Math.min(window.innerWidth - 170, btnDragRef.current.origX + dx));
+      const nextY = Math.max(10, Math.min(window.innerHeight - 65, btnDragRef.current.origY + dy));
+      setBtnPos({ x: nextX, y: nextY });
     };
 
-    const onStopDrag = () => setIsDragging(false);
+    const onMouseUp = () => {
+      if (isBtnDragging) {
+        setIsBtnDragging(false);
+        if (btnDragRef.current.hasMoved) {
+          localStorage.setItem('agent_float_btn_pos', JSON.stringify(btnPos));
+        } else {
+          setIsOpen((v) => !v);
+        }
+      }
+    };
 
-    if (isDragging) {
+    if (isBtnDragging) {
       window.addEventListener('mousemove', onMouseMove);
-      window.addEventListener('mouseup', onStopDrag);
+      window.addEventListener('mouseup', onMouseUp);
       window.addEventListener('touchmove', onTouchMove);
-      window.addEventListener('touchend', onStopDrag);
+      window.addEventListener('touchend', onMouseUp);
     }
     return () => {
       window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onStopDrag);
+      window.removeEventListener('mouseup', onStopDragWrapper);
       window.removeEventListener('touchmove', onTouchMove);
-      window.removeEventListener('touchend', onStopDrag);
+      window.removeEventListener('touchend', onStopDragWrapper);
     };
-  }, [isDragging, isExpanded]);
+    function onStopDragWrapper() {
+      setIsBtnDragging(false);
+    }
+  }, [isBtnDragging, btnPos]);
 
-  const handleStartDrag = (clientX: number, clientY: number) => {
-    if (!position) return;
-    setIsDragging(true);
-    dragOffsetRef.current = {
-      x: clientX - position.x,
-      y: clientY - position.y,
+  // Dialog Window Drag Handlers
+  const handleDialogHeaderMouseDown = (e: React.MouseEvent) => {
+    if (!dialogPos) return;
+    setIsDialogDragging(true);
+    dialogDragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      origX: dialogPos.x,
+      origY: dialogPos.y,
     };
   };
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!isDialogDragging) return;
+      const w = isExpanded ? 540 : 400;
+      const h = isExpanded ? 660 : 520;
+      const dx = e.clientX - dialogDragRef.current.startX;
+      const dy = e.clientY - dialogDragRef.current.startY;
+      const nextX = Math.max(10, Math.min(window.innerWidth - w - 10, dialogDragRef.current.origX + dx));
+      const nextY = Math.max(10, Math.min(window.innerHeight - h - 10, dialogDragRef.current.origY + dy));
+      setDialogPos({ x: nextX, y: nextY });
+    };
+
+    const onMouseUp = () => {
+      if (isDialogDragging) setIsDialogDragging(false);
+    };
+
+    if (isDialogDragging) {
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
+    }
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [isDialogDragging, isExpanded]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -154,7 +287,6 @@ export const AgentChatDrawer: React.FC = () => {
     }
   }, [messages, isOpen, isThinking]);
 
-  // Connect WebSocket with real-time streaming tokens
   const connectWs = useCallback(() => {
     try {
       if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
@@ -171,163 +303,183 @@ export const AgentChatDrawer: React.FC = () => {
         try {
           const data = JSON.parse(ev.data);
           const event = data.event;
+          const curId = currentStreamingIdRef.current;
 
-          if (event === 'agent_thinking') {
+          if (event === 'agent_thinking_start') {
             setIsThinking(true);
-          } else if (event === 'agent_thinking_start') {
-            setIsThinking(true);
-            setIsThinkingStreaming(true);
-            setThinkingText("");
-            setShowThinking(true);
+            if (curId) {
+              setMessages((prev) =>
+                prev.map((m) => (m.id === curId ? { ...m, isThinkingStreaming: true, thinking: '' } : m))
+              );
+              setExpandedThinkingIds((prev) => ({ ...prev, [curId]: true }));
+            }
           } else if (event === 'agent_thinking_chunk') {
             setIsThinking(true);
-            setIsThinkingStreaming(true);
-            setThinkingText(prev=> prev + (data.delta || ""));
+            if (curId) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === curId
+                    ? { ...m, isThinkingStreaming: true, thinking: (m.thinking || '') + (data.delta || '') }
+                    : m
+                )
+              );
+            }
           } else if (event === 'agent_thinking_end') {
-            setIsThinkingStreaming(false);
+            if (curId) {
+              setMessages((prev) =>
+                prev.map((m) => (m.id === curId ? { ...m, isThinkingStreaming: false } : m))
+              );
+            }
           } else if (event === 'tool_calling') {
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: 'tool-' + Date.now(),
-                sender: 'system',
-                text: `正在调用 MCP 工具: ${data.tool_name}...`,
-                toolCall: { toolName: data.tool_name, status: 'executing' },
-                time: new Date().toLocaleTimeString(),
-              },
-            ]);
+            setIsThinking(true);
+            if (curId) {
+              setMessages((prev) =>
+                prev.map((m) => {
+                  if (m.id !== curId) return m;
+                  const tools = [...(m.toolCalls || [])];
+                  tools.push({
+                    id: 'tc-' + Date.now(),
+                    name: data.tool_name,
+                    status: 'executing',
+                  });
+                  return { ...m, toolCalls: tools };
+                })
+              );
+            }
           } else if (event === 'tool_result') {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.toolCall?.toolName === data.tool_name && m.toolCall?.status === 'executing'
-                  ? {
-                      ...m,
-                      text: data.status === 'success' ? `✓ 工具 ${data.tool_name} 执行成功` : `✕ 工具 ${data.tool_name} 失败: ${data.error}`,
-                      toolCall: { ...m.toolCall!, status: data.status === 'success' ? 'completed' : 'error' },
-                    }
-                  : m
-              )
-            );
-            // 新增生成源全局刷新
+            if (curId) {
+              setMessages((prev) =>
+                prev.map((m) => {
+                  if (m.id !== curId) return m;
+                  const tools = (m.toolCalls || []).map((t) =>
+                    t.name === data.tool_name && t.status === 'executing'
+                      ? {
+                          ...t,
+                          status: (data.status === 'success' ? 'completed' : 'error') as any,
+                          result: data.result,
+                          error: data.error,
+                        }
+                      : t
+                  );
+                  return { ...m, toolCalls: tools };
+                })
+              );
+            }
             if (data.tool_name === 'register_custom_provider' && data.status === 'success') {
               try { window.dispatchEvent(new Event('provider-list-refresh')); } catch {}
             }
-            // 画布工具：前端透传执行与同步（Agent 全流程参与）
             if (data.tool_name && String(data.tool_name).startsWith('canvas_')) {
               try {
                 window.dispatchEvent(new CustomEvent('agent-canvas-tool', { detail: { tool: data.tool_name, status: data.status, result: data.result, error: data.error } }));
-                // 触发画布重载（持久化已在后端完成，前端拉取最新快照）
                 window.dispatchEvent(new CustomEvent('agent-canvas-updated', { detail: { tool: data.tool_name } }));
               } catch {}
             }
           } else if (event === 'agent_stream_start') {
             setIsThinking(false);
-            const streamId = 'agent-' + Date.now();
-            streamingMsgIdRef.current = streamId;
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: streamId,
-                sender: 'agent',
-                text: '',
-                isStreaming: true,
-                time: new Date().toLocaleTimeString(),
-              },
-            ]);
+            if (curId) {
+              setMessages((prev) =>
+                prev.map((m) => (m.id === curId ? { ...m, isStreaming: true, isThinkingStreaming: false } : m))
+              );
+            }
           } else if (event === 'agent_stream_chunk') {
             setIsThinking(false);
-            const streamId = streamingMsgIdRef.current;
-            if (streamId) {
+            if (curId) {
               setMessages((prev) =>
                 prev.map((m) =>
-                  m.id === streamId
-                    ? { ...m, text: m.text + (data.delta || '') }
-                    : m
+                  m.id === curId ? { ...m, text: m.text + (data.delta || ''), isStreaming: true } : m
                 )
               );
             }
           } else if (event === 'agent_response') {
             setIsThinking(false);
-            const streamId = streamingMsgIdRef.current;
-            if (streamId) {
+            if (curId) {
               setMessages((prev) =>
                 prev.map((m) =>
-                  m.id === streamId
-                    ? { ...m, text: data.message || m.text, isStreaming: false, suggestedActions: data.suggested_actions }
+                  m.id === curId
+                    ? {
+                        ...m,
+                        text: data.message || m.text,
+                        isStreaming: false,
+                        isThinkingStreaming: false,
+                        suggestedActions: data.suggested_actions,
+                      }
                     : m
                 )
               );
-              streamingMsgIdRef.current = null;
-            } else {
-              setMessages((prev) => [
-                ...prev,
-                {
-                  id: 'agent-' + Date.now(),
-                  sender: 'agent',
-                  text: data.message,
-                  suggestedActions: data.suggested_actions,
-                  time: new Date().toLocaleTimeString(),
-                },
-              ]);
+              currentStreamingIdRef.current = null;
             }
           } else if (event === 'error') {
             setIsThinking(false);
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: 'err-' + Date.now(),
-                sender: 'system',
-                text: '⚠️ ' + data.message,
-                time: new Date().toLocaleTimeString(),
-              },
-            ]);
+            if (curId) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === curId
+                    ? {
+                        ...m,
+                        text: m.text ? m.text + `\n\n⚠️ 异常: ${data.message}` : `⚠️ 指令执行异常: ${data.message}`,
+                        isStreaming: false,
+                        isThinkingStreaming: false,
+                      }
+                    : m
+                )
+              );
+              currentStreamingIdRef.current = null;
+            }
           }
         } catch (e) {
           console.warn(e);
         }
       };
       return ws;
-    } catch (e) {
+    } catch {
       setWsConnected(false);
       return null;
     }
   }, []);
-
-  useEffect(() => {
-    if (isOpen) {
-      connectWs();
-    }
-  }, [isOpen, connectWs]);
 
   const handleSendMessage = async (textToSend?: string) => {
     const text = textToSend || inputText;
     if (!text.trim() || isThinking) return;
 
     const userMsg: Message = {
-      id: 'msg-' + Date.now(),
+      id: 'usr-' + Date.now(),
       sender: 'user',
-      text,
-      time: new Date().toLocaleTimeString(),
+      text: text.trim(),
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
 
-    setMessages((prev) => [...prev, userMsg]);
+    const agentMsgId = 'agt-' + Date.now();
+    currentStreamingIdRef.current = agentMsgId;
+
+    const agentPlaceholderMsg: Message = {
+      id: agentMsgId,
+      sender: 'agent',
+      text: '',
+      isStreaming: true,
+      isThinkingStreaming: true,
+      thinking: '',
+      toolCalls: [],
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+
+    setMessages((prev) => [...prev, userMsg, agentPlaceholderMsg]);
     setInputText('');
-    if (inputRef.current) { inputRef.current.style.height = 'auto'; }
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+    }
     setIsThinking(true);
-    setThinkingText("");
-    setIsThinkingStreaming(false);
-    setShowThinking(true);
+    setExpandedThinkingIds((prev) => ({ ...prev, [agentMsgId]: true }));
 
     const shots = project?.scenes.flatMap((s) => s.shots) || [];
     const activeShot = shots.find((s) => s.id === activeShotId) || shots[0];
 
-    // P1: 画布感知透传
     let canvas_summary: string | null = null;
     try {
       const cs = useCanvasStore.getState().summary;
       const cn = useCanvasStore.getState().nodes;
       if (cn.length > 0) canvas_summary = cs;
     } catch {}
+
     const contextPayload = {
       project_id: project?.id,
       project_title: project?.title,
@@ -350,12 +502,11 @@ export const AgentChatDrawer: React.FC = () => {
       workspace: useProjectStore.getState().workspace,
     };
 
-    // 1. Try WebSocket (LangChain 流式)
+    // 1. Try WebSocket
     let ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       ws = connectWs();
-      // 等待一帧确保连接建立
-      await new Promise(r=> setTimeout(r, 120));
+      await new Promise((r) => setTimeout(r, 120));
       ws = wsRef.current;
     }
 
@@ -371,197 +522,279 @@ export const AgentChatDrawer: React.FC = () => {
           })
         );
         sentViaWs = true;
-      } catch (e) {
+      } catch {
         sentViaWs = false;
       }
     }
 
-    // 2. HTTP SSE 真实流式 Fallback (LangChain)
+    // 2. HTTP SSE Fallback
     if (!sentViaWs) {
-      const streamId = 'agent-' + Date.now();
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: streamId,
-          sender: 'agent',
-          text: '',
-          isStreaming: true,
-          time: new Date().toLocaleTimeString(),
-        },
-      ]);
       try {
-        // 优先使用 SSE 流式接口
-        await apiService.agentChatStream(text, contextPayload, effectiveSessionId, (event, data)=>{
-          if (event === 'agent_stream_chunk') {
-            setIsThinking(false);
-            setMessages(prev=> prev.map(m=> m.id===streamId ? {...m, text: m.text + (data.delta||'') } : m));
-          } else if (event === 'tool_calling') {
-            setMessages(prev=> [...prev, {
-              id: 'tool-' + Date.now() + Math.random(),
-              sender: 'system',
-              text: `正在调用 MCP 工具: ${data.tool_name}...`,
-              toolCall: { toolName: data.tool_name, status: 'executing' },
-              time: new Date().toLocaleTimeString(),
-            }]);
-          } else if (event === 'tool_result') {
-            setMessages(prev=> prev.map(m=> m.toolCall?.toolName===data.tool_name && m.toolCall?.status==='executing' ? {...m, text: data.status==='success'? `✓ 工具 ${data.tool_name} 执行成功` : `✕ 工具 ${data.tool_name} 失败: ${data.error}`, toolCall: {...m.toolCall!, status: data.status==='success'?'completed':'error'}} : m));
-            if (data.tool_name && String(data.tool_name).startsWith('canvas_')) {
-              try { window.dispatchEvent(new CustomEvent('agent-canvas-tool', { detail: { tool: data.tool_name, status: data.status, result: data.result } })); window.dispatchEvent(new CustomEvent('agent-canvas-updated', { detail: { tool: data.tool_name } })); } catch {}
-            }
-          } else if (event === 'agent_thinking') {
+        await apiService.agentChatStream(text, contextPayload, effectiveSessionId, (event, data) => {
+          if (event === 'agent_thinking_start') {
             setIsThinking(true);
+            setMessages((prev) =>
+              prev.map((m) => (m.id === agentMsgId ? { ...m, isThinkingStreaming: true, thinking: '' } : m))
+            );
+          } else if (event === 'agent_thinking_chunk') {
+            setIsThinking(true);
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === agentMsgId
+                  ? { ...m, isThinkingStreaming: true, thinking: (m.thinking || '') + (data.delta || '') }
+                  : m
+              )
+            );
+          } else if (event === 'agent_thinking_end') {
+            setMessages((prev) =>
+              prev.map((m) => (m.id === agentMsgId ? { ...m, isThinkingStreaming: false } : m))
+            );
+          } else if (event === 'agent_stream_chunk') {
+            setIsThinking(false);
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === agentMsgId ? { ...m, text: m.text + (data.delta || ''), isStreaming: true } : m
+              )
+            );
+          } else if (event === 'tool_calling') {
+            setMessages((prev) =>
+              prev.map((m) => {
+                if (m.id !== agentMsgId) return m;
+                const tools = [...(m.toolCalls || [])];
+                tools.push({ id: 'tc-' + Date.now(), name: data.tool_name, status: 'executing' });
+                return { ...m, toolCalls: tools };
+              })
+            );
+          } else if (event === 'tool_result') {
+            setMessages((prev) =>
+              prev.map((m) => {
+                if (m.id !== agentMsgId) return m;
+                const tools = (m.toolCalls || []).map((t) =>
+                  t.name === data.tool_name && t.status === 'executing'
+                    ? {
+                        ...t,
+                        status: (data.status === 'success' ? 'completed' : 'error') as any,
+                        result: data.result,
+                        error: data.error,
+                      }
+                    : t
+                );
+                return { ...m, toolCalls: tools };
+              })
+            );
+            if (data.tool_name && String(data.tool_name).startsWith('canvas_')) {
+              try {
+                window.dispatchEvent(new CustomEvent('agent-canvas-tool', { detail: { tool: data.tool_name, status: data.status, result: data.result } }));
+                window.dispatchEvent(new CustomEvent('agent-canvas-updated', { detail: { tool: data.tool_name } }));
+              } catch {}
+            }
           } else if (event === 'agent_response') {
             setIsThinking(false);
-            setMessages(prev=> prev.map(m=> m.id===streamId ? {...m, text: data.message || m.text, isStreaming:false, suggestedActions: data.suggested_actions} : m));
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === agentMsgId
+                  ? {
+                      ...m,
+                      text: data.message || m.text,
+                      isStreaming: false,
+                      isThinkingStreaming: false,
+                      suggestedActions: data.suggested_actions,
+                    }
+                  : m
+              )
+            );
+            currentStreamingIdRef.current = null;
           } else if (event === 'error') {
             setIsThinking(false);
-            setMessages(prev=> [...prev, {id:'err-'+Date.now(), sender:'system', text:'⚠️ '+data.message, time: new Date().toLocaleTimeString()}]);
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === agentMsgId
+                  ? {
+                      ...m,
+                      text: m.text ? m.text + `\n\n⚠️ ${data.message}` : `⚠️ 指令异常: ${data.message}`,
+                      isStreaming: false,
+                      isThinkingStreaming: false,
+                    }
+                  : m
+              )
+            );
+            currentStreamingIdRef.current = null;
           }
         });
         setIsThinking(false);
-        // 确保结束状态
-        setMessages(prev=> prev.map(m=> m.id===streamId ? {...m, isStreaming:false} : m));
+        setMessages((prev) =>
+          prev.map((m) => (m.id === agentMsgId ? { ...m, isStreaming: false, isThinkingStreaming: false } : m))
+        );
       } catch (e: any) {
-        // 回退到非流式
+        // Fallback to non-streaming agentChat
         try {
           const res = await apiService.agentChat(text, contextPayload, effectiveSessionId);
           setIsThinking(false);
-          if (res.executed_tools && res.executed_tools.length > 0) {
-            for (const tool of res.executed_tools) {
-              setMessages((prev) => [
-                ...prev,
-                {
-                  id: 'tool-' + Math.random(),
-                  sender: 'system',
-                  text: tool.status === 'success' ? `✓ 工具 ${tool.tool_name} 执行成功` : `✕ 工具 ${tool.tool_name} 失败: ${tool.error}`,
-                  toolCall: { toolName: tool.tool_name, status: tool.status === 'success' ? 'completed' : 'error' },
-                  time: new Date().toLocaleTimeString(),
-                },
-              ]);
-              if (String(tool.tool_name).startsWith('canvas_')) {
-                try { window.dispatchEvent(new CustomEvent('agent-canvas-tool', { detail: { tool: tool.tool_name, status: tool.status, result: tool.result } })); window.dispatchEvent(new CustomEvent('agent-canvas-updated', { detail: { tool: tool.tool_name } })); } catch {}
-              }
-            }
-          }
-          const fullText = res.reply || '指令已完成。';
+          const tools: ToolCallItem[] = (res.executed_tools || []).map((t: any) => ({
+            id: 'tc-' + Math.random(),
+            name: t.tool_name,
+            status: t.status === 'success' ? 'completed' : 'error',
+            result: t.result,
+            error: t.error,
+          }));
           setMessages((prev) =>
             prev.map((m) =>
-              m.id === streamId
-                ? { ...m, text: fullText, isStreaming: false, suggestedActions: res.suggested_actions }
+              m.id === agentMsgId
+                ? {
+                    ...m,
+                    text: res.reply || '指令已执行完成。',
+                    isStreaming: false,
+                    isThinkingStreaming: false,
+                    toolCalls: tools,
+                    suggestedActions: res.suggested_actions,
+                  }
                 : m
             )
           );
-        } catch (e2:any) {
+        } catch (err: any) {
           setIsThinking(false);
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: 'err-' + Date.now(),
-              sender: 'system',
-              text: '⚠️ 导演 Agent 响应异常: ' + (e2?.message || '未知错误'),
-              time: new Date().toLocaleTimeString(),
-            },
-          ]);
-          setMessages(prev=> prev.map(m=> m.id===streamId ? {...m, text: m.text || '请求失败', isStreaming:false} : m));
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === agentMsgId
+                ? {
+                    ...m,
+                    text: `⚠️ 抱歉，连接异常: ${err.message || '网络请求超时'}。请检查后端服务运行状态。`,
+                    isStreaming: false,
+                    isThinkingStreaming: false,
+                  }
+                : m
+            )
+          );
         }
       }
     }
   };
 
+  const handleClearHistory = async () => {
+    try {
+      await apiService.clearAgentHistory(effectiveSessionId);
+      setMessages([
+        {
+          id: 'm-reset',
+          sender: 'agent',
+          text: '已重置对话历史记忆。你可以提出全新的导演指令。',
+          suggestedActions: [
+            '重新分析当前剧情节拍',
+            '规划 3D 电影镜头组',
+            '一键全流程全要素生图',
+          ],
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ]);
+      const ws = wsRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ action: 'clear_history', session_id: effectiveSessionId }));
+      }
+    } catch (e: any) {
+      alert(e.message || '清空记忆失败');
+    }
+  };
+
+  const activeShot = project?.scenes.flatMap((s) => s.shots).find((s) => s.id === activeShotId);
+
   return (
     <>
-      {/* Floating Chat Drawer Window (Draggable) */}
-      {isOpen && position && (
+      {/* 1. 全局自由拖拽悬浮 Trigger 胶囊按钮 */}
+      <div
+        style={{
+          position: 'fixed',
+          left: `${btnPos.x}px`,
+          top: `${btnPos.y}px`,
+          zIndex: 60,
+        }}
+        className="touch-none select-none"
+      >
+        <button
+          onMouseDown={handleBtnMouseDown}
+          onTouchStart={handleBtnTouchStart}
+          className={`group flex items-center space-x-2 px-3.5 py-2.5 rounded-full backdrop-blur-xl border transition-all shadow-xl cursor-grab active:cursor-grabbing ${
+            isOpen
+              ? 'bg-brand text-white border-brand-glow shadow-brand/40 ring-2 ring-brand/50'
+              : 'bg-surface/90 hover:bg-surface border-border hover:border-brand/60 text-white shadow-black/40 hover:scale-105'
+          }`}
+          title="点击展开/收起导演 Agent，按住可任意拖拽位置"
+        >
+          <div className="relative flex items-center justify-center">
+            <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-brand to-brand-cyan flex items-center justify-center text-white shadow-sm">
+              <Bot className="w-3 h-3" />
+            </div>
+            <span
+              className={`absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full border border-surface ${
+                wsConnected ? 'bg-accent-green animate-pulse' : 'bg-amber-400'
+              }`}
+            />
+          </div>
+
+          <div className="flex items-center gap-1.5 font-bold text-xs">
+            <span className="[color:var(--color-text-main)] group-hover:text-brand">导演 Agent</span>
+            <GripHorizontal className="w-3 h-3 [color:var(--color-text-muted)] opacity-50 group-hover:opacity-100" />
+          </div>
+        </button>
+      </div>
+
+      {/* 2. 独立悬浮可拖拽会话窗口 */}
+      {isOpen && dialogPos && (
         <div
           style={{
-            left: `${position.x}px`,
-            top: `${position.y}px`,
             position: 'fixed',
-            zIndex: 999,
+            left: `${dialogPos.x}px`,
+            top: `${dialogPos.y}px`,
+            width: isExpanded ? '540px' : '410px',
+            height: isExpanded ? '680px' : '530px',
+            zIndex: 55,
           }}
-          className={`bg-surface rounded-2xl border border-border shadow-2xl flex flex-col overflow-hidden animate-fade-in select-text transition-shadow ${
-            isDragging ? 'shadow-brand/40 ring-2 ring-brand cursor-grabbing' : 'shadow-2xl'
-          } ${
-            isExpanded
-              ? 'w-[520px] h-[640px] max-w-[92vw] max-h-[85vh]'
-              : 'w-96 h-[500px] max-w-[92vw] max-h-[75vh]'
-          }`}
+          className="rounded-3xl border border-border bg-surface/95 backdrop-blur-2xl shadow-2xl flex flex-col overflow-hidden animate-fade-in transition-size duration-150"
         >
-          {/* Header - Drag Handle */}
+          {/* Window Header */}
           <div
-            onMouseDown={(e) => {
-              if ((e.target as HTMLElement).closest('button')) return;
-              handleStartDrag(e.clientX, e.clientY);
-            }}
-            onTouchStart={(e) => {
-              if ((e.target as HTMLElement).closest('button')) return;
-              if (e.touches[0]) handleStartDrag(e.touches[0].clientX, e.touches[0].clientY);
-            }}
-            className="h-12 px-4 border-b border-border flex items-center justify-between bg-surface-secondary/95 shrink-0 backdrop-blur-md cursor-grab active:cursor-grabbing select-none"
-            title="按住鼠标拖拽窗口位置"
+            onMouseDown={handleDialogHeaderMouseDown}
+            className="h-12 px-4 border-b border-border flex items-center justify-between bg-surface-secondary/80 shrink-0 cursor-grab active:cursor-grabbing select-none"
+            title="按住拖拽窗口位置"
           >
-            <div className="flex items-center space-x-2">
-              <GripHorizontal className="w-4 h-4 text-gray-500 mr-0.5" />
-              <div className="p-1.5 rounded-lg bg-gradient-to-r from-brand to-brand-blue text-white shadow-md shadow-brand/20">
+            <div className="flex items-center space-x-2.5">
+              <GripHorizontal className="w-4 h-4 [color:var(--color-text-muted)]" />
+              <div className="p-1.5 rounded-xl bg-gradient-to-tr from-brand to-brand-blue text-white shadow-md shadow-brand/30">
                 <Bot className="w-4 h-4" />
               </div>
               <div>
                 <div className="flex items-center space-x-1.5">
-                  <span className="text-xs font-bold text-white">AI 漫剧导演 Agent</span>
+                  <span className="text-xs font-bold [color:var(--color-text-main)]">AI 漫剧导演 Agent</span>
                   <span
-                    className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-accent-green animate-pulse' : 'bg-amber-400'}`}
-                    title={wsConnected ? 'WebSocket 双向流实时连接' : 'HTTP 智能通道已就绪'}
+                    className={`w-1.5 h-1.5 rounded-full ${wsConnected ? 'bg-accent-green' : 'bg-amber-400'}`}
+                    title={wsConnected ? 'WebSocket 流式通道已就绪' : 'HTTP 通道'}
                   />
                 </div>
-                <div className="text-[9px] text-gray-400">
-                  LangChain {wsConnected ? '· 实时流式' : '· HTTP SSE'} · 多轮记忆·循环
+                <div className="text-[9px] [color:var(--color-text-muted)] flex items-center gap-1">
+                  <span>多模态感知</span>
+                  <span>·</span>
+                  <span>LangChain 智能记忆</span>
                 </div>
               </div>
             </div>
 
             <div className="flex items-center space-x-1">
               <button
-                onClick={async()=>{
-                  try {
-                    await apiService.clearAgentHistory(effectiveSessionId);
-                    setMessages([{
-                      id: 'm1',
-                      sender: 'agent',
-                      text: '已清空对话历史（LangChain 记忆已重置）。你可以开始新话题了。',
-                      time: new Date().toLocaleTimeString(),
-                    }]);
-                    // 同时通知 WS 清空
-                    const ws = wsRef.current;
-                    if (ws && ws.readyState===WebSocket.OPEN) {
-                      ws.send(JSON.stringify({action:'clear_history', session_id: effectiveSessionId}));
-                    }
-                  } catch(e:any){ alert(e.message); }
-                }}
-                className="p-1.5 rounded-lg text-gray-400 hover:text-amber-300 hover:bg-surface-tertiary transition-all"
-                title="清空多轮记忆 (LangChain)"
+                onClick={handleClearHistory}
+                className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-tertiary transition-all"
+                title="重置会话记忆"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
               </button>
               <button
-                onClick={() => {
-                  if (typeof window !== 'undefined') {
-                    const w = isExpanded ? 384 : 520;
-                    const h = isExpanded ? 500 : 640;
-                    setPosition({
-                      x: Math.max(20, window.innerWidth - w - 24),
-                      y: Math.max(20, window.innerHeight - h - 30),
-                    });
-                  }
-                  setIsExpanded(!isExpanded);
-                }}
-                className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-surface-tertiary transition-all"
-                title={isExpanded ? '还原默认大小' : '放大窗口'}
+                onClick={() => setIsExpanded(!isExpanded)}
+                className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-tertiary transition-all"
+                title={isExpanded ? '还原默认尺寸' : '放大窗口'}
               >
                 {isExpanded ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
               </button>
               <button
                 onClick={() => setIsOpen(false)}
-                className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-surface-tertiary transition-all"
+                className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-tertiary transition-all"
                 title="收起悬浮窗"
               >
                 <X className="w-4 h-4" />
@@ -569,163 +802,177 @@ export const AgentChatDrawer: React.FC = () => {
             </div>
           </div>
 
-          {/* Active Context Banner */}
-          {activeShotId && (
-            <div className="px-3.5 py-1.5 bg-brand/10 border-b border-brand/20 flex items-center justify-between text-[11px] text-brand-light shrink-0">
+          {/* Active Context Bar */}
+          {activeShot && (
+            <div className="px-3.5 py-1.5 bg-brand/10 border-b border-brand/20 flex items-center justify-between text-[11px] text-brand shrink-0">
               <span className="flex items-center space-x-1.5 truncate">
-                <Film className="w-3 h-3 shrink-0" />
-                <span className="truncate">当前针对分镜: {project?.scenes.flatMap(s => s.shots).find(s => s.id === activeShotId)?.action_desc || '当前镜头'}</span>
+                <Film className="w-3.5 h-3.5 shrink-0" />
+                <span className="font-semibold truncate">
+                  镜头 #{activeShot.shot_index}: {activeShot.action_desc || activeShot.image_prompt?.slice(0, 30)}
+                </span>
               </span>
               <button
                 onClick={() => setActiveTab('director3d')}
-                className="text-[10px] text-brand-light underline ml-2 shrink-0 hover:text-white"
+                className="text-[10px] text-brand hover:underline ml-2 shrink-0 font-bold flex items-center gap-0.5"
               >
-                进入3D台
+                3D机位 <ArrowUpRight className="w-2.5 h-2.5" />
               </button>
             </div>
           )}
 
-          {/* Messages Area */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar text-xs">
-            {messages.map((m) => (
-              <div
-                key={m.id}
-                className={`flex flex-col ${m.sender === 'user' ? 'items-end' : 'items-start'}`}
-              >
-                <div
-                  className={`p-3 rounded-2xl max-w-[88%] leading-relaxed ${
-                    m.sender === 'user'
-                      ? 'bg-gradient-to-r from-brand to-brand-blue text-white rounded-br-none shadow-sm'
-                      : m.sender === 'system'
-                      ? 'bg-amber-500/10 border border-amber-500/30 text-amber-200 rounded-bl-none'
-                      : 'bg-surface-secondary border border-border text-gray-200 rounded-bl-none'
-                  }`}
-                >
-                  <p className="whitespace-pre-wrap">
-                    {m.text}
-                    {m.isStreaming && (
-                      <span className="inline-block w-1.5 h-3.5 bg-brand-light ml-1 animate-pulse align-middle" />
-                    )}
-                  </p>
+          {/* Conversation Messages Container */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-3.5 custom-scrollbar text-xs">
+            {messages.map((m) => {
+              const isUser = m.sender === 'user';
+              const isAgent = m.sender === 'agent';
+              const showThinking = !!(m.thinking || m.isThinkingStreaming);
+              const isThinkingOpen = !!expandedThinkingIds[m.id];
 
-                  {/* Tool Call Pill */}
-                  {m.toolCall && (
-                    <div className="mt-2 pt-2 border-t border-white/10 flex items-center space-x-1.5 text-[10px] font-mono">
-                      <Cpu className={`w-3 h-3 ${m.toolCall.status === 'error' ? 'text-red-400' : 'text-accent-green'}`} />
-                      <span className={m.toolCall.status === 'error' ? 'text-red-300' : 'text-accent-green'}>
-                        MCP: {m.toolCall.toolName}
-                      </span>
-                      {m.toolCall.status === 'completed' ? (
-                        <CheckCircle2 className="w-3 h-3 text-accent-green" />
-                      ) : m.toolCall.status === 'error' ? (
-                        <span className="text-red-400">✕</span>
-                      ) : (
-                        <span className="animate-spin text-accent-orange">⏳</span>
+              return (
+                <div
+                  key={m.id}
+                  className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} space-y-1 animate-fade-in`}
+                >
+                  <div
+                    className={`p-3.5 rounded-2xl max-w-[92%] leading-relaxed shadow-sm ${
+                      isUser
+                        ? 'bg-brand text-white rounded-br-none'
+                        : 'bg-surface-secondary border border-border [color:var(--color-text-main)] rounded-bl-none'
+                    }`}
+                  >
+                    {/* 1. Collapsible Thinking / Reasoning Chain */}
+                    {isAgent && showThinking && (
+                      <div className="mb-2.5 rounded-xl border border-brand/20 bg-brand/5 overflow-hidden">
+                        <button
+                          onClick={() =>
+                            setExpandedThinkingIds((prev) => ({
+                              ...prev,
+                              [m.id]: !prev[m.id],
+                            }))
+                          }
+                          className="w-full px-2.5 py-1.5 flex items-center justify-between text-[10px] font-bold text-brand hover:bg-brand/10 transition-all"
+                        >
+                          <span className="flex items-center gap-1.5">
+                            <Sparkles className={`w-3 h-3 ${m.isThinkingStreaming ? 'animate-spin' : ''}`} />
+                            <span>
+                              {m.isThinkingStreaming ? '思考推演中...' : '导演思考过程'}
+                            </span>
+                          </span>
+                          <span className="flex items-center gap-1 text-[9px] opacity-70">
+                            {isThinkingOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                          </span>
+                        </button>
+
+                        {isThinkingOpen && (
+                          <div className="p-2.5 pt-0 text-[10px] leading-relaxed [color:var(--color-text-secondary)] whitespace-pre-wrap font-mono max-h-36 overflow-y-auto custom-scrollbar border-t border-brand/10">
+                            {m.thinking || '正在感知分镜机位与剧情节拍...'}
+                            {m.isThinkingStreaming && (
+                              <span className="inline-block w-1.5 h-3 bg-brand ml-1 animate-pulse align-middle" />
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* 2. Structured Tool Call Execution Badges */}
+                    {isAgent && m.toolCalls && m.toolCalls.length > 0 && (
+                      <div className="mb-2.5 space-y-1">
+                        <div className="text-[10px] font-bold text-brand flex items-center gap-1">
+                          <Cpu className="w-3 h-3" /> 动作执行:
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {m.toolCalls.map((tc) => (
+                            <span
+                              key={tc.id}
+                              className={`px-2 py-0.5 rounded-md border text-[10px] font-mono flex items-center gap-1 shadow-xs ${
+                                tc.status === 'completed'
+                                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                                  : tc.status === 'error'
+                                  ? 'bg-red-500/10 border-red-500/30 text-red-400'
+                                  : 'bg-amber-500/10 border-amber-500/30 text-amber-400 animate-pulse'
+                              }`}
+                            >
+                              {tc.status === 'completed' ? (
+                                <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                              ) : tc.status === 'error' ? (
+                                <span>✕</span>
+                              ) : (
+                                <span className="animate-spin">⏳</span>
+                              )}
+                              <span>{tc.name}</span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 3. Main Message Content */}
+                    <div className="whitespace-pre-wrap leading-relaxed text-xs">
+                      {m.text}
+                      {m.isStreaming && (
+                        <span className="inline-block w-1.5 h-3.5 bg-brand ml-1 animate-pulse align-middle" />
                       )}
                     </div>
-                  )}
 
-                  {/* Suggested Actions within Message */}
-                  {m.suggestedActions && m.suggestedActions.length > 0 && (
-                    <div className="mt-2.5 pt-2 border-t border-white/10 space-y-1.5">
-                      <div className="text-[10px] text-gray-400 font-medium">推荐执行：</div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {m.suggestedActions.map((act, i) => (
-                          <button
-                            key={i}
-                            onClick={() => handleSendMessage(act)}
-                            className="text-[10px] px-2 py-1 rounded-lg bg-surface-tertiary hover:bg-brand/30 border border-border hover:border-brand text-gray-200 hover:text-white transition-all text-left"
-                          >
-                            ⚡ {act}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-                <span className="text-[9px] text-gray-500 mt-1 px-1">{m.time}</span>
-              </div>
-            ))}
-
-            {/* 思考过程流式展示 */}
-            {(isThinking || thinkingText) && (
-              <div className="rounded-2xl border border-violet-500/20 bg-violet-500/5 overflow-hidden">
-                <button onClick={()=> setShowThinking(v=>!v)} className="w-full px-3 py-2 flex items-center justify-between text-[11px] font-bold text-violet-300 hover:bg-violet-500/10">
-                  <span className="flex items-center gap-1.5">
-                    <span className={`w-2 h-2 rounded-full ${isThinkingStreaming ? 'bg-violet-400 animate-ping' : 'bg-violet-400'}`} />
-                    思考过程 {isThinkingStreaming && <span className="font-normal text-violet-400/70">· 流式输出中…</span>}
-                  </span>
-                  <span className="text-[10px] text-violet-400/60">{showThinking ? '收起' : '展开'} {thinkingText ? `· ${thinkingText.length}字` : ''}</span>
-                </button>
-                {showThinking && (
-                  <div className="px-3 pb-3 pt-1">
-                    {thinkingText ? (
-                      <div className="text-[11px] leading-relaxed text-violet-100 whitespace-pre-wrap max-h-[120px] overflow-y-auto custom-scrollbar bg-black/20 rounded-xl p-2 border border-violet-500/10">
-                        {thinkingText}
-                        {isThinkingStreaming && <span className="inline-block w-1.5 h-3 bg-violet-400 ml-1 animate-pulse align-middle" />}
-                      </div>
-                    ) : (
-                      <div className="text-[11px] text-violet-300/70 flex items-center gap-1.5 py-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-ping" /> 导演正在分析指令与画布上下文…
-                      </div>
-                    )}
-                    {/* 工具调用时间线简要 */}
-                    {messages.filter(m=> m.toolCall).slice(-3).length>0 && (
-                      <div className="mt-2 space-y-1">
-                        {messages.filter(m=> m.toolCall).slice(-3).map(m=>(
-                          <div key={m.id} className="text-[10px] font-mono flex items-center gap-1.5 text-violet-300/70">
-                            <Cpu className="w-3 h-3" /> {m.toolCall?.toolName} <span className={m.toolCall?.status==='completed'?'text-emerald-400': m.toolCall?.status==='error'?'text-red-400':'text-amber-400'}>{m.toolCall?.status}</span>
-                          </div>
-                        ))}
+                    {/* 4. Suggested Directorial Action Chips */}
+                    {isAgent && m.suggestedActions && m.suggestedActions.length > 0 && (
+                      <div className="mt-3 pt-2.5 border-t border-border space-y-1.5">
+                        <div className="text-[10px] font-semibold [color:var(--color-text-muted)] flex items-center gap-1">
+                          <Lightbulb className="w-3 h-3 text-amber-400" /> 推荐下一步:
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {m.suggestedActions.map((act, i) => (
+                            <button
+                              key={i}
+                              onClick={() => handleSendMessage(act)}
+                              className="text-[10px] px-2.5 py-1 rounded-xl bg-surface hover:bg-brand hover:text-white border border-border text-[color:var(--color-text-secondary)] transition-all text-left shadow-xs flex items-center gap-1"
+                            >
+                              <span>⚡</span>
+                              <span>{act}</span>
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>
-                )}
-              </div>
-            )}
-            {isThinking && !thinkingText && !isThinkingStreaming && (
-              <div className="flex items-center space-x-2 text-gray-400 text-xs py-1 px-1">
-                <span className="w-2 h-2 rounded-full bg-brand-light animate-ping" />
-                <span className="text-[11px]">导演 Agent 正在思考与调用 MCP 工具...</span>
-              </div>
-            )}
+
+                  {/* Timestamp */}
+                  <span className="text-[9px] [color:var(--color-text-muted)] px-1">{m.time}</span>
+                </div>
+              );
+            })}
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Quick Action Preset Buttons */}
-          <div className="px-3 py-2 bg-surface-secondary/40 border-t border-border/50 flex space-x-1.5 overflow-x-auto text-[10px] whitespace-nowrap custom-scrollbar shrink-0">
+          {/* Quick Directorial Command Presets */}
+          <div className="px-3 py-2 bg-surface-secondary/40 border-t border-border flex space-x-1.5 overflow-x-auto text-[10px] whitespace-nowrap custom-scrollbar shrink-0">
             {[
-              '规划当前镜 3D 特写运镜',
+              '规划当前镜 3D 特写推镜',
               '重绘当前分镜画面 (ComfyUI)',
-              '为当前台词生成角色配音',
-              '导出剪映草稿工程',
+              '将台词情绪调整为激动',
+              '生成角色配音并对齐时长',
+              '一键导出剪映工程',
             ].map((chip) => (
               <button
                 key={chip}
                 onClick={() => handleSendMessage(chip)}
-                className="px-2.5 py-1 rounded-full bg-surface-tertiary border border-border hover:border-brand text-gray-300 hover:text-white transition-all"
+                className="px-2.5 py-1 rounded-full bg-surface border border-border hover:border-brand text-[color:var(--color-text-secondary)] hover:text-brand transition-all shadow-xs"
               >
                 {chip}
               </button>
             ))}
           </div>
 
-          {/* Input Bar — 多行自适应 */}
+          {/* Input Bar */}
           <div className="p-3 border-t border-border bg-surface flex items-end space-x-2 shrink-0">
             <textarea
               ref={inputRef}
               value={inputText}
               onChange={(e) => {
                 setInputText(e.target.value);
-                // auto-resize
                 const el = e.target as HTMLTextAreaElement;
                 el.style.height = 'auto';
-                el.style.height = Math.min(el.scrollHeight, 120) + 'px';
-              }}
-              onInput={(e)=>{
-                const el = e.target as HTMLTextAreaElement;
-                el.style.height = 'auto';
-                el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+                el.style.height = Math.min(el.scrollHeight, 100) + 'px';
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
@@ -733,53 +980,21 @@ export const AgentChatDrawer: React.FC = () => {
                   handleSendMessage();
                 }
               }}
-              placeholder="向导演 Agent 下达指令（Shift+Enter 换行，Enter 发送）... 示例：把镜头改成俯视推镜 / 帮我接入这个API：https://..."
+              placeholder="向导演 Agent 下达指令（Enter 发送，Shift+Enter 换行）..."
               rows={1}
-              className="flex-1 bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand resize-none overflow-y-auto min-h-[36px] max-h-[120px] leading-relaxed"
-              style={{height: 'auto'}}
+              className="flex-1 bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs [color:var(--color-text-main)] placeholder-gray-500 focus:outline-none focus:border-brand resize-none min-h-[36px] max-h-[100px] leading-relaxed custom-scrollbar"
             />
             <button
               onClick={() => handleSendMessage()}
               disabled={!inputText.trim() || isThinking}
-              className="p-2.5 rounded-xl bg-gradient-to-r from-brand to-brand-blue text-white disabled:opacity-40 hover:opacity-90 shadow-md shadow-brand/20 transition-all shrink-0 self-end"
+              className="p-2.5 rounded-xl bg-brand hover:bg-brand-light text-white disabled:opacity-40 shadow-md shadow-brand/20 transition-all shrink-0 self-end"
               title="发送指令 (Enter)"
             >
               <Send className="w-4 h-4" />
             </button>
           </div>
-          <div className="px-3 pb-1 text-[10px] text-gray-500 text-right">Shift+Enter 换行 · 支持多行粘贴长文档</div>
         </div>
       )}
-
-      {/* Floating Toggle Button (Fixed at Bottom-Right) */}
-      <div className="fixed bottom-5 right-5 z-50">
-        <button
-          onClick={() => {
-            if (!isOpen && position === null && typeof window !== 'undefined') {
-              const w = isExpanded ? 520 : 384;
-              const h = isExpanded ? 640 : 500;
-              setPosition({
-                x: Math.max(20, window.innerWidth - w - 24),
-                y: Math.max(20, window.innerHeight - h - 30),
-              });
-            }
-            setIsOpen(!isOpen);
-          }}
-          className="flex items-center space-x-2.5 px-4 py-2.5 rounded-full bg-gradient-to-r from-brand to-brand-blue hover:from-brand-light hover:to-brand text-white font-bold text-xs shadow-2xl shadow-brand/50 hover:scale-105 transition-all border border-white/20"
-          title={isOpen ? '收起导演 Agent' : '展开 AI 漫剧导演 Agent 悬浮窗 (支持自由拖拽)'}
-        >
-          <div className="relative">
-            <Sparkles className="w-4 h-4 text-white" />
-            <span
-              className={`absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full ${
-                wsConnected ? 'bg-accent-green' : 'bg-amber-400'
-              }`}
-            />
-          </div>
-          <span>导演 Agent</span>
-          {isOpen ? <ChevronDown className="w-3.5 h-3.5 ml-0.5" /> : null}
-        </button>
-      </div>
     </>
   );
 };

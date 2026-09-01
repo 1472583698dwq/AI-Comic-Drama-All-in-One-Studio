@@ -123,6 +123,21 @@ export interface StoryboardShot {
   dynamic_inputs?: Record<string,any>;
   workflow_id?: string;
   history?: Array<{ image_url?: string; video_url?: string; audio_url?: string; ts: string; provider?: string }>;
+  // 2026 片场三大制作模式 (漫画制作 | 漫剧直出 | 图生视频结合)
+  production_mode?: 'comic' | 'motion_comic' | 'image_to_video';
+  candidates?: string[]; // 1 镜多抽候选列表 (如 4 抽)
+  selected_candidate_index?: number;
+  character_ids?: string[]; // 绑定的出场角色资产 ID
+  character_weights?: Record<string, number>; // 角色参考图/IP-Adapter 权重 (0.0~1.0)
+  scene_asset_id?: string; // 绑定的场景素材 ID
+  scene_name?: string; // 场景名称
+  scene_ref_image?: string; // 场景参考底图 URL
+  scene_prompt?: string; // 场景环境与光影提示词
+  prop_asset_ids?: string[]; // 绑定的道具/特效素材 ID 列表
+  prop_prompts?: string; // 道具与法宝描述词
+  audio_duration?: number; // 实际 TTS 配音真实时长 (秒)
+  render_status?: 'idle' | 'queued' | 'rendering' | 'done' | 'error';
+  render_error?: string;
 }
 
 export interface Scene {

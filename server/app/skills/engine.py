@@ -39,22 +39,34 @@ class SkillEngine:
         self.reload_skills()
 
     def reload_skills(self):
-        """扫描并加载 skills/ 目录下所有 SKILL.md 文件"""
+        """扫描并加载系统所有有效路径下的真实 SKILL.md 规范文件"""
         self.skills.clear()
-        if not os.path.exists(self.skills_dir):
-            os.makedirs(self.skills_dir, exist_ok=True)
-            return
 
-        for root, _, files in os.walk(self.skills_dir):
-            for f in files:
-                if f == "SKILL.md" or f.endswith(".skill.md"):
-                    file_path = os.path.join(root, f)
-                    try:
-                        skill = self._parse_skill_file(file_path)
-                        if skill:
-                            self.skills[skill.name] = skill
-                    except Exception as e:
-                        print(f"[SkillEngine] Error parsing skill file {file_path}: {e}")
+        search_dirs = [
+            self.skills_dir,
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../skills")),
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.agent/skills")),
+            os.path.expanduser("~/.gemini/antigravity/builtin/skills"),
+            os.path.expanduser("~/.gemini/antigravity/skills"),
+        ]
+
+        visited_paths = set()
+        for s_dir in search_dirs:
+            if not s_dir or not os.path.exists(s_dir):
+                continue
+            for root, _, files in os.walk(s_dir):
+                for f in files:
+                    if f == "SKILL.md" or f.endswith(".skill.md"):
+                        file_path = os.path.normpath(os.path.join(root, f))
+                        if file_path in visited_paths:
+                            continue
+                        visited_paths.add(file_path)
+                        try:
+                            skill = self._parse_skill_file(file_path)
+                            if skill:
+                                self.skills[skill.name] = skill
+                        except Exception as e:
+                            print(f"[SkillEngine] Error parsing skill file {file_path}: {e}")
 
     def _parse_skill_file(self, file_path: str) -> Optional[SkillDefinition]:
         with open(file_path, "r", encoding="utf-8") as f:
@@ -72,7 +84,7 @@ class SkillEngine:
             name=meta.get("name", os.path.basename(os.path.dirname(file_path))),
             description=meta.get("description", ""),
             version=meta.get("version", "1.0.0"),
-            author=meta.get("author", "Community"),
+            author=meta.get("author", "System"),
             category=meta.get("category", "general"),
             tools=meta.get("tools", []),
             instructions=body_str.strip(),
@@ -92,7 +104,7 @@ class SkillEngine:
         user_prompt: str = ""
     ) -> SkillExecutionResult:
         """
-        执行指定 Skill，自动串联其声明的 MCP 工具链与系统能力
+        执行指定真实系统 Skill，自动调度其声明的 MCP 工具链与 SKILL.md 实际专业指引
         """
         start_time = time.time()
         skill = self.get_skill(skill_name)
@@ -101,15 +113,14 @@ class SkillEngine:
                 skill_name=skill_name,
                 status="error",
                 execution_time_ms=0,
-                result_message=f"Skill '{skill_name}' not found"
+                result_message=f"未找到系统技能 '{skill_name}'，请确认该技能已存在于系统技能目录中"
             )
 
         tool_calls_trace = []
         modified_data = context.copy() if context else {}
 
-        # 1. 针对具体 Skill 自动调用其绑定的 MCP Tools
+        # 1. 特定工具链编排技能
         if skill_name == "novel-climax-enhancer":
-            # 步骤 A: 3D 导演台升级为战斗大特写与震颤运镜
             res_3d = await mcp_registry.execute_tool("director_3d_stage_plan", {
                 "framing": "extreme_close_up",
                 "motion": "shake",
@@ -121,7 +132,6 @@ class SkillEngine:
                 "result": res_3d.result
             })
 
-            # 步骤 B: 调用 MiniMax Speech-01 生成怒吼爆发配音
             shot_text = context.get("dialogue", "这一世，我命由我不由天！")
             res_tts = await mcp_registry.execute_tool("generate_minimax_voice", {
                 "text": shot_text,
@@ -142,13 +152,9 @@ class SkillEngine:
                 "emotion": "intense",
                 "subtitle_text": f"【高潮】{shot_text}"
             })
-            if res_tts.status == "success":
-                msg = "已执行【网文爽点重构技能】：机位已锁定大特写与战斗震颤，配音已生成为 MiniMax 爆发怒吼！"
-            else:
-                msg = f"已执行【网文爽点重构技能】：机位与情绪标记已更新；配音失败: {res_tts.error}"
+            msg = "已执行【网文爽点重构技能】：机位已锁定大特写与战斗震颤，配音已生成为 MiniMax 爆发怒吼！" if res_tts.status == "success" else f"已执行【网文爽点重构技能】：机位与情绪标记已更新；配音失败: {res_tts.error}"
 
         elif skill_name == "character-3view-consistency":
-            # 调用 ComfyUI 角色三视图生图（真实出图）
             char_name = context.get("character_name", "主角")
             char_desc = context.get("visual_prompt", "1person, detailed anime character design")
             res_img = await mcp_registry.execute_tool("comfyui_render_node", {
@@ -172,7 +178,6 @@ class SkillEngine:
                 msg = f"【角色三视图一致性技能】执行失败: {res_img.error}"
 
         elif skill_name == "jianyin-auto-assembly":
-            # 调用 pyJianYingDraft 官方草稿导出（需要完整项目数据）
             project_payload = context.get("project")
             if not project_payload:
                 return SkillExecutionResult(
@@ -194,90 +199,119 @@ class SkillEngine:
             else:
                 msg = f"【剪映多轨自动精修技能】执行失败: {res_export.error}"
 
-        elif skill.category == "prompt_optimization":
-            # 通用提示词润色：调用 LLM 对 user_prompt / original_prompt 进行增强
-            original = (context.get("original_prompt") or context.get("prompt") or user_prompt or context.get("text") or "").strip()
-            if not original:
-                original = user_prompt.strip() if user_prompt else ""
-            if not original:
-                return SkillExecutionResult(
-                    skill_name=skill_name,
-                    status="error",
-                    execution_time_ms=int((time.time() - start_time) * 1000),
-                    tool_calls=tool_calls_trace,
-                    result_message="提示词为空，无法润色"
-                )
-            # 根据 skill 名称选择润色指令
-            polish_instructions = {
-                "prompt-cinematic-boost": "将以下画面描述润色为电影级英文提示词，追加 cinematic lighting, volumetric lighting, ultra detailed, 8k, masterpiece, depth of field, film grain, rule of thirds 等标签，保持原意，仅返回润色后的英文提示词：",
-                "prompt-detail-enhancer": "将以下提示词补充丰富的细节（服饰、材质、环境、天气、光源），追加 intricate details, ultra sharp, highly detailed, 4k, octane render 等标签，仅返回润色后的英文提示词：",
-                "prompt-anime-optimizer": "将以下描述转换为适配二次元/国漫模型的提示词，自动追加 anime style / guofeng, xianxia 等风格标签与负向 low quality, blurry, deformed，仅返回润色后的提示词：",
-                "dialogue-emotion-polish": "将以下对白台词润色得更具情绪张力，调整标点与语气词，并判断最合适的配音情绪（neutral/intense/sorrow/excited/whispering/fearful），以 JSON 返回 {\"polished_text\": \"...\", \"suggested_emotion\": \"...\"}：",
-                "prompt-master-optimizer": "智能判断以下文本为画面描述或对白，若为画面则按电影感+细节增强，若为台词则按情绪润色，仅返回润色后的文本（若为台词可附情绪）：",
-            }
-            instruction = polish_instructions.get(skill_name) or f"请润色以下提示词，参考技能说明：{skill.instructions[:500]} 仅返回润色后的文本："
+        else:
+            # 2. 系统通用与提示词技能：严格根据实际 SKILL.md instructions 与用户具体要求执行
+            original = (context.get("original_prompt") or context.get("prompt") or context.get("text") or "").strip()
+            if not original and user_prompt:
+                original = user_prompt.strip()
+
+            user_req = (
+                context.get("user_instruction")
+                or context.get("user_requirement")
+                or context.get("requirement")
+                or (user_prompt if user_prompt != original else "")
+                or ""
+            ).strip()
+
+            context_type = context.get("context_type", "prompt")
+            is_dialogue = context_type == "dialogue" or skill_name == "dialogue-emotion-polish"
+
             try:
                 from app.pipelines.llm_service import llm_service
                 import asyncio as _asyncio
-                # 优先使用 chat_completion 直接润色（15s 超时，超时则 fallback）
-                llm_prompt = f"{instruction}\n\n原文：{original}\n\n润色后："
-                # 使用技能自身的 instructions 作为系统提示
-                system_prompt = f"你是专业的提示词润色助手。{skill.instructions[:800]}"
-                try:
-                    polished = await _asyncio.wait_for(
-                        llm_service.chat_completion(
-                            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": llm_prompt}],
-                            temperature=0.7,
-                        ),
-                        timeout=15.0,
-                    )
-                except _asyncio.TimeoutError:
-                    raise RuntimeError("LLM 润色超时（15s），已回退到本地增强")
-                # 清理思维标签与多余引号
                 from app.pipelines.llm_service import strip_think_tags
-                polished = strip_think_tags(polished).strip().strip('"').strip("'").strip()
-                # dialogue 特殊处理：尝试解析 JSON
-                if skill_name == "dialogue-emotion-polish":
-                    import json as _js
-                    try:
-                        # 尝试提取 JSON
-                        import re as _re
-                        m = _re.search(r"\{[^}]*polished_text[^}]*\}", polished, re.DOTALL)
-                        if m:
-                            j = _js.loads(m.group(0))
-                            polished_text = j.get("polished_text") or j.get("text") or polished
-                            emotion = j.get("suggested_emotion") or "neutral"
-                            modified_data.update({"polished_prompt": polished_text.strip(), "polished_text": polished_text.strip(), "suggested_emotion": emotion, "original_prompt": original})
-                            msg = f"已通过【{skill.description}】润色完成，建议情绪：{emotion}"
-                        else:
-                            modified_data.update({"polished_prompt": polished, "polished_text": polished, "original_prompt": original})
-                            msg = f"已通过【{skill.description}】润色完成"
-                    except Exception:
-                        modified_data.update({"polished_prompt": polished, "polished_text": polished, "original_prompt": original})
-                        msg = f"已通过【{skill.description}】润色完成"
-                else:
-                    # 画面提示词：去除可能的中文解释，仅保留英文提示词主体
-                    # 若 LLM 返回了中文解释，尝试提取英文部分
-                    if any("\u4e00" <= c <= "\u9fff" for c in polished[:20]):
-                        # 包含中文，前 20 字有中文，可能是解释，尝试取最后一行英文
-                        lines = [l.strip() for l in polished.split("\n") if l.strip()]
-                        # 找最长的英文行
-                        eng_lines = [l for l in lines if len([c for c in l if "\u4e00" <= c <= "\u9fff"]) < len(l) * 0.3]
-                        if eng_lines:
-                            polished = max(eng_lines, key=len)
-                    modified_data.update({"polished_prompt": polished, "original_prompt": original})
-                    msg = f"已通过【{skill.description}】润色完成"
-                # 记录工具调用
-                tool_calls_trace.append({"tool": "llm_polish", "status": "success", "result": {"polished": polished}})
-            except Exception as e:
-                # LLM 失败回退：简单追加后缀
-                fallback = original + ", cinematic lighting, ultra detailed, masterpiece" if "prompt" in skill_name else original + "！"
-                modified_data.update({"polished_prompt": fallback, "original_prompt": original})
-                tool_calls_trace.append({"tool": "llm_polish", "status": "error", "result": str(e)})
-                msg = f"润色服务暂不可用，已返回增强后缀版本：{str(e)[:80]}"
 
-        else:
-            msg = f"Skill '{skill_name}' 指令已载入 Agent 运行时并完成执行。"
+                # 直接载入该系统技能的真实 SKILL.md 指引
+                system_prompt = (
+                    f"你是执行系统技能【{skill.name}】的专业 AI 引擎。\n"
+                    f"【系统技能定义 (SKILL.md)】\n"
+                    f"技能描述: {skill.description}\n"
+                    f"技能专业规范与执行指导:\n{skill.instructions if skill.instructions else '根据技能目标进行高水准的深度重构与专业优化。'}\n\n"
+                    f"【核心原则】：\n"
+                    f"1. 必须完全贯彻用户的具体定制要求（如增减元素、改变天气/光影/动作/服装/镜头/情绪等）。\n"
+                    f"2. 严格遵循本系统技能的专业规范与质量标准。\n"
+                    f"{'3. 请以 JSON 格式输出: {\"polished_text\": \"...\", \"suggested_emotion\": \"neutral|intense|sorrow|excited|whispering\"}' if is_dialogue else '3. 直接输出最终生成的专业提示词/文本，不要包含多余寒暄或解释。'}"
+                )
+
+                user_msg = (
+                    f"【输入文本/原始描述】\n{original if original else '（用户未提供原描述，请根据定制要求直接创建）'}\n\n"
+                    f"【用户的具体定制要求】\n{user_req if user_req else '（无特殊附加要求，请严格按照该技能规范进行全要素专业级精修）'}\n\n"
+                    f"请输出优化结果："
+                )
+
+                polished_raw = await _asyncio.wait_for(
+                    llm_service.chat_completion(
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_msg}
+                        ],
+                        temperature=0.7,
+                    ),
+                    timeout=18.0,
+                )
+
+                cleaned = strip_think_tags(polished_raw).strip()
+                if cleaned.startswith("```json"):
+                    cleaned = cleaned[7:].strip()
+                elif cleaned.startswith("```"):
+                    cleaned = cleaned[3:].strip()
+                if cleaned.endswith("```"):
+                    cleaned = cleaned[:-3].strip()
+
+                if is_dialogue:
+                    import json as _js
+                    import re as _re
+                    suggested_emotion = "neutral"
+                    final_text = original
+                    try:
+                        m = _re.search(r"\{[\s\S]*\"polished_text\"[\s\S]*\}", cleaned)
+                        if m:
+                            parsed = _js.loads(m.group(0))
+                            final_text = parsed.get("polished_text") or cleaned
+                            suggested_emotion = parsed.get("suggested_emotion") or "neutral"
+                        else:
+                            final_text = cleaned.strip('"').strip("'")
+                    except Exception:
+                        final_text = cleaned.strip('"').strip("'")
+
+                    modified_data.update({
+                        "polished_prompt": final_text,
+                        "polished_text": final_text,
+                        "suggested_emotion": suggested_emotion,
+                        "original_prompt": original,
+                        "user_instruction": user_req
+                    })
+                    msg = f"已根据您的要求通过系统技能【{skill.name}】润色完成（推荐情绪：{suggested_emotion}）"
+                else:
+                    final_text = cleaned.strip('"').strip("'").strip()
+                    for prefix in ["润色结果：", "润色后：", "优化后：", "Prompt:", "提示词：", "输出："]:
+                        if final_text.startswith(prefix):
+                            final_text = final_text[len(prefix):].strip()
+
+                    modified_data.update({
+                        "polished_prompt": final_text,
+                        "polished_text": final_text,
+                        "original_prompt": original,
+                        "user_instruction": user_req
+                    })
+                    msg = f"已根据您的要求通过系统技能【{skill.name}】完成优化！"
+
+                tool_calls_trace.append({
+                    "tool": "system_skill_engine",
+                    "status": "success",
+                    "result": {"skill": skill.name, "user_requirement": user_req, "output": final_text}
+                })
+
+            except Exception as e:
+                fallback = f"{original} ({user_req})" if user_req else original
+                modified_data.update({
+                    "polished_prompt": fallback,
+                    "polished_text": fallback,
+                    "original_prompt": original,
+                    "user_instruction": user_req
+                })
+                tool_calls_trace.append({"tool": "system_skill_engine", "status": "fallback", "result": str(e)})
+                msg = f"系统技能执行异常（回退模式: {str(e)[:60]}）"
 
         elapsed = int((time.time() - start_time) * 1000)
         return SkillExecutionResult(
@@ -290,3 +324,4 @@ class SkillEngine:
         )
 
 skill_engine = SkillEngine()
+

@@ -43,29 +43,43 @@ def topo_sort(nodes: List[Dict[str, Any]], edges: List[Dict[str, Any]]) -> List[
     return order
 
 
+def _extract_url_from_src(src_res: Optional[Dict[str, Any]], src_data: Dict[str, Any], keys: tuple) -> Optional[str]:
+    """从上游 result/data 中按候选考提取首个非空 URL"""
+    if src_res:
+        for k in keys:
+            v = src_res.get(k)
+            if v and isinstance(v, str) and v.strip():
+                return v.strip()
+    for k in keys:
+        v = src_data.get(k)
+        if v and isinstance(v, str) and v.strip():
+            return v.strip()
+    # 兜底：data.image / data.url
+    for k in ("image", "url", "file_url", "thumb_url"):
+        v = src_data.get(k)
+        if v and isinstance(v, str) and v.strip():
+            return v.strip()
+    return None
+
+
 def collect_upstream_data(node_id: str, nodes: List[Dict], edges: List[Dict], results: Dict[str, Any]) -> Dict[str, Any]:
-    """收集上游节点已产生的可注入数据（支持多模态句柄与 Provider 连线）"""
+    """收集上游节点已产生的可注入数据（全量 Provider 系统复用：动态句柄 + 多模态聚合）"""
     incoming = [e for e in edges if e.get("target")==node_id]
     data: Dict[str, Any] = {}
-    # 记录上游节点类型，便于 Provider 识别
     id_to_node = {n["id"]: n for n in nodes}
     for e in incoming:
         src_id = e.get("source")
-        tgt_handle = e.get("targetHandle") or e.get("target_handle") or ""
-        src_handle = e.get("sourceHandle") or e.get("source_handle") or ""
+        tgt_handle = (e.get("targetHandle") or e.get("target_handle") or "").strip()
         src_node = id_to_node.get(src_id, {})
         src_type = src_node.get("type", "")
         src_res = results.get(src_id)
-        # 兼容部分节点未产生 result 但 data 中有 provider 配置（provider 节点）
         src_data = src_node.get("data", {}) if isinstance(src_node.get("data"), dict) else {}
-        # Provider 节点特殊处理：透传 provider_id
+        # Provider 节点透传 provider_id / model
         if src_type in ("provider-image", "provider-video", "provider-audio", "provider", "provider-llm"):
             prov_id = (src_res.get("provider_id") if src_res else None) or src_data.get("provider_id") or src_data.get("providerId") or src_data.get("id") or src_id
-            # 同时尝试从 node data 的 definition 提取
             if not prov_id and isinstance(src_data.get("definition"), dict):
                 prov_id = src_data["definition"].get("id")
             if prov_id:
-                # 按类型分发
                 if src_type == "provider-image" or (src_type == "provider" and (src_data.get("kind") or (src_res.get("kind") if src_res else None)) == "image"):
                     data.setdefault("provider", prov_id)
                     data.setdefault("provider_image", prov_id)
@@ -78,7 +92,6 @@ def collect_upstream_data(node_id: str, nodes: List[Dict], edges: List[Dict], re
                     data.setdefault("provider_audio", prov_id)
                     data.setdefault("audio_provider", prov_id)
                 else:
-                    # 通用 provider，按 kind
                     kind = src_data.get("kind") or (src_res.get("kind") if src_res else None) or "image"
                     if kind == "image":
                         data.setdefault("provider", prov_id)
@@ -90,52 +103,83 @@ def collect_upstream_data(node_id: str, nodes: List[Dict], edges: List[Dict], re
                         data.setdefault("audio_provider", prov_id)
                     else:
                         data.setdefault("provider", prov_id)
-                # 透传 model
                 model = src_data.get("model") or src_data.get("default_model") or (src_res.get("model") if src_res else None) or (src_res.get("default_model") if src_res else None)
                 if model:
                     data.setdefault("model", model)
                 continue
-        # 多模态句柄精准映射（P0 修复：支持 reference_images 等多连）
-        if tgt_handle in ("reference_images", "images", "image_list"):
-            url = (src_res.get("image_url") if src_res else None) or (src_res.get("result_url") if src_res else None) or src_res.get("file_url") if src_res else None
-            if not url:
-                url = (src_node.get("data", {}) or {}).get("image") or (src_node.get("data", {}) or {}).get("url")
+        # 若无显式 targetHandle，按源类型与目标节点类型推断
+        if not tgt_handle:
+            # 启发式：image 源 -> 若目标为 video 首帧优先 first_frame，否则 reference
+            if src_type in ("image", "shot-card", "comfy-workflow", "load-image", "load-image-batch"):
+                tgt_handle = "reference_images"
+                # 若目标节点有 first_frame 且尚未注入，优先作为首帧
+                tgt_node = id_to_node.get(node_id, {})
+                if tgt_node.get("type") == "video" and "first_frame" not in data:
+                    # 允许首个 image 作为首帧，后续作为参考
+                    tgt_handle = "first_frame"
+            elif src_type in ("prompt", "text-prompt", "brief", "script-split"):
+                tgt_handle = "prompt"
+            elif src_type in ("video", "video-node"):
+                tgt_handle = "video"
+            elif src_type in ("tts", "audio", "voice"):
+                tgt_handle = "audio"
+        # 按句柄精准分发
+        if tgt_handle in ("reference_images", "images", "image_list", "reference"):
+            url = _extract_url_from_src(src_res, src_data, ("image_url", "result_url", "file_url", "thumb_url"))
             if url:
                 data.setdefault("reference_images", [])
-                if isinstance(data["reference_images"], list) and url not in data["reference_images"]:
+                if url not in data["reference_images"]:
                     data["reference_images"].append(url)
-                # 同时兼容单图
                 data.setdefault("image_url", url)
+                # 兼容单 reference 字段
+                data.setdefault("reference", url)
             continue
-        if tgt_handle in ("reference_audios", "audios"):
-            url = (src_res.get("audio_url") if src_res else None) or (src_res.get("file_url") if src_res else None)
+        if tgt_handle in ("first_frame", "first_frame_url"):
+            url = _extract_url_from_src(src_res, src_data, ("image_url", "result_url", "file_url"))
+            if url and "first_frame" not in data:
+                data["first_frame"] = url
+                data["first_frame_url"] = url
+                data.setdefault("image_url", url)
+                # 同时聚合到参考集以兼容 r2v 兜底
+                data.setdefault("reference_images", [])
+                if url not in data["reference_images"]:
+                    data["reference_images"].append(url)
+            continue
+        if tgt_handle in ("last_frame", "last_frame_url"):
+            url = _extract_url_from_src(src_res, src_data, ("image_url", "result_url", "file_url"))
+            if url and "last_frame" not in data:
+                data["last_frame"] = url
+                data["last_frame_url"] = url
+            continue
+        if tgt_handle in ("reference_audios", "audios", "ref_audio", "ref_audio_path"):
+            url = _extract_url_from_src(src_res, src_data, ("audio_url", "file_url"))
             if url:
                 data.setdefault("reference_audios", [])
                 if url not in data["reference_audios"]:
                     data["reference_audios"].append(url)
+                data.setdefault("audio_url", url)
+                data.setdefault("ref_audio", url)
             continue
         if tgt_handle in ("reference_videos", "videos"):
-            url = (src_res.get("video_url") if src_res else None)
+            url = _extract_url_from_src(src_res, src_data, ("video_url",))
             if url:
                 data.setdefault("reference_videos", [])
                 if url not in data["reference_videos"]:
                     data["reference_videos"].append(url)
+                data.setdefault("video_url", url)
             continue
-        if tgt_handle in ("first_frame", "image"):
-            url = (src_res.get("image_url") if src_res else None) or (src_res.get("result_url") if src_res else None) or (src_res.get("file_url") if src_res else None)
-            if url and "first_frame" not in data:
-                data["first_frame"] = url
-                data.setdefault("image_url", url)
+        if tgt_handle in ("prompt", "text", "brief", "image_prompt", "video_prompt"):
+            txt = None
+            if src_res:
+                txt = src_res.get("prompt") or src_res.get("text") or src_res.get("brief") or src_res.get("image_prompt") or src_res.get("video_prompt")
+            if not txt:
+                txt = src_data.get("prompt") or src_data.get("text") or src_data.get("brief") or src_data.get("image_prompt")
+            if txt and isinstance(txt, str) and txt.strip() and "prompt" not in data:
+                data["prompt"] = txt.strip()
+                data["text"] = txt.strip()
             continue
-        if tgt_handle in ("prompt", "text", "brief", "image_prompt"):
-            txt = (src_res.get("prompt") if src_res else None) or (src_res.get("text") if src_res else None) or (src_res.get("brief") if src_res else None) or (src_res.get("image_prompt") if src_res else None)
-            if txt and "prompt" not in data:
-                data["prompt"] = txt
-            continue
-        if tgt_handle in ("reference", "ref", "reference_image"):
-            url = (src_res.get("image_url") if src_res else None) or (src_res.get("result_url") if src_res else None) or (src_res.get("file_url") if src_res else None)
-            if not url:
-                url = (src_node.get("data", {}) or {}).get("reference") or (src_node.get("data", {}) or {}).get("image") or (src_node.get("data", {}) or {}).get("url")
+        if tgt_handle in ("ref", "reference_image"):
+            url = _extract_url_from_src(src_res, src_data, ("image_url", "result_url", "file_url"))
             if url:
                 data["reference"] = url
                 data.setdefault("image_url", url)
@@ -143,18 +187,16 @@ def collect_upstream_data(node_id: str, nodes: List[Dict], edges: List[Dict], re
                 if url not in data["reference_images"]:
                     data["reference_images"].append(url)
             continue
-        # export 聚合句柄（video/audio）
         if tgt_handle in ("video","audio"):
-            url = None
             if tgt_handle=="video":
-                url = (src_res.get("video_url") if src_res else None)
+                url = src_res.get("video_url") if src_res else None
                 if url:
                     data.setdefault("videos", [])
                     if url not in data["videos"]:
                         data["videos"].append(url)
                     data.setdefault("video_url", url)
             else:
-                url = (src_res.get("audio_url") if src_res else None)
+                url = src_res.get("audio_url") if src_res else None
                 if url:
                     data.setdefault("audios", [])
                     if url not in data["audios"]:
@@ -162,31 +204,61 @@ def collect_upstream_data(node_id: str, nodes: List[Dict], edges: List[Dict], re
                     data.setdefault("audio_url", url)
             if url:
                 continue
-        if tgt_handle == "provider" or tgt_handle == "provider_video" or tgt_handle == "provider_image" or tgt_handle == "provider_audio":
-            # 已在上方 Provider 透传处理，此处兜底
+        if tgt_handle in ("provider", "provider_video", "provider_image", "provider_audio"):
             pass
-
         if not src_res:
             continue
-        # 透传 image_url / prompt / audio_url / video_url / asset
+        # 兜底透传：仅当无显式句柄命中时，按白名单透传已产生的多模态结果
         for k in ("image_url","file_url","thumb_url","prompt","image_prompt","brief","audio_url","video_url","minimax_camera_prompt","provider","provider_id","model"):
-            if src_res.get(k):
-                if k not in data:
-                    data[k]=src_res[k]
-        # 若上游显式返回 provider/provider_id，透传
+            if src_res.get(k) and k not in data:
+                data[k]=src_res[k]
         if src_res.get("provider_id"):
             data.setdefault("provider", src_res["provider_id"])
-        # 若上游是 asset，直接透传 visual_prompt
         if src_res.get("visual_prompt"):
             data.setdefault("visual_prompt", src_res["visual_prompt"])
         if src_res.get("result_url"):
             data.setdefault("image_url", src_res["result_url"])
-        # Provider result 透传（provider-image 节点产生的）
-        if src_res.get("provider_id"):
-            data.setdefault("provider", src_res["provider_id"])
-    # 兼容：若上游未按句柄但有多图，兜底聚合
-    # 若 data 中已有单图但 reference_images 为空，且存在多个 image 上游，尝试收集
     return data
+
+
+def _ensure_provider_registered(provider_id: Optional[str], kind: str = "image"):
+    if not provider_id:
+        return
+    from app.providers.image.registry import image_registry
+    from app.providers.video.registry import video_registry
+    from app.providers.audio.registry import audio_registry
+    # 兼容：kind 为 llm 或未知时按 provider_id 探测所有注册表
+    registries = []
+    if kind == "image":
+        registries = [image_registry]
+    elif kind == "video":
+        registries = [video_registry]
+    elif kind == "audio":
+        registries = [audio_registry]
+    else:
+        registries = [image_registry, video_registry, audio_registry]
+    # 已在任一表即视为已注册
+    for reg in registries:
+        if provider_id in reg._providers:
+            return
+    # 未命中则尝试从持久化加载并按 definition.kind 精确注册
+    try:
+        from app.providers.custom.manager import custom_provider_manager
+        from app.providers.init_providers import register_single_custom_provider
+        defn = custom_provider_manager.get_definition(provider_id)
+        if defn:
+            register_single_custom_provider(defn)
+            # 二次校验：若 kind 与 defn.kind 不一致，仍保证注册成功
+            return
+        # 兜底：若未找到定义但 provider_id 为内置，尝试全量初始化
+        if provider_id in ("comfyui", "siliconflow", "dashscope", "openai_compat", "comfyui_video", "minimax_video", "minimax", "elevenlabs", "cosyvoice", "gpt_sovits"):
+            from app.providers.init_providers import init_all_providers
+            try:
+                init_all_providers()
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"[CanvasEngine] Failed to auto-register dynamic provider {provider_id} (kind={kind}): {e}")
 
 
 async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_id: Optional[str]=None) -> Dict[str, Any]:
@@ -198,12 +270,53 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
     merged["_upstream"] = upstream
     start = time.time()
     try:
-        # 新 6 核心：prompt 直通
+        # 新 6 核心：prompt 智能体能力分发
         if ntype == "prompt":
             txt = data.get("prompt") or data.get("text") or upstream.get("prompt") or upstream.get("text") or ""
-            # 若上游已有 prompt 且当前为空，则透传上游
             if not txt.strip() and upstream.get("prompt"):
                 txt = upstream.get("prompt")
+            skill_id = data.get("skill_id") or merged.get("skill_id")
+            if skill_id == "script_generation" and txt.strip():
+                try:
+                    from app.pipelines.script_agent import script_agent
+                    style = data.get("style_preset") or merged.get("style_preset") or "donghua_xianxia"
+                    ratio = data.get("aspect_ratio") or merged.get("aspect_ratio") or "9:16"
+                    proj = await script_agent.parse_novel_to_project(txt, style, ratio)
+                    script_lines = []
+                    for s in proj.scenes:
+                        script_lines.append(f"【场景 {s.scene_index}】")
+                        for sh in s.shots:
+                            script_lines.append(f"镜头 {sh.shot_index}: [{sh.camera_framing}] {sh.action_desc}\n台词: {sh.dialogue or '（无对白）'}")
+                    script_text = "\n\n".join(script_lines)
+                    return {"status": "success", "prompt": script_text, "text": script_text, "script_data": proj.model_dump(), "elapsed_ms": int((time.time()-start)*1000)}
+                except Exception as e:
+                    print(f"[Canvas] script_generation failed: {e}")
+            elif skill_id == "proposal_generation" and txt.strip():
+                try:
+                    from app.pipelines.llm_service import llm_service
+                    res = await llm_service.chat_completion(
+                        messages=[
+                            {"role": "system", "content": "你是一位金牌影视与漫剧总策划。根据用户输入的主题或题材，生成一份高吸引力的策划案，包括世界观、主角人设、核心矛盾与前三集爆点大纲。"},
+                            {"role": "user", "content": txt}
+                        ]
+                    )
+                    content = res.get("content", txt)
+                    return {"status": "success", "prompt": content, "text": content, "elapsed_ms": int((time.time()-start)*1000)}
+                except Exception as e:
+                    print(f"[Canvas] proposal_generation failed: {e}")
+            elif skill_id == "prompt_expansion" and txt.strip():
+                try:
+                    from app.pipelines.llm_service import llm_service
+                    res = await llm_service.chat_completion(
+                        messages=[
+                            {"role": "system", "content": "你是一位电影级视觉提示词工程师。请将用户的简要描述扩写为细节丰富、电影质感强烈的专业提示词（包含景别、光影、构图、色温与胶片颗粒感）。直接输出提示词。"},
+                            {"role": "user", "content": txt}
+                        ]
+                    )
+                    content = res.get("content", txt)
+                    return {"status": "success", "prompt": content, "text": content, "elapsed_ms": int((time.time()-start)*1000)}
+                except Exception as e:
+                    print(f"[Canvas] prompt_expansion failed: {e}")
             return {"status":"success","prompt": txt, "text": txt, "elapsed_ms": int((time.time()-start)*1000)}
         if ntype == "export":
             # 聚合上游视频/音频/图片，透传即可，真实导出由前端触发 saveProjectContent/ exportJianYing
@@ -309,43 +422,101 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
             prompt = merged.get("image_prompt") or merged.get("prompt") or merged.get("brief") or ""
             if not prompt.strip():
                 return {"status":"error","error":"提示词为空"}
-            # 若上游有 visual_prompt（角色/资产），拼接增强一致性
             if upstream.get("visual_prompt") and upstream["visual_prompt"] not in prompt:
                 prompt = f"{prompt}, {upstream['visual_prompt']}"
             from app.providers.image.registry import image_registry
             from app.providers.image.base import ImageGenerateRequest
-            prov = merged.get("provider") or merged.get("provider_image") or upstream.get("provider") or upstream.get("provider_image") or data.get("provider") or data.get("provider_id")
-            model = merged.get("model") or data.get("model")
-            # 新极简节点：reference / reference_image 注入到 dynamic_inputs
-            dyn = merged.get("dynamic_inputs")
-            if not dyn:
-                ref = merged.get("reference") or merged.get("reference_image") or upstream.get("reference") or upstream.get("image_url") or upstream.get("reference_images")
-                if ref:
-                    if isinstance(ref, list):
-                        dyn = {"reference_images": ref}
-                    else:
-                        dyn = {"reference_images": [ref]}
-                # 兼容 first_frame
-                ff = merged.get("first_frame") or upstream.get("first_frame")
-                if ff and isinstance(ff, str):
-                    dyn = dyn or {}
-                    dyn.setdefault("reference_images", [])
-                    if ff not in dyn["reference_images"]:
-                        dyn["reference_images"].append(ff)
+            prov = merged.get("provider_id") or merged.get("provider") or merged.get("provider_image") or upstream.get("provider_id") or upstream.get("provider") or upstream.get("provider_image") or data.get("provider_id") or data.get("provider")
+            model = merged.get("model") or data.get("model") or merged.get("default_model")
+            dyn = dict(merged.get("dynamic_inputs") or {})
+            ref_sources = []
+            for k in ("reference_images", "reference", "reference_image", "first_frame", "first_frame_url"):
+                v = merged.get(k) or upstream.get(k)
+                if isinstance(v, list):
+                    ref_sources.extend([x for x in v if isinstance(x, str) and x.strip()])
+                elif isinstance(v, str) and v.strip():
+                    ref_sources.append(v.strip())
+            seen = set()
+            uniq_refs = []
+            for u in ref_sources:
+                if u not in seen:
+                    seen.add(u); uniq_refs.append(u)
+            if uniq_refs:
+                existing = dyn.get("reference_images") or []
+                if isinstance(existing, str):
+                    existing = [existing]
+                merged_refs = []
+                seen2 = set()
+                for u in list(existing) + uniq_refs:
+                    if isinstance(u, str) and u.strip() and u not in seen2:
+                        seen2.add(u); merged_refs.append(u)
+                dyn["reference_images"] = merged_refs
+            for k in ("last_frame", "last_frame_url"):
+                v = merged.get(k) or upstream.get(k)
+                if v and isinstance(v, str) and v.strip():
+                    dyn.setdefault("last_frame_url", v.strip())
+            extra: Dict[str, Any] = {}
+            for pk in ("aspect_ratio", "resolution", "steps", "cfg", "width", "height", "seed", "model", "style_preset", "negative_prompt", "fps", "duration"):
+                vv = merged.get(pk)
+                if vv in (None, ""):
+                    vv = data.get(pk)
+                if vv not in (None, ""):
+                    extra[pk] = vv
+            for bag in (merged.get("params"), merged.get("provider_params")):
+                if isinstance(bag, dict):
+                    for kk, vv in bag.items():
+                        if vv not in (None, "") and kk not in extra:
+                            extra[kk] = vv
+            for kk, vv in extra.items():
+                if kk not in dyn:
+                    dyn[kk] = vv
             req = ImageGenerateRequest(
                 prompt=prompt,
-                negative_prompt=merged.get("negative_prompt") or "",
-                aspect_ratio=merged.get("aspect_ratio") or "9:16",
-                style_preset=merged.get("style_preset"),
-                seed=merged.get("seed"),
-                workflow_id=merged.get("workflow_id"),
-                dynamic_inputs=dyn,
-                model=model,
+                negative_prompt=extra.get("negative_prompt") or merged.get("negative_prompt") or "",
+                aspect_ratio=extra.get("aspect_ratio") or merged.get("aspect_ratio") or "9:16",
+                resolution=extra.get("resolution"),
+                style_preset=extra.get("style_preset") or merged.get("style_preset"),
+                seed=extra.get("seed") if extra.get("seed") is not None else merged.get("seed"),
+                width=extra.get("width") or merged.get("width"),
+                height=extra.get("height") or merged.get("height"),
+                steps=extra.get("steps") or merged.get("steps"),
+                cfg=extra.get("cfg") or merged.get("cfg"),
+                workflow_id=merged.get("workflow_id") or extra.get("workflow_id"),
+                dynamic_inputs=dyn if dyn else None,
+                model=model or extra.get("model"),
+                extra=extra if extra else None,
             )
+            _ensure_provider_registered(prov, "image")
+            # 统一 MCP 动态调度：节点Agent按 provider_xxx Tool 调度（异构参数即输入），底层仍走同一 registry，模型可动态选
+            if prov:
+                try:
+                    from app.mcp.server import mcp_registry as _mcp
+                    mcp_args: Dict[str, Any] = {"prompt": prompt}
+                    if extra.get("negative_prompt"): mcp_args["negative_prompt"] = extra["negative_prompt"]
+                    if extra.get("aspect_ratio"): mcp_args["aspect_ratio"] = extra["aspect_ratio"]
+                    if extra.get("resolution"): mcp_args["resolution"] = extra["resolution"]
+                    if extra.get("steps") is not None: mcp_args["steps"] = extra["steps"]
+                    if extra.get("cfg") is not None: mcp_args["cfg"] = extra["cfg"]
+                    if extra.get("seed") is not None: mcp_args["seed"] = extra["seed"]
+                    if extra.get("style_preset"): mcp_args["style_preset"] = extra["style_preset"]
+                    if model: mcp_args["model"] = model
+                    if dyn.get("reference_images"): mcp_args["reference_images"] = dyn["reference_images"]
+                    # 其余异构透传
+                    for k,v in extra.items():
+                        if k not in mcp_args and v not in (None,""):
+                            mcp_args[k] = v
+                    # 清理空
+                    mcp_args = {k:v for k,v in mcp_args.items() if v not in (None,"")}
+                    mcp_res = await _mcp.execute_tool(f"provider_{prov}", mcp_args)
+                    if mcp_res.status == "success" and mcp_res.result and (mcp_res.result.get("image_url") or mcp_res.result.get("url")):
+                        img_url = mcp_res.result.get("image_url") or mcp_res.result.get("url")
+                        return {"status":"success","image_url": img_url, "local_path": mcp_res.result.get("local_path") or img_url, "provider": prov, "elapsed_ms": mcp_res.execution_time_ms or int((time.time()-start)*1000)}
+                except Exception as _e:
+                    print(f"[CanvasEngine] MCP provider_{prov} image fallback: {_e}")
             res = await image_registry.generate(req, provider_id=prov if prov else None)
             return {"status":"success","image_url": res.image_url, "local_path": res.local_path, "provider": res.provider, "elapsed_ms": res.elapsed_ms or int((time.time()-start)*1000)}
         elif ntype == "comfy-workflow":
-            wf_id = merged.get("workflow_id")
+            wf_id = merged.get("workflow_id") or merged.get("workflowId") or data.get("workflow_id")
             if not wf_id:
                 return {"status":"error","error":"未选择工作流"}
             prompt = merged.get("prompt") or merged.get("image_prompt") or merged.get("brief") or "masterpiece"
@@ -353,24 +524,132 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
                 prompt = f"{prompt}, {upstream['visual_prompt']}"
             from app.providers.image.registry import image_registry
             from app.providers.image.base import ImageGenerateRequest
-            req = ImageGenerateRequest(prompt=prompt, aspect_ratio="9:16", workflow_id=wf_id, dynamic_inputs=merged.get("dynamic_inputs"))
+            # 复用 Provider 系统：透传 workflow 动态参数与全局 params
+            dyn = dict(merged.get("dynamic_inputs") or {})
+            for k in ("reference_images", "reference", "first_frame"):
+                v = merged.get(k) or upstream.get(k)
+                if v:
+                    if isinstance(v, list):
+                        dyn.setdefault("reference_images", [])
+                        for uu in v:
+                            if uu not in dyn["reference_images"]:
+                                dyn["reference_images"].append(uu)
+                    elif isinstance(v, str) and v.strip():
+                        dyn.setdefault("reference_images", [])
+                        if v.strip() not in dyn["reference_images"]:
+                            dyn["reference_images"].append(v.strip())
+            extra: Dict[str, Any] = {}
+            for pk in ("aspect_ratio", "resolution", "steps", "cfg", "seed", "style_preset"):
+                vv = merged.get(pk)
+                if vv not in (None, ""):
+                    extra[pk] = vv
+            req = ImageGenerateRequest(
+                prompt=prompt,
+                aspect_ratio=extra.get("aspect_ratio") or merged.get("aspect_ratio") or "9:16",
+                resolution=extra.get("resolution"),
+                style_preset=extra.get("style_preset"),
+                seed=extra.get("seed") if extra.get("seed") is not None else merged.get("seed"),
+                steps=extra.get("steps") or merged.get("steps"),
+                cfg=extra.get("cfg") or merged.get("cfg"),
+                workflow_id=wf_id,
+                dynamic_inputs=dyn if dyn else merged.get("dynamic_inputs"),
+                extra=extra if extra else None,
+            )
+            _ensure_provider_registered("comfyui", "image")
             res = await image_registry.generate(req, provider_id="comfyui")
             return {"status":"success","image_url": res.image_url, "result_url": res.image_url, "provider": res.provider, "elapsed_ms": res.elapsed_ms or int((time.time()-start)*1000)}
         elif ntype in ("video","video-node"):
-            prompt = merged.get("video_prompt") or merged.get("prompt") or merged.get("action_desc") or upstream.get("prompt") or "cinematic motion"
+            prompt = merged.get("video_prompt") or merged.get("prompt") or merged.get("image_prompt") or merged.get("action_desc") or upstream.get("prompt") or "cinematic motion"
             mode = merged.get("mode") or "i2v"
-            first_frame = merged.get("first_frame") or merged.get("first_frame_url") or merged.get("image_url") or upstream.get("first_frame") or upstream.get("image_url") or upstream.get("reference")
-            if mode=="i2v" and not first_frame:
-                return {"status":"error","error":"I2V 模式需要首帧图像（请连入上游 image）"}
+            first_frame = merged.get("first_frame") or merged.get("first_frame_url") or merged.get("image_url") or upstream.get("first_frame") or upstream.get("first_frame_url") or upstream.get("image_url") or upstream.get("reference")
+            last_frame = merged.get("last_frame") or merged.get("last_frame_url") or upstream.get("last_frame") or upstream.get("last_frame_url") or (merged.get("dynamic_inputs") or {}).get("last_frame_url")
+            ref_imgs = merged.get("reference_images") or upstream.get("reference_images") or merged.get("reference") or upstream.get("reference")
+            if isinstance(ref_imgs, str) and ref_imgs.strip():
+                ref_imgs = [ref_imgs.strip()]
+            elif not isinstance(ref_imgs, list):
+                ref_imgs = None
+            skill_id = data.get("skill_id") or merged.get("skill_id")
+            if skill_id == "all_round_reference" or (ref_imgs and not first_frame):
+                mode = "r2v"
+            elif skill_id == "first_last_frame" or (first_frame and last_frame):
+                mode = "i2v"
+            if mode == "i2v" and not first_frame and not ref_imgs:
+                return {"status":"error","error":"视频生成需要首帧图像或参考图（请连入上游 image 或在底部控制台挂载）"}
             from app.providers.video.registry import video_registry
             from app.providers.video.base import VideoGenerateRequest
-            prov = merged.get("provider") or merged.get("video_provider") or merged.get("provider_video") or upstream.get("provider_video") or upstream.get("provider") or data.get("provider") or data.get("provider_id")
-            model = merged.get("model") or data.get("model")
-            req = VideoGenerateRequest(prompt=prompt, mode=mode, first_frame_url=first_frame, duration=int(merged.get("duration") or 5), provider=prov, dynamic_inputs=merged.get("dynamic_inputs"))
+            prov = merged.get("provider_id") or merged.get("provider") or merged.get("video_provider") or merged.get("provider_video") or upstream.get("provider_id") or upstream.get("provider_video") or upstream.get("provider") or data.get("provider_id") or data.get("provider")
+            model = merged.get("model") or data.get("model") or merged.get("default_model")
+            # 动态参数与 provider 复用
+            extra: Dict[str, Any] = {}
+            for pk in ("duration", "resolution", "aspect_ratio", "fps", "seed", "model", "workflow_id", "steps", "cfg"):
+                vv = merged.get(pk)
+                if vv in (None, ""):
+                    vv = data.get(pk)
+                if vv not in (None, ""):
+                    extra[pk] = vv
+            for bag in (merged.get("params"), merged.get("provider_params")):
+                if isinstance(bag, dict):
+                    for kk, vv in bag.items():
+                        if vv not in (None, "") and kk not in extra:
+                            extra[kk] = vv
+            dyn = dict(merged.get("dynamic_inputs") or {})
+            if last_frame and isinstance(last_frame, str) and last_frame.strip():
+                dyn["last_frame_url"] = last_frame.strip()
+            # 将 extra 同步到 dyn 以便 GenericCodeVideoProvider 捕获
+            for kk, vv in extra.items():
+                if kk not in dyn:
+                    dyn[kk] = vv
+            duration = int(extra.get("duration") or merged.get("duration") or 5)
+            resolution = extra.get("resolution") or merged.get("resolution") or "720p"
+            aspect_ratio = extra.get("aspect_ratio") or merged.get("aspect_ratio") or "9:16"
+            fps = extra.get("fps") or merged.get("fps")
+            req = VideoGenerateRequest(
+                prompt=prompt,
+                mode=mode,
+                first_frame_url=first_frame if isinstance(first_frame, str) and first_frame.strip() else None,
+                last_frame_url=last_frame if isinstance(last_frame, str) and last_frame.strip() else None,
+                reference_images=ref_imgs if isinstance(ref_imgs, list) and ref_imgs else None,
+                duration=duration,
+                resolution=resolution,
+                aspect_ratio=aspect_ratio,
+                fps=int(fps) if fps not in (None, "") else None,
+                provider=prov,
+                dynamic_inputs=dyn if dyn else None,
+                extra=extra if extra else None,
+            )
+            # 兼容：部分 registry 仍通过 extra.provider 读取
             if model:
+                req.extra = {**(req.extra or {}), "model": model}
                 req.provider = prov
-                # 将 model 透传至 extra
-                req.extra = {"model": model}
+            _ensure_provider_registered(prov, "video")
+            if prov:
+                try:
+                    from app.mcp.server import mcp_registry as _mcp2
+                    mcp_args_v: Dict[str, Any] = {
+                        "prompt": prompt,
+                        "mode": mode,
+                        "first_frame": first_frame,
+                        "first_frame_url": first_frame,
+                        "reference_images": ref_imgs if isinstance(ref_imgs, list) and ref_imgs else None,
+                        "duration": duration,
+                        "resolution": resolution,
+                        "aspect_ratio": aspect_ratio,
+                    }
+                    if fps is not None: mcp_args_v["fps"] = fps
+                    if model: mcp_args_v["model"] = model
+                    # 透传其余
+                    for k,v in extra.items():
+                        if k not in mcp_args_v and v not in (None,""):
+                            mcp_args_v[k] = v
+                    mcp_args_v = {k:v for k,v in mcp_args_v.items() if v not in (None,"",[])}
+                    mcp_res_v = await _mcp2.execute_tool(f"provider_{prov}", mcp_args_v)
+                    if mcp_res_v.status == "success" and mcp_res_v.result and (mcp_res_v.result.get("video_url") or mcp_res_v.result.get("url")):
+                        v_url = mcp_res_v.result.get("video_url") or mcp_res_v.result.get("url")
+                        return {"status":"success","video_url": v_url, "provider": prov, "elapsed_ms": mcp_res_v.execution_time_ms or int((time.time()-start)*1000), "task_id": mcp_res_v.result.get("task_id")}
+                    if mcp_res_v.status == "success" and mcp_res_v.result and mcp_res_v.result.get("task_id"):
+                        return {"status":"success","video_url": "", "provider": prov, "elapsed_ms": mcp_res_v.execution_time_ms or int((time.time()-start)*1000), "task_id": mcp_res_v.result.get("task_id")}
+                except Exception as _e2:
+                    print(f"[CanvasEngine] MCP provider_{prov} video fallback: {_e2}")
             res = await video_registry.generate(req, provider_id=prov if prov else None)
             # 处理异步排队（AutoDL）：若仅返回 task_id 则轮询至完成
             if not getattr(res, 'video_url', None) and getattr(res, 'task_id', None):
@@ -389,15 +668,79 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
                 return {"status":"error","error": f"视频排队超时 task_id={task_id}，请稍后在画布重试或查看 /storage/videos/"}
             return {"status":"success","video_url": res.video_url, "provider": res.provider, "elapsed_ms": res.elapsed_ms or int((time.time()-start)*1000), "task_id": getattr(res, 'task_id', None)}
         elif ntype in ("tts","audio","voice"):
-            text = merged.get("text") or merged.get("prompt") or merged.get("dialogue") or merged.get("subtitle_text") or merged.get("brief") or upstream.get("prompt") or upstream.get("text") or ""
+            text = merged.get("text") or merged.get("prompt") or merged.get("image_prompt") or merged.get("dialogue") or merged.get("subtitle_text") or merged.get("brief") or upstream.get("prompt") or upstream.get("text") or ""
             if not text.strip():
                 return {"status":"error","error":"配音文本为空"}
             from app.providers.audio.registry import audio_registry
             from app.providers.audio.base import AudioGenerateRequest
-            prov = merged.get("provider") or merged.get("audio_provider") or merged.get("provider_audio") or upstream.get("provider_audio") or upstream.get("provider") or data.get("provider") or data.get("provider_id") or "minimax"
-            model = merged.get("model") or data.get("model")
-            req = AudioGenerateRequest(text=text, voice_id=merged.get("voice_id") or "male-qn-qingse", emotion=merged.get("emotion") or "neutral", speed=float(merged.get("speed") or 1.0), model=model)
-            res = await audio_registry.generate(req, provider_id=prov)
+            prov = merged.get("provider_id") or merged.get("provider") or merged.get("audio_provider") or merged.get("provider_audio") or upstream.get("provider_id") or upstream.get("provider_audio") or upstream.get("provider") or data.get("provider_id") or data.get("provider") or "minimax"
+            model = merged.get("model") or data.get("model") or merged.get("default_model")
+            # 透传 provider 参数与参考音频
+            extra: Dict[str, Any] = {}
+            for pk in ("speed", "pitch", "volume", "voice_id", "emotion", "model", "ref_audio_path", "ref_audio", "reference_audio", "style_preset"):
+                vv = merged.get(pk)
+                if vv in (None, ""):
+                    vv = data.get(pk)
+                if vv not in (None, ""):
+                    extra[pk] = vv
+            for bag in (merged.get("params"), merged.get("provider_params")):
+                if isinstance(bag, dict):
+                    for kk, vv in bag.items():
+                        if vv not in (None, "") and kk not in extra:
+                            extra[kk] = vv
+            # upstream 参考音频注入
+            ref_audio = merged.get("ref_audio") or merged.get("ref_audio_path") or upstream.get("ref_audio") or upstream.get("reference_audios") or upstream.get("audio_url")
+            if isinstance(ref_audio, list) and ref_audio:
+                ref_audio = ref_audio[0]
+            if isinstance(ref_audio, str) and ref_audio.strip():
+                extra.setdefault("ref_audio_path", ref_audio.strip())
+            # 参数归一
+            voice_id = extra.get("voice_id") or merged.get("voice_id") or "male-qn-qingse"
+            emotion = extra.get("emotion") or merged.get("emotion") or "neutral"
+            try:
+                speed = float(extra.get("speed") if extra.get("speed") not in (None, "") else merged.get("speed") if merged.get("speed") not in (None, "") else 1.0)
+            except:
+                speed = 1.0
+            pitch_val = extra.get("pitch")
+            if pitch_val not in (None, ""):
+                try:
+                    pitch_val = float(pitch_val)
+                except:
+                    pitch_val = 0.0
+            else:
+                pitch_val = float(merged.get("pitch") or 0.0)
+            req = AudioGenerateRequest(
+                text=text.strip(),
+                voice_id=voice_id,
+                emotion=emotion,
+                speed=speed,
+                pitch=pitch_val,
+                ref_audio_path=extra.get("ref_audio_path") or extra.get("ref_audio"),
+                ref_text=extra.get("ref_text"),
+                model=model or extra.get("model"),
+                extra=extra if extra else None,
+            )
+            _ensure_provider_registered(prov, "audio")
+            if prov:
+                try:
+                    from app.mcp.server import mcp_registry as _mcp3
+                    mcp_args_a: Dict[str, Any] = {
+                        "text": text.strip(),
+                        "voice_id": voice_id,
+                        "emotion": emotion,
+                        "speed": speed,
+                        "pitch": pitch_val,
+                    }
+                    if extra.get("ref_audio_path"): mcp_args_a["ref_audio"] = extra["ref_audio_path"]
+                    if model: mcp_args_a["model"] = model
+                    mcp_args_a = {k:v for k,v in mcp_args_a.items() if v not in (None,"")}
+                    mcp_res_a = await _mcp3.execute_tool(f"provider_{prov}", mcp_args_a)
+                    if mcp_res_a.status == "success" and mcp_res_a.result and (mcp_res_a.result.get("audio_url") or mcp_res_a.result.get("url")):
+                        a_url = mcp_res_a.result.get("audio_url") or mcp_res_a.result.get("url")
+                        return {"status":"success","audio_url": a_url, "provider": prov, "elapsed_ms": mcp_res_a.execution_time_ms or int((time.time()-start)*1000)}
+                except Exception as _e3:
+                    print(f"[CanvasEngine] MCP provider_{prov} audio fallback: {_e3}")
+            res = await audio_registry.generate(req, provider_id=prov if prov else None)
             return {"status":"success","audio_url": res.audio_url, "provider": res.provider, "elapsed_ms": int((time.time()-start)*1000)}
         elif ntype == "director3d":
             from app.mcp.server import mcp_registry
@@ -440,19 +783,34 @@ class CanvasEngine:
             return {"results":{}, "order":[]}
         # 若指定 target_ids，计算闭包（target + 下游）
         if target_ids:
-            # BFS 下游
+            # 计算闭包：上游依赖 + 下游影响，确保单点执行时上游数据可注入
             adj: Dict[str,List[str]]={}
-            for n in nodes: adj[n["id"]]=[]
+            rev: Dict[str,List[str]]={}
+            for n in nodes:
+                adj[n["id"]]=[]
+                rev[n["id"]]=[]
             for e in edges:
-                if e.get("source") in adj:
-                    adj[e["source"]].append(e.get("target"))
+                s = e.get("source"); t = e.get("target")
+                if s in adj and t in adj:
+                    adj[s].append(t)
+                    rev[t].append(s)
+            # 1) 上游祖先
             closure=set(target_ids)
             q=list(target_ids)
             while q:
                 cur=q.pop(0)
+                for pre in rev.get(cur,[]):
+                    if pre not in closure:
+                        closure.add(pre); q.append(pre)
+            # 2) 下游后继（基于已包含上游的闭包）
+            q=list(closure)
+            visited_down=set(closure)
+            while q:
+                cur=q.pop(0)
                 for nb in adj.get(cur,[]):
-                    if nb not in closure:
-                        closure.add(nb); q.append(nb)
+                    if nb not in visited_down:
+                        visited_down.add(nb); q.append(nb)
+                        closure.add(nb)
             nodes = [n for n in nodes if n["id"] in closure]
             edges = [e for e in edges if e.get("source") in closure and e.get("target") in closure]
 

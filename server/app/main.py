@@ -6,10 +6,15 @@ from app.core.config import settings
 from app.api.routes import router
 from app.mcp.server import mcp_registry
 
-# 初始化动态 Provider 注册表（图片/音频）
+# 初始化动态 Provider 注册表（图片/音频）+ 同步为 MCP 动态 Tool（节点Agent调度）
 try:
     from app.providers.init_providers import init_all_providers
     init_all_providers()
+    # 将异构 Provider 统一暴露为 MCP Tool，供节点Agent动态调用
+    try:
+        mcp_registry.refresh_provider_tools()
+    except Exception as _e:
+        print(f"[Main] MCP provider tools refresh failed: {_e}")
 except Exception as e:
     print(f"[Main] Provider init failed: {e}")
 

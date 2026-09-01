@@ -29,6 +29,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     inputs: [
       H('prompt','提示词','text'),
       H('reference','参考图','image'),
+      H('reference_images','参考集','image'),
     ],
     outputs: [H('image','图像','image',true)],
     providerKind:'image',
@@ -39,6 +40,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     inputs: [
       H('prompt','运动描述','text'),
       H('first_frame','首帧','image'),
+      H('last_frame','尾帧','image'),
       H('reference_images','参考集','image'),
     ],
     outputs: [H('video','视频','video',true)],
@@ -51,7 +53,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   },
   'audio': {
     type:'audio', label:'生成音频', desc:'TTS 配音', color:'text-pink-500',
-    inputs: [H('text','文本','text',true)],
+    inputs: [H('text','文本','text',true), H('ref_audio','参考音频','audio')],
     outputs: [H('audio','音频','audio',true)],
     providerKind:'audio',
     isCore: true,

@@ -11,6 +11,7 @@ export const ShotCardNode: React.FC<NodeProps> = ({ data, id }) => {
   const [generating, setGenerating] = useState(false);
   const [localData, setLocalData] = useState(d);
   const { project } = useProjectStore();
+  const liveShot = project?.scenes.flatMap(s => s.shots).find(s => s.id === (d.shotId || d.id || id)) || localData;
   // 保持与 d 同步（处理连线注入的 provider）
   React.useEffect(()=> { setLocalData(d); }, [d.provider, d.provider_id, d.model]);
 
@@ -53,34 +54,61 @@ export const ShotCardNode: React.FC<NodeProps> = ({ data, id }) => {
   const allInputs = [...specInputs, ...extraHandles].slice(0,6);
 
   return (
-    <div className="w-[300px] bg-[#1A1A22] border border-[#2A2A32] rounded-2xl shadow-xl overflow-hidden">
-      <div className="px-3 py-2 bg-[#121216] border-b border-[#2A2A32] flex items-center justify-between">
-        <span className="text-xs font-bold text-white flex items-center gap-1.5"><Film className="w-3.5 h-3.5 text-violet-300"/> 分镜卡 {localData.shot_index ? `#${localData.shot_index}`: ''}</span>
+    <div className="w-[300px] bg-surface border border-border rounded-2xl shadow-xl overflow-hidden">
+      <div className="px-3 py-2.5 bg-surface border-b border-border flex items-center justify-between">
+        <span className="text-xs font-bold [color:var(--color-text-main)] flex items-center gap-1.5"><Film className="w-3.5 h-3.5 text-brand"/> 分镜卡 {localData.shot_index ? `#${localData.shot_index}`: ''}</span>
         <span className="flex items-center gap-1">
-          {providerBadge && <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-600 text-white font-mono truncate max-w-[90px] border border-white/20" title={String(providerBadge)}>{String(providerBadge).slice(0,12)}</span>}
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface/10 text-zinc-300 border border-white/10">{localData.camera_framing || 'medium'} · {localData.camera_motion || 'push_in'}</span>
+          {providerBadge && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-brand text-white font-mono truncate max-w-[90px] shadow-sm" title={String(providerBadge)}>{String(providerBadge).slice(0,12)}</span>}
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-surface-secondary [color:var(--color-text-muted)] border border-border font-mono">{localData.camera_framing || 'medium'} · {localData.camera_motion || 'push_in'}</span>
         </span>
       </div>
       {/* 输入：左侧动态 */}
       {allInputs.map((h:any, idx:number)=> (
-        <Handle key={h.id} type="target" position={Position.Left} id={h.id} className={`!w-3 !h-3 !border-2 !border-white ${h.type==='image'?'!bg-violet-500':h.type==='audio'?'!bg-pink-500':h.type==='video'?'!bg-orange-500':'!bg-sky-500'}`} style={{ top: `${18 + idx*14}%` }} title={`${h.label} (${h.type})`} />
+        <Handle key={h.id} type="target" position={Position.Left} id={h.id} className={`!w-3 !h-3 !border-2 !border-surface ${h.type==='image'?'!bg-violet-500':h.type==='audio'?'!bg-pink-500':h.type==='video'?'!bg-orange-500':'!bg-sky-500'}`} style={{ top: `${18 + idx*14}%` }} title={`${h.label} (${h.type})`} />
       ))}
       {/* 输出：右侧 */}
-      <Handle type="source" position={Position.Right} id="image" className="!bg-violet-500 !w-3 !h-3 !border-2 !border-white" style={{ top: '30%' }} title="输出 image" />
-      <Handle type="source" position={Position.Right} id="video" className="!bg-orange-500 !w-3 !h-3 !border-2 !border-white" style={{ top: '55%' }} title="输出 video" />
-      <Handle type="source" position={Position.Right} id="shot" className="!bg-sky-500 !w-3 !h-3 !border-2 !border-white" style={{ top: '80%' }} title="输出 shot" />
+      <Handle type="source" position={Position.Right} id="image" className="!bg-violet-500 !w-3 !h-3 !border-2 !border-surface" style={{ top: '30%' }} title="输出 image" />
+      <Handle type="source" position={Position.Right} id="video" className="!bg-orange-500 !w-3 !h-3 !border-2 !border-surface" style={{ top: '55%' }} title="输出 video" />
+      <Handle type="source" position={Position.Right} id="shot" className="!bg-sky-500 !w-3 !h-3 !border-2 !border-surface" style={{ top: '80%' }} title="输出 shot" />
 
-      <div className="aspect-[9/16] max-h-[220px] bg-zinc-950 relative overflow-hidden flex items-center justify-center">
-        {imgUrl ? <img src={imgUrl} alt="" className="w-full h-full object-cover"/> : <div className="text-xs text-gray-500 flex flex-col items-center gap-1"><ImageIcon className="w-6 h-6 opacity-50"/><span>{generating ? '生成中…' : '暂无画面'}</span></div>}
+      {/* 挂载的人物与场景徽章 */}
+      {(liveShot?.character_ids?.length || liveShot?.scene_name || liveShot?.prop_prompts) && (
+        <div className="px-2.5 py-1.5 bg-surface-secondary/80 border-b border-border flex items-center gap-1.5 flex-wrap">
+          {(liveShot.character_ids || []).map((cid: string) => {
+            const char = project?.characters.find(c => c.id === cid);
+            if (!char) return null;
+            const avatar = char.three_views?.front || char.avatar_url;
+            return (
+              <span key={cid} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-brand/20 text-brand-light text-[9px] font-bold border border-brand/30">
+                {avatar && <img src={avatar.startsWith('/') ? API_ORIGIN + avatar : avatar} alt="" className="w-2.5 h-2.5 rounded-full object-cover" />}
+                <span>{char.name}</span>
+              </span>
+            );
+          })}
+          {liveShot?.scene_name && (
+            <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[9px] font-medium border border-emerald-500/30 truncate max-w-[100px]">
+              🏞️ {liveShot.scene_name}
+            </span>
+          )}
+          {liveShot?.prop_prompts && (
+            <span className="px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 text-[9px] font-medium border border-amber-500/30 truncate max-w-[80px]">
+              🗡️ 道具
+            </span>
+          )}
+        </div>
+      )}
+
+      <div className="aspect-[9/16] max-h-[220px] bg-surface-secondary relative overflow-hidden flex items-center justify-center border-b border-border">
+        {imgUrl ? <img src={imgUrl} alt="" className="w-full h-full object-cover"/> : <div className="text-xs [color:var(--color-text-muted)] flex flex-col items-center gap-1"><ImageIcon className="w-6 h-6 opacity-50"/><span>{generating ? '生成中…' : '暂无画面'}</span></div>}
         {localData.subtitle_text && <div className="absolute bottom-2 left-2 right-2 bg-black/70 backdrop-blur px-2 py-1 rounded text-[11px] text-white text-center border border-white/10">{localData.subtitle_text}</div>}
       </div>
 
-      <div className="p-2.5 space-y-2 bg-[#1A1A22]">
-        <textarea value={localData.action_desc || ''} onChange={e=>{ const v=e.target.value; setLocalData((p:any)=>({...p, action_desc:v})); (d.onUpdate as any)?.(id,{action_desc:v}); }} placeholder="画面动作描述…（支持多行）" rows={2} className="w-full bg-[#24242F] border border-[#2A2A32] rounded-xl p-2 text-xs text-zinc-100 placeholder:text-gray-400 focus:outline-none focus:border-violet-500 resize-none"/>
-        <textarea value={localData.image_prompt || ''} onChange={e=>{ const v=e.target.value; setLocalData((p:any)=>({...p,image_prompt:v})); (d.onUpdate as any)?.(id,{image_prompt:v}); }} placeholder="英文画面提示词…（可粘贴长段）" rows={2} className="w-full bg-[#24242F] border border-[#2A2A32] rounded-xl p-2 text-xs font-mono text-zinc-100 placeholder:text-gray-400 focus:outline-none focus:border-violet-500 resize-none"/>
-        {allInputs.length>0 && <div className="text-[10px] text-violet-400 bg-violet-500/10 border border-violet-500/20 rounded-lg px-2 py-1">已接入 {allInputs.map((h:any)=>h.label).join('、')} · 多模态输入就绪</div>}
+      <div className="p-2.5 space-y-2 bg-surface">
+        <textarea value={localData.action_desc || ''} onChange={e=>{ const v=e.target.value; setLocalData((p:any)=>({...p, action_desc:v})); (d.onUpdate as any)?.(id,{action_desc:v}); }} placeholder="画面动作描述…（支持多行）" rows={2} className="w-full bg-surface-secondary border border-border rounded-xl p-2 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand resize-none"/>
+        <textarea value={localData.image_prompt || ''} onChange={e=>{ const v=e.target.value; setLocalData((p:any)=>({...p,image_prompt:v})); (d.onUpdate as any)?.(id,{image_prompt:v}); }} placeholder="英文画面提示词…（可粘贴长段）" rows={2} className="w-full bg-surface-secondary border border-border rounded-xl p-2 text-xs font-mono [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand resize-none"/>
+        {allInputs.length>0 && <div className="text-[10px] text-brand bg-brand/10 border border-brand/20 rounded-lg px-2 py-1 font-medium">已接入 {allInputs.map((h:any)=>h.label).join('、')} · 多模态输入就绪</div>}
         <div className="flex gap-1.5">
-          <button onClick={handleGenerate} disabled={generating} className="flex-1 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold flex items-center justify-center gap-1 disabled:opacity-40 shadow-md shadow-violet-600/20">{generating ? <RefreshCw className="w-3 h-3 animate-spin"/> : <Sparkles className="w-3 h-3"/>}{generating ? '生成中' : '生成首帧'}</button>
+          <button onClick={handleGenerate} disabled={generating} className="flex-1 py-1.5 rounded-xl bg-brand hover:bg-brand-light text-white text-xs font-semibold flex items-center justify-center gap-1 disabled:opacity-40 shadow-sm">{generating ? <RefreshCw className="w-3 h-3 animate-spin"/> : <Sparkles className="w-3 h-3"/>}{generating ? '生成中' : '生成首帧'}</button>
           <button onClick={async()=>{
             const prompt = localData.video_prompt || localData.action_desc || localData.image_prompt;
             if(!prompt){ alert('请填写视频运动描述'); return; }
@@ -104,9 +132,9 @@ export const ShotCardNode: React.FC<NodeProps> = ({ data, id }) => {
               }
               setLocalData((p:any)=>({...p, video_url: url})); (d.onUpdate as any)?.(id,{video_url:url});
             }catch(e:any){ alert(e.message); }
-          }} className="px-3 py-1.5 rounded-xl bg-orange-500/10 border border-orange-500/30 text-orange-500 hover:bg-orange-500 hover:text-white text-xs flex items-center gap-1 transition-colors"><Play className="w-3 h-3"/> 生视频</button>
+          }} className="px-3 py-1.5 rounded-xl bg-orange-500/10 border border-orange-500/30 text-orange-500 hover:bg-orange-500 hover:text-white text-xs flex items-center gap-1 transition-colors font-medium"><Play className="w-3 h-3"/> 生视频</button>
         </div>
-        {localData.video_url && <div className="text-[10px] text-emerald-500 truncate">✓ 视频已生成</div>}
+        {localData.video_url && <div className="text-[10px] text-emerald-500 font-medium truncate">✓ 视频已生成</div>}
       </div>
     </div>
   );

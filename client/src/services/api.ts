@@ -327,6 +327,28 @@ export const apiService = {
     return await res.json();
   },
 
+  async expandPrompt(prompt: string, kind: 'image' | 'video' | 'dialogue' = 'image'): Promise<string> {
+    const res = await fetch(`${API_BASE_URL}/llm/expand`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, kind }),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    const data = await res.json();
+    return data?.expanded || '';
+  },
+
+  // 节点 Agent 一体化：自然语言需求 → skill/源/参数规划 → 执行（params 为用户在高级面板覆写的异构参数）
+  async canvasAgentGenerate(payload: { node_type: string; idea: string; provider_id?: string; slots?: Record<string, any>; extra_hint?: string; params?: Record<string, any> }): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/canvas/agent/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+
   // 5. 技能 (Skills)
   async listSkills(): Promise<any[]> {
     const res = await fetch(`${API_BASE_URL}/skills`);

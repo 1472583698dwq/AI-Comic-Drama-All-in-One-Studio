@@ -96,6 +96,10 @@ class ProviderDefinition(BaseModel):
     # 输入输出 Schema（驱动画布句柄，含 x-handle 标注）
     input_schema: Optional[Dict[str, Any]] = None
     output_schema: Optional[Dict[str, Any]] = None
+    # ComfyUI 工作流绑定：每条工作流独立抽象为生成源（仅内部导出工作流）
+    workflow_id: Optional[str] = None  # 关联 storage/workflows/<workflow_id>.json
+    workflow_hash: Optional[str] = None  # 工作流内容 hash，用于变更检测
+    workflow_exposed: Optional[List[Dict[str, Any]]] = None  # 工作流暴露输入清单，用于标准→具体映射
 
     # 额外元信息
     doc_url: Optional[str] = None
@@ -133,6 +137,9 @@ class ProviderDefinition(BaseModel):
             "default_params": self.default_params,
             "input_schema": self.input_schema,
             "output_schema": self.output_schema,
+            "workflow_id": self.workflow_id,
+            "workflow_hash": self.workflow_hash,
+            "workflow_exposed": self.workflow_exposed,
             "transport": self.transport.model_dump(),
             "auth": {**self.auth.model_dump(), "has_key": bool(self.auth.key_env)},
             "health_check": self.health_check.model_dump(),

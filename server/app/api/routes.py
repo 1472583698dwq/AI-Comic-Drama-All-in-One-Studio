@@ -937,6 +937,71 @@ AGENT_SYSTEM_PROMPT = AGENT_SYSTEM_PROMPT_BODY + """
 # LangChain 多轮循环模式使用的提示词：原生 tool calling，多步持续执行不再被 JSON 约束压制
 AGENT_LOOP_SYSTEM_PROMPT = AGENT_SYSTEM_PROMPT_BODY
 
+
+def _provider_tools_brief() -> str:
+    """动态拼接全部 provider_* 生成源工具，保证导演 Agent 永远感知最新注册源（含工作流单源）"""
+    try:
+        from app.mcp.server import mcp_registry
+        lines = []
+        for t in mcp_registry.get_all_tools():
+            if not t.name.startswith("provider_"):
+                continue
+            try:
+                props = (t.input_schema or {}).get("properties", {}) or {}
+                keys = ",".join(list(props.keys())[:12])
+            except Exception:
+                keys = ""
+            lines.append(f"- {t.name} — {str(t.description)[:90]} | 参数: {keys}")
+        if not lines:
+            return ""
+        return (
+            "\n\n**动态生成源 Tools（当前已注册 " + str(len(lines)) + " 个，一源一Tool，与工作流单源完全同源）：**\n"
+            + "\n".join(lines[:90])
+            + "\n\n**编排画布时：** 用 canvas_create_node 创建 prompt/image/video/audio 节点，params 内直接写 provider_id(即Tool名去掉provider_前缀)、prompt、skill_id 与挂载的 first_frame/reference_images；"
+            "canvas_connect 按句柄(prompt/image/first_frame/last_frame/reference_images/ref_audio/text)连线后 canvas_execute 一键执行。"
+            "生成源参数异构（aspect_ratio/resolution/steps/duration/hasSound 等）一律按该 provider_* Tool 自己的 schema 填写。\n"
+        )
+    except Exception as e:
+        print(f"[Agent] provider_tools_brief failed: {e}")
+        return ""
+
+
+def get_agent_system_prompt(loop: bool = False) -> str:
+    base = AGENT_LOOP_SYSTEM_PROMPT if loop else AGENT_SYSTEM_PROMPT
+    return base + _provider_tools_brief()
+
+
+class PromptExpandRequest(BaseModel):
+    prompt: str
+    kind: str = "image"  # image / video / dialogue
+
+
+@router.post("/llm/expand")
+async def expand_prompt(req: PromptExpandRequest):
+    """电影级提示词扩写：短描述 → 专业影视分镜提示词（导演 Agent 技能后端）"""
+    from app.pipelines.llm_service import llm_service, LLMServiceError
+    if not req.prompt.strip():
+        raise HTTPException(status_code=400, detail="prompt 不能为空")
+    kind_hint = {
+        "image": "生图提示词（主体、构图、景别、光线、材质风格、画质词，英文逗号短语）",
+        "video": "视频运动提示词（主体动作、运镜轨迹、节奏、光影变化，中文一句到三句）",
+        "dialogue": "角色台词与情绪标注（中文，带情绪标签）",
+    }.get(req.kind, "生图提示词")
+    try:
+        text = await llm_service.chat_completion(
+            messages=[
+                {"role": "system", "content": f"你是漫剧影视级提示词扩写引擎。把用户的简短画面构思扩写为专业{kind_hint}。只输出提示词本身，不要解释、不要引号、不要 markdown。"},
+                {"role": "user", "content": req.prompt.strip()[:2000]},
+            ],
+            temperature=0.7,
+            max_tokens=600,
+        )
+        return {"status": "success", "expanded": (text or "").strip()[:1200]}
+    except LLMServiceError as e:
+        raise HTTPException(status_code=502, detail=f"LLM 扩写失败: {e}")
+
+
+
 @router.websocket("/ws/agent")
 async def websocket_agent_endpoint(websocket: WebSocket):
     """导演 Agent WebSocket：LangChain 多轮循环 + 记忆 + 真实流式"""
@@ -1005,7 +1070,7 @@ async def websocket_agent_endpoint(websocket: WebSocket):
 
             try:
                 decision = await llm_service.chat_json(
-                    system_prompt=AGENT_SYSTEM_PROMPT,
+                    system_prompt=get_agent_system_prompt(),
                     user_prompt=json.dumps({
                         "instruction": prompt_text,
                         "context": {
@@ -1396,7 +1461,7 @@ async def http_agent_chat(req: AgentChatRequest):
     # 回退：原单轮逻辑
     try:
         decision = await llm_service.chat_json(
-            system_prompt=AGENT_SYSTEM_PROMPT,
+            system_prompt=get_agent_system_prompt(),
             user_prompt=json.dumps({
                 "instruction": prompt_text,
                 "context": req.context or {},
@@ -1447,7 +1512,7 @@ async def http_agent_chat_stream(req: AgentChatRequest):
         if not HAS_LANGCHAIN_AGENT:
             try:
                 decision = await llm_service.chat_json(
-                    system_prompt=AGENT_SYSTEM_PROMPT,
+                    system_prompt=get_agent_system_prompt(),
                     user_prompt=json.dumps({"instruction": prompt_text, "context": req.context or {}}, ensure_ascii=False),
                     temperature=0.2,
                 )
