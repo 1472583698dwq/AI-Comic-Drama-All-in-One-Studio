@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { useDirectorAgent } from '../canvas/hooks/useDirectorAgent';
+import { useCanvasStore } from '../../stores/useCanvasStore';
 import {
   Camera,
   Move,
@@ -47,6 +49,7 @@ import {
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { useMcpStore } from '../../stores/useMcpStore';
+import { apiService } from '../../services/api';
 import {
   CameraFraming,
   CameraMotion,
@@ -56,6 +59,7 @@ import {
   StageEnvironment,
   StoryboardShot,
 } from '../../types';
+import { FRAMING_PRESETS, MOTION_PRESETS, POSE_PRESETS, CAST_LAYOUTS } from './directorPresets';
 
 // ============================================================
 // MiniMax Design 3D Director - 重构版
@@ -133,70 +137,16 @@ async function loadGLBModel(url: string, scale = 1): Promise<THREE.Group | null>
   }
 }
 
-const FRAMING_PRESETS: Array<{ id: CameraFraming; label: string; fl: number; desc: string }> = [
-  { id: 'extreme_close_up', label: '大特写 (ECU)', fl: 85, desc: '眼神/微表情震撼特写' },
-  { id: 'close_up', label: '特写 (CU)', fl: 50, desc: '面部与半身情绪聚焦' },
-  { id: 'medium', label: '中景 (MS)', fl: 35, desc: '胸部以上经典叙事' },
-  { id: 'full', label: '全景 (FS)', fl: 28, desc: '全身与站位动作展示' },
-  { id: 'long', label: '远景 (LS)', fl: 24, desc: '宏大环境与场景纵深' },
-  { id: 'bird_eye', label: '鸟瞰俯冲', fl: 20, desc: '高空俯视压迫视角' },
-  { id: 'low_angle', label: '贴地仰角', fl: 28, desc: '低机位霸气英雄感' },
-  { id: 'over_shoulder', label: '过肩对峙', fl: 40, desc: '双人对决纵深机位' },
-  { id: 'dutch_angle', label: '荷兰角倾斜', fl: 32, desc: '悬疑与心理压迫' },
-  { id: 'high_angle', label: '高角度俯视', fl: 28, desc: '俯视弱化视点' },
-];
-
-const MOTION_PRESETS: Array<{
-  id: CameraMotion;
-  label: string;
-  category: 'single' | 'combo';
-  desc: string;
-  minimaxCode: string;
-}> = [
-  { id: 'static', label: '固定镜头 (Static)', category: 'single', desc: '机位静止固定', minimaxCode: 'Static Camera' },
-  { id: 'push_in', label: '急进推镜 (Dolly In)', category: 'single', desc: '镜头逼近主角', minimaxCode: 'Dolly In' },
-  { id: 'pull_out', label: '渐远拉出 (Dolly Out)', category: 'single', desc: '由近及远展示环境', minimaxCode: 'Dolly Out' },
-  { id: 'pan_left', label: '左摇镜头 (Pan Left)', category: 'single', desc: '水平向左平滑扫视', minimaxCode: 'Pan Left' },
-  { id: 'pan_right', label: '右摇镜头 (Pan Right)', category: 'single', desc: '水平向右平滑扫视', minimaxCode: 'Pan Right' },
-  { id: 'tilt_up', label: '上仰升镜 (Tilt Up)', category: 'single', desc: '由下向上仰视扫视', minimaxCode: 'Tilt Up' },
-  { id: 'tilt_down', label: '下俯摇镜 (Tilt Down)', category: 'single', desc: '由上向下俯视扫视', minimaxCode: 'Tilt Down' },
-  { id: 'orbit', label: '360° 顺时针环绕 (Orbit)', category: 'single', desc: '英雄弧形环拍', minimaxCode: 'Orbit Clockwise' },
-  { id: 'orbit_ccw', label: '逆时针环绕 (Orbit CCW)', category: 'single', desc: '逆向弧形环拍', minimaxCode: 'Orbit Counter-Clockwise' },
-  { id: 'truck_left', label: '左横移 (Truck Left)', category: 'single', desc: '机位平行向左平移', minimaxCode: 'Truck Left' },
-  { id: 'truck_right', label: '右横移 (Truck Right)', category: 'single', desc: '机位平行向右平移', minimaxCode: 'Truck Right' },
-  { id: 'boom_up', label: '升降机升 (Boom Up)', category: 'single', desc: '垂直升起镜头', minimaxCode: 'Boom Up' },
-  { id: 'boom_down', label: '升降机降 (Boom Down)', category: 'single', desc: '垂直下降镜头', minimaxCode: 'Boom Down' },
-  { id: 'roll_left', label: '左滚转 (Roll Left)', category: 'single', desc: '镜头逆时针翻滚', minimaxCode: 'Roll Left' },
-  { id: 'roll_right', label: '右滚转 (Roll Right)', category: 'single', desc: '镜头顺时针翻滚', minimaxCode: 'Roll Right' },
-  { id: 'tracking', label: '前向跟随 (Tracking)', category: 'single', desc: '跟随主体向前推进', minimaxCode: 'Forward Tracking' },
-  { id: 'shake', label: '战斗震颤 (Shake)', category: 'single', desc: '冲击感手持震动', minimaxCode: 'Handheld Camera Shake' },
-  { id: 'dolly_zoom', label: '希区柯克变焦 (Vertigo Zoom)', category: 'combo', desc: '推镜反向变焦，空间扭曲', minimaxCode: 'Dolly Zoom (Vertigo)' },
-  { id: 'orbit_boom_up', label: '弧旋升镜 (Orbit + Boom Up)', category: 'combo', desc: '环绕+垂直升起，英雄登场', minimaxCode: 'Orbit + Boom Up' },
-  { id: 'pan_left_crane_down', label: '全景俯切 (Pan Left + Crane Down)', category: 'combo', desc: '左扫同时俯冲，战场切入', minimaxCode: 'Pan Left + Crane Down' },
-  { id: 'fast_push_shake', label: '极速推镜+冲击 (Explosive Push)', category: 'combo', desc: '爆点推进带震颤，招式命中', minimaxCode: 'Explosive Push + Shake' },
-  { id: 'low_angle_truck_right', label: '贴地侧滑 (Low Truck Right)', category: 'combo', desc: '低机位右横移，霸气侧身', minimaxCode: 'Low Angle + Truck Right' },
-];
-
-const POSE_PRESETS: Array<{ id: PosePreset; label: string; icon: string }> = [
-  { id: 'stand', label: '傲然站立', icon: '🧍' },
-  { id: 'fight', label: '武道架势', icon: '🥋' },
-  { id: 'look_back', label: '回眸凝视', icon: '👀' },
-  { id: 'run', label: '极速突进', icon: '🏃' },
-  { id: 'cast_spell', label: '御剑施法', icon: '⚡' },
-  { id: 'kneel', label: '受创半跪', icon: '🧎' },
-  { id: 'defend', label: '横刀格挡', icon: '🛡️' },
-  { id: 'fly', label: '凌空御风', icon: '🦅' },
-  { id: 'injured', label: '战损踉跄', icon: '💥' },
-];
-
-const CAST_LAYOUTS: Array<{ id: CastLayout; label: string; desc: string }> = [
-  { id: 'solo', label: '单人焦点', desc: '主角独奏，聚焦核心' },
-  { id: 'duel', label: '双人对峙', desc: '主角 VS 宿敌双向对抗' },
-  { id: 'ots', label: '过肩纵深', desc: '前景肩景 + 背景对手' },
-  { id: 'surrounded', label: '群戏包围', desc: '四方包围阵形' },
-];
-
+// 预设已迁移至 ./directorPresets（舞台与画布节点同源），此处仅保留舞台私有的焦距档位
 const FOCAL_PRESETS = [16, 24, 35, 50, 85, 135];
+
+// 基础三点光色温预设（主光颜色，轮廓光保持冷色勾边）
+const KEY_TEMPS: Record<string, { label: string; color: number }> = {
+  neon: { label: '霓虹紫', color: 0x7c3aed },
+  cold: { label: '冷白', color: 0xf5f7ff },
+  warm: { label: '暖黄', color: 0xffb46b },
+  moon: { label: '月夜蓝', color: 0x9bbcff },
+};
 
 const ENV_LABELS: Record<StageEnvironment, { label: string; desc: string; icon: string }> = {
   cyber_studio: { label: '暗黑赛博影棚', desc: '霓虹网格+城市天际线', icon: '🏙️' },
@@ -223,6 +173,23 @@ export const Director3DStage: React.FC = () => {
   const [cameraRoll, setCameraRoll] = useState<number>(activeShot?.camera_roll_deg || 0);
   const [motionSpeed, setMotionSpeed] = useState<'0.5x' | '1.0x' | '1.5x' | '2.0x'>('1.0x');
   const [motionEasing, setMotionEasing] = useState<'linear' | 'ease_in_out' | 'explosive' | 'slow_out'>('ease_in_out');
+  // 灯光（基础三点光；环境氛围光由影棚预设叠加）
+  const [keyIntensity, setKeyIntensity] = useState(3.2);
+  const [keyAzimuth, setKeyAzimuth] = useState(40);
+  const [keyTemp, setKeyTemp] = useState<'neon' | 'cold' | 'warm' | 'moon'>('neon');
+  const [rimIntensity, setRimIntensity] = useState(3.5);
+  const [ambientIntensity, setAmbientIntensity] = useState(1.8);
+  const [exposure, setExposure] = useState(1.15);
+  // 走位（主角地面路径点，点击地面打点，模拟时沿路径行走）
+  const [walkMode, setWalkMode] = useState(false);
+  const [waypoints, setWaypoints] = useState<Array<{ x: number; z: number }>>([]);
+  const walkModeRef = useRef(false);
+  const waypointsRef = useRef<Array<{ x: number; z: number }>>([]);
+  // 预演录制（录制监视器画面为 webm，可下载并上传资产库）
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordUrl, setRecordUrl] = useState<string | null>(null);
+  const [recordSecs, setRecordSecs] = useState(0);
+  const [recordMsg, setRecordMsg] = useState<string | null>(null);
   const [environment, setEnvironment] = useState<StageEnvironment>('cyber_studio');
   const [propsConfig, setPropsConfig] = useState<StagePropType[]>(['sword', 'magic_circle']);
 
@@ -246,26 +213,119 @@ export const Director3DStage: React.FC = () => {
   const [showTrajectory, setShowTrajectory] = useState(true);
   const [isSimulating, setIsSimulating] = useState(false);
   const [scrubberProgress, setScrubberProgress] = useState(0);
-  const [activeRightTab, setActiveRightTab] = useState<'optics_motion' | 'cast_props' | 'environment' | 'agent'>('optics_motion');
+  const [activeRightTab, setActiveRightTab] = useState<'optics_motion' | 'cast_props' | 'environment' | 'lighting' | 'agent'>('optics_motion');
 
-  // AI Directing Assistant
+  // AI Directing Assistant — unified via useDirectorAgent (single MCP)
   const [aiPrompt, setAiPrompt] = useState('');
-  const [aiThinking, setAiThinking] = useState(false);
+  const { execute: directorExecute, loading: aiThinking } = useDirectorAgent();
   const [appliedSuccess, setAppliedSuccess] = useState(false);
   const [snapshotSuccess, setSnapshotSuccess] = useState(false);
+  const [snapshotMsg, setSnapshotMsg] = useState<string | null>(null);
+  const [lastRecordAssetUrl, setLastRecordAssetUrl] = useState<string | null>(null);
 
-  // 同步 activeShot
+  // 同步 activeShot（仅跟随 activeShotId，避免任何 project 更新都重置未保存的手动调整）
   useEffect(() => {
-    if (activeShot) {
-      if (activeShot.camera_framing) setFraming(activeShot.camera_framing);
-      if (activeShot.camera_motion) setMotion(activeShot.camera_motion);
-      if (activeShot.pose_preset) setPose(activeShot.pose_preset);
-      if (activeShot.focal_length_mm) setFocalLength(activeShot.focal_length_mm);
-      if (activeShot.camera_roll_deg !== undefined) setCameraRoll(activeShot.camera_roll_deg);
-      if (activeShot.cast_layout) setCastLayout(activeShot.cast_layout);
-      if (activeShot.props_config) setPropsConfig(activeShot.props_config);
+    const st = useProjectStore.getState();
+    const shots = st.project?.scenes.flatMap((s) => s.shots) || [];
+    const shot = shots.find((sh) => sh.id === st.activeShotId) || shots[0];
+    if (!shot) return;
+    if (shot.camera_framing) setFraming(shot.camera_framing);
+    if (shot.camera_motion) setMotion(shot.camera_motion);
+    if (shot.pose_preset) setPose(shot.pose_preset);
+    if (shot.focal_length_mm) setFocalLength(shot.focal_length_mm);
+    if (shot.camera_roll_deg !== undefined) setCameraRoll(shot.camera_roll_deg);
+    if (shot.cast_layout) setCastLayout(shot.cast_layout);
+    if (shot.props_config) setPropsConfig(shot.props_config);
+    if (shot.motion_speed) setMotionSpeed(shot.motion_speed);
+    if (shot.walk_path) setWaypointsBoth(shot.walk_path);
+    if (shot.lighting_config) {
+      const lc = shot.lighting_config;
+      setKeyIntensity(lc.keyIntensity ?? 3.2);
+      setKeyAzimuth(lc.keyAzimuth ?? 40);
+      setKeyTemp(lc.keyTemp ?? 'neon');
+      setRimIntensity(lc.rimIntensity ?? 3.5);
+      setAmbientIntensity(lc.ambientIntensity ?? 1.8);
+      setExposure(lc.exposure ?? 1.15);
     }
-  }, [activeShotId, activeShot]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeShotId]);
+
+  // 灯光面板 → 基础三点光实时应用（主光方位绕 Y 轴旋转，高度固定）
+  useEffect(() => {
+    const az = THREE.MathUtils.degToRad(keyAzimuth);
+    const r = 6;
+    if (keyLightRef.current) {
+      keyLightRef.current.position.set(Math.sin(az) * r, 5, Math.cos(az) * r);
+      keyLightRef.current.color.setHex(KEY_TEMPS[keyTemp].color);
+      keyLightRef.current.intensity = keyIntensity;
+    }
+    if (rimLightRef.current) rimLightRef.current.intensity = rimIntensity;
+    if (ambientRef.current) ambientRef.current.intensity = ambientIntensity;
+    if (rendererRef.current) rendererRef.current.toneMappingExposure = exposure;
+  }, [keyIntensity, keyAzimuth, keyTemp, rimIntensity, ambientIntensity, exposure]);
+
+  // 走位模式 ref 镜像（供 canvas 点击监听读取，避免闭包过期）
+  useEffect(() => { walkModeRef.current = walkMode; }, [walkMode]);
+
+  // 走位路径标记渲染（青色圆点 + 连线，随 waypoints 重建）
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    if (walkMarkersRef.current) { scene.remove(walkMarkersRef.current); walkMarkersRef.current = null; }
+    if (waypoints.length === 0) return;
+    const group = new THREE.Group();
+    group.name = 'walk_markers';
+    const dotGeo = new THREE.SphereGeometry(0.05, 12, 12);
+    const dotMat = new THREE.MeshBasicMaterial({ color: 0x34c759 });
+    waypoints.forEach((wp, idx) => {
+      const dot = new THREE.Mesh(dotGeo, dotMat);
+      dot.position.set(wp.x, 0.06, wp.z);
+      group.add(dot);
+      if (idx > 0) {
+        const prev = waypoints[idx - 1];
+        const lineGeo = new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(prev.x, 0.06, prev.z),
+          new THREE.Vector3(wp.x, 0.06, wp.z),
+        ]);
+        group.add(new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: 0x34c759 })));
+      }
+    });
+    scene.add(group);
+    walkMarkersRef.current = group;
+    return () => { if (walkMarkersRef.current && sceneRef.current) { sceneRef.current.remove(walkMarkersRef.current); walkMarkersRef.current = null; } };
+  }, [waypoints]);
+
+  const setWaypointsBoth = useCallback((wps: Array<{ x: number; z: number }>) => {
+    waypointsRef.current = wps;
+    setWaypoints(wps);
+  }, []);
+
+  const clearWalk = useCallback(() => { setWaypointsBoth([]); walkBaseRef.current = null; }, [setWaypointsBoth]);
+
+  // 场景底图背景板：分镜绑定的 scene_ref_image 挂为舞台远景，第1集和第10集同一地点即同背景
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    if (backdropRef.current) { scene.remove(backdropRef.current); (backdropRef.current.material as THREE.Material)?.dispose?.(); (backdropRef.current.geometry as THREE.BufferGeometry)?.dispose?.(); backdropRef.current = null; }
+    const url = activeShot?.scene_ref_image;
+    if (!url) return;
+    let cancelled = false;
+    new THREE.TextureLoader().load(url, (tex) => {
+      if (cancelled || !sceneRef.current) { tex.dispose(); return; }
+      try {
+        const geo = new THREE.PlaneGeometry(18, 10);
+        const mat = new THREE.MeshBasicMaterial({ map: tex, fog: false });
+        (mat as any).toneMapped = false;
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(0, 3.2, -8);
+        mesh.name = 'scene_backdrop';
+        sceneRef.current.add(mesh);
+        backdropRef.current = mesh;
+      } catch { tex.dispose(); }
+    }, undefined, () => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeShotId, (activeShot as any)?.scene_ref_image]);
 
   // Three refs
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -279,6 +339,19 @@ export const Director3DStage: React.FC = () => {
   const antagonistGroupRef = useRef<THREE.Group | null>(null);
   const trajectoryLineRef = useRef<THREE.Line | null>(null);
   const cameraHelperRef = useRef<THREE.CameraHelper | null>(null);
+  // 基础三点光引用（环境光为叠加氛围，不受灯光面板控制）
+  const keyLightRef = useRef<THREE.DirectionalLight | null>(null);
+  const rimLightRef = useRef<THREE.DirectionalLight | null>(null);
+  const ambientRef = useRef<THREE.AmbientLight | null>(null);
+  // 走位路径标记组 + 模拟起点（避免与位姿/相机状态互相覆盖）
+  const walkMarkersRef = useRef<THREE.Group | null>(null);
+  const walkBaseRef = useRef<{ x: number; z: number; rotY: number } | null>(null);
+  // 场景底图背景板（分镜绑定的 scene_ref_image，预演与剧本场景同地）
+  const backdropRef = useRef<THREE.Mesh | null>(null);
+  // 预演录制
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recordChunksRef = useRef<Blob[]>([]);
+  const recordTimerRef = useRef<any>(null);
 
   const orbitStateRef = useRef({
     isRotating: false,
@@ -488,17 +561,20 @@ export const Director3DStage: React.FC = () => {
     renderer.toneMappingExposure = 1.15;
     containerRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
-    // 基础光（会被环境光覆盖，保留兜底）
+    // 基础光（会被环境光覆盖，保留兜底；灯光面板通过 ref 实时控制）
     const ambient = new THREE.AmbientLight(0x1a1528, 1.8);
     scene.add(ambient);
+    ambientRef.current = ambient;
     const keyLight = new THREE.DirectionalLight(0x7c3aed, 3.2);
     keyLight.position.set(4, 5, 3.5);
     keyLight.castShadow = true;
     keyLight.shadow.mapSize.set(1024, 1024);
     scene.add(keyLight);
+    keyLightRef.current = keyLight;
     const rimLight = new THREE.DirectionalLight(0x00d2ff, 3.5);
     rimLight.position.set(-3.5, 3.5, -3);
     scene.add(rimLight);
+    rimLightRef.current = rimLight;
     // 环境组
     const envGroup = new THREE.Group();
     envGroup.name = 'env_group';
@@ -888,12 +964,36 @@ export const Director3DStage: React.FC = () => {
 
   const handleToggleSimulation = () => {
     if (!virtualCameraRef.current) return;
-    if (isSimulating) { setIsSimulating(false); return; }
+    if (isSimulating) {
+      setIsSimulating(false);
+      // 手动停止时同样落回起点并停止录制，避免角色/机位停在半程
+      const prot = protagonistGroupRef.current;
+      if (prot && walkBaseRef.current) { prot.position.x = walkBaseRef.current.x; prot.position.z = walkBaseRef.current.z; prot.rotation.y = walkBaseRef.current.rotY; }
+      if (recorderRef.current && recorderRef.current.state !== 'inactive') { try { recorderRef.current.stop(); } catch {} }
+      return;
+    }
     setIsSimulating(true);
     const cam = virtualCameraRef.current;
     const startPos = cam.position.clone();
     const startFov = cam.fov;
     const startTime = performance.now();
+    // 记录主角走位起点（模拟结束/中断时复位，保证预演可重复）
+    const prot = protagonistGroupRef.current;
+    if (prot) walkBaseRef.current = { x: prot.position.x, z: prot.position.z, rotY: prot.rotation.y };
+    else walkBaseRef.current = null;
+    const walkPath = waypointsRef.current.length > 0 && walkBaseRef.current
+      ? [{ x: walkBaseRef.current.x, z: walkBaseRef.current.z }, ...waypointsRef.current]
+      : [];
+    // 走位路径总长度（按折线等速行走）
+    let walkSegLens: number[] = [];
+    let walkTotal = 0;
+    for (let i = 1; i < walkPath.length; i++) {
+      const dx = walkPath[i].x - walkPath[i - 1].x;
+      const dz = walkPath[i].z - walkPath[i - 1].z;
+      const len = Math.hypot(dx, dz);
+      walkSegLens.push(len);
+      walkTotal += len;
+    }
     const duration = motionSpeed === '0.5x' ? 4500 : motionSpeed === '1.5x' ? 1800 : motionSpeed === '2.0x' ? 1200 : 2500;
     const step = (now: number) => {
       const elapsed = now - startTime;
@@ -916,8 +1016,33 @@ export const Director3DStage: React.FC = () => {
       cam.lookAt(0, 1.25, 0);
       if (cameraRoll !== 0) cam.rotation.z = (cameraRoll * Math.PI) / 180;
       cam.updateProjectionMatrix();
+      // 主角沿走位路径等速行走，朝向行进方向（与运镜同一 easing 共进退）
+      if (walkPath.length > 1 && walkTotal > 0.001 && protagonistGroupRef.current) {
+        const target = ease * walkTotal;
+        let acc = 0;
+        let px = walkPath[walkPath.length - 1].x;
+        let pz = walkPath[walkPath.length - 1].z;
+        let dirX = 0;
+        let dirZ = -1;
+        for (let i = 1; i < walkPath.length; i++) {
+          if (target <= acc + walkSegLens[i - 1] || i === walkPath.length - 1) {
+            const segLen = walkSegLens[i - 1] || 1;
+            const t = Math.max(0, Math.min(1, (target - acc) / segLen));
+            px = walkPath[i - 1].x + (walkPath[i].x - walkPath[i - 1].x) * t;
+            pz = walkPath[i - 1].z + (walkPath[i].z - walkPath[i - 1].z) * t;
+            dirX = walkPath[i].x - walkPath[i - 1].x;
+            dirZ = walkPath[i].z - walkPath[i - 1].z;
+            break;
+          }
+          acc += walkSegLens[i - 1];
+        }
+        const p = protagonistGroupRef.current;
+        p.position.x = px;
+        p.position.z = pz;
+        if (Math.hypot(dirX, dirZ) > 0.001) p.rotation.y = Math.atan2(dirX, dirZ);
+      }
       if (progress < 1) requestAnimationFrame(step);
-      else { cam.position.copy(startPos); cam.fov = startFov; cam.lookAt(0, 1.25, 0); if (cameraRoll !== 0) cam.rotation.z = (cameraRoll * Math.PI) / 180; cam.updateProjectionMatrix(); setIsSimulating(false); setScrubberProgress(0); }
+      else { cam.position.copy(startPos); cam.fov = startFov; cam.lookAt(0, 1.25, 0); if (cameraRoll !== 0) cam.rotation.z = (cameraRoll * Math.PI) / 180; cam.updateProjectionMatrix(); if (protagonistGroupRef.current && walkBaseRef.current) { protagonistGroupRef.current.position.x = walkBaseRef.current.x; protagonistGroupRef.current.position.z = walkBaseRef.current.z; protagonistGroupRef.current.rotation.y = walkBaseRef.current.rotY; } if (recorderRef.current && recorderRef.current.state !== 'inactive') { try { recorderRef.current.stop(); } catch {} } setIsSimulating(false); setScrubberProgress(0); }
     };
     requestAnimationFrame(step);
   };
@@ -932,6 +1057,22 @@ export const Director3DStage: React.FC = () => {
         const y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
         const raycaster = new THREE.Raycaster();
         raycaster.setFromCamera(new THREE.Vector2(x, y), mainCameraRef.current);
+        // 走位模式：点击地面打路径点（最多 6 个），不触发旋转/选中
+        if (walkModeRef.current) {
+          const hit = new THREE.Vector3();
+          if (raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hit)) {
+            const cx = Math.max(-6, Math.min(6, hit.x));
+            const cz = Math.max(-6, Math.min(6, hit.z));
+            const cur = waypointsRef.current;
+            if (cur.length < 6) {
+              const next = [...cur, { x: cx, z: cz }];
+              waypointsRef.current = next;
+              setWaypoints(next);
+            }
+          }
+          orbitStateRef.current.prevX = e.clientX; orbitStateRef.current.prevY = e.clientY;
+          return;
+        }
         if (stageEntitiesGroupRef.current) {
           const intersects = raycaster.intersectObjects(stageEntitiesGroupRef.current.children, true);
           if (intersects.length > 0) {
@@ -973,35 +1114,182 @@ export const Director3DStage: React.FC = () => {
 
   const handleExecuteAiDirective = async () => {
     if (!aiPrompt.trim()) return;
-    setAiThinking(true);
     try {
-      const res = await invokeTool('director_3d_stage_plan', { ai_directive: aiPrompt, framing, motion, pose, focal_length_mm: focalLength, camera_roll_deg: cameraRoll, cast_layout: castLayout, speed: motionSpeed });
-      if (res.status === 'success' && res.result) {
-        const r = res.result as any;
-        if (r.framing) setFraming(r.framing);
-        if (r.motion) setMotion(r.motion);
-        if (r.pose) setPose(r.pose);
-        if (r.focal_length_mm) setFocalLength(r.focal_length_mm);
-        if (r.camera_roll_deg !== undefined) setCameraRoll(r.camera_roll_deg);
-        if (r.cast_layout) setCastLayout(r.cast_layout);
-      }
+      const r: any = await directorExecute({ ai_directive: aiPrompt, framing, motion, pose, focal_length_mm: focalLength, camera_roll_deg: cameraRoll, cast_layout: castLayout, speed: motionSpeed });
+      if (r.framing) setFraming(r.framing);
+      if (r.motion) setMotion(r.motion);
+      if (r.pose) setPose(r.pose);
+      if (r.focal_length_mm) setFocalLength(r.focal_length_mm);
+      if (r.camera_roll_deg !== undefined) setCameraRoll(r.camera_roll_deg);
+      if (r.cast_layout) setCastLayout(r.cast_layout);
+      try {
+        const nodes = useCanvasStore.getState().nodes;
+        const dirNode = nodes.find((n: any) => n.type === 'director3d');
+        if (dirNode) {
+          useCanvasStore.getState().updateNodeData(dirNode.id, {
+            ai_directive: aiPrompt,
+            minimax_camera_prompt: r.minimax_camera_prompt || r.camera_prompt,
+            framing: r.framing || framing,
+            motion: r.motion || motion,
+          });
+        }
+      } catch {}
       setTimeout(() => handleToggleSimulation(), 300);
-    } catch (e) { console.error(e); } finally { setAiThinking(false); }
+    } catch (e) { console.error(e); }
   };
 
   const handleApplyToShot = async () => {
     if (!activeShot) return;
     await invokeTool('director_3d_stage_plan', { framing, motion, pose, focal_length_mm: focalLength, camera_roll_deg: cameraRoll, cast_layout: castLayout, speed: motionSpeed });
     const updatedVideoPrompt = activeShot.video_prompt ? `${activeShot.video_prompt.replace(/\[Camera:[^\]]+\]/g, '').trim()} ${minimaxPromptPreview}`.trim() : minimaxPromptPreview;
-    updateShot(activeShot.id, { camera_framing: framing, camera_motion: motion, pose_preset: pose, focal_length_mm: focalLength, camera_roll_deg: cameraRoll, cast_layout: castLayout, props_config: propsConfig, video_prompt: updatedVideoPrompt });
+    updateShot(activeShot.id, { camera_framing: framing, camera_motion: motion, pose_preset: pose, focal_length_mm: focalLength, camera_roll_deg: cameraRoll, cast_layout: castLayout, props_config: propsConfig, video_prompt: updatedVideoPrompt, motion_speed: motionSpeed, walk_path: waypointsRef.current, lighting_config: { keyIntensity, keyAzimuth, keyTemp, rimIntensity, ambientIntensity, exposure } });
     setAppliedSuccess(true); setTimeout(() => setAppliedSuccess(false), 2500);
   };
 
-  const handleCaptureSnapshot = () => {
-    if (!pipRendererRef.current) return;
-    const dataUrl = pipRendererRef.current.domElement.toDataURL('image/png');
-    if (activeShot) updateShot(activeShot.id, { image_url: dataUrl });
+  const handleCaptureSnapshot = async () => {
+    if (!activeShot) return;
+    const shotId = activeShot.id;
+    // 截图源：监视器（导演机位视角）优先，关闭时用主舞台视角兜底；限宽 1024 压缩，避免 dataURL 撑爆项目保存
+    const src = (showPip && pipRendererRef.current?.domElement) || rendererRef.current?.domElement;
+    if (!src) { setSnapshotMsg('无可用画面（请确认舞台已加载）'); return; }
+    let dataUrl: string;
+    try {
+      const scale = Math.min(1, 1024 / src.width);
+      if (scale >= 1) dataUrl = src.toDataURL('image/jpeg', 0.88);
+      else {
+        const c = document.createElement('canvas');
+        c.width = Math.round(src.width * scale); c.height = Math.round(src.height * scale);
+        c.getContext('2d')!.drawImage(src, 0, 0, c.width, c.height);
+        dataUrl = c.toDataURL('image/jpeg', 0.88);
+      }
+    } catch { setSnapshotMsg('截图失败（画布不可读）'); return; }
+    // 先即时挂为参考不断链；上传成功后替换为资产地址（持久化 + 复用）
+    try { updateShot(shotId, { previz_url: dataUrl }); } catch {}
     setSnapshotSuccess(true); setTimeout(() => setSnapshotSuccess(false), 2500);
+    setSnapshotMsg('截图已挂为参考，正在上传资产库…');
+    try {
+      const assetUrl = await uploadPrevizFile(dataUrlToFile(dataUrl, `previz_shot${activeShot.shot_index || ''}_${Date.now()}.jpg`), `白模截图_分镜${activeShot.shot_index || ''}`);
+      try { updateShot(shotId, { previz_url: assetUrl }); } catch {}
+      setSnapshotMsg('截图已存资产库并挂为参考');
+    } catch { setSnapshotMsg('截图已挂为参考（本地，资产库上传失败）'); }
+  };
+
+  // 截图明确设为本镜首帧（覆盖需二次确认；与“仅作参考”分离）
+  const handleSetSnapshotAsFirstFrame = () => {
+    if (!activeShot?.previz_url) { setSnapshotMsg('请先截屏'); return; }
+    if (activeShot.image_url && !confirm('将覆盖当前 AI 首帧，继续？')) return;
+    updateShot(activeShot.id, { image_url: activeShot.previz_url });
+    setSnapshotMsg('已设为本镜首帧');
+  };
+
+  const dataUrlToFile = (dataUrl: string, name: string): File => {
+    const [head, b64] = dataUrl.split(',');
+    const mime = /data:(.*?);/.exec(head)?.[1] || 'image/jpeg';
+    const bin = atob(b64 || '');
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return new File([arr], name, { type: mime });
+  };
+
+  const uploadPrevizFile = async (file: File, name: string): Promise<string> => {
+    const form = new FormData();
+    form.append('name', name);
+    form.append('category', 'previz');
+    form.append('tags', 'previz,导演预演');
+    const pid = project?.id;
+    if (pid) form.append('project_id', pid);
+    form.append('file', file);
+    const r: any = await apiService.createAsset(form);
+    const assetUrl = r?.asset?.file_url || r?.asset?.url || r?.file_url || '';
+    if (!assetUrl) throw new Error('上传无返回地址');
+    return assetUrl;
+  };
+
+  // 预演录制：录制监视器（导演机位视角）画面为 webm；随运镜模拟同起同止
+  const finalizeRecording = useCallback(() => {
+    try {
+      const blob = new Blob(recordChunksRef.current, { type: 'video/webm' });
+      recordChunksRef.current = [];
+      if (blob.size === 0) { setRecordMsg('录制失败：未采集到画面（请确认监视器已开启）'); return; }
+      const secs = recordSecsRefValue();
+      const url = URL.createObjectURL(blob);
+      setRecordUrl(url);
+      setRecordSecs(secs);
+      // 自动下载一份到本地
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `previz_${activeShot?.shot_index ?? 'shot'}_${Date.now()}.webm`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setRecordMsg(`已录制 ${secs.toFixed(1)}s 预演（webm 已下载，正在上传资产库…）`);
+      // 同步上传资产库（失败不阻塞，本地文件已落盘）
+      const pid = project?.id;
+      const form = new FormData();
+      form.append('name', `导演预演_${activeShot?.shot_index ?? ''}_${new Date().toLocaleString()}`);
+      form.append('category', 'previz');
+      form.append('tags', 'previz,导演预演');
+      if (pid) form.append('project_id', pid);
+      form.append('file', new File([blob], 'previz.webm', { type: 'video/webm' }));
+      apiService.createAsset(form).then((r: any) => {
+        const assetUrl = r?.asset?.file_url || r?.asset?.url || r?.file_url || '';
+        if (assetUrl) {
+          setLastRecordAssetUrl(assetUrl);
+          // 动态预演落盘到分镜独立字段（不碰 image_url/video_url），供白模参考链路消费
+          if (activeShot) { try { updateShot(activeShot.id, { previz_video_url: assetUrl }); } catch {} }
+        }
+        setRecordMsg(`已录制 ${secs.toFixed(1)}s 预演（已存资产库${assetUrl ? '并挂为视频参考' : '，本地文件可用'}）`);
+      }).catch(() => {
+        setRecordMsg(`已录制 ${secs.toFixed(1)}s 预演（webm 已下载，资产库上传失败，可手动设为参考）`);
+      });
+    } catch (e: any) {
+      setRecordMsg(`录制失败：${e?.message || e}`);
+    }
+  }, [activeShot, project]);
+
+  const recordSecsRefValue = () => {
+    // 录制时长按当前运镜模拟时长估算（与模拟同起同止）
+    return motionSpeed === '0.5x' ? 4.5 : motionSpeed === '1.5x' ? 1.8 : motionSpeed === '2.0x' ? 1.2 : 2.5;
+  };
+
+  // 录制结果显式设为本镜视频参考（上传成功即资产地址；仅本地时提示会话有效期）
+  const handleSetRecordAsVideoRef = () => {
+    const url = lastRecordAssetUrl || recordUrl;
+    if (!url) { setRecordMsg('请先录制预演'); return; }
+    if (!activeShot) return;
+    updateShot(activeShot.id, { previz_video_url: url });
+    setRecordMsg(lastRecordAssetUrl ? '已设为本镜视频参考' : '已设为本镜视频参考（本地预览，刷新后失效，建议等待上传完成）');
+  };
+
+  const handleToggleRecording = () => {    if (isRecording) {
+      if (recorderRef.current && recorderRef.current.state !== 'inactive') { try { recorderRef.current.stop(); } catch {} }
+      if (recordTimerRef.current) { clearTimeout(recordTimerRef.current); recordTimerRef.current = null; }
+      setIsRecording(false);
+      return;
+    }
+    const canvas = pipRendererRef.current?.domElement as HTMLCanvasElement | undefined;
+    if (!canvas || !showPip) { setRecordMsg('请先开启监视器（右上 Monitor）再录制'); return; }
+    try {
+      const stream = canvas.captureStream(30);
+      const mime = (window as any).MediaRecorder && MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+        ? 'video/webm;codecs=vp9' : 'video/webm';
+      const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8_000_000 });
+      recordChunksRef.current = [];
+      rec.ondataavailable = (ev) => { if (ev.data && ev.data.size) recordChunksRef.current.push(ev.data); };
+      rec.onstop = () => { setIsRecording(false); finalizeRecording(); };
+      rec.start(200);
+      recorderRef.current = rec;
+      setIsRecording(true);
+      setRecordMsg(null);
+      setRecordUrl(null);
+      setLastRecordAssetUrl(null);
+      // 与运镜模拟同起；12s 兜底停（模拟最长 4.5s，正常由模拟结束触发 stop）
+      if (!isSimulating) handleToggleSimulation();
+      if (recordTimerRef.current) clearTimeout(recordTimerRef.current);
+      recordTimerRef.current = setTimeout(() => {
+        if (recorderRef.current && recorderRef.current.state !== 'inactive') { try { recorderRef.current.stop(); } catch {} }
+      }, 12000);
+    } catch (e: any) {
+      setRecordMsg(`录制启动失败：${e?.message || e}（该浏览器可能不支持 MediaRecorder）`);
+    }
   };
 
   return (
@@ -1031,7 +1319,7 @@ export const Director3DStage: React.FC = () => {
         {/* Agent 场景生成条 */}
         <div className="absolute top-[4.2rem] left-4 right-4 md:right-72 z-20 flex items-center space-x-2 bg-gradient-to-r from-brand/15 to-accent-blue/15 backdrop-blur-md p-2 rounded-2xl border border-brand/30 shadow-xl">
           <div className="flex items-center space-x-1.5 pl-2 text-brand-light"><Lightbulb className="w-4 h-4" /><span className="text-[10px] font-bold">Agent 布景</span></div>
-          <textarea value={scenePrompt} onChange={(e) => { setScenePrompt(e.target.value); const el=e.target as HTMLTextAreaElement; el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,80)+'px'; }} onInput={(e)=>{const el=e.target as HTMLTextAreaElement; el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,80)+'px';}} onKeyDown={(e) => { if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); handleAgentSceneGenerate(); } }} placeholder="自然语言布景（Shift+Enter 换行）：如 “切换到修仙云海，添加持剑敌人对峙，地面加符文阵” 粘贴长段亦可" rows={1} className="flex-1 bg-surface/70 border border-border rounded-xl px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand resize-none overflow-y-auto min-h-[28px] max-h-[80px] leading-relaxed" style={{height:'auto'}} />
+          <textarea value={scenePrompt} onChange={(e) => { setScenePrompt(e.target.value); const el=e.target as HTMLTextAreaElement; el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,80)+'px'; }} onInput={(e)=>{const el=e.target as HTMLTextAreaElement; el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,80)+'px';}} onKeyDown={(e) => { e.stopPropagation(); if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); handleAgentSceneGenerate(); } }} onPaste={(e) => e.stopPropagation()} onCopy={(e) => e.stopPropagation()} onCut={(e) => e.stopPropagation()} placeholder="自然语言布景（Shift+Enter 换行）：如 “切换到修仙云海，添加持剑敌人对峙，地面加符文阵” 粘贴长段亦可" rows={1} className="flex-1 nodrag select-text bg-surface/70 border border-border rounded-xl px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand resize-none overflow-y-auto min-h-[28px] max-h-[80px] leading-relaxed" style={{height:'auto'}} />
           <button onClick={handleAgentSceneGenerate} disabled={sceneGenerating || !scenePrompt.trim()} className="px-3 py-1.5 rounded-xl bg-brand hover:opacity-90 disabled:opacity-40 text-white text-xs font-bold flex items-center space-x-1 self-end"><span>{sceneGenerating ? '生成中...' : '生成'}</span><Sparkles className="w-3 h-3" /></button>
           <span className="hidden md:inline text-[10px] text-gray-400 max-w-[140px] truncate" title={sceneDesc}>{sceneDesc}</span>
         </div>
@@ -1039,7 +1327,7 @@ export const Director3DStage: React.FC = () => {
           {isSimulating && <div className="bg-surface/90 backdrop-blur-md p-2 rounded-xl border border-brand/40 shadow-xl flex items-center space-x-3"><span className="text-[10px] font-mono text-brand-light font-bold">运镜进度</span><input type="range" min="0" max="1" step="0.01" value={scrubberProgress} onChange={(e) => setScrubberProgress(parseFloat(e.target.value))} className="flex-1 accent-brand h-1.5 bg-surface-secondary rounded cursor-pointer" /><span className="text-[10px] font-mono text-gray-400">{(scrubberProgress * 100).toFixed(0)}%</span></div>}
           <div className="flex items-end space-x-2 bg-surface/90 backdrop-blur-md p-2 rounded-2xl border border-border shadow-2xl">
             <div className="flex items-center pl-2 pr-1 pt-1.5 text-brand-light self-start"><Wand2 className="w-4 h-4 animate-pulse" /></div>
-            <textarea value={aiPrompt} onChange={(e) => { setAiPrompt(e.target.value); const el=e.target as HTMLTextAreaElement; el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,80)+'px'; }} onInput={(e)=>{const el=e.target as HTMLTextAreaElement; el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,80)+'px';}} onKeyDown={(e) => { if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); handleExecuteAiDirective(); } }} placeholder="✨ AI 机位调度（Shift+Enter 换行）：如 '希区柯克变焦突显惊恐眼神'、'贴地仰角双人对峙推镜'... 粘贴长指令亦可" rows={1} className="flex-1 bg-transparent text-xs text-white placeholder-gray-500 focus:outline-none resize-none overflow-y-auto min-h-[20px] max-h-[80px] leading-relaxed py-1.5" style={{height:'auto'}} />
+            <textarea value={aiPrompt} onChange={(e) => { setAiPrompt(e.target.value); const el=e.target as HTMLTextAreaElement; el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,80)+'px'; }} onInput={(e)=>{const el=e.target as HTMLTextAreaElement; el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,80)+'px';}} onKeyDown={(e) => { e.stopPropagation(); if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); handleExecuteAiDirective(); } }} onPaste={(e) => e.stopPropagation()} onCopy={(e) => e.stopPropagation()} onCut={(e) => e.stopPropagation()} placeholder="✨ AI 机位调度（Shift+Enter 换行）：如 '希区柯克变焦突显惊恐眼神'、'贴地仰角双人对峙推镜'... 粘贴长指令亦可" rows={1} className="flex-1 nodrag select-text bg-transparent text-xs text-white placeholder-gray-500 focus:outline-none resize-none overflow-y-auto min-h-[20px] max-h-[80px] leading-relaxed py-1.5" style={{height:'auto'}} />
             <button onClick={handleExecuteAiDirective} disabled={aiThinking || !aiPrompt.trim()} className="px-4 py-1.5 rounded-xl bg-gradient-to-r from-brand to-brand-blue hover:opacity-90 disabled:opacity-50 text-white text-xs font-bold shadow-md shadow-brand/20 transition-all flex items-center space-x-1.5 self-end">{aiThinking ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}<span>{aiThinking ? '正在调度...' : 'AI 机位调度'}</span></button>
           </div>
         </div>
@@ -1050,10 +1338,12 @@ export const Director3DStage: React.FC = () => {
               <div className="flex items-center space-x-1"><span className="text-brand-light font-bold">{aspectRatioMask}</span><span className="text-gray-500">|</span><span className="text-accent-blue font-bold">{focalLength}mm</span></div>
             </div>
             <div className="flex-1 relative overflow-hidden bg-black flex items-center justify-center"><div ref={pipContainerRef} className="w-full h-full" />{compositionGrid === 'rule_of_thirds' && <div className="absolute inset-0 pointer-events-none grid grid-cols-3 grid-rows-3 border border-white/10 opacity-40"><div className="border-r border-b border-white/25" /><div className="border-r border-b border-white/25" /><div className="border-b border-white/25" /><div className="border-r border-b border-white/25" /><div className="border-r border-b border-white/25" /><div className="border-b border-white/25" /><div className="border-r border-b border-white/25" /><div className="border-r border-b border-white/25" /><div /></div>}{compositionGrid === 'crosshair' && <div className="absolute inset-0 pointer-events-none flex items-center justify-center"><Crosshair className="w-6 h-6 text-brand-light/70" /></div>}{compositionGrid === 'golden_ratio' && <div className="absolute inset-0 pointer-events-none border border-brand-light/30 rounded-full scale-90 opacity-40" />}</div>
-            <div className="p-2 bg-surface-secondary/95 border-t border-border flex items-center justify-between text-[10px]">
+            <div className="p-2 bg-surface-secondary/95 border-t border-border flex items-center justify-between text-[10px] gap-1">
               <button onClick={() => setCompositionGrid((g) => (g === 'rule_of_thirds' ? 'crosshair' : g === 'crosshair' ? 'golden_ratio' : g === 'golden_ratio' ? 'none' : 'rule_of_thirds'))} className="px-2 py-0.5 rounded bg-surface border border-border text-gray-300 hover:text-white font-mono" title="切换构图参考线">网格: {compositionGrid === 'rule_of_thirds' ? '九宫' : compositionGrid === 'crosshair' ? '十字' : compositionGrid === 'golden_ratio' ? '黄金' : '无'}</button>
-              <button onClick={handleCaptureSnapshot} className="flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-brand/30 hover:bg-brand border border-brand/50 text-brand-light hover:text-white font-bold transition-all" title="截取当前 3D 视角作为分镜画面参考">{snapshotSuccess ? <Check className="w-3 h-3 text-accent-green" /> : <Camera className="w-3 h-3" />}<span>{snapshotSuccess ? '已快照' : '截取分镜'}</span></button>
+              <button onClick={handleCaptureSnapshot} className="flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-brand/30 hover:bg-brand border border-brand/50 text-brand-light hover:text-white font-bold transition-all" title="截取导演视角为图片参考（存资产库 previz，挂分镜 previz_url）">{snapshotSuccess ? <Check className="w-3 h-3 text-accent-green" /> : <Camera className="w-3 h-3" />}<span>{snapshotSuccess ? '已快照' : '截屏为参考'}</span></button>
+              <button onClick={handleSetSnapshotAsFirstFrame} className="px-2 py-1 rounded-lg bg-surface border border-border text-gray-300 hover:text-white font-mono" title="把当前截图参考设为本镜首帧（覆盖需确认）">设为首帧</button>
             </div>
+            {(snapshotMsg || activeShot?.previz_url) && <div className="px-2 py-1 bg-surface-secondary/95 border-t border-border text-[10px] text-gray-400 leading-4">{activeShot?.previz_url && <span className="text-accent-green font-bold">✓ 参考已挂载 </span>}{snapshotMsg}</div>}
           </div>
         )}
       </div>
@@ -1062,6 +1352,7 @@ export const Director3DStage: React.FC = () => {
           <button onClick={() => setActiveRightTab('optics_motion')} className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-1.5 ${activeRightTab === 'optics_motion' ? 'bg-surface text-brand-light shadow-md' : 'text-gray-400 hover:text-gray-200'}`}><Video className="w-3.5 h-3.5" /><span>光学与运镜</span></button>
           <button onClick={() => setActiveRightTab('cast_props')} className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-1.5 ${activeRightTab === 'cast_props' ? 'bg-surface text-accent-orange shadow-md' : 'text-gray-400 hover:text-gray-200'}`}><Users className="w-3.5 h-3.5" /><span>站位与道具</span></button>
           <button onClick={() => setActiveRightTab('environment')} className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-1.5 ${activeRightTab === 'environment' ? 'bg-surface text-accent-green shadow-md' : 'text-gray-400 hover:text-gray-200'}`}><Sun className="w-3.5 h-3.5" /><span>影棚环境</span></button>
+          <button onClick={() => setActiveRightTab('lighting')} className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-1.5 ${activeRightTab === 'lighting' ? 'bg-surface text-yellow-300 shadow-md' : 'text-gray-400 hover:text-gray-200'}`}><Lightbulb className="w-3.5 h-3.5" /><span>灯光</span></button>
           <button onClick={() => setActiveRightTab('agent')} className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-1 ${activeRightTab === 'agent' ? 'bg-surface text-accent-blue shadow-md' : 'text-gray-400 hover:text-gray-200'}`}><Mic className="w-3 h-3" /><span>Agent</span></button>
         </div>
         <div className="flex-1 p-5 space-y-6 overflow-y-auto custom-scrollbar">
@@ -1088,7 +1379,12 @@ export const Director3DStage: React.FC = () => {
                   <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider pt-2">🎬 经典单轴运镜</div>
                   <div className="grid grid-cols-2 gap-2">{MOTION_PRESETS.filter((m) => m.category === 'single').map((m) => <button key={m.id} onClick={() => setMotion(m.id)} className={`p-2 rounded-xl border text-left transition-all ${motion === m.id ? 'bg-brand/20 border-brand text-white shadow-md ring-1 ring-brand' : 'bg-surface-secondary border-border text-gray-400 hover:text-gray-200'}`}><div className="text-xs font-bold truncate">{m.label}</div><div className="text-[9px] text-gray-500 truncate mt-0.5">{m.desc}</div></button>)}</div>
                 </div>
-                <div className="mt-4"><button onClick={handleToggleSimulation} className={`w-full flex items-center justify-center space-x-2 py-2.5 rounded-xl text-xs font-bold shadow-lg transition-all ${isSimulating ? 'bg-red-500 text-white' : 'bg-gradient-to-r from-accent-orange to-brand text-white hover:opacity-95'}`}>{isSimulating ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 fill-current" />}<span>{isSimulating ? '停止运镜预览' : '▶ 播放当前运镜轨迹模拟'}</span></button></div>
+                <div className="mt-4 space-y-2"><button onClick={handleToggleSimulation} className={`w-full flex items-center justify-center space-x-2 py-2.5 rounded-xl text-xs font-bold shadow-lg transition-all ${isSimulating ? 'bg-red-500 text-white' : 'bg-gradient-to-r from-accent-orange to-brand text-white hover:opacity-95'}`}>{isSimulating ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 fill-current" />}<span>{isSimulating ? '停止运镜预览' : '▶ 播放当前运镜轨迹模拟'}</span></button>
+                  <button onClick={handleToggleRecording} className={`w-full flex items-center justify-center space-x-2 py-2.5 rounded-xl text-xs font-bold shadow-lg transition-all border ${isRecording ? 'bg-red-600/20 border-red-500 text-red-300' : 'bg-surface-secondary border-border text-gray-200 hover:border-red-400'}`}><Video className="w-4 h-4" /><span>{isRecording ? '⏺ 录制中…点击停止' : '⏺ 录制预演为视频参考（webm）'}</span></button>
+                  {(recordUrl || lastRecordAssetUrl) && !isRecording && <button onClick={handleSetRecordAsVideoRef} className="w-full py-2 rounded-xl bg-surface-secondary border border-border text-[11px] text-gray-200 hover:border-brand">设为本镜视频参考{activeShot?.previz_video_url ? ' ✓已挂载' : ''}</button>}
+                  {recordMsg && <div className="text-[10px] text-gray-400 leading-4">{recordMsg}</div>}
+                  {recordUrl && <a href={recordUrl} target="_blank" rel="noreferrer" className="block text-center text-[11px] text-accent-blue underline">回放刚录制的预演</a>}
+                </div>
               </div>
             </>
           )}
@@ -1097,6 +1393,20 @@ export const Director3DStage: React.FC = () => {
               <div>
                 <label className="text-xs text-gray-300 font-semibold mb-2 flex items-center justify-between"><span>👥 多角色空间站位 (Cast Staging)</span><span className="text-[10px] text-accent-orange font-mono bg-accent-orange/10 px-2 py-0.5 rounded">{castLayout}</span></label>
                 <div className="grid grid-cols-2 gap-2">{CAST_LAYOUTS.map((c) => <button key={c.id} onClick={() => setCastLayout(c.id)} className={`p-2.5 rounded-xl text-left border transition-all ${castLayout === c.id ? 'bg-accent-orange/20 border-accent-orange text-white shadow-md ring-1 ring-accent-orange' : 'bg-surface-secondary border-border text-gray-400 hover:text-gray-200'}`}><div className="text-xs font-bold">{c.label}</div><div className="text-[9px] text-gray-500 mt-0.5">{c.desc}</div></button>)}</div>
+              </div>
+              <div>
+                <label className="text-xs text-gray-300 font-semibold mb-2 flex items-center justify-between"><span>🚶 主角走位路径 (Blocking)</span><span className="text-[10px] text-accent-green font-mono bg-accent-green/10 px-2 py-0.5 rounded">{waypoints.length}/6 点</span></label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button onClick={() => setWalkMode((v) => !v)} className={`p-2.5 rounded-xl border text-left transition-all ${walkMode ? 'bg-accent-green/20 border-accent-green text-white shadow-md ring-1 ring-accent-green' : 'bg-surface-secondary border-border text-gray-400 hover:text-gray-200'}`}><div className="text-xs font-bold">{walkMode ? '✅ 打点中：点击地面' : '开始地面打点'}</div><div className="text-[9px] text-gray-500 mt-0.5">模拟时主角沿路径行走</div></button>
+                  <button onClick={clearWalk} className="p-2.5 rounded-xl border text-left bg-surface-secondary border-border text-gray-400 hover:text-white transition-all"><div className="text-xs font-bold">清空路径</div><div className="text-[9px] text-gray-500 mt-0.5">恢复原站位</div></button>
+                </div>
+                {walkMode && <div className="text-[10px] text-accent-green mt-1.5 leading-4">在 3D 视图地面上点选，主角将在运镜模拟时按同一节奏走完全程（等速经过各点，朝向行进方向）。打点完成后请关闭打点模式再旋转视角。</div>}
+                {waypoints.length > 0 && (() => {
+                  let total = 0;
+                  for (let i = 1; i < waypoints.length; i++) total += Math.hypot(waypoints[i].x - waypoints[i - 1].x, waypoints[i].z - waypoints[i - 1].z);
+                  const secs = motionSpeed === '0.5x' ? 4.5 : motionSpeed === '1.5x' ? 1.8 : motionSpeed === '2.0x' ? 1.2 : 2.5;
+                  return <div className="text-[10px] text-gray-400 mt-1.5 font-mono">路径 {total.toFixed(1)}m · {secs}s 走完（与运镜同节奏）</div>;
+                })()}
               </div>
               <div>
                 <label className="text-xs text-gray-300 font-semibold mb-2 flex items-center justify-between"><span>🥋 角色动作姿态 (9 Poses)</span><span className="text-[10px] text-accent-green font-mono bg-accent-green/10 px-2 py-0.5 rounded">{pose}</span></label>
@@ -1166,6 +1476,40 @@ export const Director3DStage: React.FC = () => {
               <div className="p-3 rounded-xl bg-surface-secondary border border-border">
                 <div className="text-[10px] text-gray-400 font-bold mb-1">当前场景描述</div>
                 <div className="text-xs text-accent-green font-mono">{sceneDesc}</div>
+              </div>
+            </>
+          )}
+          {activeRightTab === 'lighting' && (
+            <>
+              <div>
+                <label className="text-xs text-gray-300 font-semibold mb-2 block">💡 基础三点光（环境氛围光由影棚预设叠加）</label>
+                <div className="space-y-3 p-3 rounded-xl bg-surface-secondary border border-border">
+                  <div>
+                    <div className="flex items-center justify-between text-[11px] text-gray-300 mb-1"><span>主光强度</span><span className="font-mono text-yellow-300">{keyIntensity.toFixed(1)}</span></div>
+                    <input type="range" min="0" max="8" step="0.1" value={keyIntensity} onChange={(e) => setKeyIntensity(parseFloat(e.target.value))} className="w-full accent-yellow-400 h-1.5 bg-surface rounded cursor-pointer" />
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between text-[11px] text-gray-300 mb-1"><span>主光方位</span><span className="font-mono text-yellow-300">{keyAzimuth}°</span></div>
+                    <input type="range" min="0" max="360" step="5" value={keyAzimuth} onChange={(e) => setKeyAzimuth(parseInt(e.target.value))} className="w-full accent-yellow-400 h-1.5 bg-surface rounded cursor-pointer" />
+                  </div>
+                  <div>
+                    <div className="text-[11px] text-gray-300 mb-1.5">主光色温</div>
+                    <div className="grid grid-cols-4 gap-1.5">{(Object.keys(KEY_TEMPS) as Array<'neon' | 'cold' | 'warm' | 'moon'>).map((t) => <button key={t} onClick={() => setKeyTemp(t)} className={`py-1.5 rounded-lg text-[11px] font-bold border transition-all ${keyTemp === t ? 'bg-yellow-400/20 border-yellow-400 text-white' : 'bg-surface border-border text-gray-400 hover:text-white'}`}>{KEY_TEMPS[t].label}</button>)}</div>
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between text-[11px] text-gray-300 mb-1"><span>轮廓光强度</span><span className="font-mono text-cyan-300">{rimIntensity.toFixed(1)}</span></div>
+                    <input type="range" min="0" max="8" step="0.1" value={rimIntensity} onChange={(e) => setRimIntensity(parseFloat(e.target.value))} className="w-full accent-cyan-400 h-1.5 bg-surface rounded cursor-pointer" />
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between text-[11px] text-gray-300 mb-1"><span>环境光强度</span><span className="font-mono text-gray-300">{ambientIntensity.toFixed(1)}</span></div>
+                    <input type="range" min="0" max="5" step="0.1" value={ambientIntensity} onChange={(e) => setAmbientIntensity(parseFloat(e.target.value))} className="w-full accent-gray-400 h-1.5 bg-surface rounded cursor-pointer" />
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between text-[11px] text-gray-300 mb-1"><span>曝光 (ACES)</span><span className="font-mono text-gray-300">{exposure.toFixed(2)}</span></div>
+                    <input type="range" min="0.4" max="2" step="0.05" value={exposure} onChange={(e) => setExposure(parseFloat(e.target.value))} className="w-full accent-gray-400 h-1.5 bg-surface rounded cursor-pointer" />
+                  </div>
+                </div>
+                <div className="text-[10px] text-gray-500 mt-1.5 leading-4">灯光实时作用于舞台与监视器截图；保存到分镜的联动将在分镜接入阶段补上。</div>
               </div>
             </>
           )}

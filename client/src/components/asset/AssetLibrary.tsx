@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Search, Plus, Layers, Users, Mountain, Box, Image as ImageIcon, Sparkles, Copy, Trash2, Tag, Filter, Library, Upload, Wand2, X, Loader2, Check, Files, Pencil, Save, Edit3 } from 'lucide-react';
+import { Search, Plus, Layers, Users, Mountain, Box, Image as ImageIcon, Sparkles, Copy, Trash2, Tag, Filter, Library, Upload, Wand2, X, Loader2, Check, Files, Pencil, Save, Edit3, Clapperboard, Send } from 'lucide-react';
 import { useAssetStore } from '../../stores/useAssetStore';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { useProjectListStore } from '../../stores/useProjectListStore';
@@ -14,6 +14,7 @@ const CATEGORY_TABS: { key: AssetCategory | 'all'; label: string; icon: React.Re
   { key: 'prop', label: '道具', icon: <Box className="w-3.5 h-3.5" /> },
   { key: 'background', label: '背景', icon: <ImageIcon className="w-3.5 h-3.5" /> },
   { key: 'effect', label: '特效', icon: <Sparkles className="w-3.5 h-3.5" /> },
+  { key: 'previz', label: '预演', icon: <Clapperboard className="w-3.5 h-3.5" /> },
   { key: 'other', label: '其他', icon: <Layers className="w-3.5 h-3.5" /> },
 ];
 
@@ -251,10 +252,42 @@ export const AssetLibrary: React.FC = () => {
     } catch (e: any) { alert(e.message); }
   };
 
+  /** 确保素材对应项目角色存在（同名复用，否则创建），返回角色 id */
+  const ensureProjectCharacter = (asset: any): string | null => {
+    const st = useProjectStore.getState();
+    const curProject: any = st.project;
+    if (!curProject) return null;
+    const url = asset.file_url || asset.thumb_url;
+    const exist = (curProject.characters || []).find((c: any) => c.name === asset.name);
+    if (exist) return exist.id;
+    const newChar: any = {
+      id: 'char-' + Date.now(),
+      name: asset.name,
+      gender: 'other',
+      age_group: 'youth',
+      role: 'supporting',
+      description: asset.description || asset.visual_prompt?.slice(0, 120) || '',
+      visual_prompt: asset.visual_prompt || asset.description || asset.name,
+      voice_id: asset.voice_id || '',
+      voice_name: asset.voice_name || '',
+      emotion_preset: 'neutral',
+      avatar_url: url,
+      three_views: {},
+    };
+    st.setProject({ ...curProject, characters: [...(curProject.characters || []), newChar] } as any);
+    return newChar.id;
+  };
+
+  const appendPromptOnce = (base: string, add: string): string => {
+    if (!add) return base;
+    if (base.includes(add)) return base;
+    return base ? `${base} ${add}` : add;
+  };
+
   const handleApplyToShot = (asset: any) => {
     const st = useProjectStore.getState();
     const activeShotId = st.activeShotId;
-    const curProject = st.project;
+    const curProject: any = st.project;
     if (!curProject) { alert('请先在项目看板创建/打开项目'); return; }
     let targetShotId = activeShotId;
     if (!targetShotId) {
@@ -263,47 +296,98 @@ export const AssetLibrary: React.FC = () => {
         st.setActiveShotId(firstShot.id);
         targetShotId = firstShot.id;
       } else {
-        alert('当前项目暂无分镜，已自动创建分镜并应用');
-        // 将由 handleApplyToShot 再次尝试：先创建再应用在下一次点击生效，此处直接更新 prompt 兜底
+        alert('当前项目暂无分镜');
+        return;
       }
     }
-    if (!targetShotId) { alert('请先在分镜工作台选中一个镜头'); return; }
+    const shot: any = curProject.scenes.flatMap((s:any)=>s.shots).find((s:any)=>s.id===targetShotId);
+    if (!shot || !targetShotId) { alert('请先在分镜工作台选中一个镜头'); return; }
+    const shotId: string = targetShotId;
     const url = asset.file_url || asset.thumb_url;
     const abs = url && url.startsWith('/') ? `http://127.0.0.1:8000${url}` : url;
-    if (asset.category === 'character' && asset.visual_prompt) {
-      updateShot(targetShotId, { image_prompt: asset.visual_prompt + ', ' + (curProject?.style_preset || '') } as any);
-      // 角色素材若有图，顺带注入到当前分镜的工作流暴露首个 image 槽位（便于垫图）
-      if (abs) {
-        const curShot: any = curProject.scenes.flatMap((s:any)=>s.shots).find((s:any)=>s.id===targetShotId);
-        if (curShot) {
-          const existing = curShot.dynamic_inputs || {};
-          // 仅当不存在时才注入，避免覆盖用户已填
-          if (!Object.values(existing).some((v:any)=> typeof v==='string' && v.includes('/storage/'))) {
-            updateShot(targetShotId, { dynamic_inputs: { ...existing, _asset_ref: abs } } as any);
-          }
-        }
+    const patch: any = {};
+    // 人物 → 绑定 character_ids（生成参考装配的唯一口径），描述只缺失才追加， never 覆盖
+    if (asset.category === 'character') {
+      const charId = ensureProjectCharacter(asset);
+      if (charId) {
+        const ids: string[] = [...(shot.character_ids || [])];
+        if (!ids.includes(charId)) ids.push(charId);
+        patch.character_ids = ids;
+        const weights = { ...(shot.character_weights || {}) };
+        if (weights[charId] === undefined) weights[charId] = 0.8;
+        patch.character_weights = weights;
       }
+      const tag = `[角色: ${asset.name}${asset.visual_prompt ? `, ${asset.visual_prompt}` : ''}]`;
+      patch.image_prompt = appendPromptOnce(shot.image_prompt || '', tag);
     } else if (asset.category === 'scene' || asset.category === 'background') {
-      updateShot(targetShotId, { image_prompt: asset.visual_prompt || asset.description } as any);
+      // 场景/背景 → 写 scene_ref_image + scene_asset_id（不再覆盖 image_prompt）
+      if (abs) { patch.scene_ref_image = abs; patch.scene_asset_id = asset.id; }
+      const desc = asset.visual_prompt || asset.description || '';
+      if (desc) patch.image_prompt = appendPromptOnce(shot.image_prompt || '', desc);
+    } else if (asset.category === 'prop' || asset.category === 'effect') {
+      // 道具/特效 → prop_asset_ids + 描述追加
+      const ids: string[] = [...(shot.prop_asset_ids || [])];
+      if (!ids.includes(asset.id)) ids.push(asset.id);
+      patch.prop_asset_ids = ids;
+      const desc = asset.visual_prompt || asset.description || asset.name;
+      if (desc) {
+        const add = asset.category === 'prop' ? `${desc}, detailed prop` : desc;
+        patch.image_prompt = appendPromptOnce(shot.image_prompt || '', add);
+      }
+      // 特效氛围图可兼做白模参考
+      if (asset.category === 'effect' && abs && !shot.previz_url) patch.previz_url = abs;
+    } else if (asset.category === 'previz' || (asset.tags || []).includes('previz')) {
+      // 预演 → 白模参考（图/视频各归其位）
+      if (abs && /\.(mp4|webm|mov)$/i.test(abs)) patch.previz_video_url = abs;
+      else if (abs) patch.previz_url = abs;
     } else {
-      updateShot(targetShotId, { image_prompt: (asset.visual_prompt || asset.name) + ', detailed prop' } as any);
+      const desc = asset.visual_prompt || asset.name;
+      if (desc) patch.image_prompt = appendPromptOnce(shot.image_prompt || '', `${desc}, detailed prop`);
     }
-    // 若资产有图，尝试作为 dynamic_inputs 的 image 注入（供 ShotInspector 的 exposed image 直接预览）
-    if (abs) {
-      try {
-        const curShot2: any = useProjectStore.getState().project?.scenes.flatMap((s:any)=>s.shots).find((s:any)=>s.id===targetShotId);
-        if (curShot2 && curShot2.dynamic_inputs !== undefined) {
-          // 不强制，交由用户拖拽；仅提示
-        }
-      } catch {}
-    }
+    if (!Object.keys(patch).length) { alert('该素材无可用信息写入分镜'); return; }
+    updateShot(shotId, patch);
     // 切到分镜工作台并提示
     st.setActiveTab('studio');
     try { window.dispatchEvent(new CustomEvent('asset-applied', { detail: { assetId: asset.id, shotId: targetShotId } })); } catch {}
   };
 
-  const handleAddAsCharacter = (asset: any) => {
+  const isVideoAsset = (asset: any) => /\.(mp4|webm|mov)$/i.test(asset?.file_url || '');
+  const isAudioAsset = (asset: any) => /\.(mp3|wav|ogg|m4a|flac)$/i.test(asset?.file_url || '');
+
+  /** 发送到无限画布：按素材类型装配节点（人物/场景/道具→参考图节点，视频→首帧节点，音频→复刻参考） */
+  const handleSendToCanvas = (asset: any) => {
+    try {
+      const st = useProjectStore.getState();
+      if (!st.project) { alert('请先在项目看板创建/打开项目'); return; }
+      const payload = {
+        nonce: Date.now(),
+        asset: {
+          id: asset.id, name: asset.name, category: asset.category,
+          file_url: asset.file_url || asset.thumb_url, visual_prompt: asset.visual_prompt || '',
+          description: asset.description || '',
+        },
+      };
+      localStorage.setItem('canvas_pending_asset', JSON.stringify(payload));
+      st.setActiveTab('canvas' as any);
+      window.dispatchEvent(new CustomEvent('canvas-import-asset', { detail: payload }));
+    } catch (e: any) { alert(e?.message || '发送失败'); }
+  };
+
+  /** 设为分镜白模参考：图进 previz_url，视频进 previz_video_url（生成参考装配直接消费） */
+  const handleSetAsPreviz = (asset: any) => {
     const st = useProjectStore.getState();
+    const curProject: any = st.project;
+    if (!curProject) { alert('请先在项目看板创建/打开项目'); return; }
+    const targetShotId = st.activeShotId || curProject.scenes?.flatMap((s: any) => s.shots)?.[0]?.id;
+    if (!targetShotId) { alert('当前项目暂无分镜'); return; }
+    const url = asset.file_url || asset.thumb_url;
+    const abs = url && url.startsWith('/') ? `http://127.0.0.1:8000${url}` : url;
+    if (!abs) { alert('该素材无可用文件'); return; }
+    updateShot(targetShotId, isVideoAsset(asset) ? { previz_video_url: abs } : { previz_url: abs });
+    st.setActiveTab('studio');
+  };
+
+  const handleAddAsCharacter = (asset: any) => {    const st = useProjectStore.getState();
     const curProject = st.project;
     if (!curProject) { alert('请先打开项目'); return; }
     const exists = curProject.characters.some((c:any)=> c.name===asset.name);
@@ -317,7 +401,7 @@ export const AssetLibrary: React.FC = () => {
       role: asset.category==='character' ? 'supporting' : 'supporting',
       description: asset.description || asset.visual_prompt?.slice(0,120) || '',
       visual_prompt: asset.visual_prompt || asset.description || asset.name,
-      voice_id: asset.voice_id || 'male-qn-qingse',
+      voice_id: asset.voice_id || '',
       voice_name: asset.voice_name || '',
       emotion_preset: 'neutral',
       avatar_url: url,
@@ -455,6 +539,7 @@ export const AssetLibrary: React.FC = () => {
                       {a.source==='generate' && <span className="absolute top-2 right-2 text-[8px] px-1.5 py-0.5 rounded-full bg-violet-500/90 text-white font-bold">AI</span>}
                       <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-2 space-x-1">
                         <button onClick={(e)=>{e.stopPropagation(); handleApplyToShot(a);}} className="flex-1 py-1 rounded-lg bg-brand text-white text-[10px] font-bold">应用到镜头</button>
+                        <button onClick={(e)=>{e.stopPropagation(); handleSendToCanvas(a);}} className="p-1 rounded-lg bg-white/20 text-white hover:bg-white/30" title="发送到无限画布"><Send className="w-3 h-3" /></button>
                         <button onClick={(e)=>{e.stopPropagation(); duplicateAsset(a.id);}} className="p-1 rounded-lg bg-white/20 text-white hover:bg-white/30"><Copy className="w-3 h-3" /></button>
                         <button onClick={(e)=>{e.stopPropagation(); openEdit(a);}} className="p-1 rounded-lg bg-white/20 text-white hover:bg-white/30" title="编辑"><Pencil className="w-3 h-3" /></button>
                       </div>
@@ -501,6 +586,14 @@ export const AssetLibrary: React.FC = () => {
               <button onClick={()=>handleApplyToShot(selected)} className="mt-2 w-full py-2 rounded-xl bg-brand text-white text-xs font-bold flex items-center justify-center space-x-1">
                 <Sparkles className="w-3.5 h-3.5" /><span>应用到当前镜头</span>
               </button>
+              <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+                <button onClick={()=>handleSendToCanvas(selected)} className="py-2 rounded-xl bg-surface-secondary border border-border text-xs text-white hover:border-brand flex items-center justify-center space-x-1">
+                  <Send className="w-3.5 h-3.5" /><span>发送到画布</span>
+                </button>
+                <button onClick={()=>handleSetAsPreviz(selected)} className="py-2 rounded-xl bg-surface-secondary border border-border text-xs text-white hover:border-brand flex items-center justify-center space-x-1" title="图进 previz_url，视频进 previz_video_url，生成参考装配直接消费">
+                  <Clapperboard className="w-3.5 h-3.5" /><span>设为白模参考</span>
+                </button>
+              </div>
               <button onClick={()=>handleAddAsCharacter(selected)} className="mt-1.5 w-full py-2 rounded-xl bg-surface-secondary border border-brand/30 text-xs text-brand-light hover:text-white hover:bg-brand/10 flex items-center justify-center space-x-1">
                 <Users className="w-3.5 h-3.5" /><span>添加为项目角色</span>
               </button>

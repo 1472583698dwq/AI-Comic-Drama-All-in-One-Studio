@@ -406,6 +406,7 @@ class LLMService:
         user_prompt: str,
         temperature: float = 0.2,
         timeout: float = 120.0,
+        max_tokens: int = 16384,
     ) -> Dict[str, Any]:
         """请求大模型生成严格结构化 JSON 并解析"""
         content = await self.chat_completion(
@@ -415,6 +416,7 @@ class LLMService:
             ],
             temperature=temperature,
             timeout=timeout,
+            max_tokens=max_tokens,
         )
         return extract_json_from_text(content)
 

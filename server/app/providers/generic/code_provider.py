@@ -94,21 +94,104 @@ async def _download_to_storage(url: str, prefix: str = "gen") -> tuple[str, str]
         return storage_url, local_path
 
 
-def _validate_python_code(code: str):
-    for pat in [r"os\.system", r"subprocess\.", r"shutil\."]:
-        if re.search(pat, code):
-            raise ValueError(f"forbidden pattern: {pat}")
+def _is_trusted_provider(definition=None, trusted_override=None) -> bool:
+    """可信判定（A档）：逐源 trusted=True 且全局 STUDIO_TRUSTED_MODE=1 同时满足才放行。"""
+    try:
+        want = bool(trusted_override) if trusted_override is not None else bool(getattr(definition, "trusted", False)) if definition is not None else False
+        if not want:
+            return False
+        from app.core.config import is_trusted_mode_enabled as _gate
+        return bool(_gate())
+    except Exception:
+        return False
+
+
+def _validate_python_code(code: str, trusted: bool = False):
+    if not trusted:
+        for pat in [r"os\.system", r"subprocess\.", r"shutil\."]:
+            if re.search(pat, code):
+                raise ValueError(f"forbidden pattern: {pat}（如需执行任意命令，请将该源设为可信 trusted=True 并开启 STUDIO_TRUSTED_MODE=1）")
+        # 进程级杀伤原语：命中即拒收，防止导演改码后服务崩溃重启
+        # （os._exit 直接杀进程无异常可捕；sys.exit/exit/quit 抛 SystemExit 会穿透 except Exception 杀死 worker）
+        for pat in [r"os\._exit", r"sys\.exit", r"os\.kill", r"os\.abort",
+                    r"(?<![\w.])exit\s*\(", r"(?<![\w.])quit\s*\(",
+                    r"ctypes", r"multiprocessing"]:
+            if re.search(pat, code):
+                raise ValueError(f"forbidden pattern: {pat}（该调用可杀死后端进程，已拦截；请去掉后重试）")
     try:
         ast.parse(code)
     except SyntaxError as e:
         raise ValueError(f"Python syntax error: {e}") from e
 
 
-def _python_sandbox(ctx: Dict[str, Any]):
+def _python_trusted_env(ctx: Dict[str, Any]):
+    """可信执行环境（跳出沙箱）：完整 builtins + 真实 import + os/sys/subprocess 全量开放。仅本地可信模式可用。"""
+    import builtins as _builtins
+    import sys as _sys
+    async def api_download(url: str, prefix: str = "gen"):
+        return await _download_to_storage(url, prefix=prefix)
+    api: Dict[str, Any] = {
+        "httpx": httpx,
+        "asyncio": asyncio,
+        "json": json,
+        "re": re,
+        "time": time,
+        "uuid": uuidlib,
+        "download": api_download,
+        "get_api_key": lambda: ctx.get("api_key", ""),
+        "storage_dir": _get_generated_dir(),
+        "trusted": True,
+    }
+    g: Dict[str, Any] = {
+        "__builtins__": _builtins,
+        "httpx": httpx,
+        "asyncio": asyncio,
+        "json": json,
+        "re": re,
+        "time": time,
+        "uuid": uuidlib,
+        "ctx": ctx,
+        "api": api,
+    }
+    # 预置常用系统库，省一次 import（仍可用真实 __import__ 引任意库）
+    try:
+        import os as _os
+        import subprocess as _sp
+        import pathlib as _pl
+        import shutil as _sh
+        import socket as _sock
+        g.update({"os": _os, "sys": _sys, "subprocess": _sp, "pathlib": _pl, "shutil": _sh, "socket": _sock})
+        api.update({"os": _os, "sys": _sys, "subprocess": _sp, "pathlib": _pl})
+    except Exception:
+        pass
+    try:
+        import aiohttp as _aiohttp
+        g["aiohttp"] = _aiohttp
+        api["aiohttp"] = _aiohttp
+    except Exception:
+        pass
+    try:
+        import requests as _requests
+        g["requests"] = _requests
+        api["requests"] = _requests
+    except Exception:
+        pass
+    return g, {}, api
+
+
+def _python_sandbox(ctx: Dict[str, Any], trusted: bool = False):
     """
-    构造受限执行环境，返回 (globals, locals_dict, api)。
+    构造执行环境，返回 (globals, locals_dict, api)。
     _execute_python_code（真实执行）与 compile_check_code（创建体检）共用，保证体检环境=运行环境。
+    trusted=True 且全局开关放行时走 _python_trusted_env（任意代码），否则走受限沙箱。
     """
+    if trusted:
+        try:
+            from app.core.config import is_trusted_mode_enabled as _gate2
+            if _gate2():
+                return _python_trusted_env(ctx)
+        except Exception:
+            pass
     async def api_download(url: str, prefix: str = "gen"):
         return await _download_to_storage(url, prefix=prefix)
     api: Dict[str, Any] = {
@@ -191,13 +274,49 @@ def _python_sandbox(ctx: Dict[str, Any]):
     return g, l, api
 
 
-async def _execute_python_code(code: str, entry: str, ctx: Dict[str, Any], timeout: int = 60) -> Dict[str, Any]:
-    _validate_python_code(code)
-    g, l, api = _python_sandbox(ctx)
+def _run_guarded_sync(fn, timeout: int, timeout_msg: str):
+    """同步函数隔离执行（daemon 线程 + 超时）：顶层死循环/sleep 不再卡死调用线程；
+    超时后残留线程为 daemon，不阻塞进程退出（Python 无法杀线程，残留空转由改码前置体检拦截源头）。"""
+    import threading as _th
+    import queue as _q
+    box: _q.Queue = _q.Queue(maxsize=1)
+
+    def _target():
+        try:
+            box.put((True, fn()))
+        except BaseException as e:
+            box.put((False, e))
+
+    t = _th.Thread(target=_target, daemon=True)
+    t.start()
     try:
-        exec(code, g, l)
-    except Exception as e:
+        ok, payload = box.get(timeout=timeout)
+    except _q.Empty:
+        raise RuntimeError(timeout_msg)
+    if ok:
+        return payload
+    raise payload
+
+
+async def _exec_module_guarded(code: str, g: Dict[str, Any], l: Dict[str, Any], timeout: int = 20) -> None:
+    """模块级 exec 隔离执行：顶层死循环/sleep 不再卡死事件循环致服务假死重启。"""
+    try:
+        await asyncio.to_thread(
+            _run_guarded_sync,
+            lambda: exec(code, g, l),
+            timeout,
+            f"code module-level timeout ({timeout}s)：顶层代码疑似死循环/阻塞，已中断",
+        )
+    except asyncio.CancelledError:
+        raise
+    except BaseException as e:
         raise RuntimeError(f"code compile failed: {e}") from e
+
+
+async def _execute_python_code(code: str, entry: str, ctx: Dict[str, Any], timeout: int = 60, trusted: bool = False) -> Dict[str, Any]:
+    _validate_python_code(code, trusted=trusted)
+    g, l, api = _python_sandbox(ctx, trusted=trusted)
+    await _exec_module_guarded(code, g, l)
     fn = l.get(entry) or g.get(entry)
     if not fn:
         candidates = [v for v in l.values() if callable(v)]
@@ -218,15 +337,19 @@ async def _execute_python_code(code: str, entry: str, ctx: Dict[str, Any], timeo
         return result
     except asyncio.TimeoutError:
         raise RuntimeError(f"code timeout ({timeout}s)")
-    except Exception as e:
+    except asyncio.CancelledError:
+        raise
+    except BaseException as e:
+        # SystemExit/KeyboardInterrupt 等必须就地转为普通错误，否则穿透 FastAPI 杀死 worker 致服务崩溃重启
         raise RuntimeError(f"code execution failed: {e}") from e
 
 
-def compile_check_code(language: str, code: str, entry: str = "generate") -> Dict[str, Any]:
+def compile_check_code(language: str, code: str, entry: str = "generate", trusted: bool = False) -> Dict[str, Any]:
     """
     创建即体检（零网络/零配额）：在真实沙箱中编译用户代码并定位入口函数。
     可捕获：语法错误、模块级 import 违禁/缺失、入口缺失、模块级运行时错误。
     返回 {ok, error?}；js 语言做 node --check 语法校验（node 不可用时跳过）。
+    trusted=True（且全局开关放行）时按可信环境体检，允许 os/subprocess 等。
     """
     lang = (language or "python").lower()
     if not code or not code.strip():
@@ -254,13 +377,14 @@ def compile_check_code(language: str, code: str, entry: str = "generate") -> Dic
         return {"ok": True}
     # python：真实沙箱编译 + 入口定位
     try:
-        _validate_python_code(code)
+        _validate_python_code(code, trusted=trusted)
     except Exception as e:
         return {"ok": False, "error": str(e)}
-    g, l, _api = _python_sandbox({})
+    g, l, _api = _python_sandbox({}, trusted=trusted)
     try:
-        exec(code, g, l)
-    except Exception as e:
+        _run_guarded_sync(lambda: exec(code, g, l), 20,
+                          "沙箱编译超时(20s)：顶层代码疑似死循环/阻塞")
+    except BaseException as e:
         return {"ok": False, "error": f"沙箱编译失败: {e}"}
     fn = l.get(entry) or g.get(entry)
     if not fn:
@@ -279,7 +403,7 @@ def compile_check_code(language: str, code: str, entry: str = "generate") -> Dic
 _STD_PARAM_KEYS = ("fps", "steps", "cfg", "width", "height", "resolution",
                    "aspect_ratio", "duration", "speed", "pitch", "volume",
                    "voice_id", "emotion", "workflow_id", "model", "style_preset",
-                   "seed", "negative_prompt", "text", "prompt")
+                   "seed", "negative_prompt", "text", "prompt", "task_id")
 
 
 def merge_user_params(req, keys: tuple = _STD_PARAM_KEYS) -> Dict[str, Any]:
@@ -409,6 +533,115 @@ def resolve_code_timeout(definition) -> int:
     return 600 if getattr(definition, "kind", "") == "video" else 120
 
 
+# ==================== 代码视频源异步任务表（H3 等提交即返 task_id 型） ====================
+# 背景：code 源返回 {"task_id"} 后，旧链路轮询的是 http_provider 的 _CUSTOM_VIDEO_TASKS（code 源从不写），
+# 导致 task_id 永远查不到。本表由 GenericCodeVideoProvider 提交时注册，后台协程复用源自身代码的
+# 查询模式（task_id + 空 prompt，单次秒回）推进，前端 /videos/status 经 get_custom_video_task 穿透可见。
+_CODE_VIDEO_TASKS: Dict[str, Dict[str, Any]] = {}
+_CODE_VIDEO_POLLING: set = set()  # 已在后台轮询中的 task_id（去重：查询复用不重复起协程）
+_CODE_VIDEO_POLL_INTERVAL = 5.0
+_CODE_VIDEO_MAX_ATTEMPTS = 200  # ~16 分钟，覆盖排队+生成
+_CODE_VIDEO_TERMINAL_FAIL = ("FAILED", "FAIL", "ERROR", "CANCELLED")
+
+
+def _spawn_code_video_poll(task_id: str, provider_id: str) -> None:
+    """起后台轮询（去重：同一 task 只有一个协程在跑）。"""
+    tid = str(task_id)
+    if tid in _CODE_VIDEO_POLLING:
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return  # 无运行中 loop（如单测直调）：仅注册不轮询，由外部查询推进
+    _CODE_VIDEO_POLLING.add(tid)
+
+    async def _runner():
+        try:
+            await _poll_code_video_task(tid, provider_id)
+        finally:
+            _CODE_VIDEO_POLLING.discard(tid)
+    loop.create_task(_runner())
+
+
+def get_code_video_task(task_id: str) -> Optional[Dict[str, Any]]:
+    """查询代码视频源异步任务（供 http_provider.get_custom_video_task 穿透）。"""
+    if not task_id:
+        return None
+    return _CODE_VIDEO_TASKS.get(str(task_id))
+
+
+def register_code_video_task(task_id: str, provider_id: str) -> Dict[str, Any]:
+    """注册提交即返的任务为 SUBMITTED（幂等：已存在则保留原记录）。"""
+    tid = str(task_id)
+    entry = _CODE_VIDEO_TASKS.get(tid)
+    if entry is None:
+        entry = {"status": "SUBMITTED", "task_id": tid, "provider": provider_id,
+                 "video_url": None, "created_at": time.time(), "last_poll": time.time()}
+        _CODE_VIDEO_TASKS[tid] = entry
+    return entry
+
+
+async def _poll_code_video_task(task_id: str, provider_id: str) -> None:
+    """后台轮询：复用源代码查询模式推进任务，终态落盘并更新表。常驻异常视为瞬态继续，直到终态/超时。"""
+    tid = str(task_id)
+    try:
+        from app.providers.custom.manager import custom_provider_manager as _mgr
+        definition = _mgr.get_definition(provider_id)
+    except Exception:
+        definition = None
+    if definition is None or not getattr(definition, "code", None):
+        _CODE_VIDEO_TASKS[tid] = {"status": "FAILED", "task_id": tid, "provider": provider_id,
+                                  "error": f"Provider 定义缺失，无法轮询: {provider_id}"}
+        return
+    trusted = _is_trusted_provider(definition)
+    api_key = _get_api_key_for_provider(provider_id, definition)
+    entry_name = getattr(definition, "code_entry", None) or "generate"
+    lang = (getattr(definition, "language", None) or "python").lower()
+    code = definition.code or ""
+    for _ in range(_CODE_VIDEO_MAX_ATTEMPTS):
+        await asyncio.sleep(_CODE_VIDEO_POLL_INTERVAL)
+        ctx = {"prompt": "", "task_id": tid, "api_key": api_key, "provider_id": provider_id,
+               "kind": "video", "dynamic_inputs": {"task_id": tid}}
+        try:
+            if lang in ("javascript", "js", "node"):
+                result = await asyncio.wait_for(_execute_js_code(code, entry_name, ctx, timeout=30, trusted=trusted), timeout=45)
+            else:
+                result = await asyncio.wait_for(_execute_python_code(code, entry_name, ctx, timeout=30, trusted=trusted), timeout=45)
+        except Exception as e:
+            # 瞬态错误（网络抖动/单次查询超时）：只刷新心跳，继续下一轮
+            ent = _CODE_VIDEO_TASKS.get(tid) or {}
+            ent.update({"status": ent.get("status") or "SUBMITTED", "last_poll": time.time(),
+                        "last_error": str(e)[:160]})
+            _CODE_VIDEO_TASKS[tid] = ent
+            continue
+        if not isinstance(result, dict):
+            continue
+        url, _t = extract_result_media("video", result)
+        if url:
+            try:
+                storage_url, local_path = await persist_media(url, "video", "vid")
+            except Exception as e:
+                _CODE_VIDEO_TASKS[tid] = {"status": "FAILED", "task_id": tid, "provider": provider_id,
+                                          "error": f"下载失败: {e}"}
+                return
+            _CODE_VIDEO_TASKS[tid] = {"status": "SUCCESS", "task_id": tid, "provider": provider_id,
+                                      "video_url": storage_url, "local_path": local_path}
+            print(f"[CodeVideo] Task {tid} SUCCESS -> {storage_url}")
+            return
+        status = str(result.get("status") or "").upper()
+        if status in _CODE_VIDEO_TERMINAL_FAIL:
+            _CODE_VIDEO_TASKS[tid] = {"status": "FAILED", "task_id": tid, "provider": provider_id,
+                                      "error": str(result.get("error") or result)[:300]}
+            print(f"[CodeVideo] Task {tid} FAILED: {str(result)[:160]}")
+            return
+        ent = _CODE_VIDEO_TASKS.get(tid) or {"task_id": tid, "provider": provider_id}
+        ent.update({"status": status or "SUBMITTED", "last_poll": time.time()})
+        _CODE_VIDEO_TASKS[tid] = ent
+    ent = _CODE_VIDEO_TASKS.get(tid) or {"task_id": tid, "provider": provider_id}
+    ent.update({"status": "TIMEOUT", "error": "轮询超时（~16min），可携带 task_id 重新查询"})
+    _CODE_VIDEO_TASKS[tid] = ent
+
+
 _JS_WRAPPER_TEMPLATE = r"""
 const fs = require('fs');
 (async () => {
@@ -466,7 +699,7 @@ const fs = require('fs');
 })();
 """
 
-async def _execute_js_code(code: str, entry: str, ctx: Dict[str, Any], timeout: int = 60) -> Dict[str, Any]:
+async def _execute_js_code(code: str, entry: str, ctx: Dict[str, Any], timeout: int = 60, trusted: bool = False) -> Dict[str, Any]:
     with tempfile.TemporaryDirectory() as tmpdir:
         user_path = os.path.join(tmpdir, "user_code.js")
         wrapper_path = os.path.join(tmpdir, "runner.js")
@@ -484,6 +717,12 @@ async def _execute_js_code(code: str, entry: str, ctx: Dict[str, Any], timeout: 
         env["CTX_JSON"] = json.dumps(ctx, ensure_ascii=False)
         env["USER_CODE_PATH"] = user_path
         env["ENTRY"] = entry
+        # JS 本就跑在独立 node 进程（可 require fs/child_process），trusted 仅显式标记透传
+        try:
+            from app.core.config import is_trusted_mode_enabled as _gate_js
+            env["STUDIO_TRUSTED"] = "1" if (trusted and _gate_js()) else "0"
+        except Exception:
+            env["STUDIO_TRUSTED"] = "0"
         try:
             proc = await asyncio.create_subprocess_exec(
                 "node", wrapper_path,
@@ -525,11 +764,28 @@ async def execute_code_provider(definition: ProviderDefinition, ctx: Dict[str, A
         raise RuntimeError(f"Provider {definition.id} has no code")
     timeout = resolve_code_timeout(definition)
     entry = definition.code_entry or "generate"
+    # 可信判定：逐源 trusted + 全局总闸，逐源要可信但总闸未开时直接明错（不静默回落沙箱）
+    want_trusted = bool(getattr(definition, "trusted", False))
+    trusted = False
+    if want_trusted:
+        try:
+            from app.core.config import is_trusted_mode_enabled as _gate_exec
+            if _gate_exec():
+                trusted = True
+            else:
+                raise RuntimeError(
+                    f"Provider {definition.id} 已标记可信(trusted=True)但全局可信开关未开启："
+                    "请在 .env/环境变量设 STUDIO_TRUSTED_MODE=1 并重启后端后再试（本地桌面端显式 opt-in）"
+                )
+        except RuntimeError:
+            raise
+        except Exception:
+            trusted = False
     lang = (definition.language or "python").lower()
     if lang == "python":
-        return await _execute_python_code(definition.code, entry, ctx, timeout=timeout)
+        return await _execute_python_code(definition.code, entry, ctx, timeout=timeout, trusted=trusted)
     elif lang in ("javascript", "js", "node"):
-        return await _execute_js_code(definition.code, entry, ctx, timeout=timeout)
+        return await _execute_js_code(definition.code, entry, ctx, timeout=timeout, trusted=trusted)
     else:
         raise RuntimeError(f"unsupported language: {lang}")
 
@@ -604,6 +860,15 @@ class GenericCodeImageProvider(_CodeSourceBase, ImageProvider):
         user = merge_user_params(req)
         # 出网前枚举护栏：只校验用户显式选择，非法直接报错（不消耗配额）
         validate_user_params(self.definition, user)
+        # 本地 /storage 引用内联为 data URI（云端 API 拉不到本机地址，旧链路静默丢弃）
+        from app.providers.media_refs import resolve_media_refs as _resolve_refs
+        _raw_refs = (req.dynamic_inputs or {}).get("reference_images") or []
+        if isinstance(_raw_refs, str):
+            _raw_refs = [_raw_refs]
+        _kept_refs, _dropped_refs = _resolve_refs(_raw_refs, kind="image")
+        if _raw_refs and not _kept_refs and _dropped_refs:
+            _reasons = "；".join(f"{d['ref'][:60]}({d['reason']})" for d in _dropped_refs[:3])
+            raise RuntimeError(f"参考图全部不可用，已拦截提交以免浪费配额: {_reasons}")
         ar = user.get("aspect_ratio") or getattr(req, "aspect_ratio", None) or "9:16"
         res_label = user.get("resolution") or getattr(req, "resolution", None) or "720p"
         if req.width and req.height:
@@ -624,7 +889,7 @@ class GenericCodeImageProvider(_CodeSourceBase, ImageProvider):
             "style_preset": user.get("style_preset") or req.style_preset or "",
             "api_key": api_key, "provider_id": self.id, "kind": "image",
             "dynamic_inputs": req.dynamic_inputs or {},
-            "reference_images": (req.dynamic_inputs or {}).get("reference_images") or [],
+            "reference_images": _kept_refs,
             "api_key_env": self.definition.auth.key_env,
         }
         for k, v in user.items():
@@ -635,6 +900,8 @@ class GenericCodeImageProvider(_CodeSourceBase, ImageProvider):
         if not url:
             raise RuntimeError(f"代码未返回图像地址（需含 image_url）: {str(result)[:600]}")
         storage_url, local_path = await persist_media(url, "image", "code")
+        if _dropped_refs and isinstance(result, dict):
+            result = {**result, "media_warnings": [f"参考图 {d['ref'][:60]} 已跳过({d['reason']})" for d in _dropped_refs[:5]]}
         return ImageGenerateResult(image_url=storage_url, local_path=local_path or storage_url, provider=self.id,
                                    seed=ctx["seed"], width=width, height=height,
                                    elapsed_ms=int((time.time() - started) * 1000),
@@ -650,30 +917,75 @@ class GenericCodeVideoProvider(_CodeSourceBase, VideoProvider):
             raise RuntimeError(f"Provider {self.id} missing API Key")
         user = merge_user_params(req)
         validate_user_params(self.definition, user)
+        # 兼容：reference_audios/last_frame 等可能仅在 dynamic_inputs 中
+        dyn = req.dynamic_inputs or {}
+        _extra = getattr(req, "extra", None) or {}
+        # 本地 /storage 引用内联为 data URI（云端 API 拉不到本机地址，旧链路静默丢弃致“参考无法使用”）
+        from app.providers.media_refs import resolve_media_refs as _resolve_vrefs, resolve_single_ref as _resolve_vref
+        _ff_raw = req.first_frame_url or dyn.get("first_frame") or dyn.get("first_frame_url") or ""
+        _lf_raw = getattr(req, "last_frame_url", None) or dyn.get("last_frame") or dyn.get("last_frame_url") or ""
+        _ff, _ff_drop = _resolve_vref(_ff_raw, kind="image")
+        _lf, _lf_drop = _resolve_vref(_lf_raw, kind="image")
+        _ri_raw = req.reference_images or dyn.get("reference_images") or dyn.get("reference") or []
+        if isinstance(_ri_raw, str):
+            _ri_raw = [_ri_raw]
+        _ri_kept, _ri_dropped = _resolve_vrefs(_ri_raw, kind="image")
+        _ra_raw = dyn.get("reference_audios") or dyn.get("ref_audio") or dyn.get("reference_audio") or []
+        if isinstance(_ra_raw, str):
+            _ra_raw = [_ra_raw]
+        _ra_kept, _ra_dropped = _resolve_vrefs(_ra_raw, kind="audio")
+        _media_dropped = ([{**_ff_drop, "slot": "first_frame"}] if _ff_drop else []) \
+            + ([{**_lf_drop, "slot": "last_frame"}] if _lf_drop else []) \
+            + [{**d, "slot": "reference_images"} for d in _ri_dropped] \
+            + [{**d, "slot": "reference_audios"} for d in _ra_dropped]
+        # 调用方显式挂载了媒体引用但全部不可用 → 明错拦截，不浪费配额提交无参考任务
+        _supplied_media = bool((_ff_raw or "").strip() or (_lf_raw or "").strip() or _ri_raw or _ra_raw)
+        _kept_any = bool(_ff or _lf or _ri_kept or _ra_kept)
+        if _supplied_media and not _kept_any and _media_dropped:
+            _reasons = "；".join(f"[{d.get('slot')}]{d['ref'][:60]}({d['reason']})" for d in _media_dropped[:3])
+            raise RuntimeError(f"媒体引用全部不可用，已拦截提交: {_reasons}")
         ctx: Dict[str, Any] = {
             "prompt": req.prompt or "", "mode": req.mode,
-            "first_frame_url": req.first_frame_url or "",
-            "reference_images": req.reference_images or [],
+            # 查询模式：调用方透传 task_id（dynamic_inputs/extra）+ 空 prompt → 源代码走单次查询分支
+            "task_id": dyn.get("task_id") or _extra.get("task_id") or "",
+            "first_frame_url": _ff or "",
+            "first_frame": _ff or "",
+            "last_frame_url": _lf or "",
+            "last_frame": _lf or "",
+            "reference_images": _ri_kept,
+            "reference_audios": _ra_kept,
+            "ref_audio": _ra_kept,
             # 用户显式选择 > 请求显式字段 > kind 默认
             "duration": user.get("duration") or req.duration or 5,
             "aspect_ratio": user.get("aspect_ratio") or req.aspect_ratio or "9:16",
             "resolution": user.get("resolution") or getattr(req, "resolution", None) or "720p",
             "fps": user.get("fps") or getattr(req, "fps", None) or 24,
-            "seed": req.seed if req.seed is not None else 0,
+            "seed": req.seed if req.seed is not None else user.get("seed") if user.get("seed") is not None else 0,
             "model": user.get("model") or req.provider or self.definition.default_model or "",
             # 源 params_schema 可声明 workflow_id（如 AutoDL 的工作流切换），用户显式值优先于 ComfyUI 语义的 req.workflow_id
             "workflow_id": user.get("workflow_id") or req.workflow_id or "",
             "api_key": api_key, "provider_id": self.id, "kind": "video",
-            "dynamic_inputs": req.dynamic_inputs or {},
+            "dynamic_inputs": dyn,
             "steps": user.get("steps"), "cfg": user.get("cfg"),
         }
+        # 兼容：code 内可能用 ctx.get("reference_audios") 或 ctx.get("ref_audio") 或 ctx["dynamic_inputs"]["reference_audios"]
+        # 已在上层扁平化，此处再兜底
+        for k in ("reference_audios", "ref_audio", "reference_audio", "reference_images", "first_frame", "last_frame"):
+            if k not in ctx or not ctx[k]:
+                if k in dyn and dyn[k]:
+                    ctx[k] = dyn[k]
         for k, v in user.items():
             ctx.setdefault(k, v)
         started = time.time()
         result = await execute_code_provider(self.definition, ctx)
+        if _media_dropped and isinstance(result, dict):
+            result = {**result, "media_warnings": [f"[{d.get('slot')}]{d['ref'][:60]} 已跳过({d['reason']})" for d in _media_dropped[:5]]}
         url, task_id = extract_result_media("video", result)
         if not url and task_id:
-            # 轮询接管流：用户代码只返回 task_id
+            # 轮询接管流：用户代码只返回 task_id → 注册进代码任务表并起后台轮询（复用源查询模式），
+            # 调用方立即拿到 task_id（不再阻塞），经 /videos/status 或 provider 查询分支取终态。
+            register_code_video_task(str(task_id), self.id)
+            _spawn_code_video_poll(str(task_id), self.id)
             return VideoGenerateResult(video_url="", local_path=None, provider=self.id, engine=self._engine(),
                                        duration=req.duration or 5, elapsed_ms=int((time.time() - started) * 1000),
                                        task_id=task_id, raw=result)
@@ -697,6 +1009,13 @@ class GenericCodeAudioProvider(_CodeSourceBase, AudioProvider):
         api_key = self._api_key()
         user = merge_user_params(req)
         validate_user_params(self.definition, user)
+        # 参考音频同样内联本地 /storage（音色克隆源此前收不到任何参考音频）
+        from app.providers.media_refs import resolve_media_refs as _resolve_arefs
+        _dyn_a = req.dynamic_inputs or {}
+        _a_raw = _dyn_a.get("reference_audio") or _dyn_a.get("ref_audio") or _dyn_a.get("reference_audios") or getattr(req, "ref_audio_path", None) or (user.get("ref_audio") or user.get("reference_audio"))
+        if isinstance(_a_raw, str) and _a_raw.strip():
+            _a_raw = [_a_raw]
+        _a_kept, _a_dropped = _resolve_arefs(_a_raw or [], kind="audio")
         ctx: Dict[str, Any] = {
             "text": req.text,
             "voice_id": user.get("voice_id") or req.voice_id,
@@ -705,12 +1024,17 @@ class GenericCodeAudioProvider(_CodeSourceBase, AudioProvider):
             "pitch": user.get("pitch") if user.get("pitch") is not None else req.pitch,
             "volume": user.get("volume"),
             "model": user.get("model") or self._default_model(self.definition, req),
+            "reference_audio": (_a_kept[0] if _a_kept else ""),
+            "ref_audio": (_a_kept[0] if _a_kept else ""),
+            "reference_audios": _a_kept,
             "api_key": api_key, "provider_id": self.id, "kind": "audio",
             "dynamic_inputs": req.dynamic_inputs or {},
         }
         for k, v in user.items():
             ctx.setdefault(k, v)
         result = await execute_code_provider(self.definition, ctx)
+        if _a_dropped and isinstance(result, dict):
+            result = {**result, "media_warnings": [f"参考音频 {d['ref'][:60]} 已跳过({d['reason']})" for d in _a_dropped[:3]]}
         url, _task = extract_result_media("audio", result)
         if not url:
             raise RuntimeError(f"代码未返回音频地址（需含 audio_url）: {str(result)[:600]}")

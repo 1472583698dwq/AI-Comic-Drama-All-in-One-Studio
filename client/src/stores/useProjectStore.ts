@@ -202,11 +202,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const prompt = options?.prompt || shot.video_prompt || shot.action_desc || shot.image_prompt || 'Cinematic dramatic dynamic anime video';
       const duration = options?.duration || Math.round(shot.duration) || 5;
 
+      // 首帧只放真首帧；参考图只透传调用方 dynamic_inputs 里装配好的
+      // （shotReference 唯一口径），不再把首帧重复塞进参考槽污染约束
+      const diRefs = (options?.dynamic_inputs as any)?.reference_images ?? (options?.dynamic_inputs as any)?.reference_image;
       const res: any = await apiService.generateShotVideo({
         prompt,
         mode,
         first_frame_url: shot.image_url || undefined,
-        reference_images: shot.image_url ? [shot.image_url] : undefined,
+        reference_images: Array.isArray(diRefs) ? diRefs : (diRefs ? [diRefs] : undefined),
         duration,
         aspect_ratio: proj.aspect_ratio || '9:16',
         provider: options?.provider,

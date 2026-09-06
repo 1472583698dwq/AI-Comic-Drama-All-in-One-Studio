@@ -511,6 +511,21 @@ async def import_external_workflow(external_id: str, new_name: Optional[str] = N
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+@router.post("/images/workflows/{workflow_id}/refresh-app-contract")
+async def refresh_workflow_app_contract(workflow_id: str):
+    """
+    重新读取该工作流的 ComfyUI 官方 App Mode 契约（extra.linearData）。
+    用户在 ComfyUI App Builder 里勾选输入/输出并保存后调用，生成源的表单随即按契约重建。
+    """
+    mgr = get_workflow_manager()
+    try:
+        return {"status": "success", "data": mgr.refresh_app_contract(workflow_id)}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.post("/images/workflows/upload")
 async def upload_workflow(
     file: UploadFile = File(None),
@@ -843,7 +858,7 @@ async def export_jianyin_draft(project: Project):
 
 @router.post("/pipeline/full-run")
 async def pipeline_full_run(req: PipelineRunRequest):
-    """全链路真实编排：小说 → 分镜 → 批量生图（动态Provider） → TTS → 剪映草稿"""
+    """全链路真实编排：小说 → 拆解 → 角色资产 → 批量生图 → 图生视频 → TTS → 剪映草稿"""
     try:
         return await unified_orchestrator.execute_full_pipeline(
             novel_text=req.text,
@@ -854,6 +869,12 @@ async def pipeline_full_run(req: PipelineRunRequest):
             image_provider=getattr(req, "image_provider", None),
             image_workflow_id=getattr(req, "image_workflow_id", None),
             audio_provider=getattr(req, "audio_provider", None),
+            video_provider=getattr(req, "video_provider", None),
+            video_workflow_id=getattr(req, "video_workflow_id", None),
+            enable_video=getattr(req, "enable_video", True),
+            max_videos=getattr(req, "max_videos", 6),
+            gen_roles=getattr(req, "gen_roles", True),
+            max_roles=getattr(req, "max_roles", 4),
         )
     except LLMServiceError as e:
         raise HTTPException(status_code=503, detail=str(e))
@@ -892,12 +913,19 @@ AGENT_SYSTEM_PROMPT_BODY = """你是「AI漫剧导演 Agent」，运行在 MiniM
 13. director_3d_stage_plan —— 3D导演台相机规划。参数：framing(extreme_close_up/close_up/medium/full/long/bird_eye/low_angle), motion(static/push_in/pull_out/pan_left/pan_right/tilt_up/tilt_down/orbit/shake), pose(stand/fight/look_back/run)
 14. export_jianyin_draft —— 剪映草稿导出。参数：project(完整Project JSON)
 
-**生成源扩展（解耦后每个生成源为独立节点，可多源并存）：**
-15. register_custom_provider —— [核心] 用户提供 API 文档/cURL/OpenAPI 时自动注册新生成源。参数：kind(image/video/audio/llm), name, doc_text, doc_url, curl, openapi_url, api_key, definition(可选完整JSON)。示例：{"kind":"image","name":"我的FLUX","doc_text":"POST https://api.xxx.com/v1/images/generations ...", "api_key":"sk-..."}。导演应自动解析并注册，成功后提示可在画布看到新 Provider 节点。
-16. list_custom_providers —— 列出所有自定义 Provider。参数：kind。可先查询已有。
+**生成源扩展 v2（解耦独立节点 + x-* 分组与人机分工，与画布/分镜完全同源）：**
+15. register_custom_provider —— [核心] 用户提供 API 文档/cURL/OpenAPI 时自动注册新生成源（v2 标准）。参数：kind(image/video/audio/llm), name, doc_text, doc_url, curl, openapi_url, api_key, language(python/javascript), trusted(可信开关，需全局总闸), input_schema(文件插槽,含prompt首帧参考图), params_schema(非文件参数,*必须带 x-category/x-visibility/x-agent/x-priority*), code(可选完整 async def generate(ctx,api)), definition(可选完整JSON)。v2 示例：{"kind":"image","name":"我的FLUX","doc_text":"POST https://api.xxx.com/v1/images/generations ...","language":"python","input_schema":{"prompt":{"type":"string","x-handle":"text"},"reference_images":{"type":"array","items":{"format":"uri"},"x-handle":"image","maxItems":2}},"params_schema":{"aspect_ratio":{"type":"string","enum":["9:16","16:9"],"default":"9:16","x-category":"layout","x-visibility":"basic","x-agent":"auto","x-priority":10},"steps":{"type":"integer","default":20,"x-category":"quality","x-visibility":"advanced","x-agent":"suggest","x-priority":40}},"api_key":"sk-..."}。必须把文件插槽放 input_schema，可量化参数放 params_schema 并标注 x-*，导演应自动解析并注册，成功后提示可在画布看到新 Provider 节点（基础参数常显，高级需点⚙）。需任意代码（os/subprocess/curl/ffmpeg）时传 trusted:true 并确认全局 STUDIO_TRUSTED_MODE=1。
+16. list_custom_providers —— 列出所有自定义 Provider。参数：kind,q。可先查询已有。
 17. test_custom_provider —— 测试 Provider 连通性。参数：provider_id
 18. delete_custom_provider —— 删除自定义 Provider。参数：provider_id
+19. get_provider_code —— 查看源代码与完整 Schema。参数：provider_id/name/q。用于定位未暴露参数后增量修复。
+20. update_custom_provider —— 增量补丁已有源。参数：provider_id, params_schema/input_schema 的补丁，修复分组或人机分工错误时用；可传 trusted(true/false) 开关可信模式（需全局 STUDIO_TRUSTED_MODE=1 否则执行明错）。
 19. generate_video —— 通用视频生成。参数：prompt, mode(i2v/r2v/t2v), first_frame_url, reference_images, duration, provider
+
+**可信模式双工具（A档，需 STUDIO_TRUSTED_MODE=1，否则明错提示开启方式）：**
+25. fs_file —— 文件编辑。参数：action(list/read/write/append/delete), path(围栏 storage/exports/工作区根，禁.git等), content, encoding。示例：{"action":"read","path":"storage/providers/custom/prov_xxx.json"} / {"action":"write","path":"storage/tmp_task.txt","content":"task_id=..."}
+26. shell_exec —— 命令执行（Win走PowerShell）。参数：command, cwd(围栏内), timeout(5-120s)。示例：{"command":"curl -s https://api.../query?task_id=xxx","timeout":15}
+**H3长任务异步范式（防截图式卡死）：** 视频任务约100s，单工具40s/LLM90s必超时——必须提交即返task_id再轮询：①provider代码提交后return {"task_id":...}（勿阻塞等终态）②用shell_exec单次GET查询（秒回）或provider查询分支拿video_url ③fs_file暂存task_id ④canvas_update_node回填video_url。严禁阻塞等终态、严禁让用户本地跑curl。
 
 **无限画布（Canvas DAG，可视化编排）：**
 20. canvas_query —— 查询画布摘要与节点清单，感知当前画布状态
@@ -916,12 +944,15 @@ AGENT_SYSTEM_PROMPT_BODY = """你是「AI漫剧导演 Agent」，运行在 MiniM
 - 多生成源：画布中每个 Provider 节点可独立存在，生图/视频/TTS 节点通过连线绑定具体 Provider，不再全局单选
 - 用户说“画布/无限画布/连线/节点/批量生成/参考图/用工作流/让画布执行” → 优先 canvas_query 感知画布，再用 canvas_create_node/canvas_connect 编排，最后 canvas_execute 触发。参考图场景必须创建 load-image/load-image-batch 并连到 video.reference_images 或 comfy-workflow 的 image 输入
 
-**多轮执行策略（循环模式专用）：**
+**多轮执行策略（循环模式专用-防一步即停）：**
 - 把用户目标拆解为步骤清单，逐轮执行：每轮基于上一轮工具结果决定下一个动作
 - 只有当所有步骤都完成、或确认无法继续时，才停止调用工具并输出最终总结
 - 严禁在目标未完成时提前汇报；每轮自问："用户的目标全部达成了吗？还有哪一步没做？"
 - 工具返回 error 时，分析原因并尝试修正参数重试，或改用其它工具达成同一目标
-- 单轮可并行调用多个相互独立的工具以提高效率（按需而定，无硬性上限）"""
+- 单轮可并行调用多个相互独立的工具以提高效率（按需而定，无硬性上限）
+- 【关键】查询类工具 list_* / canvas_query / list_assets / list_comfyui_workflows 仅是"侦察"，绝不能查询后直接总结收工：必须在同一轮对话内立即基于查询结果执行下一步 generate_image/generate_voice/canvas_create_node/canvas_connect/canvas_execute 等实质动作，查而不做视为未完成
+- 典型两阶段范式：①先 list_* 查可用源/工作流/音色/画布状态 ②再 generate_* 或 画布编排，必须连续完成；禁止把查询和执行拆成两次用户对话
+- 每轮输出前强制自检：列出"目标步骤清单→已完成→下一步"，清单未清零就必须继续 tool_calls，只有清单全完成才允许纯文本 reply"""
 
 # 单轮 JSON 兜底模式（llm_service.chat_json，无 LangChain/ainvoke 失败时）使用的提示词：保留 JSON 输出约束
 AGENT_SYSTEM_PROMPT = AGENT_SYSTEM_PROMPT_BODY + """
@@ -939,7 +970,7 @@ AGENT_LOOP_SYSTEM_PROMPT = AGENT_SYSTEM_PROMPT_BODY
 
 
 def _provider_tools_brief() -> str:
-    """动态拼接全部 provider_* 生成源工具，保证导演 Agent 永远感知最新注册源（含工作流单源）"""
+    """动态拼接全部 provider_* 生成源工具（v2 携带 x-visibility/x-agent 分组与人机分工）"""
     try:
         from app.mcp.server import mcp_registry
         lines = []
@@ -948,18 +979,39 @@ def _provider_tools_brief() -> str:
                 continue
             try:
                 props = (t.input_schema or {}).get("properties", {}) or {}
-                keys = ",".join(list(props.keys())[:12])
+                # 区分基础/高级便于导演只自动填 basic/auto 项
+                basic = []
+                adv = []
+                for k, v in props.items():
+                    if not isinstance(v, dict):
+                        continue
+                    # 非 uri 文件插槽与 prompt 视为输入，不计入参数分组
+                    if v.get("format") == "uri" or v.get("x-handle") in ("image","audio","video"):
+                        continue
+                    if k in ("prompt","text"):
+                        continue
+                    vis = v.get("x-visibility", "advanced")
+                    if vis == "basic":
+                        basic.append(k)
+                    elif vis == "hidden":
+                        continue
+                    else:
+                        adv.append(k)
+                keys = ",".join(list(props.keys())[:14])
+                grp = f"基础:{','.join(basic) or '无'}|高级:{','.join(adv) or '无'}"
             except Exception:
                 keys = ""
-            lines.append(f"- {t.name} — {str(t.description)[:90]} | 参数: {keys}")
+                grp = ""
+            desc = str(t.description or "")[:110].replace("\n"," ")
+            lines.append(f"- {t.name} — {desc} | {grp} | 参数: {keys}")
         if not lines:
             return ""
         return (
-            "\n\n**动态生成源 Tools（当前已注册 " + str(len(lines)) + " 个，一源一Tool，与工作流单源完全同源）：**\n"
+            "\n\n**动态生成源 Tools v2（当前已注册 " + str(len(lines)) + " 个，一源一Tool，基础常显 高级需点⚙ auto可自动 suggest需确认 manual仅手填）：**\n"
             + "\n".join(lines[:90])
-            + "\n\n**编排画布时：** 用 canvas_create_node 创建 prompt/image/video/audio 节点，params 内直接写 provider_id(即Tool名去掉provider_前缀)、prompt、skill_id 与挂载的 first_frame/reference_images；"
+            + "\n\n**编排画布时：** 用 canvas_create_node 创建 prompt/image/video/audio 节点，data 内直接写 provider_id(即Tool名去掉provider_前缀)、prompt/idea、skill_id 与挂载的 first_frame/reference_images/ref_audio；"
             "canvas_connect 按句柄(prompt/image/first_frame/last_frame/reference_images/ref_audio/text)连线后 canvas_execute 一键执行。"
-            "生成源参数异构（aspect_ratio/resolution/steps/duration/hasSound 等）一律按该 provider_* Tool 自己的 schema 填写。\n"
+            "生成源参数异构一律按该 provider_* Tool 自己的 schema 填写，含 x-visibility/x-agent：basic/auto 可由你自动按项目画幅推断，advanced/suggest 仅在用户提及时填写，hidden/manual 绝不填。\n"
         )
     except Exception as e:
         print(f"[Agent] provider_tools_brief failed: {e}")
@@ -1004,31 +1056,64 @@ async def expand_prompt(req: PromptExpandRequest):
 
 @router.websocket("/ws/agent")
 async def websocket_agent_endpoint(websocket: WebSocket):
-    """导演 Agent WebSocket：LangChain 多轮循环 + 记忆 + 真实流式"""
+    """导演 Agent WebSocket：支持并发 abort 暂停"""
     await websocket.accept()
-    # 会话隔离：使用连接id + 项目id 作为 session
     session_id = f"ws_{id(websocket)}"
+    active_task: Optional[asyncio.Task] = None
     try:
         while True:
             data_str = await websocket.receive_text()
-            data = json.loads(data_str)
+            try:
+                data = json.loads(data_str)
+            except Exception:
+                await websocket.send_json({"event": "error", "message": "消息格式错误（需 JSON）"})
+                continue
 
-            if data.get("action") not in ("agent_prompt", "clear_history"):
+            action = data.get("action")
+
+            # ── 暂停 abort ──
+            if action == "abort":
+                target_sid = str(data.get("session_id") or session_id)
+                if active_task and not active_task.done():
+                    active_task.cancel()
+                    try:
+                        await asyncio.wait_for(active_task, timeout=2)
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception:
+                        pass
+                    # 清理由回调处理，此处再补发暂停回执
+                    try:
+                        await websocket.send_json({"event": "agent_response", "message": "⏹️ 已暂停", "suggested_actions": ["继续", "换个思路"], "executed_tools": []})
+                    except Exception:
+                        pass
+                else:
+                    # 无任务时也回暂停，避免前端一直转圈
+                    try:
+                        await websocket.send_json({"event": "agent_response", "message": "⏹️ 已暂停", "suggested_actions": [], "executed_tools": []})
+                    except Exception:
+                        pass
+                continue
+
+            if action not in ("agent_prompt", "clear_history", "abort"):
                 await websocket.send_json({"event": "error", "message": f"未知 action: {data.get('action')}"})
                 continue
 
-            if data.get("action") == "clear_history":
+            if action == "clear_history":
+                # 若有运行中任务先取消
+                if active_task and not active_task.done():
+                    active_task.cancel()
+                    try:
+                        await active_task
+                    except Exception:
+                        pass
                 if HAS_LANGCHAIN_AGENT:
                     await clear_session(session_id)
-                else:
-                    # 兼容：清空时不做处理
-                    pass
                 await websocket.send_json({"event": "agent_response", "message": "已清空对话历史", "suggested_actions": []})
                 continue
 
             prompt_text = (data.get("prompt") or "").strip()
             context = data.get("context") or {}
-            # 支持前端传入 session_id 实现跨连接记忆
             if data.get("session_id"):
                 session_id = str(data.get("session_id"))
             elif context.get("project_id"):
@@ -1038,31 +1123,55 @@ async def websocket_agent_endpoint(websocket: WebSocket):
                 await websocket.send_json({"event": "error", "message": "指令不能为空"})
                 continue
 
-            # 优先使用 LangChain 引擎（带记忆、循环、流式）
+            if active_task and not active_task.done():
+                await websocket.send_json({"event": "error", "message": "已有任务运行中，请先暂停再发新指令"})
+                continue
+
+            # 优先使用 LangChain 引擎（带记忆、循环、流式）— 后台任务化以支持 abort
             if HAS_LANGCHAIN_AGENT:
-                try:
-                    # 发送 thinking 由引擎内部发送，这里先发送一个占位
-                    await websocket.send_json({"event": "agent_thinking", "message": f"正在解析导演指令: 「{prompt_text[:40]}」..."})
-                    # 流式标记：引擎会自行发送 agent_stream_chunk / tool_calling / tool_result
-                    # 先发送 stream_start 占位，引擎内部的 astream 会持续发送 chunk
-                    await websocket.send_json({"event": "agent_stream_start"})
-                    result = await run_agent_with_langchain(
-                        prompt=prompt_text,
-                        context=context,
-                        session_id=session_id,
-                        websocket=websocket,
-                        streaming=True,
-                    )
-                    await websocket.send_json({
-                        "event": "agent_response",
-                        "message": result.get("reply", "指令已执行。"),
-                        "suggested_actions": result.get("suggested_actions") or [],
-                        "executed_tools": result.get("executed_tools") or [],
-                    })
-                except LLMServiceError as e:
-                    await websocket.send_json({"event": "error", "message": str(e)})
-                except Exception as e:
-                    await websocket.send_json({"event": "error", "message": f"Agent 执行失败: {e}"})
+                # 捕获外层变量供闭包使用
+                _prompt = prompt_text
+                _context = context
+                _sid = session_id
+
+                async def _run_agent_task():
+                    try:
+                        await websocket.send_json({"event": "agent_thinking", "message": f"正在解析导演指令: 「{_prompt[:40]}」..."})
+                        result = await run_agent_with_langchain(
+                            prompt=_prompt,
+                            context=_context,
+                            session_id=_sid,
+                            websocket=websocket,
+                            streaming=True,
+                        )
+                        await websocket.send_json({
+                            "event": "agent_response",
+                            "message": result.get("reply", "指令已执行。"),
+                            "suggested_actions": result.get("suggested_actions") or [],
+                            "executed_tools": result.get("executed_tools") or [],
+                        })
+                    except asyncio.CancelledError:
+                        # 任务被 abort 取消，静默结束（外层已发暂停回执）
+                        raise
+                    except LLMServiceError as e:
+                        try:
+                            await websocket.send_json({"event": "error", "message": str(e)})
+                        except Exception:
+                            pass
+                    except Exception as e:
+                        try:
+                            await websocket.send_json({"event": "error", "message": f"Agent 执行失败: {e}"})
+                        except Exception:
+                            pass
+
+                active_task = asyncio.create_task(_run_agent_task())
+
+                def _clear_done(t: asyncio.Task):
+                    nonlocal active_task
+                    if active_task is t:
+                        active_task = None
+                active_task.add_done_callback(_clear_done)
+                # 不在此处 await，立即回到 receive 循环以接收 abort
                 continue
 
             # 回退：原有单轮逻辑（无 LangChain 时）
@@ -1124,6 +1233,12 @@ async def websocket_agent_endpoint(websocket: WebSocket):
                 "suggested_actions": decision.get("suggested_actions") or [],
             })
     except WebSocketDisconnect:
+        if 'active_task' in locals() and active_task and not active_task.done():
+            active_task.cancel()
+        pass
+    except asyncio.CancelledError:
+        if 'active_task' in locals() and active_task and not active_task.done():
+            active_task.cancel()
         pass
     except json.JSONDecodeError:
         try:
@@ -1535,7 +1650,7 @@ async def http_agent_chat_stream(req: AgentChatRequest):
                 yield "data: [DONE]\n\n"
             return
 
-        # LangChain 流式：通过队列桥接 websocket 风格回调到 SSE
+        # LangChain 流式：通过队列桥接 websocket 风格回调到 SSE（修复旧版 asyncio.wait 泄漏）
         queue: asyncio.Queue = asyncio.Queue()
 
         class SSEBridge:
@@ -1552,46 +1667,37 @@ async def http_agent_chat_stream(req: AgentChatRequest):
             streaming=True,
         ))
 
-        # 消费者：从队列取事件并转为 SSE
+        # 消费者：从队列取事件并转为 SSE（无泄漏版：wait_for 替代 wait+超时丢弃）
         try:
-            while True:
+            while not task.done() or not queue.empty():
                 try:
-                    # 等待队列或任务完成
-                    done, pending = await asyncio.wait(
-                        [asyncio.create_task(queue.get()), task],
-                        return_when=asyncio.FIRST_COMPLETED,
-                        timeout=0.5,
-                    )
-                    # 检查任务是否完成
+                    ev = await asyncio.wait_for(queue.get(), timeout=0.5)
+                    yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+                except asyncio.TimeoutError:
+                    # 超时仅用于检查 task 是否已完成，避免永久阻塞；无事件则继续轮询
                     if task.done():
-                        # 任务结束，排空队列
+                        # 任务已结束且队列已空（while 条件保证），排空残余
                         while not queue.empty():
                             ev = await queue.get()
                             yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
-                        # 任务结果已通过队列发送了 agent_response，若未发送则补一个
-                        try:
-                            result = task.result()
-                            # 若队列中未有 agent_response，前面 run_agent 已通过 bridge 发送了
-                        except Exception as e:
-                            yield f"data: {json.dumps({'event':'error','message':str(e)}, ensure_ascii=False)}\n\n"
-                        yield "data: [DONE]\n\n"
-                        break
-                    # 有新事件
-                    for d in done:
-                        if d is task:
-                            continue
-                        try:
-                            ev = d.result()
-                            yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
-                        except Exception:
-                            pass
-                except asyncio.TimeoutError:
-                    if task.done():
                         break
                     continue
+            # 任务结束，检查异常
+            if task.done():
+                try:
+                    task.result()
+                except Exception as e:
+                    yield f"data: {json.dumps({'event':'error','message':str(e)}, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
         finally:
             if not task.done():
                 task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    pass
 
     return StreamingResponse(event_generator(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 

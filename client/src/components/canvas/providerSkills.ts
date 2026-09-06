@@ -4,6 +4,8 @@
  * 与后端动态生成源系统 (ProviderDefinition) 深度打通
  */
 
+import { ControlSpec } from './controls/DynamicControl';
+
 export interface AssetSlotDef {
   key: string;
   label: string;
@@ -11,6 +13,14 @@ export interface AssetSlotDef {
   required?: boolean;
   handleType?: string;
   description?: string;
+  maxCount?: number;
+  minCount?: number;
+  originalKey?: string;
+  multi?: boolean;
+  /** 语义角色：character_ref / scene_ref / pose_ref / first_frame / last_frame / reference_images ... */
+  role?: string;
+  /** true 表示这是跨节点的聚合句柄（如 reference_images 数组），源若已提供逐节点独立槽时优先用后者 */
+  aggregate?: boolean;
 }
 
 export interface DynamicProviderInfo {
@@ -31,106 +41,117 @@ export interface DynamicProviderInfo {
   enabled?: boolean;
 }
 
-/**
- * 从 Provider 的 input_schema 中解析出所需的资产插槽
- */
-export function extractSlotsFromProvider(provider: DynamicProviderInfo | null, nodeKind: string): AssetSlotDef[] {
-  if (!provider) {
-    // 默认兜底插槽
-    if (nodeKind === 'video') {
-      return [
-        { key: 'first_frame', label: '首帧', type: 'image', required: false, description: '视频起始画面' },
-        { key: 'last_frame', label: '尾帧', type: 'image', required: false, description: '视频结束画面' },
-        { key: 'reference_images', label: '参考图', type: 'image', required: false, description: '主体/角色参考' },
-      ];
-    }
-    if (nodeKind === 'image') {
-      return [
-        { key: 'reference', label: '参考图/垫图', type: 'image', required: false, description: '垫图或风格参考' },
-      ];
-    }
-    if (nodeKind === 'audio') {
-      return [
-        { key: 'ref_audio', label: '参考音频', type: 'audio', required: false, description: '音色克隆/参考音频' },
-      ];
-    }
-    return [];
-  }
+// handle 类型归一：只认接口声明的 x-handle，未知 uri 统一按 image
+const HANDLE_MEDIA: Record<string, AssetSlotDef['type']> = {
+  image: 'image', images: 'image', reference_images: 'image',
+  audio: 'audio', audios: 'audio', reference_audios: 'audio',
+  video: 'video', videos: 'video', reference_videos: 'video',
+};
 
-  const props = provider.input_schema?.properties || {};
-  const requiredKeys: string[] = Array.isArray(provider.input_schema?.required) ? provider.input_schema.required : [];
+/**
+ * 插槽 = input_schema 中声明了媒体 x-handle（或 format:uri）的属性，一一对应，零猜测。
+ * key 取 x-slot（归一插槽键，缺省用属性名本身），originalKey 恒为属性名（provider 真实入参键）。
+ * 不再有任何按 kind 的写死兜底：源没声明 = 没有插槽。
+ */
+export function extractSlotsFromProvider(provider: DynamicProviderInfo | null, _nodeKind?: string): AssetSlotDef[] {
+  const props = provider?.input_schema?.properties || {};
+  const requiredKeys: string[] = Array.isArray(provider?.input_schema?.required) ? provider!.input_schema!.required : [];
   const slots: AssetSlotDef[] = [];
   const seen = new Set<string>();
 
-  const pushSlot = (key: string, label: string, type: AssetSlotDef['type'], desc: string, srcKey: string) => {
-    if (seen.has(key)) return;
-    seen.add(key);
-    const isRequired = requiredKeys.includes(srcKey);
-    slots.push({ key, label, type, required: isRequired, description: desc });
-  };
-
-  for (const [key, def] of Object.entries(props)) {
-    const d: any = def;
-    const xHandle = (d['x-handle'] || '').toString().toLowerCase();
-    const desc = d.description || '';
-    const isArray = d.type === 'array';
-    const itemsFormat = isArray ? (d.items?.format || '') : '';
-    const isUri = d.format === 'uri' || itemsFormat === 'uri';
-    // 仅 uri 类型的输入才视为资产插槽（prompt/text 为 string 非 uri，跳过）
-    if (!isUri) continue;
-
-    const lowerKey = key.toLowerCase();
-
-    // 1) 首帧：key 优先，其次 x-handle 精确，其次泛型 image + key 含 first
-    if (key === 'first_frame' || key === 'first_frame_url' || lowerKey === 'first_frame' || xHandle === 'first_frame' || (xHandle === 'image' && lowerKey.includes('first_frame')) || (xHandle === 'image' && lowerKey === 'firstframe')) {
-      pushSlot('first_frame', '首帧', 'image', desc || '视频起始画面', key);
-      continue;
+  for (const [key, def] of Object.entries<any>(props)) {
+    const xHandle = String(def?.['x-handle'] || '').toLowerCase();
+    const type = HANDLE_MEDIA[xHandle];
+    const isArray = def?.type === 'array';
+    const isUri = def?.format === 'uri' || (isArray && def?.items?.format === 'uri');
+    if (!type && !isUri) continue;
+    const mediaType: AssetSlotDef['type'] = type || 'image';
+    const slotKey: string = def['x-slot'] || key;
+    if (seen.has(slotKey)) continue;
+    seen.add(slotKey);
+    const isRequired = requiredKeys.includes(key);
+    let maxCount: number | undefined;
+    let minCount: number | undefined;
+    if (isArray) {
+      maxCount = typeof def.maxItems === 'number' ? def.maxItems : (typeof def.items?.maxItems === 'number' ? def.items.maxItems : undefined);
+      minCount = typeof def.minItems === 'number' ? def.minItems : (typeof def.items?.minItems === 'number' ? def.items.minItems : undefined);
+      if (minCount === undefined) minCount = isRequired ? 1 : 0;
+    } else {
+      maxCount = 1;
+      minCount = isRequired ? 1 : 0;
     }
-    if (key === 'last_frame' || key === 'last_frame_url' || xHandle === 'last_frame' || (xHandle === 'image' && lowerKey.includes('last_frame'))) {
-      pushSlot('last_frame', '尾帧', 'image', desc || '视频结束画面', key);
-      continue;
-    }
-    // 2) 参考图组：key 命中最优先
-    if (key === 'reference_images' || key === 'reference_image' || key === 'reference' || xHandle === 'reference_images' || xHandle === 'reference' || xHandle === 'images' || (isUri && lowerKey.includes('reference'))) {
-      // 统一归一到 reference_images（多图）与 reference（单图）兼容：优先用 reference_images
-      const targetKey = lowerKey.includes('reference_images') || xHandle === 'reference_images' || lowerKey === 'reference_images' ? 'reference_images' : (lowerKey === 'reference' ? 'reference' : 'reference_images');
-      const label = targetKey === 'reference' ? '参考图' : '参考图';
-      pushSlot(targetKey, label, 'image', desc || '角色/主体参考图', key);
-      continue;
-    }
-    // 3) 音频参考：需 uri 且含 audio
-    if (xHandle === 'audio' || lowerKey.includes('ref_audio') || lowerKey.includes('reference_audio') || (isUri && lowerKey.includes('audio'))) {
-      pushSlot('ref_audio', '参考音频', 'audio', desc || '音色参考', key);
-      continue;
-    }
-    // 4) 视频参考
-    if (xHandle === 'video' || xHandle === 'reference_video' || (isUri && lowerKey.includes('video'))) {
-      pushSlot('reference_video', '参考视频', 'video', desc || '动作/视频参考', key);
-      continue;
-    }
-    // 5) 兜底：泛型 image 插槽按 key 语义回落
-    if (xHandle === 'image' && isUri) {
-      if (lowerKey.includes('first')) pushSlot('first_frame', '首帧', 'image', desc || '视频起始画面', key);
-      else if (lowerKey.includes('last')) pushSlot('last_frame', '尾帧', 'image', desc || '视频结束画面', key);
-      else pushSlot('reference_images', '参考图', 'image', desc || '参考图', key);
-    }
+    slots.push({
+      key: slotKey,
+      label: def.description || def.title || slotKey,
+      type: mediaType,
+      required: isRequired,
+      description: def.description || '',
+      maxCount,
+      minCount,
+      originalKey: key,
+      multi: isArray && (maxCount === undefined || maxCount > 1),
+      role: def['x-role'] || undefined,
+      aggregate: def['x-aggregate'] === true,
+    });
   }
-
-  if (slots.length === 0) {
-    if (provider.kind === 'video') {
-      slots.push(
-        { key: 'first_frame', label: '首帧', type: 'image', required: false },
-        { key: 'last_frame', label: '尾帧', type: 'image', required: false },
-        { key: 'reference_images', label: '参考图', type: 'image', required: false }
-      );
-    } else if (provider.kind === 'image') {
-      slots.push({ key: 'reference', label: '参考图', type: 'image', required: false });
-    } else if (provider.kind === 'audio') {
-      slots.push({ key: 'ref_audio', label: '参考音频', type: 'audio', required: false, description: '音色克隆参考' });
-    }
-  }
-
   return slots;
+}
+
+/**
+ * params_schema → ControlSpec 全系统唯一映射（画布 + 分镜共用）。
+ * 分组/暴露级别/人机分工/排序只读 x-*（后端 resolve_params_schema 单点补全），前端零参数名硬编码。
+ */
+export function paramsSchemaToSpecs(schema?: Record<string, any>): ControlSpec[] {
+  if (!schema?.properties) return [];
+  const requiredArr: string[] = Array.isArray(schema.required) ? schema.required : [];
+  return Object.entries<any>(schema.properties).map(([key, def]) => {
+    const hasEnum = Array.isArray(def.enum) && def.enum.length > 0;
+    let type: ControlSpec['type'] = 'text';
+    if (hasEnum) type = 'combo';
+    else if (def.type === 'integer' || def.type === 'number') type = 'number';
+    else if (def.type === 'boolean') type = 'boolean';
+    else if (def.type === 'string' && def.format === 'uri') type = HANDLE_MEDIA[String(def['x-handle'] || '').toLowerCase()] || 'image';
+    // x-control 仅允许覆盖到已知控件，未知值保持类型推断结果
+    const xc = def['x-control'];
+    if (xc === 'slider' || xc === 'select' || xc === 'toggle' || xc === 'input') {
+      if (xc === 'slider') type = 'number';
+      else if (xc === 'select') type = 'combo';
+      else if (xc === 'toggle') type = 'boolean';
+      else type = 'text';
+    }
+    return {
+      id: key,
+      param_name: key,
+      label: def.title || key,
+      type,
+      description: def.description || '',
+      role: def['x-role'],
+      options: hasEnum ? def.enum.map((v: any) => String(v)) : undefined,
+      default_value: def.default,
+      required: requiredArr.includes(key) || !!def.required,
+      min: def.minimum ?? def.min,
+      max: def.maximum ?? def.max,
+      step: def.step,
+      category: def['x-category'] || 'advanced',
+      visibility: def['x-visibility'] || 'advanced',
+      agent: def['x-agent'] || 'suggest',
+      priority: def['x-priority'] ?? 50,
+    } as ControlSpec;
+  });
+}
+
+/**
+ * 生成人类可读的源能力摘要：几张图片/几段音频
+ */
+export function describeProviderSlots(provider: DynamicProviderInfo | null, kind: string): string {
+  const slots = extractSlotsFromProvider(provider, kind);
+  if (slots.length === 0) return '无需外部素材';
+  const parts = slots.map(s => {
+    const u = s.type === 'audio' ? '段音频' : s.type === 'video' ? '段视频' : '张图片';
+    const range = s.maxCount === undefined ? `多${u}` : s.maxCount === 1 ? `1${u}` : `${s.minCount ?? 0}-${s.maxCount}${u}`;
+    return `${s.label}${s.required ? '' : '（可选）'}：${range}`;
+  });
+  return parts.join('，');
 }
 
 /**
@@ -238,27 +259,5 @@ export const SKILL_PRESETS: Record<string, SkillPreset> = {
 
 export function getSkillPreset(skillId?: string): SkillPreset | undefined {
   return skillId ? SKILL_PRESETS[skillId] : undefined;
-}
-
-/**
- * 依据已装载插槽自动推荐技能（节点 Agent 自主选技能用）
- */
-export function inferSkillForKind(kind: string, d: any): string {
-  if (kind === 'image') {
-    const hasRef = !!(d.reference || (Array.isArray(d.reference_images) && d.reference_images.length) || d.first_frame);
-    return hasRef ? 'image_reference' : 'text_to_image';
-  }
-  if (kind === 'video') {
-    const hasFirst = !!(d.first_frame || d.first_frame_url);
-    const hasLast = !!(d.last_frame || d.last_frame_url);
-    const hasRefs = Array.isArray(d.reference_images) && d.reference_images.length > 0;
-    if (hasFirst && hasLast) return 'first_last_frame';
-    if (hasRefs && !hasFirst) return 'all_round_reference';
-    if (hasFirst) return 'first_last_frame';
-    return 'text_to_video';
-  }
-  if (kind === 'audio') return d.ref_audio || d.ref_audio_path ? 'audio_clone' : 'tts_voice';
-  if (kind === 'director3d') return 'camera_plan';
-  return 'custom_text';
 }
 

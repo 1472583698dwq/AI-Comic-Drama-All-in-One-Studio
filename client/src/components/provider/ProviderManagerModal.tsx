@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { X, Plus, Plug, Globe, Video, Mic, Cpu, Trash2, Edit3, Activity, Save, Upload, FileText, Link2, TestTube } from 'lucide-react';
 import { apiService } from '../../services/api';
+import { CAPABILITIES_BY_KIND, getCapabilities } from './providerCapabilities';
 
 interface Props { isOpen: boolean; onClose: ()=>void; }
 
@@ -11,6 +12,7 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const [providers, setProviders] = useState<any[]>([]);
   const [filter, setFilter] = useState<'all'|'image'|'video'|'audio'>('all');
   const [q, setQ] = useState('');
+  const [capFilter, setCapFilter] = useState<string>('all');
   const [editing, setEditing] = useState<any>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [importMode, setImportMode] = useState(false);
@@ -34,9 +36,14 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
   const filtered = providers.filter(p=>{
     if (filter!=='all' && p.kind!==filter) return false;
+    if (capFilter!=='all' && !getCapabilities(p).includes(capFilter)) return false;
     if (q && !(`${p.name||''} ${p.display_name||''} ${p.id}`.toLowerCase().includes(q.toLowerCase()))) return false;
     return true;
   });
+  // 能力筛选项随类型过滤联动（各 kind 能力 id 无重名，直接用 id 匹配）
+  const capOptions = filter==='all'
+    ? Object.values(CAPABILITIES_BY_KIND).flat()
+    : (CAPABILITIES_BY_KIND[filter] || []);
   const customCount = providers.filter(p=> !p.builtin).length;
 
   const handleDelete = async (id:string)=>{
@@ -61,20 +68,76 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose }) => {
       // 清理只读字段
       delete payload.health;
       // 处理 JSON 字符串字段
-      if (typeof payload.params_schema === 'string') {
-        try { payload.params_schema = JSON.parse(payload.params_schema); } catch { alert('params_schema JSON 格式错误'); return; }
-      }
-      if (typeof payload.default_params === 'string') {
-        try { payload.default_params = JSON.parse(payload.default_params); } catch { alert('default_params JSON 格式错误'); return; }
-      }
-      if (typeof payload.transport === 'string') {
-        try { payload.transport = JSON.parse(payload.transport); } catch {}
+      for (const k of ['params_schema','input_schema','output_schema','default_params','transport','auth','mapping']) {
+        if (typeof payload[k] === 'string' && payload[k].trim()) {
+          try { payload[k] = JSON.parse(payload[k]); } catch { alert(`${k} JSON 格式错误`); return; }
+        }
+        if (payload[k]==='' || payload[k]==='null') delete payload[k];
       }
       await apiService.updateProvider(editing.id, payload);
       setEditing(null);
       await fetchAll();
       window.dispatchEvent(new Event('provider-list-refresh'));
     } catch(e:any){ alert(e.message); }
+  };
+
+  const handleAutoFixVideoCode = ()=>{
+    if (!editing || editing.kind!=='video') return;
+    // 智能一键修正：按真实代码与当前 schema 动态映射，而非全量固定模板
+    const curParams = editing.params_schema && typeof editing.params_schema === 'object' ? editing.params_schema : {type:"object", properties:{}};
+    const curInput = editing.input_schema && typeof editing.input_schema === 'object' ? editing.input_schema : {type:"object", properties:{}};
+    // 解析当前 params 的 properties（兼容 JSON 字符串或对象）
+    let props: any = {};
+    try {
+      const raw = typeof curParams === 'string' ? JSON.parse(curParams) : curParams;
+      props = raw.properties || {};
+    } catch { props = (curParams as any).properties || {}; }
+    let iprops: any = {};
+    try {
+      const raw2 = typeof curInput === 'string' ? JSON.parse(curInput) : curInput;
+      iprops = raw2.properties || {};
+    } catch { iprops = (curInput as any).properties || {}; }
+    // 1) params: 保留已有的真实枚举，仅修正通用误套
+    const codeStr: string = typeof editing.code === 'string' ? editing.code : '';
+    const hasAspectInCode = codeStr.includes('aspect_ratio');
+    const hasFpsInCode = codeStr.includes('fps') || codeStr.includes('"fps"') || codeStr.includes("'fps'");
+    // 若当前 resolution 是通用 3 值且代码实际要 4 值，则替换
+    let resEnum = props.resolution?.enum;
+    if (Array.isArray(resEnum) && resEnum.length===3 && resEnum.includes('480p') && resEnum.includes('720p')) {
+      resEnum = ["480p竖","768p竖","480p横","768p横"];
+    }
+    // 若当前无 resolution 或为通用，则用 4 值；若已有 6 值则保留
+    if (!resEnum || (Array.isArray(resEnum) && resEnum.length===3)) {
+      resEnum = ["480p竖","768p竖","480p横","768p横"];
+    }
+    const newProps: any = { ...props };
+    // 写入/修正 resolution
+    newProps.resolution = { type: "string", title: "分辨率", enum: resEnum, default: resEnum.includes("768p竖") ? "768p竖" : resEnum[0], description: "分辨率（竖=9:16 横=16:9）", "x-category": "layout", "x-visibility": "basic", "x-agent": "auto", "x-priority": 20 };
+    // 保留 duration，若无则补
+    if (!newProps.duration) newProps.duration = { type: "integer", title: "时长", default: 5, minimum: 3, maximum: 15, description: "时长秒 3-15", "x-category": "motion", "x-visibility": "basic", "x-agent": "auto", "x-priority": 30 };
+    // 补 seed（若代码里有 seed 但 UI 没有）
+    if (!newProps.seed && codeStr.includes('seed')) newProps.seed = { type: "integer", title: "随机种子", description: "随机种子，留空随机", "x-category": "quality", "x-visibility": "advanced", "x-agent": "manual", "x-priority": 99 };
+    // 清理多余的 aspect_ratio/fps（若代码未使用）
+    if (!hasAspectInCode && newProps.aspect_ratio) delete newProps.aspect_ratio;
+    if (!hasFpsInCode && newProps.fps) delete newProps.fps;
+    // 移除误入 params 的文件类字段（prompt/first_frame 等应只在 input）
+    for (const k of ['prompt','first_frame','last_frame','reference_images','reference_audios','first_frame_url','ref_audio','text']) {
+      if (newProps[k] && newProps[k].format === 'uri') delete newProps[k];
+    }
+    // 兜底：若 params 为空则至少保留 resolution/duration/seed
+    const fixedParams = { type: "object", properties: newProps };
+    // 2) input: 补齐 9 张 / 3 条 上限，按真实 max 映射
+    const newIProps: any = { ...iprops };
+    // 确保基础 5 字段存在
+    if (!newIProps.prompt) newIProps.prompt = { type: "string", description: "运动描述", "x-handle": "text" };
+    if (!newIProps.first_frame) newIProps.first_frame = { type: "string", format: "uri", description: "首帧（定格开头画面）", "x-handle": "image" };
+    if (!newIProps.last_frame) newIProps.last_frame = { type: "string", format: "uri", description: "尾帧图（定格结尾画面）", "x-handle": "image" };
+    if (!newIProps.reference_images) newIProps.reference_images = { type: "array", items: { type: "string", format: "uri" }, description: "参考集，最多9张", "x-handle": "image", maxItems: 9, minItems: 0 };
+    else { newIProps.reference_images.maxItems = 9; newIProps.reference_images.minItems = 0; newIProps.reference_images.description = "参考集，最多9张"; newIProps.reference_images["x-handle"] = "image"; }
+    if (!newIProps.reference_audios) newIProps.reference_audios = { type: "array", items: { type: "string", format: "uri" }, description: "参考音频，最多3条", "x-handle": "audio", maxItems: 3, minItems: 0 };
+    else { newIProps.reference_audios.maxItems = 3; newIProps.reference_audios.minItems = 0; newIProps.reference_audios.description = "参考音频，最多3条"; newIProps.reference_audios["x-handle"] = "audio"; }
+    const fixedInput = { type: "object", properties: newIProps, required: ["prompt"] };
+    setEditing({...editing, params_schema: fixedParams, input_schema: fixedInput});
   };
   const handleCreate = async (form: any)=>{
     try {
@@ -140,10 +203,14 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose }) => {
         <div className="px-6 py-3 border-b border-border flex items-center gap-2 shrink-0">
           <div className="flex items-center gap-1 p-1 rounded-full bg-surface-secondary border border-border">
             {(['all','image','video','audio'] as const).map(k=> (
-              <button key={k} onClick={()=> setFilter(k)} className={`px-3 py-1 rounded-full text-xs font-medium ${filter===k?'bg-white dark:bg-brand text-surface dark:text-white shadow-sm':'text-gray-400 hover:text-white'}`}>{k==='all'?'全部':k==='image'?'生图':k==='video'?'视频':'语音'}</button>
+              <button key={k} onClick={()=> { setFilter(k); setCapFilter('all'); }} className={`px-3 py-1 rounded-full text-xs font-medium ${filter===k?'bg-white dark:bg-brand text-surface dark:text-white shadow-sm':'text-gray-400 hover:text-white'}`}>{k==='all'?'全部':k==='image'?'生图':k==='video'?'视频':'语音'}</button>
             ))}
           </div>
           <input value={q} onChange={e=> setQ(e.target.value)} placeholder="搜索 名称/ID…" className="flex-1 max-w-xs bg-surface-secondary border border-border rounded-full px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand"/>
+          <select value={capFilter} onChange={e=> setCapFilter(e.target.value)} className="bg-surface-secondary border border-border rounded-full px-3 py-1.5 text-xs text-white focus:outline-none focus:border-brand" title="按能力细分筛选">
+            <option value="all">全部能力</option>
+            {capOptions.map(o=> <option key={o.id} value={o.id}>{o.label}</option>)}
+          </select>
           <span className="ml-auto text-[11px] text-gray-500">内置不可删改 · 自定义可增删改查</span>
         </div>
 
@@ -166,6 +233,11 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose }) => {
                     <span className={`text-[10px] px-2 py-0.5 rounded-full border ${p.builtin?'bg-surface border-border text-gray-400':'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'}`}>{p.builtin?'内置':'自定义'}</span>
                   </div>
                   {p.description && <div className="text-[11px] text-gray-400 line-clamp-2">{p.description}</div>}
+                  <div className="flex flex-wrap items-center gap-1">
+                    {getCapabilities(p).map(c=> (
+                      <span key={c} title={c} className={`text-[10px] px-1.5 py-0.5 rounded border ${Array.isArray(p.capabilities) && p.capabilities.length ? 'bg-brand/10 border-brand/30 text-brand-light' : 'bg-black/30 border-border text-gray-500'}`}>{(CAPABILITIES_BY_KIND[p.kind] || []).find(o=>o.id===c)?.label || c}</span>
+                    ))}
+                  </div>
                   <div className="text-[10px] font-mono text-gray-500 truncate" title={p.transport?.url}>URL: {p.transport?.url || '—'}</div>
                   <div className="flex items-center gap-1.5 text-[10px] text-gray-500">
                     <span>模型:</span><span className="px-1.5 py-0.5 rounded bg-black/30 text-gray-300 truncate max-w-[140px]">{p.default_model || p.models?.[0] || '—'}</span>
@@ -192,16 +264,30 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose }) => {
                 <button onClick={()=> setEditing(null)} className="p-1 rounded hover:bg-surface-tertiary"><X className="w-4 h-4 text-gray-400"/></button>
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar text-xs">
+                {/* 代码型一键修正 */}
+                {editing.kind==='video' && editing.provider_type==='code' && !editing.builtin && (
+                  <div className="p-3 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-between gap-2">
+                    <div className="text-[11px] leading-tight">
+                      <div className="font-bold text-violet-300">检测到代码型 video 通用模板 mismatch</div>
+                      <div className="text-violet-200/70">点击一键修正为真实 API：4 分辨率（竖/横）· 去除多余 aspect_ratio/fps · 补 seed/reference_audios</div>
+                    </div>
+                    <button onClick={handleAutoFixVideoCode} className="px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-bold shrink-0">一键修正</button>
+                  </div>
+                )}
                 {[
                   {k:'name', label:'名称', type:'text'},
                   {k:'kind', label:'类型 kind (image|video|audio)', type:'select', opts:['image','video','audio','llm']},
+                  {k:'capabilities', label:'能力细分（多选；不选=按插槽自动推断）', type:'caps'},
                   {k:'description', label:'描述', type:'textarea'},
-                  {k:'transport', label:'transport JSON', type:'json'},
+                  {k:'code', label:'code (python/javascript, 完整 generate)', type:'code'},
+                  {k:'input_schema', label:'input_schema JSON (文件插槽: prompt/首帧/参考图/参考音频)', type:'json'},
+                  {k:'params_schema', label:'params_schema JSON (非文件参数, 需带 x-* 分组)', type:'json'},
+                  {k:'output_schema', label:'output_schema JSON', type:'json'},
+                  {k:'transport', label:'transport JSON (code 型可空)', type:'json'},
                   {k:'auth', label:'auth JSON', type:'json'},
                   {k:'mapping', label:'mapping JSON', type:'json'},
                   {k:'models', label:'models (逗号分隔)', type:'text'},
                   {k:'default_model', label:'default_model', type:'text'},
-                  {k:'params_schema', label:'params_schema JSON (不固定参数)', type:'json'},
                   {k:'default_params', label:'default_params JSON', type:'json'},
                 ].map(f=>{
                   const val = editing[f.k];
@@ -211,12 +297,26 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose }) => {
                       <span className="text-[11px] font-semibold text-gray-300">{f.label} <span className="text-[10px] text-gray-500">{f.k}</span></span>
                       {f.type==='textarea' ? (
                         <textarea value={display} onChange={e=> setEditing({...editing, [f.k]: e.target.value})} rows={2} className="w-full bg-black/40 border border-border rounded-lg p-2 font-mono text-xs text-white focus:outline-none focus:border-brand" disabled={editing.builtin}/>
+                      ) : f.type==='code' ? (
+                        <textarea value={display} onChange={e=> setEditing({...editing, [f.k]: e.target.value})} rows={10} className="w-full bg-black/40 border border-border rounded-lg p-2 font-mono text-[11px] text-white focus:outline-none focus:border-brand" disabled={editing.builtin} placeholder="async def generate(ctx, api): ... # 末尾可追加 # PARAMS_SCHEMA: {...}"/>
                       ) : f.type==='json' ? (
                         <textarea value={display} onChange={e=> setEditing({...editing, [f.k]: e.target.value})} rows={4} className="w-full bg-black/40 border border-border rounded-lg p-2 font-mono text-[11px] text-white focus:outline-none focus:border-brand" disabled={editing.builtin}/>
                       ) : f.type==='select' ? (
                         <select value={val||''} onChange={e=> setEditing({...editing, [f.k]: e.target.value})} className="w-full bg-surface-secondary border border-border rounded-lg px-2 py-1.5 text-xs text-white" disabled={editing.builtin}>
                           {f.opts?.map((o:string)=> <option key={o} value={o}>{o}</option>)}
                         </select>
+                      ) : f.type==='caps' ? (
+                        <div className="flex flex-wrap gap-1.5 p-2 rounded-lg bg-black/40 border border-border">
+                          {!(CAPABILITIES_BY_KIND[editing.kind] || []).length && <span className="text-[11px] text-gray-500">该类型暂无能力选项</span>}
+                          {(CAPABILITIES_BY_KIND[editing.kind] || []).map(o=> {
+                            const cur: string[] = Array.isArray(editing.capabilities) ? editing.capabilities : [];
+                            const on = cur.includes(o.id);
+                            return (
+                              <button key={o.id} disabled={editing.builtin} title={o.desc} onClick={()=> setEditing({...editing, capabilities: on ? cur.filter(c=>c!==o.id) : [...cur, o.id]})} className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition-all ${on ? 'bg-brand/20 border-brand text-white' : 'bg-surface-secondary border-border text-gray-400 hover:text-white'}`}>{o.label}</button>
+                            );
+                          })}
+                          {!editing.builtin && Array.isArray(editing.capabilities) && editing.capabilities.length > 0 && <button onClick={()=> setEditing({...editing, capabilities: []})} className="px-2 py-1 text-[11px] text-gray-500 hover:text-white underline">清空（改自动推断）</button>}
+                        </div>
                       ) : (
                         <input value={f.k==='models' && Array.isArray(val) ? val.join(',') : display} onChange={e=> {
                           if (f.k==='models') setEditing({...editing, [f.k]: e.target.value.split(',').map((s:string)=>s.trim()).filter(Boolean)});
@@ -248,12 +348,17 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose }) => {
 };
 
 const CreateForm: React.FC<{onClose:()=>void, onCreated:()=>void}> = ({ onClose, onCreated })=>{
-  const [form, setForm] = useState<any>({ name:'', kind:'image', description:'', transport: { method:'POST', url:'', headers:{'Content-Type':'application/json'}, timeout:60 }, auth:{type:'bearer'}, models:[], default_model:'', params_schema:'', default_params:'' });
+  const [form, setForm] = useState<any>({ name:'', kind:'image', description:'', transport: { method:'POST', url:'', headers:{'Content-Type':'application/json'}, timeout:60 }, auth:{type:'bearer'}, models:[], default_model:'', params_schema:'', default_params:'', capabilities: [] });
   const [apiKey, setApiKey] = useState('');
+  const toggleCap = (id: string)=>{
+    const cur: string[] = Array.isArray(form.capabilities) ? form.capabilities : [];
+    setForm({ ...form, capabilities: cur.includes(id) ? cur.filter(c=>c!==id) : [...cur, id] });
+  };
   const handleSubmit = async ()=>{
     try {
       const payload: any = { ...form };
       if (typeof payload.models === 'string') payload.models = payload.models.split(',').map((s:string)=>s.trim()).filter(Boolean);
+      if (!Array.isArray(payload.capabilities)) payload.capabilities = [];
       ['transport','auth','params_schema','default_params'].forEach(k=>{
         if (typeof payload[k]==='string' && payload[k].trim()) {
           try { payload[k]=JSON.parse(payload[k]); } catch { /* keep string for backend validation */ }
@@ -269,9 +374,18 @@ const CreateForm: React.FC<{onClose:()=>void, onCreated:()=>void}> = ({ onClose,
     <div className="w-full max-w-xl bg-surface rounded-2xl border border-border p-4 space-y-3 max-h-[85vh] overflow-y-auto">
       <div className="flex items-center justify-between"><span className="text-sm font-bold text-white">新建自定义源</span><button onClick={onClose}><X className="w-4 h-4 text-gray-400"/></button></div>
       <input value={form.name} onChange={e=> setForm({...form, name:e.target.value})} placeholder="名称，如 我的FLUX" className="w-full bg-surface-secondary border border-border rounded-lg px-3 py-2 text-xs text-white placeholder-gray-500"/>
-      <select value={form.kind} onChange={e=> setForm({...form, kind:e.target.value})} className="w-full bg-surface-secondary border border-border rounded-lg px-3 py-2 text-xs text-white">
+      <select value={form.kind} onChange={e=> setForm({...form, kind:e.target.value, capabilities: []})} className="w-full bg-surface-secondary border border-border rounded-lg px-3 py-2 text-xs text-white">
         <option value="image">生图 image</option><option value="video">视频 video</option><option value="audio">语音 audio</option>
       </select>
+      <div>
+        <div className="text-[11px] text-gray-400 mb-1.5">能力细分（多选；不选=按插槽自动推断：{(CAPABILITIES_BY_KIND[form.kind] || []).map(o=>o.label).join(' / ') || '—'}）</div>
+        <div className="flex flex-wrap gap-1.5">
+          {(CAPABILITIES_BY_KIND[form.kind] || []).map(o=> {
+            const on = (form.capabilities || []).includes(o.id);
+            return <button key={o.id} type="button" title={o.desc} onClick={()=> toggleCap(o.id)} className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition-all ${on ? 'bg-brand/20 border-brand text-white' : 'bg-surface-secondary border-border text-gray-400 hover:text-white'}`}>{o.label}</button>;
+          })}
+        </div>
+      </div>
       <textarea value={form.description} onChange={e=> setForm({...form, description:e.target.value})} placeholder="描述" rows={2} className="w-full bg-surface-secondary border border-border rounded-lg p-2 text-xs text-white"/>
       <textarea value={typeof form.transport==='string'?form.transport:JSON.stringify(form.transport, null, 2)} onChange={e=> setForm({...form, transport:e.target.value})} rows={4} placeholder='transport JSON，如 {"method":"POST","url":"https://...","headers":{"Content-Type":"application/json"}}' className="w-full bg-black/40 border border-border rounded-lg p-2 font-mono text-[11px] text-white"/>
       <textarea value={typeof form.auth==='string'?form.auth:JSON.stringify(form.auth, null, 2)} onChange={e=> setForm({...form, auth:e.target.value})} rows={2} placeholder='auth JSON，如 {"type":"bearer"}' className="w-full bg-black/40 border border-border rounded-lg p-2 font-mono text-[11px] text-white"/>

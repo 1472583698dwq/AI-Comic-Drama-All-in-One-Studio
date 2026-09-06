@@ -224,24 +224,57 @@ async def save_project_content(project_id: str, body: dict):
 
 # ---- Canvas ----
 @router.get("/projects/{project_id}/canvas")
-async def get_project_canvas(project_id: str):
+async def get_project_canvas(project_id: str, canvas_id: Optional[str] = None):
     meta = project_manager.get_meta(project_id)
     if not meta:
         raise HTTPException(status_code=404, detail=f"项目不存在: {project_id}")
-    canvas = project_manager.get_canvas(project_id)
+    canvas = project_manager.get_canvas(project_id, canvas_id=canvas_id)
     return {"project_id": project_id, "canvas": canvas}
 
 
 @router.put("/projects/{project_id}/canvas")
 async def save_project_canvas(project_id: str, body: dict):
     try:
-        # body 可为 {snapshot: {...}} 或直接 snapshot
+        # body 可为 {snapshot: {...}} 或直接 snapshot；支持 canvas_id/name 多画布
         snapshot = body.get("snapshot") if "snapshot" in body else body
         if snapshot is None:
             snapshot = body
-        saved = project_manager.save_canvas(project_id, snapshot)
+        canvas_id = body.get("canvas_id") or (snapshot.get("canvas_id") if isinstance(snapshot, dict) else None) or "default"
+        name = body.get("name") or (snapshot.get("name") if isinstance(snapshot, dict) else None)
+        saved = project_manager.save_canvas(project_id, snapshot, canvas_id=canvas_id, name=name)
         return {"status": "saved", "canvas": saved}
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"保存画布失败: {e}")
+        raise HTTPException(status_code=500, detail=f"保存失败: {e}")
+
+
+@router.get("/projects/{project_id}/canvases")
+async def list_project_canvases(project_id: str):
+    meta = project_manager.get_meta(project_id)
+    if not meta:
+        raise HTTPException(status_code=404, detail=f"项目不存在: {project_id}")
+    return {"project_id": project_id, "canvases": project_manager.list_canvases(project_id)}
+
+
+@router.put("/projects/{project_id}/canvases/{canvas_id}")
+async def rename_project_canvas(project_id: str, canvas_id: str, body: dict):
+    try:
+        name = (body.get("name") or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="名称不能为空")
+        return project_manager.rename_canvas(project_id, canvas_id, name)
+    except (FileNotFoundError, ValueError) as e:
+        raise HTTPException(status_code=404 if isinstance(e, FileNotFoundError) else 400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"重命名失败: {e}")
+
+
+@router.delete("/projects/{project_id}/canvases/{canvas_id}")
+async def delete_project_canvas(project_id: str, canvas_id: str):
+    try:
+        return project_manager.delete_canvas(project_id, canvas_id)
+    except (FileNotFoundError, ValueError) as e:
+        raise HTTPException(status_code=404 if isinstance(e, FileNotFoundError) else 400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除失败: {e}")

@@ -4,7 +4,7 @@ from datetime import datetime
 import uuid
 
 # 类别枚举：与前端保持一致
-ASSET_CATEGORIES = ["character", "scene", "prop", "background", "effect", "ui", "other"]
+ASSET_CATEGORIES = ["character", "scene", "prop", "background", "effect", "ui", "previz", "other"]
 ASSET_STATUS = ["draft", "approved", "archived"]
 
 class Asset(BaseModel):

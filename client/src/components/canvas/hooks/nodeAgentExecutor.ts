@@ -4,6 +4,7 @@
  * 所有生成一律走 MCP provider_<id> Tool（含视频 task_id 轮询），结果与 agent_state 回写节点
  */
 import { apiService } from '../../../services/api';
+import { getNodeSpec } from '../nodeRegistry';
 
 export interface AgentState {
   status: 'idle' | 'running' | 'completed' | 'failed';
@@ -21,22 +22,51 @@ export interface ExecuteAgentNodeOpts {
   onStateChange?: (state: AgentState) => void;
 }
 
-const POLL_PARAM_KEYS = ['aspect_ratio','resolution','steps','cfg','duration','hasSound','fps','seed','style_preset','negative_prompt','workflow_id','voice_id','emotion','speed','pitch','width','height','mode'];
+// 节点内部键（存储/UI/结果），永远不作为生成参数出网
+const INTERNAL_NODE_KEYS = new Set([
+  'onUpdate', 'onExecute', 'definition', '_upstream', '_last_agent_plan', 'agent_state',
+  'image_url', 'video_url', 'audio_url', 'result_url', 'url', 'width', 'height',
+  'polished_prompt', 'idea', 'skill_id', 'provider', 'provider_id', 'provider_params', 'params',
+  'skill', 'model', 'status', 'render_status', 'render_error', 'error', 'label', 'name',
+]);
 
-export function buildAgentArgs(d: any, prompt: string): Record<string, any> {
+// provider definition 缓存（同一源只拉一次，接口即映射）
+const _defCache = new Map<string, any>();
+async function getProviderDefinition(providerId: string): Promise<any> {
+  if (_defCache.has(providerId)) return _defCache.get(providerId);
+  try {
+    const res: any = await apiService.getProvider(providerId);
+    const def = res?.provider || res;
+    _defCache.set(providerId, def);
+    return def;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 按该生成源接口声明（input_schema + params_schema 的属性键）从节点数据收集参数。
+ * 键名不再硬编码：源声明什么，节点存什么、就传什么（normalized key 与 originalKey 均已写入节点数据）。
+ */
+function declaredInputKeys(def: any): string[] {
+  const props = {
+    ...((def?.input_schema?.properties) || {}),
+    ...((def?.params_schema?.properties) || {}),
+  };
+  return Object.keys(props);
+}
+
+export function buildAgentArgs(d: any, prompt: string, extraKeys: string[] = []): Record<string, any> {
   const args: Record<string, any> = {
     prompt,
     text: d.text || prompt,
     model: d.model,
-    first_frame: d.first_frame || d.first_frame_url,
-    last_frame: d.last_frame || d.last_frame_url,
-    reference_images: d.reference_images || (d.reference ? [d.reference] : undefined),
-    reference: d.reference,
-    ref_audio: d.ref_audio || d.ref_audio_path,
     ...(d.params && typeof d.params === 'object' ? d.params : {}),
     ...(d.provider_params && typeof d.provider_params === 'object' ? d.provider_params : {}),
   };
-  for (const k of POLL_PARAM_KEYS) {
+  // 声明键 + 已连线句柄键：从节点顶层数据取值
+  for (const k of extraKeys) {
+    if (INTERNAL_NODE_KEYS.has(k)) continue;
     if (d[k] !== undefined && args[k] === undefined) args[k] = d[k];
   }
   if (Array.isArray(args.reference_images)) {
@@ -81,6 +111,9 @@ export function patchFromPayload(nodeType: string, payload: any): Record<string,
   if (payload.audio_url) patch.audio_url = payload.audio_url;
   if (payload.minimax_camera_prompt) patch.minimax_camera_prompt = payload.minimax_camera_prompt;
   if (typeof payload.prompt === 'string' && payload.prompt && payload.prompt !== '__RAW__') patch.prompt = payload.prompt;
+  if (payload.width) patch.width = payload.width;
+  if (payload.height) patch.height = payload.height;
+  if (payload.width && payload.height) patch.aspect_ratio = `${payload.width}:${payload.height}`;
   return patch;
 }
 
@@ -108,7 +141,10 @@ export async function executeAgentNode(opts: ExecuteAgentNodeOpts): Promise<Reco
     throw new Error('请先在节点内选择生成源');
   }
 
-  const args = buildAgentArgs(d, prompt);
+  // 接口映射：拉取该源声明的入参键（input_schema + params_schema）+ 节点结构句柄键，从节点数据按键收集
+  const def = await getProviderDefinition(providerId);
+  const declaredKeys = [...declaredInputKeys(def), ...(getNodeSpec(node.type || '')?.inputs.map(h => h.id) || [])];
+  const args = buildAgentArgs(d, prompt, declaredKeys);
   const start = Date.now();
   setState({ status: 'running', tool: toolName, provider_id: providerId, updated_at: new Date().toISOString() });
 
@@ -129,25 +165,25 @@ export async function executeAgentNode(opts: ExecuteAgentNodeOpts): Promise<Reco
           provider: providerId,
           model: d.model,
           aspect_ratio: args.aspect_ratio,
-          dynamic_inputs: args.reference_images ? { reference_images: args.reference_images } : undefined,
+          dynamic_inputs: Object.fromEntries(Object.entries(args).filter(([k]) => !['prompt','text','model','aspect_ratio'].includes(k))),
         } as any);
       } else if (node.type === 'video') {
         payload = await apiService.generateShotVideo({
           prompt,
           provider: providerId,
           mode: args.mode || (args.first_frame ? 'i2v' : args.reference_images?.length ? 'r2v' : 't2v'),
-          first_frame_url: args.first_frame,
-          last_frame_url: args.last_frame,
+          first_frame_url: args.first_frame || args.first_frame_url,
+          last_frame_url: args.last_frame || args.last_frame_url,
           reference_images: args.reference_images,
           duration: Number(args.duration || 5),
           resolution: args.resolution,
           aspect_ratio: args.aspect_ratio,
         } as any);
       } else if (node.type === 'audio') {
-        payload = await apiService.generateTTS(prompt, args.voice_id || 'male-qn-qingse', args.emotion || 'neutral', {
+        payload = await apiService.generateTTS(prompt, args.voice_id, args.emotion, {
           provider: providerId,
           model: d.model,
-          ref_audio_path: args.ref_audio,
+          ref_audio_path: args.ref_audio || args.ref_audio_path,
           speed: args.speed,
           pitch: args.pitch,
         } as any);
@@ -156,9 +192,14 @@ export async function executeAgentNode(opts: ExecuteAgentNodeOpts): Promise<Reco
       }
     }
 
-    // 异步视频：轮询 task_id 直到出片（后端 provider_ 分支已轮询，此为双保险）
+    // 异步视频：task_id 先落盘（重启可恢复），再轮询 task_id 直到出片（后端 provider_ 分支已轮询，此为双保险）
     if (node.type === 'video' && !payload?.video_url && payload?.task_id) {
-      payload = { ...payload, video_url: await pollVideoTask(payload.task_id) };
+      updateNodeData(node.id, { _taskId: payload.task_id, _polling: true });
+      try {
+        payload = { ...payload, video_url: await pollVideoTask(payload.task_id) };
+      } finally {
+        updateNodeData(node.id, { _polling: false });
+      }
     }
 
     const patch = patchFromPayload(node.type, payload);

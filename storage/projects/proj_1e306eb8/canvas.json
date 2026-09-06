@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "active_canvas_id": "default",
+  "canvases": {
+    "default": {
+      "name": "默认画布",
+      "nodes": [],
+      "edges": [],
+      "updated_at": "2026-09-06 10:00:54"
+    }
+  }
+}

@@ -5,6 +5,7 @@ MCP 统一工具中枢 - 动态可扩展版
 - 音频：minimax/elevenlabs/cosyvoice/gpt_sovits 动态扩展
 - 导演Agent 暴露全部生成工具
 """
+import asyncio
 import time
 from typing import Dict, Any, List, Optional
 
@@ -20,6 +21,166 @@ try:
 except ImportError:
     HAS_FASTMCP = False
     mcp_app = None
+
+
+# ========== A档可信模式：文件编辑 + 命令执行共用闸门与沙盒围栏 ==========
+def _trusted_gate_or_raise():
+    """总闸未开时直接明错，提示开启方式（不静默拒绝）。"""
+    try:
+        from app.core.config import is_trusted_mode_enabled
+        if is_trusted_mode_enabled():
+            return True
+    except Exception:
+        pass
+    raise ValueError("可信模式未开启：需在 .env/环境变量设 STUDIO_TRUSTED_MODE=1 并重启后端（本地桌面端显式 opt-in，默认关闭）")
+
+
+def _trusted_safe_roots():
+    """A档允许的文件围栏：storage / exports / 工作区根。解析后必须落在此围栏内。"""
+    import os as _os
+    roots = []
+    try:
+        from app.core.config import settings as _settings
+        roots.append(_os.path.abspath(_settings.STORAGE_DIR))
+        roots.append(_os.path.abspath(_settings.EXPORTS_DIR))
+    except Exception:
+        pass
+    try:
+        roots.append(_os.path.abspath(_os.getcwd()))
+    except Exception:
+        pass
+    try:
+        roots.append(_trusted_repo_root())
+    except Exception:
+        pass
+    # 去重
+    uniq = []
+    for r in roots:
+        if r and r not in uniq:
+            uniq.append(r)
+    return uniq
+
+
+def _trusted_repo_root() -> str:
+    """仓库根（相对路径基址）：STORAGE_DIR 的父目录，兜底 cwd。"""
+    import os as _os
+    try:
+        from app.core.config import settings as _settings2
+        sd = _os.path.abspath(getattr(_settings2, "STORAGE_DIR", ""))
+        if sd:
+            return _os.path.abspath(_os.path.join(sd, ".."))
+    except Exception:
+        pass
+    return _os.path.abspath(_os.getcwd())
+
+
+def _resolve_trusted_path(path: str) -> str:
+    """将用户传入 path 解析为绝对路径并校验围栏；越界/敏感文件直接拒绝。"""
+    import os as _os
+    if not path or not str(path).strip():
+        raise ValueError("path 不能为空")
+    p = str(path).strip().replace("\\", "/")
+    roots = _trusted_safe_roots()
+    # 相对路径默认相对仓库根（含 storage 前缀的写法如 storage/... 可直达）
+    if not _os.path.isabs(p) and not (len(p) > 2 and p[1] == ":"):
+        p = _os.path.join(_trusted_repo_root(), p)
+    ap = _os.path.abspath(p)
+    # 围栏校验
+    if roots and not any(ap == r or ap.startswith(r + _os.sep) for r in roots):
+        raise ValueError(f"路径越界已拦截：{ap}（仅允许 {roots} 内）")
+    # 敏感文件保护（最小集）：.git/__pycache__ 不同情，.env 只读不写由调用方控制
+    low = ap.replace("\\", "/").lower()
+    for seg in ("/.git/", "/__pycache__/", "/node_modules/", "/.venv/", "/dist/", "/build/"):
+        if seg in low:
+            raise ValueError(f"敏感目录已拦截：{seg.strip('/')}")
+    return ap
+
+
+_SHELL_DENY = ("rm -rf", "mkfs", "shutdown", "reboot", "halt", ":(){", "del /f /s /q c:\\", "format c:")
+
+
+def _run_trusted_shell(command: str, cwd: str = "", timeout: int = 30) -> dict:
+    """A档 shell 执行：PowerShell(Win)/bash(Posix)，输出截断，超时可配（上限120s，长任务请走异步task_id轮询）。"""
+    import os as _os
+    import subprocess as _sp
+    import sys as _sys
+    _trusted_gate_or_raise()
+    cmd = (command or "").strip()
+    if not cmd:
+        raise ValueError("command 不能为空")
+    low = cmd.lower()
+    for pat in _SHELL_DENY:
+        if pat in low:
+            raise ValueError(f"危险命令已拦截：{pat}")
+    try:
+        timeout = int(timeout or 30)
+    except Exception:
+        timeout = 30
+    timeout = max(5, min(120, timeout))
+    # cwd 围栏（默认仓库根）
+    if cwd and str(cwd).strip():
+        workdir = _resolve_trusted_path(str(cwd).strip())
+        if not _os.path.isdir(workdir):
+            raise ValueError(f"cwd 不存在或非目录：{workdir}")
+    else:
+        workdir = _trusted_repo_root()
+    if _sys.platform.startswith("win"):
+        proc = _sp.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", cmd],
+                       cwd=workdir, capture_output=True, text=True, timeout=timeout)
+    else:
+        proc = _sp.run(["bash", "-lc", cmd], cwd=workdir, capture_output=True, text=True, timeout=timeout)
+    out = (proc.stdout or "")[-12000:]
+    err = (proc.stderr or "")[-4000:]
+    return {"returncode": proc.returncode, "stdout": out, "stderr": err, "cwd": workdir, "truncated": bool(proc.stdout and len(proc.stdout) > 12000)}
+
+
+def _fs_file_action(action: str, path: str, content: str = "", encoding: str = "utf-8") -> dict:
+    """A档文件工具单点实现：list/read/write/append/delete，全部走围栏校验 + 大小上限。"""
+    import os as _os
+    _trusted_gate_or_raise()
+    act = (action or "").strip().lower()
+    if act not in ("list", "read", "write", "append", "delete"):
+        raise ValueError("action 需为 list/read/write/append/delete")
+    ap = _resolve_trusted_path(path)
+    enc = (encoding or "utf-8").strip() or "utf-8"
+    if act == "list":
+        if not _os.path.isdir(ap):
+            raise ValueError(f"目录不存在：{ap}")
+        items = []
+        with _os.scandir(ap) as it:
+            for e in it:
+                try:
+                    items.append({"name": e.name, "path": e.path.replace("\\", "/"), "is_dir": e.is_dir(), "size": e.stat().st_size if not e.is_dir() else 0})
+                except Exception:
+                    continue
+                if len(items) >= 200:
+                    break
+        return {"path": ap.replace("\\", "/"), "items": items, "total": len(items)}
+    if act == "read":
+        if not _os.path.isfile(ap):
+            raise ValueError(f"文件不存在：{ap}")
+        if _os.path.getsize(ap) > 200 * 1024:
+            raise ValueError(f"文件过大（>200KB）拒绝直读：{ap}，请用 shell 分段查看")
+        with open(ap, "r", encoding=enc, errors="ignore") as f:
+            data = f.read()
+        return {"path": ap.replace("\\", "/"), "content": data[:60000], "size": len(data), "truncated": len(data) > 60000}
+    if act in ("write", "append"):
+        if content is None:
+            content = ""
+        if len(content) > 1024 * 1024:
+            raise ValueError("写入内容过大（>1MB）已拒绝")
+        parent = _os.path.dirname(ap)
+        if parent:
+            _os.makedirs(parent, exist_ok=True)
+        mode = "a" if act == "append" else "w"
+        with open(ap, mode, encoding=enc) as f:
+            f.write(content)
+        return {"path": ap.replace("\\", "/"), "action": act, "bytes": len(content.encode(enc, errors="ignore"))}
+    # delete：仅文件，不删目录（防误删）；删后不可恢复，请谨慎
+    if not _os.path.isfile(ap):
+        raise ValueError(f"文件不存在：{ap}")
+    _os.remove(ap)
+    return {"path": ap.replace("\\", "/"), "action": "deleted"}
 
 
 # 相机参数计算表 (景别与光学参数)
@@ -170,11 +331,11 @@ class MCPServerRegistry:
             return {"image_url": res.image_url, "local_path": res.local_path, "provider": res.provider, "engine": res.engine, "seed": res.seed}
 
         @mcp_app.tool
-        async def generate_voice(text: str, voice_id: str = "male-qn-qingse", provider: str = "minimax", emotion: str = "neutral", speed: float = 1.0) -> dict:
-            """通用语音生成（动态Provider）"""
+        async def generate_voice(text: str, voice_id: str = "", provider: str = "", emotion: str = "", speed: float = 1.0) -> dict:
+            """通用语音生成（动态Provider；provider/voice_id 留空 = 系统默认源 + 该源声明的默认音色）"""
             from app.providers.audio.base import AudioGenerateRequest
             reg = _lazy_audio_registry()
-            req = AudioGenerateRequest(text=text, voice_id=voice_id, emotion=emotion, speed=speed)
+            req = AudioGenerateRequest(text=text, voice_id=voice_id or "", emotion=emotion or "", speed=speed)
             res = await reg.generate(req, provider_id=provider or None)
             return {"audio_url": res.audio_url, "duration": res.duration, "provider": res.provider, "engine": res.engine}
 
@@ -188,11 +349,11 @@ class MCPServerRegistry:
             return {"image_url": res.image_url, "provider": res.provider, "engine": res.engine}
 
         @mcp_app.tool
-        async def generate_minimax_voice(text: str, voice_id: str = "male-qn-qingse", emotion: str = "neutral") -> dict:
-            """MiniMax 配音（兼容）"""
+        async def generate_minimax_voice(text: str, voice_id: str = "", emotion: str = "") -> dict:
+            """MiniMax 配音（兼容；voice_id/emotion 留空 = MiniMax 源声明的默认值）"""
             from app.providers.audio.base import AudioGenerateRequest
             reg = _lazy_audio_registry()
-            req = AudioGenerateRequest(text=text, voice_id=voice_id, emotion=emotion)
+            req = AudioGenerateRequest(text=text, voice_id=voice_id or "", emotion=emotion or "")
             res = await reg.generate(req, provider_id="minimax")
             return {"audio_url": res.audio_url, "duration": res.duration, "provider": res.provider}
 
@@ -304,6 +465,22 @@ class MCPServerRegistry:
                 return res.result
             raise RuntimeError(res.error)
 
+        @mcp_app.tool
+        async def fs_file(action: str, path: str, content: str = "", encoding: str = "utf-8") -> dict:
+            """[可信文件] list/read/write/append/delete（需 STUDIO_TRUSTED_MODE=1）"""
+            res = await mcp_registry.execute_tool("fs_file", {"action": action, "path": path, "content": content, "encoding": encoding})
+            if res.status == "success":
+                return res.result
+            raise RuntimeError(res.error)
+
+        @mcp_app.tool
+        async def shell_exec(command: str, cwd: str = "", timeout: int = 30) -> dict:
+            """[可信命令] 执行 shell（需 STUDIO_TRUSTED_MODE=1）"""
+            res = await mcp_registry.execute_tool("shell_exec", {"command": command, "cwd": cwd, "timeout": timeout})
+            if res.status == "success":
+                return res.result
+            raise RuntimeError(res.error)
+
     def _register_default_tools(self):
         # 1. 小说拆解
         self.register_tool(MCPToolDefinition(
@@ -324,10 +501,14 @@ class MCPServerRegistry:
             }
         ))
 
-        # 2. 通用图片生成（核心新增，对Agent暴露）
+        # 2. 通用图片生成（核心新增，对Agent暴露）：provider 枚举动态来自图像注册表，不写死
+        try:
+            _image_ids = _lazy_image_registry().list_ids()
+        except Exception:
+            _image_ids = []
         self.register_tool(MCPToolDefinition(
             name="generate_image",
-            description="[通用生图] 动态选择Provider生成漫剧分镜图像。支持provider=comfyui/siliconflow/dashscope/openai_compat，支持workflow_id指定ComfyUI自定义工作流。Agent应优先使用此工具。",
+            description="[通用生图] 动态选择Provider生成漫剧分镜图像。provider 留空 = 系统默认图像源；支持workflow_id指定ComfyUI自定义工作流。Agent应优先使用此工具。",
             category="ai_generation",
             icon="Image",
             author="Dynamic Image Registry",
@@ -336,7 +517,7 @@ class MCPServerRegistry:
                 "type": "object",
                 "properties": {
                     "prompt": {"type": "string", "description": "生图提示词（英文画面描述，自动追加风格后缀）"},
-                    "provider": {"type": "string", "enum": ["comfyui", "siliconflow", "dashscope", "openai_compat"], "description": "指定Provider，不填则使用系统默认 IMAGE_PROVIDER"},
+                    "provider": {"type": "string", "enum": _image_ids, "description": "指定图像源，不填则使用系统默认 IMAGE_PROVIDER"},
                     "workflow_id": {"type": "string", "description": "ComfyUI自定义工作流ID（仅provider=comfyui时有效，可通过list_comfyui_workflows查询）"},
                     "negative_prompt": {"type": "string", "description": "负向提示词"},
                     "aspect_ratio": {"type": "string", "enum": ["9:16", "16:9", "1:1"], "default": "9:16"},
@@ -373,10 +554,14 @@ class MCPServerRegistry:
             }
         ))
 
-        # 4. 通用语音生成（核心新增）
+        # 4. 通用语音生成（核心新增）：provider 枚举动态来自音频注册表，不写死
+        try:
+            _audio_ids = _lazy_audio_registry().list_ids()
+        except Exception:
+            _audio_ids = []
         self.register_tool(MCPToolDefinition(
             name="generate_voice",
-            description="[通用配音] 动态选择TTS Provider生成语音。支持provider=minimax/elevenlabs/cosyvoice/gpt_sovits，支持emotion/speed/pitch/克隆。",
+            description="[通用配音] 动态选择TTS Provider生成语音。provider 留空 = 系统默认语音源；voice_id/emotion 留空 = 该源声明的默认值。",
             category="audio",
             icon="Mic2",
             author="Dynamic Audio Registry",
@@ -385,9 +570,9 @@ class MCPServerRegistry:
                 "type": "object",
                 "properties": {
                     "text": {"type": "string", "description": "配音台词或旁白"},
-                    "provider": {"type": "string", "enum": ["minimax", "elevenlabs", "cosyvoice", "gpt_sovits"], "default": "minimax"},
-                    "voice_id": {"type": "string", "description": "音色ID（minimax: male-qn-qingse/female-shaonv等；elevenlabs: voice_id；cosyvoice/gpt_sovits: 参考音色）"},
-                    "emotion": {"type": "string", "enum": ["neutral", "intense", "sorrow", "excited", "fearful", "whispering"], "default": "neutral"},
+                    "provider": {"type": "string", "enum": _audio_ids, "description": "不填则用系统默认语音源"},
+                    "voice_id": {"type": "string", "description": "音色ID，不填则由所选源用其声明的默认音色"},
+                    "emotion": {"type": "string", "description": "情绪，不填则由所选源用其默认情绪"},
                     "speed": {"type": "number", "default": 1.0, "description": "语速 0.5-2.0"},
                     "pitch": {"type": "number", "default": 0.0, "description": "音调，仅部分Provider支持"},
                     "ref_audio_path": {"type": "string", "description": "克隆参考音频路径（gpt_sovits/cosyvoice）"},
@@ -409,8 +594,8 @@ class MCPServerRegistry:
                 "type": "object",
                 "properties": {
                     "text": {"type": "string"},
-                    "voice_id": {"type": "string", "default": "male-qn-qingse"},
-                    "emotion": {"type": "string", "enum": ["neutral", "intense", "sorrow", "excited", "fearful", "whispering"], "default": "neutral"},
+                    "voice_id": {"type": "string", "description": "不填则由 MiniMax 源用其声明的默认音色"},
+                    "emotion": {"type": "string", "enum": ["neutral", "intense", "sorrow", "excited", "fearful", "whispering"], "description": "不填 = 源默认"},
                     "speed": {"type": "number", "default": 1.0}
                 },
                 "required": ["text"]
@@ -439,10 +624,14 @@ class MCPServerRegistry:
             input_schema={"type": "object", "properties": {}, "required": []}
         ))
 
-        # 7.1 通用视频生成 (I2V / R2V / T2V)
+        # 7.1 通用视频生成 (I2V / R2V / T2V)：provider 枚举动态来自视频注册表，不写死
+        try:
+            _video_ids = _lazy_video_registry().list_ids()
+        except Exception:
+            _video_ids = []
         self.register_tool(MCPToolDefinition(
             name="generate_video",
-            description="[通用视频] 动态选择视频Provider生成动态漫剧分镜视频。支持mode=i2v(图生视频)/r2v(参考生视频)/t2v(文生视频)，支持provider=comfyui_video/minimax_video/kling。",
+            description="[通用视频] 动态选择视频Provider生成动态漫剧分镜视频。支持mode=i2v(图生视频)/r2v(参考生视频)/t2v(文生视频)。",
             category="ai_generation",
             icon="Film",
             author="Dynamic Video Registry",
@@ -454,8 +643,8 @@ class MCPServerRegistry:
                     "mode": {"type": "string", "enum": ["i2v", "r2v", "t2v"], "default": "i2v", "description": "i2v: 图生视频; r2v: 参考生视频; t2v: 文生视频"},
                     "first_frame_url": {"type": "string", "description": "首帧图像 URL (i2v 必选)"},
                     "reference_images": {"type": "array", "items": {"type": "string"}, "description": "参考图 URL 列表 (r2v 模式)"},
-                    "duration": {"type": "integer", "default": 5, "description": "视频时长秒数 3-10"},
-                    "provider": {"type": "string", "enum": ["comfyui_video", "minimax_video", "kling"], "description": "指定Provider，不填则使用系统默认 VIDEO_PROVIDER"}
+                    "duration": {"type": "integer", "default": 5, "description": "视频时长秒数"},
+                    "provider": {"type": "string", "enum": _video_ids, "description": "指定视频源，不填则使用系统默认 VIDEO_PROVIDER"}
                 },
                 "required": ["prompt"]
             }
@@ -621,6 +810,7 @@ class MCPServerRegistry:
                     "curl": {"type": "string", "description": "cURL 示例（可选）"},
                     "openapi_url": {"type": "string", "description": "OpenAPI JSON URL（可选）"},
                     "api_key": {"type": "string", "description": "API Key（可选）"},
+                    "trusted": {"type": "boolean", "description": "可信模式：True则该源跳出沙箱可执行任意代码（需全局 STUDIO_TRUSTED_MODE=1，否则创建后执行会明错）"},
                     "definition": {"type": "object", "description": "若已自行构造完整 ProviderDefinition JSON，可直接传入"}
                 },
                 "required": ["kind"]
@@ -628,7 +818,7 @@ class MCPServerRegistry:
         ))
         self.register_tool(MCPToolDefinition(
             name="list_custom_providers",
-            description="[查询] 列出所有自定义生成源 Provider（按 kind 过滤），包含健康状态",
+            description="[查询] 列出所有自定义生成源 Provider，支持按 kind/q 过滤；返回 id/name/kind/params 摘要（已剔除 code），如需代码请调用 get_provider_code",
             category="utility",
             icon="List",
             author="Provider Extension",
@@ -636,7 +826,8 @@ class MCPServerRegistry:
             input_schema={
                 "type": "object",
                 "properties": {
-                    "kind": {"type": "string", "enum": ["image", "video", "audio", "llm"], "description": "按类型过滤，不填返回全部"}
+                    "kind": {"type": "string", "enum": ["image", "video", "audio", "llm"], "description": "按类型过滤，不填返回全部"},
+                    "q": {"type": "string", "description": "按名称/ID/描述模糊搜索，支持 H3 等关键词，不填返回全部"}
                 },
                 "required": []
             }
@@ -690,13 +881,14 @@ class MCPServerRegistry:
                     "models": {"type": "array", "items": {"type": "string"}, "description": "模型列表（可选）"},
                     "default_model": {"type": "string"},
                     "doc_text": {"type": "string", "description": "补充文档（可选，用于 LLM 辅助重写）"},
+                    "trusted": {"type": "boolean", "description": "可信开关：True=跳出沙箱（需全局 STUDIO_TRUSTED_MODE=1）"},
                 },
                 "required": ["provider_id"]
             }
         ))
         self.register_tool(MCPToolDefinition(
             name="get_provider_code",
-            description="[查询] 获取指定 Provider 的完整代码与元信息，供导演审查后升级",
+            description="[查询] 获取单个 Provider 的完整代码与参数结构，支持按 id/name/q 精准或模糊选择，供导演诊断“参数未暴露”并升级",
             category="utility",
             icon="FileCode",
             author="Provider Extension",
@@ -704,9 +896,12 @@ class MCPServerRegistry:
             input_schema={
                 "type": "object",
                 "properties": {
-                    "provider_id": {"type": "string", "description": "Provider ID"}
+                    "provider_id": {"type": "string", "description": "Provider ID，如 prov_xxx；与 name/q 二选一，优先级最高"},
+                    "name": {"type": "string", "description": "按名称精确或模糊匹配，如 'MiniMax H3 音视频' 或 'H3'"},
+                    "q": {"type": "string", "description": "模糊搜索关键词（名称/ID/描述/类型），如 'h3' 或 'video'"},
+                    "kind": {"type": "string", "enum": ["image", "video", "audio", "llm"], "description": "可选：限定类型，避免同名跨类型歧义"}
                 },
-                "required": ["provider_id"]
+                "required": []
             }
         ))
         self.register_tool(MCPToolDefinition(
@@ -803,6 +998,43 @@ class MCPServerRegistry:
             input_schema={"type":"object","properties":{"project_id":{"type":"string"}},"required":[]}
         ))
 
+        # --- A档可信模式双工具：文件编辑 + 命令执行（总闸 STUDIO_TRUSTED_MODE=1，未开则明错） ---
+        self.register_tool(MCPToolDefinition(
+            name="fs_file",
+            description="[可信文件] list/read/write/append/delete 工作区文件（围栏 storage/exports/工作区根，禁.git等，读≤200KB写≤1MB）。需 STUDIO_TRUSTED_MODE=1。H3长任务可用它读写 task_id/回填分镜。",
+            category="utility",
+            icon="FileEdit",
+            author="Trusted Mode",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list", "read", "write", "append", "delete"], "description": "list=目录列表 read=读文件 write=覆盖写 append=追加 delete=删文件"},
+                    "path": {"type": "string", "description": "相对工作区根或绝对路径（围栏内），如 storage/providers/custom/prov_xxx.json"},
+                    "content": {"type": "string", "description": "write/append 时的文件内容"},
+                    "encoding": {"type": "string", "default": "utf-8", "description": "文件编码"},
+                },
+                "required": ["action", "path"]
+            }
+        ))
+        self.register_tool(MCPToolDefinition(
+            name="shell_exec",
+            description="[可信命令] 在工作区执行 shell（Win走PowerShell，输出截断12KB，timeout 5-120s）。需 STUDIO_TRUSTED_MODE=1。用于本地curl拿task_id/ffmpeg/轮询查询（单次GET秒回），H3百秒任务请提交拿task_id后轮询，勿阻塞等终态。",
+            category="utility",
+            icon="Terminal",
+            author="Trusted Mode",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "description": "要执行的命令，如 curl -s https://api.../query?task_id=xxx"},
+                    "cwd": {"type": "string", "description": "工作目录（围栏内，空=工作区根）"},
+                    "timeout": {"type": "integer", "default": 30, "description": "超时秒 5-120"},
+                },
+                "required": ["command"]
+            }
+        ))
+
     # ========== 动态 Provider→MCP 统一：异构参数即工具输入，节点Agent按 Tool 调度 ==========
     def _provider_to_tool(self, provider_id: str, kind: str, definition=None, provider_obj=None) -> MCPToolDefinition:
         """将单个 ProviderDefinition/Provider实例转为 MCP Tool，输入= input_schema + params_schema + model"""
@@ -860,10 +1092,12 @@ class MCPServerRegistry:
                     input_props = {"text": {"type":"string","description":"合成文本","x-handle":"text"}}
                     input_req = ["text"]
             if not params_props:
+                # 兜底枚举需与 ComfyUI 真实 ResolutionSelector 一致，否则会被 _set_input_guarded 拦截
+                _full_ar = ["1:1 (Square)","9:16 (Portrait Widescreen)","16:9 (Widescreen)","3:2 (Photo)","4:3 (Standard)","21:9 (Ultrawide)"]
                 if kind == 'image':
-                    params_props = {"aspect_ratio":{"type":"string","enum":["9:16","16:9","1:1"],"default":"9:16"},"resolution":{"type":"string","enum":["768P","2K"],"default":"768P"},"steps":{"type":"integer","default":20}}
+                    params_props = {"aspect_ratio":{"type":"string","enum":_full_ar,"default":"9:16 (Portrait Widescreen)"},"resolution":{"type":"string","enum":["768P","2K"],"default":"768P"},"steps":{"type":"integer","default":20}}
                 elif kind == 'video':
-                    params_props = {"aspect_ratio":{"type":"string","enum":["9:16","16:9","1:1"],"default":"9:16"},"resolution":{"type":"string","enum":["768P","2K"],"default":"768P"},"duration":{"type":"integer","default":5},"hasSound":{"type":"boolean","default":False}}
+                    params_props = {"aspect_ratio":{"type":"string","enum":_full_ar,"default":"9:16 (Portrait Widescreen)"},"resolution":{"type":"string","enum":["768P","2K"],"default":"768P"},"duration":{"type":"integer","default":5},"hasSound":{"type":"boolean","default":False}}
             # 合并为 Tool 输入
             merged_props: Dict[str, Any] = {}
             merged_props.update(input_props)
@@ -880,10 +1114,17 @@ class MCPServerRegistry:
                 merged_req.append('prompt')
             if kind=='audio' and 'text' not in merged_req and 'text' in merged_props:
                 merged_req.append('text')
+            # v2：为导演 Agent 在 description 中明示基础/高级分组，便于其只自动填 basic/auto 项
+            try:
+                basic_keys = [k for k,v in params_props.items() if isinstance(v, dict) and v.get('x-visibility')=='basic']
+                adv_keys = [k for k,v in params_props.items() if isinstance(v, dict) and v.get('x-visibility')=='advanced']
+                grp_hint = f"基础:{','.join(basic_keys) or '无'}|高级:{','.join(adv_keys) or '无'}"
+            except Exception:
+                grp_hint = "基础/高级按 x-visibility 分组"
             tool_name = f"provider_{provider_id}"
             return MCPToolDefinition(
                 name=tool_name,
-                description=f"[Provider:{kind}] {display_name} · {description[:80]} · 动态参数由该源 params_schema 决定，节点Agent按此Tool调度",
+                description=f"[Provider:{kind}] {display_name} · {description[:60]} · {grp_hint} · 文件插槽=input_schema 基本/高级由 x-visibility 控制 高级需点⚙ auto可自动 suggest仅建议",
                 category="ai_generation",
                 icon="Zap" if kind=="image" else "Film" if kind=="video" else "Mic",
                 author=f"Provider:{provider_id}",
@@ -987,18 +1228,10 @@ class MCPServerRegistry:
                 if kind == "image":
                     from app.providers.image.base import ImageGenerateRequest
                     reg = _lazy_image_registry()
-                    # 将异构参数透传：prompt + 常见字段显式，其余进 dynamic_inputs/extra
+                    # 将异构参数透传：prompt + 请求模型显式字段，其余全部进 dynamic_inputs（不锁死键名名单，媒体键由 input_schema 决定）
                     prompt = arguments.get("prompt") or arguments.get("text") or ""
-                    # 收集 reference 类
-                    dyn = {}
-                    for k in ("reference_images","reference","first_frame","last_frame","first_frame_url","last_frame_url"):
-                        if arguments.get(k) is not None:
-                            dyn[k] = arguments.get(k)
-                    # 其余 params_schema 异构参数全部进 dynamic_inputs
-                    for k,v in arguments.items():
-                        if k not in ("prompt","text","reference_images","reference","first_frame","last_frame","model","workflow_id","aspect_ratio","resolution","steps","cfg","seed","style_preset","negative_prompt"):
-                            if v not in (None,"") and k not in dyn:
-                                dyn[k] = v
+                    _explicit = ("prompt","text","model","workflow_id","aspect_ratio","resolution","steps","cfg","seed","style_preset","negative_prompt","width","height")
+                    dyn = {k: v for k, v in arguments.items() if k not in _explicit and v not in (None, "")}
                     req = ImageGenerateRequest(
                         prompt=prompt,
                         negative_prompt=arguments.get("negative_prompt") or "",
@@ -1049,7 +1282,17 @@ class MCPServerRegistry:
                     res = await reg.generate(req, provider_id=provider_id)
                     result = {"video_url": res.video_url, "local_path": res.local_path, "provider": res.provider, "engine": res.engine, "duration": res.duration, "task_id": res.task_id}
                     # 异步排队型 provider：仅返回 task_id 时轮询至出片，保证节点Agent/DAG 拿到终态 URL
+                    # 代码源（code）除外：其提交已注册代码任务表并起后台轮询，此处直接返 task_id
+                    # （阻塞等终态必超 Agent 40s 上限；前端经 /videos/status 轮询，穿透口径已统一）
+                    _is_code_provider = False
                     if not res.video_url and res.task_id:
+                        try:
+                            from app.providers.custom.manager import custom_provider_manager as _cm3
+                            _dd = _cm3.get_definition(provider_id)
+                            _is_code_provider = bool(_dd and getattr(_dd, "provider_type", "") == "code")
+                        except Exception:
+                            _is_code_provider = False
+                    if not res.video_url and res.task_id and not _is_code_provider:
                         import asyncio as _aio
                         for _ in range(120):
                             await _aio.sleep(3)
@@ -1068,15 +1311,16 @@ class MCPServerRegistry:
                 elif kind == "audio":
                     from app.providers.audio.base import AudioGenerateRequest
                     reg = _lazy_audio_registry()
+                    # voice_id/emotion 不写死：缺省传空，由各源自身默认兜底（接口声明）
                     req = AudioGenerateRequest(
                         text=arguments.get("text") or arguments.get("prompt") or "",
-                        voice_id=arguments.get("voice_id") or "male-qn-qingse",
-                        emotion=arguments.get("emotion") or "neutral",
+                        voice_id=arguments.get("voice_id") or "",
+                        emotion=arguments.get("emotion") or "",
                         speed=float(arguments.get("speed") or 1.0),
                         pitch=float(arguments.get("pitch") or 0.0),
                         ref_audio_path=arguments.get("ref_audio") or arguments.get("ref_audio_path"),
                         model=arguments.get("model"),
-                        extra={k: arguments.get(k) for k in ("voice_id","emotion","speed","pitch","model","ref_audio","ref_audio_path") if arguments.get(k) not in (None,"")},
+                        extra={k: arguments.get(k) for k in arguments if k not in ("text","prompt") and arguments.get(k) not in (None,"")},
                     )
                     try:
                         from app.canvas.engine import _ensure_provider_registered as _ens3
@@ -1125,15 +1369,15 @@ class MCPServerRegistry:
                     provider = "minimax"
                 req = AudioGenerateRequest(
                     text=arguments.get("text", ""),
-                    voice_id=arguments.get("voice_id", "male-qn-qingse"),
-                    emotion=arguments.get("emotion", "neutral"),
+                    voice_id=arguments.get("voice_id") or "",
+                    emotion=arguments.get("emotion") or "",
                     speed=float(arguments.get("speed", 1.0)),
                     pitch=float(arguments.get("pitch", 0.0)),
                     ref_audio_path=arguments.get("ref_audio_path"),
                     ref_text=arguments.get("ref_text"),
                     model=arguments.get("model"),
                 )
-                audio_res = await reg.generate(req, provider_id=provider or "minimax")
+                audio_res = await reg.generate(req, provider_id=provider or ("minimax" if tool_name == "generate_minimax_voice" else None))
                 result = {"audio_url": audio_res.audio_url, "local_path": audio_res.local_path, "provider": audio_res.provider, "engine": audio_res.engine, "duration": audio_res.duration, "voice_id": audio_res.voice_id}
 
             elif tool_name == "list_image_providers":
@@ -1253,6 +1497,8 @@ class MCPServerRegistry:
                 api_key = arguments.get("api_key") or ""
                 definition = arguments.get("definition")
                 # 分支1：直接提供 code（导演编辑后回写或用户粘贴）—— 统一创建入口
+                _trusted_arg = arguments.get("trusted")
+                _trusted_bool = bool(_trusted_arg) if not isinstance(_trusted_arg, str) else _trusted_arg.strip().lower() in ("1", "true", "yes", "on")
                 if code and isinstance(code, str) and len(code.strip()) > 20:
                     from app.api.provider_routes import create_code_source as _ccs
                     _created = _ccs(
@@ -1262,6 +1508,7 @@ class MCPServerRegistry:
                         description=f"由导演直接提供代码（{language}）",
                         api_key=api_key or None,
                         doc_text=doc_text, doc_url=doc_url,
+                        trusted=_trusted_bool,
                     )
                     result = {"status": "success" if _created["compile_check"].get("ok") else "compile_failed",
                               "provider": _created["provider"], "mode": "direct_code",
@@ -1274,6 +1521,9 @@ class MCPServerRegistry:
                     if not definition.get("name"):
                         definition["name"] = name
                     from app.api.provider_routes import create_code_source as _ccs
+                    _def_trusted = definition.get("trusted", _trusted_bool)
+                    if isinstance(_def_trusted, str):
+                        _def_trusted = _def_trusted.strip().lower() in ("1", "true", "yes", "on")
                     _created = _ccs(
                         name=definition.get("name") or name,
                         kind=kind,
@@ -1290,6 +1540,7 @@ class MCPServerRegistry:
                         models=definition.get("models"),
                         default_model=definition.get("default_model"),
                         provider_id=definition.get("id"),
+                        trusted=bool(_def_trusted),
                     )
                     result = {"status": "success" if _created["compile_check"].get("ok") else "compile_failed",
                               "provider": _created["provider"], "mode": "direct_definition",
@@ -1338,6 +1589,7 @@ class MCPServerRegistry:
                         name=name or f"自定义{kind}源", kind=kind, code=code_text, language=language,
                         description=f"由导演从文档自动生成（{language}）",
                         api_key=api_key or None, doc_text=full_doc, doc_url=doc_url or "",
+                        trusted=_trusted_bool,
                     )
                     result = {"status": "success" if _created["compile_check"].get("ok") else "compile_failed",
                               "provider": _created["provider"], "mode": "llm_code", "code": _created["code"],
@@ -1346,10 +1598,17 @@ class MCPServerRegistry:
 
             elif tool_name == "list_custom_providers":
                 from app.providers.custom.manager import custom_provider_manager as _mgr
-                kind = arguments.get("kind")
+                kind = (arguments.get("kind") or "").strip() or None
+                q = (arguments.get("q") or "").strip().lower()
                 defs = _mgr.list_definitions(kind=kind)
-                # 附带健康检查（简化：仅 is_configured）
-                result = {"providers": [d.to_provider_info() for d in defs], "total": len(defs)}
+                # q 模糊过滤：名称/ID/描述/类型
+                if q:
+                    def _hit(d):
+                        hay = f"{d.id} {d.name} {d.display_name or ''} {d.description or ''} {d.kind}".lower()
+                        return q in hay
+                    defs = [d for d in defs if _hit(d)]
+                # 返回摘要（不含 code 全文，防上下文爆炸）
+                result = {"providers": [d.to_provider_info(include_code=False) for d in defs], "total": len(defs), "q": q or None, "kind": kind}
 
             elif tool_name == "test_custom_provider":
                 pid = arguments.get("provider_id") or ""
@@ -1425,17 +1684,37 @@ class MCPServerRegistry:
                     raise ValueError(f"Provider 不存在: {pid}")
                 if pd.builtin:
                     raise ValueError("内置 Provider 不可编辑")
-                # 允许更新的字段
-                for field in ["name","description","language","code","code_entry","models","default_model","doc_text"]:
+                # 允许更新的字段（A档新增 trusted 开关）
+                if "language" in arguments and arguments["language"] is not None:
+                    _lang = str(arguments["language"]).strip().lower()
+                    if _lang in ("js", "node"):
+                        _lang = "javascript"
+                    if _lang not in ("python", "javascript"):
+                        raise ValueError(f"language 非法: {arguments['language']}（仅支持 python/javascript）")
+                    pd.language = _lang
+                if "models" in arguments and arguments["models"] is not None:
+                    _models = arguments["models"]
+                    if isinstance(_models, str):
+                        _models = [_models]
+                    if not isinstance(_models, list):
+                        raise ValueError("models 需为字符串数组")
+                    pd.models = [str(m) for m in _models]
+                for field in ["name","description","code","code_entry","default_model","doc_text"]:
                     if field in arguments and arguments[field] is not None:
                         setattr(pd, field, arguments[field])
-                # 语法检查
-                if pd.language == "python" and pd.code:
-                    try:
-                        import ast
-                        ast.parse(pd.code)
-                    except SyntaxError as se:
-                        raise ValueError(f"Python 语法错误: {se}")
+                if "trusted" in arguments and arguments["trusted"] is not None:
+                    v = arguments["trusted"]
+                    pd.trusted = bool(v) if not isinstance(v, str) else v.strip().lower() in ("1", "true", "yes", "on")
+                # 代码空洞拦截：空代码入库会导致后续每次生成都失败
+                if "code" in arguments and (not pd.code or len(pd.code.strip()) < 20):
+                    raise ValueError("code 内容过短（<20字符），拒绝保存以免生成源变砖；请提供完整 async def generate(ctx, api)")
+                # 沙箱体检（先验后存）：坏码直接打回，不入库、不热注册，避免改码后服务崩溃/变砖
+                if "code" in arguments or "language" in arguments or "trusted" in arguments:
+                    from app.providers.generic.code_provider import compile_check_code as _ccc
+                    _cc = _ccc(pd.language or "python", pd.code or "", pd.code_entry or "generate",
+                               trusted=bool(getattr(pd, "trusted", False)))
+                    if not _cc.get("ok"):
+                        raise ValueError(f"代码未通过沙箱体检，已拒绝保存: {_cc.get('error')}")
                 pd.touch()
                 from app.api.provider_routes import _default_input_schema, _default_output_schema
                 if not pd.input_schema:
@@ -1449,14 +1728,74 @@ class MCPServerRegistry:
                 result = {"status": "updated", "provider": saved.to_provider_info()}
 
             elif tool_name == "get_provider_code":
-                pid = arguments.get("provider_id") or ""
-                if not pid:
-                    raise ValueError("provider_id 不能为空")
+                # 支持 id/name/q/kind 多维精准或模糊单选
+                raw_pid = (arguments.get("provider_id") or "").strip()
+                raw_name = (arguments.get("name") or "").strip()
+                raw_q = (arguments.get("q") or "").strip()
+                raw_kind = (arguments.get("kind") or "").strip() or None
                 from app.providers.custom.manager import custom_provider_manager as _mgr
-                pd = _mgr.get_definition(pid)
+                pd = None
+                # 1) 精准 id 优先
+                if raw_pid:
+                    pd = _mgr.get_definition(raw_pid)
+                # 2) 按 name/q 模糊单选
                 if not pd:
-                    raise ValueError(f"Provider 不存在: {pid}")
-                result = {"provider_id": pid, "language": pd.language, "code": pd.code or "", "code_entry": pd.code_entry, "kind": pd.kind, "name": pd.name, "description": pd.description}
+                    search = (raw_name or raw_q or raw_pid).strip()
+                    if search:
+                        # 先精确匹配 id/name
+                        candidates = _mgr.list_definitions(kind=raw_kind)
+                        # 若仍为空，尝试不限 kind 再搜
+                        if not candidates and raw_kind:
+                            candidates = _mgr.list_definitions(kind=None)
+                        sl = search.lower()
+                        # 精确
+                        for d in candidates:
+                            if d.id.lower() == sl or (d.name and d.name.lower() == sl):
+                                pd = d
+                                break
+                        # 模糊包含
+                        if not pd:
+                            for d in candidates:
+                                hay = f"{d.id} {d.name} {d.display_name or ''} {d.description or ''}".lower()
+                                if sl in hay:
+                                    pd = d
+                                    break
+                        # 若仍无，尝试 id 前缀匹配
+                        if not pd:
+                            for d in candidates:
+                                if d.id.lower().startswith(sl) or sl.startswith(d.id.lower()[:8]):
+                                    pd = d
+                                    break
+                    else:
+                        # 无任何搜索词但有 kind 且仅 1 个，自动单选
+                        if raw_kind:
+                            cands = _mgr.list_definitions(kind=raw_kind)
+                            if len(cands) == 1:
+                                pd = cands[0]
+                if not pd:
+                    # 给出可选清单以便导演二次选择
+                    all_defs = _mgr.list_definitions(kind=raw_kind)
+                    brief = [{"id": d.id, "name": d.name, "kind": d.kind, "description": (d.description or "")[:60]} for d in all_defs[:12]]
+                    raise ValueError(f"未找到匹配的 Provider (provider_id='{raw_pid}' name='{raw_name}' q='{raw_q}' kind='{raw_kind}')，可选: {brief}")
+                # 返回完整信息：含参数结构与代码，便于诊断“未暴露”
+                info = pd.to_provider_info(include_code=False)
+                result = {
+                    "provider_id": pd.id,
+                    "id": pd.id,
+                    "name": pd.name,
+                    "kind": pd.kind,
+                    "language": pd.language,
+                    "code_entry": pd.code_entry,
+                    "code": pd.code or "",
+                    "code_preview": (pd.code[:800] + f"…(共{len(pd.code)}字符)") if pd.code and len(pd.code) > 800 else (pd.code or ""),
+                    "code_length": len(pd.code or ""),
+                    "description": pd.description,
+                    "params_schema": pd.params_schema,
+                    "input_schema": pd.input_schema,
+                    "output_schema": pd.output_schema,
+                    "default_params": pd.default_params,
+                    "provider_info": info,
+                }
 
             elif tool_name == "upgrade_provider_to_code":
                 pid = arguments.get("provider_id") or ""
@@ -1485,6 +1824,21 @@ class MCPServerRegistry:
                     unregister_single_custom_provider(pid, kind=pd.kind)
                     register_single_custom_provider(saved)
                     result = {"status": "upgraded", "provider": saved.to_provider_info()}
+
+            elif tool_name == "fs_file":
+                result = _fs_file_action(
+                    arguments.get("action") or "",
+                    arguments.get("path") or "",
+                    arguments.get("content") or "",
+                    arguments.get("encoding") or "utf-8",
+                )
+
+            elif tool_name == "shell_exec":
+                try:
+                    _to = int(arguments.get("timeout") or 30)
+                except Exception:
+                    _to = 30
+                result = _run_trusted_shell(arguments.get("command") or "", arguments.get("cwd") or "", _to)
 
             elif tool_name in ("canvas_query","canvas_create_node","canvas_update_node","canvas_connect","canvas_execute","canvas_dispatch_skill","canvas_query_assets"):
                 # 画布工具：真实持久化到 storage/projects/{id}/canvas.json，前端通过轮询/事件同步
@@ -1751,8 +2105,43 @@ class MCPServerRegistry:
                 speed = arguments.get("speed") or "1.0x"
                 ai_directive = (arguments.get("ai_directive") or "").strip()
 
-                # 自然语言指令快速智能匹配（若传入）
+                # LLM 语义解析优先（白名单校验；失败/超时即回退关键词规则，保证离线可用）
+                llm_hit = False
                 if ai_directive:
+                    try:
+                        from app.pipelines.llm_service import llm_service as _llm
+                        _sys = ("你是分镜导演调度器。把中文导演指令映射为机位参数，仅输出JSON："
+                                "{\"framing\":...,\"motion\":...,\"pose\":...,\"cast_layout\":...,\"focal_length_mm\":...}。"
+                                "framing可选：extreme_close_up/close_up/medium/full/long/bird_eye/low_angle/over_shoulder/dutch_angle/high_angle；"
+                                "motion可选：static/push_in/pull_out/pan_left/pan_right/tilt_up/tilt_down/orbit/orbit_ccw/truck_left/truck_right/boom_up/boom_down/roll_left/roll_right/tracking/shake/dolly_zoom/orbit_boom_up/pan_left_crane_down/fast_push_shake/low_angle_truck_right；"
+                                "pose可选：stand/fight/look_back/run/cast_spell/kneel/defend/fly/injured；"
+                                "cast_layout可选：solo/duel/ots/surrounded；focal_length_mm取16/20/24/28/32/35/40/50/85其一。")
+                        _parsed = await _llm.chat_json(_sys, ai_directive, temperature=0.2, timeout=12, max_tokens=300)
+                        if isinstance(_parsed, dict):
+                            _fr = str(_parsed.get("framing") or "")
+                            _mo = str(_parsed.get("motion") or "")
+                            _po = str(_parsed.get("pose") or "")
+                            _ca = str(_parsed.get("cast_layout") or "")
+                            if _fr in FRAMING_CAMERA:
+                                framing = _fr
+                            if _mo in MOTION_TRAJECTORY:
+                                motion = _mo
+                            if _po in ("stand", "fight", "look_back", "run", "cast_spell", "kneel", "defend", "fly", "injured"):
+                                pose = _po
+                            if _ca in ("solo", "duel", "ots", "surrounded"):
+                                cast_layout = _ca
+                            try:
+                                _fl = float(_parsed.get("focal_length_mm") or 0)
+                                if 12 <= _fl <= 135:
+                                    focal_length_mm = _fl
+                            except Exception:
+                                pass
+                            llm_hit = True
+                    except Exception:
+                        llm_hit = False
+
+                # 自然语言指令快速智能匹配（LLM 未命中时的关键词兜底）
+                if ai_directive and not llm_hit:
                     text_lower = ai_directive.lower()
                     if any(w in text_lower for w in ["希区柯克", "眩晕", "vertigo", "dolly zoom"]):
                         motion = "dolly_zoom"
@@ -1811,13 +2200,17 @@ class MCPServerRegistry:
                     "motion_trajectory": traj,
                     "minimax_camera_prompt": minimax_prompt,
                     "depth_guidance_ready": True,
+                    "parse_mode": "llm" if llm_hit else ("keyword" if ai_directive else "explicit"),
                     "engine": "minimax-01-director-camera-calculator"
                 }
 
             elapsed_ms = int((time.time() - start_time) * 1000)
             return MCPToolCallResponse(tool_name=tool_name, status="success", result=result, execution_time_ms=elapsed_ms)
 
-        except Exception as e:
+        except asyncio.CancelledError:
+            raise
+        except BaseException as e:
+            # SystemExit/KeyboardInterrupt 等必须就地转为普通错误，否则杀死 uvicorn worker 致服务崩溃重启
             elapsed_ms = int((time.time() - start_time) * 1000)
             return MCPToolCallResponse(tool_name=tool_name, status="error", result=None, error=str(e), execution_time_ms=elapsed_ms)
 

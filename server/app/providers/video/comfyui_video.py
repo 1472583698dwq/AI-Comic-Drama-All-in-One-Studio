@@ -75,6 +75,11 @@ class ComfyUIVideoProvider(VideoProvider):
     description = "本地 ComfyUI 视频工作流 (SVD/AnimateDiff)，支持首帧/参考驱动；未配置时自动 Mock 便于演示"
     icon = "Film"
 
+    def get_capabilities(self) -> Dict[str, Any]:
+        cap = super().get_capabilities()
+        cap["supports_workflow"] = True
+        return cap
+
     def is_configured(self) -> bool:
         # 总是可用（Mock 兜底）
         return True

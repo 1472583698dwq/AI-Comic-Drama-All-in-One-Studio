@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { apiService } from '../../services/api';
 import { Cpu, Globe, Mic, Video, Plug, Activity } from 'lucide-react';
+import { DynamicControl, groupSpecs } from '../canvas/controls/DynamicControl';
+import { paramsSchemaToSpecs } from '../canvas/providerSkills';
+import { CAPABILITIES_BY_KIND, capabilityLabel, hasCapability } from '../provider/providerCapabilities';
 
 type Kind = 'image' | 'video' | 'audio' | 'llm';
 
@@ -10,6 +13,8 @@ interface ProviderPickerProps {
   onChange: (providerId: string, definition?: any) => void;
   placeholder?: string;
   compact?: boolean;
+  /** 能力过滤（如 video 选 'i2v' 则只列出图生视频源；不传则不过滤） */
+  capability?: string;
 }
 
 const kindMeta: Record<Kind, {icon:any, color:string, bg:string, label:string}> = {
@@ -19,7 +24,7 @@ const kindMeta: Record<Kind, {icon:any, color:string, bg:string, label:string}> 
   llm:   {icon: Cpu, color: 'text-cyan-400', bg: 'bg-cyan-500/10 border-cyan-500/20', label: 'LLM'},
 };
 
-export const ProviderPicker: React.FC<ProviderPickerProps> = ({ kind, value, onChange, placeholder, compact=false }) => {
+export const ProviderPicker: React.FC<ProviderPickerProps> = ({ kind, value, onChange, placeholder, compact=false, capability }) => {
   const [providers, setProviders] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -42,6 +47,10 @@ export const ProviderPicker: React.FC<ProviderPickerProps> = ({ kind, value, onC
   }, [kind]);
 
   const selected = providers.find(p=> p.id===value);
+  // 能力过滤：当前选中即使不符合也保留（避免切换模式时选中丢失），其余按能力列出
+  const visibleProviders = capability
+    ? providers.filter(p=> p.id===value || hasCapability(p, capability))
+    : providers;
   const meta = kindMeta[kind] || kindMeta.image;
   const Icon = meta.icon;
 
@@ -63,15 +72,21 @@ export const ProviderPicker: React.FC<ProviderPickerProps> = ({ kind, value, onC
         className="w-full bg-surface-secondary border border-border rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-brand"
       >
         <option value="">{placeholder || `— 选择${meta.label}生成源 —`}</option>
-        {providers.map(p=> (
+        {visibleProviders.map(p=> (
           <option key={p.id} value={p.id}>
             {p.display_name || p.name || p.id} {p.builtin ? '·内置' : '·自定义'} {p.models?.length ? `·${p.models.length}模型` : ''}
           </option>
         ))}
       </select>
+      {capability && (
+        <div className="text-[10px] text-gray-500">已按能力过滤：<span className="text-brand-light font-bold">{capabilityLabel(kind, capability)}</span>（当前选中始终保留）</div>
+      )}
       {selected && (
-        <div className="flex items-center gap-1.5 text-[10px] text-gray-500">
+        <div className="flex items-center gap-1.5 text-[10px] text-gray-500 flex-wrap">
           <span className={`px-1.5 py-0.5 rounded border ${selected.builtin ? 'bg-brand/10 border-brand/20 text-brand-light' : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'}`}>{selected.builtin?'内置':'自定义'}</span>
+          {(Array.isArray(selected.capabilities) && selected.capabilities.length ? selected.capabilities : []).map((c: string)=> (
+            <span key={c} className="px-1.5 py-0.5 rounded border bg-black/30 border-border text-gray-300">{capabilityLabel(kind, c)}</span>
+          ))}
           <span className="truncate" title={selected.transport?.url || ''}>{selected.transport?.url ? `URL: ${selected.transport.url.slice(0,32)}…` : ''}</span>
           {selected.health?.ok !== undefined && <span className={`w-2 h-2 rounded-full ${selected.health.ok ? 'bg-emerald-500' : 'bg-amber-500'}`} />}
         </div>
@@ -81,35 +96,41 @@ export const ProviderPicker: React.FC<ProviderPickerProps> = ({ kind, value, onC
   );
 };
 
-export const ProviderParamForm: React.FC<{ definition: any; values: Record<string,any>; onChange: (next: Record<string,any>)=>void }> = ({ definition, values, onChange }) => {
+export const ProviderParamForm: React.FC<{ definition: any; values: Record<string,any>; onChange: (next: Record<string,any>)=>void; compact?: boolean }> = ({ definition, values, onChange, compact }) => {
+  const [showAll, setShowAll] = useState(false);
   if (!definition?.params_schema?.properties || Object.keys(definition.params_schema.properties).length===0) {
     return <div className="text-[10px] text-gray-500 text-center py-2">该源无额外参数（使用 prompt/size/seed 等通用字段）</div>;
   }
-  const props = definition.params_schema.properties as Record<string, any>;
+  // 全系统唯一映射（与画布 NodeAgentConsole 同一函数），分组/暴露/人机分工只认 x-*
+  const all = paramsSchemaToSpecs(definition.params_schema);
+  const specs = all.filter((s:any)=> s.visibility!=='hidden');
+  const hiddenCount = all.length - specs.length;
+  const visible = showAll ? all : specs;
+  if (visible.length===0) return <div className="text-[10px] text-gray-500 text-center py-2">该源无可调参数（{all.length}项为内部隐藏）</div>;
+  const { basic, advanced } = groupSpecs(visible);
+  const renderSpec = (spec:any) => (
+    <DynamicControl key={spec.param_name} spec={spec} value={values[spec.param_name] ?? definition.default_params?.[spec.param_name] ?? spec.default_value} onChange={(v:any)=> onChange({...values, [spec.param_name]: v})} compact={compact} />
+  );
   return (
-    <div className="space-y-2">
-      {Object.entries(props).map(([key, def]: any)=>{
-        const val = values[key] ?? definition.default_params?.[key] ?? def.default ?? '';
-        const isNumber = def.type==='integer' || def.type==='number';
-        return (
-          <div key={key} className="space-y-1">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] text-gray-300">{key}</span>
-              <span className="text-[10px] text-gray-500 max-w-[140px] truncate" title={def.description}>{def.description || def.type}</span>
-            </div>
-            {isNumber ? (
-              <input type="number" value={val} onChange={e=> onChange({...values, [key]: def.type==='integer' ? parseInt(e.target.value)||0 : parseFloat(e.target.value)||0})} className="w-full bg-surface-tertiary border border-border rounded-lg px-2 py-1 text-xs text-white"/>
-            ) : def.enum ? (
-              <select value={val} onChange={e=> onChange({...values, [key]: e.target.value})} className="w-full bg-surface-tertiary border border-border rounded-lg px-2 py-1 text-xs text-white">
-                <option value="">— 选择 —</option>
-                {def.enum.map((opt:string)=> <option key={opt} value={opt}>{opt}</option>)}
-              </select>
-            ) : (
-              <input type="text" value={val} onChange={e=> onChange({...values, [key]: e.target.value})} placeholder={def.description || key} className="w-full bg-surface-tertiary border border-border rounded-lg px-2 py-1 text-xs text-white placeholder-gray-500"/>
-            )}
-          </div>
-        );
-      })}
+    <div className="space-y-3">
+      {basic.length>0 && (
+        <div className="space-y-1.5">
+          <div className="text-[10px] font-bold text-gray-400 tracking-wider flex items-center gap-1.5"><span className="w-1 h-3 rounded-full bg-emerald-500/60" /> 基础 · Agent可自动</div>
+          <div className="grid grid-cols-1 gap-2">{basic.map(renderSpec)}</div>
+        </div>
+      )}
+      {advanced.length>0 && (
+        <div className="space-y-1.5">
+          <div className="text-[10px] font-bold text-gray-400 tracking-wider flex items-center gap-1.5"><span className="w-1 h-3 rounded-full bg-amber-500/60" /> 高级 · 建议/手填</div>
+          <div className="grid grid-cols-1 gap-2">{advanced.map(renderSpec)}</div>
+        </div>
+      )}
+      {hiddenCount>0 && (
+        <button onClick={()=>setShowAll(v=>!v)} className="w-full py-1 rounded-lg border border-border bg-surface-secondary/60 hover:border-brand/50 text-[10px] text-gray-400 hover:text-brand-light transition-colors">
+          {showAll ? `收起内部参数（隐藏 ${hiddenCount} 项）` : `展开内部参数（${hiddenCount} 项未在 App 契约中声明）`}
+        </button>
+      )}
+      {basic.length===0 && advanced.length===0 && <div className="text-[10px] text-gray-500">无可视参数</div>}
     </div>
   );
 };

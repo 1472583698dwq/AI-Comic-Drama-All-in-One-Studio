@@ -64,6 +64,9 @@ interface WorkflowInspectData {
   mapping: Record<string, string>;
   node_overrides: Record<string, Record<string, any>>;
   exposed_inputs: ExposedInput[];
+  /** ComfyUI 官方 App Mode 契约（工作流 extra.linearData 抽取而来），未声明时为空 */
+  app_contract?: { linear_mode?: boolean; inputs?: any[]; outputs?: any[] } | null;
+  source_file?: string | null;
   subgraphs?: SubgraphItem[];
   nodes: NodeItem[];
   available_models: {
@@ -90,6 +93,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [validating, setValidating] = useState(false);
+  const [refreshingContract, setRefreshingContract] = useState(false);
   const [validationResult, setValidationResult] = useState<any>(null);
   const [activeTab, setActiveTab] = useState<'nodes' | 'exposed' | 'mapping' | 'json'>('nodes');
   const [filterCategory, setFilterCategory] = useState<string>('all');
@@ -126,6 +130,22 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
       loadData();
     }
   }, [isOpen, workflowId]);
+
+  // 在 ComfyUI App Builder 里改完勾选并保存工作流后，回读 extra.linearData 重建生成源表单
+  const handleRefreshContract = async () => {
+    setRefreshingContract(true);
+    try {
+      const res = await apiService.refreshWorkflowAppContract(workflowId);
+      const n = (res?.data?.app_contract?.inputs || []).length;
+      await loadData();
+      onSaved?.();
+      alert(n ? `已读取 App 契约：${n} 个声明输入` : '来源文件里没有 extra.linearData，请先在 ComfyUI 的 App Builder 中勾选输入并保存');
+    } catch (e: any) {
+      alert(`读取 App 契约失败: ${e?.message || e}`);
+    } finally {
+      setRefreshingContract(false);
+    }
+  };
 
   const handleValidate = async () => {
     setValidating(true);
@@ -563,7 +583,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
           )}
 
           {activeTab === 'exposed' && (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <button
                 type="button"
                 onClick={handleAutoDetectExposed}
@@ -571,6 +591,25 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
               >
                 <span>⚡ 自动探测图片与文本节点</span>
               </button>
+              <button
+                type="button"
+                onClick={handleRefreshContract}
+                disabled={refreshingContract}
+                className="px-3 py-1 rounded-lg text-xs font-medium bg-brand/20 hover:bg-brand/30 text-brand-light border border-brand/30 transition disabled:opacity-50 flex items-center gap-1"
+                title="重新读取工作流的 extra.linearData（ComfyUI App Builder 勾选结果）"
+              >
+                <span>{refreshingContract ? '读取中…' : '🔄 重新读取 App 契约'}</span>
+              </button>
+              {(() => {
+                const declared = (data?.app_contract?.inputs || []).length;
+                return declared ? (
+                  <span className="text-[11px] text-emerald-300">已按 App 契约的 {declared} 个输入渲染表单</span>
+                ) : (
+                  <span className="text-[11px] text-gray-400">
+                    该工作流未声明 App 契约，表单只显示能语义命名的参数；在 ComfyUI 的 App Builder 勾选后点上方按钮回读
+                  </span>
+                );
+              })()}
             </div>
           )}
         </div>

@@ -250,13 +250,12 @@ def _ensure_provider_registered(provider_id: Optional[str], kind: str = "image")
             register_single_custom_provider(defn)
             # 二次校验：若 kind 与 defn.kind 不一致，仍保证注册成功
             return
-        # 兜底：若未找到定义但 provider_id 为内置，尝试全量初始化
-        if provider_id in ("comfyui", "siliconflow", "dashscope", "openai_compat", "comfyui_video", "minimax_video", "minimax", "elevenlabs", "cosyvoice", "gpt_sovits"):
-            from app.providers.init_providers import init_all_providers
-            try:
-                init_all_providers()
-            except Exception:
-                pass
+        # 兜底：未找到自定义定义时，全量初始化一次内置注册表（不写死任何内置 id 名单）
+        from app.providers.init_providers import init_all_providers
+        try:
+            init_all_providers()
+        except Exception:
+            pass
     except Exception as e:
         print(f"[CanvasEngine] Failed to auto-register dynamic provider {provider_id} (kind={kind}): {e}")
 
@@ -397,7 +396,7 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
                     if text.strip():
                         from app.providers.audio.registry import audio_registry
                         from app.providers.audio.base import AudioGenerateRequest
-                        req = AudioGenerateRequest(text=text, voice_id=merged.get("voice_id") or "male-qn-qingse", emotion=merged.get("emotion") or "neutral")
+                        req = AudioGenerateRequest(text=text, voice_id=merged.get("voice_id") or "", emotion=merged.get("emotion") or "")
                         res = await audio_registry.generate(req, provider_id=prov_id if prov_id else None)
                         return {"status":"success","provider_id": prov_id, "provider": prov_id, "kind": kind, "audio_url": res.audio_url, "elapsed_ms": int((time.time()-start)*1000)}
                 except Exception as e:
@@ -694,9 +693,9 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
                 ref_audio = ref_audio[0]
             if isinstance(ref_audio, str) and ref_audio.strip():
                 extra.setdefault("ref_audio_path", ref_audio.strip())
-            # 参数归一
-            voice_id = extra.get("voice_id") or merged.get("voice_id") or "male-qn-qingse"
-            emotion = extra.get("emotion") or merged.get("emotion") or "neutral"
+            # 参数归一：音色/情绪缺省留空，由所选源自身声明兜底（不再写死 male-qn-qingse/neutral）
+            voice_id = extra.get("voice_id") or merged.get("voice_id") or ""
+            emotion = extra.get("emotion") or merged.get("emotion") or ""
             try:
                 speed = float(extra.get("speed") if extra.get("speed") not in (None, "") else merged.get("speed") if merged.get("speed") not in (None, "") else 1.0)
             except:

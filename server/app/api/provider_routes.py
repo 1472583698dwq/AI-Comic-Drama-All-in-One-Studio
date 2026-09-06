@@ -255,12 +255,31 @@ def _sanitize_for_frontend(pd: ProviderDefinition) -> Dict[str, Any]:
     info = pd.to_provider_info(include_code=True)
     if info.get("code") and len(info["code"]) > 8000:
         info["code_preview"] = info["code"][:8000] + "\n... (truncated, full code via GET /providers/{id})"
-    # 存量自定义源缺 schema 时在读取路径兜底（唯一规则入口 resolve_params_schema，不落盘），
-    # 否则 params_schema=null 导致分镜/画布渲染不出独立控件、参数无法透传
+    # 存量自定义源缺 schema 时在读取路径兜底，但代码型不硬套通用模板以免与真实 API mismatch
     try:
-        info["params_schema"] = resolve_params_schema(pd.code, pd.kind, info.get("params_schema"))
+        if pd.provider_type == "code":
+            # 代码型：显式 > 代码尾注释 > 保持已存（不回落通用模板）
+            explicit = info.get("params_schema")
+            if explicit and isinstance(explicit, dict) and explicit.get("properties"):
+                info["params_schema"] = _enrich_params_schema(explicit, pd.kind)
+            else:
+                extracted = _extract_params_schema_from_code(pd.code or "")
+                if extracted:
+                    info["params_schema"] = _enrich_params_schema(extracted, pd.kind)
+                else:
+                    # 无显式也无注释：保持空，避免通用 480p/720p 误套到 480p竖等真实接口
+                    # 若存储本身已有通用残留（历史错误），则保留但前端会通过一键修正按钮提示
+                    if not info.get("params_schema") or not isinstance(info.get("params_schema"), dict) or not info["params_schema"].get("properties"):
+                        # 保持 None，让前端显示“无额外参数”而非错误参数
+                        info["params_schema"] = info.get("params_schema")  # keep as is
+                    else:
+                        info["params_schema"] = _enrich_params_schema(info["params_schema"], pd.kind)
+        else:
+            info["params_schema"] = resolve_params_schema(pd.code, pd.kind, info.get("params_schema"))
         if not info.get("input_schema") or not info["input_schema"].get("properties"):
             info["input_schema"] = _default_input_schema(pd.kind)
+        else:
+            info["input_schema"] = _enrich_input_schema(info["input_schema"], pd.kind)
         if not info.get("output_schema") or not info["output_schema"].get("properties"):
             info["output_schema"] = _default_output_schema(pd.kind)
     except Exception:
@@ -286,18 +305,73 @@ def _extract_params_schema_from_code(code_text: str) -> Optional[Dict[str, Any]]
     return None
 
 
+def _enrich_params_schema(schema: Dict[str, Any], kind: str) -> Dict[str, Any]:
+    """
+    为 params_schema 补全 x-* 扩展（向下兼容存量无 x-* 的源）。
+    缺省规则： layout→auto/basic  quality→suggest/advanced  audio→auto/basic  其余→suggest/advanced
+    """
+    if not schema or not isinstance(schema.get("properties"), dict):
+        return schema
+    # 按 kind 的默认 x-* 映射表
+    defaults_map = {
+        "aspect_ratio": {"x-category": "layout", "x-visibility": "basic", "x-agent": "auto", "x-priority": 10},
+        "resolution":   {"x-category": "layout", "x-visibility": "basic", "x-agent": "auto", "x-priority": 20},
+        "duration":     {"x-category": "motion", "x-visibility": "basic", "x-agent": "auto", "x-priority": 30},
+        "fps":          {"x-category": "motion", "x-visibility": "basic", "x-agent": "auto", "x-priority": 31},
+        "steps":        {"x-category": "quality", "x-visibility": "advanced", "x-agent": "suggest", "x-priority": 40},
+        "cfg":          {"x-category": "quality", "x-visibility": "advanced", "x-agent": "suggest", "x-priority": 41},
+        "seed":         {"x-category": "quality", "x-visibility": "advanced", "x-agent": "manual", "x-priority": 99},
+        "negative_prompt": {"x-category": "quality", "x-visibility": "advanced", "x-agent": "suggest", "x-priority": 42},
+        "speed":        {"x-category": "audio", "x-visibility": "basic", "x-agent": "auto", "x-priority": 10},
+        "pitch":        {"x-category": "audio", "x-visibility": "advanced", "x-agent": "suggest", "x-priority": 20},
+        "volume":       {"x-category": "audio", "x-visibility": "advanced", "x-agent": "suggest", "x-priority": 21},
+        "voice_id":     {"x-category": "audio", "x-visibility": "basic", "x-agent": "auto", "x-priority": 5, "x-role": "voice"},
+        "emotion":      {"x-category": "audio", "x-visibility": "basic", "x-agent": "auto", "x-priority": 6, "x-role": "emotion"},
+    }
+    for key, prop in schema["properties"].items():
+        if not isinstance(prop, dict):
+            continue
+        dm = defaults_map.get(key, {})
+        # 模糊匹配：workflow 暴露键如 "49_aspect_ratio" 应命中 aspect_ratio
+        if not dm:
+            lk = key.lower()
+            for k2, v2 in defaults_map.items():
+                if k2 in lk:
+                    dm = v2
+                    break
+        # 若已显式声明则保留，否则补默认值
+        for xk, xv in dm.items():
+            if xk not in prop:
+                prop[xk] = xv
+        # 兜底：未命中映射表的自定义参数
+        if "x-category" not in prop:
+            prop["x-category"] = "advanced"
+        if "x-visibility" not in prop:
+            prop["x-visibility"] = "advanced"
+        if "x-agent" not in prop:
+            prop["x-agent"] = "suggest"
+        if "x-priority" not in prop:
+            prop["x-priority"] = 50
+    return schema
+
+
 def resolve_params_schema(code: str, kind: str, explicit: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     params_schema 单点解析（全系统唯一规则）：
     显式声明 > 代码内 PARAMS_SCHEMA 注释 > kind 通用默认。
     创建/升级/导入/MCP/读取兜底 一律走这里，杜绝多处规则不一致。
+    返回值已自动补全 x-*，保证前端分组与人机分工一致。
     """
+    base: Optional[Dict[str, Any]] = None
     if explicit and explicit.get("properties"):
-        return explicit
-    extracted = _extract_params_schema_from_code(code or "")
-    if extracted:
-        return extracted
-    return _default_params_schema(kind)
+        base = explicit
+    else:
+        extracted = _extract_params_schema_from_code(code or "")
+        if extracted:
+            base = extracted
+        else:
+            base = _default_params_schema(kind)
+    return _enrich_params_schema(base, kind)
 
 
 def code_gen_system_prompt(kind: str, language: str, tmpl: str = "") -> str:
@@ -310,10 +384,11 @@ def code_gen_system_prompt(kind: str, language: str, tmpl: str = "") -> str:
 - 防御式解析（必须）：响应一律用 .get() 链取值；业务码非成功、data 缺失或为 null 时，必须 raise RuntimeError 并把服务端 code/msg/原始响应前300字符带出来，严禁对可能为 None 的值做 [] 下标取值
 - 列表结果元素可能是对象（取其中的 url 字段）也可能是字符串，两种都兼容
 - 必须包含完整请求、鉴权、payload、轮询（视频类用 while/for+sleep 并设最大轮询次数）、错误处理
-- 成功返回 {{"image_url": url}} / {{"video_url": url}} / {{"audio_url": url}}，轮询场景可先返回 task_id 再由框架接管
-- 若该 API 有自己的参数枚举（分辨率档位/比例/时长档等），必须在代码最后一行追加单行注释（一行合法 JSON）：
-  # PARAMS_SCHEMA: {{"type":"object","properties":{{"resolution":{{"type":"string","title":"分辨率","enum":["...真实枚举..."],"default":"...","description":"..."}}}}}}
-  框架会把它解析为该源的独立参数控件；没有自定义枚举则省略此行
+- 成功返回 {{"image_url": url}} / {{"video_url": url}} / {{"audio_url": url}}，轮询场景可先返回 task_id 再由框架接管；视频长任务（H3约100s）推荐提交后即返 task_id，由框架/调用方轮询，勿在代码内阻塞超600s
+- 可信源（trusted=True且全局STUDIO_TRUSTED_MODE=1）可用任意库与系统调用（os/subprocess/curl/ffmpeg/文件读写），普通沙箱仅可用httpx/aiohttp且禁os系导入
+- 若该 API 有自己的参数枚举（分辨率档位/比例/时长档等），必须在代码最后一行追加单行注释（一行合法 JSON），并按标准标注分组与人机分工：
+  # PARAMS_SCHEMA: {{"type":"object","properties":{{"resolution":{{"type":"string","title":"分辨率","enum":["...真实枚举..."],"default":"...","description":"...","x-category":"layout","x-visibility":"basic","x-agent":"auto","x-priority":20}}}}}}
+  可用 x-category: layout/motion/quality/audio/advanced； x-visibility: basic/advanced/hidden； x-agent: auto(可代填)/suggest(建议)/manual(仅手填)； x-priority 越小越靠前。没有自定义枚举则省略此行
 - 仅输出代码，不要 markdown、不要解释
 模板参考：
 {tmpl[:2000]}
@@ -341,6 +416,7 @@ def create_code_source(
     code_timeout: Optional[int] = None,
     provider_id: Optional[str] = None,
     icon: str = "Zap",
+    trusted: bool = False,
 ) -> Dict[str, Any]:
     """
     动态生成源统一创建入口（MCP 直建/带定义/文档 LLM 生成、/providers/import 共用）：
@@ -366,6 +442,7 @@ def create_code_source(
         "provider_type": "code", "language": lang, "code": code,
         "code_entry": code_entry or "generate",
         "code_timeout": code_timeout or (600 if kind == "video" else 120),
+        "trusted": bool(trusted),
         "description": description or "动态代码生成源", "icon": icon,
         "scope": scope or "global", "enabled": True,
         "doc_text": (doc_text or "")[:4000], "raw_api_doc": (doc_text or "")[:4000],
@@ -379,8 +456,21 @@ def create_code_source(
     if api_key:
         data["auth"] = {"type": "bearer", "key_env": f"CUSTOM_PROVIDER_{pid}", "prefix": "Bearer "}
     pd = ProviderDefinition.model_validate(data)
-    # schema 规整：唯一规则入口
-    pd.params_schema = resolve_params_schema(pd.code, pd.kind, params_schema)
+    # schema 规整：代码型不套通用模板，优先用显式或代码尾 PARAMS_SCHEMA，否则保持空由一键修正或 LLM 填充
+    if params_schema and params_schema.get("properties"):
+        pd.params_schema = _enrich_params_schema(params_schema, kind)
+    else:
+        extracted = _extract_params_schema_from_code(pd.code or "")
+        if extracted:
+            pd.params_schema = _enrich_params_schema(extracted, kind)
+        elif kind == "video":
+            # 代码型 video 不硬套固定模板，避免与真实 API（如 4/6 分辨率、是否支持 fps/aspect_ratio）不一致
+            # 保持为 None，前端显示“无额外参数”并提示一键修正；LLM 创建时会通过注释带真实枚举
+            pd.params_schema = None
+        else:
+            # image/audio 仍用通用
+            _def = _default_params_schema(kind)
+            pd.params_schema = _enrich_params_schema(_def, kind)
     pd.input_schema = input_schema if (input_schema and input_schema.get("properties")) else _default_input_schema(pd.kind)
     pd.output_schema = output_schema if (output_schema and output_schema.get("properties")) else _default_output_schema(pd.kind)
     saved = custom_provider_manager.save_definition(pd)
@@ -389,8 +479,8 @@ def create_code_source(
         os.environ[f"CUSTOM_PROVIDER_{saved.id}"] = api_key
     from app.providers.init_providers import register_single_custom_provider
     register_single_custom_provider(saved)
-    # 创建即体检（零配额）：结果回传调用方（Agent 闭环）
-    cc = compile_check_code(saved.language or "python", saved.code or "", saved.code_entry or "generate")
+    # 创建即体检（零配额）：结果回传调用方（Agent 闭环），可信源按可信环境体检
+    cc = compile_check_code(saved.language or "python", saved.code or "", saved.code_entry or "generate", trusted=bool(getattr(saved, "trusted", False)))
     if not cc.get("ok"):
         print(f"[ProviderRoutes] 新建源 {saved.id} 体检未通过: {cc.get('error')}")
     return {"id": saved.id, "provider": _sanitize_for_frontend(saved), "compile_check": cc, "code": code}
@@ -407,24 +497,61 @@ def _infer_kind_from_doc(doc: str, url: str = "") -> Optional[str]:
         return "audio"
     return None
 
+def _enrich_input_schema(schema: Dict[str, Any], kind: str) -> Dict[str, Any]:
+    """
+    input_schema 单点补全：为媒体属性补 x-handle/x-slot、为文本属性补 x-role。
+    原则：只做声明补全（缺省时按 type/format 推断），不改已声明值——前端插槽/句柄完全按此映射，不再猜属性名。
+    """
+    if not schema or not isinstance(schema.get("properties"), dict):
+        return schema
+    for key, prop in schema["properties"].items():
+        if not isinstance(prop, dict):
+            continue
+        lk = str(key).lower()
+        fmt = prop.get("format") or (prop.get("items", {}) or {}).get("format", "")
+        if "x-handle" not in prop:
+            if fmt == "uri":
+                if "audio" in lk:
+                    prop["x-handle"] = "audio"
+                elif "video" in lk:
+                    prop["x-handle"] = "video"
+                else:
+                    prop["x-handle"] = "image"
+            elif prop.get("type") == "string":
+                prop["x-handle"] = "text"
+        if prop.get("x-handle") in ("image", "audio", "video") and "x-slot" not in prop:
+            prop["x-slot"] = key
+        if prop.get("x-handle") == "text" and "x-role" not in prop:
+            if "negative" in lk:
+                prop["x-role"] = "prompt_aux"
+            elif lk in ("text", "dialogue", "voiceover"):
+                prop["x-role"] = "dialogue"
+            else:
+                prop["x-role"] = "prompt"
+    return schema
+
+
 def _default_input_schema(kind: str) -> Dict[str, Any]:
     if kind == "image":
         return {"type":"object","properties":{
-            "prompt":{"type":"string","description":"画面提示词","x-handle":"text"},
-            "reference_images":{"type":"array","items":{"type":"string","format":"uri"},"description":"参考图","x-handle":"image"},
+            "prompt":{"type":"string","description":"画面提示词","x-handle":"text","x-role":"prompt"},
+            "reference_images":{"type":"array","items":{"type":"string","format":"uri"},"description":"参考图","x-handle":"image","x-slot":"reference_images","maxItems":4,"minItems":0},
         },"required":["prompt"]}
     elif kind == "video":
         return {"type":"object","properties":{
-            "prompt":{"type":"string","description":"运动描述","x-handle":"text"},
-            "first_frame":{"type":"string","format":"uri","description":"首帧","x-handle":"image"},
-            "reference_images":{"type":"array","items":{"type":"string","format":"uri"},"description":"参考集","x-handle":"image"},
+            "prompt":{"type":"string","description":"运动描述","x-handle":"text","x-role":"prompt"},
+            "first_frame":{"type":"string","format":"uri","description":"首帧（定格开头画面）","x-handle":"image","x-slot":"first_frame"},
+            "last_frame":{"type":"string","format":"uri","description":"尾帧图（定格结尾画面）","x-handle":"image","x-slot":"last_frame"},
+            "reference_images":{"type":"array","items":{"type":"string","format":"uri"},"description":"参考集，最多9张","x-handle":"image","x-slot":"reference_images","maxItems":9,"minItems":0},
+            "reference_audios":{"type":"array","items":{"type":"string","format":"uri"},"description":"参考音频，最多3条","x-handle":"audio","x-slot":"ref_audio","maxItems":3,"minItems":0},
         },"required":["prompt"]}
     elif kind == "audio":
         return {"type":"object","properties":{
-            "text":{"type":"string","description":"合成文本","x-handle":"text"},
+            "text":{"type":"string","description":"合成文本","x-handle":"text","x-role":"dialogue"},
+            "reference_audio":{"type":"string","format":"uri","description":"参考音频","x-handle":"audio","x-slot":"ref_audio"},
         },"required":["text"]}
     else:
-        return {"type":"object","properties":{"prompt":{"type":"string","x-handle":"text"}},"required":["prompt"]}
+        return {"type":"object","properties":{"prompt":{"type":"string","x-handle":"text","x-role":"prompt"}},"required":["prompt"]}
 
 def _default_output_schema(kind: str) -> Dict[str, Any]:
     if kind == "image":
@@ -439,23 +566,25 @@ def _default_output_schema(kind: str) -> Dict[str, Any]:
 def _default_params_schema(kind: str) -> Dict[str, Any]:
     if kind == "image":
         return {"type": "object","properties": {
-            "aspect_ratio": {"type": "string","title": "画面比例","enum": ["9:16","16:9","1:1"],"default": "9:16","description": "输出画面比例，下游画布/分镜自动联动"},
-            "resolution": {"type": "string","title": "分辨率","enum": ["480p","720p","1080p"],"default": "720p","description": "分辨率档位，框架自动映射为宽高"},
-            "steps": {"type": "integer","title": "采样步数","default": 20,"minimum": 4,"maximum": 60,"description": "采样步数 4-60"},
-            "cfg": {"type": "number","title": "CFG","default": 7.0,"minimum": 1,"maximum": 15,"step": 0.5,"description": "CFG 1-15"},
+            "aspect_ratio": {"type": "string","title": "画面比例","enum": ["9:16","16:9","1:1"],"default": "9:16","description": "输出画面比例，下游画布/分镜自动联动", "x-category": "layout", "x-visibility": "basic", "x-agent": "auto", "x-priority": 10},
+            "resolution": {"type": "string","title": "分辨率","enum": ["480p","720p","1080p"],"default": "720p","description": "分辨率档位，框架自动映射为宽高", "x-category": "layout", "x-visibility": "basic", "x-agent": "auto", "x-priority": 20},
+            "steps": {"type": "integer","title": "采样步数","default": 20,"minimum": 4,"maximum": 60,"description": "采样步数 4-60", "x-category": "quality", "x-visibility": "advanced", "x-agent": "suggest", "x-priority": 40},
+            "cfg": {"type": "number","title": "CFG","default": 7.0,"minimum": 1,"maximum": 15,"step": 0.5,"description": "CFG 1-15", "x-category": "quality", "x-visibility": "advanced", "x-agent": "suggest", "x-priority": 41},
         }}
     elif kind == "video":
         return {"type": "object","properties": {
-            "aspect_ratio": {"type": "string","title": "画面比例","enum": ["9:16","16:9","1:1"],"default": "9:16","description": "画面比例"},
-            "resolution": {"type": "string","title": "分辨率","enum": ["480p","720p","1080p"],"default": "720p","description": "视频分辨率 480p/720p/1080p"},
-            "duration": {"type": "integer","title": "时长","default": 5,"minimum": 3,"maximum": 15,"description": "时长秒 3-15"},
-            "fps": {"type": "integer","title": "帧率","enum": [16,24,30],"default": 24,"description": "帧率"},
+            "aspect_ratio": {"type": "string","title": "画面比例","enum": ["9:16","16:9","1:1"],"default": "9:16","description": "画面比例", "x-category": "layout", "x-visibility": "basic", "x-agent": "auto", "x-priority": 10},
+            "resolution": {"type": "string","title": "分辨率","enum": ["480p","720p","1080p"],"default": "720p","description": "视频分辨率 480p/720p/1080p", "x-category": "layout", "x-visibility": "basic", "x-agent": "auto", "x-priority": 20},
+            "duration": {"type": "integer","title": "时长","default": 5,"minimum": 3,"maximum": 15,"description": "时长秒 3-15", "x-category": "motion", "x-visibility": "basic", "x-agent": "auto", "x-priority": 30},
+            "fps": {"type": "integer","title": "帧率","enum": [16,24,30],"default": 24,"description": "帧率", "x-category": "motion", "x-visibility": "basic", "x-agent": "auto", "x-priority": 31},
         }}
     elif kind == "audio":
         return {"type": "object","properties": {
-            "speed": {"type": "number","title": "语速","default": 1.0,"minimum": 0.5,"maximum": 2.0,"step": 0.1,"description": "语速 0.5-2.0"},
-            "pitch": {"type": "number","title": "音调","default": 0,"minimum": -12,"maximum": 12,"step": 1,"description": "音调 -12~12"},
-            "volume": {"type": "number","title": "音量","default": 1.0,"minimum": 0,"maximum": 2.0,"step": 0.1,"description": "音量 0-2"},
+            "voice_id": {"type": "string","title": "音色","description": "音色ID", "x-category": "audio", "x-visibility": "basic", "x-agent": "auto", "x-priority": 5},
+            "emotion": {"type": "string","title": "情绪","enum": ["neutral","happy","sad","angry","whisper","excited"],"default": "neutral","description": "情感", "x-category": "audio", "x-visibility": "basic", "x-agent": "auto", "x-priority": 6},
+            "speed": {"type": "number","title": "语速","default": 1.0,"minimum": 0.5,"maximum": 2.0,"step": 0.1,"description": "语速 0.5-2.0", "x-category": "audio", "x-visibility": "basic", "x-agent": "auto", "x-priority": 10},
+            "pitch": {"type": "number","title": "音调","default": 0,"minimum": -12,"maximum": 12,"step": 1,"description": "音调 -12~12", "x-category": "audio", "x-visibility": "advanced", "x-agent": "suggest", "x-priority": 20},
+            "volume": {"type": "number","title": "音量","default": 1.0,"minimum": 0,"maximum": 2.0,"step": 0.1,"description": "音量 0-2", "x-category": "audio", "x-visibility": "advanced", "x-agent": "suggest", "x-priority": 21},
         }}
     else:
         return {"type": "object","properties": {}}
@@ -489,6 +618,20 @@ async def list_providers(kind: Optional[str] = None, scope: Optional[str] = None
                     info["builtin"] = True
                     info["provider_type"] = "builtin"
                     info["enabled"] = True
+                    # 内置源也补 x-*，保证画布/分镜分组与人机徽标一致
+                    try:
+                        raw_ps = info.get("params_schema")
+                        if raw_ps and raw_ps.get("properties"):
+                            info["params_schema"] = _enrich_params_schema(raw_ps, reg_kind)
+                        else:
+                            info["params_schema"] = _default_params_schema(reg_kind)
+                        # input_schema 兜底 + 声明补全（x-slot/x-role 单点，供前端纯接口映射）
+                        if not info.get("input_schema") or not info["input_schema"].get("properties"):
+                            info["input_schema"] = _default_input_schema(reg_kind)
+                        else:
+                            info["input_schema"] = _enrich_input_schema(info["input_schema"], reg_kind)
+                    except Exception:
+                        pass
                     result.append(info)
         except Exception as e:
             print(f"[ProviderRoutes] builtin list failed: {e}")
@@ -511,11 +654,23 @@ async def get_provider(provider_id: str):
         from app.providers.image.registry import image_registry
         from app.providers.audio.registry import audio_registry
         from app.providers.video.registry import video_registry
-        for reg in (image_registry, audio_registry, video_registry):
+        for reg, reg_kind in [(image_registry, "image"), (video_registry, "video"), (audio_registry, "audio")]:
             prov = reg.get(provider_id)
             if prov and not (hasattr(reg, "is_custom") and reg.is_custom(provider_id)):
                 info = prov.to_provider_info() if hasattr(prov, "to_provider_info") else {"id": provider_id}
+                info["kind"] = reg_kind
                 info["builtin"] = True
+                info["provider_type"] = "builtin"
+                # 与列表口径一致：schema 单点补全，前端只按接口映射
+                try:
+                    raw_ps = info.get("params_schema")
+                    info["params_schema"] = _enrich_params_schema(raw_ps, reg_kind) if (raw_ps and raw_ps.get("properties")) else _default_params_schema(reg_kind)
+                    if not info.get("input_schema") or not info["input_schema"].get("properties"):
+                        info["input_schema"] = _default_input_schema(reg_kind)
+                    else:
+                        info["input_schema"] = _enrich_input_schema(info["input_schema"], reg_kind)
+                except Exception:
+                    pass
                 return {"provider": info}
     except Exception:
         pass
@@ -539,9 +694,12 @@ class ProviderCreateRequest(BaseModel):
     code: str = ""
     code_entry: str = "generate"
     code_timeout: int = 60
+    trusted: bool = False  # A档可信开关：True=跳出沙箱（需全局 STUDIO_TRUSTED_MODE=1）
     # 可选元数据
     models: List[str] = Field(default_factory=list)
     default_model: Optional[str] = None
+    # 能力细分（为空则前端按 input_schema 插槽推断，不阻塞创建）
+    capabilities: List[str] = Field(default_factory=list)
     params_schema: Optional[Dict[str, Any]] = None
     default_params: Dict[str, Any] = Field(default_factory=dict)
     input_schema: Optional[Dict[str, Any]] = None
@@ -605,8 +763,17 @@ async def create_provider(req: ProviderCreateRequest):
         import uuid
         data["id"] = f"prov_{uuid.uuid4().hex[:8]}"
     else:
-        if data["id"] in ("comfyui", "siliconflow", "dashscope", "openai_compat", "minimax", "elevenlabs", "cosyvoice", "gpt_sovits", "comfyui_video", "minimax_video"):
-            raise HTTPException(status_code=400, detail=f"id {data['id']} 与内置冲突")
+        # 与内置源冲突检测：动态查三注册表（不写死 id 名单）
+        try:
+            from app.providers.image.registry import image_registry as _ir
+            from app.providers.video.registry import video_registry as _vr
+            from app.providers.audio.registry import audio_registry as _ar
+            if _ir.get(data["id"]) or _vr.get(data["id"]) or _ar.get(data["id"]):
+                raise HTTPException(status_code=400, detail=f"id {data['id']} 与内置源冲突")
+        except HTTPException:
+            raise
+        except Exception:
+            pass
     if custom_provider_manager.get_definition(data["id"]):
         raise HTTPException(status_code=409, detail=f"Provider 已存在: {data['id']}")
     if req.api_key:
@@ -617,10 +784,33 @@ async def create_provider(req: ProviderCreateRequest):
         data["auth"] = {"type": "none", "key_env": None, "prefix": "Bearer "}
     try:
         pd = ProviderDefinition.model_validate(data)
-        if not pd.params_schema or not pd.params_schema.get("properties"):
-            pd.params_schema = _default_params_schema(pd.kind)
-        if not pd.input_schema or not pd.input_schema.get("properties"):
-            pd.input_schema = _default_input_schema(pd.kind)
+        # 代码型 provider 不自动套通用模板，避免与真实 API 不一致（见截图问题）
+        if pd.provider_type == "code":
+            if not pd.params_schema or not pd.params_schema.get("properties"):
+                # 优先从代码尾 # PARAMS_SCHEMA 提取真实枚举
+                extracted = _extract_params_schema_from_code(pd.code or "")
+                if extracted:
+                    pd.params_schema = _enrich_params_schema(extracted, pd.kind)
+                elif pd.kind == "video":
+                    # 最小可用模板：与截图真实 API 一致（4 分辨率，无 aspect_ratio/fps，带 seed）
+                    pd.params_schema = {
+                        "type": "object",
+                        "properties": {
+                            "resolution": {"type": "string","title": "分辨率","enum": ["480p竖","768p竖","480p横","768p横"],"default": "768p竖","description": "分辨率（竖=9:16 横=16:9）","x-category": "layout","x-visibility": "basic","x-agent": "auto","x-priority": 20},
+                            "duration": {"type": "integer","title": "时长","default": 5,"minimum": 3,"maximum": 15,"description": "时长秒 3-15","x-category": "motion","x-visibility": "basic","x-agent": "auto","x-priority": 30},
+                            "seed": {"type": "integer","title": "随机种子","description": "随机种子，留空随机","x-category": "quality","x-visibility": "advanced","x-agent": "manual","x-priority": 99}
+                        }
+                    }
+                else:
+                    pd.params_schema = _default_params_schema(pd.kind)
+            if not pd.input_schema or not pd.input_schema.get("properties"):
+                # 代码型 input 若未声明，尝试从代码 infer，或使用含 reference_audios 的新默认
+                pd.input_schema = _default_input_schema(pd.kind)
+        else:
+            if not pd.params_schema or not pd.params_schema.get("properties"):
+                pd.params_schema = _default_params_schema(pd.kind)
+            if not pd.input_schema or not pd.input_schema.get("properties"):
+                pd.input_schema = _default_input_schema(pd.kind)
         if not pd.output_schema or not pd.output_schema.get("properties"):
             pd.output_schema = _default_output_schema(pd.kind)
         # 规范化 code_entry
@@ -676,6 +866,17 @@ async def update_provider(provider_id: str, body: Dict[str, Any] = Body(...)):
             ast.parse(body["code"])
         except SyntaxError as e:
             raise HTTPException(status_code=400, detail=f"Python 语法错误: {e}")
+    # 沙箱体检（先验后存）：坏码直接打回，避免改码后服务崩溃/变砖
+    if "code" in body and body.get("code"):
+        from app.providers.generic.code_provider import compile_check_code as _ccc_rest
+        _lang_rest = body.get("language") or pd.language or "python"
+        _trusted_rest = body.get("trusted", pd.trusted)
+        if isinstance(_trusted_rest, str):
+            _trusted_rest = _trusted_rest.strip().lower() in ("1", "true", "yes", "on")
+        _cc_rest = _ccc_rest(_lang_rest, body["code"], body.get("code_entry") or pd.code_entry or "generate",
+                             trusted=bool(_trusted_rest))
+        if not _cc_rest.get("ok"):
+            raise HTTPException(status_code=400, detail=f"代码未通过沙箱体检，已拒绝保存: {_cc_rest.get('error')}")
     current = pd.model_dump()
     # 深度合并
     for k, v in body.items():
@@ -683,10 +884,26 @@ async def update_provider(provider_id: str, body: Dict[str, Any] = Body(...)):
             current[k] = {**(current.get(k) or {}), **v}
         else:
             current[k] = v
+    # 若更新了 code 且未显式传 params_schema，尝试从新 code 尾注释提取真实 schema 覆盖通用残留
+    if "code" in body and "params_schema" not in body:
+        try:
+            ext = _extract_params_schema_from_code(body["code"] or "")
+            if ext:
+                current["params_schema"] = _enrich_params_schema(ext, current.get("kind", pd.kind))
+        except Exception:
+            pass
+    # 若更新了 code 且未显式传 input_schema，且新 input 缺 reference_audios，尝试保留旧 input 的扩展字段
+    # （由前端升级接口手动传 input_schema 覆盖，此处不自动清理）
     # 若更新了 code，强制标记非 legacy
     if "code" in body:
         current["legacy_json_mode"] = False
         current["provider_type"] = "code"
+    # 统一 enrich，保证 x-* 完整（尤其手动修正后的 schema）
+    if current.get("params_schema") and isinstance(current["params_schema"], dict) and current["params_schema"].get("properties"):
+        try:
+            current["params_schema"] = _enrich_params_schema(current["params_schema"], current.get("kind", pd.kind))
+        except Exception:
+            pass
     try:
         updated = ProviderDefinition.model_validate(current)
     except Exception as e:
@@ -815,6 +1032,7 @@ class ProviderImportRequest(BaseModel):
     api_key: Optional[str] = None
     language: Optional[str] = "python"  # python | javascript
     definition: Optional[Dict[str, Any]] = None
+    trusted: bool = False  # A档可信开关
 
 
 @router.post("/providers/import")
@@ -906,6 +1124,7 @@ async def import_provider_from_doc(req: ProviderImportRequest):
             api_key=req.api_key,
             doc_text=doc_content,
             doc_url=req.doc_url or "",
+            trusted=bool(getattr(req, "trusted", False)),
         )
         return {"status": "success" if created["compile_check"].get("ok") else "compile_failed",
                 "provider": created["provider"], "mode": "llm_code", "code": created["code"],

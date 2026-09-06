@@ -1,0 +1,157 @@
+{
+  "id": "prov_e3a19229",
+  "name": "AutoDL H3 文生视频",
+  "display_name": null,
+  "kind": "video",
+  "provider_type": "code",
+  "description": "由导演直接提供代码（python）",
+  "icon": "Zap",
+  "scope": "global",
+  "project_id": null,
+  "builtin": false,
+  "enabled": true,
+  "language": "python",
+  "code": "import httpx\n\nasync def generate(ctx, api):\n    BASE = \"https://autodl.art/api/v1\"\n    WORKFLOW_ID = \"minimax_h3_lightx2v_no_pic\"\n    API_KEY = ctx.get(\"api_key\") or \"3jfV2WXEzzGkSW1gcuZwAtTAMbDhruqwgphMu9mXQ5EIKapd\"\n    headers = {\"Authorization\": API_KEY, \"Content-Type\": \"application/json\"}\n\n    _RES_MAP = {\n        \"480p\": \"480p竖\", \"720p\": \"720p竖\", \"1080p\": \"1080p竖\",\n        \"480p竖\": \"480p竖\", \"480p横\": \"480p横\",\n        \"720p竖\": \"720p竖\", \"720p横\": \"720p横\",\n        \"1080p竖\": \"1080p竖\", \"1080p横\": \"1080p横\",\n    }\n\n    dyn = ctx.get(\"dynamic_inputs\") or {}\n    prompt = (ctx.get(\"prompt\") or \"\").strip()\n    task_id = (ctx.get(\"task_id\") or dyn.get(\"task_id\") or \"\").strip()\n\n    # —— 查询模式（秒回，不许 sleep）——\n    if task_id and not prompt:\n        async with httpx.AsyncClient(timeout=15) as client:\n            r = await client.get(f\"{BASE}/comfyui/comfyui_workflow/result/{task_id}\", headers=headers)\n            r.raise_for_status()\n            data = (r.json() or {}).get(\"data\", {}) or {}\n            status = str(data.get(\"status\") or \"\").upper()\n            url = None\n            for item in (data.get(\"results\") or []):\n                if isinstance(item, dict) and item.get(\"type\") == \"video\" and item.get(\"url\"):\n                    url = item[\"url\"]\n                    break\n            if not url and data.get(\"results\"):\n                first = data[\"results\"][0]\n                url = first.get(\"url\") if isinstance(first, dict) else (first if isinstance(first, str) else None)\n            if url:\n                return {\"video_url\": url, \"status\": data.get(\"status\"), \"task_id\": task_id}\n            if status in (\"FAILED\", \"ERROR\", \"FAIL\", \"CANCELLED\"):\n                raise RuntimeError(f\"AutoDL 任务失败 task_id={task_id}: {str(data)[:300]}\")\n            return {\"video_url\": None, \"status\": data.get(\"status\") or \"QUEUED\", \"task_id\": task_id}\n\n    if not prompt:\n        raise ValueError(\"缺少 prompt\")\n\n    try:\n        duration = max(3, min(10, int(ctx.get(\"duration\") or 5)))\n    except (ValueError, TypeError):\n        duration = 5\n    body = {\n        \"prompt\": prompt,\n        \"duration\": duration,\n        \"resolution\": _RES_MAP.get(ctx.get(\"resolution\") or \"480p竖\", \"480p竖\"),\n    }\n\n    # 首帧/参考图/尾帧 → ref_image_0..8（保序去重；仅公网 http(s)）\n    ordered = []\n    for k in (\"first_frame\", \"first_frame_url\"):\n        v = ctx.get(k) or dyn.get(k)\n        if isinstance(v, str) and v.startswith((\"http://\", \"https://\", \"data:\")):\n            ordered.append(v)\n            break\n    for u in (ctx.get(\"reference_images\") or dyn.get(\"reference_images\") or []):\n        if isinstance(u, str) and u.startswith(\"http\"):\n            ordered.append(u)\n    for k in (\"last_frame\", \"last_frame_url\"):\n        v = ctx.get(k) or dyn.get(k)\n        if isinstance(v, str) and v.startswith((\"http://\", \"https://\", \"data:\")):\n            ordered.append(v)\n            break\n    seen, uniq = set(), []\n    for u in ordered:\n        if u not in seen:\n            seen.add(u)\n            uniq.append(u)\n    for i, u in enumerate(uniq[:9]):\n        body[f\"ref_image_{i}\"] = u\n\n    # —— 提交即返（不许轮询：外层 40s 即超时，框架后台轮询接管）——\n    async with httpx.AsyncClient(timeout=20) as client:\n        r = await client.post(f\"{BASE}/comfyui/comfyui_workflow/{WORKFLOW_ID}\", json=body, headers=headers)\n        r.raise_for_status()\n        resp = r.json() or {}\n        if resp.get(\"code\") not in (None, \"Success\", \"success\"):\n            raise RuntimeError(f\"AutoDL 提交失败: {str(resp)[:400]}\")\n        new_id = (resp.get(\"data\") or {}).get(\"task_id\")\n        if not new_id:\n            raise RuntimeError(f\"AutoDL 未返回 task_id: {str(resp)[:400]}\")\n        return {\"video_url\": None, \"task_id\": new_id, \"status\": \"SUBMITTED\"}\n",
+  "code_entry": "generate",
+  "code_timeout": 600,
+  "trusted": false,
+  "transport": {
+    "method": "POST",
+    "url": "",
+    "headers": {},
+    "query": {},
+    "timeout": 60
+  },
+  "auth": {
+    "type": "none",
+    "header_name": "Authorization",
+    "query_name": "api_key",
+    "key_env": null,
+    "prefix": "Bearer "
+  },
+  "mapping": {
+    "request_template": null,
+    "response_mappings": {}
+  },
+  "health_check": {
+    "url": null,
+    "method": "GET",
+    "expect_status": 200,
+    "test_payload": null
+  },
+  "legacy_json_mode": false,
+  "models": [],
+  "default_model": null,
+  "params_schema": {
+    "type": "object",
+    "properties": {
+      "duration": {
+        "type": "integer",
+        "title": "时长",
+        "default": 5,
+        "minimum": 3,
+        "maximum": 10,
+        "description": "视频时长 3-10 秒",
+        "x-category": "motion",
+        "x-visibility": "basic",
+        "x-agent": "auto",
+        "x-priority": 30
+      },
+      "resolution": {
+        "type": "string",
+        "title": "分辨率",
+        "enum": [
+          "480p竖",
+          "480p横",
+          "720p竖",
+          "720p横",
+          "1080p竖",
+          "1080p横"
+        ],
+        "default": "480p竖",
+        "description": "AutoDL 真实档位，竖=9:16 横=16:9",
+        "x-category": "layout",
+        "x-visibility": "basic",
+        "x-agent": "auto",
+        "x-priority": 20
+      },
+      "workflow_id": {
+        "type": "string",
+        "title": "工作流ID",
+        "default": "minimax_h3_lightx2v_no_pic",
+        "description": "AutoDL 工作流 ID",
+        "x-category": "advanced",
+        "x-visibility": "advanced",
+        "x-agent": "suggest",
+        "x-priority": 50
+      },
+      "seed": {
+        "type": "integer",
+        "title": "随机种子",
+        "description": "随机种子",
+        "x-category": "quality",
+        "x-visibility": "advanced",
+        "x-agent": "manual",
+        "x-priority": 99
+      }
+    }
+  },
+  "default_params": {},
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "description": "运动描述",
+        "x-handle": "text"
+      },
+      "first_frame": {
+        "type": "string",
+        "format": "uri",
+        "description": "首帧",
+        "x-handle": "image"
+      },
+      "reference_images": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "format": "uri"
+        },
+        "description": "参考集，最多9张",
+        "x-handle": "image",
+        "maxItems": 9,
+        "minItems": 0
+      },
+      "last_frame": {
+        "type": "string",
+        "format": "uri",
+        "description": "尾帧",
+        "x-handle": "image"
+      }
+    },
+    "required": [
+      "prompt"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "video_url": {
+        "type": "string",
+        "format": "uri",
+        "x-handle": "video"
+      }
+    },
+    "required": [
+      "video_url"
+    ]
+  },
+  "workflow_id": null,
+  "workflow_hash": null,
+  "workflow_exposed": null,
+  "doc_url": null,
+  "doc_text": "",
+  "created_at": "2026-09-02T09:36:55.098476",
+  "updated_at": "2026-09-03T16:01:52.947794",
+  "raw_api_doc": ""
+}

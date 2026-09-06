@@ -115,6 +115,16 @@ export interface StoryboardShot {
   camera_roll_deg?: number;
   cast_layout?: CastLayout;
   props_config?: StagePropType[];
+  // 3D 导演台预演落盘（与 AI 首帧 image_url / 成片 video_url 解耦，避免互相覆盖）
+  previz_url?: string; // 白模截图（PNG dataURL 或资产 URL），供分镜参考与白模约束生成
+  previz_video_url?: string; // 动态预演录制（webm），走位+运镜同节奏
+  motion_speed?: '0.5x' | '1.0x' | '1.5x' | '2.0x'; // 运镜模拟速度
+  walk_path?: Array<{ x: number; z: number }>; // 主角地面走位路径点
+  canvas_id?: string; // 隶属画布（分镜右键 → 新画布/隶属画布，视频在该画布生成后回写）
+  lighting_config?: { // 基础三点光（环境氛围光由影棚预设叠加，不在此）
+    keyIntensity: number; keyAzimuth: number; keyTemp: 'neon' | 'cold' | 'warm' | 'moon';
+    rimIntensity: number; ambientIntensity: number; exposure: number;
+  };
   // P0+: Provider 驱动落盘
   image_provider?: string;
   video_provider?: string;
@@ -208,7 +218,7 @@ export interface SkillExecutionResult {
   modified_data?: Record<string, any>;
 }
 
-export type AssetCategory = 'character' | 'scene' | 'prop' | 'background' | 'effect' | 'ui' | 'other';
+export type AssetCategory = 'character' | 'scene' | 'prop' | 'background' | 'effect' | 'ui' | 'previz' | 'other';
 export type AssetStatus = 'draft' | 'approved' | 'archived';
 
 export interface Asset {

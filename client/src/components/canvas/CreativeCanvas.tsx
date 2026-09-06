@@ -14,7 +14,7 @@ import { executeAgentNode } from './hooks/nodeAgentExecutor';
 import { ShotCardNode } from './nodes/ShotCardNode';
 import { ComfyWorkflowNode } from './nodes/ComfyWorkflowNode';
 import { BriefNode, ScriptSplitNode } from './nodes/BriefNode';
-import { AssetNode, Director3DNode } from './nodes/AssetNode';
+import { AssetNode } from './nodes/AssetNode';
 import { VideoNode } from './nodes/VideoNode';
 import { TTSNode } from './nodes/TTSNode';
 import { TimelineExportNode } from './nodes/TimelineExportNode';
@@ -24,6 +24,8 @@ import { PromptNode, ImageNode, VideoGenNode, AudioNode, Director3DMinimalNode, 
 import { FloatingAgentPromptBar } from './FloatingAgentPromptBar';
 import { WorkflowInspectorModal } from '../workflow/WorkflowInspectorModal';
 import { getNodeSpec } from './nodeRegistry';
+import { CanvasManagerModal } from './CanvasManagerModal';
+import { buildShotReferenceInputs } from '../storyboard/shotReference';
 
 const nodeTypes: any = {
   // 6 核心 Agent 节点
@@ -87,11 +89,21 @@ const InnerCanvas: React.FC = () => {
   const [assetQuery, setAssetQuery] = useState('');
   const [inspectWfId, setInspectWfId] = useState('');
   const [saving, setSaving] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [executingNodeIds, setExecutingNodeIds] = useState<Set<string>>(new Set());
+  const isGenerating = executingNodeIds.size > 0;
   const [isLoading, setIsLoading] = useState(true);
+  // 多画布：隶属画布切换（默认 default；分镜右键可新建/隶属）
+  const [canvasId, setCanvasId] = useState<string>('default');
+  const [canvasList, setCanvasList] = useState<Array<{ id: string; name: string; updated_at: string; node_count: number }>>([]);
+  const [showManager, setShowManager] = useState(false);
+  const canvasIdRef = useRef<string>('default');
+  useEffect(() => { canvasIdRef.current = canvasId; }, [canvasId]);
+  // 切换/新建/删除清空时的单次保存抑制，避免空画布写回旧 id 复活已删画布
+  const suppressSaveRef = useRef(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const loadedRef = useRef(false);
   const pidRef = useRef<string | null>(null);
+  const canvasRef = useRef<string>('default');
   const [isDragging, setIsDragging] = useState(false);
 
   useEffect(() => {
@@ -100,24 +112,36 @@ const InnerCanvas: React.FC = () => {
     return () => window.removeEventListener('open-workflow-inspector', h as any);
   }, []);
 
-  // 加载画布
+  // 加载画布（项目/画布切换时重载）
   useEffect(() => {
     if (!pid) { setIsLoading(false); return; }
-    if (pidRef.current !== pid) {
+    if (pidRef.current !== pid || canvasRef.current !== canvasId) {
       pidRef.current = pid;
+      canvasRef.current = canvasId;
       loadedRef.current = false;
       setIsLoading(true);
+      apiService.listProjectCanvases(pid).then(r => setCanvasList(r.canvases || [])).catch(() => {});
     }
     if (loadedRef.current) { setIsLoading(false); return; }
     loadedRef.current = true;
     setIsLoading(true);
     const timer = setTimeout(() => setIsLoading(false), 3000);
-    loadCanvas().then(snap => {
+    loadCanvas(canvasId).then(snap => {
       if (snap && Array.isArray(snap.nodes)) {
-        const withHandlers = snap.nodes.map((n: any) => ({
-          ...n,
-          data: { ...n.data, onUpdate: handleNodeUpdate, onExecute: handleNodeExecute }
-        }));
+        const withHandlers = snap.nodes.map((n: any) => {
+          const nd = { ...(n.data || {}) };
+          // 重启/重载复位：running 是进程内态，持久化后重载必为幽灵“执行中”；复位 idle 但保留 _taskId 以便恢复查询
+          if (nd?.agent_state?.status === 'running') {
+            const tid = nd._taskId || nd._last_agent_plan?.task_id || '';
+            nd.agent_state = {
+              status: 'idle', tool: nd.agent_state?.tool, provider_id: nd.agent_state?.provider_id,
+              error: tid ? `服务中断前任务状态未知，task_id=${tid} 已保留，可重新查询` : '服务中断前任务状态未知，已复位为空闲',
+              updated_at: new Date().toISOString(),
+            };
+            nd._polling = false;
+          }
+          return { ...n, data: { ...nd, onUpdate: handleNodeUpdate, onExecute: handleNodeExecute } };
+        });
         setNodes(withHandlers);
         if (Array.isArray(snap.edges)) setEdges(snap.edges);
         if (withHandlers.length > 0 && !selectedNodeId) {
@@ -126,6 +150,10 @@ const InnerCanvas: React.FC = () => {
       }
       clearTimeout(timer);
       setIsLoading(false);
+      // 分镜导入在画布切换后到达：载入完成再建子图并自动生成
+      if (pendingBuildRef.current) {
+        setTimeout(() => { try { continuePendingBuildRef.current?.(); } catch {} }, 600);
+      }
     }).catch((e) => {
       console.warn('[Canvas] load failed', e);
       clearTimeout(timer);
@@ -162,13 +190,14 @@ const InnerCanvas: React.FC = () => {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // 800ms 防抖同步
+  // 800ms 防抖同步（带当前画布 id）
   useEffect(() => {
     if (!pid || !loadedRef.current) return;
+    if (suppressSaveRef.current) { suppressSaveRef.current = false; return; }
     let vp: any = {};
     try { vp = getViewport(); } catch {}
     const snap = { nodes, edges, viewport: vp, updated_at: new Date().toISOString(), version: 2 };
-    debouncedSave(snap);
+    debouncedSave(snap, canvasIdRef.current);
     try { useCanvasStore.getState().setFromFlow(nodes as any, edges as any); } catch {}
   }, [nodes, edges]);
 
@@ -180,79 +209,39 @@ const InnerCanvas: React.FC = () => {
   const handleNodeUpdate = useCallback((nodeId: string, patch: any) => {
     setNodes(nds => {
       let next = nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, ...patch, onUpdate: handleNodeUpdate, onExecute: handleNodeExecute } } : n);
-      const propagatable = patch.image_url || patch.result_url || patch.video_url || patch.audio_url || patch.prompt || patch.text || patch.reference || patch.first_frame || patch.last_frame || patch.reference_images || patch.first_frame_url || patch.last_frame_url || patch.ref_audio || patch.ref_audio_path;
+      // 产出/输入键变化才向下游传播；键 → 语义一律来自「边上的 targetHandle + 目标节点结构声明」，不再写死别名组
+      const OUTPUT_KEYS = ['image_url', 'result_url', 'video_url', 'audio_url', 'prompt', 'text', 'camera_prompt', 'reference_images', 'reference', 'first_frame', 'last_frame', 'ref_audio'];
+      const propagatable = OUTPUT_KEYS.some(k => patch[k] !== undefined);
       if (propagatable) {
+        const srcData = next.find(n => n.id === nodeId)?.data as any;
         const downstreamEdges = (edgesRef.current || edges).filter((e: any) => e.source === nodeId);
         for (const e of downstreamEdges) {
           const tgtIdx = next.findIndex(n => n.id === e.target);
           if (tgtIdx === -1) continue;
           const tgt = next[tgtIdx];
-          const srcData = next.find(n => n.id === nodeId)?.data as any;
-          const patchDown: any = { _upstream: { ...((tgt.data as any)._upstream || {}) } };
+          const tgtSpec = getNodeSpec(tgt.type || '');
           const th = (e as any).targetHandle || '';
-          const urlImg = patch.image_url || patch.result_url || srcData?.image_url || srcData?.result_url;
-          // first_frame 精准映射
-          if ((patch.image_url || patch.result_url || patch.first_frame || patch.first_frame_url) && (th === 'first_frame' || th === 'first_frame_url' || (th === 'image' && tgt.type === 'video'))) {
-            const url = patch.first_frame || patch.first_frame_url || urlImg;
-            if (url) { patchDown.first_frame = url; patchDown.first_frame_url = url; patchDown.image_url = url; patchDown._upstream.first_frame = url; patchDown._upstream.first_frame_url = url; }
-          } else if (th === 'last_frame' || th === 'last_frame_url' || patch.last_frame || patch.last_frame_url) {
-            const url = patch.last_frame || patch.last_frame_url || srcData?.last_frame;
-            if (url) { patchDown.last_frame = url; patchDown.last_frame_url = url; patchDown._upstream.last_frame = url; patchDown._upstream.last_frame_url = url; }
-          } else if (patch.reference_images || patch.reference || th === 'reference_images' || th === 'reference' || th === 'images') {
-            const arr = patch.reference_images || (patch.reference ? [patch.reference] : null) || (patch.image_url ? [patch.image_url] : null);
-            if (arr) {
-              const tgtExisting = (tgt.data as any).reference_images || [];
-              const merged = Array.isArray(arr) ? arr : [arr];
-              const dedup = [...tgtExisting];
-              for (const u of merged) if (u && !dedup.includes(u)) dedup.push(u);
-              patchDown.reference_images = dedup.length ? dedup : merged;
-              patchDown.reference = merged[0];
-              patchDown._upstream.reference_images = patchDown.reference_images;
-              patchDown._upstream.reference = merged[0];
-            }
-            if (urlImg && !patchDown.reference_images) {
-              patchDown.reference_images = [urlImg];
-              patchDown._upstream.reference_images = [urlImg];
-            }
-          } else if (urlImg) {
-            // 兜底：无句柄时按目标类型推断
-            if (tgt.type === 'video' && !(tgt.data as any).first_frame) {
-              patchDown.first_frame = urlImg; patchDown.first_frame_url = urlImg;
-              patchDown._upstream.first_frame = urlImg;
-            } else {
-              patchDown.reference_images = [urlImg];
-              patchDown.reference = urlImg;
-              patchDown._upstream.reference_images = [urlImg];
-            }
-            patchDown.image_url = urlImg;
-            patchDown._upstream.image_url = urlImg;
-            patchDown._upstream.reference = urlImg;
+          const inDef = tgtSpec?.inputs.find(h => h.id === th) || (th ? undefined : tgtSpec?.inputs.find(h => ['image','video','audio','text'].includes(h.type)));
+          const hType = inDef?.type || '';
+          const patchDown: any = { _upstream: { ...((tgt.data as any)._upstream || {}) } };
+          const setKey = (k: string, v: any) => { if (v !== undefined && v !== null) { patchDown[k] = v; patchDown._upstream[k] = v; } };
+          if (hType === 'image') {
+            const img = patch.image_url || patch.result_url || patch.first_frame || patch.reference || (Array.isArray(patch.reference_images) ? patch.reference_images[0] : patch.reference_images) || srcData?.image_url || srcData?.result_url;
+            const arr = Array.isArray(patch.reference_images) ? patch.reference_images : undefined;
+            if (arr && arr.length > 1 && (th || '').match(/images|reference/)) setKey(inDef!.id, arr);
+            else if (img) setKey(inDef!.id, img);
+          } else if (hType === 'video') {
+            setKey(inDef!.id, patch.video_url || srcData?.video_url);
+          } else if (hType === 'audio') {
+            setKey(inDef!.id, patch.audio_url || patch.ref_audio || srcData?.audio_url);
+          } else if (hType === 'text') {
+            const txt = patch.prompt ?? patch.text ?? patch.camera_prompt ?? srcData?.prompt ?? srcData?.text ?? srcData?.camera_prompt;
+            setKey(inDef!.id, typeof txt === 'string' ? txt : undefined);
           }
-          // 参考音频透传
-          const audioUrl = patch.audio_url || patch.ref_audio || patch.ref_audio_path || srcData?.audio_url;
-          if (patch.audio_url || patch.ref_audio || patch.ref_audio_path) {
-            if (th === 'ref_audio' || th === 'reference_audios' || th === 'audio' || tgt.type === 'audio') {
-              patchDown.ref_audio = audioUrl; patchDown.ref_audio_path = audioUrl;
-              patchDown.audio_url = audioUrl;
-              patchDown._upstream.ref_audio = audioUrl;
-            }
-            patchDown.audio_url = audioUrl;
-            patchDown._upstream.audio_url = audioUrl;
-          }
-          if (patch.video_url) {
-            patchDown.video_url = patch.video_url;
-            patchDown._upstream.video_url = patch.video_url;
-          }
-          if (patch.prompt || patch.text) {
-            const txt = patch.prompt || patch.text || srcData?.prompt || srcData?.text;
-            if (th === 'prompt' || th === 'text' || !th || tgt.type === 'image' || tgt.type === 'video' || tgt.type === 'audio' || tgt.type === 'prompt') {
-              patchDown.prompt = txt; patchDown.text = txt; patchDown.image_prompt = txt; patchDown.video_prompt = txt;
-            }
-            patchDown._upstream.prompt = txt; patchDown._upstream.text = txt;
-          }
-          // 透传 params 变更（如 aspect_ratio/duration 等）
-          for (const pk of ['aspect_ratio','resolution','steps','cfg','duration','fps','seed','model','provider','provider_id','workflow_id','voice_id','emotion','speed','pitch']) {
-            if (patch[pk] !== undefined) { patchDown[pk] = patch[pk]; patchDown._upstream[pk] = patch[pk]; }
+          // params 类键（源声明的入参）原样透传，不在此层做语义解释
+          for (const [k, v] of Object.entries(patch)) {
+            if (OUTPUT_KEYS.includes(k) || k === '_upstream') continue;
+            if (v !== undefined) { patchDown[k] = v; patchDown._upstream[k] = v; }
           }
           next[tgtIdx] = { ...tgt, data: { ...tgt.data, ...patchDown, onUpdate: handleNodeUpdate, onExecute: handleNodeExecute, _upstream: patchDown._upstream } } as any;
         }
@@ -262,12 +251,12 @@ const InnerCanvas: React.FC = () => {
   }, [edges]);
 
   // 执行节点生成 — 统一口径：image/video/audio 走 nodeAgentExecutor（MCP provider_* + 轮询 + agent_state），
-  // prompt/director3d/旧节点 走各自通道，彻底消除双轨分叉
+  // prompt/director3d/旧节点 走各自通道，彻底消除双轨分叉；按 nodeId 独立异步
   const handleNodeExecute = useCallback(async (nodeId: string, customData?: any) => {
     const curNodes = nodesRef.current || nodes;
     const node = curNodes.find(n => n.id === nodeId);
     if (!node) return;
-    setIsGenerating(true);
+    setExecutingNodeIds(prev => new Set(prev).add(nodeId));
     try {
       if (node.type === 'prompt') {
         const d: any = { ...node.data, ...(customData || {}) };
@@ -303,7 +292,8 @@ const InnerCanvas: React.FC = () => {
         await executeAgentNode({ node, override: customData, updateNodeData: handleNodeUpdate });
       } else if (node.type === 'director3d') {
         const d: any = { ...node.data, ...(customData || {}) };
-        const res = await apiService.callMcpTool('director_3d_stage_plan', { framing: d.framing || 'medium', motion: d.motion || 'push_in', pose: d.pose || 'stand', focal_length_mm: d.focal_length_mm || 35, camera_roll_deg: d.camera_roll_deg || 0 });
+        // 与 3D 舞台 / useDirectorAgent 同口径 8 参数（之前缺 cast_layout/speed 会被后端静默回退）
+        const res = await apiService.callMcpTool('director_3d_stage_plan', { framing: d.framing || 'medium', motion: d.motion || 'push_in', pose: d.pose || 'stand', focal_length_mm: d.focal_length_mm || 35, camera_roll_deg: d.camera_roll_deg || 0, cast_layout: d.cast_layout || 'solo', speed: d.speed || '1.0x', ai_directive: d.ai_directive || '' });
         const r = (res as any)?.result || res;
         handleNodeUpdate(nodeId, { minimax_camera_prompt: r.minimax_camera_prompt || JSON.stringify(r).slice(0, 200), ...r });
       } else {
@@ -326,7 +316,7 @@ const InnerCanvas: React.FC = () => {
     } catch (e: any) {
       alert(`生成失败: ${e.message || e}`);
     } finally {
-      setIsGenerating(false);
+      setExecutingNodeIds(prev => { const n = new Set(prev); n.delete(nodeId); return n; });
     }
   }, [nodes]);
 
@@ -364,47 +354,37 @@ const InnerCanvas: React.FC = () => {
         const tgtHandle = (params.targetHandle || '') as string;
         const patch: any = {};
         const srcType = srcNode.type || '';
+        // 目标句柄类型 = 节点结构声明（nodeRegistry），值写回一律按句柄键本身，不做别名镜像
+        const tgtSpec = getNodeSpec(tgtNode.type || '');
+        const handleTypeOf = (hid: string): string => tgtSpec?.inputs.find(h => h.id === hid)?.type || '';
+        const ht = handleTypeOf(tgtHandle);
         if (['prompt', 'text-prompt', 'brief'].includes(srcType)) {
           const txt = srcData.prompt || srcData.text || srcData.brief || '';
-          if (txt) { patch.prompt = txt; patch.text = txt; patch.image_prompt = txt; patch.video_prompt = txt; }
+          // 文本按目标句柄键写入；无句柄信息时按目标节点声明的首个 text 输入
+          const key = tgtHandle || tgtSpec?.inputs.find(h => h.type === 'text')?.id || 'prompt';
+          if (txt) patch[key] = txt;
         }
-        if (['image', 'shot-card', 'comfy-workflow', 'load-image', 'load-image-batch'].includes(srcType)) {
-          const url = srcData.image_url || srcData.result_url || srcData.image || srcData.url || srcData.file_url;
-          const urlArr = srcData.reference_images || srcData.images;
-          if (tgtHandle === 'first_frame' || tgtHandle === 'first_frame_url') {
-            if (url) patch.first_frame = url, patch.first_frame_url = url;
-          } else if (tgtHandle === 'last_frame' || tgtHandle === 'last_frame_url') {
-            if (url) patch.last_frame = url, patch.last_frame_url = url;
-          } else if (tgtHandle === 'reference_images' || tgtHandle === 'images') {
-            const arr = Array.isArray(urlArr) && urlArr.length ? urlArr : url ? [url] : [];
-            if (arr.length) {
-              const existing = (tgtNode.data as any).reference_images || [];
-              patch.reference_images = [...existing, ...arr.filter((u: string) => !existing.includes(u))];
-              patch.reference = arr[0];
-            }
+        const srcMedia = srcData.image_url || srcData.result_url || srcData.image || srcData.url || srcData.file_url;
+        if (['image', 'shot-card', 'comfy-workflow', 'load-image', 'load-image-batch'].includes(srcType) && srcMedia) {
+          if (ht === 'image') {
+            const urlArr = Array.isArray(srcData.reference_images) ? srcData.reference_images : (Array.isArray(srcData.images) ? srcData.images : [srcMedia]);
+            const existing = Array.isArray((tgtNode.data as any)[tgtHandle]) ? (tgtNode.data as any)[tgtHandle] : [];
+            const merged = [...existing, ...urlArr.filter((u: string) => !existing.includes(u))];
+            patch[tgtHandle || 'reference_images'] = urlArr.length > 1 || (tgtHandle && Array.isArray((tgtNode.data as any)[tgtHandle])) ? merged : srcMedia;
           } else {
-            // 兜底：按 target 类型推断
-            if (url) {
-              if (tgtNode.type === 'video' && !(tgtNode.data as any).first_frame && tgtHandle !== 'reference_images') {
-                patch.first_frame = url; patch.first_frame_url = url;
-              } else {
-                const existing = (tgtNode.data as any).reference_images || [];
-                patch.reference_images = [...existing, url].filter((v,i,a)=>a.indexOf(v)===i);
-                patch.reference = url;
-              }
-              patch.image_url = url;
-            }
+            patch.image_url = srcMedia;
           }
         }
         if (srcType === 'video' && srcData.video_url) {
-          if (tgtHandle === 'video' || tgtNode.type === 'export') patch.video_url = srcData.video_url;
-          else patch.video_url = srcData.video_url;
+          patch.video_url = srcData.video_url;
         }
         if (['audio', 'tts'].includes(srcType) && srcData.audio_url) {
-          if (tgtHandle === 'ref_audio' || tgtHandle === 'reference_audios' || tgtNode.type === 'audio') {
-            patch.ref_audio = srcData.audio_url; patch.ref_audio_path = srcData.audio_url;
-          }
-          patch.audio_url = srcData.audio_url;
+          if (ht === 'audio' && tgtHandle) patch[tgtHandle] = srcData.audio_url;
+          else patch.audio_url = srcData.audio_url;
+        }
+        if (srcType === 'director3d') {
+          const cam = srcData.camera_prompt || '';
+          if (cam) patch[tgtHandle || 'camera_prompt'] = cam;
         }
         // Provider 节点透传
         if (['provider-image','provider-video','provider-audio','provider','provider-llm'].includes(srcType)) {
@@ -575,6 +555,190 @@ const InnerCanvas: React.FC = () => {
     return () => window.removeEventListener('canvas-export-shots', h as any);
   }, [nodes, pid, project]);
 
+  // 分镜 → 画布：新建画布 / 隶属现有画布 → 装配 prompt/导演/视频子图 → 自动生成视频并回写分镜。
+  // 不再是“往当前画布追加一个导演节点”。复杂 ComfyUI 工作流与自定义源在节点内照常换源即用。
+  const importedShotNonce = useRef<number>(0);
+  const pendingBuildRef = useRef<any>(null);
+  const importRunnerRef = useRef<(p: any) => void>(() => {});
+  const continuePendingBuildRef = useRef<() => void>(() => {});
+
+  const runShotOnCanvas = async (payload: any, targetCid: string, targetName?: string) => {
+    const shot = payload?.shot;
+    if (!shot?.id || !pid) return;
+    const proj = useProjectStore.getState().project;
+    const refs = buildShotReferenceInputs(shot, proj || { characters: [] }, 'video');
+    const vprompt = shot.video_prompt || shot.action_desc || shot.image_prompt || '';
+    const camMatch = /\[(?:Camera|运镜):[^\]]+\]/.exec(vprompt);
+    const camPrompt = camMatch ? camMatch[0] : '';
+    const curNodes = nodesRef.current || [];
+    const maxX = curNodes.reduce((m: number, n: any) => Math.max(m, n.position?.x || 0), 0);
+    const baseX = curNodes.length ? maxX + 320 : 120;
+    const baseY = 120 + (curNodes.length % 3) * 80;
+    const mk = (type: string, dx: number, dy: number, data: any) => {
+      const n = createNode(type, { x: baseX + dx, y: baseY + dy });
+      n.data = { ...n.data, ...data };
+      return n;
+    };
+    const newNodes: Node[] = [];
+    const newEdges: Edge[] = [];
+    const edge = (s: Node, sh: string, t: Node, th: string) => {
+      newEdges.push({ id: `e_${s.id}_${t.id}_${sh}_${th}`, source: s.id, target: t.id, sourceHandle: sh, targetHandle: th, type: 'smoothstep', animated: true } as any);
+    };
+    const promptNode = mk('prompt', 0, 0, { prompt: vprompt, text: vprompt });
+    newNodes.push(promptNode);
+    const dirNode = mk('director3d', 0, 240, {
+      framing: shot.camera_framing || 'medium',
+      motion: shot.camera_motion || 'push_in',
+      pose: shot.pose_preset || 'stand',
+      focal_length_mm: shot.focal_length_mm || 35,
+      camera_roll_deg: shot.camera_roll_deg || 0,
+      cast_layout: shot.cast_layout || 'solo',
+      speed: shot.motion_speed || '1.0x',
+      ai_directive: '',
+    });
+    newNodes.push(dirNode);
+    let imgNode: Node | null = null;
+    if (!shot.image_url && shot.image_prompt) {
+      imgNode = mk('image', 0, 480, { prompt: shot.image_prompt, provider_id: shot.image_provider || undefined });
+      newNodes.push(imgNode);
+    }
+    const videoNode = mk('video', 420, 120, {
+      prompt: vprompt,
+      duration: Math.round(shot.duration) || 5,
+      provider_id: shot.video_provider || undefined,
+      camera_prompt: camPrompt,
+      first_frame: shot.image_url || undefined,
+      reference_images: refs.reference_images.length ? refs.reference_images : undefined,
+    });
+    newNodes.push(videoNode);
+    edge(promptNode, 'prompt', videoNode, 'prompt');
+    edge(dirNode, 'camera_prompt', videoNode, 'camera_prompt');
+    if (imgNode) {
+      edge(promptNode, 'prompt', imgNode, 'prompt');
+      edge(imgNode, 'image', videoNode, 'first_frame');
+    }
+    setNodes(nds => [...nds, ...newNodes]);
+    setEdges(es => [...es, ...newEdges]);
+    setSelectedNodeId(videoNode.id);
+    // 隶属关系落盘 + 子图即时保存（含画布名）
+    try { useProjectStore.getState().updateShot(shot.id, { canvas_id: targetCid }); } catch {}
+    try {
+      await apiService.saveProjectCanvas(pid, { nodes: [...(nodesRef.current || []), ...newNodes], edges: [...(edgesRef.current || []), ...newEdges], version: 2 }, targetCid, targetName);
+      apiService.listProjectCanvases(pid).then(r => setCanvasList(r.canvases || [])).catch(() => {});
+    } catch {}
+    if (payload.autoRun === false) return;
+    // 无视频源不硬跑：子图已建好，提示绑源后手动执行（避免“请选择生成源”报错吓人）
+    if (!videoNode.data.provider_id) {
+      alert('子图已建好：该分镜未绑定视频源，请在视频节点内选择源后手动执行');
+      return;
+    }
+    // 自动生成：导演机位 → 视频 → 回写分镜
+    await new Promise(r => setTimeout(r, 800));
+    try { await handleNodeExecute(dirNode.id); } catch {}
+    await new Promise(r => setTimeout(r, 400));
+    await handleNodeExecute(videoNode.id);
+    const vd: any = (nodesRef.current || []).find((n: any) => n.id === videoNode.id)?.data;
+    if (vd?.video_url) {
+      try { useProjectStore.getState().updateShot(shot.id, { video_url: vd.video_url, status: 'completed' }); } catch {}
+      alert(`分镜 #${shot.shot_index || ''} 视频已生成并回写`);
+    } else {
+      alert('已在画布建好子图，视频未自动产出，请手动执行视频节点');
+    }
+  };
+
+  const processShotImport = (payload: any) => {
+    const shot = payload?.shot;
+    if (!shot?.id) return;
+    const nonce = Number(payload?.nonce || 0);
+    if (nonce && nonce === importedShotNonce.current) return;
+    if (nonce) importedShotNonce.current = nonce;
+    if (!pid) { alert('请先在 项目看板 创建/打开项目'); return; }
+    const mode = payload?.mode || 'existing';
+    if (mode === 'new') {
+      const cname = payload?.canvas_name || `分镜#${shot.shot_index || ''}画布`;
+      const cid = `cv_${Date.now().toString(36)}`;
+      pendingBuildRef.current = { payload, cid, cname };
+      suppressSaveRef.current = true;
+      setNodes([]); setEdges([]); setSelectedNodeId(null);
+      setCanvasId(cid);
+    } else {
+      const cid = payload?.canvas_id || canvasIdRef.current;
+      if (cid !== canvasIdRef.current) {
+        pendingBuildRef.current = { payload, cid };
+        switchCanvas(cid);
+      } else {
+        runShotOnCanvas(payload, cid);
+      }
+    }
+  };
+  importRunnerRef.current = processShotImport;
+  continuePendingBuildRef.current = () => {
+    const pb = pendingBuildRef.current;
+    pendingBuildRef.current = null;
+    if (!pb) return;
+    runShotOnCanvas(pb.payload, pb.cid, pb.cname);
+  };
+
+  useEffect(() => {
+    const onEvent = (e: any) => { try { importRunnerRef.current(e?.detail); } catch {} };
+    window.addEventListener('canvas-import-shot', onEvent as any);
+    // 兜底：消费分镜写入的 pending（画布当时未挂载时）
+    try {
+      const raw = localStorage.getItem('canvas_pending_shot');
+      if (raw) {
+        const payload = JSON.parse(raw);
+        localStorage.removeItem('canvas_pending_shot');
+        setTimeout(() => { try { importRunnerRef.current(payload); } catch {} }, 600);
+      }
+    } catch {}
+    return () => window.removeEventListener('canvas-import-shot', onEvent as any);
+  }, []);
+
+  // 素材库 → 画布：按素材类型装配节点（人物/场景/道具→参考图，视频→首帧，音频→复刻参考）
+  const importedAssetNonce = useRef<number>(0);
+  useEffect(() => {
+    const buildFromAsset = (payload: any) => {
+      const asset = payload?.asset;
+      if (!asset || !asset.id) return;
+      const nonce = Number(payload?.nonce || 0);
+      if (nonce && nonce === importedAssetNonce.current) return;
+      if (nonce) importedAssetNonce.current = nonce;
+      let abs = asset.file_url || '';
+      if (abs && abs.startsWith('/')) abs = 'http://127.0.0.1:8000' + abs;
+      if (!abs) return;
+      const isVideo = /\.(mp4|webm|mov)$/i.test(abs);
+      const isAudio = /\.(mp3|wav|ogg|m4a|flac)$/i.test(abs);
+      const label = asset.visual_prompt || asset.description || asset.name || '';
+      const curNodes = nodesRef.current || [];
+      const maxX = curNodes.reduce((m: number, n: any) => Math.max(m, n.position?.x || 0), 0);
+      const pos = { x: curNodes.length ? maxX + 320 : 120, y: 200 + (curNodes.length % 3) * 80 };
+      let node: Node;
+      if (isAudio) {
+        node = createNode('audio', pos);
+        node.data = { ...node.data, text: '', ref_audio: abs };
+      } else if (isVideo) {
+        node = createNode('video', pos);
+        node.data = { ...node.data, prompt: label, duration: 5, first_frame: abs };
+      } else {
+        node = createNode('image', pos);
+        node.data = { ...node.data, prompt: label, reference_images: [abs] };
+      }
+      setNodes(nds => [...nds, node]);
+      setSelectedNodeId(node.id);
+    };
+    const onEvent = (e: any) => buildFromAsset(e?.detail);
+    window.addEventListener('canvas-import-asset', onEvent as any);
+    try {
+      const raw = localStorage.getItem('canvas_pending_asset');
+      if (raw) {
+        const payload = JSON.parse(raw);
+        localStorage.removeItem('canvas_pending_asset');
+        setTimeout(() => buildFromAsset(payload), 600);
+      }
+    } catch {}
+    return () => window.removeEventListener('canvas-import-asset', onEvent as any);
+  }, []);
+
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     const type = e.dataTransfer.getData('application/canvas-nodetype');
@@ -603,7 +767,43 @@ const InnerCanvas: React.FC = () => {
   const handleManualSave = async () => {
     if (!pid) { alert('请先在 项目看板 创建/打开项目'); return; }
     setSaving(true);
-    try { await apiService.saveProjectCanvas(pid, { nodes, edges, version: 2 }); alert('画布已保存'); } catch (e: any) { alert(e.message); } finally { setSaving(false); }
+    try {
+      const nm = canvasList.find(c => c.id === canvasIdRef.current)?.name;
+      await apiService.saveProjectCanvas(pid, { nodes, edges, version: 2 }, canvasIdRef.current, nm);
+      const r = await apiService.listProjectCanvases(pid).catch(() => null);
+      if (r) setCanvasList(r.canvases || []);
+      alert('画布已保存');
+    } catch (e: any) { alert(e.message); } finally { setSaving(false); }
+  };
+
+  const currentCanvasName = canvasList.find(c => c.id === canvasId)?.name || (canvasId === 'default' ? '默认画布' : canvasId);
+
+  // 切换画布（先存当前，再载目标；目标已删时跳过保存避免复活）
+  const switchCanvas = async (cid: string, skipSave = false) => {
+    if (!pid || cid === canvasIdRef.current) return;
+    if (!skipSave) {
+      try {
+        const nm = canvasList.find(c => c.id === canvasIdRef.current)?.name;
+        await apiService.saveProjectCanvas(pid, { nodes: nodesRef.current || [], edges: edgesRef.current || [], version: 2 }, canvasIdRef.current, nm);
+      } catch {}
+    }
+    setNodes([]); setEdges([]); setSelectedNodeId(null);
+    setCanvasId(cid);
+  };
+
+  // 新建画布并切换
+  const createCanvas = async (name: string) => {
+    if (!pid) { alert('请先在 项目看板 创建/打开项目'); return null; }
+    const cid = `cv_${Date.now().toString(36)}`;
+    try {
+      await apiService.saveProjectCanvas(pid, { nodes: [], edges: [], version: 2 }, cid, name);
+      const r = await apiService.listProjectCanvases(pid).catch(() => null);
+      if (r) setCanvasList(r.canvases || []);
+    } catch (e: any) { alert(e.message); return null; }
+    suppressSaveRef.current = true;
+    setNodes([]); setEdges([]); setSelectedNodeId(null);
+    setCanvasId(cid);
+    return cid;
   };
 
   const onDragOver = (e: React.DragEvent) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; };
@@ -716,6 +916,46 @@ const InnerCanvas: React.FC = () => {
           </div>
           <div className="flex-1" />
           <div className="flex items-center gap-2">
+            <select value={canvasId} onChange={e=>switchCanvas(e.target.value)} title="隶属画布：分镜视频在此画布生成" className="px-2 py-1 rounded-full bg-surface-secondary border border-border text-xs [color:var(--color-text-main)] focus:outline-none max-w-[160px]">
+              {canvasList.length === 0 && <option value={canvasId}>{currentCanvasName}</option>}
+              {canvasList.map(c=> <option key={c.id} value={c.id}>{c.name}（{c.node_count}节点）</option>)}
+            </select>
+            <button onClick={() => setShowManager(true)} className="px-3 py-1 rounded-full bg-surface-secondary border border-border text-xs font-medium [color:var(--color-text-main)] hover:bg-surface-tertiary transition-colors" title="查看全部画布：新建/打开/改名/删除/隶属分镜">管理</button>
+            <CanvasManagerModal
+              isOpen={showManager}
+              onClose={() => setShowManager(false)}
+              projectId={pid}
+              currentId={canvasId}
+              onSwitch={(cid, opts) => switchCanvas(cid, opts?.skipSave)}
+              onChanged={() => { if (pid) apiService.listProjectCanvases(pid).then(r => setCanvasList(r.canvases || [])).catch(() => {}); }}
+            />
+            <button onClick={async()=>{ const n = canvasList.length + 1; const cid = await createCanvas(`画布${n}`); if (cid) alert(`已新建${`画布${n}`}并切换`); }} className="px-3 py-1 rounded-full bg-surface-secondary border border-border text-xs font-medium [color:var(--color-text-main)] hover:bg-surface-tertiary transition-colors">+ 新画布</button>
+            <button onClick={async()=>{
+              if (!pid) return;
+              const cur = canvasList.find(c => c.id === canvasIdRef.current);
+              const nv = prompt('重命名画布', cur?.name || currentCanvasName);
+              if (!nv || !nv.trim()) return;
+              try {
+                await apiService.renameProjectCanvas(pid, canvasIdRef.current, nv.trim());
+                const r = await apiService.listProjectCanvases(pid).catch(() => null);
+                if (r) setCanvasList(r.canvases || []);
+              } catch (e: any) { alert(e.message); }
+            }} className="px-3 py-1 rounded-full bg-surface-secondary border border-border text-xs font-medium [color:var(--color-text-main)] hover:bg-surface-tertiary transition-colors" title="重命名当前画布">✎</button>
+            <button onClick={async()=>{
+              if (!pid) return;
+              if (canvasList.length <= 1) { alert('至少保留一个画布'); return; }
+              const cur = canvasList.find(c => c.id === canvasIdRef.current)?.name || currentCanvasName;
+              if (!confirm(`删除画布「${cur}」？节点将丢失`)) return;
+              try {
+                const r: any = await apiService.deleteProjectCanvas(pid, canvasIdRef.current);
+                const list = await apiService.listProjectCanvases(pid).catch(() => null);
+                if (list) setCanvasList(list.canvases || []);
+                const next = r?.active_canvas_id || 'default';
+                suppressSaveRef.current = true;
+                setNodes([]); setEdges([]); setSelectedNodeId(null);
+                setCanvasId(next);
+              } catch (e: any) { alert(e.message); }
+            }} className="w-7 h-7 rounded-full bg-surface-secondary border border-border text-[color:var(--color-text-muted)] hover:text-red-400 flex items-center justify-center transition-colors" title="删除当前画布">🗑</button>
             <button onClick={() => setNodes(nds => nds.map((n, i) => ({ ...n, position: { x: 120 + i * 400, y: 120 } })))} className="px-3 py-1 rounded-full bg-surface-secondary border border-border text-xs font-medium [color:var(--color-text-main)] hover:bg-surface-tertiary transition-colors">横向排布</button>
             <button onClick={() => { if (confirm('清空画布？')) { setNodes([]); setEdges([]); setSelectedNodeId(null); } }} className="w-7 h-7 rounded-full bg-surface-secondary border border-border text-[color:var(--color-text-muted)] hover:text-red-400 flex items-center justify-center transition-colors" title="清空">×</button>
           </div>

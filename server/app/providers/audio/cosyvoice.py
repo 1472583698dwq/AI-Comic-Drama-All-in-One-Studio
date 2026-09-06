@@ -70,6 +70,10 @@ class CosyVoiceProvider(AudioProvider):
     async def generate(self, req: AudioGenerateRequest) -> AudioGenerateResult:
         if not req.text or not req.text.strip():
             return AudioGenerateResult(audio_url="", local_path="", voice_id=req.voice_id, text=req.text, emotion=req.emotion, duration=0.0, provider=self.id, engine="cosyvoice", status="empty")
+        # 空音色 → 本源声明的默认音色
+        if not req.voice_id:
+            from dataclasses import replace
+            req = replace(req, voice_id="中文女")
 
         base = settings.COSYVOICE_URL.rstrip("/")
         # 尝试多种API形态，逐一回退

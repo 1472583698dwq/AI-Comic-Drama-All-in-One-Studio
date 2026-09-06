@@ -17,6 +17,18 @@ export type ControlSpec = {
   min?: number;
   max?: number;
   step?: number;
+  // v1 标准扩展：分组、人机分工与语义角色（全部来自接口 schema 的 x-*，前端零参数名硬编码）
+  category?: string; // layout/motion/quality/audio/advanced
+  visibility?: 'basic' | 'advanced' | 'hidden';
+  agent?: 'auto' | 'suggest' | 'manual';
+  priority?: number;
+  role?: string; // x-role: prompt / prompt_aux / dialogue ...
+};
+
+const agentBadge: Record<string, {label:string, cls:string, title:string}> = {
+  auto: { label: 'Agent可填', cls: 'bg-violet-500/15 text-violet-300 border-violet-500/30', title: 'Agent 可自动代填（项目/上游推断），你改后不再覆盖' },
+  suggest: { label: '建议', cls: 'bg-amber-500/15 text-amber-300 border-amber-500/30', title: 'Agent 仅在你未填时建议值，可手调' },
+  manual: { label: '手填', cls: 'bg-white/10 text-white/50 border-white/15', title: '仅手填，Agent 不代填（seed/锁定项）' },
 };
 
 export const DynamicControl: React.FC<{
@@ -24,7 +36,8 @@ export const DynamicControl: React.FC<{
   value: any;
   onChange: (v:any)=>void;
   onAliasChange?: (alias:string)=>void;
-}> = ({ spec, value, onChange, onAliasChange }) => {
+  compact?: boolean;
+}> = ({ spec, value, onChange, onAliasChange, compact }) => {
   const label = spec.alias || spec.label || spec.param_name;
   const desc = spec.description || '';
   const isMedia = spec.type==='image' || spec.type==='audio' || spec.type==='video';
@@ -39,11 +52,13 @@ export const DynamicControl: React.FC<{
   const isNumber = spec.type==='number';
   const isBool = spec.type==='boolean';
 
+  const ag = spec.agent ? agentBadge[spec.agent] : null;
   return (
-    <div className="space-y-1.5">
+    <div className={`space-y-1.5 ${compact ? 'space-y-1' : ''}`}>
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] font-medium [color:var(--color-text-main)] truncate" title={desc}>
-          {label} <span className="[color:var(--color-text-muted)] font-normal">· {spec.param_name}</span> {spec.required && <span className="text-red-500">*</span>}
+        <span className="text-[11px] font-medium [color:var(--color-text-main)] truncate flex items-center gap-1.5" title={desc}>
+          <span className="truncate">{label} <span className="[color:var(--color-text-muted)] font-normal">· {spec.param_name}</span> {spec.required && <span className="text-red-500">*</span>}</span>
+          {ag && <span className={`shrink-0 text-[9px] px-1 py-0.5 rounded border font-medium ${ag.cls}`} title={ag.title}>{ag.label}</span>}
         </span>
         {onAliasChange && <button onClick={()=>{
           const nv = prompt('重命名/注释（显示名）', label);
@@ -100,14 +115,38 @@ export const DynamicControl: React.FC<{
         </label>
       ) : (
         <div className="space-y-1.5">
-          {(spec.param_name === 'prompt' || spec.param_name === 'text' || spec.param_name === 'image_prompt' || (spec.label && String(spec.label).includes('提示'))) && (
+          {(spec.role === 'prompt' || spec.role === 'prompt_aux' || spec.role === 'dialogue') && (
             <div className="flex justify-end">
-              <AiPolishButton value={String(value ?? '')} onPolish={(v: any) => onChange(v)} contextType={spec.param_name === 'text' ? 'dialogue' : 'prompt'} size="xs" />
+              <AiPolishButton value={String(value ?? '')} onPolish={(v: any) => onChange(v)} contextType={spec.role === 'dialogue' ? 'dialogue' : 'prompt'} size="xs" />
             </div>
           )}
-          <textarea value={value ?? ''} onChange={e=> onChange(e.target.value)} placeholder={spec.description||''} rows={spec.param_name==='prompt' || spec.param_name==='text' ? 2 : 1} className="w-full bg-surface-secondary border border-border rounded-xl p-2 text-sm [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand resize-none"/>
+          <textarea value={value ?? ''} onChange={e=> onChange(e.target.value)} placeholder={spec.description||''} rows={spec.role === 'prompt' || spec.role === 'dialogue' ? 2 : 1} className="w-full bg-surface-secondary border border-border rounded-xl p-2 text-sm [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand resize-none"/>
         </div>
       )}
     </div>
   );
 };
+
+export const CATEGORY_LABEL: Record<string, string> = {
+  layout: '版式',
+  motion: '运动/时长',
+  quality: '画质/采样',
+  audio: '声音',
+  advanced: '高级',
+};
+
+export function groupSpecs(specs: ControlSpec[]) {
+  const visOrder = { basic: 0, advanced: 1, hidden: 2 } as const;
+  const sorted = [...specs].sort((a,b)=>{
+    const va = visOrder[(a.visibility||'advanced') as keyof typeof visOrder] ?? 1;
+    const vb = visOrder[(b.visibility||'advanced') as keyof typeof visOrder] ?? 1;
+    if (va !== vb) return va - vb;
+    const pa = a.priority ?? 50, pb = b.priority ?? 50;
+    if (pa !== pb) return pa - pb;
+    return a.param_name.localeCompare(b.param_name);
+  });
+  const basic = sorted.filter(s=> (s.visibility||'advanced')==='basic' && s.visibility!=='hidden');
+  const advanced = sorted.filter(s=> (s.visibility||'advanced')==='advanced');
+  const hidden = sorted.filter(s=> s.visibility==='hidden');
+  return { basic, advanced, hidden, sorted };
+}

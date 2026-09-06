@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { FolderKanban, Plus, Upload, Search, Trash2, Copy, Archive, ExternalLink, Sparkles, Clock, Film, Users, Filter } from 'lucide-react';
+import { FolderKanban, Plus, Upload, Search, Trash2, Copy, Archive, ExternalLink, Sparkles, Clock, Film, Users, Filter, Zap } from 'lucide-react';
 import { useProjectListStore } from '../stores/useProjectListStore';
 import { useProjectStore } from '../stores/useProjectStore';
 import { apiService } from '../services/api';
+import { OneKeyRunModal } from '../components/workflow/OneKeyRunModal';
 
 export const ProjectDashboard: React.FC = () => {
   const { projects, fetchProjects, createBlank, importProjectFile, openProject, deleteProject, duplicateProject, isLoading } = useProjectListStore();
@@ -11,6 +12,7 @@ export const ProjectDashboard: React.FC = () => {
   const [status, setStatus] = useState('all');
   const [sort, setSort] = useState('updated_at');
   const [showCreate, setShowCreate] = useState(false);
+  const [showOneKey, setShowOneKey] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newStyle, setNewStyle] = useState('donghua_xianxia');
   const [newRatio, setNewRatio] = useState('9:16');
@@ -99,6 +101,7 @@ export const ProjectDashboard: React.FC = () => {
           <label className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white dark:bg-surface-secondary border border-border text-xs font-medium text-surface dark:text-white hover:border-border-active cursor-pointer">
             <Upload className="w-3.5 h-3.5"/> 导入 <input type="file" accept=".json,.zip" className="hidden" onChange={handleImport} />
           </label>
+          <button onClick={()=>setShowOneKey(true)} className="px-4 py-1.5 rounded-full bg-gradient-to-r from-amber-500 to-brand text-white text-xs font-bold shadow-md flex items-center gap-1.5"><Zap className="w-3.5 h-3.5"/> 一键成片</button>
           <button onClick={()=>setShowCreate(true)} className="px-4 py-1.5 rounded-full bg-brand text-white text-xs font-bold shadow-md shadow-brand/20 hover:bg-brand-light flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/> 新建项目</button>
         </div>
       </div>
@@ -187,6 +190,9 @@ export const ProjectDashboard: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* 一键成片 Agent */}
+      <OneKeyRunModal isOpen={showOneKey} onClose={()=>setShowOneKey(false)} />
     </div>
   );
 };

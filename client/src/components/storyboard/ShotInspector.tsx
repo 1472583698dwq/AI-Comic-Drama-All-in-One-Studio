@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Sparkles, 
   Play, 
@@ -36,10 +36,94 @@ import { StoryboardShot, EmotionType } from '../../types';
 import { apiService } from '../../services/api';
 import { WorkflowInspectorModal } from '../workflow/WorkflowInspectorModal';
 import { ProviderPicker, ProviderParamForm } from '../ui/ProviderPicker';
+import { extractSlotsFromProvider } from '../canvas/providerSkills';
+import { buildShotReferenceInputs, promptWithCharacterTags, withCameraIntent } from './shotReference';
 import { AiPolishButton } from '../ui/AiPolishButton';
 import { AssetPickerModal } from '../asset/AssetPickerModal';
+import { CanvasResourcePickerModal } from '../canvas/CanvasResourcePickerModal';
 
 const API_ORIGIN = 'http://127.0.0.1:8000';
+
+/**
+ * 生成源插槽挂载区：完全按该源 input_schema 声明的媒体槽位逐条渲染（首帧/尾帧/参考图/参考音频…），
+ * 源未声明即不显示，不再有任何按 kind 写死的输入块。
+ */
+const ProviderSlotList: React.FC<{
+  slots: any[];
+  values: Record<string, any>;
+  uploadingKey: string | null;
+  onWrite: (keys: string[], v: any) => void;
+  onUpload: (keys: string[], f: File, multi: boolean) => void;
+  onPickFromLibrary: (slot: any, keys: string[], multi: boolean) => void;
+  onInjectCharacter?: (keys: string[], multi: boolean) => void;
+  resolveUrl: (u?: string | null) => string;
+}> = ({ slots, values, uploadingKey, onWrite, onUpload, onPickFromLibrary, onInjectCharacter, resolveUrl }) => {
+  if (!slots.length) return null;
+  return (
+    <div className="space-y-1.5">
+      {slots.map((slot: any) => {
+        const writeKeys = Array.from(new Set([slot.key, slot.originalKey].filter(Boolean) as string[]));
+        const raw = values[slot.key] ?? (slot.originalKey ? values[slot.originalKey] : undefined);
+        const urls: string[] = Array.isArray(raw) ? raw.filter(Boolean).map(String) : (raw ? [String(raw)] : []);
+        const isMulti = !!slot.multi || (slot.maxCount ?? 1) > 1;
+        const typeWord = slot.type === 'audio' ? '音频' : slot.type === 'video' ? '视频' : '图片';
+        return (
+          <div key={slot.key} className="space-y-1 bg-surface-secondary border border-border/80 rounded-lg p-2 text-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-gray-300 font-medium">{slot.label}{slot.required && <span className="text-red-400"> *</span>}</span>
+              <span className="text-[9px] text-gray-500 font-mono" title={slot.description || ''}>{slot.originalKey || slot.key}</span>
+            </div>
+            {urls.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                {urls.map((u) => (
+                  slot.type === 'audio'
+                    ? <span key={u} className="px-2 py-1 rounded bg-black/40 text-[10px] font-mono text-pink-300 max-w-[150px] truncate">🎵 {u.split(/[\\/]/).pop()}</span>
+                    : <img key={u} src={resolveUrl(u)} alt="" className="w-16 h-16 rounded-lg object-cover border border-border" />
+                ))}
+                <button type="button" onClick={() => onWrite(writeKeys, isMulti ? [] : '')} className="px-2 py-1 rounded bg-red-500/20 text-red-400 text-[11px] hover:bg-red-500/30">清除</button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-1.5">
+                {slot.type === 'image' && onInjectCharacter && (
+                  <button
+                    type="button"
+                    onClick={() => onInjectCharacter(writeKeys, isMulti)}
+                    className="px-2 py-1 rounded bg-brand/20 hover:bg-brand/30 border border-brand/40 text-[11px] text-brand-light font-medium flex items-center gap-1 transition"
+                    title="一键注入该分镜出场角色的立绘或三视图"
+                  >
+                    <UserCheck className="w-3 h-3" />
+                    <span>🎭 注入当前角色</span>
+                  </button>
+                )}
+                <label className="px-2 py-1 rounded bg-surface-tertiary hover:bg-surface-tertiary/80 border border-border text-[11px] text-gray-300 cursor-pointer flex items-center gap-1 transition">
+                  <Upload className="w-3 h-3" />
+                  <span>{uploadingKey === slot.key ? '上传中...' : `📁 上传${typeWord}`}</span>
+                  <input
+                    type="file"
+                    accept={slot.type === 'image' ? 'image/*' : slot.type === 'audio' ? 'audio/*' : 'video/*'}
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) onUpload(writeKeys, f, isMulti);
+                    }}
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => onPickFromLibrary(slot, writeKeys, isMulti)}
+                  className="px-2 py-1 rounded bg-surface-tertiary hover:bg-brand/20 border border-border text-[11px] text-gray-300 hover:text-brand-light flex items-center gap-1"
+                >
+                  <FolderOpen className="w-3 h-3" />
+                  <span>素材库</span>
+                </button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
 
 export const ShotInspector: React.FC = () => {
   const { 
@@ -82,7 +166,7 @@ export const ShotInspector: React.FC = () => {
     (localStorage.getItem('storyboard_video_mode') as any) || 'i2v'
   );
   const [videoProvider, setVideoProvider] = useState<string>(
-    localStorage.getItem('default_video_provider') || 'comfyui_video'
+    localStorage.getItem('default_video_provider') || ''
   );
   const [videoProviderDef, setVideoProviderDef] = useState<any>(null);
   const [videoProviderParams, setVideoProviderParams] = useState<Record<string,any>>({});
@@ -92,13 +176,17 @@ export const ShotInspector: React.FC = () => {
   const [imageProviderDef, setImageProviderDef] = useState<any>(null);
   const [imageProviderParams, setImageProviderParams] = useState<Record<string,any>>({});
   const [audioProvider, setAudioProvider] = useState<string>(
-    localStorage.getItem('default_audio_provider') || 'minimax'
+    localStorage.getItem('default_audio_provider') || ''
   );
   const [audioProviderDef, setAudioProviderDef] = useState<any>(null);
   const [audioProviderParams, setAudioProviderParams] = useState<Record<string,any>>({});
   const [healthMap, setHealthMap] = useState<Record<string, any>>({});
   const [batchSelected, setBatchSelected] = useState<Set<string>>(new Set());
   const [queue, setQueue] = useState<Array<{id:string, type:'image'|'video'|'audio', status:'queued'|'running'|'done'|'error'}>>([]);
+  // 分镜右键菜单：使用新画布 / 隶属到现有画布（视频在该画布生成后回写分镜）
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; shotId: string } | null>(null);
+  const [ctxCanvases, setCtxCanvases] = useState<Array<{ id: string; name: string; node_count: number }>>([]);
+  const [ctxLoadingCanvas, setCtxLoadingCanvas] = useState(false);
   const [ttsError, setTtsError] = useState<string | null>(null);
   const [regenError, setRegenError] = useState<string | null>(null);
   const [videoError, setVideoError] = useState<string | null>(null);
@@ -107,15 +195,16 @@ export const ShotInspector: React.FC = () => {
   const [audioEl, setAudioEl] = useState<HTMLAudioElement | null>(null);
   const [showHotkeysHint, setShowHotkeysHint] = useState(true);
 
-  const [workflows, setWorkflows] = useState<any[]>([]);
+  // 旧分镜可能只存了 workflow_id 而没选源，仅作为未选源时的兜底
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>(
     localStorage.getItem('default_workflow_id') || ''
   );
-  const [workflowExposedInputs, setWorkflowExposedInputs] = useState<any[]>([]);
   const [shotDynamicInputs, setShotDynamicInputs] = useState<Record<string, any>>({});
   const [inspectingWorkflowId, setInspectingWorkflowId] = useState<string>('');
   const [projectAssets, setProjectAssets] = useState<any[]>([]);
   const [uploadingInputKey, setUploadingInputKey] = useState<string | null>(null);
+  // 生成源插槽的素材选择（复用画布的四源选择器，支持多选累积）
+  const [slotPicker, setSlotPicker] = useState<{ slot: any; writeKeys: string[]; multi: boolean } | null>(null);
 
   const [assetPickerConfig, setAssetPickerConfig] = useState<{
     isOpen: boolean;
@@ -141,10 +230,10 @@ export const ShotInspector: React.FC = () => {
   }, [activeShot?.id, activeShot?.production_mode]);
 
   useEffect(() => {
-    loadWorkflowsAndAssets();
-    const onAssetRefresh = () => loadWorkflowsAndAssets();
+    loadProjectAssets();
+    const onAssetRefresh = () => loadProjectAssets();
     const onAssetApplied = (e: any) => {
-      if (e.detail?.shotId === activeShot?.id) loadWorkflowsAndAssets();
+      if (e.detail?.shotId === activeShot?.id) loadProjectAssets();
     };
     window.addEventListener('asset-refresh', onAssetRefresh as any);
     window.addEventListener('asset-applied', onAssetApplied as any);
@@ -155,14 +244,10 @@ export const ShotInspector: React.FC = () => {
   }, [activeShot?.id]);
 
   useEffect(() => {
-    loadWorkflowsAndAssets();
+    loadProjectAssets();
   }, [project?.id]);
 
-  const loadWorkflowsAndAssets = async () => {
-    try {
-      const wfRes = await apiService.listWorkflows('all');
-      setWorkflows(wfRes?.workflows || []);
-    } catch (_) {}
+  const loadProjectAssets = async () => {
     try {
       const pid = project?.id || (useProjectStore.getState() as any).activeProjectId || undefined;
       const assetRes = await apiService.listAssets({ project_id: pid, page: 1, limit: 100, scope: undefined });
@@ -176,8 +261,8 @@ export const ShotInspector: React.FC = () => {
     const mode = s.production_mode || (project?.id ? localStorage.getItem(`storyboard_mode_${project.id}`) : null) || 'image_to_video';
     setProductionMode(mode as any);
     if(s.image_provider !== undefined) setImageProvider(s.image_provider || localStorage.getItem('default_image_provider') || '');
-    if(s.video_provider !== undefined) setVideoProvider(s.video_provider || localStorage.getItem('default_video_provider') || 'comfyui_video');
-    if(s.audio_provider !== undefined) setAudioProvider(s.audio_provider || localStorage.getItem('default_audio_provider') || 'minimax');
+    if(s.video_provider !== undefined) setVideoProvider(s.video_provider || localStorage.getItem('default_video_provider') || '');
+    if(s.audio_provider !== undefined) setAudioProvider(s.audio_provider || localStorage.getItem('default_audio_provider') || '');
     if(s.workflow_id !== undefined) setSelectedWorkflowId(s.workflow_id || localStorage.getItem('default_workflow_id') || '');
     if(s.dynamic_inputs) setShotDynamicInputs(s.dynamic_inputs || {});
     if(s.provider_params?.image) setImageProviderParams(s.provider_params.image);
@@ -195,28 +280,37 @@ export const ShotInspector: React.FC = () => {
     }
   };
 
+  // 恢复选中源时从接口拉回 definition（工作流/API 路由、参数表单、插槽全部按 definition 映射，不再用 id 前缀猜）
   useEffect(() => {
-    if (!selectedWorkflowId) {
-      setWorkflowExposedInputs([]);
-      return;
+    if (imageProvider && imageProviderDef?.id !== imageProvider) {
+      apiService.getProvider(imageProvider).then((r: any) => setImageProviderDef(r?.provider || null)).catch(() => {});
     }
-    apiService.inspectWorkflow(selectedWorkflowId)
-      .then(res => {
-        const exposed = res?.data?.exposed_inputs || res?.exposed_inputs || [];
-        setWorkflowExposedInputs(exposed);
-        const initVals: Record<string, any> = {};
-        for (const exp of exposed) {
-          const key = exp.id || exp.node_id;
-          if (exp.default_value !== undefined && exp.default_value !== null) {
-            initVals[key] = exp.default_value;
-          }
-        }
-        setShotDynamicInputs(prev => ({ ...initVals, ...prev }));
-      })
-      .catch(() => {
-        setWorkflowExposedInputs([]);
-      });
-  }, [selectedWorkflowId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imageProvider]);
+  useEffect(() => {
+    if (videoProvider && videoProviderDef?.id !== videoProvider) {
+      apiService.getProvider(videoProvider).then((r: any) => setVideoProviderDef(r?.provider || null)).catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videoProvider]);
+  useEffect(() => {
+    if (audioProvider && audioProviderDef?.id !== audioProvider) {
+      apiService.getProvider(audioProvider).then((r: any) => setAudioProviderDef(r?.provider || null)).catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [audioProvider]);
+
+  // 后端重建 schema 后（改暴露清单/新增源）强制重拉三个当前源的 definition
+  const refreshSourceDefs = async () => {
+    const pairs: Array<[string, (d: any) => void]> = [
+      [imageProvider, setImageProviderDef],
+      [videoProvider, setVideoProviderDef],
+      [audioProvider, setAudioProviderDef],
+    ];
+    await Promise.all(pairs.filter(([pid]) => !!pid).map(([pid, setDef]) =>
+      apiService.getProvider(pid).then((r: any) => setDef(r?.provider || null)).catch(() => {})
+    ));
+  };
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -308,7 +402,7 @@ export const ShotInspector: React.FC = () => {
     updateShot(activeShot.id, { status: 'generating_audio', render_status: 'rendering' });
     try {
       const char = project?.characters.find((c) => c.name === activeShot.speaker_name);
-      const voiceId = char?.voice_id || 'male-qn-qingse';
+      const voiceId = char?.voice_id;
       const extraParams: any = { ...audioProviderParams };
       const res = await apiService.generateTTS(textToSpeak, voiceId, activeShot.emotion, { provider: audioProvider || undefined, ...extraParams });
       const url = res.audio_url?.startsWith('/') ? API_ORIGIN + res.audio_url : res.audio_url;
@@ -340,28 +434,131 @@ export const ShotInspector: React.FC = () => {
     }
   };
 
-  const handleUploadImageForInput = async (key: string, file: File) => {
+  // 插槽写穿透：同一插槽的归一键与源真实键一起写，避免下游读到半更新状态
+  const setSlotValue = (writeKeys: string[], value: any) => {
+    const next = { ...shotDynamicInputs };
+    writeKeys.forEach((k) => { next[k] = value; });
+    setShotDynamicInputs(next);
+    if (activeShot) updateShot(activeShot.id, { dynamic_inputs: next } as any);
+  };
+
+  const handleSlotUploadFile = async (writeKeys: string[], file: File, multi: boolean) => {
+    const key = writeKeys[0];
     try {
       setUploadingInputKey(key);
-      const res = await apiService.uploadImageToComfyUI(file);
-      if (res.name) {
-        setShotDynamicInputs(prev => ({ ...prev, [key]: res.name }));
+      const isImage = file.type.startsWith('image/') || /\.(png|jpe?g|webp|bmp|gif)$/i.test(file.name);
+      let value = '';
+      if (isImage) {
+        const res = await apiService.uploadImageToComfyUI(file);
+        value = res?.name || '';
+      } else {
+        value = await new Promise<string>((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(r.result as string);
+          r.onerror = () => reject(new Error('读取文件失败'));
+          r.readAsDataURL(file);
+        });
       }
+      if (!value) throw new Error('上传未返回文件名');
+      setSlotValue(writeKeys, multi ? [value] : value);
     } catch (e: any) {
-      alert(`上传垫图失败: ${e?.message || e}`);
+      alert(`上传素材失败: ${e?.message || e}`);
     } finally {
       setUploadingInputKey(null);
     }
   };
 
-  const handleInjectCurrentCharacter = (key: string) => {
+  const injectCharacterToSlot = (writeKeys: string[], multi: boolean) => {
     const currentChar = project?.characters.find(c => c.name === activeShot.speaker_name) || project?.characters?.[0];
     const charImg = currentChar?.three_views?.front || currentChar?.avatar_url || currentChar?.three_views?.three_quarter;
     if (!charImg) {
       alert('当前角色未找到立绘或三视图图片，请在角色工坊生成');
       return;
     }
-    setShotDynamicInputs(prev => ({ ...prev, [key]: charImg }));
+    setSlotValue(writeKeys, multi ? [charImg] : charImg);
+  };
+
+  const pickAssetForSlot = (slot: any, writeKeys: string[], multi: boolean) => {
+    setSlotPicker({ slot, writeKeys, multi });
+  };
+
+  // 画布产出 / 角色库 / 素材库 / 本地上传 四源统一选择，多选时累积而非覆盖
+  const handleSlotPicked = (urlOrUrls: string | string[], meta?: any) => {
+    if (!slotPicker) return;
+    const { writeKeys, multi } = slotPicker;
+    const incoming = Array.isArray(urlOrUrls) ? urlOrUrls.filter(Boolean) : (urlOrUrls ? [urlOrUrls] : []);
+    if (!incoming.length) return;
+    let value: any;
+    if (multi) {
+      const cur = shotDynamicInputs[writeKeys[0]];
+      const existing: string[] = Array.isArray(cur) ? cur : (cur ? [String(cur)] : []);
+      const merged = [...existing];
+      incoming.forEach((u) => { if (!merged.includes(u)) merged.push(u); });
+      const max = slotPicker.slot?.maxCount;
+      value = typeof max === 'number' && max > 0 ? merged.slice(-max) : merged;
+    } else {
+      value = incoming[incoming.length - 1];
+    }
+    setSlotValue(writeKeys, value);
+    // 选中角色素材时顺带把形象词并入提示词，与画布行为一致
+    if (meta?.visual_prompt && activeShot && !(activeShot.image_prompt || '').includes(meta.visual_prompt)) {
+      updateShot(activeShot.id, { image_prompt: `${activeShot.image_prompt || ''}${activeShot.image_prompt ? ', ' : ''}${meta.visual_prompt}` } as any);
+    }
+    setSlotPicker(null);
+  };
+
+  // 源已提供逐节点独立槽时不再渲染聚合数组槽，避免同一节点两个入口、以及靠位置猜归属
+  const resolveRenderSlots = (def: any, kind: 'image' | 'video' | 'audio') => {
+    const all = extractSlotsFromProvider(def, kind);
+    const perNode = all.filter((s: any) => !s.aggregate);
+    if (perNode.length) return perNode;
+    if (all.length) return all;
+    return [{ key: 'reference_images', originalKey: 'reference_images', label: '参考图/垫图', type: 'image', multi: true, maxCount: 4 }];
+  };
+
+  // 语音源若自行声明了情绪参数（x-role: emotion），情绪就由源参数表单唯一负责，页面不再重复放一个下拉
+  const audioEmotionKey = useMemo(() => {
+    const props = (audioProviderDef?.params_schema?.properties || {}) as Record<string, any>;
+    return Object.keys(props).find((k) => props[k]?.['x-role'] === 'emotion') || '';
+  }, [audioProviderDef]);
+
+
+  // 只提交该源声明过的键（input_schema + params_schema 的并集），杜绝切换源后残留上一源的参数；
+  // 未选源（definition 为空）时原样放行，保持系统默认通道的旧行为。
+  // LEGACY_SLOT_ALIASES：旧代码里的单数 / 带 _url 后缀写法，归并到源真正声明的槽位键。
+  const LEGACY_SLOT_ALIASES: Record<string, string[]> = {
+    reference_image: ['reference_images', 'reference'],
+    first_frame_url: ['first_frame'],
+    last_frame_url: ['last_frame'],
+    reference_audio_url: ['reference_audio', 'reference_audios'],
+  };
+
+  const keepDeclaredOnly = (def: any, values: Record<string, any>): Record<string, any> => {
+    const declared = new Set<string>([
+      ...Object.keys(def?.input_schema?.properties || {}),
+      ...Object.keys(def?.params_schema?.properties || {}),
+    ]);
+    if (!declared.size) return { ...values };
+    const out: Record<string, any> = {};
+    const put = (k: string, v: any) => {
+      if (v === '' || v === null || v === undefined || (Array.isArray(v) && v.length === 0)) return;
+      out[k] = v;
+    };
+    Object.entries(values).forEach(([k, v]) => {
+      if (declared.has(k)) { put(k, v); return; }
+      const alias = (LEGACY_SLOT_ALIASES[k] || []).find((a) => declared.has(a));
+      if (alias) put(alias, v);
+    });
+    return out;
+  };
+
+  // 批量渲染取各分镜自己存下的插槽值与源参数（按该镜所选源，而非当前激活源）
+  const shotBatchInputs = (sh: any, kind: 'image' | 'video') => {
+    const merged: Record<string, any> = { ...(sh?.dynamic_inputs || {}) };
+    Object.entries((sh?.provider_params?.[kind]) || {}).forEach(([k, v]) => {
+      if (v !== '' && v !== null && v !== undefined) merged[k] = v;
+    });
+    return Object.keys(merged).length ? merged : undefined;
   };
 
   const handleRegenerateImage = async (customCount?: number) => {
@@ -370,47 +567,36 @@ export const ShotInspector: React.FC = () => {
     setIsRegenerating(true);
     updateShot(activeShot.id, { status: 'generating_image', render_status: 'rendering' });
 
-    let promptWithCharacters = activeShot.image_prompt;
-    const boundCharIds = activeShot.character_ids || [];
-    const boundChars = (project?.characters || []).filter(c => boundCharIds.includes(c.id));
-    
-    if (boundChars.length > 0) {
-      const charTags = boundChars.map(c => `[角色: ${c.name}, ${c.visual_prompt || c.description}]`).join(' ');
-      if (!promptWithCharacters.includes(boundChars[0].name)) {
-        promptWithCharacters = `${charTags} ${promptWithCharacters}`;
-      }
-    }
+    // 角色标签 + 相机意图统一装配（shotReference 唯一口径）：全量绑定角色进 prompt，
+    // 景别/运镜自动补后缀（已含 [Camera: / [运镜: 的不动，导演台保存的优先）
+    let promptWithCharacters = withCameraIntent(
+      promptWithCharacterTags(activeShot.image_prompt, activeShot, project),
+      activeShot,
+    );
 
     try {
-      const isCustomImageProvider = !!imageProvider && (imageProvider.startsWith('prov_') || (imageProviderDef as any)?.provider_type === 'http');
-      const isHttpImageProvider = isCustomImageProvider || (!!imageProvider && !['comfyui',''].includes(imageProvider));
-      const useImageWorkflow = !!selectedWorkflowId && !isHttpImageProvider;
-      
-      let dynamic_inputs: Record<string,any> | undefined = undefined;
-      if (useImageWorkflow) {
-        dynamic_inputs = Object.keys(shotDynamicInputs).length ? { ...shotDynamicInputs } : undefined;
-        const exposedKeys = new Set(Object.keys(shotDynamicInputs));
-        const filtered: Record<string,any> = {};
-        Object.entries(imageProviderParams).forEach(([k,v])=>{
-          if(v!=='' && v!==null && v!==undefined && exposedKeys.has(k)) filtered[k]=v;
-        });
-        if(Object.keys(filtered).length) dynamic_inputs = { ...(dynamic_inputs||{}), ...filtered };
-      } else {
-        const merged: Record<string,any> = {};
-        Object.entries(imageProviderParams).forEach(([k,v])=> { if(v!=='' && v!==null && v!==undefined) merged[k]=v; });
-        dynamic_inputs = Object.keys(merged).length ? merged : undefined;
-      }
+      // 工作流来自所选生成源本身；仅在未选源时回退旧分镜遗留的 workflow_id
+      const defWfId = (imageProviderDef as any)?.workflow_id || '';
+      const imageWorkflowId = defWfId || (imageProvider ? '' : selectedWorkflowId);
 
-      if (boundChars.length > 0) {
-        const primaryChar = boundChars[0];
-        const charRef = primaryChar.three_views?.front || primaryChar.avatar_url || primaryChar.three_views?.three_quarter;
-        if (charRef) {
-          dynamic_inputs = {
-            ...(dynamic_inputs || {}),
-            reference_image: (dynamic_inputs as any)?.reference_image || charRef,
-            character_weight: activeShot.character_weights?.[primaryChar.id] || 0.8,
-          };
-        }
+      // 插槽值与源参数一并直传：params_schema 的 key 即暴露项原生 id，后端可直接落节点
+      const mergedInputs: Record<string, any> = keepDeclaredOnly(imageProviderDef, shotDynamicInputs);
+      Object.entries(imageProviderParams).forEach(([k, v]) => {
+        if (v !== '' && v !== null && v !== undefined) mergedInputs[k] = v;
+      });
+      let dynamic_inputs: Record<string, any> | undefined = Object.keys(mergedInputs).length ? mergedInputs : undefined;
+
+            // 参考装配（唯一口径）：全量绑定角色 + 场景底图 + 白模截图；用户手填优先，不覆盖
+      const shotRefs = buildShotReferenceInputs(activeShot, project, 'image');
+      if (shotRefs.reference_images.length) {
+        const di: any = dynamic_inputs || {};
+        dynamic_inputs = {
+          ...di,
+          reference_image: di.reference_image || di.reference_images || shotRefs.reference_image,
+          reference_images: di.reference_images || di.reference_image || shotRefs.reference_images,
+          character_weight: di.character_weight ?? shotRefs.character_weight,
+          ...(di.character_weights || shotRefs.character_weights ? { character_weights: { ...(shotRefs.character_weights || {}), ...(di.character_weights || {}) } } : {}),
+        };
       }
 
       const count = customCount || candidateCount;
@@ -420,7 +606,7 @@ export const ShotInspector: React.FC = () => {
           prompt: promptWithCharacters,
           aspect_ratio: project?.aspect_ratio || '9:16',
           style_preset: project?.style_preset,
-          workflow_id: useImageWorkflow ? selectedWorkflowId : undefined,
+          workflow_id: imageWorkflowId || undefined,
           provider: imageProvider || undefined,
           model: imageProviderDef?.default_model || undefined,
           dynamic_inputs: { ...(dynamic_inputs || {}), seed: s },
@@ -448,7 +634,7 @@ export const ShotInspector: React.FC = () => {
           prompt: promptWithCharacters,
           aspect_ratio: project?.aspect_ratio || '9:16',
           style_preset: project?.style_preset,
-          workflow_id: useImageWorkflow ? selectedWorkflowId : undefined,
+          workflow_id: imageWorkflowId || undefined,
           provider: imageProvider || undefined,
           model: imageProviderDef?.default_model || undefined,
           dynamic_inputs,
@@ -465,11 +651,8 @@ export const ShotInspector: React.FC = () => {
       setPreviewTab('image');
     } catch (e: any) {
       const msg = e?.message || '生图失败';
-      if(msg.includes('未定义的参数') && selectedWorkflowId){
-        setRegenError('工作流不支持部分生成源参数，已自动忽略。');
-      } else {
-        setRegenError(msg);
-      }
+      // 参数由源自身清单生成，不再出现"工作流不支持某参数"的静默忽略，一律如实上报
+      setRegenError(msg);
       updateShot(activeShot.id, { status: 'error', render_status: 'error', render_error: msg });
     } finally {
       setIsRegenerating(false);
@@ -477,20 +660,19 @@ export const ShotInspector: React.FC = () => {
   };
 
   const handleGenerateVideo = async () => {
-    const prompt = activeShot.video_prompt?.trim() || activeShot.action_desc || activeShot.image_prompt;
+    const rawPrompt = activeShot.video_prompt?.trim() || activeShot.action_desc || activeShot.image_prompt;
+    // 相机意图兜底：没去过导演台也按分镜自身景别/运镜补后缀（已有 [Camera: / [运镜: 的不动）
+    const prompt = withCameraIntent(rawPrompt, activeShot);
     if (!prompt) {
       setVideoError('请填写视频运动运镜提示词');
       return;
     }
-    
-    // 获取参考图：图生视频使用首帧，漫剧直出模式优先使用分镜图或绑定角色的立绘/三视图
-    let refImage = activeShot.image_url;
-    if (productionMode === 'motion_comic' && !refImage) {
-      const boundChar = (project?.characters || []).find(c => (activeShot.character_ids || []).includes(c.id));
-      if (boundChar) {
-        refImage = boundChar.three_views?.front || boundChar.avatar_url || boundChar.three_views?.three_quarter;
-      }
-    }
+
+    // 首帧只放真首帧 (image_url)；角色/场景/白模走参考槽（buildShotReferenceInputs 唯一口径）。
+    // 无首帧的漫剧直出走 r2v（参考驱动），不再把角色立绘画进首帧键。
+    const shotRefs = buildShotReferenceInputs(activeShot, project, 'video');
+    const refImage = activeShot.image_url || '';
+    const hasVideoRefs = shotRefs.reference_images.length > 0;
 
     if (productionMode === 'image_to_video' && !activeShot.image_url) {
       setVideoError('图生视频模式需要先在步骤 1 生成精控首帧画面');
@@ -501,33 +683,35 @@ export const ShotInspector: React.FC = () => {
     setIsGeneratingVid(true);
     updateShot(activeShot.id, { status: 'generating_video', render_status: 'rendering' });
     try {
-      const isCustomVideoProvider = !!videoProvider && (videoProvider.startsWith('prov_') || (videoProviderDef as any)?.provider_type === 'http');
-      const isHttpVideoProvider = isCustomVideoProvider || (!!videoProvider && !['comfyui_video',''].includes(videoProvider));
-      const useVideoWorkflow = !!selectedWorkflowId && !isHttpVideoProvider;
-      let dynamic_inputs: Record<string,any> | undefined = undefined;
-      if (useVideoWorkflow) {
-        dynamic_inputs = Object.keys(shotDynamicInputs).length ? { ...shotDynamicInputs } : undefined;
-        if (refImage && !dynamic_inputs?.reference_image) {
-          dynamic_inputs = { ...(dynamic_inputs || {}), reference_image: refImage };
-        }
-        const exposedKeys = new Set(Object.keys(shotDynamicInputs));
-        const filtered: Record<string,any> = {};
-        Object.entries(videoProviderParams).forEach(([k,v])=>{
-          if(v!=='' && v!==null && v!==undefined && exposedKeys.has(k)) filtered[k]=v;
-        });
-        if(Object.keys(filtered).length) dynamic_inputs = { ...(dynamic_inputs||{}), ...filtered };
-      } else {
-        const merged: Record<string,any> = {};
-        if (refImage) merged.first_frame_url = refImage;
-        Object.entries(videoProviderParams).forEach(([k,v])=> { if(v!=='' && v!==null && v!==undefined) merged[k]=v; });
-        dynamic_inputs = Object.keys(merged).length ? merged : undefined;
+      // 工作流来自所选视频源本身；仅在未选源时回退旧分镜遗留的 workflow_id
+      const defVideoWfId = (videoProviderDef as any)?.workflow_id || '';
+      const videoWorkflowId = defVideoWfId || (videoProvider ? '' : selectedWorkflowId);
+
+      const merged: Record<string, any> = {
+        ...(shotRefs.reference_images.length ? { reference_images: shotRefs.reference_images, reference_image: shotRefs.reference_images[0] } : {}),
+        ...(shotRefs.character_weight !== undefined ? { character_weight: shotRefs.character_weight } : {}),
+        ...(shotRefs.character_weights ? { character_weights: shotRefs.character_weights } : {}),
+        ...(shotRefs.previz_video_url ? { previz_video_url: shotRefs.previz_video_url } : {}),
+        ...keepDeclaredOnly(videoProviderDef, shotDynamicInputs),
+      };
+      if (refImage) {
+        // 首帧喂给哪个键：按该源 input_schema 声明的插槽，无声明再回退 first_frame_url
+        const vSlots = extractSlotsFromProvider(videoProviderDef, 'video');
+        const ffSlot = vSlots.find(s => s.key === 'first_frame' || (s.originalKey || '').toLowerCase().includes('first'));
+        const ffKey = ffSlot?.originalKey || ffSlot?.key || 'first_frame_url';
+        if (!merged[ffKey]) merged[ffKey] = refImage;
+        if (ffSlot && ffSlot.key !== ffSlot.originalKey && !merged[ffSlot.key]) merged[ffSlot.key] = refImage;
       }
+      Object.entries(videoProviderParams).forEach(([k, v]) => {
+        if (v !== '' && v !== null && v !== undefined) merged[k] = v;
+      });
+      const dynamic_inputs = Object.keys(merged).length ? merged : undefined;
       await generateShotVideo(activeShot.id, {
-        mode: productionMode === 'motion_comic' ? (refImage ? 'r2v' : 't2v') : 'i2v',
+        mode: productionMode === 'motion_comic' ? (refImage || hasVideoRefs ? 'r2v' : 't2v') : 'i2v',
         prompt,
         duration: Math.round(activeShot.duration) || 5,
         provider: videoProvider,
-        workflow_id: useVideoWorkflow ? selectedWorkflowId : undefined,
+        workflow_id: videoWorkflowId || undefined,
         dynamic_inputs,
       });
       setVideoSuccess(true);
@@ -553,12 +737,21 @@ export const ShotInspector: React.FC = () => {
       updateShot(sh.id, { status: 'generating_image', render_status: 'rendering' });
       try {
         const prov = (sh as any).image_provider || imageProvider || undefined;
+        // 批量与单镜同口径：角色标签 + 相机意图进 prompt，全量参考进 inputs
+        const bRefs = buildShotReferenceInputs(sh, project, 'image');
+        const bInputs: Record<string, any> = {
+          ...(bRefs.reference_images.length ? { reference_images: bRefs.reference_images, reference_image: bRefs.reference_images[0] } : {}),
+          ...(bRefs.character_weight !== undefined ? { character_weight: bRefs.character_weight } : {}),
+          ...(bRefs.character_weights ? { character_weights: bRefs.character_weights } : {}),
+          ...shotBatchInputs(sh, 'image'),
+        };
         const res = await apiService.generateShotImage({
-          prompt: sh.image_prompt,
+          prompt: withCameraIntent(promptWithCharacterTags(sh.image_prompt, sh, project), sh),
           aspect_ratio: project?.aspect_ratio || '9:16',
           style_preset: project?.style_preset,
-          workflow_id: (sh as any).workflow_id || selectedWorkflowId || undefined,
+          workflow_id: (sh as any).workflow_id || undefined,
           provider: prov || undefined,
+          dynamic_inputs: bInputs,
         });
         updateShot(sh.id, { image_url: res.image_url, candidates: [res.image_url], status: 'completed', render_status: 'done' });
         setQueue(q => q.map(j => j.id === sh.id ? { ...j, status: 'done' } : j));
@@ -582,7 +775,7 @@ export const ShotInspector: React.FC = () => {
       try {
         const text = sh.dialogue || sh.voiceover || '';
         const char = project?.characters.find(c => c.name === sh.speaker_name);
-        const voiceId = char?.voice_id || 'male-qn-qingse';
+        const voiceId = char?.voice_id;
         const res = await apiService.generateTTS(text, voiceId, sh.emotion, { provider: (sh as any).audio_provider || audioProvider || undefined });
         const audioSec = res.duration || 3.5;
         const fittedSec = Math.max(1.5, Math.round((audioSec + 0.4) * 10) / 10);
@@ -602,6 +795,44 @@ export const ShotInspector: React.FC = () => {
     setTimeout(() => setQueue(q => q.filter(j => !ids.includes(j.id))), 4000);
   };
 
+  // 分镜 → 画布：使用新画布 / 隶属到现有画布（视频在该画布生成后回写分镜）。
+  // payload 去掉 dataURL 级大字段，避免 localStorage 配额爆炸。
+  const sendShotToCanvas = (shot: any, opts: { mode: 'new' | 'existing'; canvas_id?: string }) => {
+    if (!shot?.id) return;
+    const cp: any = { ...shot };
+    if (typeof cp.previz_url === 'string' && cp.previz_url.startsWith('data:')) delete cp.previz_url;
+    const payload = {
+      shot: cp,
+      projectId: project?.id,
+      nonce: Date.now(),
+      mode: opts.mode,
+      canvas_id: opts.canvas_id,
+      canvas_name: opts.mode === 'new' ? `分镜#${shot.shot_index || ''}画布` : undefined,
+      autoRun: true,
+    };
+    try { localStorage.setItem('canvas_pending_shot', JSON.stringify(payload)); } catch {}
+    setActiveTab('canvas' as any);
+    try { window.dispatchEvent(new CustomEvent('canvas-import-shot', { detail: payload })); } catch {}
+    setCtxMenu(null);
+  };
+
+  const openShotCtxMenu = async (e: React.MouseEvent, shot: any) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setActiveShotId(shot.id);
+    const x = Math.min(e.clientX, window.innerWidth - 250);
+    const y = Math.min(e.clientY, window.innerHeight - 260);
+    setCtxMenu({ x, y, shotId: shot.id });
+    setCtxCanvases([]);
+    setCtxLoadingCanvas(true);
+    try {
+      if (project?.id) {
+        const r = await apiService.listProjectCanvases(project.id);
+        setCtxCanvases(r.canvases || []);
+      }
+    } catch {} finally { setCtxLoadingCanvas(false); }
+  };
+
   const handleBatchAllVideos = async () => {
     const targetShots = batchSelected.size > 0 ? shots.filter(s => batchSelected.has(s.id)) : shots.filter(s => s.image_url);
     if (targetShots.length === 0) { alert('没有可转视频的分镜（请先生成首帧图片）'); return; }
@@ -612,13 +843,23 @@ export const ShotInspector: React.FC = () => {
       setQueue(q => q.map(j => j.id === sh.id ? { ...j, status: 'running' } : j));
       try {
         const prov = (sh as any).video_provider || videoProvider;
-        await generateShotVideo(sh.id, { 
-          mode: videoMode, 
-          prompt: sh.video_prompt || sh.action_desc || sh.image_prompt, 
-          duration: Math.round(sh.duration) || 5, 
-          provider: prov, 
-          workflow_id: (sh as any).workflow_id || selectedWorkflowId || undefined, 
-          dynamic_inputs: (sh as any).dynamic_inputs || shotDynamicInputs 
+        // 批量与单镜同口径：首帧只放真首帧，角色/场景/白模进参考，相机意图进 prompt
+        const bvRefs = buildShotReferenceInputs(sh, project, 'video');
+        const bvInputs: Record<string, any> = {
+          ...(bvRefs.reference_images.length ? { reference_images: bvRefs.reference_images, reference_image: bvRefs.reference_images[0] } : {}),
+          ...(bvRefs.character_weight !== undefined ? { character_weight: bvRefs.character_weight } : {}),
+          ...(bvRefs.character_weights ? { character_weights: bvRefs.character_weights } : {}),
+          ...(bvRefs.first_frame_url ? { first_frame_url: bvRefs.first_frame_url } : {}),
+          ...(bvRefs.previz_video_url ? { previz_video_url: bvRefs.previz_video_url } : {}),
+          ...shotBatchInputs(sh, 'video'),
+        };
+        await generateShotVideo(sh.id, {
+          mode: videoMode,
+          prompt: withCameraIntent(sh.video_prompt || sh.action_desc || sh.image_prompt, sh),
+          duration: Math.round(sh.duration) || 5,
+          provider: prov,
+          workflow_id: (sh as any).workflow_id || undefined,
+          dynamic_inputs: bvInputs
         });
         setQueue(q => q.map(j => j.id === sh.id ? { ...j, status: 'done' } : j));
       } catch {
@@ -702,6 +943,7 @@ export const ShotInspector: React.FC = () => {
               <div
                 key={shot.id}
                 onClick={() => setActiveShotId(shot.id)}
+                onContextMenu={(e) => openShotCtxMenu(e, shot)}
                 className={`p-2 rounded-xl border cursor-pointer transition-all relative ${
                   isSelected
                     ? 'bg-surface-tertiary border-brand glow-border shadow-md'
@@ -1074,14 +1316,9 @@ export const ShotInspector: React.FC = () => {
           </div>
           <div className="flex items-center gap-1">
             <button onClick={() => duplicateShot(activeShot.id)} className="p-1.5 rounded-lg bg-surface-secondary border border-border text-gray-400 hover:text-white hover:border-brand" title="复制此分镜 (Ctrl+D)"><Copy className="w-3.5 h-3.5"/></button>
-            <button onClick={()=> {
-              try{
-                const payload = { shot: activeShot, projectId: project?.id };
-                localStorage.setItem('canvas_pending_shot', JSON.stringify(payload));
-                setActiveTab('canvas' as any);
-                if(typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('canvas-import-shot', {detail: payload}));
-              }catch{}
-            }} className="p-1.5 rounded-lg bg-surface-secondary border border-border text-gray-400 hover:text-white hover:border-brand" title="发送到无限画布"><Layers className="w-3.5 h-3.5"/></button>
+            <button onClick={(e)=> {
+              if (activeShot) openShotCtxMenu(e as any, activeShot);
+            }} className="p-1.5 rounded-lg bg-surface-secondary border border-border text-gray-400 hover:text-white hover:border-brand" title="发送到无限画布：使用新画布 / 隶属画布，视频生成后回写"><Layers className="w-3.5 h-3.5"/></button>
             <button onClick={() => deleteShot(activeShot.id)} className="p-1.5 rounded-lg text-gray-500 hover:text-red-400 hover:bg-red-500/10" title="删除此分镜"><Trash2 className="w-3.5 h-3.5" /></button>
           </div>
         </div>
@@ -1445,214 +1682,48 @@ export const ShotInspector: React.FC = () => {
                   </div>
                 )}
 
-                {/* ComfyUI 生图工作流选择 */}
-                <div className="bg-surface border border-border rounded-xl p-2.5 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-medium text-gray-300">ComfyUI 工作流</span>
-                    {selectedWorkflowId && (
-                      <button onClick={() => setInspectingWorkflowId(selectedWorkflowId)} className="text-[10px] text-brand-light hover:underline flex items-center gap-1">
-                        <Sliders className="w-3 h-3" /> 参数与暴露
-                      </button>
-                    )}
-                  </div>
-                  <select
-                    value={selectedWorkflowId}
-                    onChange={(e) => {
-                      setSelectedWorkflowId(e.target.value);
-                      localStorage.setItem('default_workflow_id', e.target.value);
-                      updateShot(activeShot.id, { workflow_id: e.target.value });
-                    }}
-                    className="w-full bg-surface-secondary border border-border rounded-lg px-2 py-1.5 text-xs text-white"
-                  >
-                    <option value="">-- 系统默认 (API 生图) --</option>
-                    {workflows.map((wf) => (
-                      <option key={wf.id} value={wf.id}>
-                        {wf.name || wf.id} ({wf.source === 'internal' ? '内部' : '外部'})
-                      </option>
-                    ))}
-                  </select>
-
-                  {/* 工作流动态暴露输入项（全类型自适应组件） */}
-                  {workflowExposedInputs.length > 0 && (
-                    <div className="pt-2 border-t border-border/60 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-bold text-amber-300 flex items-center gap-1">
-                          <span>⭐️ 工作流暴露输入项 ({workflowExposedInputs.length})</span>
-                        </span>
-                        <span className="text-[10px] text-gray-400">已自适应映射节点</span>
+                {/* 源声明的输入区：提示词 + 媒体插槽，全部来自该源 input_schema，零写死模板 */}
+                {(() => {
+                  const def: any = imageProviderDef;
+                  const inProps = def?.input_schema?.properties || {};
+                  const promptLabel = String(inProps?.prompt?.title || inProps?.prompt?.description || '正向生图提示词');
+                  const slots: any[] = resolveRenderSlots(def, 'image');
+                  return (
+                    <div className="space-y-2.5">
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between text-[11px] text-gray-300 font-semibold">
+                          <span className="truncate" title={promptLabel}>{promptLabel}</span>
+                          <span className="flex items-center gap-2 shrink-0">
+                            {def?.workflow_id && (
+                              <button onClick={() => setInspectingWorkflowId(def.workflow_id)} className="text-[10px] font-normal text-brand-light hover:underline flex items-center gap-1" title="编辑该工作流的暴露清单">
+                                <Sliders className="w-3 h-3" /> 参数与暴露
+                              </button>
+                            )}
+                            <span className="text-[10px] text-gray-500 font-mono">{activeShot.image_prompt?.length || 0} 字</span>
+                          </span>
+                        </div>
+                        <textarea
+                          value={activeShot.image_prompt}
+                          onChange={(e) => updateShot(activeShot.id, { image_prompt: e.target.value })}
+                          rows={3}
+                          className="w-full bg-surface-secondary border border-border rounded-xl p-2.5 text-xs font-mono text-white placeholder-gray-500 focus:outline-none focus:border-brand"
+                          placeholder={inProps?.prompt?.description ? `${inProps.prompt.description}...` : '输入画面提示词...'}
+                        />
                       </div>
 
-                      <div className="space-y-2">
-                        {workflowExposedInputs.map((exp: any) => {
-                          const key = exp.id || exp.node_id;
-                          const val = shotDynamicInputs[key];
-                          const isImageType = exp.type === 'image' || exp.type === 'audio' || exp.type === 'video';
-
-                          return (
-                            <div key={key} className="space-y-1 bg-surface-secondary border border-border/80 rounded-lg p-2 text-xs">
-                              <div className="flex items-center justify-between">
-                                <span className="text-gray-300 font-medium">{exp.label || exp.param_name}</span>
-                                <span className="text-[9px] text-gray-500 font-mono">#{exp.node_id}</span>
-                              </div>
-
-                              {isImageType ? (
-                                <div className="space-y-1.5 pt-1">
-                                  {val ? (
-                                    <div className="flex items-center gap-2">
-                                      {exp.type === 'image' ? (
-                                        <img src={getMediaUrl(val)} alt="" className="w-16 h-16 rounded-lg object-cover border border-border" />
-                                      ) : exp.type === 'audio' ? (
-                                        <span className="text-xs font-mono truncate max-w-[140px] text-pink-300">🎵 {String(val).slice(0, 24)}...</span>
-                                      ) : (
-                                        <span className="text-xs font-mono truncate max-w-[140px] text-orange-300">🎬 {String(val).slice(0, 24)}...</span>
-                                      )}
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          const next = { ...shotDynamicInputs, [key]: '' };
-                                          setShotDynamicInputs(next);
-                                          updateShot(activeShot.id, { dynamic_inputs: next } as any);
-                                        }}
-                                        className="px-2 py-1 rounded bg-red-500/20 text-red-400 text-xs hover:bg-red-500/30"
-                                      >
-                                        移除
-                                      </button>
-                                    </div>
-                                  ) : (
-                                    <div className="flex flex-wrap items-center gap-1.5">
-                                      {exp.type === 'image' && (
-                                        <button
-                                          type="button"
-                                          onClick={() => handleInjectCurrentCharacter(key)}
-                                          className="px-2 py-1 rounded bg-brand/20 hover:bg-brand/30 border border-brand/40 text-[11px] text-brand-light font-medium flex items-center gap-1 transition"
-                                          title="一键注入该分镜出场角色的立绘或三视图"
-                                        >
-                                          <UserCheck className="w-3 h-3" />
-                                          <span>🎭 注入当前角色</span>
-                                        </button>
-                                      )}
-                                      <label className="px-2 py-1 rounded bg-surface-tertiary hover:bg-surface-tertiary/80 border border-border text-[11px] text-gray-300 cursor-pointer flex items-center gap-1 transition">
-                                        <Upload className="w-3 h-3" />
-                                        <span>{uploadingInputKey === key ? '上传中...' : `📁 上传${exp.type === 'audio' ? '音频' : exp.type === 'video' ? '视频' : '图片'}`}</span>
-                                        <input
-                                          type="file"
-                                          accept={exp.type === 'image' ? 'image/*' : exp.type === 'audio' ? 'audio/*' : 'video/*'}
-                                          className="hidden"
-                                          onChange={(e) => {
-                                            const f = e.target.files?.[0];
-                                            if (f) {
-                                              if (exp.type === 'image') handleUploadImageForInput(key, f);
-                                              else {
-                                                const r = new FileReader();
-                                                r.onload = () => {
-                                                  const next = { ...shotDynamicInputs, [key]: r.result as string };
-                                                  setShotDynamicInputs(next);
-                                                  updateShot(activeShot.id, { dynamic_inputs: next } as any);
-                                                };
-                                                r.readAsDataURL(f);
-                                              }
-                                            }
-                                          }}
-                                        />
-                                      </label>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setAssetPickerConfig({
-                                            isOpen: true,
-                                            title: `为工作流选择素材`,
-                                            category: exp.type === 'image' ? 'character' : 'scene',
-                                            onSelect: (asset) => {
-                                              const next = { ...shotDynamicInputs, [key]: asset.url };
-                                              setShotDynamicInputs(next);
-                                              updateShot(activeShot.id, { dynamic_inputs: next } as any);
-                                            },
-                                          });
-                                        }}
-                                        className="px-2 py-1 rounded bg-surface-tertiary hover:bg-brand/20 border border-border text-[11px] text-gray-300 hover:text-brand-light flex items-center gap-1"
-                                      >
-                                        <FolderOpen className="w-3 h-3" />
-                                        <span>素材库</span>
-                                      </button>
-                                    </div>
-                                  )}
-                                </div>
-                              ) : (exp.type === 'select' || exp.type === 'combo') ? (
-                                <select
-                                  value={val ?? ''}
-                                  onChange={(e) => {
-                                    const next = { ...shotDynamicInputs, [key]: e.target.value };
-                                    setShotDynamicInputs(next);
-                                    updateShot(activeShot.id, { dynamic_inputs: next } as any);
-                                  }}
-                                  className="w-full bg-surface-tertiary border border-border rounded-lg px-2 py-1 text-xs text-white"
-                                >
-                                  <option value="">-- 请选择 --</option>
-                                  {(exp.choices || []).map((c: string) => (
-                                    <option key={c} value={c}>{c}</option>
-                                  ))}
-                                  {!(exp.choices || []).includes(val) && val && <option value={val}>{val}</option>}
-                                </select>
-                              ) : exp.type === 'boolean' ? (
-                                <label className="flex items-center gap-2 cursor-pointer pt-0.5">
-                                  <input
-                                    type="checkbox"
-                                    checked={!!val}
-                                    onChange={(e) => {
-                                      const next = { ...shotDynamicInputs, [key]: e.target.checked };
-                                      setShotDynamicInputs(next);
-                                      updateShot(activeShot.id, { dynamic_inputs: next } as any);
-                                    }}
-                                    className="w-4 h-4 rounded text-brand bg-surface-tertiary border-border"
-                                  />
-                                  <span className="text-xs text-gray-300">{val ? '开启' : '关闭'}</span>
-                                </label>
-                              ) : exp.type === 'number' ? (
-                                <input
-                                  type="number"
-                                  value={val ?? ''}
-                                  onChange={(e) => {
-                                    const next = { ...shotDynamicInputs, [key]: parseFloat(e.target.value) || 0 };
-                                    setShotDynamicInputs(next);
-                                    updateShot(activeShot.id, { dynamic_inputs: next } as any);
-                                  }}
-                                  className="w-full bg-surface-tertiary border border-border rounded-lg px-2 py-1 text-xs text-white"
-                                />
-                              ) : (
-                                <textarea
-                                  value={val ?? ''}
-                                  onChange={(e) => {
-                                    const next = { ...shotDynamicInputs, [key]: e.target.value };
-                                    setShotDynamicInputs(next);
-                                    updateShot(activeShot.id, { dynamic_inputs: next } as any);
-                                  }}
-                                  rows={2}
-                                  placeholder={exp.description || key}
-                                  className="w-full bg-surface-tertiary border border-border rounded-lg px-2 py-1 text-xs text-white placeholder-gray-500 resize-none font-mono"
-                                />
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
+                      <ProviderSlotList
+                        slots={slots}
+                        values={shotDynamicInputs}
+                        uploadingKey={uploadingInputKey}
+                        onWrite={setSlotValue}
+                        onUpload={handleSlotUploadFile}
+                        onPickFromLibrary={pickAssetForSlot}
+                        onInjectCharacter={injectCharacterToSlot}
+                        resolveUrl={getMediaUrl}
+                      />
                     </div>
-                  )}
-                </div>
-
-                {/* 提示词输入区（无工作流自定义提示词暴露时，使用首帧标准输入区） */}
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between text-[11px] text-gray-300 font-semibold">
-                    <span>正向生图提示词</span>
-                    <span className="text-[10px] text-gray-500 font-mono">{activeShot.image_prompt?.length || 0} 字</span>
-                  </div>
-                  <textarea
-                    value={activeShot.image_prompt}
-                    onChange={(e) => updateShot(activeShot.id, { image_prompt: e.target.value })}
-                    rows={3}
-                    className="w-full bg-surface-secondary border border-border rounded-xl p-2.5 text-xs font-mono text-white placeholder-gray-500 focus:outline-none focus:border-brand"
-                    placeholder="输入画面首帧提示词..."
-                  />
-                </div>
+                  );
+                })()}
 
                 <div className="flex gap-2">
                   <button
@@ -1769,7 +1840,12 @@ export const ShotInspector: React.FC = () => {
                       values={audioProviderParams}
                       onChange={(next) => {
                         setAudioProviderParams(next);
-                        updateShot(activeShot.id, { provider_params: { ...(activeShot as any).provider_params, audio: next } } as any);
+                        // 源自行声明情绪时，把值同步回镜头情绪字段（配音与剪映导出都读镜头上的 emotion）
+                        const emo = audioEmotionKey ? next[audioEmotionKey] : undefined;
+                        updateShot(activeShot.id, {
+                          provider_params: { ...(activeShot as any).provider_params, audio: next },
+                          ...(emo ? { emotion: emo as EmotionType } : {}),
+                        } as any);
                       }}
                     />
                   </div>
@@ -1781,13 +1857,14 @@ export const ShotInspector: React.FC = () => {
                       <option key={c.id} value={c.name}>{c.name}</option>
                     ))}
                   </select>
-                  <select value={activeShot.emotion} onChange={(e) => updateShot(activeShot.id, { emotion: e.target.value as EmotionType })} className="bg-surface-secondary border border-border rounded-lg px-2 py-1.5 text-xs text-white">
-                    <option value="neutral">😐 平静</option>
-                    <option value="intense">🔥 怒吼</option>
-                    <option value="sorrow">😢 悲痛</option>
-                    <option value="excited">⚡ 兴奋</option>
-                    <option value="whispering">🤫 耳语</option>
-                  </select>
+                  {!audioEmotionKey && (
+                    <select value={activeShot.emotion} onChange={(e) => updateShot(activeShot.id, { emotion: e.target.value as EmotionType })} className="bg-surface-secondary border border-border rounded-lg px-2 py-1.5 text-xs text-white">
+                      {/* 情绪选项 = 所选语音源 params_schema.emotion 声明的枚举；源未声明时回退系统 EmotionType 域模型 */}
+                      {(['neutral', 'intense', 'sorrow', 'excited', 'fearful', 'whispering'] as string[]).map((v) => (
+                        <option key={v} value={v}>{v}</option>
+                      ))}
+                    </select>
+                  )}
                 </div>
 
                 <div className="flex items-center justify-between text-xs text-gray-400 pt-1">
@@ -1850,6 +1927,7 @@ export const ShotInspector: React.FC = () => {
               <ProviderPicker
                 kind="video"
                 value={videoProvider}
+                capability={productionMode === 'image_to_video' ? 'i2v' : productionMode === 'motion_comic' ? 'r2v' : undefined}
                 onChange={(pid, def) => {
                   setVideoProvider(pid);
                   setVideoProviderDef(def || null);
@@ -1876,6 +1954,23 @@ export const ShotInspector: React.FC = () => {
                   />
                 </div>
               )}
+
+              {/* 视频源声明的素材插槽（首帧由分镜图自动供给，其余按 input_schema 逐条挂载） */}
+              {(() => {
+                const vSlots = resolveRenderSlots(videoProviderDef, 'video')
+                  .filter((s: any) => s.role !== 'first_frame' && s.key !== 'first_frame');
+                return (
+                  <ProviderSlotList
+                    slots={vSlots}
+                    values={shotDynamicInputs}
+                    uploadingKey={uploadingInputKey}
+                    onWrite={setSlotValue}
+                    onUpload={handleSlotUploadFile}
+                    onPickFromLibrary={pickAssetForSlot}
+                    resolveUrl={getMediaUrl}
+                  />
+                );
+              })()}
 
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-orange-300">运镜/运动描述</span>
@@ -1907,17 +2002,29 @@ export const ShotInspector: React.FC = () => {
                 ))}
               </div>
 
-              <div className="flex items-center justify-between text-xs text-gray-400 pt-1">
-                <span>生成时长: <b className="text-orange-400">{Math.round(activeShot.duration)}s</b></span>
-              </div>
-              <input
-                type="range"
-                min="3"
-                max="10"
-                value={Math.round(activeShot.duration)}
-                onChange={(e) => updateShot(activeShot.id, { duration: parseFloat(e.target.value) })}
-                className="w-full accent-orange-500"
-              />
+              {(() => {
+                // 时长是镜头属性，滑杆始终保留；但名称与可拖动范围取自该源声明的 duration 参数（未声明则用镜头通用范围）
+                const props = (videoProviderDef?.params_schema?.properties || {}) as Record<string, any>;
+                const durKey = Object.keys(props).find((k) => k === 'duration' || props[k]?.['x-std-key'] === 'duration');
+                const dur = durKey ? props[durKey] : null;
+                return (
+                  <>
+                    <div className="flex items-center justify-between text-xs text-gray-400 pt-1">
+                      <span>{dur?.title || '镜头时长'}: <b className="text-orange-400">{Math.round(activeShot.duration)}s</b></span>
+                      {dur && <span className="text-[10px] text-gray-500 font-mono">{dur.minimum}~{dur.maximum}s 由该源声明</span>}
+                    </div>
+                    <input
+                      type="range"
+                      min={dur?.minimum ?? 1}
+                      max={dur?.maximum ?? 30}
+                      step={dur?.step ?? 1}
+                      value={Math.round(activeShot.duration)}
+                      onChange={(e) => updateShot(activeShot.id, { duration: parseFloat(e.target.value) })}
+                      className="w-full accent-orange-500"
+                    />
+                  </>
+                );
+              })()}
 
               <button
                 onClick={handleGenerateVideo}
@@ -1977,19 +2084,29 @@ export const ShotInspector: React.FC = () => {
           isOpen={!!inspectingWorkflowId}
           onClose={() => setInspectingWorkflowId('')}
           onSaved={() => {
-            loadWorkflowsAndAssets();
-            if (selectedWorkflowId) {
-              apiService.inspectWorkflow(selectedWorkflowId).then(res => {
-                setWorkflowExposedInputs(res?.exposed_inputs || []);
-              });
-            }
+            loadProjectAssets();
+            // 暴露清单变了 → 该工作流对应生成源的 schema 已在后端重建，必须重新拉 definition 才能反映到表单
+            refreshSourceDefs();
+            window.dispatchEvent(new Event('provider-list-refresh'));
           }}
-          onDeleted={(deletedId) => {
-            loadWorkflowsAndAssets();
-            if (selectedWorkflowId === deletedId) {
-              setWorkflowExposedInputs([]);
-            }
+          onDeleted={() => {
+            loadProjectAssets();
+            refreshSourceDefs();
+            window.dispatchEvent(new Event('provider-list-refresh'));
           }}
+        />
+      )}
+
+      {/* 生成源插槽素材选择：画布产出 / 角色库 / 素材库 / 本地上传 */}
+      {slotPicker && (
+        <CanvasResourcePickerModal
+          isOpen={!!slotPicker}
+          onClose={() => setSlotPicker(null)}
+          onSelect={handleSlotPicked}
+          slotKey={slotPicker.writeKeys[0]}
+          slotLabel={slotPicker.slot?.label}
+          multiSelect={slotPicker.multi}
+          acceptType={slotPicker.slot?.type || 'image'}
         />
       )}
 
@@ -2004,6 +2121,31 @@ export const ShotInspector: React.FC = () => {
         }}
         onClose={() => setAssetPickerConfig(p => ({ ...p, isOpen: false }))}
       />
+
+      {/* 分镜右键菜单：使用新画布 / 隶属到现有画布（视频在该画布生成后回写分镜） */}
+      {ctxMenu && (() => {
+        const shot: any = shots.find((s: any) => s.id === ctxMenu.shotId);
+        if (!shot) return null;
+        const affil = ctxCanvases.find(c => c.id === shot.canvas_id);
+        return (
+          <div className="fixed inset-0 z-[70]" onClick={() => setCtxMenu(null)} onContextMenu={e => { e.preventDefault(); setCtxMenu(null); }}>
+            <div className="absolute w-60 rounded-xl bg-surface border border-border shadow-2xl p-1.5 space-y-0.5" style={{ left: ctxMenu.x, top: ctxMenu.y }} onClick={e => e.stopPropagation()}>
+              <div className="px-2.5 py-1.5 text-[11px] font-bold text-gray-400">分镜 #{shot.shot_index}{affil ? ` · 隶属「${affil.name}」` : ''}</div>
+              <button onClick={() => sendShotToCanvas(shot, { mode: 'new' })} className="w-full text-left px-2.5 py-2 rounded-lg text-xs text-white hover:bg-brand/20 flex items-center gap-2"><Plus className="w-3.5 h-3.5 text-brand-light" /><span>使用新画布生成视频</span></button>
+              <div className="px-2.5 pt-1.5 text-[10px] text-gray-500 font-bold">隶属到现有画布</div>
+              {ctxLoadingCanvas && <div className="px-2.5 py-1.5 text-[11px] text-gray-500">加载画布列表…</div>}
+              {!ctxLoadingCanvas && ctxCanvases.length === 0 && <div className="px-2.5 py-1.5 text-[11px] text-gray-500">暂无画布（先用新画布）</div>}
+              {ctxCanvases.map(c => (
+                <button key={c.id} onClick={() => sendShotToCanvas(shot, { mode: 'existing', canvas_id: c.id })} className="w-full text-left px-2.5 py-2 rounded-lg text-xs text-gray-200 hover:bg-brand/20 flex items-center gap-2 truncate">
+                  <Layers className="w-3.5 h-3.5 text-gray-500" />
+                  <span className="truncate">{shot.canvas_id === c.id ? '✓ ' : ''}{c.name}（{c.node_count}节点）</span>
+                </button>
+              ))}
+              <div className="px-2.5 py-1.5 text-[10px] text-gray-600 leading-4">视频在所选画布自动生成后回写本分镜</div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

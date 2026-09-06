@@ -3,7 +3,7 @@
  * 统一多模态资源选择器 (Unified Asset & Context Picker Modal)
  * 4 大真实数据源：画布产出资源 + 角色库立绘 + 项目素材库 + 本地上传
  */
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   Search,
@@ -21,8 +21,11 @@ import {
 } from 'lucide-react';
 import { useCanvasStore } from '../../stores/useCanvasStore';
 import { useProjectStore } from '../../stores/useProjectStore';
-import { useAssetStore } from '../../stores/useAssetStore';
 import { apiService } from '../../services/api';
+
+const API_ORIGIN = typeof window !== 'undefined' && window.location.port === '5173' ? 'http://127.0.0.1:8000' : '';
+// 相对产物 URL（/storage、/assets）在 dev 下必须回源，否则缩略图 404；存值保持原样，仅展示拼接
+const resolveUrl = (u?: string) => (u && u.startsWith('/') ? API_ORIGIN + u : (u || ''));
 
 interface Props {
   isOpen: boolean;
@@ -56,10 +59,37 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
   const project = useProjectStore((s) => s.project);
   const characters = project?.characters || [];
 
-  // 3. 项目素材库
-  const assetStoreAssets = useAssetStore((s) => s.assets) || [];
-  const projectAssets = (project as any)?.assets || [];
-  const allProjectAssets = [...assetStoreAssets, ...projectAssets.filter((pa: any) => !assetStoreAssets.some((a) => a.id === pa.id))];
+  // 3. 项目素材库：打开即直拉（不依赖素材库面板的 store 缓存，否则没进过面板就永远是空的）
+  const [libAssets, setLibAssets] = useState<any[]>([]);
+  const [libLoading, setLibLoading] = useState(false);
+  useEffect(() => {
+    if (!isOpen) return;
+    // 切槽位/重开时清掉上次的勾选与搜索，避免串槽
+    setSelectedUrls([]);
+    setSearchQuery('');
+    let cancelled = false;
+    (async () => {
+      setLibLoading(true);
+      try {
+        let pid: string | undefined;
+        try {
+          const pls = await import('../../stores/useProjectListStore');
+          pid = pls.useProjectListStore.getState().activeProjectId || undefined;
+        } catch {}
+        if (!pid) {
+          try { pid = useProjectStore.getState().activeProjectId || undefined; } catch {}
+        }
+        const r: any = await apiService.listAssets({ project_id: pid, include_shared: true, limit: 100 } as any);
+        if (!cancelled) setLibAssets(r?.assets || []);
+      } catch {
+        if (!cancelled) setLibAssets([]);
+      } finally {
+        if (!cancelled) setLibLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isOpen, slotKey]);
+  const allProjectAssets = libAssets;
 
   if (!isOpen) return null;
 
@@ -115,8 +145,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
     if (multiSelect) {
       setSelectedUrls((prev) => (prev.includes(url) ? prev.filter((u) => u !== url) : [...prev, url]));
     } else {
-      onSelect(url, meta);
-      onClose();
+      setSelectedUrls((prev) => (prev[0] === url ? [] : [url]));
     }
   };
 
@@ -125,6 +154,19 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
       onSelect(selectedUrls);
       onClose();
     }
+  };
+
+  // 上传走资产库通道成功后刷新本弹窗列表，下次打开即见
+  const refreshLib = async () => {
+    try {
+      let pid: string | undefined;
+      try {
+        const pls = await import('../../stores/useProjectListStore');
+        pid = pls.useProjectListStore.getState().activeProjectId || undefined;
+      } catch {}
+      const r: any = await apiService.listAssets({ project_id: pid, include_shared: true, limit: 100 } as any);
+      setLibAssets(r?.assets || []);
+    } catch {}
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -158,6 +200,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
             const u = assetRes?.asset?.file_url || assetRes?.file_url || assetRes?.url;
             if (u) {
               urls.push(u);
+              refreshLib();
               continue;
             }
           } catch {}
@@ -185,8 +228,8 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="w-full max-w-4xl max-h-[85vh] bg-[#1a1b1e] border border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden text-white">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={onClose}>
+      <div className="w-full max-w-4xl max-h-[85vh] bg-[#1a1b1e] border border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden text-white" onClick={(e) => e.stopPropagation()}>
         {/* 顶部标题栏 */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-white/[0.02]">
           <div className="flex items-center gap-3">
@@ -289,7 +332,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
         </div>
 
         {/* 内容展示区 */}
-        <div className="flex-1 overflow-y-auto p-6 min-h-[360px]">
+        <div className="flex-1 overflow-y-auto p-6 min-h-0">
           {/* Tab 1: 画布上的资源 */}
           {activeTab === 'canvas' && (
             <>
@@ -321,9 +364,9 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
                       >
                         <div className="aspect-[9/16] w-full bg-black/60 relative overflow-hidden flex items-center justify-center">
                           {asset.type === 'video' ? (
-                            <video src={asset.url} className="w-full h-full object-cover" muted />
+                            <video src={resolveUrl(asset.url)} className="w-full h-full object-cover" muted />
                           ) : (
-                            <img src={asset.url} alt={asset.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                            <img src={resolveUrl(asset.url)} alt={asset.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
                           )}
                           <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-black/60 backdrop-blur-md text-[10px] font-mono text-white/80 border border-white/10">
                             {asset.sourceNodeType}
@@ -358,7 +401,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
                   {filteredCharacters.map((char: any) => {
-                    const avatar = char.avatar_url || char.avatar || (char.reference_images && char.reference_images[0]) || '';
+                    const avatar = char.avatar_url || char.avatar || char.three_views?.front || (char.reference_images && char.reference_images[0]) || '';
                     const isSelected = selectedUrls.includes(avatar);
                     return (
                       <div
@@ -372,7 +415,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
                       >
                         <div className="aspect-square w-full rounded-xl bg-black/60 overflow-hidden relative border border-white/10 flex items-center justify-center">
                           {avatar ? (
-                            <img src={avatar} alt={char.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                            <img src={resolveUrl(avatar)} alt={char.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                           ) : (
                             <UserCheck className="w-10 h-10 text-white/20" />
                           )}
@@ -406,7 +449,12 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
           {/* Tab 3: 场景与素材库 */}
           {activeTab === 'assets' && (
             <>
-              {filteredProjectAssets.length === 0 ? (
+              {libLoading ? (
+                <div className="h-64 flex flex-col items-center justify-center text-white/40 text-center gap-2">
+                  <div className="w-8 h-8 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
+                  <p className="text-sm">正在加载素材库…</p>
+                </div>
+              ) : filteredProjectAssets.length === 0 ? (
                 <div className="h-64 flex flex-col items-center justify-center text-white/40 text-center gap-2">
                   <FolderOpen className="w-10 h-10 stroke-[1.5]" />
                   <p className="text-sm">素材库暂无资产</p>
@@ -429,11 +477,11 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
                       >
                         <div className="aspect-[4/3] w-full bg-black/60 relative overflow-hidden flex items-center justify-center">
                           {asset.category === 'video' || asset.type === 'video' ? (
-                            <Video className="w-8 h-8 text-orange-400" />
+                            u ? (<video src={resolveUrl(u)} className="w-full h-full object-cover" muted />) : (<Video className="w-8 h-8 text-orange-400" />)
                           ) : asset.category === 'audio' || asset.type === 'audio' ? (
                             <Music className="w-8 h-8 text-pink-400" />
                           ) : u ? (
-                            <img src={u} alt={asset.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                            <img src={resolveUrl(u)} alt={asset.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                           ) : (
                             <ImageIcon className="w-8 h-8 text-white/30" />
                           )}
@@ -478,29 +526,39 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
           )}
         </div>
 
-        {/* 底部多选确认栏 */}
-        {multiSelect && (
-          <div className="px-6 py-3 border-t border-white/10 bg-white/[0.02] flex items-center justify-between">
-            <span className="text-xs text-white/60">
-              已选 <strong className="text-violet-400 font-mono">{selectedUrls.length}</strong> 项
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={onClose}
-                className="px-4 py-1.5 rounded-xl border border-white/10 text-xs font-semibold hover:bg-white/5 transition-colors"
-              >
-                取消
-              </button>
-              <button
-                onClick={handleConfirmMulti}
-                disabled={selectedUrls.length === 0}
-                className="px-5 py-1.5 rounded-xl bg-violet-600 text-white text-xs font-bold hover:bg-violet-500 disabled:opacity-40 transition-all shadow-lg shadow-violet-600/30"
-              >
-                确认装载
-              </button>
-            </div>
+        {/* 底部确认栏 - 始终显示，修复无法确定/退出 */}
+        <div className="px-6 py-3 border-t border-white/10 bg-[#1a1b1e] flex items-center justify-between shrink-0">
+          <span className="text-xs text-white/60">
+            {selectedUrls.length === 0 ? (
+              <span>未选择 {multiSelect ? '· 可多选' : ''}</span>
+            ) : multiSelect ? (
+              <>已选 <strong className="text-violet-400 font-mono">{selectedUrls.length}</strong> 项</>
+            ) : (
+              <>已选 <strong className="text-violet-400 font-mono">1</strong> 项</>
+            )}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onClose}
+              className="px-4 py-1.5 rounded-xl border border-white/10 text-xs font-semibold text-white/70 hover:text-white hover:bg-white/5 transition-colors"
+            >
+              取消
+            </button>
+            <button
+              onClick={() => {
+                if (multiSelect) handleConfirmMulti();
+                else if (selectedUrls.length > 0) {
+                  onSelect(selectedUrls[0]);
+                  onClose();
+                }
+              }}
+              disabled={selectedUrls.length === 0}
+              className="px-5 py-1.5 rounded-xl bg-violet-600 text-white text-xs font-bold hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-lg shadow-violet-600/30"
+            >
+              确认{multiSelect && selectedUrls.length > 0 ? ` (${selectedUrls.length})` : ''}
+            </button>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

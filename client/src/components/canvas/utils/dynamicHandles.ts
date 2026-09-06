@@ -1,38 +1,31 @@
-export type HandleDef = { id: string; label: string; type: 'image' | 'audio' | 'video' | 'text'; required?: boolean };
+export type HandleDef = { id: string; label: string; type: 'image' | 'audio' | 'video' | 'text'; required?:boolean };
+
+// 类型只认接口声明：x-handle 优先；uri 缺 x-handle 时按属性键粗判媒体类型（后端 enrich 已保证 x-handle 存在）
+const coerce = (xHandle: string, key: string, isUri: boolean): HandleDef['type'] | null => {
+  const h = (xHandle || '').toLowerCase();
+  if (['image','images','reference_images','first_frame','last_frame'].includes(h)) return 'image';
+  if (['audio','audios','reference_audios','ref_audio'].includes(h)) return 'audio';
+  if (['video','videos','reference_videos'].includes(h)) return 'video';
+  if (h === 'text' || h === 'prompt') return 'text';
+  if (isUri) {
+    const lk = key.toLowerCase();
+    if (lk.includes('audio')) return 'audio';
+    if (lk.includes('video')) return 'video';
+    return 'image';
+  }
+  return null;
+};
 
 export function handlesFromSchema(schema: any): HandleDef[] {
   if (!schema?.properties) return [];
+  const required: string[] = Array.isArray(schema.required) ? schema.required : [];
   const out: HandleDef[] = [];
   for (const [key, def] of Object.entries<any>(schema.properties)) {
-    const xHandle = def['x-handle'] as string | undefined;
-    const t = def.type;
-    const isArray = t === 'array';
-    const itemsFormat = isArray ? (def.items?.format || '') : (def.format || '');
-    const desc = (def.description || '').toLowerCase();
-    let hType: HandleDef['type'] | null = null;
-    if (xHandle) {
-      if (['image','images','reference_images'].includes(xHandle)) hType = 'image';
-      else if (['audio','audios','reference_audios'].includes(xHandle)) hType = 'audio';
-      else if (['video','videos','reference_videos'].includes(xHandle)) hType = 'video';
-      else if (xHandle === 'text' || xHandle === 'prompt') hType = 'text';
-    }
-    if (!hType) {
-      if (isArray && itemsFormat === 'uri') {
-        if (key.includes('image') || desc.includes('image')) hType = 'image';
-        else if (key.includes('audio') || desc.includes('audio')) hType = 'audio';
-        else if (key.includes('video') || desc.includes('video')) hType = 'video';
-        else hType = 'image';
-      } else if (t === 'string' && def.format === 'uri') {
-        if (key.includes('image') || desc.includes('image')) hType = 'image';
-        else if (key.includes('audio') || desc.includes('audio')) hType = 'audio';
-        else if (key.includes('video') || desc.includes('video')) hType = 'video';
-      } else if (key.includes('prompt') || desc.includes('prompt')) {
-        hType = 'text';
-      }
-    }
-    if (hType) {
-      out.push({ id: key, label: def.title || key, type: hType, required: !!def.required });
-    }
+    const isArray = def?.type === 'array';
+    const isUri = def?.format === 'uri' || (isArray && def?.items?.format === 'uri');
+    const t = coerce(String(def?.['x-handle'] || ''), key, isUri);
+    if (!t) continue;
+    out.push({ id: def['x-slot'] || key, label: def.description || def.title || key, type: t, required: required.includes(key) || !!def.required });
   }
   return out;
 }

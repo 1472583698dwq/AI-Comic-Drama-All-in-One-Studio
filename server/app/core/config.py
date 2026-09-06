@@ -59,6 +59,8 @@ MANAGED_KEYS = [
     "VIDU_API_KEY",
     # JianYing Draft & Paths
     "JIANYIN_DRAFT_PATH",
+    # Trusted Mode 总闸（A档）
+    "STUDIO_TRUSTED_MODE",
 ]
 
 
@@ -191,6 +193,10 @@ class Settings(BaseModel):
     # JianYing Draft Custom Location
     JIANYIN_DRAFT_PATH: str = os.getenv("JIANYIN_DRAFT_PATH", get_default_jianyin_draft_path())
 
+    # Trusted Mode（可信模式总闸）：允许自定义生成源 trusted=True 跳出沙箱 + Agent fs/shell 工具生效
+    # 本地桌面端默认关闭，需显式 STUDIO_TRUSTED_MODE=1 开启。开启后仍需逐源勾选 trusted。
+    STUDIO_TRUSTED_MODE: str = os.getenv("STUDIO_TRUSTED_MODE", "0")
+
     # Local storage paths
     # 开发态：仓库根 storage；打包态：优先复用仓库根 storage（避免构建清空用户配置）
     STORAGE_DIR: str = os.path.abspath(
@@ -218,6 +224,22 @@ class Settings(BaseModel):
 settings = Settings()
 os.makedirs(settings.STORAGE_DIR, exist_ok=True)
 os.makedirs(settings.EXPORTS_DIR, exist_ok=True)
+
+
+def is_trusted_mode_enabled() -> bool:
+    """可信模式总闸：显式 STUDIO_TRUSTED_MODE=1/true/on 才放行。"""
+    try:
+        v = str(getattr(settings, "STUDIO_TRUSTED_MODE", "0") or os.getenv("STUDIO_TRUSTED_MODE", "0")).strip().lower()
+        if v in ("1", "true", "yes", "on"):
+            return True
+    except Exception:
+        pass
+    try:
+        if str(os.getenv("STUDIO_TRUSTED_MODE", "")).strip().lower() in ("1", "true", "yes", "on"):
+            return True
+    except Exception:
+        pass
+    return False
 
 ENV_FILE = get_primary_env_file()
 JSON_CONFIG_FILE = os.path.join(settings.STORAGE_DIR, "config_store.json")

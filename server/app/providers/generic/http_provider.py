@@ -187,8 +187,8 @@ async def _autodl_poll_and_download(task_id: str, poll_url: str, headers: Dict[s
     from app.core.config import settings
     videos_dir = os.path.join(settings.STORAGE_DIR, "videos")
     os.makedirs(videos_dir, exist_ok=True)
-    # 初始化状态
-    _CUSTOM_VIDEO_TASKS[task_id] = {"status": "QUEUED", "task_id": task_id, "provider": provider_id, "created_at": time.time()}
+    # 初始化状态（保留 node 上下文便于按节点隔离查询）
+    _CUSTOM_VIDEO_TASKS[task_id] = {"status": "QUEUED", "task_id": task_id, "provider": provider_id, "created_at": time.time(), "node_id": None, "project_id": None}
     max_attempts = 120  # 最多 10 分钟 (120*5s)
     for _ in range(max_attempts):
         await asyncio.sleep(5.0)
@@ -241,7 +241,16 @@ async def _autodl_poll_and_download(task_id: str, poll_url: str, headers: Dict[s
 
 
 def get_custom_video_task(task_id: str) -> Optional[Dict[str, Any]]:
-    return _CUSTOM_VIDEO_TASKS.get(task_id)
+    hit = _CUSTOM_VIDEO_TASKS.get(task_id)
+    if hit is not None:
+        return hit
+    # 穿透：代码视频源（H3 等提交即返 task_id 型）的任务落在 code_provider 表，前端 /videos/status
+    # 与 MCP/canvas 轮询统一经此口径查询，无需各处重复兼容。
+    try:
+        from app.providers.generic.code_provider import get_code_video_task
+        return get_code_video_task(task_id)
+    except Exception:
+        return None
 
 
 # ---------- Generic Image Provider ----------
@@ -908,8 +917,12 @@ class GenericHttpVideoProvider(VideoProvider):
                 if not video_url:
                     # 30s 内未完成，转后台轮询并立即返回 task_id，前端可通过 /videos/status/{task_id} 查询
                     print(f"[VideoProvider {self.id}] task {task_id} still {last_status} after {short_timeout}s, switch to background polling")
-                    # 注册后台任务
-                    _CUSTOM_VIDEO_TASKS[task_id] = {"status": last_status, "task_id": task_id, "provider": self.id, "poll_url": poll_url, "headers": headers, "created_at": time.time()}
+                    # 注册后台任务（按 node 隔离，带 node_id/project_id 便于追踪）
+                    _node_id = getattr(req, "_node_id", None) if hasattr(req, "_node_id") else (req.extra.get("_node_id") if isinstance(getattr(req, "extra", None), dict) else None)
+                    _proj_id = getattr(req, "_project_id", None) if hasattr(req, "_project_id") else (req.extra.get("_project_id") if isinstance(getattr(req, "extra", None), dict) else None)
+                    if not _node_id and isinstance(getattr(req, "dynamic_inputs", None), dict):
+                        _node_id = req.dynamic_inputs.get("_node_id")
+                    _CUSTOM_VIDEO_TASKS[task_id] = {"status": last_status, "task_id": task_id, "provider": self.id, "poll_url": poll_url, "headers": headers, "created_at": time.time(), "node_id": _node_id, "project_id": _proj_id}
                     try:
                         asyncio.create_task(_autodl_poll_and_download(task_id, poll_url, headers, self.id))
                     except Exception as e:

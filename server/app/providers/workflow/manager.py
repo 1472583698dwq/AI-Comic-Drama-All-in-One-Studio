@@ -236,12 +236,19 @@ def is_save_format_workflow(data: Dict[str, Any]) -> bool:
 
 _OBJECT_INFO_CACHE: Optional[Dict[str, Any]] = None
 _OBJECT_INFO_CACHE_TS: float = 0
+# ComfyUI 离线时的失败短缓存：启动期十余个 combo 参数会轮询 object_info，
+# 无缓存时每次卡满 timeout（约 3s），累计 30s+ 拖慢服务就绪。失败只缓存 60s，
+# ComfyUI 上线后最多 1 分钟即恢复精准枚举。
+_OBJECT_INFO_FAIL_TS: float = 0
+_OBJECT_INFO_FAIL_TTL: float = 60.0
 
 
 def _fetch_object_info(timeout: float = 3.0) -> Optional[Dict[str, Any]]:
-    global _OBJECT_INFO_CACHE, _OBJECT_INFO_CACHE_TS
+    global _OBJECT_INFO_CACHE, _OBJECT_INFO_CACHE_TS, _OBJECT_INFO_FAIL_TS
     if _OBJECT_INFO_CACHE is not None and time.time() - _OBJECT_INFO_CACHE_TS < 300:
         return _OBJECT_INFO_CACHE
+    if time.time() - _OBJECT_INFO_FAIL_TS < _OBJECT_INFO_FAIL_TTL:
+        return None
     url = (getattr(settings, "COMFYUI_SERVER_URL", "") or "http://127.0.0.1:8188").rstrip("/")
     try:
         import httpx
@@ -253,6 +260,7 @@ def _fetch_object_info(timeout: float = 3.0) -> Optional[Dict[str, Any]]:
                 return _OBJECT_INFO_CACHE
     except Exception:
         pass
+    _OBJECT_INFO_FAIL_TS = time.time()
     return None
 
 
@@ -283,6 +291,10 @@ def _combo_choices_from_oi(ct: str, pname: str, current: Any = None) -> Optional
             choices = [str(x) for x in spec[0]]
         elif isinstance(spec[0], str) and len(spec) > 1 and isinstance(spec[1], dict) and isinstance(spec[1].get("options"), list):
             choices = [str(x) for x in spec[1]["options"]]
+        # 剔除新版 object_info 的字典式嵌套选项（"{'key': 'on', 'inputs': ...}"，如 TextGenerate.sampling_mode）：
+        # 它们是子控件 schema 而非合法枚举，stringify 后会误导模糊匹配把垃圾写回工作流（致 execution_error）。
+        # 与前端 schema 构建侧（combo 分支）过滤口径一致。
+        choices = [c for c in choices if not c.startswith("{") and "'inputs':" not in c]
         if not choices:
             return None
         choices = choices[:80]
@@ -293,9 +305,29 @@ def _combo_choices_from_oi(ct: str, pname: str, current: Any = None) -> Optional
         return None
 
 
+def _normalize_combo_value(val: Any, valid: List[str]) -> Any:
+    """将短值/旧值自动映射到真实枚举，如 9:16 → 9:16 (Portrait Widescreen)"""
+    s = str(val).strip()
+    if s in valid:
+        return s
+    # 前缀匹配：9:16 匹配 9:16 (...)
+    prefix = s.split(" ")[0].split("(")[0].strip()
+    for v in valid:
+        v_prefix = v.split(" ")[0].split("(")[0].strip()
+        if v_prefix == prefix or v_prefix == s or v.startswith(s) or s.startswith(v_prefix):
+            return v
+    # 旧值兼容：9:16 (Portrait) → 9:16 (Portrait Widescreen)
+    # 短字符串（如 "on"/"off"）跳过子串兜底，避免误命中长选项内的子串（如 "{'key': 'on', ...}" 残留）。
+    if len(s) >= 3 and len(prefix) >= 3:
+        for v in valid:
+            if prefix in v or s in v:
+                return v
+    return None
+
+
 def _set_input_guarded(wf: Dict[str, Any], nid: str, pname: str, val: Any) -> None:
     """
-    带枚举护栏的参数写入：值不在 ComfyUI 真实枚举内时拒绝写入。
+    带枚举护栏的参数写入：值不在 ComfyUI 真实枚举内时尝试自动映射，仍不匹配则拒绝写入。
     背景：新版 ComfyUI 对非法 combo 值不报错，而是把整条输出分支软剪枝（状态仍 success），
     表现为"工作流已完成但未捕获到图像输出"。离线（拿不到 object_info）时不拦截。
     """
@@ -304,9 +336,50 @@ def _set_input_guarded(wf: Dict[str, Any], nid: str, pname: str, val: Any) -> No
         return
     valid = _combo_choices_from_oi(str(node.get("class_type", "")), pname)
     if valid is not None and str(val) not in valid:
-        print(f"[Workflow] 已拦截非法枚举注入: #{nid} {node.get('class_type')}.{pname} = {val!r}（不在 ComfyUI 枚举内，避免输出分支被剪枝）")
-        return
+        mapped = _normalize_combo_value(val, valid)
+        if mapped is not None and mapped in valid:
+            print(f"[Workflow] 枚举自动映射: #{nid} {node.get('class_type')}.{pname} {val!r} → {mapped!r}")
+            val = mapped
+        else:
+            print(f"[Workflow] 已拦截非法枚举注入: #{nid} {node.get('class_type')}.{pname} = {val!r}（不在 ComfyUI 枚举内，避免输出分支被剪枝）")
+            return
     node.setdefault("inputs", {})[pname] = val
+
+
+def _write_exposed(wf: Dict[str, Any], nid: str, pname: str, val: Any) -> None:
+    """
+    写入暴露项参数；支持嵌套 widget（如 TextGenerate 的 sampling_mode.temperature）。
+    带点号的名字先尝试当作独立 widget 写入；不存在时折叠进父 widget 的 dict / JSON 字符串子字段，
+    父项也不存在则拒绝写入 —— 避免伪造出 ComfyUI 不认的扁平键。
+    """
+    node = wf.get(str(nid))
+    if not isinstance(node, dict):
+        return
+    inputs = node.setdefault("inputs", {})
+    if "." not in pname:
+        _set_input_guarded(wf, nid, pname, val)
+        return
+    if pname in inputs:
+        _set_input_guarded(wf, nid, pname, val)
+        return
+    parent, child = pname.split(".", 1)
+    if parent not in inputs:
+        print(f"[Workflow] 跳过未知嵌套参数 #{nid} {pname}（父 widget {parent} 不存在）")
+        return
+    holder = inputs[parent]
+    if isinstance(holder, dict):
+        holder[child] = val
+        return
+    if isinstance(holder, str):
+        try:
+            parsed = json.loads(holder)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, dict):
+            parsed[child] = val
+            inputs[parent] = json.dumps(parsed, ensure_ascii=False)
+            return
+    print(f"[Workflow] 跳过嵌套参数 #{nid} {pname}（父 widget {parent} 非可写字典）")
 
 
 def _is_link(v: Any) -> bool:
@@ -416,9 +489,16 @@ def _apply_dynamic_inputs(wf: Dict[str, Any], dynamic_inputs: Optional[Dict[str,
         if ks.startswith(("exp_", "combo_", "num_")):
             parsed = _nid_param(ks.split("_", 1)[1]) if "_" in ks else None
             if parsed:
-                _set_input_guarded(wf, parsed[0], parsed[1], val)
+                _write_exposed(wf, parsed[0], parsed[1], val)
         elif ks.startswith(("img_", "txt_", "aud_", "vid_")):
-            prefix, target_nid = ks.split("_", 1)
+            prefix, rest = ks.split("_", 1)
+            # 暴露项 id 可能带参数后缀（如 txt_30:27_string_b → 节点 30:27 的 string_b），
+            # 先按 {节点}_{参数} 解析，解析不出再把 rest 整体当节点 id。
+            parsed_media = _nid_param(rest)
+            if parsed_media:
+                _write_exposed(wf, parsed_media[0], parsed_media[1], val)
+                continue
+            target_nid = rest
             node = wf.get(target_nid)
             if not isinstance(node, dict):
                 continue
@@ -1334,6 +1414,258 @@ def auto_detect_exposed_inputs(clean_wf: Dict[str, Any], mapping: Optional[Dict[
     return exposed
 
 
+# ========== 暴露清单单点解析（工作流 = 生成源，两侧必须同源） ==========
+def resolve_exposed_inputs(clean_wf: Dict[str, Any], meta: Optional[Dict[str, Any]] = None) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
+    """
+    解析某工作流的最终暴露清单与映射，全系统唯一口径。
+    先取清单（新鲜探测为基准 + 已存白名单保留用户编辑），再叠加官方 App Mode 契约
+    （meta.app_contract，来自工作流的 extra.linearData）：被契约声明的项拿到作者显示名与顺序并标记 declared，
+    未被声明的项由 schema 生成侧收进隐藏层，从而不再把整张图摊平成参数表。
+    """
+    exposed, mapping = _resolve_exposed_raw(clean_wf, meta)
+    try:
+        apply_app_contract(exposed, (meta or {}).get("app_contract"))
+    except Exception:
+        pass
+    return exposed, mapping
+
+
+def _resolve_exposed_raw(clean_wf: Dict[str, Any], meta: Optional[Dict[str, Any]] = None) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
+    """
+    以 auto_detect 的新鲜清单为基准（保证 combo/number 等控件类型不退化），
+    已保存的白名单仅用于保留用户编辑的 label/别名/描述/默认值。
+    inspect_workflow_nodes 与 _build_provider_schemas_from_workflow 共用，杜绝"参数与暴露"改了但生成源没变。
+    """
+    meta = meta or {}
+    try:
+        current_mapping = meta.get("mapping") or auto_generate_mapping(analyze_workflow(clean_wf))
+    except Exception:
+        current_mapping = {}
+    try:
+        fresh_exposed = auto_detect_exposed_inputs(clean_wf, current_mapping)
+    except Exception:
+        fresh_exposed = []
+    saved_exposed = meta.get("exposed_inputs")
+    if saved_exposed is None or len(saved_exposed) == 0:
+        return fresh_exposed, current_mapping
+
+    has_dirty = any(e.get('param_name') == 'undefined' or str(e.get('id', '')).endswith('_undefined') for e in saved_exposed)
+    need_merge = has_dirty or any(
+        any(se.get('node_id') == fe['node_id'] and se.get('param_name') == fe['param_name'] and se.get('type') != fe.get('type') for se in saved_exposed)
+        for fe in fresh_exposed
+    )
+    if has_dirty or need_merge or len(saved_exposed) < 4:
+        saved_map = {f"{e['node_id']}_{e['param_name']}": e for e in saved_exposed if e.get('param_name') and e.get('param_name') != 'undefined'}
+        keep_user_keys = ('label', 'alias', 'description', 'default_value', 'required')
+        exposed_inputs: List[Dict[str, Any]] = []
+        for fe in fresh_exposed:
+            key = f"{fe['node_id']}_{fe['param_name']}"
+            if key in saved_map:
+                se = saved_map[key]
+                merged = {**fe}
+                for k in keep_user_keys:
+                    v = se.get(k)
+                    if v not in (None, ''):
+                        merged[k] = v
+                # ComfyUI 离线时新鲜探测会把 combo/number 退化成 text（id 前缀也随之从 combo_ 掉成 exp_），
+                # 此时必须保留已存条目的类型与 id，否则下拉框会整体退化为手填输入。
+                if fe.get('type') == 'text' and se.get('type') in ('combo', 'number', 'boolean'):
+                    merged['type'] = se['type']
+                    if se.get('id'):
+                        merged['id'] = se['id']
+                fresh_opts = [str(o) for o in (fe.get('options') or fe.get('choices') or [])]
+                user_opts = [str(o) for o in (se.get('options') or se.get('choices') or []) if o not in fresh_opts]
+                opts = list(dict.fromkeys(fresh_opts + user_opts))
+                if opts:
+                    merged['options'] = opts
+                    merged['choices'] = opts
+                exposed_inputs.append(merged)
+            else:
+                exposed_inputs.append(fe)
+        fresh_keys = {f"{e['node_id']}_{e['param_name']}" for e in fresh_exposed}
+        for se in saved_exposed:
+            key = f"{se['node_id']}_{se['param_name']}"
+            if key not in fresh_keys and se.get('param_name') != 'undefined':
+                exposed_inputs.append(se)
+        return exposed_inputs, current_mapping
+
+    # 白名单有效：type / 数值范围 / 下拉选项以 fresh 为准，其余保留用户编辑
+    type_fix_map = {f"{e['node_id']}_{e['param_name']}": e for e in fresh_exposed}
+    exposed_inputs = []
+    for se in saved_exposed:
+        key = f"{se['node_id']}_{se['param_name']}"
+        fe = type_fix_map.get(key)
+        if fe:
+            merged = {**se, "type": fe.get("type", se.get("type"))}
+            fresh_opts = [str(o) for o in (fe.get("options") or fe.get("choices") or [])]
+            user_opts = [str(o) for o in (se.get("options") or se.get("choices") or []) if o not in fresh_opts]
+            opts = list(dict.fromkeys(fresh_opts + user_opts))
+            if opts:
+                merged["options"] = opts
+                merged["choices"] = opts
+            for mk in ("min", "max", "step"):
+                if fe.get(mk) is not None:
+                    merged[mk] = fe[mk]
+            exposed_inputs.append(merged)
+        else:
+            exposed_inputs.append(se)
+    return exposed_inputs, current_mapping
+
+
+# 标准参数语义表：命中则决定分组/暴露级别/人机分工，未命中一律 advanced + suggest
+WF_PARAM_SEMANTICS: Dict[str, Dict[str, Any]] = {
+    "aspect_ratio":     {"x-category": "layout",  "x-visibility": "basic",    "x-agent": "auto",    "x-priority": 10},
+    "resolution":       {"x-category": "layout",  "x-visibility": "basic",    "x-agent": "auto",    "x-priority": 20},
+    "width":            {"x-category": "layout",  "x-visibility": "basic",    "x-agent": "auto",    "x-priority": 21},
+    "height":           {"x-category": "layout",  "x-visibility": "basic",    "x-agent": "auto",    "x-priority": 22},
+    "duration":         {"x-category": "motion",  "x-visibility": "basic",    "x-agent": "auto",    "x-priority": 30},
+    "frame_rate":       {"x-category": "motion",  "x-visibility": "basic",    "x-agent": "auto",    "x-priority": 31},
+    "fps":              {"x-category": "motion",  "x-visibility": "basic",    "x-agent": "auto",    "x-priority": 31},
+    "steps":            {"x-category": "quality", "x-visibility": "advanced", "x-agent": "suggest", "x-priority": 40},
+    "cfg":              {"x-category": "quality", "x-visibility": "advanced", "x-agent": "suggest", "x-priority": 41},
+    "denoise":          {"x-category": "quality", "x-visibility": "advanced", "x-agent": "suggest", "x-priority": 43},
+    "sampler_name":     {"x-category": "quality", "x-visibility": "advanced", "x-agent": "suggest", "x-priority": 44},
+    "scheduler":        {"x-category": "quality", "x-visibility": "advanced", "x-agent": "suggest", "x-priority": 45},
+    "unet_name":        {"x-category": "quality", "x-visibility": "basic",    "x-agent": "manual",  "x-priority": 4},
+    "ckpt_name":        {"x-category": "quality", "x-visibility": "basic",    "x-agent": "manual",  "x-priority": 3},
+    "clip_name":        {"x-category": "quality", "x-visibility": "advanced", "x-agent": "manual",  "x-priority": 46},
+    "vae_name":         {"x-category": "quality", "x-visibility": "basic",    "x-agent": "manual",  "x-priority": 5},
+    "lora_name":        {"x-category": "quality", "x-visibility": "basic",    "x-agent": "manual",  "x-priority": 6},
+    "seed":             {"x-category": "quality", "x-visibility": "advanced", "x-agent": "manual",  "x-priority": 99},
+    "filename_prefix":  {"x-category": "advanced", "x-visibility": "hidden",  "x-agent": "manual",  "x-priority": 200},
+}
+
+
+def wf_std_alias(pname: str) -> Optional[str]:
+    """暴露项参数名 → 标准名（先精确后包含，长名优先以免 fps 抢先命中 frame_rate 之类）"""
+    low = str(pname or "").lower()
+    if not low:
+        return None
+    if low in WF_PARAM_SEMANTICS:
+        return low
+    for k in sorted(WF_PARAM_SEMANTICS.keys(), key=len, reverse=True):
+        if k in low:
+            return k
+    return None
+
+
+NON_PROMPT_TEXT_PARAMS = ("filename", "prefix", "name", "path", "directory", "folder", "seed")
+SYSTEM_PROMPT_MARKERS = ("system", "系统")
+USER_PROMPT_MARKERS = ("user", "用户", "正向")
+
+
+def pick_prompt_text_slot(exposed: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    选出工作流真正承接用户提示词的文本暴露项（单点规则，init_providers 注入与此必须一致）。
+    两条陷阱必须避开：
+    ① 文本型暴露项还包含 filename_prefix / 路径等非创作输入，要先排除，否则 prompt 会绑到 SaveImage 参数上；
+    ② "System Prompt" 与 "User Prompt" 都含 prompt 字样，若按 prompt 匹配会把用户输入写进系统提示词节点，
+       因此用户标记优先命中，系统标记项排到最后。
+    """
+    def _is_mechanical(e: Dict[str, Any]) -> bool:
+        pname = str(e.get("param_name", "")).lower()
+        if any(t in pname for t in NON_PROMPT_TEXT_PARAMS):
+            return True
+        return wf_std_alias(pname) is not None
+
+    def _lab(e: Dict[str, Any]) -> str:
+        return f"{e.get('label', '') or ''}{e.get('alias', '') or ''}{e.get('description', '') or ''}".lower()
+
+    candidates = [e for e in (exposed or []) if str(e.get("type")) == "text" and not _is_mechanical(e)]
+    if not candidates:
+        return None
+    for e in candidates:
+        if any(m in _lab(e) for m in USER_PROMPT_MARKERS) or "提示词" in _lab(e):
+            return e
+    for e in candidates:
+        pn = str(e.get("param_name", "")).lower()
+        if pn in ("prompt", "value", "text", "string") or pn.startswith("string_"):
+            return e
+    free = [e for e in candidates if not any(m in _lab(e) for m in SYSTEM_PROMPT_MARKERS)]
+    if free:
+        return free[0]
+    return candidates[0]
+
+
+# ========== ComfyUI 官方 App Mode 契约（extra.linearMode / extra.linearData） ==========
+# 官方结构：extra.linearData = { "inputs": [ [WidgetId, 显示名, config?] ], "outputs": [NodeId] }
+#           WidgetId = "graphId:nodeId:widgetName"（子图节点 id 自身含冒号，故 node 取中段重拼）
+def parse_linear_widget_id(widget_id: str) -> Tuple[Optional[str], Optional[str]]:
+    """WidgetId → (node_id, widget_name)；解析失败返回 (None, None)"""
+    parts = str(widget_id or "").split(":")
+    if len(parts) < 3:
+        return None, None
+    node_id = ":".join(parts[1:-1]).strip()
+    widget = parts[-1].strip()
+    return (node_id or None), (widget or None)
+
+
+def extract_app_contract(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    从 UI/Save 格式工作流里抽取 App Mode 契约。
+    API 格式导出（顶层即节点表）不含 extra，因此必须在转换前抽取、或从外部原始文件回读，
+    随后作为 meta.app_contract 持久化 —— 图文件本身始终保持纯节点表。
+    """
+    if not isinstance(data, dict):
+        return None
+    extra = data.get("extra")
+    if not isinstance(extra, dict):
+        return None
+    ld = extra.get("linearData")
+    if not isinstance(ld, dict):
+        return None
+    raw_inputs = ld.get("inputs") or []
+    raw_outputs = ld.get("outputs") or []
+    inputs: List[Dict[str, Any]] = []
+    for idx, item in enumerate(raw_inputs):
+        if isinstance(item, (list, tuple)):
+            wid = str(item[0]) if len(item) > 0 else ""
+            name = str(item[1]) if len(item) > 1 and item[1] else ""
+            config = item[2] if len(item) > 2 and isinstance(item[2], dict) else {}
+        elif isinstance(item, dict):
+            wid = str(item.get("id") or item.get("widgetId") or "")
+            name = str(item.get("name") or item.get("label") or "")
+            config = {k: v for k, v in item.items() if k not in ("id", "widgetId", "name", "label")}
+        else:
+            continue
+        node_id, widget = parse_linear_widget_id(wid)
+        if not node_id or not widget:
+            continue
+        inputs.append({
+            "widget_id": wid, "node_id": node_id, "param_name": widget,
+            "display_name": name, "order": idx, "config": config,
+        })
+    outputs = [{"node_id": str(n)} for n in raw_outputs if str(n).strip()]
+    if not inputs and not outputs:
+        return None
+    return {"linear_mode": bool(extra.get("linearMode")), "inputs": inputs, "outputs": outputs}
+
+
+def apply_app_contract(exposed: List[Dict[str, Any]], contract: Optional[Dict[str, Any]]) -> bool:
+    """
+    把契约标注到暴露项上：declared=True / 作者显示名 / 契约顺序（决定 x-priority）。
+    返回是否存在有效契约（决定未声明项是否该收进隐藏层）。
+    """
+    inputs = (contract or {}).get("inputs") or []
+    if not inputs:
+        return False
+    by_key = {(str(i.get("node_id")), str(i.get("param_name"))): i for i in inputs}
+    for exp in exposed:
+        hit = by_key.get((str(exp.get("node_id")), str(exp.get("param_name"))))
+        if not hit:
+            continue
+        exp["declared"] = True
+        exp["app_order"] = hit.get("order")
+        dn = str(hit.get("display_name") or "").strip()
+        if dn:
+            exp["label"] = dn
+            exp["alias"] = dn
+        cfg = hit.get("config") or {}
+        if isinstance(cfg.get("description"), str) and cfg["description"].strip():
+            exp["description"] = cfg["description"].strip()
+    return any(e.get("declared") for e in exposed)
+
+
 class ComfyWorkflowManager:
     # ----- 内部工作流 -----
     def list_internal_workflows(self) -> List[Dict[str, Any]]:
@@ -1623,8 +1955,12 @@ class ComfyWorkflowManager:
         wf = self.get_workflow(workflow_id)
         return wf, meta
 
-    def save_workflow(self, name: str, workflow_json: Dict[str, Any], mapping: Optional[Dict[str, str]] = None, description: str = "") -> Dict[str, Any]:
+    def save_workflow(self, name: str, workflow_json: Dict[str, Any], mapping: Optional[Dict[str, str]] = None, description: str = "",
+                      app_contract: Optional[Dict[str, Any]] = None, source_file: Optional[str] = None) -> Dict[str, Any]:
         converted = False
+        # App Mode 契约只存在于 UI/Save 格式，转成 API 格式前必须先抽取
+        if app_contract is None:
+            app_contract = extract_app_contract(workflow_json)
         if is_save_format_workflow(workflow_json):
             try:
                 workflow_json = convert_save_format_to_api_format(workflow_json)
@@ -1667,6 +2003,8 @@ class ComfyWorkflowManager:
             "warnings": warnings,
             "source": "internal",
             "auto_converted": converted,
+            "app_contract": app_contract,
+            "source_file": source_file,
         }
         with open(_meta_path(workflow_id), "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)
@@ -1684,7 +2022,47 @@ class ComfyWorkflowManager:
             raise FileNotFoundError(f"外部工作流不存在: {external_id}")
         if not meta.get("is_api_format"):
             raise ValueError(f"该外部工作流非API Format，无法导入: {meta.get('error')}")
-        return self.save_workflow(name=new_name or meta.get("name", "imported"), workflow_json=wf, mapping=meta.get("mapping"), description=f"从 {meta.get('file_path')} 导入")
+        # 外部原文件是 UI 格式才含 extra.linearData；转成 API 格式后契约即丢失，必须回读原文件抽取
+        contract = self._contract_from_file(meta.get("file_path"))
+        return self.save_workflow(
+            name=new_name or meta.get("name", "imported"),
+            workflow_json=wf,
+            mapping=meta.get("mapping"),
+            description=f"从 {meta.get('file_path')} 导入",
+            app_contract=contract,
+            source_file=meta.get("file_path"),
+        )
+
+    @staticmethod
+    def _contract_from_file(file_path: Optional[str]) -> Optional[Dict[str, Any]]:
+        if not file_path or not os.path.exists(file_path):
+            return None
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                return extract_app_contract(json.load(f))
+        except Exception:
+            return None
+
+    def refresh_app_contract(self, workflow_id: str) -> Dict[str, Any]:
+        """
+        重新从来源文件读取 App Mode 契约（用户在 ComfyUI App Builder 里改完勾选后调用）。
+        找不到来源文件时清空契约，回落到"高级/隐藏"分层策略。
+        """
+        if workflow_id.startswith("ext_"):
+            raise ValueError("外部工作流为只读，请先导入为内部工作流")
+        meta = self.get_meta(workflow_id)
+        if not meta:
+            raise FileNotFoundError(f"工作流不存在: {workflow_id}")
+        contract = self._contract_from_file(meta.get("source_file"))
+        meta["app_contract"] = contract
+        meta["updated_at"] = time.time()
+        with open(_meta_path(workflow_id), "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+        try:
+            sync_workflow_provider(workflow_id)
+        except Exception:
+            pass
+        return {"workflow_id": workflow_id, "app_contract": contract}
 
     def update_mapping(self, workflow_id: str, mapping: Dict[str, str]) -> Dict[str, Any]:
         # 外部工作流的映射仅内存生效，不持久化到外部文件；如需持久化请先导入
@@ -2514,72 +2892,7 @@ class ComfyWorkflowManager:
                             "choices": p.get("choices"),
                         })
 
-        current_mapping = (meta.get("mapping") if meta else None) or auto_generate_mapping(analyze_workflow(clean_wf))
-        saved_exposed = (meta.get("exposed_inputs") if meta else None)
-        fresh_exposed = auto_detect_exposed_inputs(clean_wf, current_mapping)
-        # 白名单与全量：始终以 fresh 34 为基准，确保下拉/数值等独立控件类型正确；已保存的白名单仅用于保留用户自定义 label/别名/default_value
-        if saved_exposed is None or len(saved_exposed) == 0:
-            exposed_inputs = fresh_exposed
-        else:
-            has_dirty = any(e.get('param_name')=='undefined' or str(e.get('id','')).endswith('_undefined') for e in saved_exposed)
-            # 若含脏数据或类型不匹配（如 aspect_ratio 存为 text 但 fresh 为 combo），则以 fresh 为准
-            need_merge = has_dirty or any(
-                any(se.get('node_id')==fe['node_id'] and se.get('param_name')==fe['param_name'] and se.get('type')!=fe.get('type') for se in saved_exposed)
-                for fe in fresh_exposed
-            )
-            if has_dirty or need_merge or len(saved_exposed) < 4:
-                saved_map = {f"{e['node_id']}_{e['param_name']}": e for e in saved_exposed if e.get('param_name') and e.get('param_name')!='undefined'}
-                # 用户自定义元数据白名单：label/别名/描述/默认值 保留用户编辑，type 以 fresh 为准
-                keep_user_keys = ('label', 'alias', 'description', 'default_value', 'required')
-                exposed_inputs = []
-                for fe in fresh_exposed:
-                    key = f"{fe['node_id']}_{fe['param_name']}"
-                    if key in saved_map:
-                        se = saved_map[key]
-                        merged = {**fe}
-                        for k in keep_user_keys:
-                            v = se.get(k)
-                            if v not in (None, ''):
-                                merged[k] = v
-                        # 下拉选项：fresh（ComfyUI 真实枚举）优先在前，历史硬编码错值/用户自定义去重追加在后
-                        fresh_opts = [str(o) for o in (fe.get('options') or fe.get('choices') or [])]
-                        user_opts = [str(o) for o in (se.get('options') or se.get('choices') or []) if o not in fresh_opts]
-                        opts = list(dict.fromkeys(fresh_opts + user_opts))
-                        if opts:
-                            merged['options'] = opts
-                            merged['choices'] = opts
-                        exposed_inputs.append(merged)
-                    else:
-                        exposed_inputs.append(fe)
-                # 保留保存中但新检测未覆盖的用户手动添加项
-                fresh_keys = {f"{e['node_id']}_{e['param_name']}" for e in fresh_exposed}
-                for se in saved_exposed:
-                    key = f"{se['node_id']}_{se['param_name']}"
-                    if key not in fresh_keys and se.get('param_name')!='undefined':
-                        exposed_inputs.append(se)
-            else:
-                # 已保存的白名单有效：type 始终以 fresh 为准（确保 combo 下拉不退化为手填）
-                type_fix_map = {f"{e['node_id']}_{e['param_name']}": e for e in fresh_exposed}
-                exposed_inputs = []
-                for se in saved_exposed:
-                    key = f"{se['node_id']}_{se['param_name']}"
-                    if key in type_fix_map:
-                        fe = type_fix_map[key]
-                        merged = {**se, "type": fe.get("type", se.get("type"))}
-                        # 下拉选项：fresh（ComfyUI 真实枚举）优先在前，用户自定义去重追加在后（历史错值不再遮蔽真实枚举）
-                        fresh_opts = [str(o) for o in (fe.get("options") or fe.get("choices") or [])]
-                        user_opts = [str(o) for o in (se.get("options") or se.get("choices") or []) if o not in fresh_opts]
-                        opts = list(dict.fromkeys(fresh_opts + user_opts))
-                        if opts:
-                            merged["options"] = opts
-                            merged["choices"] = opts
-                        # 数值滑杆范围以 fresh 为准
-                        for mk in ("min", "max", "step"):
-                            if fe.get(mk) is not None:
-                                merged[mk] = fe[mk]
-                        exposed_inputs.append(merged)
-                    else:
-                        exposed_inputs.append(se)
+        exposed_inputs, current_mapping = resolve_exposed_inputs(clean_wf, meta)
 
         return {
             "workflow_id": workflow_id,
@@ -2589,6 +2902,8 @@ class ComfyWorkflowManager:
             "mapping": current_mapping,
             "node_overrides": node_overrides,
             "exposed_inputs": exposed_inputs,
+            "app_contract": (meta or {}).get("app_contract"),
+            "source_file": (meta or {}).get("source_file"),
             "subgraphs": list(subgraphs_map.values()),
             "nodes": nodes_list,
             "available_models": available_models,
@@ -2899,71 +3214,227 @@ def _detect_workflow_kind(workflow: Dict[str, Any], meta: Optional[Dict[str, Any
     return "image"
 
 
+MEDIA_ROLE_KEYWORDS: List[Tuple[str, Tuple[str, ...]]] = [
+    ("first_frame",  ("首帧", "first", "start_image", "起始")),
+    ("last_frame",   ("尾帧", "last", "end_image", "结束")),
+    ("character_ref", ("角色", "人物", "立绘", "face", "character", "idol", "identity")),
+    ("scene_ref",    ("场景", "背景", "scene", "background", "环境")),
+    ("pose_ref",     ("姿态", "动作", "骨架", "pose", "openpose", "depth")),
+    ("control_ref",  ("控制", "controlnet", "canny", "lineart", "scribble", "mask")),
+    ("style_ref",    ("风格", "style", "参考风格", "垫图风格")),
+    ("ipadapter_ref", ("ipadapter", "ip_adapter", "一致性")),
+]
+
+
+def infer_media_role(exp: Dict[str, Any]) -> str:
+    """
+    推断媒体暴露项的语义角色。作者命名（label/alias）优先，其次参数名（如 mask）；
+    不使用自动探测的通用描述做判据 —— 所有 LoadImage 共用一段"支持上传角色立绘、构图草图…"文案，
+    用它会让多参考工作流的每个槽都被判成同一角色。
+    """
+    strong = f"{exp.get('label','')} {exp.get('alias','')}".lower()
+    weak = str(exp.get('param_name', '') or "").lower()
+    for role, kws in MEDIA_ROLE_KEYWORDS:
+        if any(k.lower() in strong for k in kws):
+            return role
+    for role, kws in MEDIA_ROLE_KEYWORDS:
+        if any(k.lower() in weak for k in kws):
+            return role
+    return "reference_images"
+
+
 def _build_provider_schemas_from_workflow(workflow: Dict[str, Any], meta: Optional[Dict[str, Any]] = None):
-    """标准化：所有工作流 Provider 统一用标准 x-handle 输入（prompt/reference_images...），内部再映射到具体节点"""
+    """
+    工作流 → 生成源 schema（全量同源，零固定模板）
+
+    - input_schema：仅标准句柄（prompt / reference_images / first_frame / last_frame），供画布连线与
+      节点 Agent 自动装配；prompt 的展示名取自该工作流真实文本入口，不再假设"所有源都有一个正向提示词"。
+    - params_schema：**逐条**来自暴露清单（number/combo/boolean/text 全收），key 一律使用暴露项原生 id
+      （num_30:3_steps / combo_49_aspect_ratio / txt_30:18），这样前端填的值可被 _apply_dynamic_inputs
+      直接写进节点，无需任何标准名映射；title 取真实中文标签，x-* 由 WF_PARAM_SEMANTICS 决定分组与人机分工。
+      不再做"steps/cfg/seed 白名单"筛选，也不在清单为空时回落 seed/steps/cfg 假参数。
+    """
     kind = _detect_workflow_kind(workflow, meta)
     try:
-        exposed = auto_detect_exposed_inputs(workflow, (meta or {}).get("mapping"))
+        exposed, _mapping = resolve_exposed_inputs(workflow, meta)
     except Exception:
         exposed = []
-    # 标准化输入：节点Agent按 prompt/reference_images/first_frame 等标准句柄调用
+    prompt_slot = pick_prompt_text_slot(exposed)
+
     if kind == "video":
-        input_props = {
-            "prompt": {"type":"string","description":"运动/提示词","x-handle":"text"},
-            "first_frame": {"type":"string","format":"uri","description":"首帧","x-handle":"image"},
-            "last_frame": {"type":"string","format":"uri","description":"尾帧","x-handle":"image"},
-            "reference_images": {"type":"array","items":{"type":"string","format":"uri"},"description":"参考图组","x-handle":"image"},
+        input_props: Dict[str, Any] = {
+            "prompt": {"type": "string", "description": "运动/提示词", "x-handle": "text", "x-role": "prompt"},
+            "first_frame": {"type": "string", "format": "uri", "description": "首帧", "x-handle": "image", "x-slot": "first_frame"},
+            "last_frame": {"type": "string", "format": "uri", "description": "尾帧", "x-handle": "image", "x-slot": "last_frame"},
+            "reference_images": {"type": "array", "items": {"type": "string", "format": "uri"}, "description": "参考图组", "x-handle": "image", "x-slot": "reference_images"},
         }
         input_required = ["prompt"]
     elif kind == "image":
         input_props = {
-            "prompt": {"type":"string","description":"画面提示词","x-handle":"text"},
-            "reference_images": {"type":"array","items":{"type":"string","format":"uri"},"description":"参考图/垫图","x-handle":"image"},
+            "prompt": {"type": "string", "description": "画面提示词", "x-handle": "text", "x-role": "prompt"},
+            "reference_images": {"type": "array", "items": {"type": "string", "format": "uri"}, "description": "参考图/垫图", "x-handle": "image", "x-slot": "reference_images"},
         }
         input_required = ["prompt"]
     else:
-        input_props = {"prompt": {"type":"string","description":"提示词","x-handle":"text"}}
+        input_props = {"prompt": {"type": "string", "description": "提示词", "x-handle": "text", "x-role": "prompt"}}
         input_required = ["prompt"]
-    # 参数：从 exposed 提取通用采样参数，映射到标准 key
+
+    # 用工作流真实文本入口的名称覆盖标准 prompt（前端据此显示，不再出现写死的"正向生图提示词"）
+    if prompt_slot:
+        real_label = str(prompt_slot.get("alias") or prompt_slot.get("label") or "").strip()
+        if real_label:
+            input_props["prompt"]["title"] = real_label
+            input_props["prompt"]["description"] = real_label
+        input_props["prompt"]["x-comfy-id"] = prompt_slot.get("id")
+
+    # 逐个媒体暴露项出独立槽位：多参考工作流因此有"角色图/场景图/姿态图"各一个槽，
+    # 而不是一个靠位置猜的参考图数组。标准句柄（上方 prompt/reference_images 等）保留给画布连线与 Agent，
+    # 标注 x-aggregate 供前端在已有独立槽时不重复渲染。
+    has_per_node_media = False
+    for exp in exposed:
+        etype = str(exp.get("type") or "")
+        if etype not in ("image", "audio", "video"):
+            continue
+        eid = str(exp.get("id") or f"{exp.get('node_id')}_{exp.get('param_name')}")
+        if not eid or eid in input_props:
+            continue
+        has_per_node_media = True
+        label = str(exp.get("alias") or exp.get("label") or eid)
+        input_props[eid] = {
+            "type": "string",
+            "format": "uri",
+            "title": label,
+            "description": label,
+            "x-handle": etype,
+            "x-slot": eid,
+            "x-role": infer_media_role(exp),
+            "x-comfy-id": eid,
+            "x-comfy-param": exp.get("param_name"),
+            "x-comfy-node": exp.get("node_id"),
+            "required": bool(exp.get("required")),
+        }
+
+    # 存在独立槽位时，把标准聚合句柄标记为 x-aggregate，前端据此不再重复画一个泛化多选槽
+    if has_per_node_media:
+        for agg in ("reference_images", "first_frame", "last_frame"):
+            if agg in input_props:
+                input_props[agg]["x-aggregate"] = True
+
+    # 契约决定可见性：被 App Mode 声明的项按声明顺序排在基础层；
+    # 有契约时未声明项一律收进隐藏层（仍暴露给 Agent 与"全部参数"抽屉），无契约时只保留能语义命名的项。
+    has_contract = any(bool(e.get("declared")) for e in exposed)
+
     params_props: Dict[str, Any] = {}
     for exp in exposed:
-        if exp.get("type") in ("number","combo","boolean"):
-            pname = str(exp.get("param_name",""))
-            low = pname.lower()
-            std_key = None
-            if "steps" in low: std_key = "steps"
-            elif low == "cfg": std_key = "cfg"
-            elif "seed" in low: std_key = "seed"
-            elif "sampler" in low: std_key = "sampler_name"
-            elif "scheduler" in low: std_key = "scheduler"
-            elif "width" in low: std_key = "width"
-            elif "height" in low: std_key = "height"
-            elif "duration" in low: std_key = "duration"
-            elif "resolution" in low: std_key = "resolution"
-            elif "fps" in low or "frame_rate" in low: std_key = "fps"
-            else: std_key = f"{exp.get('node_id')}_{pname}"
-            if std_key in params_props:
-                continue
-            if exp.get("type") == "number":
-                prop: Dict[str, Any] = {"type":"integer" if exp.get("step")==1 or isinstance(exp.get("default_value"), int) else "number","description":exp.get("label",""),"default":exp.get("default_value")}
-                if exp.get("min") is not None: prop["minimum"]=exp["min"]
-                if exp.get("max") is not None: prop["maximum"]=exp["max"]
-                if exp.get("step") is not None: prop["step"]=exp["step"]
-                params_props[std_key]=prop
-            elif exp.get("type")=="combo":
-                opts=exp.get("options") or exp.get("choices") or []
-                params_props[std_key]={"type":"string","enum": opts[:30] if opts else [str(exp.get("default_value",""))], "default":exp.get("default_value"),"description":exp.get("label","")}
-            elif exp.get("type")=="boolean":
-                params_props[std_key]={"type":"boolean","default":bool(exp.get("default_value",False)),"description":exp.get("label","")}
-    if not params_props:
-        params_props = {"seed":{"type":"integer","default":0},"steps":{"type":"integer","default":20,"minimum":4,"maximum":60},"cfg":{"type":"number","default":7.0}}
-    input_schema = {"type":"object","properties": input_props, "required": input_required}
-    params_schema = {"type":"object","properties": params_props}
-    if kind=="video":
-        output_schema={"type":"object","properties":{"video_url":{"type":"string","format":"uri","x-handle":"video"}},"required":["video_url"]}
+        etype = str(exp.get("type") or "")
+        if etype not in ("number", "combo", "boolean", "text"):
+            continue  # image/audio/video 已由 input_schema 槽位承载
+        eid = str(exp.get("id") or f"{exp.get('node_id')}_{exp.get('param_name')}")
+        if not eid or eid.endswith("_undefined") or "undefined" in eid:
+            continue
+        if prompt_slot is exp:
+            continue  # 正向提示词的唯一入口，避免与标准 prompt 重复成两个输入框
+        pname = str(exp.get("param_name", "") or "")
+        label = str(exp.get("alias") or exp.get("label") or pname or eid)
+        desc = str(exp.get("description") or "") or label
+        std = wf_std_alias(pname)
+        default_value = exp.get("default_value")
+
+        if etype == "number":
+            step = exp.get("step")
+            is_int = step in (1, 1.0) or (isinstance(default_value, int) and not isinstance(default_value, bool))
+            prop: Dict[str, Any] = {"type": "integer" if is_int else "number", "title": label, "description": desc}
+            if default_value is not None:
+                prop["default"] = int(default_value) if is_int else default_value
+            if exp.get("min") is not None:
+                prop["minimum"] = exp["min"]
+            if exp.get("max") is not None:
+                prop["maximum"] = exp["max"]
+            if step is not None:
+                prop["step"] = step
+        elif etype == "combo":
+            raw_opts = [str(o) for o in (exp.get("options") or exp.get("choices") or [])]
+            # 剔除 object_info 偶发返回的字典式选项（"{'key': 'on', 'inputs': ...}"），否则下拉出现乱码项
+            opts = [o for o in raw_opts if not o.startswith("{") and "'inputs':" not in o]
+            if default_value is not None and str(default_value) not in opts:
+                opts = [str(default_value)] + opts
+            prop = {"type": "string", "title": label, "description": desc, "x-control": "select"}
+            if opts:
+                prop["enum"] = opts[:60]
+            if default_value is not None:
+                prop["default"] = str(default_value)
+        elif etype == "boolean":
+            prop = {"type": "boolean", "title": label, "description": desc,
+                    "default": bool(default_value), "x-control": "toggle"}
+        else:  # text
+            prop = {"type": "string", "title": label, "description": desc, "x-control": "input"}
+            if default_value:
+                prop["default"] = str(default_value)
+
+        sem = WF_PARAM_SEMANTICS.get(std or "", {})
+        if exp.get("declared"):
+            # 作者显式声明：顺序即界面顺序，一律进基础层
+            category, visibility, agent, priority = "advanced", "basic", "auto", int(exp.get("app_order") or 0) * 10
+        elif has_contract:
+            # 已有契约却未被声明：属于图内部件，不占创作界面
+            category, visibility, agent, priority = "advanced", "hidden", "suggest", 500
+        elif std:
+            category = sem.get("x-category", "advanced")
+            visibility = sem.get("x-visibility", "advanced")
+            agent = sem.get("x-agent", "suggest")
+            priority = sem.get("x-priority", 50)
+        elif etype == "text":
+            # 额外文本入口本身就是可创作内容，未命名也保留在高级层
+            category, visibility, agent, priority = "advanced", "advanced", "suggest", 70
+        else:
+            category, visibility, agent, priority = "advanced", "hidden", "suggest", 500
+        prop["x-category"] = category
+        prop["x-visibility"] = visibility
+        prop["x-agent"] = agent
+        prop["x-priority"] = priority
+        if std:
+            prop["x-std-key"] = std
+        params_props[eid] = prop
+
+    input_schema = {"type": "object", "properties": input_props, "required": input_required}
+    params_schema = {"type": "object", "properties": params_props}
+    if kind == "video":
+        output_schema = {"type": "object", "properties": {"video_url": {"type": "string", "format": "uri", "x-handle": "video"}}, "required": ["video_url"]}
     else:
-        output_schema={"type":"object","properties":{"image_url":{"type":"string","format":"uri","x-handle":"image"}},"required":["image_url"]}
+        output_schema = {"type": "object", "properties": {"image_url": {"type": "string", "format": "uri", "x-handle": "image"}}, "required": ["image_url"]}
     return kind, input_schema, params_schema, output_schema, exposed
+
+
+def _persist_exposed_baseline(workflow_id: str, meta: Optional[Dict[str, Any]], exposed: List[Dict[str, Any]]) -> Optional[tuple]:
+    """
+    把工作流暴露清单写入 meta 作为基线（供 ComfyUI 离线启动时复用），并用新 meta 重算 schema。
+    返回重算后的 (kind, input_schema, params_schema, output_schema, exposed)；
+    meta 已包含同等或更完整清单时返回 None，由调用方决定沿用现状。
+    """
+    if not exposed:
+        return None
+    if len((meta or {}).get("exposed_inputs") or []) >= len(exposed):
+        return None
+    try:
+        mpath = _meta_path(workflow_id)
+        if not os.path.exists(mpath):
+            return None
+        with open(mpath, "r", encoding="utf-8") as f:
+            m = json.load(f)
+        m["exposed_inputs"] = exposed
+        with open(mpath, "w", encoding="utf-8") as f:
+            json.dump(m, f, ensure_ascii=False, indent=2)
+        wf = workflow_manager.get_workflow(workflow_id)
+        if not wf:
+            return None
+        return _build_provider_schemas_from_workflow(wf, m)
+    except Exception:
+        return None
+
+
+# 工作流→生成源的 Schema 生成规则版本：resolve/auto_detect/_build_* 等规则变更时 +1，
+# 存量源在下次启动时自动重建一次。启动 fast path 靠它判断，未变更时全程零网络。
+WORKFLOW_SCHEMA_VERSION = 1
 
 
 def sync_workflow_provider(workflow_id: str):
@@ -2977,18 +3448,49 @@ def sync_workflow_provider(workflow_id: str):
             return None
         if not meta or meta.get("source") != "internal":
             return None
-        # 外部未导入的工作流也允许同步为只读 Provider（直接读外部文件）
-        kind, input_schema, params_schema, output_schema, exposed = _build_provider_schemas_from_workflow(wf, meta)
-        # 计算 hash 用于变更检测
+        # Fast path（无 ComfyUI 也能秒级启动的关键）：工作流内容未变、规则版本一致、
+        # 且存量定义带有暴露清单时，直接复用存量定义。init_all_providers 启动时已从
+        # storage 把它注册进 Registry，这里跳过 _build_provider_schemas_from_workflow
+        # 中的 ComfyUI object_info 在线探测，零网络开销。ComfyUI 上线后的精准枚举
+        # 在“工作流内容变更 / 规则升级 / 首次同步”时才会触发重建。
         content_hash = hashlib.md5(json.dumps(wf, sort_keys=True).encode("utf-8")).hexdigest()[:8]
         pid = _workflow_provider_id(workflow_id)
-        # 构造 ProviderDefinition
-        from app.models.provider_definition import ProviderDefinition
         from app.providers.custom.manager import custom_provider_manager
         existing = custom_provider_manager.get_definition(pid)
-        # 若已存在且 hash 与 exposed 均未变则跳过（减少无谓重建）
+        if (existing is not None
+                and getattr(existing, "workflow_hash", None) == content_hash
+                and getattr(existing, "workflow_id", None) == workflow_id
+                and (getattr(existing, "schema_version", None) or 0) == WORKFLOW_SCHEMA_VERSION
+                and list(getattr(existing, "workflow_exposed", None) or [])):
+            return existing
+        # 内容变更 / 首次同步 / 规则升级：走完整构建（含 ComfyUI 在线探测；
+        # 离线时自动降级并受已存清单基线保护，见下）
+        kind, input_schema, params_schema, output_schema, exposed = _build_provider_schemas_from_workflow(wf, meta)
+        # 构造 ProviderDefinition
+        from app.models.provider_definition import ProviderDefinition
+        saved_exp = list(getattr(existing, "workflow_exposed", None) or []) if existing else []
+        baseline = saved_exp if len(saved_exp) > len(exposed) else []
+        if baseline and content_hash and getattr(existing, "workflow_hash", None) != content_hash:
+            baseline = []  # 工作流内容已变，旧清单不再可信
+        if baseline:
+            rebuilt = _persist_exposed_baseline(workflow_id, meta, baseline)
+            if rebuilt:
+                kind, input_schema, params_schema, output_schema, exposed = rebuilt
+            elif len(saved_exp) > len(exposed):
+                return existing
+        elif exposed and len(exposed) > len((meta or {}).get("exposed_inputs") or []):
+            # 本次探测比 meta 基线更完整（ComfyUI 在线）→ 固化，供后续离线启动复用
+            _persist_exposed_baseline(workflow_id, meta, exposed)
+        # 已存在且 hash、暴露清单、输入与参数 schema、规则版本全部未变才跳过
+        # （schema 规则升级后需自动重建存量源；版本不一致时落到下方重新保存以盖戳）
         if existing and getattr(existing, "workflow_hash", None) == content_hash and existing.workflow_id == workflow_id:
-            if getattr(existing, "workflow_exposed", None) == exposed:
+            same = (
+                getattr(existing, "workflow_exposed", None) == exposed
+                and (getattr(existing, "params_schema", None) or {}).get("properties") == params_schema.get("properties")
+                and (getattr(existing, "input_schema", None) or {}).get("properties") == input_schema.get("properties")
+                and (getattr(existing, "schema_version", None) or 0) == WORKFLOW_SCHEMA_VERSION
+            )
+            if same:
                 return existing
         name = (meta or {}).get("name") or workflow_id
         desc = (meta or {}).get("description") or f"ComfyUI 工作流 {workflow_id} 抽象的独立生成源"
@@ -3015,6 +3517,7 @@ def sync_workflow_provider(workflow_id: str):
             "workflow_id": workflow_id,
             "workflow_hash": content_hash,
             "workflow_exposed": exposed,
+            "schema_version": WORKFLOW_SCHEMA_VERSION,
             "models": models[:5],
             "default_model": models[0] if models else None,
             "params_schema": params_schema,

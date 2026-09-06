@@ -55,10 +55,8 @@ class ElevenLabsProvider(AudioProvider):
         if not settings.ELEVENLABS_API_KEY:
             raise RuntimeError("ELEVENLABS_API_KEY 未配置")
 
-        # voice_id 若为预设的 male-qn-qingse 等，需要映射到真实 elevenlabs voice_id
-        # 若用户直接填 elevenlabs voice_id 则直通
+        # voice_id 若为其他源预设ID，映射到真实 elevenlabs voice_id；用户直填则直通；空则取本源音色列表首位
         voice_id = req.voice_id
-        # 简单映射：若是预设中文ID，尝试使用默认多语言voice
         preset_map = {
             "male-qn-qingse": "JBFqnCBsd6RMkjVDRZzb",  # George
             "female-shaonv": "21m00Tcm4TlvDq8ikWAM",
@@ -66,6 +64,14 @@ class ElevenLabsProvider(AudioProvider):
         }
         if voice_id in preset_map:
             voice_id = preset_map[voice_id]
+        if not voice_id:
+            try:
+                voices = await self.list_voices()
+                voice_id = (voices[0].get("id") if voices else "") or ""
+            except Exception:
+                voice_id = ""
+            if not voice_id:
+                raise RuntimeError("ElevenLabs 未返回可用音色，请显式指定 voice_id")
 
         # ElevenLabs 情感通过 stability/similarity 等控制，这里将 emotion 映射
         emotion_to_settings = {

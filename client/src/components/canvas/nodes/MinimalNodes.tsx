@@ -26,8 +26,15 @@ import {
 } from 'lucide-react';
 import { useCanvasStore } from '../../../stores/useCanvasStore';
 import { HIGH_LEVEL_AGENT_SKILLS } from '../providerSkills';
+// 导演预设与 3D 舞台同源（景别/运镜全量一致，避免节点选不出来的断层）
+import { FRAMING_PRESETS, MOTION_PRESETS, framingShortLabel, motionShortLabel } from '../../director3d/directorPresets';
 
 const API_ORIGIN = typeof window !== 'undefined' && window.location.port === '5173' ? 'http://127.0.0.1:8000' : '';
+// 相对 /storage 产物 URL 在 dev（5173）下必须回源到后端，否则 Vite 直接 404，节点黑盒无法回显
+const resolveMediaUrl = (u: any): string => {
+  if (!u || typeof u !== 'string') return '';
+  return u.startsWith('/') ? API_ORIGIN + u : u;
+};
 
 // 统一的 Agent 卡片外壳
 const AgentShell: React.FC<{
@@ -212,14 +219,22 @@ export const PromptNode: React.FC<NodeProps> = ({ id, data, selected }) => {
         </>
       }
     >
-      <div className="w-full flex flex-col gap-2" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full flex flex-col gap-2" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
         {selected ? (
           <textarea
             value={content}
             onChange={(e) => updateNodeData(id, { text: e.target.value, prompt: e.target.value })}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            onFocus={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+            onPaste={(e) => { e.stopPropagation(); const text = (e.clipboardData as any)?.getData('text/plain') || (e.clipboardData as any)?.getData('text') || ''; if (text) { e.preventDefault(); const t = e.target as HTMLTextAreaElement; const s = t.selectionStart ?? content.length; const en = t.selectionEnd ?? content.length; const nv = content.slice(0, s) + text + content.slice(en); updateNodeData(id, { text: nv, prompt: nv }); requestAnimationFrame(() => { try { t.selectionStart = t.selectionEnd = s + text.length; } catch {} }); } }}
+            onCopy={(e) => e.stopPropagation()}
+            onCut={(e) => e.stopPropagation()}
             placeholder="输入故事创意 / 小说段落 / 分镜描述，点击下方技能触发拆解、扩写…"
             rows={content ? 6 : 3}
-            className="w-full max-h-48 bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white/90 placeholder-white/40 focus:outline-none focus:border-cyan-500 resize-y leading-relaxed select-text"
+            className="w-full max-h-48 bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white/90 placeholder-white/40 focus:outline-none focus:border-cyan-500 resize-y leading-relaxed select-text nodrag"
+            autoFocus
           />
         ) : content ? (
           <div className="w-full max-h-48 overflow-y-auto p-3.5 rounded-2xl bg-black/40 border border-white/10 text-xs text-white/90 whitespace-pre-wrap leading-relaxed select-text font-sans">
@@ -265,30 +280,40 @@ export const PromptNode: React.FC<NodeProps> = ({ id, data, selected }) => {
   );
 };
 
+const getNodeAspectStyle = (d: any): React.CSSProperties => {
+  const raw = d.aspect_ratio || d.params?.aspect_ratio || d.provider_params?.aspect_ratio || d._last_agent_plan?.params?.aspect_ratio || d._last_agent_plan?.final_args?.aspect_ratio || (d.width && d.height ? `${d.width}:${d.height}` : null);
+  if (d.width && d.height) return { aspectRatio: `${d.width} / ${d.height}` };
+  const m = String(raw || '9:16').match(/(\d+)\s*[:：]\s*(\d+)/);
+  if (m) return { aspectRatio: `${m[1]} / ${m[2]}` };
+  return { aspectRatio: '9 / 16' };
+};
+
 // 2. 概念分镜生图 Agent 节点 - Per-Node Agent：节点内选源/挂插槽/输Prompt/生成
 export const ImageNode: React.FC<NodeProps> = ({ id, data, selected }) => {
   const d: any = data;
   const imgUrl = d.image_url || d.result_url || d.url;
   const st: any = d.agent_state;
+  const aspectStyle = getNodeAspectStyle(d);
   return (
     <AgentShell
       id={id}
       selected={selected}
       icon={ImageIcon}
       label="分镜生图 Agent"
-      providerBadge={d.provider ? `${(d.provider || '').replace(/^comfyui_/, '')}${d.model ? ':' + d.model : ''}` : '待绑定生成源'}
+      providerBadge={d.provider ? `${d.provider}${d.model ? ':' + d.model : ''}` : '待绑定生成源'}
       handles={
         <>
-          <Handle type="target" position={Position.Left} id="prompt" className="!w-3 !h-3 !bg-cyan-500 !border-2 !border-[#141419]" style={{ top: '30%' }} />
-          <Handle type="target" position={Position.Left} id="reference" className="!w-3 !h-3 !bg-violet-500 !border-2 !border-[#141419]" style={{ top: '50%' }} />
-          <Handle type="target" position={Position.Left} id="reference_images" className="!w-3 !h-3 !bg-violet-400 !border-2 !border-[#141419]" style={{ top: '70%' }} />
+          <Handle type="target" position={Position.Left} id="prompt" className="!w-3 !h-3 !bg-cyan-500 !border-2 !border-[#141419]" style={{ top: '25%' }} />
+          <Handle type="target" position={Position.Left} id="reference" className="!w-3 !h-3 !bg-violet-500 !border-2 !border-[#141419]" style={{ top: '42%' }} />
+          <Handle type="target" position={Position.Left} id="reference_images" className="!w-3 !h-3 !bg-violet-400 !border-2 !border-[#141419]" style={{ top: '58%' }} />
+          <Handle type="target" position={Position.Left} id="camera_prompt" className="!w-3 !h-3 !bg-amber-500 !border-2 !border-[#141419]" style={{ top: '75%' }} />
           <Handle type="source" position={Position.Right} id="image" className="!w-3 !h-3 !bg-violet-500 !border-2 !border-[#141419]" />
         </>
       }
     >
       {imgUrl ? (
-        <div className="w-full aspect-[9/16] max-h-[300px] rounded-2xl overflow-hidden bg-black/60 border border-white/10 relative group">
-          <img src={imgUrl} alt="生成的画面" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+        <div className="w-full max-h-[420px] rounded-2xl overflow-hidden bg-black/60 border border-white/10 relative group" style={aspectStyle}>
+          <img src={resolveMediaUrl(imgUrl)} alt="生成的画面" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
           <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-black/60 text-[9px] font-mono text-violet-300 border border-violet-500/30">{d.skill_id || 'text_to_image'} · {d.provider || 'auto'}</div>
           {st?.status === 'running' && (
             <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-2">
@@ -301,13 +326,14 @@ export const ImageNode: React.FC<NodeProps> = ({ id, data, selected }) => {
           </div>
         </div>
       ) : (
-        <div className="w-full aspect-[9/16] max-h-[220px] rounded-2xl border-2 border-dashed border-white/15 bg-black/20 flex flex-col items-center justify-center p-4 text-center">
+        <div className="w-full max-h-[320px] rounded-2xl border-2 border-dashed border-white/15 bg-black/20 flex flex-col items-center justify-center p-4 text-center" style={aspectStyle}>
           <ImageIcon className="w-8 h-8 text-violet-400/50 mb-2" />
           <span className="text-xs font-bold text-white/80">待生成画面</span>
+          <span className="text-[10px] text-white/30 mt-1 font-mono">{String(d.aspect_ratio || d.params?.aspect_ratio || '9:16').split(' ')[0]}</span>
           {st?.status === 'failed' && <span className="text-[10px] text-red-400 mt-1 line-clamp-2" title={st.error}>✗ {st.error}</span>}
         </div>
       )}
-      {/* 控制台已下沉至底部栏：点此节点时底部自动切换为该节点的 Agent 控制台 */}
+      {/* 比例跟随产物：aspectStyle 来自 aspect_ratio 参数或生成结果宽高 */}
     </AgentShell>
   );
 };
@@ -317,6 +343,7 @@ export const VideoGenNode: React.FC<NodeProps> = ({ id, data, selected }) => {
   const d: any = data;
   const vidUrl = d.video_url || d.result_url;
   const st: any = d.agent_state;
+  const aspectStyle = getNodeAspectStyle(d);
   const [isPlaying, setIsPlaying] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const togglePlay = (e: React.MouseEvent) => {
@@ -330,20 +357,21 @@ export const VideoGenNode: React.FC<NodeProps> = ({ id, data, selected }) => {
       selected={selected}
       icon={VideoIcon}
       label="动态导演视频 Agent"
-      providerBadge={d.provider ? `${(d.provider || '').replace(/^comfyui_/, '')}${d.model ? ':' + d.model : ''}` : '待绑定视频源'}
+      providerBadge={d.provider ? `${d.provider}${d.model ? ':' + d.model : ''}` : '待绑定视频源'}
       handles={
         <>
-          <Handle type="target" position={Position.Left} id="first_frame" className="!w-3 !h-3 !bg-orange-500 !border-2 !border-[#141419]" style={{ top: '25%' }} />
-          <Handle type="target" position={Position.Left} id="last_frame" className="!w-3 !h-3 !bg-orange-400 !border-2 !border-[#141419]" style={{ top: '40%' }} />
-          <Handle type="target" position={Position.Left} id="reference_images" className="!w-3 !h-3 !bg-amber-500 !border-2 !border-[#141419]" style={{ top: '55%' }} />
-          <Handle type="target" position={Position.Left} id="prompt" className="!w-3 !h-3 !bg-cyan-500 !border-2 !border-[#141419]" style={{ top: '75%' }} />
+          <Handle type="target" position={Position.Left} id="camera_prompt" className="!w-3 !h-3 !bg-amber-500 !border-2 !border-[#141419]" style={{ top: '15%' }} />
+          <Handle type="target" position={Position.Left} id="first_frame" className="!w-3 !h-3 !bg-orange-500 !border-2 !border-[#141419]" style={{ top: '32%' }} />
+          <Handle type="target" position={Position.Left} id="last_frame" className="!w-3 !h-3 !bg-orange-400 !border-2 !border-[#141419]" style={{ top: '46%' }} />
+          <Handle type="target" position={Position.Left} id="reference_images" className="!w-3 !h-3 !bg-amber-500 !border-2 !border-[#141419]" style={{ top: '60%' }} />
+          <Handle type="target" position={Position.Left} id="prompt" className="!w-3 !h-3 !bg-cyan-500 !border-2 !border-[#141419]" style={{ top: '78%' }} />
           <Handle type="source" position={Position.Right} id="video" className="!w-3 !h-3 !bg-orange-500 !border-2 !border-[#141419]" />
         </>
       }
     >
       {vidUrl ? (
-        <div className="w-full aspect-[9/16] max-h-[300px] rounded-2xl overflow-hidden bg-black/80 border border-white/10 relative group flex items-center justify-center">
-          <video ref={videoRef} src={vidUrl} loop playsInline onEnded={() => setIsPlaying(false)} className="w-full h-full object-cover" />
+        <div className="w-full max-h-[420px] rounded-2xl overflow-hidden bg-black/80 border border-white/10 relative group flex items-center justify-center" style={aspectStyle}>
+          <video ref={videoRef} src={resolveMediaUrl(vidUrl)} loop playsInline preload="metadata" onEnded={() => setIsPlaying(false)} className="w-full h-full object-cover" />
           <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-black/60 text-[9px] font-mono text-orange-300 border border-orange-500/30">{d.skill_id || 'video'} · {d.provider || 'auto'}</div>
           {st?.status === 'running' && (
             <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-2">
@@ -356,9 +384,10 @@ export const VideoGenNode: React.FC<NodeProps> = ({ id, data, selected }) => {
           </button>
         </div>
       ) : (
-        <div className="w-full aspect-[9/16] max-h-[220px] rounded-2xl border-2 border-dashed border-white/15 bg-black/20 flex flex-col items-center justify-center p-4 text-center">
+        <div className="w-full max-h-[320px] rounded-2xl border-2 border-dashed border-white/15 bg-black/20 flex flex-col items-center justify-center p-4 text-center" style={aspectStyle}>
           <Film className="w-8 h-8 text-orange-400/50 mb-2" />
           <span className="text-xs font-bold text-white/80">待生成镜头视频</span>
+          <span className="text-[10px] text-white/30 mt-1 font-mono">{String(d.aspect_ratio || d.params?.aspect_ratio || '9:16').split(' ')[0]}</span>
           <div className="mt-2 flex flex-wrap gap-1 justify-center">
             {(d.first_frame || d.first_frame_url) && <span className="px-2 py-0.5 rounded-full bg-orange-500/10 border border-orange-500/30 text-[10px] text-orange-300 font-mono">✓ 首帧</span>}
             {(d.last_frame || d.last_frame_url) && <span className="px-2 py-0.5 rounded-full bg-orange-500/10 border border-orange-500/30 text-[10px] text-orange-300 font-mono">✓ 尾帧</span>}
@@ -367,7 +396,7 @@ export const VideoGenNode: React.FC<NodeProps> = ({ id, data, selected }) => {
           {st?.status === 'failed' && <span className="text-[10px] text-red-400 mt-2 line-clamp-2" title={st.error}>✗ {st.error}</span>}
         </div>
       )}
-      {/* 控制台已下沉至底部栏 */}
+      {/* 比例跟随产物 */}
     </AgentShell>
   );
 };
@@ -413,9 +442,9 @@ export const AudioNode: React.FC<NodeProps> = ({ id, data, selected }) => {
             <div className="flex flex-col flex-1 min-w-0">
               <span className="text-xs font-bold text-pink-200">角色配音音频</span>
               <span className="text-[10px] text-pink-300/60 font-mono truncate">{audioUrl.split('/').pop()}</span>
-              <span className="text-[9px] text-pink-300/40">{d.skill_id || 'tts_voice'} · {d.voice_id || 'male-qn-qingse'}</span>
+              <span className="text-[9px] text-pink-300/40">{d.skill_id || 'agent'}{d.voice_id ? ' · ' + d.voice_id : ''}</span>
             </div>
-            <audio ref={audioRef} src={audioUrl} onEnded={() => setIsPlaying(false)} className="hidden" />
+            <audio ref={audioRef} src={resolveMediaUrl(audioUrl)} onEnded={() => setIsPlaying(false)} className="hidden" />
           </div>
         ) : (
           <div className="flex flex-col items-center text-center py-3">
@@ -454,20 +483,20 @@ export const Director3DMinimalNode: React.FC<NodeProps> = ({ id, data, selected 
         </>
       }
     >
-      <div className="w-full flex flex-col gap-2 p-1" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full flex flex-col gap-2 p-1" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} onPaste={(e) => e.stopPropagation()}>
         <div className="grid grid-cols-2 gap-2 text-[11px]">
           {selected ? (
             <>
               <label className="flex flex-col gap-1 p-2 rounded-xl bg-black/40 border border-white/10">
                 <span className="text-white/40 text-[9px]">景别</span>
-                <select value={d.framing || 'close_up'} onChange={(e) => updateNodeData(id, { framing: e.target.value })} className="bg-black/50 border border-white/10 rounded-lg px-1.5 py-1 text-[11px] text-cyan-300 focus:outline-none focus:border-cyan-500">
-                  {[['extreme_close_up','大特写'],['close_up','特写'],['medium','中景'],['full','全景'],['long','远景'],['bird_eye','鸟瞰'],['low_angle','仰视'],['over_shoulder','过肩']].map(([v,l])=>(<option key={v} value={v}>{l}</option>))}
+                <select value={d.framing || 'medium'} onChange={(e) => updateNodeData(id, { framing: e.target.value })} className="bg-black/50 border border-white/10 rounded-lg px-1.5 py-1 text-[11px] text-cyan-300 focus:outline-none focus:border-cyan-500">
+                  {FRAMING_PRESETS.map((f)=>(<option key={f.id} value={f.id}>{f.label}</option>))}
                 </select>
               </label>
               <label className="flex flex-col gap-1 p-2 rounded-xl bg-black/40 border border-white/10">
                 <span className="text-white/40 text-[9px]">运镜</span>
                 <select value={d.motion || 'push_in'} onChange={(e) => updateNodeData(id, { motion: e.target.value })} className="bg-black/50 border border-white/10 rounded-lg px-1.5 py-1 text-[11px] text-orange-300 focus:outline-none focus:border-orange-500">
-                  {[['static','固定'],['push_in','推入'],['pull_out','拉出'],['pan_left','左摇'],['pan_right','右摇'],['tilt_up','上摇'],['orbit','环绕'],['dolly_zoom','眩晕'],['fast_push_shake','冲击震颤']].map(([v,l])=>(<option key={v} value={v}>{l}</option>))}
+                  {MOTION_PRESETS.map((m)=>(<option key={m.id} value={m.id}>{m.label}{m.category === 'combo' ? ' ★' : ''}</option>))}
                 </select>
               </label>
             </>
@@ -475,17 +504,34 @@ export const Director3DMinimalNode: React.FC<NodeProps> = ({ id, data, selected 
             <>
               <div className="p-2 rounded-xl bg-black/40 border border-white/10 flex flex-col">
                 <span className="text-white/40 text-[9px]">景别</span>
-                <span className="font-bold text-cyan-300">{d.framing || 'close_up'}</span>
+                <span className="font-bold text-cyan-300">{framingShortLabel(d.framing)}</span>
               </div>
               <div className="p-2 rounded-xl bg-black/40 border border-white/10 flex flex-col">
                 <span className="text-white/40 text-[9px]">运镜</span>
-                <span className="font-bold text-orange-300">{d.motion || 'push_in'}</span>
+                <span className="font-bold text-orange-300">{motionShortLabel(d.motion)}</span>
               </div>
             </>
           )}
         </div>
+        {selected && (
+          <textarea
+            value={d.ai_directive || ''}
+            onChange={(e) => updateNodeData(id, { ai_directive: e.target.value })}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            onFocus={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+            onPaste={(e) => { e.stopPropagation(); const text = (e.clipboardData as any)?.getData('text/plain') || (e.clipboardData as any)?.getData('text') || ''; if (text) { e.preventDefault(); const t = e.target as HTMLTextAreaElement; const cur = d.ai_directive || ''; const s = t.selectionStart ?? cur.length; const en = t.selectionEnd ?? cur.length; const nv = cur.slice(0, s) + text + cur.slice(en); updateNodeData(id, { ai_directive: nv }); requestAnimationFrame(() => { try { t.selectionStart = t.selectionEnd = s + text.length; } catch {} }); } }}
+            onCopy={(e) => e.stopPropagation()}
+            onCut={(e) => e.stopPropagation()}
+            placeholder="粘贴/输入自然语言机位指令，如“希区柯克变焦突显惊恐”或“贴地仰角双人对峙推镜”"
+            rows={2}
+            className="w-full bg-black/40 border border-white/10 rounded-xl px-2.5 py-2 text-[11px] text-white placeholder-white/40 focus:outline-none focus:border-blue-500 resize-none nodrag select-text"
+            autoFocus
+          />
+        )}
         {d.minimax_camera_prompt && (
-          <div className="p-2.5 rounded-xl bg-blue-950/20 border border-blue-500/30 text-[10px] text-blue-200 font-mono line-clamp-3">
+          <div className="p-2.5 rounded-xl bg-blue-950/20 border border-blue-500/30 text-[10px] text-blue-200 font-mono line-clamp-3 select-text nodrag">
             运镜 Prompt: {d.minimax_camera_prompt}
           </div>
         )}

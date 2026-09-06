@@ -67,6 +67,8 @@ class MiniMaxTTSProvider(AudioProvider):
 
         emotion_tag = EMOTION_TAGS.get(req.emotion, "")
         formatted_text = f"{emotion_tag}{req.text}" if emotion_tag else req.text
+        # 空音色 → 本源声明的第一个预设（默认值由源自己给出，不再由调用方写死）
+        voice_id = req.voice_id or VOICE_PRESETS[0]["id"]
 
         headers = {
             "Authorization": f"Bearer {settings.MINIMAX_API_KEY}",
@@ -76,7 +78,7 @@ class MiniMaxTTSProvider(AudioProvider):
             "model": settings.TTS_MODEL,
             "text": formatted_text,
             "voice_setting": {
-                "voice_id": req.voice_id,
+                "voice_id": voice_id,
                 "speed": req.speed,
                 "vol": 1.0,
                 "pitch": int(req.pitch),
@@ -122,7 +124,7 @@ class MiniMaxTTSProvider(AudioProvider):
         return AudioGenerateResult(
             audio_url=f"/storage/{filename}",
             local_path=filepath,
-            voice_id=req.voice_id,
+            voice_id=voice_id,
             text=req.text,
             emotion=req.emotion,
             duration=duration,

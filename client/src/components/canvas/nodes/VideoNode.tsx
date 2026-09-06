@@ -8,7 +8,8 @@ const API_ORIGIN = window.location.port === '5173' ? 'http://127.0.0.1:8000' : '
 export const VideoNode: React.FC<NodeProps> = ({ data, id }) => {
   const d: any = data;
   const [mode, setMode] = useState(d.mode || 'i2v');
-  const [provider, setProvider] = useState(d.provider || d.provider_id || 'comfyui_video');
+  const [provider, setProvider] = useState(d.provider || d.provider_id || '');
+  const [providers, setProviders] = useState<any[]>([]);
   const [prompt, setPrompt] = useState(d.video_prompt || d.prompt || '');
   const [firstFrame, setFirstFrame] = useState(d.first_frame_url || d.image_url || '');
   const [duration, setDuration] = useState(d.duration || 5);
@@ -19,6 +20,9 @@ export const VideoNode: React.FC<NodeProps> = ({ data, id }) => {
     const p = (d as any).provider || (d as any).provider_id || (d as any).provider_video;
     if (p && p !== provider) setProvider(p);
   }, [d.provider, d.provider_id, d.provider_video]);
+
+  // 视频源列表 = 生成源接口（不再写死 comfyui_video/minimax_video/kling）
+  React.useEffect(()=> { apiService.listProviders({ kind: 'video' } as any).then((r:any)=> setProviders(r?.providers||[])).catch(()=>{}); }, []);
 
   const handleGenerate = async () => {
     const p = prompt || d.action_desc || 'cinematic motion';
@@ -90,10 +94,8 @@ export const VideoNode: React.FC<NodeProps> = ({ data, id }) => {
         </div>
         <div className="flex gap-1.5">
           <select value={provider} onChange={e=>{setProvider(e.target.value); (d.onUpdate as any)?.(id,{provider:e.target.value});}} className="flex-1 bg-surface-secondary border border-border rounded-xl px-2.5 py-1.5 text-xs [color:var(--color-text-main)] focus:outline-none focus:border-brand">
-            <option value="comfyui_video">ComfyUI 本地 (SVD/AnimateDiff)</option>
-            <option value="minimax_video">MiniMax 云端</option>
-            <option value="kling">Kling</option>
-            {d.provider && !['comfyui_video','minimax_video','kling'].includes(d.provider) && <option value={d.provider}>{d.provider} (连线)</option>}
+            <option value="">系统默认视频源</option>
+            {providers.map((p:any)=> <option key={p.id} value={p.id}>{p.display_name || p.name || p.id}{p.builtin ? ' ·内置' : ' ·自定义'}</option>)}
           </select>
           {(d.provider || d.provider_id) && <span className="text-[10px] px-2 py-1 rounded bg-brand/10 border border-brand/20 text-brand flex items-center font-medium">已连线</span>}
         </div>

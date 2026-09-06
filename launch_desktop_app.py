@@ -137,7 +137,7 @@ def main():
 
     # 2. Wait for server to become healthy
     safe_log("[2/2] 等待服务就绪...")
-    if not wait_for_server(timeout=30.0):
+    if not wait_for_server(timeout=90.0):
         safe_log("[Warning] 服务探测超时，尝试直接呈现窗口...")
 
     safe_log("[Success] 服务已就绪！正在打开原生桌面工作台...")

@@ -38,9 +38,12 @@ class CanvasAgentGenerateRequest(BaseModel):
     node_type: str  # image / video / audio
     idea: str
     provider_id: Optional[str] = ""   # 空=Agent 自动选源
+    skill_id: Optional[str] = ""  # 用户在顶部选的 skill，Agent 将按此 skill 润色提示词
     slots: Optional[Dict[str, Any]] = None
     params: Optional[Dict[str, Any]] = None  # 用户在高级面板覆写的异构参数（如 aspect_ratio/resolution/steps 等）
     extra_hint: Optional[str] = ""
+    node_id: Optional[str] = None
+    project_id: Optional[str] = None
 
 
 @router.post("/canvas/agent/generate")
@@ -58,24 +61,37 @@ async def canvas_agent_generate(req: CanvasAgentGenerateRequest):
     from app.mcp.server import mcp_registry
 
     slots = req.slots or {}
-    plan = await plan_node_agent(node_type, req.idea.strip(), (req.provider_id or "").strip(), slots, req.extra_hint or "")
+    plan = await plan_node_agent(node_type, req.idea.strip(), (req.provider_id or "").strip(), slots, req.extra_hint or "", (req.skill_id or "").strip())
+    # 透传 node_id/project_id 供任务表隔离与日志追踪（每个 node 独立异步任务）
+    if req.node_id:
+        plan["_node_id"] = req.node_id
+    # 若用户显式选了 skill，以用户选择为准（Agent 仅负责润色提示词风格）
+    if (req.skill_id or "").strip():
+        plan["skill_id"] = (req.skill_id or "").strip()
     pid = plan.get("provider_id") or ""
     if not pid:
         raise HTTPException(status_code=500, detail=f"无可用 {node_type} 生成源，请先注册生成源")
 
     final_prompt = (plan.get("prompt") or req.idea).strip()
     args: Dict[str, Any] = {"prompt": final_prompt, "text": final_prompt}
+    if req.node_id:
+        args["_node_id"] = req.node_id
+    if req.project_id:
+        args["_project_id"] = req.project_id
     if plan.get("model"):
         args["model"] = plan["model"]
-    if slots.get("first_frame"):
-        args["first_frame"] = slots["first_frame"]
-    if slots.get("last_frame"):
-        args["last_frame"] = slots["last_frame"]
-    refs = slots.get("reference_images") or ([slots["reference"]] if slots.get("reference") else None)
-    if refs:
-        args["reference_images"] = refs
-    if slots.get("ref_audio"):
-        args["ref_audio"] = slots["ref_audio"]
+    # 插槽零映射：前端已按该源 input_schema 声明的键（归一键+源原始键）打包，这里原样透传给 provider Tool
+    def _is_media_val(v: Any) -> bool:
+        if isinstance(v, str):
+            return v.startswith(("http://", "https://", "data:", "/storage", "storage", "/"))
+        if isinstance(v, list):
+            return bool(v) and all(_is_media_val(x) for x in v)
+        return False
+    for k, v in slots.items():
+        if v is None or v == "" or (isinstance(v, list) and len(v) == 0):
+            continue
+        if _is_media_val(v):
+            args[k] = v
     # Agent 规划的参数为初值，用户在高级面板覆写的异构参数优先
     merged_params: Dict[str, Any] = {**(plan.get("params") or {})}
     if req.params:
@@ -87,20 +103,27 @@ async def canvas_agent_generate(req: CanvasAgentGenerateRequest):
     plan["params"] = merged_params
     plan["params_source"] = "user_override" if req.params else "agent"
     if node_type == "video":
-        if args.get("first_frame") or args.get("last_frame"):
-            args.setdefault("mode", "i2v")
-        elif refs:
-            args.setdefault("mode", "r2v")
-        else:
-            args.setdefault("mode", "t2v")
+        # mode 推断：有首/尾帧类媒体键 → i2v；有参考图 → r2v；否则 t2v（按值语义，不锁死键名）
+        has_frame = any(_is_media_val(v) and ("frame" in k.lower()) for k, v in slots.items() if v)
+        has_ref = any(_is_media_val(v) and ("reference" in k.lower() or "ref" in k.lower()) and "audio" not in k.lower() for k, v in slots.items() if v)
+        args.setdefault("mode", "i2v" if has_frame else "r2v" if has_ref else "t2v")
     args = {k: v for k, v in args.items() if v not in (None, "", [])}
 
     res = await mcp_registry.execute_tool(f"provider_{pid}", args)
     if res.status != "success":
         return {"status": "error", "plan": {**plan, "final_args": args}, "error": res.error or "生成失败"}
     # 视频异步 task 兜底轮询（provider_ 分支内部已有轮询，这里处理仍返回 task_id 的旧源）
+    # 代码源除外：后台轮询已接管，直接返 task_id（阻塞必超前端/Agent 等待，前端经 /videos/status 轮询）
     result = res.result or {}
+    _is_code_pid = False
     if node_type == "video" and not result.get("video_url") and result.get("task_id"):
+        try:
+            from app.providers.custom.manager import custom_provider_manager as _cmCanvas
+            _ddc = _cmCanvas.get_definition(pid or "")
+            _is_code_pid = bool(_ddc and getattr(_ddc, "provider_type", "") == "code")
+        except Exception:
+            _is_code_pid = False
+    if node_type == "video" and not result.get("video_url") and result.get("task_id") and not _is_code_pid:
         import asyncio
         from app.providers.generic.http_provider import get_custom_video_task
         for _ in range(140):

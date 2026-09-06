@@ -8,9 +8,10 @@ const API_ORIGIN = window.location.port === '5173' ? 'http://127.0.0.1:8000' : '
 export const TTSNode: React.FC<NodeProps> = ({ data, id }) => {
   const d:any = data;
   const [text, setText] = useState(d.text || d.dialogue || d.brief || '');
-  const [provider, setProvider] = useState(d.provider || d.provider_id || 'minimax');
-  const [voiceId, setVoiceId] = useState(d.voice_id || 'male-qn-qingse');
-  const [emotion, setEmotion] = useState(d.emotion || 'neutral');
+  const [provider, setProvider] = useState(d.provider || d.provider_id || '');
+  const [voiceId, setVoiceId] = useState(d.voice_id || '');
+  const [emotion, setEmotion] = useState(d.emotion || '');
+  const [providers, setProviders] = useState<any[]>([]);
   const [voices, setVoices] = useState<any[]>([]);
   const [generating, setGenerating] = useState(false);
   const [audioUrl, setAudioUrl] = useState(d.audio_url || '');
@@ -20,6 +21,9 @@ export const TTSNode: React.FC<NodeProps> = ({ data, id }) => {
     const p = (d as any).provider || (d as any).provider_id || (d as any).provider_audio || (d as any).audio_provider;
     if (p && p !== provider) setProvider(p);
   }, [d.provider, d.provider_id, d.provider_audio, d.audio_provider]);
+
+  // 语音源列表 = 生成源接口（不再写死 minimax/elevenlabs/...）
+  useEffect(()=> { apiService.listProviders({ kind: 'audio' } as any).then((r:any)=> setProviders(r?.providers||[])).catch(()=>{}); }, []);
 
   useEffect(()=> {
     apiService.listTtsVoices(provider).then(r=> setVoices(r.voices||[])).catch(()=>{});
@@ -70,16 +74,18 @@ export const TTSNode: React.FC<NodeProps> = ({ data, id }) => {
         <textarea value={text} onChange={e=>{setText(e.target.value); (d.onUpdate as any)?.(id,{text:e.target.value});}} placeholder="输入台词/旁白… (可连入上游文本)" rows={3} className="w-full bg-surface-secondary border border-border rounded-xl p-2.5 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand resize-none"/>
         <div className="space-y-1">
           <select value={provider} onChange={e=> setProvider(e.target.value)} className="w-full bg-surface-secondary border border-border rounded-xl px-2.5 py-1.5 text-xs [color:var(--color-text-main)] focus:outline-none focus:border-brand">
-            <option value="minimax">MiniMax</option><option value="elevenlabs">ElevenLabs</option><option value="cosyvoice">CosyVoice</option><option value="gpt_sovits">GPT-SoVITS</option>
-            {(d.provider || d.provider_id) && !['minimax','elevenlabs','cosyvoice','gpt_sovits'].includes(String(d.provider || d.provider_id)) && <option value={String(d.provider || d.provider_id)}>{String(d.provider || d.provider_id)} (连线)</option>}
+            <option value="">系统默认语音源</option>
+            {providers.map((p:any)=> <option key={p.id} value={p.id}>{p.display_name || p.name || p.id}{p.builtin ? ' ·内置' : ' ·自定义'}</option>)}
           </select>
           {(d.provider || d.provider_id) && <div className="text-[11px] text-brand bg-brand/10 border border-brand/20 rounded-lg px-2 py-1 font-medium">✓ 已绑定 Provider：{String(d.provider || d.provider_id).slice(0,24)} · 优先使用连线源</div>}
         </div>
         <select value={voiceId} onChange={e=>{setVoiceId(e.target.value); (d.onUpdate as any)?.(id,{voice_id:e.target.value});}} className="w-full bg-surface-secondary border border-border rounded-xl px-2.5 py-1.5 text-xs [color:var(--color-text-main)] focus:outline-none focus:border-brand">
-          {voices.length ? voices.map((v:any)=> <option key={v.voice_id||v.id} value={v.voice_id||v.id}>{v.voice_name||v.name||v.voice_id} {v.emotion?'·'+v.emotion:''}</option>) : <option value={voiceId}>{voiceId}</option>}
+          <option value="">默认音色（源声明）</option>
+          {voices.map((v:any)=> <option key={v.voice_id||v.id} value={v.voice_id||v.id}>{v.voice_name||v.name||v.voice_id} {v.emotion?'·'+v.emotion:''}</option>)}
         </select>
         <select value={emotion} onChange={e=>{setEmotion(e.target.value); (d.onUpdate as any)?.(id,{emotion:e.target.value});}} className="w-full bg-surface-secondary border border-border rounded-xl px-2.5 py-1.5 text-xs [color:var(--color-text-main)] focus:outline-none focus:border-brand">
-          <option value="neutral">平静</option><option value="intense">怒吼爆发</option><option value="sorrow">悲痛</option><option value="excited">兴奋</option><option value="whispering">低语</option><option value="fearful">恐惧</option>
+          <option value="">自动</option>
+          {((providers.find((p:any)=>p.id===provider)?.params_schema?.properties?.emotion as any)?.enum || ['neutral','intense','sorrow','excited','fearful','whispering']).map((v:string)=> <option key={v} value={v}>{v}</option>)}
         </select>
         <button onClick={handleGenerate} disabled={generating} className="w-full py-2.5 rounded-xl bg-brand hover:bg-brand-light text-white text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-40 shadow-sm transition-colors">
           {generating ? <><div className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin"/> 生成中…</> : <><Volume2 className="w-3.5 h-3.5"/> 生成配音</>}

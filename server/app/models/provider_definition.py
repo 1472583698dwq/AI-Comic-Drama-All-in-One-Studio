@@ -77,6 +77,9 @@ class ProviderDefinition(BaseModel):
     code: Optional[str] = None  # 完整源码
     code_entry: str = "generate"
     code_timeout: int = 60
+    # === 可信模式（A档最小闭环）：trusted=True 时跳出受限沙箱，可执行任意代码 ===
+    # 需同时满足全局开关 STUDIO_TRUSTED_MODE=1，否则回落沙箱并报错提示。
+    trusted: bool = False
 
     # 兼容：旧 JSON 模板（已废弃，仅用于存量迁移，创建新源时忽略）
     transport: ProviderTransport = Field(default_factory=ProviderTransport)
@@ -100,6 +103,13 @@ class ProviderDefinition(BaseModel):
     workflow_id: Optional[str] = None  # 关联 storage/workflows/<workflow_id>.json
     workflow_hash: Optional[str] = None  # 工作流内容 hash，用于变更检测
     workflow_exposed: Optional[List[Dict[str, Any]]] = None  # 工作流暴露输入清单，用于标准→具体映射
+    schema_version: Optional[int] = None  # 工作流→Schema 生成规则版本，不一致时触发重建（启动 fast path 依据）
+    # 能力细分（创建/导入时勾选，空则前端按 input_schema 插槽推断）：
+    # image: t2i 文生图 / i2i 图生图 / reference 参考生图
+    # video: t2v 文生视频 / i2v 图生视频(首帧) / r2v 参考生视频 / start_end 首尾帧
+    # audio: tts 文本配音 / clone 声音复刻
+    # llm: chat 对话生成
+    capabilities: List[str] = Field(default_factory=list)
 
     # 额外元信息
     doc_url: Optional[str] = None
@@ -125,6 +135,8 @@ class ProviderDefinition(BaseModel):
             "display_name": self.get_display_name(),
             "kind": self.kind,
             "provider_type": self.provider_type,
+            # 能力声明：前端据此决定 工作流选择 是否对该源生效（接口映射，不写死 id 名单）
+            "supports_workflow": self.provider_type == "comfyui",
             "description": self.description,
             "icon": self.icon,
             "scope": self.scope,
@@ -140,6 +152,8 @@ class ProviderDefinition(BaseModel):
             "workflow_id": self.workflow_id,
             "workflow_hash": self.workflow_hash,
             "workflow_exposed": self.workflow_exposed,
+            "schema_version": self.schema_version,
+            "capabilities": list(self.capabilities or []),
             "transport": self.transport.model_dump(),
             "auth": {**self.auth.model_dump(), "has_key": bool(self.auth.key_env)},
             "health_check": self.health_check.model_dump(),
@@ -149,6 +163,7 @@ class ProviderDefinition(BaseModel):
             "language": self.language,
             "code_entry": self.code_entry,
             "code_timeout": self.code_timeout,
+            "trusted": bool(getattr(self, "trusted", False)),
             "legacy_json_mode": self.legacy_json_mode,
             "has_code": bool(self.code),
         }

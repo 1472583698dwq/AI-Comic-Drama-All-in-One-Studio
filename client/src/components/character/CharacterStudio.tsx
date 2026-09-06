@@ -26,6 +26,13 @@ export const CharacterStudio: React.FC = () => {
   const [isGeneratingSheet, setIsGeneratingSheet] = useState(false);
   const [regenError, setRegenError] = useState<string | null>(null);
   const [assetPickerViewKey, setAssetPickerViewKey] = useState<'front' | 'side' | 'three_quarter' | 'avatar' | null>(null);
+  // 音色列表 = 语音源接口（/tts/voices），不写死 minimax 预设
+  const [voiceOptions, setVoiceOptions] = useState<Array<{id: string; name: string}>>([]);
+  useEffect(() => {
+    apiService.listTtsVoices().then((r: any) => {
+      setVoiceOptions((r?.voices || []).map((v: any) => ({ id: v.id || v.voice_id, name: v.name || v.voice_name || v.id })));
+    }).catch(() => {});
+  }, []);
 
   // Auto select first char if active becomes invalid
   useEffect(() => {
@@ -51,8 +58,8 @@ export const CharacterStudio: React.FC = () => {
       gender: 'other',
       age_group: 'youth',
       emotion_preset: 'neutral',
-      voice_id: 'male-qn-qingse',
-      voice_name: '热血少年',
+      voice_id: '',
+      voice_name: '',
       description: '角色性格与外貌特征描述...',
       visual_prompt: 'masterpiece, best quality, 1boy, handsome anime character...',
       three_views: {},
@@ -436,28 +443,22 @@ export const CharacterStudio: React.FC = () => {
             <div className="bg-surface p-4 rounded-2xl border border-border space-y-2">
               <label className="text-xs font-bold text-white flex items-center justify-between">
                 <span>🎙️ 专属角色音色</span>
-                <span className="text-[10px] text-accent-pink font-mono">MiniMax Speech-01</span>
+                <span className="text-[10px] text-accent-pink font-mono">{voiceOptions.length} 个可选音色 · 来自语音源接口</span>
               </label>
               <select
                 value={selectedChar.voice_id}
                 onChange={(e) => {
                   const val = e.target.value;
-                  const nameMap: any = {
-                    'male-qn-qingse': '热血少年',
-                    'female-shaonv': '灵动少女',
-                    'male-badao': '霸道魔尊',
-                    'female-yujie': '冷艳御姐',
-                    'male-pangbai': '史诗宏大旁白'
-                  };
-                  updateCharacter(selectedChar.id, { voice_id: val, voice_name: nameMap[val] || val });
+                  const hit = voiceOptions.find(v => v.id === val);
+                  updateCharacter(selectedChar.id, { voice_id: val, voice_name: hit?.name || val });
                 }}
                 className="w-full bg-surface-secondary border border-border rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-brand"
               >
-                <option value="male-qn-qingse">热血少年 (青涩坚毅 / 主角推荐)</option>
-                <option value="female-shaonv">灵动少女 (清脆甜美 / 女主推荐)</option>
-                <option value="male-badao">霸道魔尊 (狂傲霸气 / 反派推荐)</option>
-                <option value="female-yujie">冷艳御姐 (清冷高贵)</option>
-                <option value="male-pangbai">史诗宏大旁白 (沧桑低沉)</option>
+                <option value="">源默认音色</option>
+                {voiceOptions.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                {selectedChar.voice_id && !voiceOptions.some(v => v.id === selectedChar.voice_id) && (
+                  <option value={selectedChar.voice_id}>{selectedChar.voice_name || selectedChar.voice_id} (连线)</option>
+                )}
               </select>
             </div>
           </div>

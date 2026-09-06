@@ -73,7 +73,7 @@ export const MobileCardFlow: React.FC<MobileCardFlowProps> = ({ onOpenExport, st
     setIsPlayingTTS(true);
     try {
       const char = project?.characters.find((c) => c.name === currentShot.speaker_name);
-      const voiceId = char?.voice_id || 'male-qn-qingse';
+      const voiceId = char?.voice_id || '';
       const res = await apiService.generateTTS(text, voiceId, currentShot.emotion);
       const url = res.audio_url?.startsWith('/') ? API_ORIGIN + res.audio_url : res.audio_url;
       if (!res.audio_url) throw new Error('未返回音频');

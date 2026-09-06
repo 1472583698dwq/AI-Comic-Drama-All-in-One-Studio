@@ -1,6 +1,26 @@
 """
 Provider 初始化 - 代码生成源为唯一方式（彻底去 JSON 模板）
 """
+
+
+def _inject_workflow_prompt(dyn: dict, req, exposed: list) -> dict:
+    """
+    标准 prompt → 工作流真实文本入口（选择规则与 schema 生成同源，见 pick_prompt_text_slot）。
+    用户已显式填写该槽位（dyn 中存在）时不覆盖，保证"生成源参数列表"优先于隐式提示词。
+    """
+    try:
+        txt = (getattr(req, "prompt", None) or "").strip() if getattr(req, "prompt", None) else ""
+        if not txt:
+            return dyn
+        from app.providers.workflow.manager import pick_prompt_text_slot
+        chosen = pick_prompt_text_slot(exposed or [])
+        if chosen and chosen.get("id") and chosen["id"] not in dyn:
+            dyn[chosen["id"]] = txt
+    except Exception:
+        pass
+    return dyn
+
+
 def _make_provider(definition):
     """根据 definition.language/code 选择代码执行器，兼容存量 JSON 迁移"""
     kind = getattr(definition, "kind", "image")
@@ -70,6 +90,8 @@ def _make_provider(definition):
                         dyn.pop("reference_images", None)
                         for idx, exp in enumerate(img_slots):
                             k = exp.get("id")
+                            if k in dyn:
+                                continue  # 用户已按节点显式挂载的独立槽优先，位置映射不覆盖
                             if idx < len(std_refs) and std_refs[idx]:
                                 dyn[k] = std_refs[idx]
                             elif idx == 0 and std_refs and std_refs[0]:
@@ -92,27 +114,8 @@ def _make_provider(definition):
                         for k,v in list(getattr(req,"extra").items()):
                             if k in _map and _map[k] not in dyn and v not in (None,""):
                                 dyn[_map[k]] = v
-                    # 文本提示词 → 工作流真实文本入口（如 PrimitiveString 30:19，用户想法经 Agent 润色后必须落盘）
-                    try:
-                        txt = (getattr(req, "prompt", None) or "").strip() if getattr(req, "prompt", None) else ""
-                        if txt:
-                            txt_slots = [e for e in (_exposed or []) if e.get("type") == "text"]
-                            # 优先 alias/标签含 提示词/user 的“用户提示词”入口
-                            chosen = None
-                            for e in txt_slots:
-                                lab = str(e.get("label","") or "") + str(e.get("alias","") or "") + str(e.get("description","") or "")
-                                if "提示词" in lab or "user" in lab.lower():
-                                    chosen = e; break
-                            if not chosen:
-                                for e in txt_slots:
-                                    if str(e.get("param_name","")).lower() in ("prompt","value","text"):
-                                        chosen = e; break
-                            if not chosen and txt_slots:
-                                chosen = txt_slots[0]
-                            if chosen and chosen.get("id") not in dyn:
-                                dyn[chosen["id"]] = txt
-                    except Exception:
-                        pass
+                    # 文本提示词 → 工作流真实文本入口（单点规则，与生成源 schema 同源）
+                    dyn = _inject_workflow_prompt(dyn, req, _exposed)
                     req.dynamic_inputs = dyn
                 except Exception:
                     pass
@@ -141,6 +144,8 @@ def _make_provider(definition):
                         dyn.pop("reference_images", None); dyn.pop("reference", None)
                         for idx, exp in enumerate(img_slots):
                             k = exp.get("id")
+                            if k in dyn:
+                                continue  # 用户已按节点显式挂载的独立槽优先，位置映射不覆盖
                             if idx < len(std_refs) and std_refs[idx]:
                                 dyn[k] = std_refs[idx]
                             elif idx == 0 and std_refs and std_refs[0]:
@@ -154,26 +159,8 @@ def _make_provider(definition):
                             val = getattr(req,"extra").get(std_key)
                         if val is not None and exp_id not in dyn:
                             dyn[exp_id] = val
-                    # 文本提示词 → 工作流真实文本入口（同上，解决 30:6 链路经 Switch/Concat 无法直写的问题）
-                    try:
-                        txt = (getattr(req, "prompt", None) or "").strip() if getattr(req, "prompt", None) else ""
-                        if txt:
-                            txt_slots = [e for e in (_exposed or []) if e.get("type") == "text"]
-                            chosen = None
-                            for e in txt_slots:
-                                lab = str(e.get("label","") or "") + str(e.get("alias","") or "") + str(e.get("description","") or "")
-                                if "提示词" in lab or "user" in lab.lower():
-                                    chosen = e; break
-                            if not chosen:
-                                for e in txt_slots:
-                                    if str(e.get("param_name","")).lower() in ("prompt","value","text"):
-                                        chosen = e; break
-                            if not chosen and txt_slots:
-                                chosen = txt_slots[0]
-                            if chosen and chosen.get("id") not in dyn:
-                                dyn[chosen["id"]] = txt
-                    except Exception:
-                        pass
+                    # 文本提示词 → 工作流真实文本入口（单点规则，与生成源 schema 同源）
+                    dyn = _inject_workflow_prompt(dyn, req, _exposed)
                     req.dynamic_inputs = dyn
                 except Exception:
                     pass

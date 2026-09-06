@@ -8,6 +8,7 @@
 """
 import os
 import json
+import time
 import uuid
 from typing import List, Optional, Dict, Any
 from datetime import datetime
@@ -46,6 +47,50 @@ def _canvas_path(project_id: str) -> str:
     return os.path.join(PROJECTS_ROOT, project_id, "canvas.json")
 
 
+# ===== 双 ID 兼容层 =====
+# 存储目录/index.json 用目录名 id（proj_xxx），但 split_novel_script 生成的 content.json 内部
+# project.id 是另一个 UUID。前端（及导演 Agent 的 context.project_id）常把内部 UUID 当 project_id 传入，
+# 导致 canvas_create_node/save_canvas 等写路径报"项目不存在"。此处把任意传入 id 统一解析到真实目录名。
+_UUID_ID_MAP: Dict[str, str] = {}
+_UUID_MAP_BUILT = False
+
+
+def _rebuild_uuid_map():
+    global _UUID_MAP_BUILT
+    _UUID_ID_MAP.clear()
+    try:
+        for entry in os.listdir(PROJECTS_ROOT):
+            cp = _content_path(entry)
+            if not os.path.isdir(os.path.join(PROJECTS_ROOT, entry)) or not os.path.exists(cp):
+                continue
+            try:
+                with open(cp, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                cid = str((data or {}).get("id") or "")
+                if cid and cid != entry:
+                    _UUID_ID_MAP[cid] = entry
+            except Exception:
+                continue
+    except Exception:
+        pass
+    _UUID_MAP_BUILT = True
+
+
+def _resolve_id(project_id: str) -> str:
+    if not project_id:
+        return project_id
+    if os.path.isdir(os.path.join(PROJECTS_ROOT, project_id)):
+        return project_id
+    if not _UUID_MAP_BUILT:
+        _rebuild_uuid_map()
+    resolved = _UUID_ID_MAP.get(project_id, project_id)
+    if resolved != project_id:
+        return resolved
+    # 目录可能新建：强制重建一次映射再试
+    _rebuild_uuid_map()
+    return _UUID_ID_MAP.get(project_id, project_id)
+
+
 class ProjectManager:
     def list_projects(self, q: Optional[str] = None, status: Optional[str] = None, sort: str = "updated_at") -> List[Dict[str, Any]]:
         items = _load_index()
@@ -72,12 +117,14 @@ class ProjectManager:
         return filtered
 
     def get_meta(self, project_id: str) -> Optional[Dict[str, Any]]:
+        project_id = _resolve_id(project_id)
         for m in _load_index():
             if m.get("id") == project_id:
                 return m
         return None
 
     def get_content(self, project_id: str) -> Optional[Dict[str, Any]]:
+        project_id = _resolve_id(project_id)
         p = _content_path(project_id)
         if not os.path.exists(p):
             return None
@@ -140,6 +187,7 @@ class ProjectManager:
         _save_index(items)
 
     def update_meta(self, project_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        project_id = _resolve_id(project_id)
         items = _load_index()
         for i, m in enumerate(items):
             if m.get("id") == project_id:
@@ -157,6 +205,7 @@ class ProjectManager:
         return None
 
     def delete_project(self, project_id: str) -> bool:
+        project_id = _resolve_id(project_id)
         items = _load_index()
         new_items = [m for m in items if m.get("id") != project_id]
         if len(new_items) == len(items):
@@ -170,6 +219,7 @@ class ProjectManager:
         return True
 
     def duplicate_project(self, project_id: str) -> Optional[Dict[str, Any]]:
+        project_id = _resolve_id(project_id)
         meta_dict = self.get_meta(project_id)
         if not meta_dict:
             return None
@@ -202,6 +252,7 @@ class ProjectManager:
         return new_meta.model_dump()
 
     def open_project(self, project_id: str) -> Optional[Dict[str, Any]]:
+        project_id = _resolve_id(project_id)
         items = _load_index()
         for i, m in enumerate(items):
             if m.get("id") == project_id:
@@ -213,6 +264,7 @@ class ProjectManager:
         return None
 
     def save_content(self, project_id: str, content: Dict[str, Any]) -> Dict[str, Any]:
+        project_id = _resolve_id(project_id)
         # 确保 meta 存在
         meta_dict = self.get_meta(project_id)
         if not meta_dict:
@@ -247,23 +299,133 @@ class ProjectManager:
             pass
         return content
 
-    def save_canvas(self, project_id: str, snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    def save_canvas(self, project_id: str, snapshot: Dict[str, Any], canvas_id: str = "default", name: Optional[str] = None) -> Dict[str, Any]:
+        project_id = _resolve_id(project_id)
         if not self.get_meta(project_id):
             raise FileNotFoundError(f"项目不存在: {project_id}")
         os.makedirs(os.path.join(PROJECTS_ROOT, project_id), exist_ok=True)
-        with open(_canvas_path(project_id), "w", encoding="utf-8") as f:
-            json.dump(snapshot, f, ensure_ascii=False, indent=2)
-        return snapshot
+        # 归一化为多画布结构（兼容存量单画布文件，原样迁移为 default）
+        store: Dict[str, Any] = {"version": 2, "active_canvas_id": canvas_id, "canvases": {}}
+        p = _canvas_path(project_id)
+        if os.path.exists(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    old = json.load(f)
+                if isinstance(old, dict) and isinstance(old.get("canvases"), dict):
+                    store = old
+                elif isinstance(old, dict):
+                    store["canvases"]["default"] = {
+                        "name": "默认画布",
+                        "nodes": old.get("nodes", []),
+                        "edges": old.get("edges", []),
+                        "updated_at": old.get("updated_at", ""),
+                    }
+            except Exception:
+                pass
+        nodes = snapshot.get("nodes", []) if isinstance(snapshot, dict) else []
+        edges = snapshot.get("edges", []) if isinstance(snapshot, dict) else []
+        prev = store["canvases"].get(canvas_id, {})
+        store["canvases"][canvas_id] = {
+            "name": name or prev.get("name") or ("默认画布" if canvas_id == "default" else canvas_id),
+            "nodes": nodes,
+            "edges": edges,
+            "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        store["active_canvas_id"] = canvas_id
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(store, f, ensure_ascii=False, indent=2)
+        return {"canvas_id": canvas_id, "name": store["canvases"][canvas_id]["name"]}
 
-    def get_canvas(self, project_id: str) -> Optional[Dict[str, Any]]:
+    def get_canvas(self, project_id: str, canvas_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        project_id = _resolve_id(project_id)
         p = _canvas_path(project_id)
         if not os.path.exists(p):
             return None
         try:
             with open(p, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
         except Exception:
             return None
+        if not isinstance(data, dict):
+            return None
+        # 存量单画布文件：原样返回
+        if not isinstance(data.get("canvases"), dict):
+            return data
+        # 显式请求的画布不存在 → 返回 None（绝不回退，避免“新画布”载入默认画布内容）
+        if canvas_id:
+            cur = data["canvases"].get(canvas_id)
+            if not cur:
+                return None
+            return {"canvas_id": canvas_id, "name": cur.get("name", canvas_id), "nodes": cur.get("nodes", []), "edges": cur.get("edges", [])}
+        cid = data.get("active_canvas_id") or "default"
+        cur = data["canvases"].get(cid) or data["canvases"].get("default")
+        if not cur:
+            return None
+        return {"canvas_id": cid, "name": cur.get("name", cid), "nodes": cur.get("nodes", []), "edges": cur.get("edges", [])}
+
+    def list_canvases(self, project_id: str) -> List[Dict[str, Any]]:
+        project_id = _resolve_id(project_id)
+        p = _canvas_path(project_id)
+        if not os.path.exists(p):
+            return []
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            return []
+        if not isinstance(data, dict):
+            return []
+        if not isinstance(data.get("canvases"), dict):
+            legacy = data if isinstance(data.get("nodes"), list) else None
+            if legacy is None:
+                return []
+            return [{"id": "default", "name": "默认画布", "updated_at": "", "node_count": len(legacy.get("nodes", []))}]
+        out = []
+        for cid, c in data["canvases"].items():
+            out.append({"id": cid, "name": (c or {}).get("name", cid), "updated_at": (c or {}).get("updated_at", ""), "node_count": len((c or {}).get("nodes", []))})
+        return out
+
+    def rename_canvas(self, project_id: str, canvas_id: str, name: str) -> Dict[str, Any]:
+        project_id = _resolve_id(project_id)
+        p = _canvas_path(project_id)
+        if not os.path.exists(p):
+            raise FileNotFoundError(f"项目不存在或无画布: {project_id}")
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            raise ValueError(f"画布文件损坏: {e}")
+        if not isinstance(data, dict) or not isinstance(data.get("canvases"), dict):
+            raise ValueError("存量单画布暂不支持重命名，请先打开画布触发迁移")
+        if canvas_id not in data["canvases"]:
+            raise FileNotFoundError(f"画布不存在: {canvas_id}")
+        data["canvases"][canvas_id]["name"] = name or canvas_id
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return {"id": canvas_id, "name": data["canvases"][canvas_id]["name"]}
+
+    def delete_canvas(self, project_id: str, canvas_id: str) -> Dict[str, Any]:
+        project_id = _resolve_id(project_id)
+        p = _canvas_path(project_id)
+        if not os.path.exists(p):
+            raise FileNotFoundError(f"项目不存在或无画布: {project_id}")
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            raise ValueError(f"画布文件损坏: {e}")
+        if not isinstance(data, dict) or not isinstance(data.get("canvases"), dict):
+            raise ValueError("存量单画布不可删除（仅 default）")
+        if canvas_id not in data["canvases"]:
+            raise FileNotFoundError(f"画布不存在: {canvas_id}")
+        if len(data["canvases"]) <= 1:
+            raise ValueError("至少保留一个画布")
+        del data["canvases"][canvas_id]
+        if data.get("active_canvas_id") == canvas_id:
+            data["active_canvas_id"] = "default" if "default" in data["canvases"] else next(iter(data["canvases"]))
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return {"deleted": canvas_id, "active_canvas_id": data.get("active_canvas_id")}
 
 
 project_manager = ProjectManager()

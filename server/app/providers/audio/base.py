@@ -10,8 +10,9 @@ from dataclasses import dataclass
 @dataclass
 class AudioGenerateRequest:
     text: str
-    voice_id: str = "male-qn-qingse"
-    emotion: str = "neutral"  # neutral/intense/sorrow/excited/fearful/whispering
+    # 不写死音色：空值由具体源按其声明（models 首位/DEFAULT_VOICE）兜底
+    voice_id: str = ""
+    emotion: str = ""  # 空 = 源默认情绪
     speed: float = 1.0
     pitch: float = 0.0
     # 扩展：克隆/参考音频

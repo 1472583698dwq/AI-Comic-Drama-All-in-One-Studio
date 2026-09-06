@@ -1,11 +1,11 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { 
-  Sparkles, 
-  Send, 
-  Bot, 
-  User, 
-  CheckCircle2, 
-  X, 
+import {
+  Sparkles,
+  Send,
+  Bot,
+  User,
+  CheckCircle2,
+  X,
   Maximize2,
   Minimize2,
   RefreshCw,
@@ -16,11 +16,16 @@ import {
   Wand2,
   Lightbulb,
   Cpu,
-  ArrowUpRight
+  ArrowUpRight,
+  Square,
+  Pause,
+  Copy,
+  Check
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { useCanvasStore } from '../../stores/useCanvasStore';
 import { apiService } from '../../services/api';
+import { MarkdownText } from './MarkdownText';
 
 const isDev = typeof window !== 'undefined' && window.location.port === '5173';
 const WS_URL = isDev
@@ -57,6 +62,27 @@ export const AgentChatDrawer: React.FC = () => {
   const [inputText, setInputText] = useState('');
   const [wsConnected, setWsConnected] = useState(false);
   const [expandedThinkingIds, setExpandedThinkingIds] = useState<Record<string, boolean>>({});
+  const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
+
+  // 单条消息复制（全局文字可复制入口之一）
+  const handleCopyMessage = async (e: React.MouseEvent, id: string, text: string) => {
+    e.stopPropagation();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      } catch {}
+    }
+    setCopiedMsgId(id);
+    setTimeout(() => setCopiedMsgId((v) => (v === id ? null : v)), 1500);
+  };
 
   // LangChain 会话记忆：按项目隔离，支持多轮
   const [sessionId, setSessionId] = useState<string>(() => {
@@ -122,6 +148,7 @@ export const AgentChatDrawer: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const currentStreamingIdRef = useRef<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Initialize dialog position when opened
   useEffect(() => {
@@ -230,18 +257,16 @@ export const AgentChatDrawer: React.FC = () => {
     }
     return () => {
       window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onStopDragWrapper);
+      window.removeEventListener('mouseup', onMouseUp);
       window.removeEventListener('touchmove', onTouchMove);
-      window.removeEventListener('touchend', onStopDragWrapper);
+      window.removeEventListener('touchend', onMouseUp);
     };
-    function onStopDragWrapper() {
-      setIsBtnDragging(false);
-    }
   }, [isBtnDragging, btnPos]);
 
   // Dialog Window Drag Handlers
   const handleDialogHeaderMouseDown = (e: React.MouseEvent) => {
     if (!dialogPos) return;
+    if ((e.target as HTMLElement).closest('button')) return;
     setIsDialogDragging(true);
     dialogDragRef.current = {
       startX: e.clientX,
@@ -527,8 +552,10 @@ export const AgentChatDrawer: React.FC = () => {
       }
     }
 
-    // 2. HTTP SSE Fallback
+    // 2. HTTP SSE Fallback（支持 Abort 暂停）
     if (!sentViaWs) {
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
       try {
         await apiService.agentChatStream(text, contextPayload, effectiveSessionId, (event, data) => {
           if (event === 'agent_thinking_start') {
@@ -620,12 +647,29 @@ export const AgentChatDrawer: React.FC = () => {
             );
             currentStreamingIdRef.current = null;
           }
-        });
+        }, { signal: controller.signal } as any);
         setIsThinking(false);
         setMessages((prev) =>
           prev.map((m) => (m.id === agentMsgId ? { ...m, isStreaming: false, isThinkingStreaming: false } : m))
         );
       } catch (e: any) {
+        // 被暂停则不再 fallback
+        if (e?.name === 'AbortError' || String(e?.message || e).toLowerCase().includes('abort')) {
+          setIsThinking(false);
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === agentMsgId
+                ? {
+                    ...m,
+                    text: m.text ? m.text + "\n\n⏹️ 已暂停" : "⏹️ 已暂停",
+                    isStreaming: false,
+                    isThinkingStreaming: false,
+                  }
+                : m
+            )
+          );
+          currentStreamingIdRef.current = null;
+        } else {
         // Fallback to non-streaming agentChat
         try {
           const res = await apiService.agentChat(text, contextPayload, effectiveSessionId);
@@ -666,11 +710,66 @@ export const AgentChatDrawer: React.FC = () => {
             )
           );
         }
+        }
+      } finally {
+        abortControllerRef.current = null;
       }
     }
   };
 
+  const handleAbort = useCallback(() => {
+    // WS 暂停
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify({ action: 'abort', session_id: effectiveSessionId }));
+      } catch {}
+    }
+    // SSE 暂停
+    if (abortControllerRef.current) {
+      try { abortControllerRef.current.abort(); } catch {}
+      abortControllerRef.current = null;
+    }
+    const curId = currentStreamingIdRef.current;
+    setIsThinking(false);
+    if (curId) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === curId
+            ? {
+                ...m,
+                text: m.text ? m.text + "\n\n⏹️ 已暂停" : "⏹️ 已暂停",
+                isStreaming: false,
+                isThinkingStreaming: false,
+              }
+            : m
+        )
+      );
+      currentStreamingIdRef.current = null;
+    } else {
+      // 无 curId 时也强制结束 thinking
+      setMessages((prev) =>
+        prev.map((m) => (m.isStreaming || m.isThinkingStreaming ? { ...m, isStreaming: false, isThinkingStreaming: false } : m))
+      );
+    }
+  }, [effectiveSessionId]);
+
+  // Esc 全局暂停
+  useEffect(() => {
+    if (!isOpen || !isThinking) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        handleAbort();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, isThinking, handleAbort]);
+
   const handleClearHistory = async () => {
+    // 暂停后再清
+    if (isThinking) handleAbort();
     try {
       await apiService.clearAgentHistory(effectiveSessionId);
       setMessages([
@@ -834,12 +933,22 @@ export const AgentChatDrawer: React.FC = () => {
                   className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} space-y-1 animate-fade-in`}
                 >
                   <div
-                    className={`p-3.5 rounded-2xl max-w-[92%] leading-relaxed shadow-sm ${
+                    className={`p-3.5 rounded-2xl max-w-[92%] leading-relaxed shadow-sm group/msg relative allow-select select-text ${
                       isUser
                         ? 'bg-brand text-white rounded-br-none'
                         : 'bg-surface-secondary border border-border [color:var(--color-text-main)] rounded-bl-none'
                     }`}
                   >
+                    {/* 单条复制按钮 */}
+                    {m.text && (
+                      <button
+                        onClick={(e) => handleCopyMessage(e, m.id, m.text)}
+                        className="absolute top-1.5 right-1.5 p-1 rounded-md opacity-0 group-hover/msg:opacity-100 transition-opacity bg-black/20 hover:bg-black/40 text-white/70 hover:text-white"
+                        title="复制本条消息"
+                      >
+                        {copiedMsgId === m.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                      </button>
+                    )}
                     {/* 1. Collapsible Thinking / Reasoning Chain */}
                     {isAgent && showThinking && (
                       <div className="mb-2.5 rounded-xl border border-brand/20 bg-brand/5 overflow-hidden">
@@ -864,7 +973,7 @@ export const AgentChatDrawer: React.FC = () => {
                         </button>
 
                         {isThinkingOpen && (
-                          <div className="p-2.5 pt-0 text-[10px] leading-relaxed [color:var(--color-text-secondary)] whitespace-pre-wrap font-mono max-h-36 overflow-y-auto custom-scrollbar border-t border-brand/10">
+                          <div className="p-2.5 pt-0 text-[10px] leading-relaxed [color:var(--color-text-secondary)] whitespace-pre-wrap font-mono max-h-36 overflow-y-auto custom-scrollbar border-t border-brand/10 allow-select select-text">
                             {m.thinking || '正在感知分镜机位与剧情节拍...'}
                             {m.isThinkingStreaming && (
                               <span className="inline-block w-1.5 h-3 bg-brand ml-1 animate-pulse align-middle" />
@@ -906,13 +1015,19 @@ export const AgentChatDrawer: React.FC = () => {
                       </div>
                     )}
 
-                    {/* 3. Main Message Content */}
-                    <div className="whitespace-pre-wrap leading-relaxed text-xs">
-                      {m.text}
-                      {m.isStreaming && (
-                        <span className="inline-block w-1.5 h-3.5 bg-brand ml-1 animate-pulse align-middle" />
-                      )}
-                    </div>
+                    {/* 3. Main Message Content（Agent 侧 Markdown 渲染，用户侧纯文本，均可选中复制） */}
+                    {isAgent ? (
+                      <div className="leading-relaxed text-xs">
+                        <MarkdownText text={m.text} />
+                        {m.isStreaming && (
+                          <span className="inline-block w-1.5 h-3.5 bg-brand ml-1 animate-pulse align-middle" />
+                        )}
+                      </div>
+                    ) : (
+                      <div className="whitespace-pre-wrap leading-relaxed text-xs">
+                        {m.text}
+                      </div>
+                    )}
 
                     {/* 4. Suggested Directorial Action Chips */}
                     {isAgent && m.suggestedActions && m.suggestedActions.length > 0 && (
@@ -944,24 +1059,36 @@ export const AgentChatDrawer: React.FC = () => {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Quick Directorial Command Presets */}
-          <div className="px-3 py-2 bg-surface-secondary/40 border-t border-border flex space-x-1.5 overflow-x-auto text-[10px] whitespace-nowrap custom-scrollbar shrink-0">
-            {[
-              '规划当前镜 3D 特写推镜',
-              '重绘当前分镜画面 (ComfyUI)',
-              '将台词情绪调整为激动',
-              '生成角色配音并对齐时长',
-              '一键导出剪映工程',
-            ].map((chip) => (
-              <button
-                key={chip}
-                onClick={() => handleSendMessage(chip)}
-                className="px-2.5 py-1 rounded-full bg-surface border border-border hover:border-brand text-[color:var(--color-text-secondary)] hover:text-brand transition-all shadow-xs"
-              >
-                {chip}
+          {/* Quick Presets / Pause Hint */}
+          {isThinking ? (
+            <div className="px-3 py-2 bg-amber-500/10 border-t border-amber-500/20 flex items-center justify-between text-[10px] shrink-0">
+              <span className="flex items-center gap-1.5 text-amber-500 font-bold">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                正在执行中… 可点击右侧 ■ 或按 Esc 暂停
+              </span>
+              <button onClick={handleAbort} className="px-2.5 py-1 rounded-full bg-red-500 hover:bg-red-600 text-white font-bold flex items-center gap-1 transition-all">
+                <Square className="w-3 h-3 fill-white" /> 暂停
               </button>
-            ))}
-          </div>
+            </div>
+          ) : (
+            <div className="px-3 py-2 bg-surface-secondary/40 border-t border-border flex space-x-1.5 overflow-x-auto text-[10px] whitespace-nowrap custom-scrollbar shrink-0">
+              {[
+                '规划当前镜 3D 特写推镜',
+                '重绘当前分镜画面 (ComfyUI)',
+                '将台词情绪调整为激动',
+                '生成角色配音并对齐时长',
+                '一键导出剪映工程',
+              ].map((chip) => (
+                <button
+                  key={chip}
+                  onClick={() => handleSendMessage(chip)}
+                  className="px-2.5 py-1 rounded-full bg-surface border border-border hover:border-brand text-[color:var(--color-text-secondary)] hover:text-brand transition-all shadow-xs"
+                >
+                  {chip}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Input Bar */}
           <div className="p-3 border-t border-border bg-surface flex items-end space-x-2 shrink-0">
@@ -975,22 +1102,48 @@ export const AgentChatDrawer: React.FC = () => {
                 el.style.height = Math.min(el.scrollHeight, 100) + 'px';
               }}
               onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === 'Escape' && isThinking) {
+                  e.preventDefault();
+                  handleAbort();
+                  return;
+                }
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
-                  handleSendMessage();
+                  if (isThinking) handleAbort();
+                  else handleSendMessage();
                 }
               }}
-              placeholder="向导演 Agent 下达指令（Enter 发送，Shift+Enter 换行）..."
+              onPaste={(e) => {
+                e.stopPropagation();
+                const text = (e.clipboardData as any)?.getData('text/plain') || (e.clipboardData as any)?.getData('text') || '';
+                if (text) {
+                  e.preventDefault();
+                  const target = e.target as HTMLTextAreaElement;
+                  const start = target.selectionStart ?? inputText.length;
+                  const end = target.selectionEnd ?? inputText.length;
+                  const newValue = inputText.slice(0, start) + text + inputText.slice(end);
+                  setInputText(newValue);
+                  requestAnimationFrame(() => {
+                    try { target.selectionStart = target.selectionEnd = start + text.length; } catch {}
+                    target.style.height = 'auto';
+                    target.style.height = Math.min(target.scrollHeight, 100) + 'px';
+                  });
+                }
+              }}
+              onCopy={(e) => e.stopPropagation()}
+              onCut={(e) => e.stopPropagation()}
+              placeholder={isThinking ? "正在执行中… 按 Esc 或点击 ■ 暂停" : "向导演 Agent 下达指令（Enter 发送，Shift+Enter 换行）..."}
               rows={1}
-              className="flex-1 bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs [color:var(--color-text-main)] placeholder-gray-500 focus:outline-none focus:border-brand resize-none min-h-[36px] max-h-[100px] leading-relaxed custom-scrollbar"
+              className="flex-1 bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs [color:var(--color-text-main)] placeholder-gray-500 focus:outline-none focus:border-brand resize-none min-h-[36px] max-h-[100px] leading-relaxed custom-scrollbar select-text"
             />
             <button
-              onClick={() => handleSendMessage()}
-              disabled={!inputText.trim() || isThinking}
-              className="p-2.5 rounded-xl bg-brand hover:bg-brand-light text-white disabled:opacity-40 shadow-md shadow-brand/20 transition-all shrink-0 self-end"
-              title="发送指令 (Enter)"
+              onClick={() => (isThinking ? handleAbort() : handleSendMessage())}
+              disabled={!isThinking && !inputText.trim()}
+              className={`p-2.5 rounded-xl text-white shadow-md transition-all shrink-0 self-end ${isThinking ? 'bg-red-500 hover:bg-red-600 shadow-red-500/20 animate-pulse' : 'bg-brand hover:bg-brand-light shadow-brand/20'} disabled:opacity-40`}
+              title={isThinking ? "暂停 (Esc)" : "发送指令 (Enter)"}
             >
-              <Send className="w-4 h-4" />
+              {isThinking ? <Square className="w-4 h-4 fill-white" /> : <Send className="w-4 h-4" />}
             </button>
           </div>
         </div>

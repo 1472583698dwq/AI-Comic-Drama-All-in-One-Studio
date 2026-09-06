@@ -1,0 +1,86 @@
+{
+  "id": "prov_005a9ba2",
+  "name": "测试代码源",
+  "display_name": null,
+  "kind": "image",
+  "provider_type": "code",
+  "description": "由导演直接提供代码（python）",
+  "icon": "Zap",
+  "scope": "global",
+  "project_id": null,
+  "builtin": false,
+  "enabled": true,
+  "language": "python",
+  "code": "async def generate(ctx, api):\n    return {\"image_url\": \"https://example.com/test.png\"}\n",
+  "code_entry": "generate",
+  "code_timeout": 60,
+  "transport": {
+    "method": "POST",
+    "url": "",
+    "headers": {},
+    "query": {},
+    "timeout": 60
+  },
+  "auth": {
+    "type": "none",
+    "header_name": "Authorization",
+    "query_name": "api_key",
+    "key_env": null,
+    "prefix": "Bearer "
+  },
+  "mapping": {
+    "request_template": null,
+    "response_mappings": {}
+  },
+  "health_check": {
+    "url": null,
+    "method": "GET",
+    "expect_status": 200,
+    "test_payload": null
+  },
+  "legacy_json_mode": false,
+  "models": [],
+  "default_model": null,
+  "params_schema": null,
+  "default_params": {},
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "description": "画面提示词",
+        "x-handle": "text"
+      },
+      "reference_images": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "format": "uri"
+        },
+        "description": "参考图",
+        "x-handle": "image"
+      }
+    },
+    "required": [
+      "prompt"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "image_url": {
+        "type": "string",
+        "format": "uri",
+        "x-handle": "image"
+      }
+    },
+    "required": [
+      "image_url"
+    ]
+  },
+  "doc_url": null,
+  "doc_text": null,
+  "created_at": "2026-08-28T11:09:01.083200",
+  "updated_at": "2026-08-28T11:09:01.218678",
+  "raw_api_doc": null
+}

@@ -26,12 +26,15 @@ export const apiService = {
     return await res.json();
   },
 
-  // 2. TTS 超拟人配音生成（动态Provider）
-  async generateTTS(text: string, voiceId: string, emotion: string = 'neutral', opts?: { provider?: string; speed?: number; pitch?: number; model?: string; ref_audio_path?: string }): Promise<any> {
+  // 2. TTS 超拟人配音生成（动态Provider；voice_id/emotion 缺省时由后端所选源的声明默认值兜底）
+  async generateTTS(text: string, voiceId?: string, emotion?: string, opts?: { provider?: string; speed?: number; pitch?: number; model?: string; ref_audio_path?: string }): Promise<any> {
+    const body: Record<string, any> = { text, speed: opts?.speed ?? 1.0, pitch: opts?.pitch ?? 0.0, provider: opts?.provider, model: opts?.model, ref_audio_path: opts?.ref_audio_path };
+    if (voiceId) body.voice_id = voiceId;
+    if (emotion) body.emotion = emotion;
     const res = await fetch(`${API_BASE_URL}/tts/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, voice_id: voiceId, emotion, speed: opts?.speed ?? 1.0, pitch: opts?.pitch ?? 0.0, provider: opts?.provider, model: opts?.model, ref_audio_path: opts?.ref_audio_path }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) {
       const body = await res.json().catch(() => null);
@@ -266,6 +269,12 @@ export const apiService = {
     return await res.json();
   },
 
+  async refreshWorkflowAppContract(workflowId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/images/workflows/${encodeURIComponent(workflowId)}/refresh-app-contract`, { method: 'POST' });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+
   async saveWorkflowOverrides(workflowId: string, data: { mapping?: Record<string, string>; node_overrides?: Record<string, Record<string, any>>; exposed_inputs?: any[]; auto_import_if_ext?: boolean }): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/images/workflows/${encodeURIComponent(workflowId)}/overrides`, {
       method: 'POST',
@@ -339,7 +348,7 @@ export const apiService = {
   },
 
   // 节点 Agent 一体化：自然语言需求 → skill/源/参数规划 → 执行（params 为用户在高级面板覆写的异构参数）
-  async canvasAgentGenerate(payload: { node_type: string; idea: string; provider_id?: string; slots?: Record<string, any>; extra_hint?: string; params?: Record<string, any> }): Promise<any> {
+  async canvasAgentGenerate(payload: { node_type: string; idea: string; provider_id?: string; skill_id?: string; slots?: Record<string, any>; extra_hint?: string; params?: Record<string, any>; node_id?: string }): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/canvas/agent/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -440,11 +449,12 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
-  async agentChatStream(prompt: string, context?: any, sessionId?: string, onEvent?: (event: string, data: any)=>void): Promise<any> {
+  async agentChatStream(prompt: string, context?: any, sessionId?: string, onEvent?: (event: string, data: any)=>void, opts?: { signal?: AbortSignal }): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/agent/chat/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt, context: context || {}, session_id: sessionId || undefined }),
+      signal: opts?.signal,
     });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     if (!res.body || !onEvent) return await res.json();
@@ -488,6 +498,8 @@ export const apiService = {
   async pipelineFullRun(params: {
     text: string; style_preset?: string; aspect_ratio?: string; custom_instructions?: string; max_images?: number;
     image_provider?: string; image_workflow_id?: string; audio_provider?: string;
+    video_provider?: string; video_workflow_id?: string; enable_video?: boolean; max_videos?: number;
+    gen_roles?: boolean; max_roles?: number;
   }): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/pipeline/full-run`, {
       method: 'POST',
@@ -501,8 +513,57 @@ export const apiService = {
         image_provider: params.image_provider,
         image_workflow_id: params.image_workflow_id,
         audio_provider: params.audio_provider,
+        video_provider: params.video_provider,
+        video_workflow_id: params.video_workflow_id,
+        enable_video: params.enable_video ?? true,
+        max_videos: params.max_videos ?? 6,
+        gen_roles: params.gen_roles ?? true,
+        max_roles: params.max_roles ?? 4,
       }),
     });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(extractErrorMessage(res, body));
+    }
+    return await res.json();
+  },
+
+  // 9.1 一键成片 Agent（异步任务 + 轮询）
+  async onekeyRun(params: {
+    title?: string; text: string; style_preset?: string; aspect_ratio?: string; custom_instructions?: string;
+    max_images?: number; image_provider?: string; image_workflow_id?: string; audio_provider?: string;
+    video_provider?: string; video_workflow_id?: string; enable_video?: boolean; max_videos?: number;
+    gen_roles?: boolean; max_roles?: number;
+  }): Promise<{ task_id: string; status: string }> {
+    const res = await fetch(`${API_BASE_URL}/onekey/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: params.title || '一键成片',
+        text: params.text,
+        style_preset: params.style_preset || 'donghua_xianxia',
+        aspect_ratio: params.aspect_ratio || '9:16',
+        custom_instructions: params.custom_instructions || '',
+        max_images: params.max_images ?? 12,
+        image_provider: params.image_provider,
+        image_workflow_id: params.image_workflow_id,
+        audio_provider: params.audio_provider,
+        video_provider: params.video_provider,
+        video_workflow_id: params.video_workflow_id,
+        enable_video: params.enable_video ?? true,
+        max_videos: params.max_videos ?? 6,
+        gen_roles: params.gen_roles ?? true,
+        max_roles: params.max_roles ?? 4,
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(extractErrorMessage(res, body));
+    }
+    return await res.json();
+  },
+  async onekeyStatus(taskId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/onekey/tasks/${encodeURIComponent(taskId)}`);
     if (!res.ok) {
       const body = await res.json().catch(() => null);
       throw new Error(extractErrorMessage(res, body));
@@ -556,13 +617,32 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
-  async getProjectCanvas(projectId: string): Promise<any> {
-    const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/canvas`);
+  async getProjectCanvas(projectId: string, canvasId?: string): Promise<any> {
+    const qs = canvasId ? `?canvas_id=${encodeURIComponent(canvasId)}` : '';
+    const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/canvas${qs}`);
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
-  async saveProjectCanvas(projectId: string, snapshot: any): Promise<any> {
-    const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/canvas`, { method: 'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(snapshot) });
+  async saveProjectCanvas(projectId: string, snapshot: any, canvasId?: string, name?: string): Promise<any> {
+    const body: any = { ...(snapshot || {}) };
+    if (canvasId) body.canvas_id = canvasId;
+    if (name) body.name = name;
+    const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/canvas`, { method: 'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async listProjectCanvases(projectId: string): Promise<{ project_id: string; canvases: Array<{ id: string; name: string; updated_at: string; node_count: number }> }> {
+    const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/canvases`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async renameProjectCanvas(projectId: string, canvasId: string, name: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/canvases/${encodeURIComponent(canvasId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async deleteProjectCanvas(projectId: string, canvasId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/canvases/${encodeURIComponent(canvasId)}`, { method: 'DELETE' });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },

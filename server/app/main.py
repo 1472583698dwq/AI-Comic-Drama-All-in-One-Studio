@@ -67,6 +67,13 @@ try:
     print("[Main] Provider routes mounted at /api/v1/providers")
 except Exception as e:
     print(f"[Main] Provider routes mount failed: {e}")
+# 一键成片 Agent 任务路由（异步 + 轮询）
+try:
+    from app.api.onekey_routes import router as onekey_router
+    app.include_router(onekey_router, prefix=settings.API_V1_STR)
+    print("[Main] OneKey routes mounted at /api/v1/onekey")
+except Exception as e:
+    print(f"[Main] OneKey routes mount failed: {e}")
 
 # Mount standard MCP protocol server (Streamable HTTP)
 if mcp_http_app:

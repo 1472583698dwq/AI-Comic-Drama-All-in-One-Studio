@@ -1,0 +1,156 @@
+{
+  "id": "prov_6131876a",
+  "name": "AutoDL H3 图音生视频 v2 (15s)",
+  "display_name": null,
+  "kind": "video",
+  "provider_type": "code",
+  "description": "AutoDL H3 工作流 minimax_h3_image_audio_to_video_v2_15s：图+音生视频，支持最多9张参考图、3条参考音频，时长1-15秒，480p/768p 竖横。",
+  "icon": "Zap",
+  "scope": "global",
+  "project_id": null,
+  "builtin": false,
+  "enabled": true,
+  "language": "python",
+  "code": "import asyncio\nimport httpx\n\nasync def generate(ctx, api):\n    AUTODL_BASE = \"https://autodl.art/api/v1\"\n    WORKFLOW_ID = \"minimax_h3_image_audio_to_video_v2_15s\"\n    AUTODL_API_KEY = \"3jfV2WXEzzGkSW1gcuZwAtTAMbDhruqwgphMu9mXQ5EIKapd\"\n\n    headers = {\n        \"Authorization\": f\"Bearer {AUTODL_API_KEY}\",\n        \"Content-Type\": \"application/json\"\n    }\n\n    dyn = ctx.get(\"dynamic_inputs\") or {}\n    prompt = (ctx.get(\"prompt\") or \"\").strip()\n    task_id = (ctx.get(\"task_id\") or dyn.get(\"task_id\") or \"\").strip()\n\n    # 查询模式：有 task_id 且无 prompt → 单次 GET（秒回，绝不阻塞）。\n    # 由框架后台轮询（_poll_code_video_task）或调用方携带 task_id 复用，勿在此 sleep 循环。\n    if task_id and not prompt:\n        async with httpx.AsyncClient(timeout=15) as client:\n            r = await client.get(f\"{AUTODL_BASE}/comfyui/comfyui_workflow/result/{task_id}\", headers=headers)\n            r.raise_for_status()\n            data = (r.json() or {}).get(\"data\", {}) or {}\n            status = str(data.get(\"status\") or \"\").upper()\n            results = data.get(\"results\") or []\n            url = None\n            for item in results:\n                if isinstance(item, dict) and item.get(\"type\") == \"video\" and item.get(\"url\"):\n                    url = item[\"url\"]\n                    break\n            if not url and results:\n                first = results[0]\n                url = first.get(\"url\") if isinstance(first, dict) else (first if isinstance(first, str) else None)\n            if url:\n                return {\"video_url\": url, \"status\": data.get(\"status\"), \"task_id\": task_id}\n            if status in (\"FAILED\", \"ERROR\", \"FAIL\", \"CANCELLED\"):\n                raise RuntimeError(f\"AutoDL 任务失败 task_id={task_id}: {str(data)[:300]}\")\n            return {\"video_url\": None, \"status\": data.get(\"status\") or \"QUEUED\", \"task_id\": task_id}\n\n    if not prompt:\n        raise ValueError(\"缺少 prompt\")\n\n    # 组装 body（严格对齐官方能跑通的示例；时长钳位 1-15 防参数非法）\n    try:\n        duration = int(ctx.get(\"duration\") or 5)\n    except (ValueError, TypeError):\n        duration = 5\n    duration = max(1, min(15, duration))\n    body = {\n        \"prompt\": prompt,\n        \"duration\": duration,\n        \"resolution\": ctx.get(\"resolution\") or \"768p竖\",\n    }\n    seed = ctx.get(\"seed\")\n    if seed is not None:\n        try:\n            s = int(seed)\n            if s > 0:\n                body[\"seed\"] = s\n        except (ValueError, TypeError):\n            pass\n\n    # 首帧/参考图/尾帧 → ref_image_0..8（保序去重；仅公网 http(s)，本地 /storage 路径 AutoDL 不认则跳过）\n    ordered_images = []\n    for key in (\"first_frame\", \"first_frame_url\"):\n        v = ctx.get(key) or dyn.get(key)\n        if isinstance(v, str) and v.startswith((\"http://\", \"https://\", \"data:\")):\n            ordered_images.append(v)\n            break\n    for url in (ctx.get(\"reference_images\") or dyn.get(\"reference_images\") or []):\n        if isinstance(url, str) and url.startswith((\"http://\", \"https://\", \"data:\")):\n            ordered_images.append(url)\n    for key in (\"last_frame\", \"last_frame_url\"):\n        v = ctx.get(key) or dyn.get(key)\n        if isinstance(v, str) and v.startswith((\"http://\", \"https://\", \"data:\")):\n            ordered_images.append(v)\n            break\n    seen = set()\n    uniq_images = []\n    for u in ordered_images:\n        if u not in seen:\n            seen.add(u)\n            uniq_images.append(u)\n    for i, url in enumerate(uniq_images[:9]):\n        body[f\"ref_image_{i}\"] = url\n\n    # 参考音频 → ref_audio_0..2（兼容 reference_audios / ref_audio / 单字符串三种形态）\n    audios = []\n    for key in (\"reference_audios\", \"ref_audio\", \"reference_audio\"):\n        v = ctx.get(key) if ctx.get(key) is not None else dyn.get(key)\n        if isinstance(v, str) and v:\n            audios.append(v)\n        elif isinstance(v, list):\n            audios.extend(v)\n    n = 0\n    seen_a = set()\n    for url in audios:\n        if isinstance(url, str) and url.startswith((\"http://\", \"https://\", \"data:\")) and url not in seen_a:\n            seen_a.add(url)\n            body[f\"ref_audio_{n}\"] = url\n            n += 1\n        if n >= 3:\n            break\n\n    # 提交即返 task_id（绝不在此轮询等终态：外层 Agent 40s 即超时；框架后台轮询接管）\n    async with httpx.AsyncClient(timeout=20) as client:\n        r = await client.post(f\"{AUTODL_BASE}/comfyui/comfyui_workflow/{WORKFLOW_ID}\", json=body, headers=headers)\n        r.raise_for_status()\n        resp = r.json() or {}\n        if resp.get(\"code\") not in (None, \"Success\", \"success\"):\n            raise RuntimeError(f\"AutoDL 提交失败: {str(resp)[:400]}\")\n        new_task_id = (resp.get(\"data\") or {}).get(\"task_id\")\n        if not new_task_id:\n            raise RuntimeError(f\"AutoDL 未返回 task_id: {str(resp)[:400]}\")\n        return {\"video_url\": None, \"task_id\": new_task_id, \"status\": \"SUBMITTED\"}\n",
+  "code_entry": "generate",
+  "code_timeout": 600,
+  "trusted": false,
+  "transport": {
+    "method": "POST",
+    "url": "",
+    "headers": {},
+    "query": {},
+    "timeout": 60
+  },
+  "auth": {
+    "type": "bearer",
+    "header_name": "Authorization",
+    "query_name": "api_key",
+    "key_env": "CUSTOM_PROVIDER_prov_6131876a",
+    "prefix": "Bearer "
+  },
+  "mapping": {
+    "request_template": null,
+    "response_mappings": {}
+  },
+  "health_check": {
+    "url": null,
+    "method": "GET",
+    "expect_status": 200,
+    "test_payload": null
+  },
+  "legacy_json_mode": false,
+  "models": [],
+  "default_model": null,
+  "params_schema": {
+    "type": "object",
+    "properties": {
+      "resolution": {
+        "type": "string",
+        "title": "分辨率",
+        "enum": [
+          "480p竖",
+          "768p竖",
+          "480p横",
+          "768p横"
+        ],
+        "default": "768p竖",
+        "description": "分辨率（竖=9:16 横=16:9）",
+        "x-category": "layout",
+        "x-visibility": "basic",
+        "x-agent": "auto",
+        "x-priority": 20
+      },
+      "duration": {
+        "type": "integer",
+        "title": "时长",
+        "default": 5,
+        "minimum": 3,
+        "maximum": 15,
+        "description": "时长秒",
+        "x-category": "motion",
+        "x-visibility": "basic",
+        "x-agent": "auto",
+        "x-priority": 30
+      },
+      "seed": {
+        "type": "integer",
+        "title": "随机种子",
+        "description": "随机种子，留空随机",
+        "x-category": "quality",
+        "x-visibility": "advanced",
+        "x-agent": "manual",
+        "x-priority": 99
+      }
+    }
+  },
+  "default_params": {},
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "description": "运动描述",
+        "x-handle": "text"
+      },
+      "first_frame": {
+        "type": "string",
+        "format": "uri",
+        "description": "首帧",
+        "x-handle": "image"
+      },
+      "last_frame": {
+        "type": "string",
+        "format": "uri",
+        "description": "尾帧",
+        "x-handle": "image"
+      },
+      "reference_images": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "format": "uri"
+        },
+        "description": "参考集，最多9张",
+        "x-handle": "image",
+        "maxItems": 9,
+        "minItems": 0
+      },
+      "reference_audios": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "format": "uri"
+        },
+        "description": "参考音频，最多3条",
+        "x-handle": "audio",
+        "maxItems": 3,
+        "minItems": 0
+      }
+    },
+    "required": [
+      "prompt"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "video_url": {
+        "type": "string",
+        "format": "uri",
+        "x-handle": "video"
+      }
+    },
+    "required": [
+      "video_url"
+    ]
+  },
+  "workflow_id": null,
+  "workflow_hash": null,
+  "workflow_exposed": null,
+  "doc_url": null,
+  "doc_text": "AutoDL H3 工作流 minimax_h3_image_audio_to_video_v2_15s\n提交任务 POST https://autodl.art/api/v1/comfyui/comfyui_workflow/minimax_h3_image_audio_to_video_v2_15s\n查询任务 GET https://autodl.art/api/v1/comfyui/comfyui_workflow/result/{task_id}\nHeaders: Authorization: <token>, Content-Type: application/json\n请求体:\n{\n  \"seed\": 随机种子(选填整数),\n  \"prompt\": 视频生成提示词(必填,1-10000字符),\n  \"duration\": 视频时长(选填整数1-15,默认5),\n  \"resolution\": 输出分辨率(选填:480p竖/768p竖/480p横/768p横,默认768p竖),\n  \"ref_audio_0..2\": 参考音频URL(选填,MP3/WAV/MP4/FLAC,最多3条),\n  \"ref_image_0..8\": 参考图片URL(选填,JPG/PNG/WebP,最多9张)\n}\n响应 data.status 为 SUCCESS/completed 表示完成, results[0].url 为视频地址; FAILED 表示失败。",
+  "created_at": "2026-09-02T14:25:07.379152",
+  "updated_at": "2026-09-03T14:52:18.639455",
+  "raw_api_doc": "AutoDL H3 工作流 minimax_h3_image_audio_to_video_v2_15s\n提交任务 POST https://autodl.art/api/v1/comfyui/comfyui_workflow/minimax_h3_image_audio_to_video_v2_15s\n查询任务 GET https://autodl.art/api/v1/comfyui/comfyui_workflow/result/{task_id}\nHeaders: Authorization: <token>, Content-Type: application/json\n请求体:\n{\n  \"seed\": 随机种子(选填整数),\n  \"prompt\": 视频生成提示词(必填,1-10000字符),\n  \"duration\": 视频时长(选填整数1-15,默认5),\n  \"resolution\": 输出分辨率(选填:480p竖/768p竖/480p横/768p横,默认768p竖),\n  \"ref_audio_0..2\": 参考音频URL(选填,MP3/WAV/MP4/FLAC,最多3条),\n  \"ref_image_0..8\": 参考图片URL(选填,JPG/PNG/WebP,最多9张)\n}\n响应 data.status 为 SUCCESS/completed 表示完成, results[0].url 为视频地址; FAILED 表示失败。"
+}

@@ -8,33 +8,12 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { RefreshCw, Plus, Trash2, Settings2, Sparkles, X, Loader2, AlertTriangle } from 'lucide-react';
 import { useCanvasStore } from '../../stores/useCanvasStore';
 import { apiService } from '../../services/api';
-import { DynamicProviderInfo, extractSlotsFromProvider, AssetSlotDef, getSkillsForKind, getSkillPreset } from './providerSkills';
+import { DynamicProviderInfo, extractSlotsFromProvider, AssetSlotDef, getSkillsForKind, getSkillPreset, paramsSchemaToSpecs } from './providerSkills';
 import { CanvasResourcePickerModal } from './CanvasResourcePickerModal';
 import { DynamicControl } from './controls/DynamicControl';
 import { useNodeExecution } from './hooks/useNodeExecution';
 
 type GenKind = 'image' | 'video' | 'audio';
-
-function paramsSchemaToSpecs(schema?: Record<string, any>): any[] {
-  if (!schema?.properties) return [];
-  const requiredArr: string[] = Array.isArray(schema.required) ? schema.required : [];
-  return Object.entries(schema.properties).map(([key, def]: any) => {
-    const hasEnum = Array.isArray(def.enum) && def.enum.length > 0;
-    let type: any = 'text';
-    if (hasEnum) type = 'combo';
-    else if (def.type === 'integer' || def.type === 'number') type = 'number';
-    else if (def.type === 'boolean') type = 'boolean';
-    else if (def.type === 'string' && def.format === 'uri') type = 'image';
-    return {
-      id: key, param_name: key, label: def.title || key, type,
-      description: def.description || '',
-      options: hasEnum ? def.enum.map((v: any) => String(v)) : undefined,
-      default_value: def.default,
-      required: requiredArr.includes(key) || !!def.required,
-      min: def.minimum ?? def.min, max: def.maximum ?? def.max, step: def.step,
-    };
-  });
-}
 
 export const NodeAgentBar: React.FC<{ nodeId: string; kind: GenKind }> = ({ nodeId, kind }) => {
   const node = useCanvasStore((s) => s.nodes.find((n: any) => n.id === nodeId));
@@ -80,7 +59,7 @@ export const NodeAgentBar: React.FC<{ nodeId: string; kind: GenKind }> = ({ node
     return slots;
   }, [currentProvider, kind, preset, d]);
 
-  const paramSpecs = useMemo(() => paramsSchemaToSpecs(currentProvider?.params_schema), [currentProvider]);
+  const paramSpecs = useMemo(() => paramsSchemaToSpecs(currentProvider?.params_schema).filter(s => s.visibility !== 'hidden'), [currentProvider]);
   const customParams: Record<string, any> = d.params || d.provider_params || {};
 
   const selectProvider = (pid: string) => {
@@ -105,25 +84,24 @@ export const NodeAgentBar: React.FC<{ nodeId: string; kind: GenKind }> = ({ node
     updateNodeData(nodeId, { skill_id: skillId, ...(Object.keys(nextParams).length ? { params: nextParams, provider_params: nextParams } : {}) });
   };
 
-  const isSlotMulti = (slot: AssetSlotDef) => slot.key === 'reference_images' || slot.key === 'reference_video';
+  const isSlotMulti = (slot: AssetSlotDef) => !!slot.multi || (slot.maxCount !== undefined && slot.maxCount > 1);
 
   const handleSlotSelect = (urlOrUrls: string | string[], meta?: any) => {
     if (!pickerSlot) return;
     const patch: Record<string, any> = {};
+    // 仅写接口声明的键：归一 key + 源属性 originalKey，无别名猜测
+    const writeKeys = new Set<string>([pickerSlot.key, pickerSlot.originalKey || pickerSlot.key]);
     if (isSlotMulti(pickerSlot)) {
       const arr = Array.isArray(urlOrUrls) ? urlOrUrls : [urlOrUrls];
       const existing: string[] = Array.isArray(d[pickerSlot.key]) ? d[pickerSlot.key] : [];
       const merged = [...existing];
       for (const u of arr) if (!merged.includes(u)) merged.push(u);
-      patch[pickerSlot.key] = merged;
-      if (pickerSlot.key === 'reference_images') patch.reference = merged[0];
+      const max = pickerSlot.maxCount;
+      const limited = max !== undefined && merged.length > max ? merged.slice(-max) : merged;
+      writeKeys.forEach(k => { patch[k] = limited; });
     } else {
       const url = Array.isArray(urlOrUrls) ? urlOrUrls[0] : urlOrUrls;
-      patch[pickerSlot.key] = url;
-      if (pickerSlot.key === 'first_frame') patch.first_frame_url = url;
-      if (pickerSlot.key === 'last_frame') patch.last_frame_url = url;
-      if (pickerSlot.key === 'reference') patch.reference_images = [url];
-      if (pickerSlot.key === 'ref_audio') patch.ref_audio_path = url;
+      writeKeys.forEach(k => { patch[k] = url; });
     }
     if (meta?.visual_prompt && !(d.prompt || '').includes(meta.visual_prompt)) {
       const cur = (d.prompt || d.text || '') as string;
@@ -137,11 +115,9 @@ export const NodeAgentBar: React.FC<{ nodeId: string; kind: GenKind }> = ({ node
   };
 
   const clearSlot = (key: string) => {
+    const slot = skillSlots.find(s => s.key === key);
     const patch: Record<string, any> = { [key]: undefined };
-    if (key === 'first_frame') { patch.first_frame_url = undefined; }
-    if (key === 'last_frame') { patch.last_frame_url = undefined; }
-    if (key === 'reference' || key === 'reference_images') { patch.reference = undefined; patch.reference_images = undefined; }
-    if (key === 'ref_audio') { patch.ref_audio_path = undefined; }
+    if (slot?.originalKey && slot.originalKey !== key) patch[slot.originalKey] = undefined;
     updateNodeData(nodeId, patch);
   };
 
@@ -193,7 +169,7 @@ export const NodeAgentBar: React.FC<{ nodeId: string; kind: GenKind }> = ({ node
       {skillSlots.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {skillSlots.map((slot) => {
-            const raw = d[slot.key] ?? (slot.key === 'first_frame' ? d.first_frame_url : slot.key === 'last_frame' ? d.last_frame_url : slot.key === 'ref_audio' ? d.ref_audio || d.ref_audio_path : slot.key === 'reference_images' ? (Array.isArray(d.reference_images) ? d.reference_images : d.reference ? [d.reference] : undefined) : undefined);
+            const raw = d[slot.key] ?? (slot.originalKey ? d[slot.originalKey] : undefined);
             const isPopulated = Array.isArray(raw) ? raw.length > 0 : !!raw;
             const thumb = Array.isArray(raw) ? raw[0] : raw;
             return (

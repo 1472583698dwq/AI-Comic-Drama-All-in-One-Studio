@@ -103,11 +103,18 @@ class PipelineRunRequest(BaseModel):
     image_provider: Optional[str] = None
     image_workflow_id: Optional[str] = None
     audio_provider: Optional[str] = None
+    # v2 一键成片
+    video_provider: Optional[str] = None
+    video_workflow_id: Optional[str] = None
+    enable_video: bool = True
+    max_videos: int = 6
+    gen_roles: bool = True
+    max_roles: int = 4
 
 class TTSGenerateRequest(BaseModel):
     text: str
-    voice_id: str = "male-qn-qingse"
-    emotion: str = "neutral"
+    voice_id: str = ""   # 空 = 由所选语音源自身声明的默认音色兜底
+    emotion: str = ""    # 空 = 源默认情绪
     speed: float = 1.0
     pitch: float = 0.0
     provider: Optional[str] = None  # minimax / elevenlabs / cosyvoice / gpt_sovits
