@@ -121,6 +121,7 @@ export interface StoryboardShot {
   motion_speed?: '0.5x' | '1.0x' | '1.5x' | '2.0x'; // 运镜模拟速度
   walk_path?: Array<{ x: number; z: number }>; // 主角地面走位路径点
   canvas_id?: string; // 隶属画布（分镜右键 → 新画布/隶属画布，视频在该画布生成后回写）
+  stage_layout?: Record<string, { p: [number, number, number]; r: [number, number, number]; s: number }>; // 3D导演台物体摆位（entity名 → 位姿），对标小云雀/updream可视化摆放持久化
   lighting_config?: { // 基础三点光（环境氛围光由影棚预设叠加，不在此）
     keyIntensity: number; keyAzimuth: number; keyTemp: 'neon' | 'cold' | 'warm' | 'moon';
     rimIntensity: number; ambientIntensity: number; exposure: number;

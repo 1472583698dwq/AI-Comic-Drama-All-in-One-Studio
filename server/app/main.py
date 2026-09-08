@@ -74,6 +74,13 @@ try:
     print("[Main] OneKey routes mounted at /api/v1/onekey")
 except Exception as e:
     print(f"[Main] OneKey routes mount failed: {e}")
+# 插件系统路由（P0：providers/skills/workflows 三类扩展点）
+try:
+    from app.api.plugin_routes import router as plugin_router
+    app.include_router(plugin_router, prefix=settings.API_V1_STR)
+    print("[Main] Plugin routes mounted at /api/v1/plugins")
+except Exception as e:
+    print(f"[Main] Plugin routes mount failed: {e}")
 
 # Mount standard MCP protocol server (Streamable HTTP)
 if mcp_http_app:

@@ -20,16 +20,38 @@ export const ProjectDashboard: React.FC = () => {
   useEffect(() => { fetchProjects({ q: q || undefined, status, sort }); }, [status, sort]);
   const handleSearch = () => fetchProjects({ q: q || undefined, status, sort });
 
+  const buildBlankProject = (id: string, meta?: any): any => ({
+    id,
+    title: meta?.title || newTitle.trim() || '未命名项目',
+    original_novel: '',
+    style_preset: meta?.style_preset || newStyle || 'donghua_xianxia',
+    aspect_ratio: meta?.aspect_ratio || newRatio || '9:16',
+    characters: [],
+    scenes: [{ id: 'scene-1', scene_index: 1, title: '场景 1', location: '', time_of_day: 'day', atmosphere: 'epic', shots: [] }],
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+
   const handleCreate = async () => {
     if (!newTitle.trim()) return;
-    const meta = await createBlank({ title: newTitle.trim(), style_preset: newStyle, aspect_ratio: newRatio });
-    setShowCreate(false); setNewTitle('');
-    // 打开后自动尝试加载内容
     try {
-      const data = await apiService.getProject(meta.id);
-      if (data.content) setProject(data.content);
-    } catch {}
-    useProjectStore.getState().setActiveTab('studio');
+      const meta = await createBlank({ title: newTitle.trim(), style_preset: newStyle, aspect_ratio: newRatio });
+      setShowCreate(false); setNewTitle('');
+      // 空白新建后端不落 content.json（content 为 null 是正常态）：必须兜底空工程，否则工作台无项目直接黑屏
+      try {
+        const data = await apiService.getProject(meta.id);
+        if (data?.content?.scenes) setProject(data.content);
+        else setProject(buildBlankProject(meta.id, meta));
+      } catch {
+        setProject(buildBlankProject(meta.id, undefined));
+      }
+      // 双 store 的 activeProjectId 保持一致（画布/素材按它隔离）
+      try { useProjectListStore.getState().setActiveProjectId(meta.id); } catch {}
+      try { localStorage.setItem('activeProjectId', meta.id); } catch {}
+      useProjectStore.getState().setActiveTab('studio');
+    } catch (e: any) {
+      alert(e?.message || '创建项目失败');
+    }
   };
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -40,7 +62,7 @@ export const ProjectDashboard: React.FC = () => {
       // 若返回内容则直接加载
       try {
         const data = await apiService.getProject(res.id);
-        if (data.content) setProject(data.content);
+        if (data?.content?.scenes) setProject(data.content);
         useProjectStore.getState().setActiveTab('studio');
       } catch {}
     } catch (err: any) { alert(err.message); }
@@ -51,7 +73,7 @@ export const ProjectDashboard: React.FC = () => {
     await openProject(id);
     try {
       const data = await apiService.getProject(id);
-      if (data.content) {
+      if (data?.content?.scenes) {
         setProject(data.content);
         useProjectStore.getState().setActiveTab('studio');
       } else {

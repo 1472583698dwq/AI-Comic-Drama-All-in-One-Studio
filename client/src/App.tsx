@@ -13,6 +13,8 @@ import { McpToolsModal } from './components/mcp/McpToolsModal';
 import { SkillStudioModal } from './components/skills/SkillStudioModal';
 import { ConfigView } from './views/ConfigView';
 import { ProjectDashboard } from './views/ProjectDashboard';
+import { AgentModeView } from './views/AgentModeView';
+import { ErrorBoundary } from './components/ui/ErrorBoundary';
 import { ProviderManagerModal } from './components/provider/ProviderManagerModal';
 import { GlobalAiPolish } from './components/ui/GlobalAiPolish';
 const CreativeCanvas = React.lazy(()=> import('./components/canvas/CreativeCanvas').then(m=> ({default: m.CreativeCanvas})));
@@ -83,8 +85,16 @@ export function App() {
               <ProjectDashboard />
             </main>
           )}
+          {/* Agent独立模式页（无需 project 即可访问，对话调工具生成） */}
+          {activeTab === 'agent' && (
+            <main className="flex-1 flex flex-col overflow-hidden relative">
+              <ErrorBoundary name="Agent模式页">
+                <AgentModeView />
+              </ErrorBoundary>
+            </main>
+          )}
           {/* 无项目时的引导：仅在 production 非 projects/assets 时显示 */}
-          {!project && activeTab !== 'assets' && activeTab !== 'characters' && activeTab !== 'projects' && (
+          {!project && activeTab !== 'assets' && activeTab !== 'characters' && activeTab !== 'projects' && activeTab !== 'agent' && (
             <div className="flex-1 flex flex-col items-center justify-center bg-background p-8 text-center space-y-4">
               <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-brand to-accent-pink flex items-center justify-center text-3xl shadow-xl shadow-brand/20">
                 🎬
@@ -125,7 +135,7 @@ export function App() {
           )}
 
           {/* Main Workspace Layout when project loaded */}
-          {project && activeTab !== 'assets' && activeTab !== 'characters' && activeTab !== 'projects' && (
+          {project && activeTab !== 'assets' && activeTab !== 'characters' && activeTab !== 'projects' && activeTab !== 'agent' && (
             <main className="flex-1 flex flex-col overflow-hidden relative">
               {platformMode === 'desktop' ? (
                 /* Desktop Professional Studio */

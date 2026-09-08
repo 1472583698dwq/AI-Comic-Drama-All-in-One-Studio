@@ -17,7 +17,8 @@ import {
   Sun,
   Moon,
   FolderKanban,
-  Plug
+  Plug,
+  Bot
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { useMcpStore } from '../../stores/useMcpStore';
@@ -63,7 +64,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenImport, onOpenExport, onOp
             <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-brand text-white font-mono font-bold tracking-wider">PRO v2</span>
           </div>
           <p className="text-[11px] leading-none text-gray-400 truncate max-w-[180px] lg:max-w-[220px] mt-0.5">
-            {project?.title || '未选择项目'} · {project?.scenes[0]?.shots.length || 0}镜 · {totalDuration.toFixed(0)}s
+            {project?.title || '未选择项目'} · {(project?.scenes || []).reduce((n: number, s: any) => n + (s?.shots?.length || 0), 0)}镜 · {totalDuration.toFixed(0)}s
           </p>
         </div>
       </div>
@@ -87,10 +88,11 @@ export const Header: React.FC<HeaderProps> = ({ onOpenImport, onOpenExport, onOp
                 { id:'director3d', label:'3D', icon: Compass, color:'text-accent-orange' },
                 { id:'timeline', label:'剪辑', icon: Video, color:'text-brand-blue' },
                 { id:'assets', label:'素材', icon: Library, color:'text-brand-blue' },
+                { id:'agent', label:'Agent', icon: Bot, color:'text-accent-green' },
               ].map(t=>{
                 const active = activeTab===t.id;
                 return (
-                  <button key={t.id} onClick={() => setActiveTab(t.id as any)} className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all ${active ? 'bg-surface text-white shadow-sm border border-border-active' : 'text-gray-500 hover:text-gray-200'}`}>
+                  <button key={t.id} onClick={() => { if (t.id === 'agent') setWorkspace('production'); setActiveTab(t.id as any); }} className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all ${active ? 'bg-surface text-white shadow-sm border border-border-active' : 'text-gray-500 hover:text-gray-200'}`}>
                     <t.icon className={`w-3.5 h-3.5 ${t.color}`} /><span>{t.label}</span>
                   </button>
                 );

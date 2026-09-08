@@ -135,6 +135,7 @@ export const ShotInspector: React.FC = () => {
     duplicateShot,
     deleteShot,
     setActiveTab,
+    setWorkspace,
     generateShotVideo,
     bindCharacterToShot,
     unbindCharacterFromShot,
@@ -156,6 +157,10 @@ export const ShotInspector: React.FC = () => {
     (localStorage.getItem('storyboard_inspector_tab') as any) || 'visual'
   );
   const [productionMode, setProductionMode] = useState<'comic' | 'motion_comic' | 'image_to_video'>('image_to_video');
+  // 三模式预览锁定：漫画只看图、直出只看视频、图生两步可切（避免跨模式串台）
+  const effectivePreviewTab = productionMode === 'comic' ? 'image' : productionMode === 'motion_comic' ? 'video' : previewTab;
+  // 预览框跟随项目画幅（9:16 / 16:9 / 1:1），不再写死竖屏
+  const previewAspect = (project?.aspect_ratio || '9:16').replace(':', '/');
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [isGeneratingVid, setIsGeneratingVid] = useState(false);
@@ -348,18 +353,21 @@ export const ShotInspector: React.FC = () => {
 
       if (e.code === 'KeyR' && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
+        if (productionMode === 'motion_comic') return;
         handleRegenerateImage();
         return;
       }
 
       if (e.code === 'KeyV' && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
+        if (productionMode === 'comic') return;
         handleGenerateVideo();
         return;
       }
 
       if (e.code === 'KeyT' && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
+        if (productionMode === 'comic') return;
         handlePlayTTS();
         return;
       }
@@ -382,7 +390,7 @@ export const ShotInspector: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeShot?.id, project?.scenes, isPlayingAudio, isRegenerating, isGeneratingVid, candidateCount]);
+  }, [activeShot?.id, project?.scenes, isPlayingAudio, isRegenerating, isGeneratingVid, candidateCount, productionMode]);
 
   if (!activeShot) {
     return (
@@ -394,6 +402,8 @@ export const ShotInspector: React.FC = () => {
   }
 
   const handlePlayTTS = async () => {
+    // 漫画模式仅编辑对白文字：拦截试听配音
+    if (productionMode === 'comic') { setTtsError('漫画模式仅编辑对白，切到视频模式再试听配音'); return; }
     const textToSpeak = activeShot.dialogue || activeShot.voiceover || '';
     if (!textToSpeak.trim()) { setTtsError('当前分镜无台词/旁白，无法配音'); return; }
     if (audioEl) { audioEl.pause(); setAudioEl(null); setIsPlayingAudio(false); }
@@ -562,6 +572,8 @@ export const ShotInspector: React.FC = () => {
   };
 
   const handleRegenerateImage = async (customCount?: number) => {
+    // 直出模式无需单张生图：角色立绘直接驱动视频，避免误触污染首帧
+    if (productionMode === 'motion_comic') { setRegenError('直出模式无需生图，直接点「直出动态视频」'); return; }
     if (!activeShot.image_prompt?.trim()) { setRegenError('生图提示词为空'); return; }
     setRegenError(null);
     setIsRegenerating(true);
@@ -660,6 +672,11 @@ export const ShotInspector: React.FC = () => {
   };
 
   const handleGenerateVideo = async () => {
+    // 漫画模式为纯生图流：拦截视频生成（含快捷键/兜底入口）
+    if (productionMode === 'comic') {
+      setVideoError('漫画模式仅生图，切到「漫剧制作 / 图生视频」再生成动态视频');
+      return;
+    }
     const rawPrompt = activeShot.video_prompt?.trim() || activeShot.action_desc || activeShot.image_prompt;
     // 相机意图兜底：没去过导演台也按分镜自身景别/运镜补后缀（已有 [Camera: / [运镜: 的不动）
     const prompt = withCameraIntent(rawPrompt, activeShot);
@@ -668,10 +685,11 @@ export const ShotInspector: React.FC = () => {
       return;
     }
 
-    // 首帧只放真首帧 (image_url)；角色/场景/白模走参考槽（buildShotReferenceInputs 唯一口径）。
-    // 无首帧的漫剧直出走 r2v（参考驱动），不再把角色立绘画进首帧键。
+    // 直出（多参考 r2v）只吃绑定：角色/场景/道具进参考槽，旧首帧一律不注入；
+    // 图生（i2v）才用真首帧。无绑定的直出走 t2v。
+    const isDirect = productionMode === 'motion_comic';
     const shotRefs = buildShotReferenceInputs(activeShot, project, 'video');
-    const refImage = activeShot.image_url || '';
+    const refImage = isDirect ? '' : (activeShot.image_url || '');
     const hasVideoRefs = shotRefs.reference_images.length > 0;
 
     if (productionMode === 'image_to_video' && !activeShot.image_url) {
@@ -707,12 +725,13 @@ export const ShotInspector: React.FC = () => {
       });
       const dynamic_inputs = Object.keys(merged).length ? merged : undefined;
       await generateShotVideo(activeShot.id, {
-        mode: productionMode === 'motion_comic' ? (refImage || hasVideoRefs ? 'r2v' : 't2v') : 'i2v',
+        mode: isDirect ? (hasVideoRefs ? 'r2v' : 't2v') : 'i2v',
         prompt,
         duration: Math.round(activeShot.duration) || 5,
         provider: videoProvider,
         workflow_id: videoWorkflowId || undefined,
         dynamic_inputs,
+        omit_first_frame: isDirect,
       });
       setVideoSuccess(true);
       setPreviewTab('video');
@@ -811,6 +830,8 @@ export const ShotInspector: React.FC = () => {
       autoRun: true,
     };
     try { localStorage.setItem('canvas_pending_shot', JSON.stringify(payload)); } catch {}
+    // 必须同时切换工作台到 creative，否则 App 仍停留在 production 视图，画布挂载后由兜底消费 pending
+    try { setWorkspace('creative'); } catch {}
     setActiveTab('canvas' as any);
     try { window.dispatchEvent(new CustomEvent('canvas-import-shot', { detail: payload })); } catch {}
     setCtxMenu(null);
@@ -843,23 +864,31 @@ export const ShotInspector: React.FC = () => {
       setQueue(q => q.map(j => j.id === sh.id ? { ...j, status: 'running' } : j));
       try {
         const prov = (sh as any).video_provider || videoProvider;
-        // 批量与单镜同口径：首帧只放真首帧，角色/场景/白模进参考，相机意图进 prompt
+        // 批量与单镜同口径：直出镜跳过旧首帧（纯绑定驱动 r2v/t2v），图生镜首帧只放真首帧
+        const shDirect = ((sh as any).production_mode || productionMode) === 'motion_comic';
         const bvRefs = buildShotReferenceInputs(sh, project, 'video');
         const bvInputs: Record<string, any> = {
           ...(bvRefs.reference_images.length ? { reference_images: bvRefs.reference_images, reference_image: bvRefs.reference_images[0] } : {}),
           ...(bvRefs.character_weight !== undefined ? { character_weight: bvRefs.character_weight } : {}),
           ...(bvRefs.character_weights ? { character_weights: bvRefs.character_weights } : {}),
-          ...(bvRefs.first_frame_url ? { first_frame_url: bvRefs.first_frame_url } : {}),
+          ...(!shDirect && bvRefs.first_frame_url ? { first_frame_url: bvRefs.first_frame_url } : {}),
           ...(bvRefs.previz_video_url ? { previz_video_url: bvRefs.previz_video_url } : {}),
           ...shotBatchInputs(sh, 'video'),
         };
+        // 直出镜若调用方残留首帧键也一并剥离，避免旧图污染
+        if (shDirect) {
+          for (const k of Object.keys(bvInputs)) {
+            if (/first/i.test(k)) delete bvInputs[k];
+          }
+        }
         await generateShotVideo(sh.id, {
-          mode: videoMode,
+          mode: shDirect ? (bvRefs.reference_images.length ? 'r2v' : 't2v') : videoMode,
           prompt: withCameraIntent(sh.video_prompt || sh.action_desc || sh.image_prompt, sh),
           duration: Math.round(sh.duration) || 5,
           provider: prov,
           workflow_id: (sh as any).workflow_id || undefined,
-          dynamic_inputs: bvInputs
+          dynamic_inputs: bvInputs,
+          omit_first_frame: shDirect,
         });
         setQueue(q => q.map(j => j.id === sh.id ? { ...j, status: 'done' } : j));
       } catch {
@@ -919,15 +948,21 @@ export const ShotInspector: React.FC = () => {
         </div>
 
         <div className="px-2.5 py-1.5 bg-surface-secondary/30 border-b border-border flex items-center justify-between gap-1 text-[10px] shrink-0">
+          {productionMode !== 'motion_comic' && (
           <button onClick={handleBatchAllImages} className="flex-1 py-1 rounded-lg bg-brand/20 hover:bg-brand/30 border border-brand/30 text-brand-light font-bold flex items-center justify-center gap-1 transition-all" title="对所有选中/全部镜头批量并发生成画面">
             <Sparkles className="w-3 h-3 text-brand" /> 批量生图
           </button>
+          )}
+          {productionMode !== 'comic' && (
           <button onClick={handleBatchAllTTS} className="flex-1 py-1 rounded-lg bg-pink-500/15 hover:bg-pink-500/25 border border-pink-500/30 text-pink-300 font-bold flex items-center justify-center gap-1 transition-all" title="批量合成全剧台词配音">
             <Volume2 className="w-3 h-3 text-pink-400" /> 批量配音
           </button>
+          )}
+          {productionMode !== 'comic' && (
           <button onClick={handleBatchAllVideos} className="flex-1 py-1 rounded-lg bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/30 text-orange-300 font-bold flex items-center justify-center gap-1 transition-all" title="批量转为动态视频">
             <Film className="w-3 h-3 text-orange-400" /> 批量视频
           </button>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
@@ -1122,8 +1157,8 @@ export const ShotInspector: React.FC = () => {
         {videoError && <div className="mb-2 px-3 py-1.5 rounded-xl bg-red-500/15 border border-red-500/40 text-xs text-red-300 max-w-md truncate">⚠️ {videoError}</div>}
         {ttsError && <div className="mb-2 px-3 py-1.5 rounded-xl bg-red-500/15 border border-red-500/40 text-xs text-red-300 max-w-md truncate">⚠️ {ttsError}</div>}
 
-        <div className="relative max-h-[60vh] aspect-[9/16] rounded-2xl overflow-hidden shadow-2xl border border-border/80 group bg-black">
-          {previewTab === 'video' ? (
+        <div className="relative max-h-[60vh] w-full max-w-md rounded-2xl overflow-hidden shadow-2xl border border-border/80 group bg-black" style={{ aspectRatio: previewAspect }}>
+          {effectivePreviewTab === 'video' ? (
             activeShot.video_url ? (
               <video
                 key={activeShot.video_url}
@@ -1135,9 +1170,12 @@ export const ShotInspector: React.FC = () => {
                 className="w-full h-full object-cover"
               />
             ) : (
-              <div className="w-full h-full min-h-[45vh] min-w-[26vh] bg-surface-secondary flex flex-col items-center justify-center text-gray-400 text-xs space-y-3 p-6 text-center">
+              <div className="w-full h-full min-h-[30vh] bg-surface-secondary flex flex-col items-center justify-center text-gray-400 text-xs space-y-3 p-6 text-center">
                 <Film className="w-10 h-10 text-accent-orange/60" />
                 <span className="font-semibold text-white">当前分镜尚未生成动态视频</span>
+                {productionMode === 'motion_comic' && buildShotReferenceInputs(activeShot, project, 'video').reference_images.length === 0 && (
+                  <span className="text-[11px] text-amber-300">⚠️ 尚未绑定角色 / 场景，直接生成将退为文生视频</span>
+                )}
                 <button
                   onClick={handleGenerateVideo}
                   disabled={isGeneratingVid}
@@ -1156,7 +1194,7 @@ export const ShotInspector: React.FC = () => {
               }`}
             />
           ) : (
-            <div className="w-full h-full min-h-[45vh] min-w-[26vh] bg-surface-secondary flex flex-col items-center justify-center text-gray-400 text-xs space-y-3 p-4 text-center">
+            <div className="w-full h-full min-h-[30vh] bg-surface-secondary flex flex-col items-center justify-center text-gray-400 text-xs space-y-3 p-4 text-center">
               <span>{activeShot.status === 'generating_image' ? '⚡ 画面生成中，请稍候...' : '该分镜暂无画面'}</span>
               <button onClick={() => handleRegenerateImage()} disabled={isRegenerating} className="px-4 py-2 rounded-xl bg-brand text-white text-xs font-bold shadow-lg hover:bg-brand-light disabled:opacity-40 flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5" /> 立即生成画面 {candidateCount===4 ? '(4抽⚡)' : ''}
@@ -1209,7 +1247,7 @@ export const ShotInspector: React.FC = () => {
                 <ImageIcon className="w-4 h-4" />
               </button>
             )}
-            {activeShot.video_url && previewTab==='video' && (
+            {activeShot.video_url && effectivePreviewTab==='video' && (
               <button
                 onClick={()=> handleSaveShotToAsset('video')}
                 disabled={savingAsset}
@@ -1632,7 +1670,11 @@ export const ShotInspector: React.FC = () => {
                 <textarea value={activeShot.action_desc} onChange={(e) => updateShot(activeShot.id, { action_desc: e.target.value })} rows={2} className="mt-1 w-full bg-surface-secondary border border-border rounded-xl p-2.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand leading-relaxed" placeholder="描述人物动作、情景与交互..."/>
               </div>
 
-              {/* 4. 生图源 / ComfyUI 工作流专属全动态参数表单 */}
+              {/* 4. 生图源专属表单（直出模式隐藏：立绘直驱视频，无需单张生图） */}
+              {productionMode === 'motion_comic' && (
+                <div className="text-[11px] text-gray-500 bg-surface-secondary/60 border border-border rounded-lg px-2.5 py-1.5">直出模式跳过生图：绑定上方角色 / 场景 / 道具后，直接去「运镜动态」页生成参考生视频</div>
+              )}
+              {productionMode !== 'motion_comic' && (
               <div className="p-3 rounded-2xl bg-surface-secondary/50 border border-border space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-white flex items-center gap-1.5">
@@ -1744,6 +1786,7 @@ export const ShotInspector: React.FC = () => {
                 </div>
                 {regenError && <div className="text-xs text-red-300">{regenError}</div>}
               </div>
+              )}
 
               {/* 镜头机位与运动预设 */}
               <div className="grid grid-cols-2 gap-2">
@@ -1815,6 +1858,12 @@ export const ShotInspector: React.FC = () => {
                   className="w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-pink-500/50 resize-none leading-relaxed"
                 />
 
+                {/* 漫画模式仅编辑对白文字：隐藏语音源/TTS试听（切到漫剧/图生模式可配音） */}
+                {productionMode === 'comic' && (
+                  <div className="text-[11px] text-gray-500 bg-surface-secondary/60 border border-border rounded-lg px-2.5 py-1.5">漫画模式仅编辑对白与字幕，切到「漫剧制作 / 图生视频」可配音</div>
+                )}
+                {productionMode !== 'comic' && (
+                  <>
                 <ProviderPicker
                   kind="audio"
                   value={audioProvider}
@@ -1850,6 +1899,8 @@ export const ShotInspector: React.FC = () => {
                     />
                   </div>
                 )}
+                  </>
+                )}
 
                 <div className="flex items-center gap-2">
                   <select value={activeShot.speaker_name || project?.characters[0]?.name || ''} onChange={(e) => updateShot(activeShot.id, { speaker_name: e.target.value })} className="flex-1 bg-surface-secondary border border-border rounded-lg px-2 py-1.5 text-xs text-white">
@@ -1878,12 +1929,16 @@ export const ShotInspector: React.FC = () => {
                   </button>
                 </div>
 
+                {productionMode !== 'comic' && (
+                  <>
                 <button onClick={handlePlayTTS} disabled={isPlayingAudio} className="w-full py-2.5 rounded-xl bg-gradient-to-r from-pink-500 to-violet-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-md shadow-pink-500/20 hover:opacity-95 disabled:opacity-40">
                   <Volume2 className={`w-3.5 h-3.5 ${isPlayingAudio ? 'animate-bounce' : ''}`} />
                   <span>{isPlayingAudio ? '合成并播放中...' : '试听配音 (按 T 快捷生成)'}</span>
                 </button>
                 {ttsError && <div className="text-xs text-red-300">{ttsError}</div>}
                 {activeShot.audio_url && <audio controls src={getMediaUrl(activeShot.audio_url)} className="w-full mt-1" />}
+                  </>
+                )}
               </div>
 
               <div className="p-3 rounded-2xl bg-surface-secondary/40 border border-border space-y-1.5">
@@ -1903,6 +1958,11 @@ export const ShotInspector: React.FC = () => {
                 <span className={`w-2 h-2 rounded-full ${healthMap[videoProvider]?.ok ? 'bg-emerald-500' : healthMap[videoProvider]?.ok === false ? 'bg-amber-500' : 'bg-zinc-600'}`} />
               </div>
 
+              {/* 直出模式锁定参考生视频：i2v/t2v 切卡隐藏，有无参考由生成时自动判定 r2v/t2v */}
+              {productionMode === 'motion_comic' && (
+                <div className="text-[11px] font-bold text-orange-300 bg-orange-500/10 border border-orange-500/30 rounded-lg px-2.5 py-1.5">📌 参考生视频 (R2V)：上方绑定的角色 / 场景 / 道具自动作为多参考驱动</div>
+              )}
+              {productionMode !== 'motion_comic' && (
               <div className="grid grid-cols-3 gap-1">
                 {[
                   { id: 'i2v', label: '图生视频' },
@@ -1923,6 +1983,7 @@ export const ShotInspector: React.FC = () => {
                   </button>
                 ))}
               </div>
+              )}
 
               <ProviderPicker
                 kind="video"

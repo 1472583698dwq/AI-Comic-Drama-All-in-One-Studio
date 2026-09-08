@@ -17,9 +17,12 @@ const INLINE_RE =
 function parseInline(text: string): React.ReactNode[] {
   const out: React.ReactNode[] = [];
   let last = 0;
-  INLINE_RE.lastIndex = 0;
+  // 必须每次新建实例：函数会递归调用自身，加粗/斜体内层会重置共享正则的lastIndex，
+  // 若共用模块级 /g 正则，外层循环会从头重新匹配同一token导致页面卡死（2026-09-08实测）。
+  const re = new RegExp(INLINE_RE);
+  re.lastIndex = 0;
   let m: RegExpExecArray | null;
-  while ((m = INLINE_RE.exec(text)) !== null) {
+  while ((m = re.exec(text)) !== null) {
     if (m.index > last) out.push(text.slice(last, m.index));
     const [full, code, bold1, bold2, strike, ital1, ital2, _link, linkText, href] = m;
     if (code) {

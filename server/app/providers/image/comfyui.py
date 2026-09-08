@@ -312,6 +312,15 @@ class ComfyUIProvider(ImageProvider):
                     cfg=cfg,
                 )
 
+            # 提交前最后一道防线：剥离装饰/孤立未知节点；真实缺插件则提前抛友好错误
+            try:
+                workflow, _stripped = workflow_manager.strip_unsupported_nodes(workflow)
+                if _stripped:
+                    print(f"[ComfyUI] 提交前已自动剥离 {len(_stripped)} 个装饰/无效节点: " + ", ".join(f"{s['class_type']}#{s['id']}" for s in _stripped[:8]))
+            except RuntimeError:
+                raise
+            except Exception as pre_e:
+                print(f"[ComfyUI] 提交前检查跳过: {pre_e}")
             # 提交
             submit_resp = await client.post(
                 f"{self.server_url}/prompt",

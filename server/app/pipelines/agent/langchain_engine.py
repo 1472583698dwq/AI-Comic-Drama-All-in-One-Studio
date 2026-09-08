@@ -201,14 +201,79 @@ if HAS_LANGCHAIN:
                 from langchain_core.messages import AIMessageChunk
                 yield AIMessageChunk(content=chunk)
 
+# ─── P1：HITL审批 + 工具子集裁剪 ──────────────────────────
+import uuid as _uuid
+
+# 待确认的破坏性调用：approval_id -> Future[bool]
+_PENDING_APPROVALS: Dict[str, Any] = {}
+
+
+def resolve_approval(approval_id: str, approved: bool) -> bool:
+    fut = _PENDING_APPROVALS.get(approval_id)
+    if fut is None or getattr(fut, "done", lambda: True)():
+        return False
+    try:
+        fut.set_result(bool(approved))
+        return True
+    except Exception:
+        return False
+
+
+def _is_destructive_call(name: str, args: Dict[str, Any]) -> bool:
+    try:
+        from app.agent.loop import DESTRUCTIVE_TOOLS
+    except Exception:
+        DESTRUCTIVE_TOOLS = {"delete_custom_provider", "shell_exec", "fs_file"}
+    if name == "shell_exec":
+        return True
+    if name == "delete_custom_provider":
+        return True
+    if name == "fs_file":
+        act = str((args or {}).get("action", "")).lower()
+        return act in ("write", "append", "delete")
+    return False
+
+
+def _build_allowed_tools(query: str) -> Optional[set]:
+    """按意图裁剪bind_tools子集：检索命中 + 常驻 + 破坏性（可提请但走审批）。"""
+    try:
+        from app.agent.loop import search_tools, CORE_TOOLS
+    except Exception:
+        return None
+    try:
+        hits = search_tools(query or "", 12) or []
+    except Exception:
+        return None
+    allowed = set(CORE_TOOLS) | {"search_tools"}
+    always = {"get_provider_code", "update_custom_provider", "test_custom_provider",
+              "canvas_dispatch_skill", "canvas_query_assets", "list_custom_providers",
+              "list_comfyui_workflows", "list_voices", "list_video_providers",
+              "list_image_providers", "list_voice_providers",
+              "delete_custom_provider", "shell_exec", "fs_file",
+              "register_custom_provider", "generate_video", "generate_image",
+              "generate_voice", "generate_minimax_voice"}
+    allowed |= always
+    prov_count = 0
+    for h in hits:
+        n = h.get("name", "")
+        if n.startswith("provider_"):
+            if prov_count >= 8:
+                continue
+            prov_count += 1
+        allowed.add(n)
+    return allowed
+
+
 # ─── 工具转换 ────────────────────────────────────────────
-def _mcp_to_langchain_tools() -> List[Any]:
+def _mcp_to_langchain_tools(allowed: Optional[set] = None) -> List[Any]:
     if not HAS_LANGCHAIN:
         return []
     from pydantic import create_model, Field, BaseModel
     tools = []
     for mcp_tool in mcp_registry.get_all_tools():
         name = mcp_tool.name
+        if allowed is not None and name not in allowed:
+            continue
         desc = mcp_tool.description or ""
         schema = mcp_tool.input_schema or {"type": "object", "properties": {}}
         props = schema.get("properties", {}) if isinstance(schema, dict) else {}
@@ -371,7 +436,33 @@ async def run_agent_with_langchain(
     websocket=None,
     max_iterations: Optional[int] = None,
     streaming: bool = True,
+    mode: str = "execute",
 ) -> Dict[str, Any]:
+    # P0双模式：chat纯问答不进循环（省token/零副作用），execute走ReAct
+    _mode = (mode or "execute").strip().lower()
+    if _mode == "chat":
+        reply = await llm_service.chat_completion(
+            messages=[
+                {"role": "system", "content": "你是AI漫剧导演顾问，只做问答讲解，不调用任何工具。用中文简洁回答。"},
+                {"role": "user", "content": (prompt or "")[:4000]},
+            ],
+            temperature=0.5,
+        )
+        try:
+            async with _get_session_lock(session_id):
+                SESSION_MEMORY[session_id].append(HumanMessage(content=f"指令: {prompt}"))
+                SESSION_MEMORY[session_id].append(AIMessage(content=reply))
+                SESSION_MEMORY[session_id] = _trim_history(SESSION_MEMORY[session_id])
+        except Exception:
+            pass
+        return {"reply": reply, "suggested_actions": ["切换到执行模式让我直接做"], "executed_tools": [], "mode": "chat"}
+    # execute预算：mode未指定max时用P0默认值12（引擎安全上限30不变）
+    try:
+        from app.agent.loop import MODE_BUDGETS
+        if not max_iterations:
+            max_iterations = int(MODE_BUDGETS["execute"]["max_steps"])
+    except Exception:
+        pass
     async with _get_session_lock(session_id):
         history = _trim_history(SESSION_MEMORY.get(session_id, []))
     context_block = _build_context_block(context)
@@ -394,11 +485,21 @@ async def run_agent_with_langchain(
     llm = get_chat_model(streaming=streaming)
     if llm is None:
         raise RuntimeError("无法初始化 Chat Model")
-    tools = _mcp_to_langchain_tools()
+    # P1真裁剪：按本轮意图取子集进bind_tools，非全部49个
+    try:
+        _allowed = _build_allowed_tools(prompt or "")
+    except Exception:
+        _allowed = None
+    tools = _mcp_to_langchain_tools(_allowed)
+    try:
+        print(f"[DirectorAgent] bind_tools subset: {len(tools)} (allowed={len(_allowed) if _allowed else 'all'})")
+    except Exception:
+        pass
     llm_with_tools = llm.bind_tools(tools) if hasattr(llm, "bind_tools") and tools else llm
 
     from app.api.routes import get_agent_system_prompt
-    system_extra = "\n\n你是具备多轮记忆的导演 Agent，可进行多轮工具调用且无固定轮次上限——持续执行直到用户目标全部完成，请基于历史与工具结果持续推理。"
+    system_extra = ("\n\n你是具备多轮记忆的导演 Agent，可进行多轮工具调用且无固定轮次上限——持续执行直到用户目标全部完成，请基于历史与工具结果持续推理。"
+                    "\n工具检索优先：provider_*动态源很多时，先调search_tools按意图取子集（如 生图/配音/画布/剪映），再执行，禁止把90个全量定义硬背进每轮。")
     messages: List[BaseMessage] = [SystemMessage(content=get_agent_system_prompt(loop=True) + system_extra)]
     for h in history:
         messages.append(h)
@@ -495,6 +596,12 @@ async def run_agent_with_langchain(
                         for tc in _calls:
                             name = tc.get("name") or ""
                             args = tc.get("args") or {}
+                            # 兜底路径破坏性调用直接拒绝（避免无审批执行）
+                            if _is_destructive_call(name, args):
+                                _msg = f"破坏性工具 {name} 需用户确认，兜底路径已跳过（请用WS执行模式确认后重试）"
+                                executed_tools.append({"tool_name": name, "arguments": args, "status": "error", "result": None, "error": _msg})
+                                messages.append(ToolMessage(content=_msg, tool_call_id=tc.get("id") or name, name=name))
+                                continue
                             await _safe_send({"event": "tool_calling", "tool_name": name, "arguments": args, "status": "executing"})
                             _res = await asyncio.wait_for(mcp_registry.execute_tool(name, args, project_context=context.get("project") if isinstance(context, dict) else None), timeout=30)
                             executed_tools.append({"tool_name": name, "arguments": args, "status": _res.status, "result": _res.result, "error": _res.error})
@@ -583,6 +690,31 @@ async def run_agent_with_langchain(
                         args = {}
                 if not name:
                     return None
+                # P1 HITL：破坏性调用先请示，无WS/超时/拒绝则跳过（HTTP无交互自动拒绝并引导走WS）
+                if _is_destructive_call(name, args):
+                    if websocket is None:
+                        msg = f"破坏性工具 {name} 需用户确认，已跳过（请用WS执行模式确认后重试）"
+                        executed_tools.append({"tool_name": name, "arguments": args, "status": "error", "result": None, "error": msg})
+                        messages.append(ToolMessage(content=msg, tool_call_id=tc.get("id") or name, name=name))
+                        return None
+                    _aid = f"appr_{_uuid.uuid4().hex[:8]}"
+                    _loop = asyncio.get_running_loop()
+                    _fut = _loop.create_future()
+                    _PENDING_APPROVALS[_aid] = _fut
+                    try:
+                        await _safe_send({"event": "approval_required", "approval_id": _aid, "tool_name": name, "arguments": args})
+                        try:
+                            _ok = await asyncio.wait_for(_fut, timeout=120)
+                        except asyncio.TimeoutError:
+                            _ok = False
+                        if not _ok:
+                            msg = f"用户拒绝/超时，已跳过破坏性工具 {name}"
+                            executed_tools.append({"tool_name": name, "arguments": args, "status": "error", "result": None, "error": msg})
+                            await _safe_send({"event": "tool_result", "tool_name": name, "status": "error", "error": msg})
+                            messages.append(ToolMessage(content=msg, tool_call_id=tc.get("id") or name, name=name))
+                            return None
+                    finally:
+                        _PENDING_APPROVALS.pop(_aid, None)
                 await _safe_send({"event": "tool_calling", "tool_name": name, "arguments": args, "status": "executing"})
                 try:
                     res = await asyncio.wait_for(mcp_registry.execute_tool(name, args, project_context=context.get("project") if isinstance(context, dict) else None), timeout=40)

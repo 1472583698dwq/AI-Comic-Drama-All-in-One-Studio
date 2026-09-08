@@ -8,6 +8,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { X, Zap, Loader2, CheckCircle2, AlertTriangle, Clapperboard } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { useProjectStore } from '../../stores/useProjectStore';
+import { autoBindShotCharacters } from '../storyboard/shotReference';
 import { ProviderPicker } from '../ui/ProviderPicker';
 
 interface Props { isOpen: boolean; onClose: () => void; }
@@ -104,6 +105,8 @@ export const OneKeyRunModal: React.FC<Props> = ({ isOpen, onClose }) => {
       });
       const pid = created?.project?.id || created?.id;
       if (!pid) throw new Error('项目创建失败');
+      // 落盘前自动绑定人物（说话人 + 正文提及），免逐镜手绑
+      try { autoBindShotCharacters(proj as any); } catch {}
       await apiService.saveProjectContent(pid, { ...proj, id: pid });
       await useProjectStore.getState().loadActiveProject(pid);
       useProjectStore.getState().setActiveTab('studio' as any);

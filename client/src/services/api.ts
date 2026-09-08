@@ -439,21 +439,21 @@ export const apiService = {
     return await res.json();
   },
 
-  // 8. 导演 Agent (LangChain 多轮+流式)
-  async agentChat(prompt: string, context?: any, sessionId?: string): Promise<any> {
+  // 8. 导演 Agent (LangChain 多轮+流式，双模式：chat问答/execute执行)
+  async agentChat(prompt: string, context?: any, sessionId?: string, mode?: string): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/agent/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, context: context || {}, session_id: sessionId || undefined }),
+      body: JSON.stringify({ prompt, context: context || {}, session_id: sessionId || undefined, mode: mode || 'execute' }),
     });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
-  async agentChatStream(prompt: string, context?: any, sessionId?: string, onEvent?: (event: string, data: any)=>void, opts?: { signal?: AbortSignal }): Promise<any> {
+  async agentChatStream(prompt: string, context?: any, sessionId?: string, onEvent?: (event: string, data: any)=>void, opts?: { signal?: AbortSignal; mode?: string }): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/agent/chat/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, context: context || {}, session_id: sessionId || undefined }),
+      body: JSON.stringify({ prompt, context: context || {}, session_id: sessionId || undefined, mode: opts?.mode || 'execute' }),
       signal: opts?.signal,
     });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
@@ -808,6 +808,34 @@ export const apiService = {
   },
   async setProviderApiKey(providerId: string, api_key: string): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/providers/${encodeURIComponent(providerId)}/api-key`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ api_key }) });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  // 插件系统 P0
+  async listPlugins(): Promise<{ plugins: any[]; total: number }> {
+    const res = await fetch(`${API_BASE_URL}/plugins`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async pluginSpec(): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/plugins/spec`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async installPlugin(file: File): Promise<any> {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch(`${API_BASE_URL}/plugins/install`, { method: 'POST', body: fd });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async setPluginEnabled(id: string, enabled: boolean): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/plugins/${encodeURIComponent(id)}/${enabled ? 'enable' : 'disable'}`, { method: 'POST' });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async uninstallPlugin(id: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/plugins/${encodeURIComponent(id)}`, { method: 'DELETE' });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },

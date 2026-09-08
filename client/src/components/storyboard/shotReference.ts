@@ -129,4 +129,40 @@ export function withCameraIntent(prompt: string, shot: any): string {
   return `${prompt}${cameraIntentSuffix(shot)}`;
 }
 
+/**
+ * 导入自动绑定：小说拆解 / 一键成片落盘前，按说话人精确匹配 + 正文提及匹配自动填充 character_ids。
+ * 已有手动绑定的分镜不动；无角色或无匹配的分镜保持空白待手绑（避免主角污染全剧参考）。
+ */
+export function autoBindShotCharacters(proj: any): { boundShots: number; totalShots: number } {
+  const chars: any[] = proj?.characters || [];
+  if (!chars.length) return { boundShots: 0, totalShots: 0 };
+  let bound = 0, total = 0;
+  for (const sc of proj?.scenes || []) {
+    for (const sh of sc?.shots || []) {
+      total++;
+      if (Array.isArray(sh.character_ids) && sh.character_ids.length) continue;
+      const ids: string[] = [];
+      if (sh.speaker_name) {
+        const sp = chars.find((c: any) => c.name === sh.speaker_name);
+        if (sp) {
+          ids.push(sp.id);
+          sh.speaker_id = sp.id;
+        }
+      }
+      const hay = `${sh.action_desc || ''} ${sh.dialogue || ''} ${sh.voiceover || ''} ${sh.image_prompt || ''}`;
+      for (const c of chars) {
+        if (c?.name && hay.includes(c.name) && !ids.includes(c.id)) ids.push(c.id);
+      }
+      if (ids.length) {
+        sh.character_ids = ids;
+        const w: Record<string, number> = { ...((sh as any).character_weights || {}) };
+        for (const id of ids) if (w[id] == null) w[id] = 0.8;
+        (sh as any).character_weights = w;
+        bound++;
+      }
+    }
+  }
+  return { boundShots: bound, totalShots: total };
+}
+
 export type { StoryboardShot };

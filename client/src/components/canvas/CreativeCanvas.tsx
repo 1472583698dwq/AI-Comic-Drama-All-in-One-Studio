@@ -164,7 +164,7 @@ const InnerCanvas: React.FC = () => {
     const onAssetRefresh = () => apiService.listAssets({ project_id: pid || undefined, limit: 24 }).then(r => setAssets(r.assets || [])).catch(() => {});
     window.addEventListener('asset-refresh', onAssetRefresh as any);
     return () => { clearTimeout(timer); window.removeEventListener('asset-refresh', onAssetRefresh as any); };
-  }, [pid]);
+  }, [pid, canvasId]);
 
   // 历史回退 (Ctrl+Z)
   const histRef = useRef<{ nodes: any[]; edges: any[] }[]>([]);
@@ -607,7 +607,8 @@ const InnerCanvas: React.FC = () => {
       duration: Math.round(shot.duration) || 5,
       provider_id: shot.video_provider || undefined,
       camera_prompt: camPrompt,
-      first_frame: shot.image_url || undefined,
+      // 直出（多参考）不带旧首帧：纯绑定驱动 r2v/t2v；图生才带真首帧
+      first_frame: shot.production_mode === 'motion_comic' ? undefined : (shot.image_url || undefined),
       reference_images: refs.reference_images.length ? refs.reference_images : undefined,
     });
     newNodes.push(videoNode);
@@ -788,6 +789,7 @@ const InnerCanvas: React.FC = () => {
       } catch {}
     }
     setNodes([]); setEdges([]); setSelectedNodeId(null);
+    suppressSaveRef.current = true;
     setCanvasId(cid);
   };
 

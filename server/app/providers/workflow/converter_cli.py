@@ -38,7 +38,9 @@ _MODE_BYPASS = 4  # node skipped; inputs passed through to outputs
 # Node types that exist only in the UI graph and never appear in API output.
 # Aligns with cloud-mcp-server's VIRTUAL_NODE_TYPES and the frontend's
 # isVirtualNode set — every type the frontend's graphToPrompt() skips.
-_UI_ONLY_NODE_TYPES = frozenset({"Note", "MarkdownNote", "PrimitiveNode", "GetNode", "SetNode", "Reroute"})
+# "Label" is rgthree-comfy's title decoration node (no inputs/outputs);
+# leaving it in the prompt breaks servers without that pack (missing_node_type).
+_UI_ONLY_NODE_TYPES = frozenset({"Note", "MarkdownNote", "PrimitiveNode", "GetNode", "SetNode", "Reroute", "Label"})
 
 # Sentinel IDs litegraph uses inside a subgraph definition for the synthetic
 # input and output proxy nodes (the boxes the user wires through).

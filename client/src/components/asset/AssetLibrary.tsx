@@ -368,6 +368,7 @@ export const AssetLibrary: React.FC = () => {
         },
       };
       localStorage.setItem('canvas_pending_asset', JSON.stringify(payload));
+      st.setWorkspace('creative');
       st.setActiveTab('canvas' as any);
       window.dispatchEvent(new CustomEvent('canvas-import-asset', { detail: payload }));
     } catch (e: any) { alert(e?.message || '发送失败'); }

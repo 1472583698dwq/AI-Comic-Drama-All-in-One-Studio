@@ -6,7 +6,7 @@ interface ProjectState {
   project: Project | null;
   activeProjectId: string | null; // P0: 关联 ProjectMeta
   activeShotId: string | null;
-  activeTab: 'projects' | 'studio' | 'director3d' | 'timeline' | 'characters' | 'assets' | 'mcp' | 'config' | 'canvas';
+  activeTab: 'projects' | 'studio' | 'director3d' | 'timeline' | 'characters' | 'assets' | 'mcp' | 'config' | 'canvas' | 'agent';
   workspace: 'production' | 'creative'; // P0: 双工作台
   platformMode: 'desktop' | 'mobile';
   isPlaying: boolean;
@@ -20,7 +20,7 @@ interface ProjectState {
   // Actions
   setProject: (project: Project) => void;
   setActiveShotId: (shotId: string | null) => void;
-  setActiveTab: (tab: 'projects' | 'studio' | 'director3d' | 'timeline' | 'characters' | 'assets' | 'mcp' | 'config' | 'canvas') => void;
+  setActiveTab: (tab: 'projects' | 'studio' | 'director3d' | 'timeline' | 'characters' | 'assets' | 'mcp' | 'config' | 'canvas' | 'agent') => void;
   setWorkspace: (w: 'production'|'creative') => void;
   setPlatformMode: (mode: 'desktop' | 'mobile') => void;
   setIsPlaying: (isPlaying: boolean) => void;
@@ -29,7 +29,7 @@ interface ProjectState {
 
   // Script & Generation
   importNovelScript: (text: string, style?: StylePreset, ratio?: AspectRatio) => Promise<void>;
-  generateShotVideo: (shotId: string, options?: { mode?: 'i2v' | 'r2v' | 't2v'; prompt?: string; duration?: number; provider?: string; workflow_id?: string; dynamic_inputs?: Record<string, any> }) => Promise<void>;
+  generateShotVideo: (shotId: string, options?: { mode?: 'i2v' | 'r2v' | 't2v'; prompt?: string; duration?: number; provider?: string; workflow_id?: string; dynamic_inputs?: Record<string, any>; omit_first_frame?: boolean }) => Promise<void>;
   updateShot: (shotId: string, updates: Partial<StoryboardShot>) => void;
   updateCharacter: (charId: string, updates: Partial<Character>) => void;
   addCharacter: (character: Character) => void;
@@ -84,14 +84,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!pid) return;
     set({ isLoading: true, loadingMessage: '正在同步项目状态...' });
     try {
-      const res = await apiService.openProject(pid);
-      if (res && res.project) {
-        get().setProject(res.project);
-      } else if (res && res.scenes) {
-        get().setProject(res as any);
-      } else {
-        const p = await apiService.getProject(pid);
-        if (p) get().setProject(p as any);
+      // open 仅更新 last_opened_at（返回 meta，无场景），内容以 getProject 的 content 为准
+      try { await apiService.openProject(pid); } catch {}
+      const p = await apiService.getProject(pid);
+      const content = (p as any)?.content ?? (p as any)?.project ?? p;
+      if (content && Array.isArray(content.scenes)) {
+        get().setProject(content as any);
       }
     } catch (e: any) {
       console.warn('Failed to auto-load active project:', e);
@@ -101,23 +99,30 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   setProject: (project) => {
-    const total = project.scenes.flatMap((s) => s.shots).reduce((sum, sh) => sum + sh.duration, 0);
-    const savedShotId = localStorage.getItem('active_shot_id_' + project.id);
-    const allShots = project.scenes.flatMap((s) => s.shots);
+    // 归一化兜底：任何缺 scenes/characters 的畸形内容都不得打崩整屏黑屏
+    const rawScenes = Array.isArray((project as any)?.scenes) ? (project as any).scenes : [];
+    const safe: Project = {
+      ...(project as any),
+      scenes: rawScenes.map((s: any) => ({ ...s, shots: Array.isArray(s?.shots) ? s.shots : [] })),
+      characters: Array.isArray((project as any)?.characters) ? (project as any).characters : [],
+    } as Project;
+    const total = safe.scenes.flatMap((s) => s.shots).reduce((sum, sh) => sum + sh.duration, 0);
+    const savedShotId = localStorage.getItem('active_shot_id_' + safe.id);
+    const allShots = safe.scenes.flatMap((s) => s.shots);
     const foundSaved = allShots.find(s => s.id === savedShotId);
     const firstShotId = foundSaved?.id || allShots[0]?.id || null;
 
     // 同步 activeProjectId
-    if (project?.id) {
-      localStorage.setItem('activeProjectId', project.id);
-      set({ project, totalDuration: total, activeShotId: firstShotId, apiError: null, activeProjectId: project.id });
+    if (safe?.id) {
+      localStorage.setItem('activeProjectId', safe.id);
+      set({ project: safe, totalDuration: total, activeShotId: firstShotId, apiError: null, activeProjectId: safe.id });
     } else {
-      set({ project, totalDuration: total, activeShotId: firstShotId, apiError: null });
+      set({ project: safe, totalDuration: total, activeShotId: firstShotId, apiError: null });
     }
     // 自动保存到后端（若有 activeProjectId）
-    const pid = project?.id || get().activeProjectId;
-    if (pid && project) {
-      persistProject(project, pid);
+    const pid = safe?.id || get().activeProjectId;
+    if (pid && safe) {
+      persistProject(safe, pid);
     }
   },
 
@@ -146,6 +151,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ isLoading: true, loadingMessage: '正在调用 MiniMax LLM 拆解小说剧情与角色关系...', apiError: null });
     try {
       const proj = await apiService.parseScript(text, style, ratio);
+      // 导入即绑定：说话人 + 正文提及自动填充 character_ids，免逐镜手绑（已有绑定不动）
+      try {
+        const { autoBindShotCharacters } = await import('../components/storyboard/shotReference');
+        autoBindShotCharacters(proj as any);
+      } catch {}
       get().setProject(proj);
     } catch (e: any) {
       set({ apiError: e?.message || '小说拆解失败' });
@@ -203,12 +213,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const duration = options?.duration || Math.round(shot.duration) || 5;
 
       // 首帧只放真首帧；参考图只透传调用方 dynamic_inputs 里装配好的
-      // （shotReference 唯一口径），不再把首帧重复塞进参考槽污染约束
+      // （shotReference 唯一口径），不再把首帧重复塞进参考槽污染约束。
+      // 直出（多参考 r2v）调用方传 omit_first_frame：旧首帧不再注入，纯绑定驱动。
       const diRefs = (options?.dynamic_inputs as any)?.reference_images ?? (options?.dynamic_inputs as any)?.reference_image;
       const res: any = await apiService.generateShotVideo({
         prompt,
         mode,
-        first_frame_url: shot.image_url || undefined,
+        first_frame_url: options?.omit_first_frame ? undefined : (shot.image_url || undefined),
         reference_images: Array.isArray(diRefs) ? diRefs : (diRefs ? [diRefs] : undefined),
         duration,
         aspect_ratio: proj.aspect_ratio || '9:16',

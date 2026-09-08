@@ -997,6 +997,15 @@ class MCPServerRegistry:
             is_enabled=True,
             input_schema={"type":"object","properties":{"project_id":{"type":"string"}},"required":[]}
         ))
+        self.register_tool(MCPToolDefinition(
+            name="search_tools",
+            description="[Agent检索] 按关键词检索可用工具子集（名/描述/分类加权），避免90个provider全量进prompt。侦察类，只返回名+描述+分类，先检索再执行，查而不做视为未完成。",
+            category="utility",
+            icon="Search",
+            author="Agent Mode",
+            is_enabled=True,
+            input_schema={"type":"object","properties":{"query":{"type":"string","description":"检索关键词，如 生图 配音 画布 剪映"},"limit":{"type":"integer","default":12,"description":"返回条数 4-20"}},"required":[]}
+        ))
 
         # --- A档可信模式双工具：文件编辑 + 命令执行（总闸 STUDIO_TRUSTED_MODE=1，未开则明错） ---
         self.register_tool(MCPToolDefinition(
@@ -1198,6 +1207,16 @@ class MCPServerRegistry:
             return MCPToolCallResponse(tool_name=tool_name, status="error", result=None, error=f"MCP Tool '{tool_name}' not found", execution_time_ms=0)
         try:
             result = None
+            # Agent检索：关键词取工具子集，防provider全量爆context（Anthropic Code Mode同思路）
+            if tool_name == "search_tools":
+                try:
+                    from app.agent.loop import search_tools as _search
+                    q = (arguments or {}).get("query", "")
+                    lim = int((arguments or {}).get("limit", 12) or 12)
+                    result = {"tools": _search(q, max(4, min(lim, 20)))}
+                except Exception as e:
+                    return MCPToolCallResponse(tool_name=tool_name, status="error", result=None, error=f"search_tools失败: {e}", execution_time_ms=int((time.time()-start_time)*1000))
+                return MCPToolCallResponse(tool_name=tool_name, status="success", result=result, error=None, execution_time_ms=int((time.time()-start_time)*1000))
             # 动态 Provider Tool 统一调度：节点Agent按 Tool 调度，参数即该源 params_schema 异构输入
             if tool_name.startswith("provider_"):
                 provider_id = tool_name[len("provider_"):]

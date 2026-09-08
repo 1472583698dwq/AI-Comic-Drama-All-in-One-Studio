@@ -221,6 +221,15 @@ class ComfyUIVideoProvider(VideoProvider):
         # 5. 提交到 ComfyUI（已完成 I2V/R2V 图像上传与参数注入，支持节俭/API 与全量/UI 双模式）
         if True:
             async with httpx.AsyncClient(timeout=20.0) as client:
+                # 提交前最后一道防线：剥离装饰/孤立未知节点；真实缺插件则提前抛友好错误
+                try:
+                    injected_wf, _stripped = workflow_manager.strip_unsupported_nodes(injected_wf)
+                    if _stripped:
+                        print(f"[ComfyUIVideo] 提交前已自动剥离 {len(_stripped)} 个装饰/无效节点: " + ", ".join(f"{s['class_type']}#{s['id']}" for s in _stripped[:8]))
+                except RuntimeError:
+                    raise
+                except Exception as pre_e:
+                    print(f"[ComfyUIVideo] 提交前检查跳过: {pre_e}")
                 payload = {"prompt": injected_wf, "client_id": str(uuidlib.uuid4())}
                 r = await client.post(f"{server_url}/prompt", json=payload)
                 if r.status_code != 200:

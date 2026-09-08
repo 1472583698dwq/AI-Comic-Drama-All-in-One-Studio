@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { useDirectorAgent } from '../canvas/hooks/useDirectorAgent';
 import { useCanvasStore } from '../../stores/useCanvasStore';
 import {
@@ -206,6 +207,16 @@ export const Director3DStage: React.FC = () => {
 
   // 3. Interactive & UI States
   const [selectedEntity, setSelectedEntity] = useState<string | null>('protagonist');
+  // —— 对标小云雀/updream的物体摆放：Gizmo模式 + 吸附 + 锁定 + 大纲 + 数值面板 ——
+  // 小云雀：选中进可移动态 + 坐标轴手柄 + 右侧数值 + 复位/锁定/撤销
+  // updream：G移动/R旋转/W选择/Q导航 + 黄色选中 + 单轴拖 + 图层锁定 + 从当前视角建机位
+  // MiniMax Design：Agent自动搭 + 手动微调兜底（本文件既有Agent布景即该层）
+  const [gizmoMode, setGizmoMode] = useState<'translate' | 'rotate' | 'scale'>('translate');
+  const [snapEnabled, setSnapEnabled] = useState(true);
+  const [lockedIds, setLockedIds] = useState<Record<string, boolean>>({});
+  const [entityList, setEntityList] = useState<Array<{ id: string; label: string }>>([]);
+  const [selectedTransform, setSelectedTransform] = useState<{ p: [number, number, number]; r: [number, number, number]; s: number } | null>(null);
+  const gizmoModeRef = useRef<'translate' | 'rotate' | 'scale'>('translate');
   const [compositionGrid, setCompositionGrid] = useState<'rule_of_thirds' | 'golden_ratio' | 'crosshair' | 'diagonal' | 'none'>('rule_of_thirds');
   const [aspectRatioMask, setAspectRatioMask] = useState<'9:16' | '16:9' | '1:1' | '2.35:1'>('9:16');
   const [showPip, setShowPip] = useState(true);
@@ -238,6 +249,18 @@ export const Director3DStage: React.FC = () => {
     if (shot.props_config) setPropsConfig(shot.props_config);
     if (shot.motion_speed) setMotionSpeed(shot.motion_speed);
     if (shot.walk_path) setWaypointsBoth(shot.walk_path);
+    // 摆位持久化恢复（小云雀式：切镜不丢摆放）
+    if ((shot as any).stage_layout) {
+      entityTransformsRef.current = { ...(shot as any).stage_layout };
+      // 已重建的物体即时应用，未重建的在重建effect中应用
+      const g = stageEntitiesGroupRef.current;
+      if (g) {
+        Object.entries(entityTransformsRef.current).forEach(([id, t]: any) => {
+          const o = g.getObjectByName(id);
+          if (o && t?.p && t?.r) { o.position.set(t.p[0], t.p[1], t.p[2]); o.rotation.set(t.r[0], t.r[1], t.r[2]); o.scale.setScalar(t.s || 1); }
+        });
+      }
+    } else { entityTransformsRef.current = {}; }
     if (shot.lighting_config) {
       const lc = shot.lighting_config;
       setKeyIntensity(lc.keyIntensity ?? 3.2);
@@ -352,6 +375,32 @@ export const Director3DStage: React.FC = () => {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recordChunksRef = useRef<Blob[]>([]);
   const recordTimerRef = useRef<any>(null);
+  // —— 物体摆放操控 refs（对标三家：Gizmo + 选中高亮 + 撤销 + 持久化）——
+  const transformControlsRef = useRef<TransformControls | null>(null);
+  const selectionBoxRef = useRef<THREE.BoxHelper | null>(null);
+  const entityTransformsRef = useRef<Record<string, { p: [number, number, number]; r: [number, number, number]; s: number }>>({});
+  const undoStackRef = useRef<Array<{ id: string; prev: { p: [number, number, number]; r: [number, number, number]; s: number } }>>([]);
+  const gizmoDraggingRef = useRef(false);
+  const mouseDownPosRef = useRef<{ x: number; y: number } | null>(null);
+  const lockedIdsRef = useRef<Record<string, boolean>>({});
+  // 跨effect调用的稳定引用（Three初始化闭包用，避免过期闭包）
+  const pushUndoRef = useRef<((id: string, prev: { p: [number, number, number]; r: [number, number, number]; s: number }) => void) | null>(null);
+  const setSelectedTransformRef = useRef<((t: { p: [number, number, number]; r: [number, number, number]; s: number } | null) => void) | null>(null);
+  const applySnapRef = useRef<(() => void) | null>(null);
+  useEffect(() => { lockedIdsRef.current = lockedIds; }, [lockedIds]);
+  useEffect(() => { gizmoModeRef.current = gizmoMode; if (transformControlsRef.current) transformControlsRef.current.setMode(gizmoMode); }, [gizmoMode]);
+  useEffect(() => {
+    setSelectedTransformRef.current = setSelectedTransform;
+    applySnapRef.current = () => {
+      const tc: any = transformControlsRef.current;
+      if (!tc) return;
+      try {
+        if (snapEnabled) { tc.setTranslationSnap(0.1); tc.setRotationSnap(THREE.MathUtils.degToRad(5)); tc.setScaleSnap(0.05); }
+        else { tc.setTranslationSnap(null); tc.setRotationSnap(null); tc.setScaleSnap(null); }
+      } catch {}
+    };
+    applySnapRef.current();
+  }, [snapEnabled]);
 
   const orbitStateRef = useRef({
     isRotating: false,
@@ -392,6 +441,153 @@ export const Director3DStage: React.FC = () => {
     orbitStateRef.current.phi = Math.PI / 3.0;
     updateMainCameraPosition();
   }, [updateMainCameraPosition]);
+
+  // ============================================================
+  // 物体摆放操控 helpers（对标 小云雀/ updream / MiniMax Design）
+  // ============================================================
+  const entityLabel = useCallback((id: string): string => {
+    if (id === 'protagonist' || id === 'entity_protagonist') return '主角';
+    if (id === 'antagonist' || id === 'entity_antagonist') return '对手';
+    if (id === 'supporting' || id === 'entity_supporting') return '配角';
+    if (id.includes('sword')) return '飞剑';
+    if (id.includes('shield')) return '护盾';
+    if (id.includes('magic_circle')) return '符文阵';
+    if (id.includes('chair')) return '椅子';
+    if (id.includes('helmet')) return '头盔';
+    if (id.includes('camera')) return '相机道具';
+    if (id.includes('avocado')) return '牛油果';
+    if (id.includes('boombox') || id.includes('boom')) return '音响';
+    if (id.includes('incense')) return '香炉';
+    if (id.includes('flag')) return '战旗';
+    if (id.startsWith('custom_')) return `导入模型(${id.slice(-4)})`;
+    return id.replace('entity_', '').replace('prop_', '');
+  }, []);
+
+  const findStageRoot = useCallback((obj: THREE.Object3D | null): THREE.Object3D | null => {
+    if (!obj || !stageEntitiesGroupRef.current) return null;
+    let cur: THREE.Object3D | null = obj;
+    while (cur && cur.parent && cur.parent !== stageEntitiesGroupRef.current) cur = cur.parent;
+    if (cur && cur.parent === stageEntitiesGroupRef.current) return cur;
+    return null;
+  }, []);
+
+  const snapshotObjectTransform = useCallback((obj: THREE.Object3D) => {
+    const p: [number, number, number] = [obj.position.x, obj.position.y, obj.position.z];
+    const r: [number, number, number] = [obj.rotation.x, obj.rotation.y, obj.rotation.z];
+    const s = obj.scale.x;
+    return { p, r, s };
+  }, []);
+
+  const refreshEntityList = useCallback(() => {
+    const g = stageEntitiesGroupRef.current;
+    if (!g) return;
+    const list = g.children
+      .filter((c) => c.name && !c.name.startsWith('walk_'))
+      .map((c) => ({ id: c.name, label: '' }));
+    setEntityList(list.map((e) => ({ ...e, label: entityLabel(e.id) })));
+  }, [entityLabel]);
+
+  const attachGizmoTo = useCallback((id: string | null) => {
+    const tc = transformControlsRef.current;
+    const scene = sceneRef.current;
+    if (!tc || !scene) return;
+    // 清旧高亮
+    if (selectionBoxRef.current) { scene.remove(selectionBoxRef.current); (selectionBoxRef.current as any)?.dispose?.(); selectionBoxRef.current = null; }
+    if (!id || !stageEntitiesGroupRef.current) { try { (tc as any).detach(); } catch {} setSelectedTransform(null); return; }
+    const obj = stageEntitiesGroupRef.current.getObjectByName(id);
+    if (!obj) { try { (tc as any).detach(); } catch {} setSelectedTransform(null); return; }
+    if (lockedIdsRef.current[id]) { try { (tc as any).detach(); } catch {} }
+    else { try { (tc as any).attach(obj); } catch {} }
+    try {
+      const box = new THREE.BoxHelper(obj as THREE.Object3D, 0x00d2ff);
+      (box.material as THREE.Material).transparent = true;
+      (box.material as any).opacity = 0.9;
+      scene.add(box);
+      selectionBoxRef.current = box;
+    } catch {}
+    // updream式黄显：选中物体描边感（emissive轻提），取消时由重建/下次选中覆盖
+    setSelectedTransform(snapshotObjectTransform(obj));
+  }, [snapshotObjectTransform]);
+
+  const selectEntity = useCallback((id: string | null) => {
+    setSelectedEntity(id);
+    (window as any).__director_selected__ = id;
+    attachGizmoTo(id);
+  }, [attachGizmoTo]);
+
+  const pushUndo = useCallback((id: string, prev: { p: [number, number, number]; r: [number, number, number]; s: number }) => {
+    undoStackRef.current.push({ id, prev });
+    if (undoStackRef.current.length > 50) undoStackRef.current.shift();
+  }, []);
+
+  const undoLastTransform = useCallback(() => {
+    const top = undoStackRef.current.pop();
+    if (!top || !stageEntitiesGroupRef.current) return;
+    const obj = stageEntitiesGroupRef.current.getObjectByName(top.id);
+    if (!obj) return;
+    obj.position.set(...top.prev.p);
+    obj.rotation.set(...top.prev.r);
+    obj.scale.setScalar(top.prev.s);
+    entityTransformsRef.current[top.id] = { ...top.prev };
+    if (selectionBoxRef.current) selectionBoxRef.current.update();
+    setSelectedTransform({ ...top.prev });
+  }, []);
+
+  const applyNumericToSelected = useCallback((patch: Partial<{ px: number; py: number; pz: number; ry: number; s: number }>) => {
+    if (!selectedEntity || !stageEntitiesGroupRef.current) return;
+    const obj = stageEntitiesGroupRef.current.getObjectByName(selectedEntity);
+    if (!obj) return;
+    pushUndo(selectedEntity, snapshotObjectTransform(obj));
+    if (patch.px !== undefined) obj.position.x = patch.px;
+    if (patch.py !== undefined) obj.position.y = Math.max(0, patch.py);
+    if (patch.pz !== undefined) obj.position.z = patch.pz;
+    if (patch.ry !== undefined) obj.rotation.y = (patch.ry * Math.PI) / 180;
+    if (patch.s !== undefined) obj.scale.setScalar(Math.max(0.1, Math.min(5, patch.s)));
+    const snap = snapshotObjectTransform(obj);
+    entityTransformsRef.current[selectedEntity] = snap;
+    if (selectionBoxRef.current) selectionBoxRef.current.update();
+    setSelectedTransform(snap);
+  }, [selectedEntity, pushUndo, snapshotObjectTransform]);
+
+  const resetSelectedTransform = useCallback(() => {
+    if (!selectedEntity || !stageEntitiesGroupRef.current) return;
+    const obj = stageEntitiesGroupRef.current.getObjectByName(selectedEntity);
+    if (!obj) return;
+    pushUndo(selectedEntity, snapshotObjectTransform(obj));
+    // 小云雀式复位：回到该类物体的默认摆位（角色回原点/道具回预设）
+    const defaults: Record<string, { p: [number, number, number]; ry: number }> = {
+      entity_protagonist: { p: [0, 0, 0], ry: 0 },
+      entity_antagonist: { p: [0, 0, -2.3], ry: 180 },
+      entity_supporting: { p: [-1.9, 0, -1.2], ry: 108 },
+    };
+    const d = defaults[selectedEntity];
+    if (d) { obj.position.set(...d.p); obj.rotation.set(0, (d.ry * Math.PI) / 180, 0); obj.scale.setScalar(1); }
+    else { obj.position.set(0, obj.position.y * 0 + (selectedEntity.includes('magic_circle') ? 0.02 : 0.5), 0); obj.rotation.set(0, 0, 0); obj.scale.setScalar(1); }
+    const snap = snapshotObjectTransform(obj);
+    entityTransformsRef.current[selectedEntity] = snap;
+    if (selectionBoxRef.current) selectionBoxRef.current.update();
+    setSelectedTransform(snap);
+  }, [selectedEntity, pushUndo, snapshotObjectTransform]);
+
+  const deleteSelectedCustom = useCallback(() => {
+    if (!selectedEntity || !stageEntitiesGroupRef.current) return;
+    if (!selectedEntity.startsWith('custom_')) return;
+    const obj = stageEntitiesGroupRef.current.getObjectByName(selectedEntity);
+    if (obj) stageEntitiesGroupRef.current.remove(obj);
+    delete entityTransformsRef.current[selectedEntity];
+    setCustomModelNames((prev) => prev.slice(0, Math.max(0, prev.length - 1)));
+    selectEntity('protagonist');
+    refreshEntityList();
+  }, [selectedEntity, selectEntity, refreshEntityList]);
+
+  // 同步跨effect引用
+  useEffect(() => { pushUndoRef.current = pushUndo; }, [pushUndo]);
+  useEffect(() => { undoLastTransformRef.current = undoLastTransform; }, [undoLastTransform]);
+  useEffect(() => { deleteSelectedCustomRef.current = deleteSelectedCustom; }, [deleteSelectedCustom]);
+  const selectEntityRef = useRef<((id: string | null) => void) | null>(null);
+  const undoLastTransformRef = useRef<(() => void) | null>(null);
+  const deleteSelectedCustomRef = useRef<(() => void) | null>(null);
+  useEffect(() => { selectEntityRef.current = selectEntity; }, [selectEntity]);
 
   // ============================================================
   // Agent 场景生成（对标 MiniMax Design 自然语言布景）
@@ -503,15 +699,19 @@ export const Director3DStage: React.FC = () => {
       if (!group) throw new Error('解析失败，确认模型为合规 glTF');
       if (stageEntitiesGroupRef.current) {
         const clone = group.clone(true) as THREE.Group;
-        clone.name = `custom_${Date.now()}`;
+        const newId = `custom_${Date.now()}`;
+        clone.name = newId;
         const offset = new THREE.Vector3((Math.random() - 0.5) * 1.6, 0, (Math.random() - 0.5) * 1.6);
         clone.position.copy(offset);
+        clone.userData.baseY = offset.y;
         // 悬浮微光标识为导入模型
         const light = new THREE.PointLight(0x00d2ff, 0.7, 2.2);
         light.position.copy(offset).add(new THREE.Vector3(0, 1.1, 0));
         stageEntitiesGroupRef.current.add(clone);
         stageEntitiesGroupRef.current.add(light);
         setCustomModelNames((prev) => [...prev, file.name]);
+        refreshEntityList();
+        setTimeout(() => selectEntity(newId), 50);
       } else {
         const fakeKey = `custom_${Date.now()}`;
         (MODEL_URLS as any)[fakeKey] = url;
@@ -584,15 +784,70 @@ export const Director3DStage: React.FC = () => {
     stageEntitiesGroup.name = 'stage_entities';
     scene.add(stageEntitiesGroup);
     stageEntitiesGroupRef.current = stageEntitiesGroup;
+    // —— Gizmo 手柄（对标小云雀坐标轴 / updream G-R 模式）——
+    try {
+      const tc = new TransformControls(mainCamera, renderer.domElement);
+      tc.setMode(gizmoModeRef.current);
+      tc.setSize(0.85);
+      // @ts-ignore r169+ helper 模式兼容
+      const helperObj: any = (tc as any).getHelper ? (tc as any).getHelper() : tc;
+      scene.add(helperObj);
+      (tc as any).addEventListener('dragging-changed', (e: any) => {
+        gizmoDraggingRef.current = !!e.value;
+        if (e.value) {
+          orbitStateRef.current.isRotating = false;
+          orbitStateRef.current.isPanning = false;
+          const obj = (tc as any).object;
+          if (obj?.name) {
+            const p = obj.position, r = obj.rotation;
+            pushUndoRef.current?.(obj.name, { p: [p.x, p.y, p.z], r: [r.x, r.y, r.z], s: obj.scale.x });
+          }
+        } else {
+          const obj = (tc as any).object;
+          if (obj?.name) {
+            const p = obj.position, r = obj.rotation;
+            const snap = { p: [p.x, p.y, p.z] as [number, number, number], r: [r.x, r.y, r.z] as [number, number, number], s: obj.scale.x };
+            entityTransformsRef.current[obj.name] = snap;
+            setSelectedTransformRef.current?.(snap);
+            if (selectionBoxRef.current) selectionBoxRef.current.update();
+          }
+        }
+      });
+      (tc as any).addEventListener('objectChange', () => {
+        const obj = (tc as any).object;
+        if (!obj) return;
+        // 地面约束：角色/道具不沉入地下（updream式防穿地）
+        if (obj.position.y < 0) obj.position.y = 0;
+        if (selectionBoxRef.current) selectionBoxRef.current.update();
+        const p = obj.position, r = obj.rotation;
+        setSelectedTransformRef.current?.({ p: [p.x, p.y, p.z], r: [r.x, r.y, r.z], s: obj.scale.x });
+      });
+      transformControlsRef.current = tc;
+      applySnapRef.current?.();
+    } catch (e) { console.warn('[Director3D] TransformControls init failed', e); }
     let reqId: number;
     const animate = () => {
       reqId = requestAnimationFrame(animate);
-      if (protagonistGroupRef.current) protagonistGroupRef.current.position.y = Math.sin(Date.now() * 0.0018) * 0.01;
-      if (antagonistGroupRef.current) antagonistGroupRef.current.position.y = Math.sin(Date.now() * 0.0018 + 1.2) * 0.01;
-      const magicCircle = scene.getObjectByName('magic_circle_mesh');
-      if (magicCircle) magicCircle.rotation.z += 0.006;
-      const sword = scene.getObjectByName('floating_sword_mesh');
-      if (sword) { sword.position.y = 1.85 + Math.sin(Date.now() * 0.0025) * 0.06; sword.rotation.y += 0.012; }
+      // 呼吸浮动改为基于baseY的叠加，避免覆盖用户Gizmo摆放（此前直接赋值会丢Y）
+      const t = Date.now();
+      if (protagonistGroupRef.current && !gizmoDraggingRef.current) {
+        const o = protagonistGroupRef.current;
+        const base = (o.userData.baseY ?? o.position.y) as number;
+        o.position.y = base + Math.sin(t * 0.0018) * 0.01;
+      }
+      if (antagonistGroupRef.current && !gizmoDraggingRef.current) {
+        const o = antagonistGroupRef.current;
+        const base = (o.userData.baseY ?? o.position.y) as number;
+        o.position.y = base + Math.sin(t * 0.0018 + 1.2) * 0.01;
+      }
+      const magicCircle = scene.getObjectByName('prop_magic_circle');
+      if (magicCircle && !(transformControlsRef.current as any)?.dragging) (magicCircle as THREE.Group).rotation.y += 0.006;
+      const sword = scene.getObjectByName('prop_sword');
+      if (sword && !(transformControlsRef.current as any)?.dragging) {
+        const baseY = ((sword as THREE.Group).userData.baseY ?? sword.position.y) as number;
+        if (!gizmoDraggingRef.current) sword.position.y = baseY + Math.sin(t * 0.0025) * 0.03;
+        sword.rotation.y += 0.004;
+      }
       // 云朵漂浮
       const clouds = scene.getObjectByName('clouds_group');
       if (clouds) clouds.rotation.y += 0.0004;
@@ -617,6 +872,8 @@ export const Director3DStage: React.FC = () => {
     return () => {
       cancelAnimationFrame(reqId);
       window.removeEventListener('resize', handleResize);
+      try { (transformControlsRef.current as any)?.dispose?.(); } catch {}
+      transformControlsRef.current = null;
       if (containerRef.current && renderer.domElement) containerRef.current.removeChild(renderer.domElement);
       renderer.dispose();
     };
@@ -762,10 +1019,25 @@ export const Director3DStage: React.FC = () => {
     if (!sceneRef.current || !stageEntitiesGroupRef.current) return;
     let cancelled = false;
     const stage = stageEntitiesGroupRef.current;
-    // 清理旧实体但保留环境
+    // 清理旧实体但保留环境 + 保留用户导入的custom模型（小云雀式：换姿势不丢自有资产）
+    const keptCustom: THREE.Object3D[] = [];
+    [...stage.children].forEach((c) => { if (c.name.startsWith('custom_')) keptCustom.push(c); });
     while (stage.children.length) stage.remove(stage.children[0]);
+    keptCustom.forEach((c) => stage.add(c));
     protagonistGroupRef.current = null;
     antagonistGroupRef.current = null;
+    // 保存的摆位应用（切镜/换姿势不丢摆放；用户拖过的优先于默认值）
+    const applySaved = (obj: THREE.Object3D) => {
+      const t = entityTransformsRef.current[obj.name];
+      if (t) {
+        obj.position.set(t.p[0], t.p[1], t.p[2]);
+        obj.rotation.set(t.r[0], t.r[1], t.r[2]);
+        obj.scale.setScalar(t.s || 1);
+        return true;
+      }
+      return false;
+    };
+    const markBaseY = (obj: THREE.Object3D) => { obj.userData.baseY = obj.position.y; };
 
     const applyPoseToGLB = (group: THREE.Group, pose: PosePreset) => {
       // GLB 为绑定模型时，简单通过整体旋转/位移模拟姿态，避免复杂骨骼重定向
@@ -788,8 +1060,9 @@ export const Director3DStage: React.FC = () => {
       }
       if (cancelled) return;
       protagonist.name = 'entity_protagonist';
-      protagonist.position.set(0, 0, 0);
+      if (!applySaved(protagonist)) protagonist.position.set(0, 0, 0);
       stage.add(protagonist);
+      markBaseY(protagonist);
       protagonistGroupRef.current = protagonist;
 
       // Antagonist
@@ -802,10 +1075,13 @@ export const Director3DStage: React.FC = () => {
         }
         if (cancelled) return;
         antagonist.name = 'entity_antagonist';
-        if (castLayout === 'duel') { antagonist.position.set(0, 0, -2.3); antagonist.rotation.y = Math.PI; }
-        else if (castLayout === 'ots') { antagonist.position.set(-0.35, 0, -2.5); antagonist.rotation.y = Math.PI * 0.9; }
-        else { antagonist.position.set(1.9, 0, -1.2); antagonist.rotation.y = -Math.PI * 0.6; }
+        if (!applySaved(antagonist)) {
+          if (castLayout === 'duel') { antagonist.position.set(0, 0, -2.3); antagonist.rotation.y = Math.PI; }
+          else if (castLayout === 'ots') { antagonist.position.set(-0.35, 0, -2.5); antagonist.rotation.y = Math.PI * 0.9; }
+          else { antagonist.position.set(1.9, 0, -1.2); antagonist.rotation.y = -Math.PI * 0.6; }
+        }
         stage.add(antagonist);
+        markBaseY(antagonist);
         antagonistGroupRef.current = antagonist;
       } else antagonistGroupRef.current = null;
 
@@ -814,42 +1090,48 @@ export const Director3DStage: React.FC = () => {
         let sup: THREE.Group | null = await loadGLBModel(MODEL_URLS.human_supporting, 0.98);
         if (!sup || cancelled) sup = createRealisticHuman({ pose: 'fight', role: 'supporting', name: 'Supporting', primaryColor: 0x1e3a8a, accentColor: 0x60a5fa, hairColor: 0x0f172a });
         if (cancelled) return;
-        sup.name = 'entity_supporting'; sup.position.set(-1.9, 0, -1.2); sup.rotation.y = Math.PI * 0.6; stage.add(sup);
+        sup.name = 'entity_supporting';
+        if (!applySaved(sup)) { sup.position.set(-1.9, 0, -1.2); sup.rotation.y = Math.PI * 0.6; }
+        stage.add(sup);
+        markBaseY(sup);
       }
 
       if (cancelled) return;
-      // 道具 - GLB 优先，失败回退程序化
+      // 道具 - GLB 优先，失败回退程序化（全部具名以支持选中/拖拽/持久化）
       const addPropGLBOrFallback = async (type: StagePropType, fallback: () => THREE.Group, pos: THREE.Vector3, glbKey?: string, scale = 1) => {
         if (glbKey && MODEL_URLS[glbKey]) {
           const glb = await loadGLBModel(MODEL_URLS[glbKey], scale);
           if (glb && !cancelled) {
-            glb.position.copy(pos);
+            glb.name = `prop_${type}`;
+            if (!applySaved(glb)) glb.position.copy(pos);
             // 悬浮道具加轻微发光
             const light = new THREE.PointLight(0x7c3aed, 0.6, 2);
-            light.position.copy(pos).add(new THREE.Vector3(0, 0.2, 0));
+            light.position.copy(glb.position).add(new THREE.Vector3(0, 0.2, 0));
             stage.add(light);
-            glb.name = `prop_${type}`;
             stage.add(glb);
+            markBaseY(glb);
             return;
           }
         }
         if (cancelled) return;
         const fb = fallback();
-        fb.position.copy(pos);
+        fb.name = `prop_${type}`;
+        if (!applySaved(fb)) fb.position.copy(pos);
         stage.add(fb);
+        markBaseY(fb);
       };
 
       if (propsConfig.includes('sword')) {
         const sword = createRealisticSword();
-        sword.name = 'floating_sword_mesh'; sword.position.set(0.65, 1.75, 0.45); stage.add(sword);
+        sword.name = 'prop_sword'; if (!applySaved(sword)) sword.position.set(0.65, 1.75, 0.45); stage.add(sword); markBaseY(sword);
       }
       if (propsConfig.includes('shield')) {
         const shield = createRealisticShield();
-        shield.name = 'energy_shield_mesh'; shield.position.set(0, 1.2, 0.55); stage.add(shield);
+        shield.name = 'prop_shield'; if (!applySaved(shield)) shield.position.set(0, 1.2, 0.55); stage.add(shield); markBaseY(shield);
       }
       if (propsConfig.includes('magic_circle')) {
         const circle = createRealisticMagicCircle();
-        circle.name = 'magic_circle_mesh'; circle.position.set(0, 0.02, 0); stage.add(circle);
+        circle.name = 'prop_magic_circle'; if (!applySaved(circle)) circle.position.set(0, 0.02, 0); stage.add(circle); markBaseY(circle);
       }
       // 真实 GLB 道具（新增类型）
       if (propsConfig.includes('chair' as StagePropType)) {
@@ -868,25 +1150,39 @@ export const Director3DStage: React.FC = () => {
         await addPropGLBOrFallback('boombox' as StagePropType, () => createRealisticShield(), new THREE.Vector3(-1.0, 0.5, 0.9), 'boombox', 1.1);
       }
       if (cancelled) return;
-      // 场景专属道具（根据环境自动补充真实物品）
+      // 场景专属道具（根据环境自动补充真实物品，具名可选中）
       if (environment === 'xianxia_cloud' && !propsConfig.includes('magic_circle')) {
-        const incense = createIncenseBurner(); incense.position.set(-1.2, 0.3, 0.8); stage.add(incense);
+        const incense = createIncenseBurner(); incense.name = 'prop_incense';
+        if (!applySaved(incense)) incense.position.set(-1.2, 0.3, 0.8); stage.add(incense); markBaseY(incense);
       }
       if (environment === 'desert_battle') {
-        const flag = createBattleFlag(); flag.position.set(1.5, 0, -1.0); stage.add(flag);
+        const flag = createBattleFlag(); flag.name = 'prop_flag';
+        if (!applySaved(flag)) flag.position.set(1.5, 0, -1.0); stage.add(flag); markBaseY(flag);
       }
       // 根据环境自动补充真实 GLB 道具（示例：赛博影棚自动放置 BoomBox，霓虹都市放置椅子）
       if (environment === 'cyber_studio' && !propsConfig.includes('boombox' as StagePropType)) {
         const autoBox = await loadGLBModel(MODEL_URLS.boombox, 0.9);
-        if (autoBox && !cancelled) { autoBox.position.set(1.4, 0.35, -0.6); stage.add(autoBox); }
+        if (autoBox && !cancelled) { autoBox.name = 'prop_auto_boombox'; if (!applySaved(autoBox)) autoBox.position.set(1.4, 0.35, -0.6); stage.add(autoBox); markBaseY(autoBox); }
       }
       if (environment === 'neon_city' && !propsConfig.includes('chair' as StagePropType)) {
         const autoChair = await loadGLBModel(MODEL_URLS.chair, 1.0);
-        if (autoChair && !cancelled) { autoChair.position.set(-1.3, 0, 0.7); autoChair.rotation.y = Math.PI * 0.2; stage.add(autoChair); }
+        if (autoChair && !cancelled) { autoChair.name = 'prop_auto_chair'; if (!applySaved(autoChair)) { autoChair.position.set(-1.3, 0, 0.7); autoChair.rotation.y = Math.PI * 0.2; } stage.add(autoChair); markBaseY(autoChair); }
       }
+      if (cancelled) return;
+      refreshEntityList();
+      // 重建后恢复选中挂载（切姿势/环境不丢选中）
+      try {
+        const cur = (window as any).__director_selected__ || null;
+        const selName = typeof cur === 'string' ? cur : null;
+        const g2 = stageEntitiesGroupRef.current;
+        if (g2 && selName && g2.getObjectByName(selName) && transformControlsRef.current) {
+          (transformControlsRef.current as any).attach(g2.getObjectByName(selName));
+        }
+      } catch {}
     })();
 
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pose, castLayout, propsConfig, environment]);
 
   const updateVirtualCameraOptics = useCallback(() => {
@@ -1050,7 +1346,26 @@ export const Director3DStage: React.FC = () => {
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+    const pickRoot = (clientX: number, clientY: number): string | null => {
+      if (!sceneRef.current || !mainCameraRef.current || !stageEntitiesGroupRef.current) return null;
+      const rect = container.getBoundingClientRect();
+      const x = ((clientX - rect.left) / rect.width) * 2 - 1;
+      const y = -((clientY - rect.top) / rect.height) * 2 + 1;
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(new THREE.Vector2(x, y), mainCameraRef.current);
+      const intersects = raycaster.intersectObjects(stageEntitiesGroupRef.current.children, true);
+      for (const hit of intersects) {
+        let cur: THREE.Object3D | null = hit.object;
+        while (cur && cur.parent && cur.parent !== stageEntitiesGroupRef.current) cur = cur.parent;
+        if (cur && (cur as THREE.Object3D).name) return (cur as THREE.Object3D).name;
+      }
+      return null;
+    };
     const onMouseDown = (e: MouseEvent) => {
+      mouseDownPosRef.current = { x: e.clientX, y: e.clientY };
+      // Gizmo正被拖拽时，视角不抢事件（小云雀/updream：手柄优先）
+      const tc: any = transformControlsRef.current;
+      if (tc && (tc.dragging || tc.axis)) return;
       if (e.button === 0 && sceneRef.current && mainCameraRef.current) {
         const rect = container.getBoundingClientRect();
         const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -1073,18 +1388,26 @@ export const Director3DStage: React.FC = () => {
           orbitStateRef.current.prevX = e.clientX; orbitStateRef.current.prevY = e.clientY;
           return;
         }
-        if (stageEntitiesGroupRef.current) {
-          const intersects = raycaster.intersectObjects(stageEntitiesGroupRef.current.children, true);
-          if (intersects.length > 0) {
-            let hitObj: THREE.Object3D | null = intersects[0].object;
-            while (hitObj && hitObj.parent && hitObj.parent !== stageEntitiesGroupRef.current) hitObj = hitObj.parent;
-            if (hitObj?.name?.includes('protagonist')) setSelectedEntity('protagonist');
-            else if (hitObj?.name?.includes('antagonist')) setSelectedEntity('antagonist');
-            else if (hitObj?.name?.includes('supporting')) setSelectedEntity('supporting');
-            else if (hitObj?.name?.includes('sword')) setSelectedEntity('prop_sword');
+        // 锁定物体不可选中（updream图层锁定防误拖）
+        const hitId = pickRoot(e.clientX, e.clientY);
+        if (hitId) {
+          if (lockedIdsRef.current[hitId]) {
+            orbitStateRef.current.prevX = e.clientX; orbitStateRef.current.prevY = e.clientY;
+            orbitStateRef.current.isRotating = true;
+            return;
           }
+          // 有命中：先选中，不立即旋转；拖动超阈值才转视角（点击=选中，拖=转视角）
+          selectEntityRef.current?.(hitId);
+          (window as any).__director_selected__ = hitId;
+          (orbitStateRef as any).current.pendingHit = true;
+        } else {
+          (orbitStateRef as any).current.pendingHit = false;
         }
-        orbitStateRef.current.isRotating = true;
+        orbitStateRef.current.prevX = e.clientX; orbitStateRef.current.prevY = e.clientY;
+        // 延迟判定：小移动=点击选中，大移动=旋转（避免选中即转视角）
+        (orbitStateRef as any).current.downPos = { x: e.clientX, y: e.clientY };
+        orbitStateRef.current.isRotating = false;
+        (orbitStateRef as any).current.maybeRotating = true;
       } else if (e.button === 1 || e.button === 2) orbitStateRef.current.isPanning = true;
       orbitStateRef.current.prevX = e.clientX; orbitStateRef.current.prevY = e.clientY;
     };
@@ -1092,24 +1415,60 @@ export const Director3DStage: React.FC = () => {
       const deltaX = e.clientX - orbitStateRef.current.prevX;
       const deltaY = e.clientY - orbitStateRef.current.prevY;
       orbitStateRef.current.prevX = e.clientX; orbitStateRef.current.prevY = e.clientY;
+      const st: any = orbitStateRef.current;
+      if (st.maybeRotating && st.downPos) {
+        const moved = Math.hypot(e.clientX - st.downPos.x, e.clientY - st.downPos.y);
+        // Gizmo拖拽中绝不转视角
+        if (gizmoDraggingRef.current) return;
+        if (moved > 5) { st.isRotating = true; st.maybeRotating = false; }
+        else return;
+      }
       if (orbitStateRef.current.isRotating) { orbitStateRef.current.theta -= deltaX * 0.006; orbitStateRef.current.phi -= deltaY * 0.006; updateMainCameraPosition(); }
       else if (orbitStateRef.current.isPanning) { const factor = orbitStateRef.current.radius * 0.0015; orbitStateRef.current.target.x -= deltaX * factor; orbitStateRef.current.target.y += deltaY * factor; updateMainCameraPosition(); }
     };
-    const onMouseUp = () => { orbitStateRef.current.isRotating = false; orbitStateRef.current.isPanning = false; };
+    const onMouseUp = (e: MouseEvent) => {
+      const st: any = orbitStateRef.current;
+      // 点击空白处清空选中（小云雀式），拖拽则保留
+      if (st.maybeRotating && mouseDownPosRef.current) {
+        const moved = Math.hypot(e.clientX - mouseDownPosRef.current.x, e.clientY - mouseDownPosRef.current.y);
+        if (moved <= 5 && !st.pendingHit) { selectEntityRef.current?.(null); (window as any).__director_selected__ = null; }
+      }
+      orbitStateRef.current.isRotating = false; orbitStateRef.current.isPanning = false;
+      st.maybeRotating = false; st.pendingHit = false; st.downPos = null;
+      mouseDownPosRef.current = null;
+    };
     const onWheel = (e: WheelEvent) => { e.preventDefault(); orbitStateRef.current.radius = Math.max(1.2, Math.min(16.0, orbitStateRef.current.radius + e.deltaY * 0.003)); updateMainCameraPosition(); };
     const onContextMenu = (e: MouseEvent) => e.preventDefault();
+    // 快捷键（对标updream：W选择/G移动/R旋转 + 小云雀Ctrl+Z撤销）
+    const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (document.activeElement?.tagName || '').toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undoLastTransformRef.current?.(); return; }
+      if (e.key.toLowerCase() === 'w') setGizmoMode('translate');
+      else if (e.key.toLowerCase() === 'e') setGizmoMode('rotate');
+      else if (e.key.toLowerCase() === 'r' && !e.ctrlKey && !e.metaKey) setGizmoMode('scale');
+      else if (e.key.toLowerCase() === 'g') setGizmoMode('translate');
+      else if (e.key === 'Escape') { selectEntityRef.current?.(null); (window as any).__director_selected__ = null; }
+      else if (e.key === 'Delete' || e.key === 'Backspace') {
+        const id = (window as any).__director_selected__ as string | null;
+        if (id && id.startsWith('custom_')) deleteSelectedCustomRef.current?.();
+      }
+    };
     container.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
     container.addEventListener('wheel', onWheel, { passive: false });
     container.addEventListener('contextmenu', onContextMenu);
+    window.addEventListener('keydown', onKeyDown);
     return () => {
       container.removeEventListener('mousedown', onMouseDown);
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
       container.removeEventListener('wheel', onWheel);
       container.removeEventListener('contextmenu', onContextMenu);
+      window.removeEventListener('keydown', onKeyDown);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [updateMainCameraPosition]);
 
   const handleExecuteAiDirective = async () => {
@@ -1142,7 +1501,18 @@ export const Director3DStage: React.FC = () => {
     if (!activeShot) return;
     await invokeTool('director_3d_stage_plan', { framing, motion, pose, focal_length_mm: focalLength, camera_roll_deg: cameraRoll, cast_layout: castLayout, speed: motionSpeed });
     const updatedVideoPrompt = activeShot.video_prompt ? `${activeShot.video_prompt.replace(/\[Camera:[^\]]+\]/g, '').trim()} ${minimaxPromptPreview}`.trim() : minimaxPromptPreview;
-    updateShot(activeShot.id, { camera_framing: framing, camera_motion: motion, pose_preset: pose, focal_length_mm: focalLength, camera_roll_deg: cameraRoll, cast_layout: castLayout, props_config: propsConfig, video_prompt: updatedVideoPrompt, motion_speed: motionSpeed, walk_path: waypointsRef.current, lighting_config: { keyIntensity, keyAzimuth, keyTemp, rimIntensity, ambientIntensity, exposure } });
+    // 同步Gizmo摆位：从场景实时抓取，避免ref滞后导致丢摆放
+    try {
+      const g = stageEntitiesGroupRef.current;
+      if (g) {
+        g.children.forEach((o) => {
+          if (o.name && !o.name.startsWith('walk_')) {
+            entityTransformsRef.current[o.name] = { p: [o.position.x, o.position.y, o.position.z], r: [o.rotation.x, o.rotation.y, o.rotation.z], s: o.scale.x };
+          }
+        });
+      }
+    } catch {}
+    updateShot(activeShot.id, { camera_framing: framing, camera_motion: motion, pose_preset: pose, focal_length_mm: focalLength, camera_roll_deg: cameraRoll, cast_layout: castLayout, props_config: propsConfig, video_prompt: updatedVideoPrompt, motion_speed: motionSpeed, walk_path: waypointsRef.current, lighting_config: { keyIntensity, keyAzimuth, keyTemp, rimIntensity, ambientIntensity, exposure }, stage_layout: { ...entityTransformsRef.current } } as any);
     setAppliedSuccess(true); setTimeout(() => setAppliedSuccess(false), 2500);
   };
 
@@ -1307,7 +1677,7 @@ export const Director3DStage: React.FC = () => {
               {shots.map((sh, idx) => <option key={sh.id} value={sh.id}>#{sh.shot_index || idx + 1}: {sh.action_desc.slice(0, 16) || '分镜镜头'}</option>)}
             </select>
           </div>
-          {selectedEntity && <><span className="text-gray-600">|</span><div className="flex items-center space-x-1.5 bg-brand/20 border border-brand/40 px-2 py-0.5 rounded-full text-[10px] text-brand-light"><Focus className="w-3 h-3" /><span>选中: {selectedEntity === 'protagonist' ? '主角' : selectedEntity === 'antagonist' ? '对手' : selectedEntity}</span></div></>}
+          {selectedEntity && <><span className="text-gray-600">|</span><button onClick={() => selectEntity(null)} title="点击取消选中（Esc）" className="flex items-center space-x-1.5 bg-brand/20 border border-brand/40 px-2 py-0.5 rounded-full text-[10px] text-brand-light hover:bg-brand/30"><Focus className="w-3 h-3" /><span>选中: {entityLabel(selectedEntity)} ×</span></button></>}
         </div>
         <div className="absolute top-4 right-4 z-20 flex items-center space-x-2">
           <button onClick={handleResetView} className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-surface/85 hover:bg-surface border border-border text-xs text-gray-300 hover:text-white backdrop-blur-md shadow-md transition-all"><Compass className="w-3.5 h-3.5" /><span>视角复位</span></button>
@@ -1316,6 +1686,32 @@ export const Director3DStage: React.FC = () => {
           <button onClick={() => setShowPip(!showPip)} className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border text-xs backdrop-blur-md shadow-md transition-all ${showPip ? 'bg-brand/20 border-brand text-brand-light' : 'bg-surface/85 border-border text-gray-400 hover:text-white'}`}><Monitor className="w-3.5 h-3.5" /><span>监视器</span></button>
         </div>
         <div ref={containerRef} className="w-full h-full cursor-grab active:cursor-grabbing outline-none" />
+        {/* 物体摆放工具条（对标小云雀中间工具栏 + updream左侧栏）：选择/移动/旋转/缩放/吸附/撤销 */}
+        <div className="absolute left-4 top-1/2 -translate-y-1/2 z-20 flex flex-col items-center space-y-1 bg-surface/90 backdrop-blur-md p-1.5 rounded-2xl border border-border shadow-xl">
+          <button onClick={() => setGizmoMode('translate')} title="移动 (W/G)：拖坐标轴移动物体，空白拖拽旋转视角" className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all ${gizmoMode === 'translate' ? 'bg-brand text-white shadow-md' : 'text-gray-400 hover:text-white hover:bg-surface-secondary'}`}><Move className="w-4 h-4" /></button>
+          <button onClick={() => setGizmoMode('rotate')} title="旋转 (E)：拖圆环旋转，右侧可输角度" className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all ${gizmoMode === 'rotate' ? 'bg-brand text-white shadow-md' : 'text-gray-400 hover:text-white hover:bg-surface-secondary'}`}><Rotate3d className="w-4 h-4" /></button>
+          <button onClick={() => setGizmoMode('scale')} title="缩放 (R)：拖手柄缩放" className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all ${gizmoMode === 'scale' ? 'bg-brand text-white shadow-md' : 'text-gray-400 hover:text-white hover:bg-surface-secondary'}`}><Maximize2 className="w-4 h-4" /></button>
+          <div className="w-6 h-px bg-border" />
+          <button onClick={() => setSnapEnabled((v) => !v)} title={snapEnabled ? '吸附开：移动0.1m/旋转5°（点击关闭）' : '吸附关（点击开启）'} className={`w-9 h-9 rounded-xl flex items-center justify-center text-xs font-bold transition-all ${snapEnabled ? 'bg-accent-blue/20 text-accent-blue border border-accent-blue/40' : 'text-gray-500 hover:text-white'}`}>🧲</button>
+          <button onClick={undoLastTransform} title="撤销上次摆放 (Ctrl+Z)" className="w-9 h-9 rounded-xl flex items-center justify-center text-gray-400 hover:text-white hover:bg-surface-secondary transition-all">↩</button>
+          <button onClick={resetSelectedTransform} title="复位选中物体到默认摆位（小云雀式复位）" className="w-9 h-9 rounded-xl flex items-center justify-center text-gray-400 hover:text-white hover:bg-surface-secondary transition-all"><RefreshCw className="w-4 h-4" /></button>
+        </div>
+        {/* 底部操作提示（对标updream快捷键教学） */}
+        <div className="absolute bottom-[5.2rem] left-16 z-10 hidden md:block text-[10px] text-gray-500 leading-4 bg-black/40 px-2 py-1 rounded-lg backdrop-blur-sm pointer-events-none">
+          左键点击选中 · 拖轴移动/旋转 · 拖空白旋转视角 · 右键平移 · 滚轮缩放 · <span className="text-gray-300 font-mono">W移动 E旋转 R缩放 Ctrl+Z撤销 Esc取消</span>
+        </div>
+        {/* 大纲列表（对标updream图层区 + 小云雀左侧素材区）：点选比视口点选更可靠，支持锁定防误拖 */}
+        {entityList.length > 0 && (
+          <div className="absolute left-16 top-[4.2rem] z-20 w-36 bg-surface/90 backdrop-blur-md rounded-2xl border border-border shadow-xl p-1.5 space-y-0.5 max-h-56 overflow-y-auto custom-scrollbar">
+            <div className="text-[10px] text-gray-500 font-bold px-1.5 py-1">场景大纲 ({entityList.length})</div>
+            {entityList.map((e) => (
+              <div key={e.id} className={`group flex items-center space-x-1 px-1.5 py-1 rounded-lg text-[11px] cursor-pointer transition-all ${selectedEntity === e.id ? 'bg-brand/20 text-white border border-brand/40' : 'text-gray-400 hover:text-white hover:bg-surface-secondary border border-transparent'}`}>
+                <button onClick={() => selectEntity(e.id)} className="flex-1 text-left truncate">{e.label}</button>
+                <button onClick={() => setLockedIds((prev) => ({ ...prev, [e.id]: !prev[e.id] }))} title={lockedIds[e.id] ? '解锁（允许拖拽）' : '锁定（防误拖，对标updream锁定）'} className={`text-[10px] px-1 rounded ${lockedIds[e.id] ? 'text-yellow-300' : 'text-gray-600 hover:text-gray-300 opacity-0 group-hover:opacity-100'}`}>{lockedIds[e.id] ? '🔒' : '🔓'}</button>
+              </div>
+            ))}
+          </div>
+        )}
         {/* Agent 场景生成条 */}
         <div className="absolute top-[4.2rem] left-4 right-4 md:right-72 z-20 flex items-center space-x-2 bg-gradient-to-r from-brand/15 to-accent-blue/15 backdrop-blur-md p-2 rounded-2xl border border-brand/30 shadow-xl">
           <div className="flex items-center space-x-1.5 pl-2 text-brand-light"><Lightbulb className="w-4 h-4" /><span className="text-[10px] font-bold">Agent 布景</span></div>
@@ -1390,6 +1786,32 @@ export const Director3DStage: React.FC = () => {
           )}
           {activeRightTab === 'cast_props' && (
             <>
+              {/* 选中物体数值面板（对标小云雀右侧属性 + updream右侧机位/人物选项卡）：Gizmo拖 + 数值输双通道 */}
+              <div className="p-3 rounded-xl bg-surface-secondary border border-brand/30 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-white">🎯 选中物体 {selectedEntity ? `· ${entityLabel(selectedEntity)}` : '· 未选中'}</span>
+                  {selectedEntity && <span className="text-[10px] font-mono text-gray-500">{selectedEntity}</span>}
+                </div>
+                {!selectedEntity && <div className="text-[11px] text-gray-500 leading-4">点击视口中任意角色/道具，或左侧大纲点选。拖坐标轴手柄移动，右侧数值可精确输入（小云雀式双通道）。</div>}
+                {selectedEntity && selectedTransform && (
+                  <>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      <label className="text-[10px] text-gray-400">X<input type="number" step="0.1" value={Number(selectedTransform.p[0].toFixed(2))} onChange={(e) => applyNumericToSelected({ px: parseFloat(e.target.value) || 0 })} className="mt-0.5 w-full bg-surface border border-border rounded-lg px-1.5 py-1 text-[11px] text-white font-mono focus:border-brand focus:outline-none" /></label>
+                      <label className="text-[10px] text-gray-400">Y<input type="number" step="0.1" value={Number(selectedTransform.p[1].toFixed(2))} onChange={(e) => applyNumericToSelected({ py: parseFloat(e.target.value) || 0 })} className="mt-0.5 w-full bg-surface border border-border rounded-lg px-1.5 py-1 text-[11px] text-white font-mono focus:border-brand focus:outline-none" /></label>
+                      <label className="text-[10px] text-gray-400">Z<input type="number" step="0.1" value={Number(selectedTransform.p[2].toFixed(2))} onChange={(e) => applyNumericToSelected({ pz: parseFloat(e.target.value) || 0 })} className="mt-0.5 w-full bg-surface border border-border rounded-lg px-1.5 py-1 text-[11px] text-white font-mono focus:border-brand focus:outline-none" /></label>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <label className="text-[10px] text-gray-400">朝向°<input type="number" step="5" value={Number(((selectedTransform.r[1] * 180) / Math.PI).toFixed(0))} onChange={(e) => applyNumericToSelected({ ry: parseFloat(e.target.value) || 0 })} className="mt-0.5 w-full bg-surface border border-border rounded-lg px-1.5 py-1 text-[11px] text-white font-mono focus:border-brand focus:outline-none" /></label>
+                      <label className="text-[10px] text-gray-400">缩放<input type="number" step="0.1" min="0.1" max="5" value={Number(selectedTransform.s.toFixed(2))} onChange={(e) => applyNumericToSelected({ s: parseFloat(e.target.value) || 1 })} className="mt-0.5 w-full bg-surface border border-border rounded-lg px-1.5 py-1 text-[11px] text-white font-mono focus:border-brand focus:outline-none" /></label>
+                    </div>
+                    <div className="flex items-center space-x-1.5">
+                      <button onClick={() => setLockedIds((prev) => selectedEntity ? { ...prev, [selectedEntity]: !prev[selectedEntity] } : prev)} className="flex-1 py-1.5 rounded-lg bg-surface border border-border text-[11px] text-gray-300 hover:text-white">{lockedIds[selectedEntity] ? '🔒 已锁定（点击解锁）' : '🔓 未锁定（点击锁定防误拖）'}</button>
+                      <button onClick={resetSelectedTransform} className="flex-1 py-1.5 rounded-lg bg-surface border border-border text-[11px] text-gray-300 hover:text-white">复位摆位</button>
+                      {selectedEntity.startsWith('custom_') && <button onClick={deleteSelectedCustom} className="flex-1 py-1.5 rounded-lg bg-red-500/20 border border-red-500/40 text-[11px] text-red-300 hover:text-white">删除模型</button>}
+                    </div>
+                  </>
+                )}
+              </div>
               <div>
                 <label className="text-xs text-gray-300 font-semibold mb-2 flex items-center justify-between"><span>👥 多角色空间站位 (Cast Staging)</span><span className="text-[10px] text-accent-orange font-mono bg-accent-orange/10 px-2 py-0.5 rounded">{castLayout}</span></label>
                 <div className="grid grid-cols-2 gap-2">{CAST_LAYOUTS.map((c) => <button key={c.id} onClick={() => setCastLayout(c.id)} className={`p-2.5 rounded-xl text-left border transition-all ${castLayout === c.id ? 'bg-accent-orange/20 border-accent-orange text-white shadow-md ring-1 ring-accent-orange' : 'bg-surface-secondary border-border text-gray-400 hover:text-gray-200'}`}><div className="text-xs font-bold">{c.label}</div><div className="text-[9px] text-gray-500 mt-0.5">{c.desc}</div></button>)}</div>

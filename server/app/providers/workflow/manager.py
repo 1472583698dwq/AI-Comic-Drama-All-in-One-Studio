@@ -751,7 +751,8 @@ def _legacy_convert_save_format_to_api_format(data: Dict[str, Any], object_info:
     NON_EXECUTABLE = {
         "MarkdownNote", "Note", "TextNote", "WorkflowNotes", "GroupNote",
         "Comment", "DisplayNote", "PrimitiveNodeNote", "EasyMarkdown",
-        "CR Note", "CR Text", "Markdown", "Reroute", "PrimitiveNode"
+        "CR Note", "CR Text", "Markdown", "Reroute", "PrimitiveNode",
+        "Label",  # rgthree-comfy 标题装饰节点
     }
 
     # 收集 PrimitiveNode 的真实值与 Reroute
@@ -2109,11 +2110,12 @@ class ComfyWorkflowManager:
 
         # 1. 官方 CLI 定义的 UI-only 类型（永远不出现在 API 输出中）
         CLI_UI_ONLY = {"Note", "MarkdownNote", "PrimitiveNode", "GetNode", "SetNode", "Reroute"}
-        # 扩展：本项目历史过滤的注释类型
+        # 扩展：本项目历史过滤的注释类型（含 rgthree-comfy 的 Label 标题装饰节点，无输入输出，缺插件会导致 missing_node_type）
         NON_EXECUTABLE_CLASSES = CLI_UI_ONLY | {
             "TextNote", "WorkflowNotes", "GroupNote",
             "Comment", "DisplayNote", "PrimitiveNodeNote", "EasyMarkdown",
-            "CR Note", "CR Text", "Markdown", "LoadImageOutput"
+            "CR Note", "CR Text", "Markdown", "LoadImageOutput",
+            "Label",
         }
 
         # 先过滤纯注释节点
@@ -2195,6 +2197,73 @@ class ComfyWorkflowManager:
                         pass
                 return cleaned
         return filtered
+
+    # 提交前可安全剥离的装饰类节点（无输入输出、纯画布装饰）
+    DECORATIVE_NODE_TYPES = frozenset({"Label"})
+
+    def strip_unsupported_nodes(self, prompt, object_info=None):
+        """提交 /prompt 前最后一道防线（输入为 API-format prompt）。
+
+        - 装饰类（Label 等）：一律剥离并清理孤儿引用；
+        - object_info 中不存在的 class_type：无任何连线引用则剥离（保主链路不断），
+          被其他节点引用则抛 RuntimeError，明确提示安装对应插件（fail fast，
+          比 ComfyUI 400 更易懂）；
+        - object_info 取不到（服务器离线）时只做装饰剥离，不做未知判定。
+
+        返回 (cleaned_prompt, stripped[{id, class_type, title}])。
+        """
+        if not isinstance(prompt, dict) or not prompt:
+            return prompt, []
+        cleaned = {k: v for k, v in prompt.items() if isinstance(v, dict)}
+        stripped = []
+        for nid in [k for k, v in cleaned.items() if v.get("class_type") in self.DECORATIVE_NODE_TYPES]:
+            node = cleaned[nid]
+            stripped.append({
+                "id": str(nid),
+                "class_type": node.get("class_type"),
+                "title": str((node.get("_meta") or {}).get("title", "") or ""),
+            })
+            del cleaned[nid]
+        # 收集被其他节点输入引用的 id
+        referenced = set()
+        for node in cleaned.values():
+            inputs = node.get("inputs")
+            if not isinstance(inputs, dict):
+                continue
+            for val in inputs.values():
+                if isinstance(val, list) and len(val) == 2 and isinstance(val[0], (str, int)):
+                    referenced.add(str(val[0]))
+        if object_info is None:
+            try:
+                object_info = _fetch_object_info()
+            except Exception:
+                object_info = None
+        if isinstance(object_info, dict) and object_info:
+            known = set(object_info.keys())
+            for nid, node in list(cleaned.items()):
+                ct = node.get("class_type")
+                if not ct or ct in known:
+                    continue
+                title = str((node.get("_meta") or {}).get("title", "") or "") or ct
+                if str(nid) in referenced:
+                    raise RuntimeError(
+                        f"ComfyUI 缺少运行此工作流所需的自定义插件节点 [{ct}] (节点: '{title}', ID #{nid})。\n"
+                        f"💡 解决方法：\n"
+                        f"1. 请在 ComfyUI Manager (插件管理器) 中搜索并安装包含 '{ct}' 的插件包后重启 ComfyUI；\n"
+                        f"2. 或在 ComfyUI 画布中移除或替换此节点后重新导出/重新导入工作流。"
+                    )
+                stripped.append({"id": str(nid), "class_type": ct, "title": title})
+                del cleaned[nid]
+        # 清理剥离后产生的孤儿引用
+        for node in cleaned.values():
+            inputs = node.get("inputs")
+            if not isinstance(inputs, dict):
+                continue
+            for name in list(inputs):
+                val = inputs[name]
+                if isinstance(val, list) and len(val) == 2 and isinstance(val[0], (str, int)) and str(val[0]) not in cleaned:
+                    del inputs[name]
+        return cleaned, stripped
 
     def inject_params(
         self,
@@ -2982,10 +3051,16 @@ class ComfyWorkflowManager:
         server_url = (getattr(settings, "COMFYUI_SERVER_URL", "") or "http://127.0.0.1:8188").rstrip("/")
         try:
             import httpx
+            # 校验同样先过提交前防线：装饰节点剥离后不再误报，真实缺插件直接返回友好错误
+            stripped = []
+            try:
+                injected, stripped = self.strip_unsupported_nodes(injected)
+            except RuntimeError as pre_e:
+                return {"valid": False, "errors": [{"message": str(pre_e), "suggested_fix": "请在 ComfyUI Manager 中安装缺失的插件包后重启"}], "stripped": stripped}
             async with httpx.AsyncClient(timeout=10.0) as client:
                 r = await client.post(f"{server_url}/prompt", json={"prompt": injected, "client_id": "test_validate"})
                 if r.status_code == 200:
-                    return {"valid": True, "node_count": len(injected), "prompt_id": r.json().get("prompt_id")}
+                    return {"valid": True, "node_count": len(injected), "prompt_id": r.json().get("prompt_id"), "stripped": stripped}
 
                 err = r.json()
                 errors = []

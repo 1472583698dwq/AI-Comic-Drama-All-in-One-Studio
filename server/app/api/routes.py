@@ -1095,6 +1095,16 @@ async def websocket_agent_endpoint(websocket: WebSocket):
                         pass
                 continue
 
+            # ── P1 HITL审批回执 ──
+            if action == "approve_tool":
+                try:
+                    from app.pipelines.agent.langchain_engine import resolve_approval
+                    _ok = resolve_approval(str(data.get("approval_id") or ""), bool(data.get("approved", False)))
+                    await websocket.send_json({"event": "approval_ack", "approval_id": data.get("approval_id"), "approved": bool(data.get("approved", False)), "resolved": _ok})
+                except Exception as e:
+                    await websocket.send_json({"event": "error", "message": f"审批回执失败: {e}"})
+                continue
+
             if action not in ("agent_prompt", "clear_history", "abort"):
                 await websocket.send_json({"event": "error", "message": f"未知 action: {data.get('action')}"})
                 continue
@@ -1127,6 +1137,27 @@ async def websocket_agent_endpoint(websocket: WebSocket):
                 await websocket.send_json({"event": "error", "message": "已有任务运行中，请先暂停再发新指令"})
                 continue
 
+            # Agent双模式：chat纯问答 / execute调工具（P0）
+            try:
+                from app.agent.loop import normalize_mode as _nmode
+                _wmode = _nmode(data.get("mode"))
+            except Exception:
+                _wmode = "execute"
+            if _wmode == "chat":
+                try:
+                    await websocket.send_json({"event": "agent_thinking", "message": "问答模式思考中（不调工具）…"})
+                    reply = await llm_service.chat_completion(
+                        messages=[
+                            {"role": "system", "content": "你是AI漫剧导演顾问，只做问答讲解，不调用任何工具。用中文简洁回答。"},
+                            {"role": "user", "content": prompt_text[:4000]},
+                        ],
+                        temperature=0.5,
+                    )
+                    await websocket.send_json({"event": "agent_response", "message": reply, "suggested_actions": ["切换到执行模式让我直接做"], "executed_tools": [], "mode": "chat"})
+                except Exception as e:
+                    await websocket.send_json({"event": "error", "message": str(e)})
+                continue
+
             # 优先使用 LangChain 引擎（带记忆、循环、流式）— 后台任务化以支持 abort
             if HAS_LANGCHAIN_AGENT:
                 # 捕获外层变量供闭包使用
@@ -1143,12 +1174,14 @@ async def websocket_agent_endpoint(websocket: WebSocket):
                             session_id=_sid,
                             websocket=websocket,
                             streaming=True,
+                            mode="execute",
                         )
                         await websocket.send_json({
                             "event": "agent_response",
                             "message": result.get("reply", "指令已执行。"),
                             "suggested_actions": result.get("suggested_actions") or [],
                             "executed_tools": result.get("executed_tools") or [],
+                            "mode": "execute",
                         })
                     except asyncio.CancelledError:
                         # 任务被 abort 取消，静默结束（外层已发暂停回执）
@@ -1306,6 +1339,7 @@ class AgentChatRequest(BaseModel):
     context: Dict[str, Any] = Field(default_factory=dict)
     session_id: Optional[str] = Field(default=None, description="会话ID，用于多轮记忆隔离")
     stream: bool = Field(default=False, description="是否流式返回")
+    mode: str = Field(default="execute", description="Agent模式：chat问答（不调工具）| execute执行（ReAct调工具生成）")
 
 def _is_masked_placeholder(v: str) -> bool:
     return "****" in v
@@ -1543,12 +1577,32 @@ async def test_config_connection(req: ConfigTestRequest):
 
 @router.post("/agent/chat")
 async def http_agent_chat(req: AgentChatRequest):
-    """导演 Agent HTTP 问答 — LangChain 多轮循环 + 记忆（兼容旧接口）"""
+    """导演 Agent HTTP 问答 — LangChain 多轮循环 + 记忆（兼容旧接口）
+
+    mode=chat：纯问答，不调任何工具；mode=execute：ReAct调工具生成。
+    """
     prompt_text = (req.prompt or "").strip()
     if not prompt_text:
         raise HTTPException(status_code=400, detail="指令不能为空")
 
     session_id = req.session_id or (req.context.get("project_id") if isinstance(req.context, dict) and req.context.get("project_id") else "http_default")
+    try:
+        from app.agent.loop import normalize_mode
+        _mode = normalize_mode(getattr(req, "mode", "execute"))
+    except Exception:
+        _mode = "execute"
+    if _mode == "chat":
+        try:
+            reply = await llm_service.chat_completion(
+                messages=[
+                    {"role": "system", "content": "你是AI漫剧导演顾问，只做问答讲解，不调用任何工具。用中文简洁回答，涉及操作时给出步骤。"},
+                    {"role": "user", "content": prompt_text[:4000]},
+                ],
+                temperature=0.5,
+            )
+            return {"reply": reply, "suggested_actions": ["切换到执行模式让我直接做", "继续追问细节"], "executed_tools": [], "mode": "chat"}
+        except LLMServiceError as e:
+            raise HTTPException(status_code=503, detail=str(e))
     # 若请求要求流式，则走 SSE
     if req.stream:
         # 复用流式端点逻辑，但此处返回错误提示引导使用 /agent/chat/stream
@@ -1615,8 +1669,28 @@ async def http_agent_chat_stream(req: AgentChatRequest):
     if not prompt_text:
         raise HTTPException(status_code=400, detail="指令不能为空")
     session_id = req.session_id or (req.context.get("project_id") if isinstance(req.context, dict) and req.context.get("project_id") else "http_stream")
+    try:
+        from app.agent.loop import normalize_mode as _nm
+        _smode = _nm(getattr(req, "mode", "execute"))
+    except Exception:
+        _smode = "execute"
 
     async def event_generator():
+        if _smode == "chat":
+            try:
+                reply = await llm_service.chat_completion(
+                    messages=[
+                        {"role": "system", "content": "你是AI漫剧导演顾问，只做问答讲解，不调用任何工具。用中文简洁回答。"},
+                        {"role": "user", "content": prompt_text[:4000]},
+                    ],
+                    temperature=0.5,
+                )
+                yield f"data: {json.dumps({'event':'agent_response','message':reply,'suggested_actions':['切换到执行模式让我直接做'],'mode':'chat'}, ensure_ascii=False)}\n\n"
+                yield "data: [DONE]\n\n"
+            except Exception as e:
+                yield f"data: {json.dumps({'event':'error','message':str(e)}, ensure_ascii=False)}\n\n"
+                yield "data: [DONE]\n\n"
+            return
         # 辅助发送函数
         async def send_event(event: str, data: Dict[str, Any]):
             # SSE 格式：data: json\n\n
