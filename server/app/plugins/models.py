@@ -17,6 +17,7 @@ class PluginExtensionPoints(BaseModel):
     providers: List[str] = Field(default_factory=list)
     skills: List[str] = Field(default_factory=list)
     workflows: List[str] = Field(default_factory=list)
+    custom_nodes: List[str] = Field(default_factory=list)
     # P1预留：声明后仅展示，不执行
     mcp_tools: List[str] = Field(default_factory=list)
     canvas_nodes: List[str] = Field(default_factory=list)
@@ -47,6 +48,17 @@ class PluginRecord(BaseModel):
     installed_files: List[str] = Field(default_factory=list)
     provider_ids: List[str] = Field(default_factory=list)
     skill_names: List[str] = Field(default_factory=list)
+    workflow_ids: List[str] = Field(default_factory=list)
+    mcp_tools: List[str] = Field(default_factory=list)
+
+
+# mcp_tools 查壳文件契约（P1）：每个 .py 须定义 PLUGIN_TOOLS 列表 + 同模块入口函数
+# PLUGIN_TOOLS = [{"name": "text_stats", "description": "...",
+#                  "input_schema": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
+#                  "entry": "text_stats"}]
+# def text_stats(args: dict, ctx: dict) -> dict: return {...}
+# 注册名为 plugin_<插件id>_<name>；执行强制走 trusted 总闸 + 30s超时 + 结果截断。
+MCP_TOOL_NAME_RE = r"^[a-z0-9_]{2,48}$"
 
 
 MANIFEST_TEMPLATE: Dict = {
@@ -60,6 +72,7 @@ MANIFEST_TEMPLATE: Dict = {
         "providers": ["providers/*.json"],
         "skills": ["skills/*/SKILL.md"],
         "workflows": ["workflows/*.json"],
+        "custom_nodes": ["custom_nodes/*.json"],
     },
 }
 
@@ -67,8 +80,9 @@ MANIFEST_TEMPLATE: Dict = {
 EXTENSION_POINTS_DOC: Dict[str, str] = {
     "providers": "P0可用：ProviderDefinition JSON（推荐code模式python/javascript），启用后热注册并自动转为 provider_* MCP Tool + 画布可选源",
     "skills": "P0可用：SKILL.md目录（含name/description/tools frontmatter），通用技能零代码生效，编排技能需P1",
-    "workflows": "P0半可用：ComfyUI工作流JSON落盘到storage/workflows，启用后需到Infra页手动同步（P1自动单文件sync）",
-    "mcp_tools": "P1：在插件内声明新增MCP工具（python函数+schema），走trusted闸门执行",
+    "workflows": "P1可用：ComfyUI工作流JSON经save_workflow校验入库（含Save格式自动转换）并自动sync为独立生成源",
+    "mcp_tools": "P1可用：在插件内声明新增MCP工具（python查壳函数+schema），注册为 plugin_<id>_<name>，执行强制走trusted总闸",
+    "custom_nodes": "P1可用：代码节点包（input_schema+params_schema+run代码JSON），启用后体检入库并出现在画布工具栏",
     "canvas_nodes": "P1：声明新画布节点类型（NodeSpec+组件），需前端贡献点注册",
     "director_packs": "P1：导演台扩展包（预设/环境/道具/GLB），复用directorPresets同源机制",
     "exporters": "P1：新导出目标（CapCut/FFmpeg/MP4），复用ExportModal装配",

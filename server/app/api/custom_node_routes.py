@@ -1,0 +1,79 @@
+# -*- coding: utf-8 -*-
+"""自定义节点 HTTP API — 列表 / 详情 / 单次执行 / 代码模板。
+
+节点创作统一走插件包（custom_nodes/*.json，随包安装启用）；
+本路由仅读与执行，不设独立增删改。
+"""
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+
+from app.custom_nodes.manager import custom_node_manager, run_custom_node
+from app.custom_nodes.models import CustomNodeDefinition, PY_RUN_TEMPLATE, JS_RUN_TEMPLATE
+
+router = APIRouter()
+
+
+class CustomNodeRunRequest(BaseModel):
+    model_config = {"extra": "allow"}
+    custom_node_id: str = ""
+    inputs: Dict[str, Any] = {}
+    params: Dict[str, Any] = {}
+    project_id: Optional[str] = None
+
+
+def _to_info(d: CustomNodeDefinition) -> Dict[str, Any]:
+    info = d.model_dump()
+    info["has_code"] = bool(d.code)
+    return info
+
+
+@router.get("/custom-nodes")
+async def list_custom_nodes(kind: Optional[str] = None):
+    nodes = custom_node_manager.list_nodes(kind=kind)
+    try:
+        from app.mcp.server import mcp_registry
+        tool_names = {t.name for t in mcp_registry.get_all_tools()}
+    except Exception:
+        tool_names = set()
+    out = []
+    for n in nodes:
+        info = _to_info(n)
+        info["mcp_tool"] = f"customnode_{n.id}" if f"customnode_{n.id}" in tool_names else None
+        out.append(info)
+    return {"nodes": out, "total": len(out)}
+
+
+@router.get("/custom-nodes/templates")
+async def custom_node_templates():
+    return {
+        "python": PY_RUN_TEMPLATE,
+        "javascript": JS_RUN_TEMPLATE,
+        "contract": "async def run(inputs, params, ctx) -> dict；返回 image_url/video_url/audio_url/text",
+    }
+
+
+@router.get("/custom-nodes/{nid}")
+async def get_custom_node(nid: str):
+    d = custom_node_manager.get(nid)
+    if not d:
+        raise HTTPException(status_code=404, detail=f"自定义节点不存在: {nid}")
+    return {"node": _to_info(d)}
+
+
+@router.post("/custom-nodes/run")
+async def run_custom_node_once(req: CustomNodeRunRequest):
+    """单次执行（节点内按钮/测试）：收集好的 inputs + params 直调。"""
+    d = custom_node_manager.get(req.custom_node_id)
+    if not d:
+        raise HTTPException(status_code=404, detail=f"自定义节点不存在: {req.custom_node_id}")
+    if not d.enabled:
+        raise HTTPException(status_code=400, detail="该节点已禁用")
+    try:
+        result = await run_custom_node(d, req.inputs or {}, req.params or {}, {"project_id": req.project_id})
+        if not isinstance(result, dict):
+            raise ValueError("节点代码须返回dict")
+        return {"status": "success", "custom_node_id": d.id, "kind": d.kind, **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"自定义节点执行失败: {e}")

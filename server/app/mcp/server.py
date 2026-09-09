@@ -1044,6 +1044,39 @@ class MCPServerRegistry:
             }
         ))
 
+        # --- Creator 能力提案链（参考 DeepSeek Harness Creator）：inspect/propose/start/finalize ---
+        self.register_tool(MCPToolDefinition(
+            name="creator_inspect_runtime",
+            description="[Creator只读] 检查运行时：生成源/技能/画布/工作流现状，供提案依据。零副作用。",
+            category="utility", icon="ScanEye", author="Creator", is_enabled=True,
+            input_schema={"type": "object", "properties": {}, "required": []}
+        ))
+        self.register_tool(MCPToolDefinition(
+            name="creator_propose_capability",
+            description="[Creator提案] 缺能力先造能力：补源参数/接新源/新Skill/画布模板。只生成临时提案，需人Start才试跑。",
+            category="workflow", icon="Lightbulb", author="Creator", is_enabled=True,
+            input_schema={"type": "object", "properties": {
+                "goal": {"type": "string", "description": "要补的能力，如 给H3补first_frame插槽 / 做个6格漫剧模板"},
+            }, "required": ["goal"]}
+        ))
+        self.register_tool(MCPToolDefinition(
+            name="creator_start_test",
+            description="[Creator试跑] 人来Start后只做只读/小参试跑，不写生产。返回试跑报告。",
+            category="workflow", icon="FlaskConical", author="Creator", is_enabled=True,
+            input_schema={"type": "object", "properties": {
+                "proposal_id": {"type": "string", "description": "提案ID，如 prop_xxx"},
+            }, "required": ["proposal_id"]}
+        ))
+        self.register_tool(MCPToolDefinition(
+            name="creator_finalize",
+            description="[Creator收尾] persist真写生产（备份→写入→热重载→试跑，失败自回滚）/ discard卸载临时包 / rollback按备份恢复。",
+            category="workflow", icon="PackageCheck", author="Creator", is_enabled=True,
+            input_schema={"type": "object", "properties": {
+                "proposal_id": {"type": "string"},
+                "action": {"type": "string", "enum": ["persist", "discard", "rollback"], "default": "persist"},
+            }, "required": ["proposal_id"]}
+        ))
+
     # ========== 动态 Provider→MCP 统一：异构参数即工具输入，节点Agent按 Tool 调度 ==========
     def _provider_to_tool(self, provider_id: str, kind: str, definition=None, provider_obj=None) -> MCPToolDefinition:
         """将单个 ProviderDefinition/Provider实例转为 MCP Tool，输入= input_schema + params_schema + model"""
@@ -1190,6 +1223,38 @@ class MCPServerRegistry:
         except Exception as e:
             print(f"[MCP] refresh_provider_tools failed: {e}")
 
+    def refresh_customnode_tools(self):
+        """自定义代码节点 → customnode_<id> MCP Tool（一节点一Tool，Agent/节点可直接调度）"""
+        for k in list(self.tools.keys()):
+            if k.startswith("customnode_"):
+                del self.tools[k]
+        try:
+            from app.custom_nodes.manager import custom_node_manager
+            for d in custom_node_manager.list_nodes():
+                if not d.enabled:
+                    continue
+                try:
+                    in_props = dict(((d.input_schema or {}).get("properties") or {}))
+                    in_req = list(((d.input_schema or {}).get("required") or []))
+                    # 文本兜底：无显式文本槽也允许 prompt/text 直投
+                    if "prompt" not in in_props:
+                        in_props["prompt"] = {"type": "string", "description": "文本输入（未声明文本槽时的兜底）"}
+                    param_props = dict(((d.params_schema or {}).get("properties") or {}))
+                    merged_props = {**in_props, **param_props}
+                    self.register_tool(MCPToolDefinition(
+                        name=f"customnode_{d.id}",
+                        description=f"[自定义节点·{d.kind}] {d.name} — {d.description or '用户代码节点'}",
+                        category="ai_generation",
+                        icon="Boxes",
+                        author="CustomNode",
+                        is_enabled=True,
+                        input_schema={"type": "object", "properties": merged_props, "required": in_req},
+                    ))
+                except Exception as e:
+                    print(f"[MCP] register customnode tool {d.id} failed: {e}")
+        except Exception as e:
+            print(f"[MCP] refresh_customnode_tools failed: {e}")
+
     def register_tool(self, tool: MCPToolDefinition):
         self.tools[tool.name] = tool
 
@@ -1217,6 +1282,38 @@ class MCPServerRegistry:
                 except Exception as e:
                     return MCPToolCallResponse(tool_name=tool_name, status="error", result=None, error=f"search_tools失败: {e}", execution_time_ms=int((time.time()-start_time)*1000))
                 return MCPToolCallResponse(tool_name=tool_name, status="success", result=result, error=None, execution_time_ms=int((time.time()-start_time)*1000))
+            # 插件查壳工具：plugin_<id>_<name>，强制trusted总闸 + 30s超时（与fs_file/shell_exec同闸）
+            if tool_name.startswith("plugin_"):
+                try:
+                    from app.plugins.manager import run_plugin_tool
+                    result = await run_plugin_tool(tool_name, arguments or {})
+                except ValueError as e:
+                    return MCPToolCallResponse(tool_name=tool_name, status="error", result=None, error=str(e), execution_time_ms=int((time.time()-start_time)*1000))
+                except Exception as e:
+                    return MCPToolCallResponse(tool_name=tool_name, status="error", result=None, error=f"插件工具执行失败: {e}", execution_time_ms=int((time.time()-start_time)*1000))
+                return MCPToolCallResponse(tool_name=tool_name, status="success", result=result, error=None, execution_time_ms=int((time.time()-start_time)*1000))
+            # 自定义代码节点：customnode_<id>，inputs 按 input_schema 键收集，其余进 params
+            if tool_name.startswith("customnode_"):
+                try:
+                    from app.custom_nodes.manager import custom_node_manager, run_custom_node
+                    cnid = tool_name[len("customnode_"):]
+                    definition = custom_node_manager.get(cnid)
+                    if not definition:
+                        return MCPToolCallResponse(tool_name=tool_name, status="error", result=None, error=f"自定义节点不存在: {cnid}", execution_time_ms=int((time.time()-start_time)*1000))
+                    in_keys = set(((definition.input_schema or {}).get("properties") or {}).keys()) | {"prompt", "text"}
+                    param_keys = set(((definition.params_schema or {}).get("properties") or {}).keys())
+                    inputs = {k: v for k, v in (arguments or {}).items() if k in in_keys and v not in (None, "")}
+                    params = {k: v for k, v in (arguments or {}).items() if k in param_keys and v not in (None, "")}
+                    if isinstance((arguments or {}).get("params"), dict):
+                        for k, v in arguments["params"].items():
+                            if v not in (None, "") and k not in params:
+                                params[k] = v
+                    result = await run_custom_node(definition, inputs, params, {"project_id": (arguments or {}).get("_project_id")})
+                    if not isinstance(result, dict):
+                        return MCPToolCallResponse(tool_name=tool_name, status="error", result=None, error="自定义节点须返回dict", execution_time_ms=int((time.time()-start_time)*1000))
+                    return MCPToolCallResponse(tool_name=tool_name, status="success", result={"custom_node_id": cnid, "kind": definition.kind, **result}, error=None, execution_time_ms=int((time.time()-start_time)*1000))
+                except Exception as e:
+                    return MCPToolCallResponse(tool_name=tool_name, status="error", result=None, error=f"自定义节点执行失败: {e}", execution_time_ms=int((time.time()-start_time)*1000))
             # 动态 Provider Tool 统一调度：节点Agent按 Tool 调度，参数即该源 params_schema 异构输入
             if tool_name.startswith("provider_"):
                 provider_id = tool_name[len("provider_"):]
@@ -1858,6 +1955,27 @@ class MCPServerRegistry:
                 except Exception:
                     _to = 30
                 result = _run_trusted_shell(arguments.get("command") or "", arguments.get("cwd") or "", _to)
+
+            elif tool_name in ("creator_inspect_runtime", "creator_propose_capability", "creator_start_test", "creator_finalize"):
+                from app.agent import creator as _creator
+                if tool_name == "creator_inspect_runtime":
+                    result = _creator.inspect_runtime(project_context if isinstance(project_context, dict) else {"project": project_context})
+                elif tool_name == "creator_propose_capability":
+                    goal = (arguments.get("goal") or "").strip()
+                    if not goal:
+                        raise ValueError("goal 不能为空")
+                    result = _creator.propose_capability(goal, {"project": project_context} if project_context else {})
+                elif tool_name == "creator_start_test":
+                    pid = (arguments.get("proposal_id") or "").strip()
+                    if not pid:
+                        raise ValueError("proposal_id 不能为空")
+                    result = await _creator.start_test(pid, {"project": project_context} if project_context else {})
+                elif tool_name == "creator_finalize":
+                    pid = (arguments.get("proposal_id") or "").strip()
+                    act = (arguments.get("action") or "persist").strip()
+                    if not pid:
+                        raise ValueError("proposal_id 不能为空")
+                    result = await _creator.finalize(pid, act, {"project": project_context} if project_context else {})
 
             elif tool_name in ("canvas_query","canvas_create_node","canvas_update_node","canvas_connect","canvas_execute","canvas_dispatch_skill","canvas_query_assets"):
                 # 画布工具：真实持久化到 storage/projects/{id}/canvas.json，前端通过轮询/事件同步

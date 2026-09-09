@@ -99,10 +99,24 @@ async function pollVideoTask(taskId: string): Promise<string> {
   throw new Error(lastErr || `视频排队超时 task_id=${taskId}，请稍后重试或查看 /storage/videos/`);
 }
 
+const _customDefCache = new Map<string, any>();
+async function getCustomNodeDefinition(customNodeId: string): Promise<any> {
+  if (_customDefCache.has(customNodeId)) return _customDefCache.get(customNodeId);
+  try {
+    const res: any = await apiService.getCustomNode(customNodeId);
+    const def = res?.node || res;
+    _customDefCache.set(customNodeId, def);
+    return def;
+  } catch {
+    return null;
+  }
+}
+
 export function patchFromPayload(nodeType: string, payload: any): Record<string, any> {
   const patch: Record<string, any> = {};
   if (!payload || typeof payload !== 'object') return patch;
-  if (payload.image_url || (payload.url && nodeType === 'image')) {
+  if (nodeType === 'custom' && typeof payload.text === 'string' && payload.text) patch.text = payload.text;
+  if (payload.image_url || (payload.url && (nodeType === 'image' || nodeType === 'custom'))) {
     const u = payload.image_url || payload.url;
     patch.image_url = u;
     patch.result_url = u;
@@ -134,6 +148,41 @@ export async function executeAgentNode(opts: ExecuteAgentNodeOpts): Promise<Reco
     updateNodeData(node.id, { agent_state: s });
     onStateChange?.(s);
   };
+
+  // 自定义代码节点：按其 input_schema/params_schema 声明键收集，直调 /custom-nodes/run
+  if (node.type === 'custom') {
+    const cid: string = d.custom_node_id || '';
+    if (!cid) {
+      const st: AgentState = { status: 'failed', error: '未绑定自定义节点', updated_at: new Date().toISOString() };
+      setState(st);
+      throw new Error('请先在节点内选择自定义节点');
+    }
+    const start = Date.now();
+    setState({ status: 'running', tool: `customnode_${cid}`, updated_at: new Date().toISOString() });
+    try {
+      const def = await getCustomNodeDefinition(cid);
+      const inKeys = Object.keys(def?.input_schema?.properties || {});
+      const paramKeys = Object.keys(def?.params_schema?.properties || {});
+      const inputs: Record<string, any> = {};
+      for (const k of [...inKeys, 'prompt', 'text', 'video', 'video_url', 'image', 'image_url', 'reference_images', 'first_frame', 'audio', 'audio_url', 'ref_audio']) {
+        if (d[k] !== undefined && d[k] !== '' && !(Array.isArray(d[k]) && !d[k].length)) inputs[k] = d[k];
+      }
+      const params: Record<string, any> = { ...(d.params && typeof d.params === 'object' ? d.params : {}) };
+      for (const k of paramKeys) {
+        if (d[k] !== undefined && d[k] !== '' && params[k] === undefined) params[k] = d[k];
+      }
+      const payload: any = await apiService.runCustomNode({ custom_node_id: cid, inputs, params });
+      if (payload?.status === 'error') throw new Error(String(payload?.error || '自定义节点执行失败'));
+      const patch = patchFromPayload('custom', payload);
+      if (!Object.keys(patch).length) throw new Error(payload?.detail || '自定义节点未返回结果');
+      updateNodeData(node.id, patch);
+      setState({ status: 'completed', tool: `customnode_${cid}`, elapsed_ms: Date.now() - start, updated_at: new Date().toISOString() });
+      return payload;
+    } catch (e: any) {
+      setState({ status: 'failed', tool: `customnode_${cid}`, error: String(e?.message || e).slice(0, 200), elapsed_ms: Date.now() - start, updated_at: new Date().toISOString() });
+      throw e;
+    }
+  }
 
   if (!providerId) {
     const st: AgentState = { status: 'failed', error: '未绑定生成源，请在节点内选择', updated_at: new Date().toISOString() };

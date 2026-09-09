@@ -107,6 +107,17 @@ def collect_upstream_data(node_id: str, nodes: List[Dict], edges: List[Dict], re
                 if model:
                     data.setdefault("model", model)
                 continue
+        # 自定义节点源：按其产出内容推断句柄（视频→video，音频→audio，图像→参考集，文本→prompt）
+        if src_type == "custom" and not tgt_handle:
+            if src_res:
+                if src_res.get("video_url"):
+                    tgt_handle = "video"
+                elif src_res.get("audio_url"):
+                    tgt_handle = "audio"
+                elif src_res.get("image_url") or src_res.get("result_url"):
+                    tgt_handle = "reference_images"
+                elif src_res.get("prompt") or src_res.get("text"):
+                    tgt_handle = "prompt"
         # 若无显式 targetHandle，按源类型与目标节点类型推断
         if not tgt_handle:
             # 启发式：image 源 -> 若目标为 video 首帧优先 first_frame，否则 reference
@@ -402,6 +413,48 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
                 except Exception as e:
                     print(f"[Canvas] provider-audio generate failed, fallback: {e}")
             return {"status":"success","provider_id": prov_id, "provider": prov_id, "kind": kind, "model": model, "definition": data.get("definition"), "elapsed_ms": int((time.time()-start)*1000)}
+        elif ntype == "custom":
+            # 自定义代码节点：按其 input_schema 收集上游 → run(inputs, params) → 结果透传
+            cnid = data.get("custom_node_id") or data.get("customNodeId") or ""
+            if not cnid:
+                return {"status":"error","error":"未绑定自定义节点（custom_node_id 为空）"}
+            try:
+                from app.custom_nodes.manager import custom_node_manager, run_custom_node
+                definition = custom_node_manager.get(cnid)
+                if not definition:
+                    return {"status":"error","error":f"自定义节点不存在: {cnid}"}
+                if not definition.enabled:
+                    return {"status":"error","error":f"自定义节点已禁用: {cnid}"}
+                declared_in = list(((definition.input_schema or {}).get("properties") or {}).keys())
+                inputs: Dict[str, Any] = {}
+                for k in declared_in:
+                    v = upstream.get(k, merged.get(k, None))
+                    if v not in (None, ""):
+                        inputs[k] = v
+                # 文本兜底：prompt/text 互通
+                if "prompt" not in inputs and (upstream.get("prompt") or merged.get("prompt")):
+                    inputs["prompt"] = upstream.get("prompt") or merged.get("prompt")
+                if "text" not in inputs and (upstream.get("text") or merged.get("text")):
+                    inputs["text"] = upstream.get("text") or merged.get("text")
+                declared_params = list(((definition.params_schema or {}).get("properties") or {}).keys())
+                params: Dict[str, Any] = {}
+                for k in declared_params:
+                    v = merged.get(k, None)
+                    if v not in (None, ""):
+                        params[k] = v
+                # 节点内 params 字典整体透传（与 provider 节点一致）
+                if isinstance(merged.get("params"), dict):
+                    for k, v in merged["params"].items():
+                        if v not in (None, "") and k not in params:
+                            params[k] = v
+                result = await run_custom_node(definition, inputs, params, {"project_id": project_id})
+                if not isinstance(result, dict):
+                    return {"status":"error","error":"自定义节点须返回dict"}
+                out = {"status":"success","custom_node_id": cnid, "kind": definition.kind, "elapsed_ms": int((time.time()-start)*1000)}
+                out.update(result)
+                return out
+            except Exception as e:
+                return {"status":"error","error":f"自定义节点执行失败: {e}"}
         elif ntype == "brief":
             return {"status":"success","brief": data.get("brief",""), "elapsed_ms": int((time.time()-start)*1000)}
         elif ntype == "script-split":

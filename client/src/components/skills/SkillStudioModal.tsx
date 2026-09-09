@@ -19,6 +19,7 @@ import {
 import { apiService } from '../../services/api';
 import { useSkillStore } from '../../stores/useSkillStore';
 import { useProjectStore } from '../../stores/useProjectStore';
+import { SkillVersionDiff } from './SkillVersionDiff';
 import { SkillDefinition } from '../../types';
 
 interface SkillStudioModalProps {
@@ -54,7 +55,7 @@ export const SkillStudioModal: React.FC<SkillStudioModalProps> = ({ isOpen, onCl
     setImporting(true);
     try {
       const res = await apiService.importSkill(importFile || undefined, importContent || undefined, importName || undefined);
-      alert(`已导入技能: ${res.skill?.name || importName}`);
+      alert(`已导入技能: ${res.skill?.name || importName}${res.overwritten ? '（已覆盖旧版，旧版已自动备份，可在版本历史中 diff/回溯）' : ''}`);
       setShowImport(false);
       setImportFile(null);
       setImportContent('');
@@ -237,6 +238,9 @@ export const SkillStudioModal: React.FC<SkillStudioModalProps> = ({ isOpen, onCl
                     {selectedSkill.instructions || '此 Skill 声明了专属执行逻辑，执行时将自动调用关联的 MCP 工具。'}
                   </pre>
                 </div>
+
+                {/* Skill 版本历史与 diff */}
+                <SkillVersionDiff skillName={selectedSkill.name} />
 
                 {/* Execution Result Log Banner */}
                 {lastResult && (

@@ -103,6 +103,20 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   'load-video': { type:'load-video', label:'加载视频', desc:'兼容', color:'text-orange-400', inputs: [], outputs: [H('video','视频','video',true)] },
   'load-audio': { type:'load-audio', label:'加载音频', desc:'兼容', color:'text-pink-400', inputs: [], outputs: [H('audio','音频','audio',true)] },
   'text-prompt': { type:'text-prompt', label:'文本提示词', desc:'兼容', color:'text-sky-400', inputs: [], outputs: [H('prompt','提示词','text',true)] },
+  // 自定义代码节点：一段代码即一节点（视频超分/风格迁移…），输入输出按其 input_schema 动态解析，isCore 进工具栏
+  'custom': {
+    type:'custom', label:'自定义节点', desc:'代码节点（超分/处理）', color:'text-teal-400',
+    inputs: [
+      H('prompt','提示词','text'),
+      H('reference_images','参考集','image'),
+      H('first_frame','首帧','image'),
+      H('video','视频','video'),
+      H('audio','音频','audio'),
+      H('ref_audio','参考音频','audio'),
+    ],
+    outputs: [H('image','图像','image'), H('video','视频','video'), H('audio','音频','audio'), H('text','文本','text')],
+    isCore: true,
+  },
 };
 
 export function getNodeSpec(type:string): NodeSpec | undefined {

@@ -158,7 +158,15 @@ async def import_skill(
     dest_dir = os.path.join(SKILLS_ROOT_DIR, skill_name)
     os.makedirs(dest_dir, exist_ok=True)
     dest_path = os.path.join(dest_dir, "SKILL.md")
-    # 若已存在，覆盖
+    # 若已存在，先备份到版本库再覆盖（版本 diff 可回溯）
+    overwritten = os.path.exists(dest_path)
+    if overwritten:
+        try:
+            from app.agent.creator import backup_skill_version
+            with open(dest_path, "r", encoding="utf-8") as _f:
+                backup_skill_version(skill_name, _f.read(), "import-overwrite")
+        except Exception as e:
+            print(f"[Skills] 导入前备份失败: {e}")
     with open(dest_path, "w", encoding="utf-8") as f:
         f.write(raw_content)
 
@@ -172,7 +180,7 @@ async def import_skill(
     if not imported:
         raise HTTPException(status_code=500, detail="导入后未找到技能，请检查 SKILL.md 格式")
 
-    return {"status": "imported", "skill": imported.model_dump(), "total": len(skill_engine.list_skills())}
+    return {"status": "imported", "overwritten": overwritten, "skill": imported.model_dump(), "total": len(skill_engine.list_skills())}
 
 @router.delete("/skills/{skill_name}")
 async def delete_skill(skill_name: str):
@@ -1340,6 +1348,7 @@ class AgentChatRequest(BaseModel):
     session_id: Optional[str] = Field(default=None, description="会话ID，用于多轮记忆隔离")
     stream: bool = Field(default=False, description="是否流式返回")
     mode: str = Field(default="execute", description="Agent模式：chat问答（不调工具）| execute执行（ReAct调工具生成）")
+    run_mode: str = Field(default="approve", description="运行模式：approve审批 / auto自动 / create创造")
 
 def _is_masked_placeholder(v: str) -> bool:
     return "****" in v
@@ -1800,6 +1809,128 @@ async def clear_agent_history(body: Dict[str, Any] = {}):
         await clear_session(session_id)
         return {"status": "cleared", "session_id": session_id}
     return {"status": "ok", "session_id": session_id, "has_langchain": False}
+
+
+class AgentPlanPreviewRequest(BaseModel):
+    prompt: str = ""
+    context: Dict[str, Any] = Field(default_factory=dict)
+    run_mode: str = "approve"
+
+
+@router.post("/agent/plan/preview")
+async def agent_plan_preview(req: AgentPlanPreviewRequest):
+    """业务意图Plan预览(确定性规则，无LLM)：意图路由 + 可编辑步骤 + 是否需确认 + 预估耗时（含三模式闸）"""
+    from app.agent.business import build_plan
+    from app.agent.mode_policy import normalize_run_mode, apply_to_plan
+    plan = build_plan(req.prompt or "", req.context or {})
+    # 创造模式：若命中补源/新能力意图，附带一份临时提案（不生效，需人Start）
+    mode = normalize_run_mode(req.run_mode)
+    try:
+        if mode == "create":
+            from app.agent import creator as _creator
+            goal = (req.prompt or "")[:500]
+            if any(k in goal for k in ["补", "暴露", "参数", "模板", "Skill", "skill", "接入", "源", "H3", "h3", "first_frame"]):
+                prop = _creator.propose_capability(goal, req.context or {})
+                plan["creator_proposal"] = prop
+    except Exception as e:
+        plan["creator_note"] = f"提案生成失败: {e}"[:200]
+    return apply_to_plan(plan, mode)
+
+
+class CreatorProposeRequest(BaseModel):
+    goal: str = ""
+    context: Dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/agent/creator/propose")
+async def creator_propose(req: CreatorProposeRequest):
+    from app.agent import creator as _creator
+    if not (req.goal or "").strip():
+        raise HTTPException(status_code=400, detail="goal 不能为空")
+    return _creator.propose_capability(req.goal, req.context or {})
+
+
+@router.post("/agent/creator/{proposal_id}/start")
+async def creator_start(proposal_id: str):
+    from app.agent import creator as _creator
+    try:
+        return await _creator.start_test(proposal_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+class CreatorFinalizeRequest(BaseModel):
+    action: str = "persist"
+
+
+@router.post("/agent/creator/{proposal_id}/finalize")
+async def creator_finalize(proposal_id: str, req: CreatorFinalizeRequest):
+    from app.agent import creator as _creator
+    act = (req.action or "persist").strip().lower()
+    if act not in ("persist", "discard", "rollback"):
+        raise HTTPException(status_code=400, detail="action 仅支持 persist/discard/rollback")
+    try:
+        return await _creator.finalize(proposal_id, act)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/agent/creator/proposals")
+async def creator_list(limit: int = 20):
+    from app.agent import creator as _creator
+    return {"proposals": _creator.list_proposals(limit=limit)}
+
+
+@router.get("/agent/creator/templates")
+async def creator_template_list():
+    """Creator 画布模板列表（画布“从模板新建”消费）。"""
+    from app.agent import creator as _creator
+    return {"templates": _creator.list_templates()}
+
+
+@router.get("/agent/creator/templates/{tid}")
+async def creator_template_get(tid: str):
+    from app.agent import creator as _creator
+    try:
+        return _creator.get_template(tid)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/skills/{skill_name}/versions")
+async def skill_version_list(skill_name: str):
+    """Skill 版本历史：current + 快照（导入覆盖/Creator 备份自动留档）。"""
+    from app.agent import creator as _creator
+    return {"skill": skill_name, "versions": _creator.list_skill_versions(skill_name)}
+
+
+@router.get("/skills/{skill_name}/versions/{vid}")
+async def skill_version_get(skill_name: str, vid: str):
+    from app.agent import creator as _creator
+    try:
+        return {"skill": skill_name, "vid": vid, "content": _creator.get_skill_version(skill_name, vid)}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/agent/mode/policy")
+async def agent_mode_policy():
+    from app.agent.mode_policy import RUN_MODES, MODE_BUDGETS, TOOL_RISK
+    return {"modes": list(RUN_MODES), "budgets": MODE_BUDGETS, "tool_risk_sample": dict(list(TOOL_RISK.items())[:24])}
+
+
+@router.get("/agent/traces")
+async def list_agent_traces(limit: int = 30):
+    from app.agent.trace import list_runs
+    return {"runs": list_runs(limit=limit)}
+
+
+@router.get("/agent/traces/{run_id}")
+async def get_agent_trace(run_id: str, limit: int = 500):
+    from app.agent.trace import get_trace
+    return {"run_id": run_id, "events": get_trace(run_id, limit=limit)}
 
 # ============================================================
 # 系统原生文件夹选择器与资源管理器集成

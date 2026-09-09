@@ -3,7 +3,7 @@ import {
   ReactFlow, Background, Controls, MiniMap, useNodesState, useEdgesState, addEdge, Connection, Edge, Node, ReactFlowProvider, useReactFlow
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Search, Sparkles, Image as ImageIcon, Film, Box, Library, Save, Download, Mic, Type, Plus, Wand2, Layers } from 'lucide-react';
+import { Search, Sparkles, Image as ImageIcon, Film, Box, Boxes, Library, Save, Download, Mic, Type, Plus, Wand2, Layers } from 'lucide-react';
 import { useProjectListStore } from '../../stores/useProjectListStore';
 import { useThemeStore } from '../../stores/useThemeStore';
 import { useProjectStore } from '../../stores/useProjectStore';
@@ -21,6 +21,7 @@ import { TimelineExportNode } from './nodes/TimelineExportNode';
 import { ProviderNode, ProviderImageNode, ProviderVideoNode, ProviderAudioNode } from './nodes/ProviderNode';
 import { LoadImageNode, LoadImageBatchNode, LoadVideoNode, LoadAudioNode, TextPromptNode } from './nodes/LoaderNodes';
 import { PromptNode, ImageNode, VideoGenNode, AudioNode, Director3DMinimalNode, ExportNode } from './nodes/MinimalNodes';
+import { CustomNode } from './nodes/CustomNode';
 import { FloatingAgentPromptBar } from './FloatingAgentPromptBar';
 import { WorkflowInspectorModal } from '../workflow/WorkflowInspectorModal';
 import { getNodeSpec } from './nodeRegistry';
@@ -54,6 +55,7 @@ const nodeTypes: any = {
   'load-video': LoadVideoNode,
   'load-audio': LoadAudioNode,
   'text-prompt': TextPromptNode,
+  'custom': CustomNode,
 };
 
 let idSeq = 0;
@@ -87,6 +89,20 @@ const InnerCanvas: React.FC = () => {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [assets, setAssets] = useState<any[]>([]);
   const [assetQuery, setAssetQuery] = useState('');
+  const [customNodes, setCustomNodes] = useState<any[]>([]);
+  const refreshCustomNodes = async () => {
+    try {
+      const r: any = await apiService.listCustomNodes();
+      setCustomNodes(r.nodes || []);
+    } catch {}
+  };
+  useEffect(() => { refreshCustomNodes(); }, []);
+  useEffect(() => {
+    const h = () => refreshCustomNodes();
+    window.addEventListener('customnode-list-refresh', h as any);
+    return () => window.removeEventListener('customnode-list-refresh', h as any);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [inspectWfId, setInspectWfId] = useState('');
   const [saving, setSaving] = useState(false);
   const [executingNodeIds, setExecutingNodeIds] = useState<Set<string>>(new Set());
@@ -400,12 +416,12 @@ const InnerCanvas: React.FC = () => {
     }, 0);
   }, [isValidConnection]);
 
-  const createNode = (type: string, position: { x: number; y: number }) => {
+  const createNode = (type: string, position: { x: number; y: number }, extraData?: Record<string, any>) => {
     const node: Node = {
       id: genId(type),
       type: type as any,
       position,
-      data: { onUpdate: handleNodeUpdate, onExecute: handleNodeExecute },
+      data: { onUpdate: handleNodeUpdate, onExecute: handleNodeExecute, ...(extraData || {}) },
     };
     if (type === 'prompt') node.data = { ...node.data, prompt: '' };
     if (type === 'image') node.data = { ...node.data, prompt: '' };
@@ -465,6 +481,77 @@ const InnerCanvas: React.FC = () => {
     if (newNodes.length > 0) setSelectedNodeId(newNodes[0].id);
   };
 
+  // Creator 模板（Agent 创造模式产物，storage/canvas_templates）：从模板新建节点链
+  const [creatorTemplates, setCreatorTemplates] = useState<any[]>([]);
+  const refreshCreatorTemplates = async () => {
+    try {
+      const r: any = await apiService.listCreatorTemplates();
+      setCreatorTemplates(r.templates || []);
+    } catch {}
+  };
+  useEffect(() => {
+    refreshCreatorTemplates();
+    const h = () => refreshCreatorTemplates();
+    window.addEventListener('creator-template-refresh', h as any);
+    return () => window.removeEventListener('creator-template-refresh', h as any);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const addCreatorTemplate = (tpl: any) => {
+    const KEY2TYPE: Record<string, string> = {
+      image: 'image', video: 'video', audio: 'audio',
+      prompt: 'prompt', text: 'prompt',
+      director: 'director3d', director3d: 'director3d', export: 'export',
+    };
+    const baseX = 120, baseY = 80;
+    const idByKey: Record<string, string> = {};
+    const newNodes: Node[] = [];
+    for (const n of (tpl.nodes || [])) {
+      const key = String(n.key || '');
+      const type = KEY2TYPE[key];
+      if (!type) continue;
+      const node = createNode(type, { x: baseX + (Number(n.x) || 0), y: baseY + (Number(n.y) || 0) });
+      idByKey[key] = node.id;
+      newNodes.push(node);
+    }
+    if (newNodes.length === 0) { alert('该模板无可用节点（未知节点类型已跳过）'); return; }
+    const byId: Record<string, Node> = {};
+    newNodes.forEach(n => { byId[n.id] = n; });
+    const inferHandles = (prevType: string, curType: string): [string, string] | null => {
+      if (prevType === 'video' && curType === 'audio') return null; // 需经 prompt 分叉，调用方处理
+      if (prevType === 'prompt' && curType === 'image') return ['prompt', 'prompt'];
+      if (prevType === 'image' && curType === 'video') return ['image', 'first_frame'];
+      if (prevType === 'audio' && curType === 'export') return ['audio', 'audio'];
+      if (prevType === 'video' && curType === 'export') return ['video', 'video'];
+      if (prevType === 'prompt' && curType === 'video') return ['prompt', 'prompt'];
+      if (prevType === 'prompt' && curType === 'audio') return ['prompt', 'text'];
+      const ps = getNodeSpec(prevType || '');
+      const ts = getNodeSpec(curType || '');
+      if (ps && ts && ps.outputs[0] && ts.inputs[0] && ps.outputs[0].type === ts.inputs[0].type) {
+        return [ps.outputs[0].id || 'prompt', ts.inputs[0].id || 'prompt'];
+      }
+      return null;
+    };
+    const newEdges: Edge[] = [];
+    const promptNode = newNodes.find(n => n.type === 'prompt');
+    for (const e of (tpl.edges || [])) {
+      const sid = idByKey[String(e.from || '')];
+      const tid = idByKey[String(e.to || '')];
+      if (!sid || !tid) continue;
+      const prev = byId[sid], cur = byId[tid];
+      let pair = inferHandles(prev.type as string, cur.type as string);
+      if (!pair && prev.type === 'video' && cur.type === 'audio' && promptNode) {
+        pair = null;
+        newEdges.push({ id: `e_${promptNode.id}_${cur.id}`, source: promptNode.id, target: cur.id, sourceHandle: 'prompt', targetHandle: 'text', type: 'smoothstep', animated: true } as any);
+        continue;
+      }
+      if (!pair) continue;
+      newEdges.push({ id: `e_${sid}_${tid}`, source: sid, target: tid, sourceHandle: pair[0], targetHandle: pair[1], type: 'smoothstep', animated: true } as any);
+    }
+    setNodes(nds => [...nds, ...newNodes]);
+    setEdges(es => [...es, ...newEdges]);
+    setSelectedNodeId(newNodes[0].id);
+  };
+
   // 监听衍生 + 菜单（使用 ref 避免闭包陈旧）
   useEffect(() => {
     const onAdd = (e: any) => {
@@ -504,6 +591,8 @@ const InnerCanvas: React.FC = () => {
       window.removeEventListener('canvas-duplicate-node', onDuplicate as any);
     };
   }, []);
+
+
 
   // Agent 自主编排后刷新（方案 6.2：画布产出后重载）
   useEffect(() => {
@@ -855,6 +944,26 @@ const InnerCanvas: React.FC = () => {
             </div>
           </div>
 
+          {/* Creator 模板：Agent 创造模式沉淀，可从模板新建节点链 */}
+          <div>
+            <div className="text-xs font-bold mb-2 [color:var(--color-text-main)] flex items-center gap-1.5">
+              我的模板 · Creator
+              <button onClick={refreshCreatorTemplates} title="刷新模板列表" className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-violet-500/10 border border-violet-500/30 text-violet-300 hover:bg-violet-500/20">刷新</button>
+            </div>
+            {creatorTemplates.length === 0 ? (
+              <div className="text-[11px] [color:var(--color-text-muted)] px-1">暂无。去 Agent 创造模式说“做个漫剧模板”，持久化后即出现在这里。</div>
+            ) : (
+              <div className="space-y-2">
+                {creatorTemplates.map((t: any) => (
+                  <button key={t.id} onClick={() => addCreatorTemplate(t)} title="从模板新建节点链到当前画布" className="w-full text-left p-3 rounded-2xl border border-violet-500/25 bg-violet-500/5 hover:border-violet-500/50 hover:bg-violet-500/10 hover:shadow-md transition-all">
+                    <div className="text-sm font-semibold [color:var(--color-text-main)]">{t.name || t.id}</div>
+                    <div className="text-xs [color:var(--color-text-muted)] mt-0.5">{(t.nodes || []).length} 节点 · 点击从模板新建</div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* 6 核心 Agent 节点 */}
           <div>
             <div className="text-xs font-bold mb-2 [color:var(--color-text-main)]">核心 Agent 节点</div>
@@ -879,6 +988,42 @@ const InnerCanvas: React.FC = () => {
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+
+          {/* 自定义代码节点（来自插件包 custom_nodes，一段代码即一节点） */}
+          <div>
+            <div className="text-xs font-bold mb-2 [color:var(--color-text-main)] flex items-center gap-1.5">
+              自定义节点
+              <button onClick={() => useProjectStore.getState().setActiveTab('config')} title="去设置 → 插件中心安装含自定义节点的插件包"
+                className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-teal-500/10 border border-teal-500/30 text-teal-300 hover:bg-teal-500/20">插件安装</button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {customNodes.map((c: any) => (
+                <div
+                  key={c.id}
+                  draggable
+                  onDragStart={e => e.dataTransfer.setData('application/canvas-nodetype', 'custom')}
+                  onClick={() => {
+                    const pos = { x: 120 + nodes.length * 40, y: 120 + nodes.length * 40 };
+                    const node = createNode('custom', pos, { custom_node_id: c.id });
+                    setNodes(nds => [...nds, node]);
+                    setSelectedNodeId(node.id);
+                  }}
+                  className="flex flex-col gap-1.5 p-3 rounded-2xl bg-surface-secondary border border-border hover:border-teal-500/40 hover:bg-surface-tertiary hover:shadow-md cursor-grab active:cursor-grabbing transition-all"
+                >
+                  <Boxes className="w-5 h-5 text-teal-400" />
+                  <div>
+                    <div className="text-xs font-bold [color:var(--color-text-main)] leading-none truncate">{c.name}</div>
+                    <div className="text-[10px] [color:var(--color-text-muted)] mt-1">{c.kind}/{c.language}</div>
+                  </div>
+                </div>
+              ))}
+              {customNodes.length === 0 && (
+                <div className="col-span-2 p-3 rounded-2xl border border-dashed border-border text-[11px] [color:var(--color-text-muted)]">
+                  暂无自定义节点，去设置 → 插件中心安装含节点的插件包
+                </div>
+              )}
             </div>
           </div>
 
@@ -931,6 +1076,7 @@ const InnerCanvas: React.FC = () => {
               onSwitch={(cid, opts) => switchCanvas(cid, opts?.skipSave)}
               onChanged={() => { if (pid) apiService.listProjectCanvases(pid).then(r => setCanvasList(r.canvases || [])).catch(() => {}); }}
             />
+
             <button onClick={async()=>{ const n = canvasList.length + 1; const cid = await createCanvas(`画布${n}`); if (cid) alert(`已新建${`画布${n}`}并切换`); }} className="px-3 py-1 rounded-full bg-surface-secondary border border-border text-xs font-medium [color:var(--color-text-main)] hover:bg-surface-tertiary transition-colors">+ 新画布</button>
             <button onClick={async()=>{
               if (!pid) return;
@@ -984,6 +1130,12 @@ const InnerCanvas: React.FC = () => {
                     <button key={t.id} onClick={() => addTemplate(t)} className="p-4 rounded-2xl border border-border bg-surface-secondary hover:border-brand/40 hover:bg-surface-tertiary text-left transition-all group">
                       <div className="text-xs font-bold [color:var(--color-text-main)] group-hover:text-brand">{t.label}</div>
                       <div className="text-[11px] [color:var(--color-text-muted)] mt-1">{t.desc}</div>
+                    </button>
+                  ))}
+                  {creatorTemplates.map((t: any) => (
+                    <button key={t.id} onClick={() => addCreatorTemplate(t)} className="p-4 rounded-2xl border border-violet-500/25 bg-violet-500/5 hover:border-violet-500/50 hover:bg-violet-500/10 text-left transition-all group">
+                      <div className="text-xs font-bold [color:var(--color-text-main)] group-hover:text-violet-300">{t.name || t.id}</div>
+                      <div className="text-[11px] [color:var(--color-text-muted)] mt-1">Creator 模板 · {(t.nodes || []).length} 节点</div>
                     </button>
                   ))}
                 </div>

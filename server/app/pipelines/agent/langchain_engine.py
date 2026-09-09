@@ -511,6 +511,19 @@ async def run_agent_with_langchain(
     stall_count = 0
     nudged_empty = False
     nudged_query = False
+    # P2 trace: run_id 落盘(JSONL)，供回放/审计；失败也不影响主流程
+    import uuid as _trace_uuid
+    _run_id = f"{session_id}_{int(time.time())}_{_trace_uuid.uuid4().hex[:6]}"
+    try:
+        from app.agent.trace import log_event as _trace_log
+        from app.agent.business import detect_intent as _detect
+        try:
+            _det = _detect(prompt, context or {})
+        except Exception:
+            _det = {"intent": "unknown"}
+        _trace_log(_run_id, "run_start", {"prompt": (prompt or "")[:500], "session_id": session_id, "intent": _det, "mode": _mode})
+    except Exception:
+        _trace_log = None  # type: ignore
     # 心跳：LLM 超时时前端会卡在紫色竖条，定时推送 thinking 保活
     async def _safe_send(ev: Dict[str, Any]):
         if not websocket:
@@ -790,7 +803,18 @@ async def run_agent_with_langchain(
         SESSION_MEMORY[session_id].append(HumanMessage(content=human_history))
         SESSION_MEMORY[session_id].append(AIMessage(content=full_reply))
         SESSION_MEMORY[session_id] = _trim_history(SESSION_MEMORY[session_id])
-    return {"reply": full_reply, "tool_calls": [{"tool": t["tool_name"], "arguments": t["arguments"]} for t in executed_tools] if executed_tools else [], "suggested_actions": [], "executed_tools": executed_tools}
+    try:
+        if _trace_log:
+            _trace_log(_run_id, "run_end", {"reply": (full_reply or "")[:1000], "executed_tools": [{"tool": t.get("tool_name"), "status": t.get("status")} for t in executed_tools]})
+    except Exception:
+        pass
+    out = {"reply": full_reply, "tool_calls": [{"tool": t["tool_name"], "arguments": t["arguments"]} for t in executed_tools] if executed_tools else [], "suggested_actions": [], "executed_tools": executed_tools}
+    try:
+        if _trace_log:
+            out["run_id"] = _run_id
+    except Exception:
+        pass
+    return out
 
 async def clear_session(session_id: str):
     async with _get_session_lock(session_id):

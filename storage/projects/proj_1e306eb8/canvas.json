@@ -6,7 +6,145 @@
       "name": "默认画布",
       "nodes": [],
       "edges": [],
-      "updated_at": "2026-09-06 10:00:54"
+      "updated_at": "2026-09-06 16:50:32"
+    },
+    "cv_mtpeb9n6": {
+      "name": "画布2",
+      "nodes": [],
+      "edges": [],
+      "updated_at": "2026-09-06 13:53:24"
+    },
+    "cv_mtpfapqu": {
+      "name": "分镜#7画布",
+      "nodes": [
+        {
+          "id": "prompt_1788675647036_1",
+          "type": "prompt",
+          "position": {
+            "x": 120,
+            "y": 120
+          },
+          "data": {
+            "prompt": "新分镜描述...",
+            "text": "新分镜描述..."
+          },
+          "measured": {
+            "width": 360,
+            "height": 253
+          },
+          "selected": false
+        },
+        {
+          "id": "director3d_1788675647036_2",
+          "type": "director3d",
+          "position": {
+            "x": 113.10780987001777,
+            "y": 487.5055174046708
+          },
+          "data": {
+            "framing": "medium",
+            "motion": "push_in",
+            "pose": "stand",
+            "focal_length_mm": 35,
+            "camera_roll_deg": 0,
+            "cast_layout": "solo",
+            "speed": "1.0x",
+            "ai_directive": ""
+          },
+          "measured": {
+            "width": 360,
+            "height": 253
+          },
+          "selected": true,
+          "dragging": false
+        },
+        {
+          "id": "image_1788675647036_3",
+          "type": "image",
+          "position": {
+            "x": 109.66171480502672,
+            "y": 821.6987825144276
+          },
+          "data": {
+            "prompt": "Cinematic anime shot, high quality lighting, masterpiece"
+          },
+          "measured": {
+            "width": 360,
+            "height": 405
+          },
+          "selected": true,
+          "dragging": false
+        },
+        {
+          "id": "video_1788675647036_4",
+          "type": "video",
+          "position": {
+            "x": 1493.8696929939056,
+            "y": 526.6133272746886
+          },
+          "data": {
+            "prompt": "新分镜描述...",
+            "duration": 4,
+            "provider_id": "prov_6131876a",
+            "camera_prompt": "",
+            "provider": "prov_6131876a",
+            "params": {
+              "resolution": "768p竖",
+              "duration": 5
+            },
+            "provider_params": {
+              "resolution": "768p竖",
+              "duration": 5
+            },
+            "_polling": false
+          },
+          "measured": {
+            "width": 360,
+            "height": 405
+          },
+          "dragging": false,
+          "selected": true
+        }
+      ],
+      "edges": [
+        {
+          "id": "e_prompt_1788675647036_1_video_1788675647036_4_prompt_prompt",
+          "source": "prompt_1788675647036_1",
+          "target": "video_1788675647036_4",
+          "sourceHandle": "prompt",
+          "targetHandle": "prompt",
+          "type": "smoothstep",
+          "animated": true
+        },
+        {
+          "id": "e_director3d_1788675647036_2_video_1788675647036_4_camera_prompt_camera_prompt",
+          "source": "director3d_1788675647036_2",
+          "target": "video_1788675647036_4",
+          "sourceHandle": "camera_prompt",
+          "targetHandle": "camera_prompt",
+          "type": "smoothstep",
+          "animated": true
+        },
+        {
+          "id": "e_prompt_1788675647036_1_image_1788675647036_3_prompt_prompt",
+          "source": "prompt_1788675647036_1",
+          "target": "image_1788675647036_3",
+          "sourceHandle": "prompt",
+          "targetHandle": "prompt",
+          "type": "smoothstep",
+          "animated": true
+        },
+        {
+          "id": "e_image_1788675647036_3_video_1788675647036_4_image_first_frame",
+          "source": "image_1788675647036_3",
+          "target": "video_1788675647036_4",
+          "sourceHandle": "image",
+          "targetHandle": "first_frame",
+          "type": "smoothstep",
+          "animated": true
+        }
+      ],
+      "updated_at": "2026-09-06 14:21:36"
     }
   }
 }

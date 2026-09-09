@@ -8,25 +8,39 @@
 
 生命周期：discover → validate → install → enable ⇄ disable → uninstall
 安全：id/版本白名单、路径围栏（禁.. /绝对路径）、单文件≤1MB/包≤20MB、数量上限；
-      provider走custom沙箱体检，skill走通用LLM分支（零代码），不执行插件内任意代码。
+      provider走custom沙箱体检，skill走通用LLM分支（零代码）；
+      mcp_tools查壳函数仅在trusted总闸开启后执行（与fs_file/shell_exec同闸），30s超时+结果截断。
 """
+import asyncio
 import glob
+import importlib.util
 import json
 import os
 import re
 import shutil
+import sys
 import tempfile
 import time
 import zipfile
 from typing import Any, Dict, List, Optional, Tuple
 
-from app.plugins.models import PluginManifest, PluginRecord
+from app.plugins.models import PluginManifest, PluginRecord, MCP_TOOL_NAME_RE
 
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9\-]{1,63}$")
 _VER_RE = re.compile(r"^\d+\.\d+\.\d+([\-+][0-9A-Za-z.\-]+)?$")
+_TOOL_RE = re.compile(MCP_TOOL_NAME_RE)
 _MAX_FILE = 1_000_000
 _MAX_TOTAL = 20_000_000
 _MAX_PER_KIND = 20
+_PLUGIN_TOOL_TIMEOUT = 30
+_PLUGIN_TOOL_MAX_OUT = 20000
+
+# 查壳工具运行时注册表：tool_name -> {"pid","file","entry","input_schema"}
+_PLUGIN_TOOL_HANDLERS: Dict[str, Dict[str, Any]] = {}
+
+
+def _pid_norm(pid: str) -> str:
+    return re.sub(r"[^a-z0-9_]", "_", pid.lower().replace("-", "_"))
 
 
 def _plugins_root() -> str:
@@ -96,6 +110,7 @@ def validate_manifest_dict(data: Dict[str, Any]) -> PluginManifest:
         raise ValueError("版本非法：须为semver，如 1.0.0")
     eps = m.extensionPoints
     for rel in (eps.providers + eps.skills + eps.workflows + eps.mcp_tools
+                + eps.custom_nodes
                 + eps.canvas_nodes + eps.director_packs + eps.exporters + eps.themes):
         _safe_rel("<manifest>", rel)
     return m
@@ -148,9 +163,11 @@ def discover() -> List[Dict[str, Any]]:
                 "providers": _glob_kind(pdir, eps.providers),
                 "skills": _glob_kind(pdir, eps.skills),
                 "workflows": _glob_kind(pdir, eps.workflows),
+                "mcp_tools": _glob_kind(pdir, eps.mcp_tools),
+                "custom_nodes": _glob_kind(pdir, eps.custom_nodes),
             },
             "deferred": {
-                k: getattr(eps, k) for k in ("mcp_tools", "canvas_nodes", "director_packs", "exporters", "themes")
+                k: getattr(eps, k) for k in ("canvas_nodes", "director_packs", "exporters", "themes")
                 if getattr(eps, k)
             },
         })
@@ -173,7 +190,8 @@ def install_from_dir(src_dir: str) -> PluginManifest:
     idx = _load_index()
     idx.setdefault("plugins", {})[m.id] = {
         "version": m.version, "enabled": False, "installed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "installed_files": [], "provider_ids": [], "skill_names": [],
+        "installed_files": [], "provider_ids": [], "skill_names": [], "workflow_ids": [], "mcp_tools": [],
+        "custom_nodes": [],
     }
     _save_index(idx)
     return m
@@ -225,15 +243,145 @@ def _skills_target_root() -> str:
     return os.path.join(os.path.abspath(os.path.join(here, "..", "..", "skills")), ".plugins")
 
 
-def _workflows_root() -> str:
+def _load_plugin_module(pid: str, path: str):
+    """查壳加载插件python文件（每次新鲜加载，无跨调用状态残留）。"""
+    stem = os.path.splitext(os.path.basename(path))[0]
+    safe_stem = re.sub(r"[^a-z0-9_]", "_", stem.lower()) or "mod"
+    mod_name = f"studio_plugin_{_pid_norm(pid)}_{safe_stem}"
+    spec = importlib.util.spec_from_file_location(mod_name, path)
+    if not spec or not spec.loader:
+        raise ValueError(f"无法加载模块: {path}")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[mod_name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _register_plugin_tools(pid: str, pdir: str, patterns: List[str]) -> Tuple[List[str], List[str]]:
+    """查壳注册插件mcp_tools为 plugin_<id>_<name> MCP Tool。返回 (registered, warnings)。"""
+    from app.mcp.server import mcp_registry
+    from app.models.schemas import MCPToolDefinition
+
+    registered: List[str] = []
+    warnings: List[str] = []
+    for rel in _glob_kind(pdir, patterns):
+        if not rel.lower().endswith(".py"):
+            warnings.append(f"跳过非py: {rel}")
+            continue
+        fpath = os.path.join(pdir, rel)
+        try:
+            mod = _load_plugin_module(pid, fpath)
+        except Exception as e:
+            warnings.append(f"查壳失败 {rel}: {e}")
+            continue
+        decls = getattr(mod, "PLUGIN_TOOLS", None)
+        if not isinstance(decls, list) or not decls:
+            warnings.append(f"无PLUGIN_TOOLS声明已跳过: {rel}")
+            continue
+        for d in decls:
+            try:
+                if not isinstance(d, dict):
+                    raise ValueError("声明须为dict")
+                name = str(d.get("name") or "")
+                if not _TOOL_RE.match(name):
+                    raise ValueError(f"工具名非法: {name}（小写字母数字下划线，2~48字符）")
+                desc = str(d.get("description") or "").strip()
+                if not desc:
+                    raise ValueError(f"工具 {name} 缺少description")
+                schema = d.get("input_schema") or {"type": "object", "properties": {}}
+                if not isinstance(schema, dict) or schema.get("type") != "object":
+                    raise ValueError(f"工具 {name} input_schema须为type=object的dict")
+                entry = str(d.get("entry") or name)
+                if not callable(getattr(mod, entry, None)):
+                    raise ValueError(f"工具 {name} 入口函数缺失: {entry}")
+                tool_name = f"plugin_{_pid_norm(pid)}_{name}"
+                if tool_name in mcp_registry.tools and tool_name not in _PLUGIN_TOOL_HANDLERS:
+                    warnings.append(f"工具名冲突已跳过: {tool_name}")
+                    continue
+                mcp_registry.register_tool(MCPToolDefinition(
+                    name=tool_name,
+                    description=f"[插件{pid}] {desc}",
+                    category="plugin",
+                    icon="Puzzle",
+                    author=pid,
+                    is_enabled=True,
+                    input_schema=schema,
+                ))
+                _PLUGIN_TOOL_HANDLERS[tool_name] = {
+                    "pid": pid, "file": fpath, "entry": entry, "input_schema": schema,
+                }
+                registered.append(tool_name)
+            except Exception as e:
+                warnings.append(f"工具注册失败 {rel}: {e}")
+    return registered, warnings
+
+
+def _unregister_plugin_tools(tool_names: List[str]) -> None:
     try:
-        from app.core.config import settings
-        base = os.path.abspath(settings.STORAGE_DIR)
+        from app.mcp.server import mcp_registry
+        for tn in tool_names or []:
+            _PLUGIN_TOOL_HANDLERS.pop(tn, None)
+            try:
+                mcp_registry.tools.pop(tn, None)
+            except Exception:
+                pass
     except Exception:
-        base = os.path.abspath(os.path.join(os.getcwd(), "storage"))
-    root = os.path.join(base, "workflows")
-    os.makedirs(root, exist_ok=True)
-    return root
+        pass
+
+
+async def run_plugin_tool(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """执行查壳插件工具：trusted总闸 + 必填校验 + 30s超时 + 结果截断。供mcp execute_tool分支调用。"""
+    from app.mcp.server import _trusted_gate_or_raise
+    h = _PLUGIN_TOOL_HANDLERS.get(tool_name)
+    if not h:
+        raise ValueError(f"插件工具未注册（插件可能被禁用）: {tool_name}")
+    _trusted_gate_or_raise()
+    schema = h.get("input_schema") or {}
+    required = schema.get("required") or []
+    args = dict(arguments or {})
+    missing = [k for k in required if args.get(k) in (None, "")]
+    if missing:
+        raise ValueError(f"缺少必填参数: {missing}")
+    mod = _load_plugin_module(h["pid"], h["file"])
+    fn = getattr(mod, h["entry"], None)
+    if not callable(fn):
+        raise ValueError(f"入口函数丢失: {h['entry']}")
+    ctx = {"plugin_id": h["pid"], "tool": tool_name}
+    result = await asyncio.wait_for(asyncio.to_thread(fn, args, ctx), timeout=_PLUGIN_TOOL_TIMEOUT)
+    try:
+        s = json.dumps(result, ensure_ascii=False, default=str)
+    except Exception:
+        s = str(result)
+        result = {"output": s}
+    if len(s) > _PLUGIN_TOOL_MAX_OUT:
+        return {"output": s[:_PLUGIN_TOOL_MAX_OUT] + "…[截断]", "truncated": True}
+    return result if isinstance(result, dict) else {"output": result}
+
+
+def restore_enabled_plugins() -> Dict[str, Any]:
+    """启动期恢复已启用插件的查壳工具注册（providers/skills/workflows由各自存储自恢复）。"""
+    idx = _load_index().get("plugins", {})
+    out: Dict[str, Any] = {"restored": [], "warnings": []}
+    for pid, rec in idx.items():
+        if not rec.get("enabled"):
+            continue
+        pdir = os.path.join(_plugins_root(), pid)
+        if not os.path.isdir(pdir):
+            out["warnings"].append(f"{pid} 目录丢失已跳过")
+            continue
+        try:
+            m = _read_manifest(pdir)
+        except Exception as e:
+            out["warnings"].append(f"{pid} manifest无效: {e}")
+            continue
+        try:
+            reged, warns = _register_plugin_tools(pid, pdir, m.extensionPoints.mcp_tools)
+            if reged:
+                out["restored"].append({pid: reged})
+            out["warnings"].extend(warns)
+        except Exception as e:
+            out["warnings"].append(f"{pid} 恢复失败: {e}")
+    return out
 
 
 def enable(pid: str) -> Dict[str, Any]:
@@ -245,13 +393,15 @@ def enable(pid: str) -> Dict[str, Any]:
     if m.id != pid:
         raise ValueError("目录名与manifest id不一致")
     idx = _load_index()
-    rec = idx.setdefault("plugins", {}).setdefault(pid, {"version": m.version, "enabled": False, "installed_at": "", "installed_files": [], "provider_ids": [], "skill_names": []})
+    rec = idx.setdefault("plugins", {}).setdefault(pid, {"version": m.version, "enabled": False, "installed_at": "", "installed_files": [], "provider_ids": [], "skill_names": [], "workflow_ids": [], "mcp_tools": [], "custom_nodes": []})
     if rec.get("enabled"):
         return {"id": pid, "enabled": True, "note": "已启用，无需重复操作"}
-    summary: Dict[str, Any] = {"providers": [], "skills": [], "workflows": [], "warnings": []}
+    summary: Dict[str, Any] = {"providers": [], "skills": [], "workflows": [], "mcp_tools": [], "custom_nodes": [], "warnings": []}
     installed_files: List[str] = []
     provider_ids: List[str] = []
     skill_names: List[str] = []
+    workflow_ids: List[str] = []
+    registered_tools: List[str] = []
 
     # —— providers：经custom_manager体检 + 热注册 + MCP刷新 ——
     try:
@@ -302,24 +452,76 @@ def enable(pid: str) -> Dict[str, Any]:
     except Exception as e:
         summary["warnings"].append(f"skills子系统不可用: {e}")
 
-    # —— workflows：P0仅落盘，提示去Infra同步 ——
+    # —— workflows：经save_workflow校验入库（含Save格式自动转换）+ 自动sync为独立源 ——
     try:
-        wroot = _workflows_root()
+        from app.providers.workflow.manager import workflow_manager
         for rel in _glob_kind(pdir, m.extensionPoints.workflows):
             if not rel.lower().endswith(".json"):
                 summary["warnings"].append(f"跳过非JSON: {rel}")
                 continue
-            dest = os.path.join(wroot, os.path.basename(rel))
-            if os.path.exists(dest):
-                summary["warnings"].append(f"已存在同名工作流已跳过: {os.path.basename(rel)}")
-                continue
-            shutil.copy2(os.path.join(pdir, rel), dest)
-            installed_files.append(dest)
-            summary["workflows"].append(os.path.basename(rel))
-        if summary["workflows"]:
-            summary["warnings"].append("工作流已落盘，请到 设置→基础设施 手动同步后生效（P1自动sync）")
+            try:
+                with open(os.path.join(pdir, rel), "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+                if not isinstance(payload, dict):
+                    raise ValueError("工作流JSON须为对象")
+                wname = f"{m.name}-{os.path.splitext(os.path.basename(rel))[0]}"
+                meta = workflow_manager.save_workflow(
+                    name=wname, workflow_json=payload,
+                    description=f"插件{m.id}自带工作流（{rel}）",
+                )
+                wid = str(meta.get("id") or "")
+                if wid:
+                    workflow_ids.append(wid)
+                summary["workflows"].append({
+                    "id": wid, "name": wname,
+                    "provider": f"comfyui_{wid}" if wid and not wid.startswith("ext_") else None,
+                    "warnings": meta.get("warnings", []),
+                })
+            except Exception as e:
+                summary["warnings"].append(f"工作流失败 {rel}: {e}")
     except Exception as e:
-        summary["warnings"].append(f"workflows落盘失败: {e}")
+        summary["warnings"].append(f"workflow子系统不可用: {e}")
+
+    # —— mcp_tools：查壳注册为 plugin_<id>_<name>（执行走trusted闸门） ——
+    try:
+        reged, warns = _register_plugin_tools(pid, pdir, m.extensionPoints.mcp_tools)
+        registered_tools = reged
+        summary["mcp_tools"] = reged
+        summary["warnings"].extend(warns)
+        if reged:
+            summary["warnings"].append("插件工具执行需全局 STUDIO_TRUSTED_MODE=1（与fs_file/shell_exec同闸），未开启时调用明错")
+    except Exception as e:
+        summary["warnings"].append(f"mcp_tools失败: {e}")
+
+    # —— custom_nodes：代码节点包（JSON含code），体检入库 + MCP注册 + 画布工具栏 ——
+    custom_ids: List[str] = []
+    try:
+        from app.custom_nodes.manager import custom_node_manager
+        from app.custom_nodes.models import CustomNodeDefinition as _CND
+        for rel in _glob_kind(pdir, m.extensionPoints.custom_nodes):
+            if not rel.lower().endswith(".json"):
+                summary["warnings"].append(f"跳过非JSON: {rel}")
+                continue
+            try:
+                with open(os.path.join(pdir, rel), "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+                definition = _CND.model_validate(payload)
+                if custom_node_manager.get(definition.id):
+                    summary["warnings"].append(f"已存在同名节点已跳过: {definition.id}")
+                    continue
+                saved = custom_node_manager.save(definition)
+                custom_ids.append(saved.id)
+                summary["custom_nodes"].append({"id": saved.id, "kind": saved.kind, "mcp_tool": f"customnode_{saved.id}"})
+            except Exception as e:
+                summary["warnings"].append(f"自定义节点失败 {rel}: {e}")
+        try:
+            from app.mcp.server import mcp_registry as _mcp2
+            if hasattr(_mcp2, "refresh_customnode_tools"):
+                _mcp2.refresh_customnode_tools()
+        except Exception:
+            pass
+    except Exception as e:
+        summary["warnings"].append(f"custom_nodes子系统不可用: {e}")
 
     try:
         from app.mcp.server import mcp_registry
@@ -329,7 +531,9 @@ def enable(pid: str) -> Dict[str, Any]:
 
     rec.update({"version": m.version, "enabled": True,
                 "installed_at": rec.get("installed_at") or time.strftime("%Y-%m-%d %H:%M:%S"),
-                "installed_files": installed_files, "provider_ids": provider_ids, "skill_names": skill_names})
+                "installed_files": installed_files, "provider_ids": provider_ids,
+                "skill_names": skill_names, "workflow_ids": workflow_ids, "mcp_tools": registered_tools,
+                "custom_nodes": custom_ids})
     _save_index(idx)
     summary.update({"id": pid, "enabled": True})
     return summary
@@ -365,6 +569,45 @@ def disable(pid: str) -> Dict[str, Any]:
             removed.append(f"provider:{prov_id}")
     except Exception as e:
         warnings.append(f"provider子系统不可用: {e}")
+    # workflows：删工作流 + 同步删对应 Provider（仅追踪到的id）
+    try:
+        from app.providers.workflow.manager import workflow_manager, remove_workflow_provider
+        for wid in rec.get("workflow_ids", []):
+            try:
+                workflow_manager.delete_workflow(wid)
+            except Exception as e:
+                warnings.append(f"工作流删除失败 {wid}: {e}")
+            try:
+                remove_workflow_provider(wid)
+            except Exception:
+                pass
+            removed.append(f"workflow:{wid}")
+    except Exception as e:
+        warnings.append(f"workflow子系统不可用: {e}")
+    # 查壳工具反注册（仅追踪到的）
+    try:
+        _unregister_plugin_tools(rec.get("mcp_tools", []))
+        for tn in rec.get("mcp_tools", []):
+            removed.append(f"mcp_tool:{tn}")
+    except Exception as e:
+        warnings.append(f"插件工具反注册失败: {e}")
+    # 自定义节点：删定义 + MCP反注册（仅追踪到的id）
+    try:
+        from app.custom_nodes.manager import custom_node_manager
+        for cid in rec.get("custom_nodes", []):
+            try:
+                custom_node_manager.delete(cid)
+            except Exception as e:
+                warnings.append(f"自定义节点删除失败 {cid}: {e}")
+            removed.append(f"custom_node:{cid}")
+        try:
+            from app.mcp.server import mcp_registry as _mcp3
+            if hasattr(_mcp3, "refresh_customnode_tools"):
+                _mcp3.refresh_customnode_tools()
+        except Exception:
+            pass
+    except Exception as e:
+        warnings.append(f"custom_nodes子系统不可用: {e}")
     # 落盘文件：仅删追踪到的
     for fp in rec.get("installed_files", []):
         try:
@@ -391,7 +634,7 @@ def disable(pid: str) -> Dict[str, Any]:
         mcp_registry.refresh_provider_tools()
     except Exception:
         pass
-    rec.update({"enabled": False, "installed_files": [], "provider_ids": [], "skill_names": []})
+    rec.update({"enabled": False, "installed_files": [], "provider_ids": [], "skill_names": [], "workflow_ids": [], "mcp_tools": [], "custom_nodes": []})
     _save_index(idx)
     return {"id": pid, "enabled": False, "removed": removed, "warnings": warnings}
 

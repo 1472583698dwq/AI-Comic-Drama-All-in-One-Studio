@@ -74,13 +74,38 @@ try:
     print("[Main] OneKey routes mounted at /api/v1/onekey")
 except Exception as e:
     print(f"[Main] OneKey routes mount failed: {e}")
-# 插件系统路由（P0：providers/skills/workflows 三类扩展点）
+# 插件系统路由（P1：providers/skills/workflows/mcp_tools 四类扩展点）
 try:
     from app.api.plugin_routes import router as plugin_router
     app.include_router(plugin_router, prefix=settings.API_V1_STR)
     print("[Main] Plugin routes mounted at /api/v1/plugins")
 except Exception as e:
     print(f"[Main] Plugin routes mount failed: {e}")
+# 自定义代码节点路由（CRUD/体检/试运行/单次执行）
+try:
+    from app.api.custom_node_routes import router as custom_node_router
+    app.include_router(custom_node_router, prefix=settings.API_V1_STR)
+    print("[Main] CustomNode routes mounted at /api/v1/custom-nodes")
+except Exception as e:
+    print(f"[Main] CustomNode routes mount failed: {e}")
+# 自定义代码节点 MCP Tool 注册（一节点一Tool）
+try:
+    from app.mcp.server import mcp_registry as _mcp_reg
+    if hasattr(_mcp_reg, "refresh_customnode_tools"):
+        _mcp_reg.refresh_customnode_tools()
+        print("[Main] CustomNode tools registered")
+except Exception as e:
+    print(f"[Main] CustomNode tools register failed: {e}")
+# 已启用插件的查壳工具恢复（providers/skills/workflows由各自存储自恢复）
+try:
+    from app.plugins.manager import restore_enabled_plugins
+    _restored = restore_enabled_plugins()
+    if _restored.get("restored"):
+        print(f"[Main] Restored plugin tools: {_restored['restored']}")
+    for _w in _restored.get("warnings", [])[:5]:
+        print(f"[Main] Plugin restore note: {_w}")
+except Exception as e:
+    print(f"[Main] Plugin restore failed: {e}")
 
 # Mount standard MCP protocol server (Streamable HTTP)
 if mcp_http_app:

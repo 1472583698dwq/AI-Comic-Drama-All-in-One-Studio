@@ -8,6 +8,8 @@
   "extensionPoints": {
     "providers": [],
     "skills": ["skills/*/SKILL.md"],
-    "workflows": []
+    "workflows": [],
+    "mcp_tools": ["mcp_tools/*.py"],
+    "custom_nodes": ["custom_nodes/*.json"]
   }
 }

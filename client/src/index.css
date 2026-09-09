@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* dark: 变体跟随应用内主题切换（.dark 类），而非仅跟随操作系统 */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --color-background: var(--color-background);
   --color-surface: var(--color-surface);
@@ -207,3 +210,64 @@ input, textarea, select {
 input::placeholder, textarea::placeholder {
   color: var(--color-text-muted);
 }
+
+/* ============ 浅色主题可读性修复 ============
+ * 病因：大量组件把 text-white / gray-100~400 / zinc 等“只为深色设计”的
+ * 浅色文字写死在主题表面（浅色下为白色底）上，导致白底白字看不清。
+ * 策略：浅色主题下把这些浅色文字统一映射为深色；常黑容器
+ * （节点卡/控制台/代码块/图片浮层/渐变与实色按钮）内保持原色。
+ * 常黑容器指：节点卡 bg-[#141419]/[#1c1d24]、控制台 bg-[#18191c]、
+ * 代码块 pre / bg-black/40~60（非 fixed 遮罩）、图片浮层 absolute bg-black/60~70、
+ * 渐变背景、实色饱和按钮。fixed 全屏遮罩不豁免（其内部卡片是浅色的）。 */
+[data-theme="light"] .text-white { color: #0F172A !important; }
+[data-theme="light"] .text-gray-100 { color: #1E293B !important; }
+[data-theme="light"] .text-gray-200 { color: #1E293B !important; }
+[data-theme="light"] .text-gray-300 { color: #334155 !important; }
+[data-theme="light"] .text-gray-400 { color: #64748B !important; }
+[data-theme="light"] .text-zinc-100 { color: #1E293B !important; }
+[data-theme="light"] .text-zinc-200 { color: #334155 !important; }
+[data-theme="light"] .text-zinc-300 { color: #475569 !important; }
+[data-theme="light"] .text-white\/90 { color: rgba(15, 23, 42, 0.9) !important; }
+[data-theme="light"] .text-white\/80 { color: rgba(15, 23, 42, 0.82) !important; }
+[data-theme="light"] .text-white\/70 { color: rgba(15, 23, 42, 0.72) !important; }
+[data-theme="light"] .text-white\/60 { color: rgba(15, 23, 42, 0.62) !important; }
+[data-theme="light"] .text-white\/50 { color: rgba(15, 23, 42, 0.55) !important; }
+[data-theme="light"] .text-white\/40 { color: rgba(15, 23, 42, 0.45) !important; }
+[data-theme="light"] .text-white\/30 { color: rgba(15, 23, 42, 0.35) !important; }
+[data-theme="light"] .hover\:text-white:hover { color: #0F172A !important; }
+[data-theme="light"] .fill-white { fill: #0F172A !important; }
+[data-theme="light"] .text-amber-200 { color: #B45309 !important; }
+[data-theme="light"] .text-violet-300 { color: #6D28D9 !important; }
+[data-theme="light"] .text-emerald-300 { color: #047857 !important; }
+/* 浅色下白色边框/分割线不可见，同步映射为深色 */
+[data-theme="light"] .border-white\/5 { border-color: rgba(15, 23, 42, 0.06) !important; }
+[data-theme="light"] .border-white\/10 { border-color: rgba(15, 23, 42, 0.12) !important; }
+[data-theme="light"] .border-white\/15 { border-color: rgba(15, 23, 42, 0.16) !important; }
+[data-theme="light"] .border-white\/20 { border-color: rgba(15, 23, 42, 0.22) !important; }
+[data-theme="light"] .divide-white\/5 > :not([hidden]) ~ :not([hidden]) { border-color: rgba(15, 23, 42, 0.06) !important; }
+
+/* ---- 常黑容器内保持浅色（后代 + 实色按钮自身） ---- */
+[data-theme="light"] :is([class*="bg-[#141419]"], [class*="bg-[#1c1d24]"], [class*="bg-[#18191c]"], [class*="bg-gradient"], pre, .bg-black\/40, .bg-black\/50, .bg-black\/60:not(.fixed), .absolute.bg-black\/70) :is(.text-white) { color: #fff !important; }
+[data-theme="light"] :is([class*="bg-[#141419]"], [class*="bg-[#1c1d24]"], [class*="bg-[#18191c]"], [class*="bg-gradient"], pre, .bg-black\/40, .bg-black\/50, .bg-black\/60:not(.fixed), .absolute.bg-black\/70) :is(.hover\:text-white:hover) { color: #fff !important; }
+[data-theme="light"] :is([class*="bg-[#141419]"], [class*="bg-[#1c1d24]"], [class*="bg-[#18191c]"], [class*="bg-gradient"], pre, .bg-black\/40, .bg-black\/50, .bg-black\/60:not(.fixed), .absolute.bg-black\/70) :is(.fill-white) { fill: #fff !important; }
+[data-theme="light"] :is([class*="bg-[#141419]"], [class*="bg-[#1c1d24]"], [class*="bg-[#18191c]"], [class*="bg-gradient"], pre, .bg-black\/40, .bg-black\/50, .bg-black\/60:not(.fixed), .absolute.bg-black\/70) :is(.text-gray-100, .text-zinc-100) { color: #F3F4F6 !important; }
+[data-theme="light"] :is([class*="bg-[#141419]"], [class*="bg-[#1c1d24]"], [class*="bg-[#18191c]"], [class*="bg-gradient"], pre, .bg-black\/40, .bg-black\/50, .bg-black\/60:not(.fixed), .absolute.bg-black\/70) :is(.text-gray-200) { color: #E5E7EB !important; }
+[data-theme="light"] :is([class*="bg-[#141419]"], [class*="bg-[#1c1d24]"], [class*="bg-[#18191c]"], [class*="bg-gradient"], pre, .bg-black\/40, .bg-black\/50, .bg-black\/60:not(.fixed), .absolute.bg-black\/70) :is(.text-gray-300, .text-zinc-200) { color: #D1D5DB !important; }
+[data-theme="light"] :is([class*="bg-[#141419]"], [class*="bg-[#1c1d24]"], [class*="bg-[#18191c]"], [class*="bg-gradient"], pre, .bg-black\/40, .bg-black\/50, .bg-black\/60:not(.fixed), .absolute.bg-black\/70) :is(.text-gray-400) { color: #9CA3AF !important; }
+[data-theme="light"] :is([class*="bg-[#141419]"], [class*="bg-[#1c1d24]"], [class*="bg-[#18191c]"], [class*="bg-gradient"], pre, .bg-black\/40, .bg-black\/50, .bg-black\/60:not(.fixed), .absolute.bg-black\/70) :is(.text-zinc-300) { color: #D4D4D8 !important; }
+[data-theme="light"] :is([class*="bg-[#141419]"], [class*="bg-[#1c1d24]"], [class*="bg-[#18191c]"], [class*="bg-gradient"], pre, .bg-black\/40, .bg-black\/50, .bg-black\/60:not(.fixed), .absolute.bg-black\/70) :is(.text-white\/90) { color: rgba(255, 255, 255, 0.9) !important; }
+[data-theme="light"] :is([class*="bg-[#141419]"], [class*="bg-[#1c1d24]"], [class*="bg-[#18191c]"], [class*="bg-gradient"], pre, .bg-black\/40, .bg-black\/50, .bg-black\/60:not(.fixed), .absolute.bg-black\/70) :is(.text-white\/80) { color: rgba(255, 255, 255, 0.8) !important; }
+[data-theme="light"] :is([class*="bg-[#141419]"], [class*="bg-[#1c1d24]"], [class*="bg-[#18191c]"], [class*="bg-gradient"], pre, .bg-black\/40, .bg-black\/50, .bg-black\/60:not(.fixed), .absolute.bg-black\/70) :is(.text-white\/70) { color: rgba(255, 255, 255, 0.7) !important; }
+[data-theme="light"] :is([class*="bg-[#141419]"], [class*="bg-[#1c1d24]"], [class*="bg-[#18191c]"], [class*="bg-gradient"], pre, .bg-black\/40, .bg-black\/50, .bg-black\/60:not(.fixed), .absolute.bg-black\/70) :is(.text-white\/60) { color: rgba(255, 255, 255, 0.6) !important; }
+[data-theme="light"] :is([class*="bg-[#141419]"], [class*="bg-[#1c1d24]"], [class*="bg-[#18191c]"], [class*="bg-gradient"], pre, .bg-black\/40, .bg-black\/50, .bg-black\/60:not(.fixed), .absolute.bg-black\/70) :is(.text-white\/50) { color: rgba(255, 255, 255, 0.5) !important; }
+[data-theme="light"] :is([class*="bg-[#141419]"], [class*="bg-[#1c1d24]"], [class*="bg-[#18191c]"], [class*="bg-gradient"], pre, .bg-black\/40, .bg-black\/50, .bg-black\/60:not(.fixed), .absolute.bg-black\/70) :is(.text-white\/40) { color: rgba(255, 255, 255, 0.4) !important; }
+[data-theme="light"] :is([class*="bg-[#141419]"], [class*="bg-[#1c1d24]"], [class*="bg-[#18191c]"], [class*="bg-gradient"], pre, .bg-black\/40, .bg-black\/50, .bg-black\/60:not(.fixed), .absolute.bg-black\/70) :is(.text-white\/30) { color: rgba(255, 255, 255, 0.3) !important; }
+[data-theme="light"] :is([class*="bg-[#141419]"], [class*="bg-[#1c1d24]"], [class*="bg-[#18191c]"], [class*="bg-gradient"], pre, .bg-black\/40, .bg-black\/50, .bg-black\/60:not(.fixed), .absolute.bg-black\/70) :is(.text-amber-200) { color: #FDE68A !important; }
+[data-theme="light"] :is([class*="bg-[#141419]"], [class*="bg-[#1c1d24]"], [class*="bg-[#18191c]"], [class*="bg-gradient"], pre, .bg-black\/40, .bg-black\/50, .bg-black\/60:not(.fixed), .absolute.bg-black\/70) :is(.text-violet-300) { color: #C4B5FD !important; }
+[data-theme="light"] :is([class*="bg-[#141419]"], [class*="bg-[#1c1d24]"], [class*="bg-[#18191c]"], [class*="bg-gradient"], pre, .bg-black\/40, .bg-black\/50, .bg-black\/60:not(.fixed), .absolute.bg-black\/70) :is(.text-emerald-300) { color: #6EE7B7 !important; }
+[data-theme="light"] :is([class*="bg-[#141419]"], [class*="bg-[#1c1d24]"], [class*="bg-[#18191c]"], [class*="bg-gradient"], pre, .bg-black\/40, .bg-black\/50, .bg-black\/60:not(.fixed), .absolute.bg-black\/70) :is(.border-white\/5, .border-white\/10, .border-white\/15, .border-white\/20) { border-color: rgba(255, 255, 255, 0.12) !important; }
+/* 实色/半透明深色按钮自身（常位于图片或深色条上）保持白字 */
+[data-theme="light"] [class*="bg-gradient"].text-white { color: #fff !important; }
+[data-theme="light"] [class*="bg-gradient"].fill-white { fill: #fff !important; }
+[data-theme="light"] :is(.bg-brand, .bg-brand-light, .bg-violet-500, .bg-violet-600, .bg-red-500, .bg-emerald-500, .bg-amber-500, .bg-black, .bg-zinc-900, .bg-gray-900, .bg-brand\/80, .bg-violet-500\/90, .bg-white\/20, .bg-white\/30, .bg-black\/40, .bg-black\/50, .bg-black\/60, .bg-black\/70).text-white { color: #fff !important; }
+[data-theme="light"] :is(.bg-brand, .bg-brand-light, .bg-violet-500, .bg-violet-600, .bg-red-500, .bg-emerald-500, .bg-amber-500, .bg-black, .bg-zinc-900, .bg-gray-900, .bg-brand\/80, .bg-violet-500\/90, .bg-white\/20, .bg-white\/30, .bg-black\/40, .bg-black\/50, .bg-black\/60, .bg-black\/70).fill-white { fill: #fff !important; }

@@ -7,6 +7,8 @@ import { useProjectStore } from '../stores/useProjectStore';
 import { useCanvasStore } from '../stores/useCanvasStore';
 import { apiService } from '../services/api';
 import { MarkdownText } from '../components/agent/MarkdownText';
+import { PlanCard, ArtifactCard, ErrorCard, PlanPreview, CapabilityProposalCard } from '../components/agent/AgentCards';
+import { extractArtifact, toStructuredError, detectLocalIntent } from '../components/agent/businessIntents';
 
 const isDev = typeof window !== 'undefined' && window.location.port === '5173';
 const WS_URL = isDev
@@ -32,12 +34,17 @@ interface ChatMsg {
   suggested?: string[];
   mode?: 'chat' | 'execute';
   time: string;
+  plan?: PlanPreview | null;
+  planConfirmed?: boolean;
+  artifacts?: Array<{ kind: 'image' | 'video' | 'audio'; url: string; tool: string; label: string; applied?: boolean }>;
+  errors?: Array<{ tool: string; what: string; why: string; next: string }>;
 }
 
-try { (window as any).__STUDIO_BUILD__ = 'agent-page-20260908-p1'; } catch {}
+try { (window as any).__STUDIO_BUILD__ = 'agent-page-20260909-trimode'; } catch {}
 
 const QUICK_ASK = ['这个项目怎么做分镜？', '首尾帧和参考图有什么区别？', '剪映导出需要什么前置条件？'];
 const QUICK_DO = ['为当前镜头规划3D特写推镜', '生成主角怒吼配音并对齐时长', '把画布现有节点全量执行一遍', '导出剪映工程草稿'];
+const QUICK_CREATE = ['给H3视频源补first_frame插槽', '做个6格漫剧画布模板', '新建古风战斗Skill规范'];
 
 export const AgentModeView: React.FC = () => {
   const { project, activeShotId } = useProjectStore();
@@ -45,6 +52,12 @@ export const AgentModeView: React.FC = () => {
     try { return (localStorage.getItem('agent_mode') as any) || 'execute'; } catch { return 'execute'; }
   });
   useEffect(() => { try { localStorage.setItem('agent_mode', mode); } catch {} }, [mode]);
+  // 三运行模式：approve审批(默认) / auto自动 / create创造
+  const [runMode, setRunMode] = useState<'approve' | 'auto' | 'create'>(() => {
+    try { return (localStorage.getItem('agent_run_mode') as any) || 'approve'; } catch { return 'approve'; }
+  });
+  useEffect(() => { try { localStorage.setItem('agent_run_mode', runMode); } catch {} }, [runMode]);
+  const [proposalBusy, setProposalBusy] = useState<Record<string, string>>({});
 
   const [sessionId] = useState(() => {
     try {
@@ -74,6 +87,8 @@ export const AgentModeView: React.FC = () => {
   const bottomRef = useRef<HTMLDivElement>(null);
   const modeRef = useRef(mode);
   modeRef.current = mode;
+  const runModeRef = useRef(runMode);
+  runModeRef.current = runMode;
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, thinking]);
 
   // ---- WS ----
@@ -98,11 +113,30 @@ export const AgentModeView: React.FC = () => {
           } else if (event === 'tool_calling') {
             if (curId) patch((m) => ({ ...m, steps: [...(m.steps || []), { id: 's' + Date.now() + Math.random(), name: data.tool_name, status: 'executing' }] }));
           } else if (event === 'tool_result') {
-            if (curId) patch((m) => ({
-              ...m,
-              steps: (m.steps || []).map((s) => (s.name === data.tool_name && s.status === 'executing'
-                ? { ...s, status: data.status === 'success' ? 'completed' : 'error', result: data.result, error: data.error } : s)),
-            }));
+            if (curId) patch((m) => {
+              const steps: ToolStep[] = (m.steps || []).map((s) => (s.name === data.tool_name && s.status === 'executing'
+                ? { ...s, status: (data.status === 'success' ? 'completed' : 'error') as ToolStep['status'], result: data.result, error: data.error } : s));
+              // P0业务卡：成功提产物 / 失败提结构化错误；Creator 提案单独成卡
+              let artifacts = m.artifacts || [];
+              let errors = m.errors || [];
+              let plan = m.plan;
+              try {
+                if (data.status === 'success' && data.result) {
+                  const r = data.result as any;
+                  const prop = r?.proposal || (r?.proposal_id ? r : null);
+                  if ((data.tool_name === 'creator_propose_capability' || data.tool_name?.startsWith?.('creator_')) && prop?.proposal_id) {
+                    plan = { ...(plan as any), creator_proposal: prop } as any;
+                  } else {
+                    const a = extractArtifact(data.tool_name, data.result);
+                    if (a) artifacts = [...artifacts, { ...a }];
+                  }
+                } else if (data.status !== 'success') {
+                  const se = toStructuredError(data.tool_name, data.error || '执行失败');
+                  errors = [...errors, { tool: data.tool_name, ...se }];
+                }
+              } catch {}
+              return { ...m, steps, artifacts, errors, plan };
+            });
           } else if (event === 'approval_required') {
             const aid = String(data.approval_id || '');
             if (aid) {
@@ -156,21 +190,13 @@ export const AgentModeView: React.FC = () => {
     return id;
   };
 
-  const send = useCallback(async (raw?: string) => {
-    const text = (raw ?? input).trim();
-    if (!text || thinking) return;
-    const m = modeRef.current;
-    setMessages((prev) => [...prev, { id: 'u' + Date.now(), sender: 'user', text, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
-    setInput('');
-    setThinking(true);
-    const agentId = pushAgentMsg(m);
-    const ctx = buildContext();
-
-    // WS优先
+  const executeSend = useCallback(async (agentId: string, text: string, ctx: any, m: 'chat' | 'execute') => {
+    const rm = runModeRef.current;
+    // WS优先（run_mode 透传，后端 trace 审计；未知字段后端忽略）
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
       try {
-        ws.send(JSON.stringify({ action: 'agent_prompt', prompt: text, context: ctx, session_id: effSession, mode: m }));
+        ws.send(JSON.stringify({ action: 'agent_prompt', prompt: text, context: ctx, session_id: effSession, mode: m, run_mode: rm }));
         return;
       } catch {}
     }
@@ -183,25 +209,56 @@ export const AgentModeView: React.FC = () => {
           if (mm.id !== agentId) return mm;
           if (event === 'agent_stream_chunk') return { ...mm, text: mm.text + (data.delta || '') };
           if (event === 'tool_calling') return { ...mm, steps: [...(mm.steps || []), { id: 's' + Date.now(), name: data.tool_name, status: 'executing' as const }] };
-          if (event === 'tool_result') return {
-            ...mm,
-            steps: (mm.steps || []).map((s) => (s.name === data.tool_name && s.status === 'executing'
-              ? { ...s, status: data.status === 'success' ? 'completed' as const : 'error' as const, result: data.result, error: data.error } : s)),
-          };
+          if (event === 'tool_result') {
+            const steps = (mm.steps || []).map((s) => (s.name === data.tool_name && s.status === 'executing'
+              ? { ...s, status: data.status === 'success' ? 'completed' as const : 'error' as const, result: data.result, error: data.error } : s));
+            let artifacts = mm.artifacts || [];
+            let errors = mm.errors || [];
+            let plan = mm.plan;
+            try {
+              if (data.status === 'success' && data.result) {
+                const r = data.result as any;
+                const prop = r?.proposal || (r?.proposal_id ? r : null);
+                if ((data.tool_name === 'creator_propose_capability' || data.tool_name?.startsWith?.('creator_')) && prop?.proposal_id) {
+                  plan = { ...(plan as any), creator_proposal: prop } as any;
+                } else {
+                  const a = extractArtifact(data.tool_name, data.result);
+                  if (a) artifacts = [...artifacts, { ...a }];
+                }
+              } else if (data.status !== 'success') {
+                const se = toStructuredError(data.tool_name, data.error || '执行失败');
+                errors = [...errors, { tool: data.tool_name, ...se }];
+              }
+            } catch {}
+            return { ...mm, steps, artifacts, errors, plan };
+          }
           if (event === 'agent_response') return { ...mm, text: data.message || mm.text, suggested: data.suggested_actions };
           if (event === 'error') return { ...mm, text: mm.text + `\n\n⚠️ ${data.message}` };
           return mm;
         }));
         if (event === 'agent_response' || event === 'error') { setThinking(false); curIdRef.current = null; }
-      }, { signal: ctrl.signal, mode: m } as any);
+      }, { signal: ctrl.signal, mode: m, runMode: runModeRef.current } as any);
     } catch (e: any) {
       if (String(e?.message || '').toLowerCase().includes('abort')) {
         setMessages((prev) => prev.map((mm) => (mm.id === agentId ? { ...mm, text: mm.text + '\n\n⏹️ 已暂停' } : mm)));
       } else {
         try {
-          const res = await apiService.agentChat(text, ctx, effSession, m);
+          const res = await apiService.agentChat(text, ctx, effSession, m, runModeRef.current);
           const steps: ToolStep[] = (res.executed_tools || []).map((t: any) => ({ id: 's' + Math.random(), name: t.tool_name, status: t.status === 'success' ? 'completed' : 'error', result: t.result, error: t.error }));
-          setMessages((prev) => prev.map((mm) => (mm.id === agentId ? { ...mm, text: res.reply || '完成。', steps, suggested: res.suggested_actions } : mm)));
+          const artifacts: ChatMsg['artifacts'] = [];
+          const errors: ChatMsg['errors'] = [];
+          for (const t of (res.executed_tools || [])) {
+            try {
+              if (t.status === 'success' && t.result) {
+                const a = extractArtifact(t.tool_name, t.result);
+                if (a) artifacts!.push({ ...a });
+              } else if (t.status !== 'success') {
+                const se = toStructuredError(t.tool_name, t.error || '执行失败');
+                errors!.push({ tool: t.tool_name, ...se });
+              }
+            } catch {}
+          }
+          setMessages((prev) => prev.map((mm) => (mm.id === agentId ? { ...mm, text: res.reply || '完成。', steps, artifacts, errors, suggested: res.suggested_actions } : mm)));
         } catch (err: any) {
           setMessages((prev) => prev.map((mm) => (mm.id === agentId ? { ...mm, text: `⚠️ 连接异常：${err?.message || '未知'}` } : mm)));
         }
@@ -211,7 +268,110 @@ export const AgentModeView: React.FC = () => {
     } finally {
       abortRef.current = null;
     }
-  }, [input, thinking, buildContext, effSession]);
+  }, [buildContext, effSession]);
+
+  const pendingTextRef = useRef<Record<string, { text: string; ctx: any; mode: 'chat' | 'execute' }>>({});
+
+  const confirmPlan = useCallback((msgId: string) => {
+    const p = pendingTextRef.current[msgId];
+    if (!p) return;
+    setMessages((prev) => prev.map((mm) => (mm.id === msgId ? { ...mm, planConfirmed: true } : mm)));
+    setThinking(true);
+    executeSend(msgId, p.text, p.ctx, p.mode);
+    delete pendingTextRef.current[msgId];
+  }, [executeSend]);
+
+  const cancelPlan = useCallback((msgId: string) => {
+    delete pendingTextRef.current[msgId];
+    setThinking(false);
+    curIdRef.current = null;
+    setMessages((prev) => prev.map((mm) => (mm.id === msgId ? { ...mm, text: (mm.text || '') + '\n\n已取消该计划，可调整说法后重试。', plan: null } : mm)));
+  }, []);
+
+  // Creator 提案动作：Start 试跑 / persist 真写生产 / discard / rollback 按备份恢复
+  const proposalAction = useCallback(async (msgId: string, proposalId: string, kind: 'start' | 'persist' | 'discard' | 'rollback') => {
+    setProposalBusy((p) => ({ ...p, [proposalId]: kind }));
+    try {
+      if (kind === 'start') {
+        const r = await apiService.creatorStart(proposalId);
+        const checks = ((r as any)?.report?.checks || []).map((c: any) => `${c.ok ? '✓' : '✕'}${c.name}`).join('；');
+        setMessages((prev) => prev.map((mm) => {
+          if (mm.id !== msgId || !mm.plan?.creator_proposal) return mm;
+          return {
+            ...mm,
+            plan: { ...mm.plan, creator_proposal: { ...(mm.plan.creator_proposal as any), status: (r as any)?.proposal?.status || 'tested' } },
+            text: mm.text + `\n\n试跑${(r as any)?.proposal?.status === 'tested' ? '通过' : '有问题'}：${checks || '无检查项'}`,
+          };
+        }));
+      } else {
+        const r = await apiService.creatorFinalize(proposalId, kind);
+        try {
+          if ((r as any)?.template_id) window.dispatchEvent(new Event('creator-template-refresh'));
+          if ((r as any)?.skill) window.dispatchEvent(new Event('skill-list-refresh'));
+        } catch {}
+        setMessages((prev) => prev.map((mm) => {
+          if (mm.id !== msgId || !mm.plan?.creator_proposal) return mm;
+          const gone = kind === 'discard';
+          const status = (r as any)?.status || (gone ? 'discarded' : 'persisted');
+          return {
+            ...mm,
+            plan: gone ? { ...mm.plan, creator_proposal: undefined } : { ...mm.plan, creator_proposal: { ...(mm.plan.creator_proposal as any), status } },
+            text: mm.text + (gone ? '\n\n提案已丢弃（teardown），未动生产。' : `\n\n${(r as any)?.note || '完成。'}`),
+          };
+        }));
+      }
+    } catch (e: any) {
+      setMessages((prev) => prev.map((mm) => (mm.id === msgId ? { ...mm, text: mm.text + `\n\n提案操作失败：${e?.message || '未知'}` } : mm)));
+    } finally {
+      setProposalBusy((p) => { const n = { ...p }; delete n[proposalId]; return n; });
+    }
+  }, []);
+
+  const send = useCallback(async (raw?: string) => {
+    const text = (raw ?? input).trim();
+    if (!text || thinking) return;
+    const m = modeRef.current;
+    const rm = runModeRef.current;
+    setMessages((prev) => [...prev, { id: 'u' + Date.now(), sender: 'user', text, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
+    setInput('');
+    setThinking(true);
+    const agentId = pushAgentMsg(m);
+    const ctx = buildContext();
+
+    // 三模式闸：执行模式先取Plan预览（含 run_mode）；问答模式直发
+    if (m === 'execute') {
+      try {
+        const plan = await apiService.agentPlanPreview(text, ctx, rm);
+        if (plan && plan.steps && plan.steps.length > 0) {
+          const local = detectLocalIntent(text, !!ctx.active_shot);
+          const hasProposal = !!(plan as any).creator_proposal;
+          setMessages((prev) => prev.map((mm) => (mm.id === agentId ? {
+            ...mm,
+            text: `**${plan.label}** · ${plan.reason || local.label}，预估${plan.est_total_s >= 60 ? `约${Math.round(plan.est_total_s / 60)}分钟` : `约${plan.est_total_s}s`}（${plan.run_mode || rm}）。${hasProposal ? '创造模式附带能力提案，先 Start 试跑再执行主计划。' : plan.needs_confirm ? '确认后开始执行。' : '风险较低，直接开始执行。'}`,
+            plan,
+          } : mm)));
+          if (plan.needs_confirm || hasProposal) {
+            pendingTextRef.current[agentId] = { text, ctx, mode: m };
+            setThinking(false);
+            return;
+          }
+        } else if ((plan as any)?.creator_proposal) {
+          // 无执行步骤但有提案（如纯补源意图）：同样先展示提案卡
+          setMessages((prev) => prev.map((mm) => (mm.id === agentId ? {
+            ...mm,
+            text: `**${plan.label}**（${plan.run_mode || rm}）：先处理能力提案，再执行。`,
+            plan,
+          } : mm)));
+          pendingTextRef.current[agentId] = { text, ctx, mode: m };
+          setThinking(false);
+          return;
+        }
+      } catch {
+        // 预览失败不阻塞，直接执行
+      }
+    }
+    await executeSend(agentId, text, ctx, m);
+  }, [input, thinking, buildContext, effSession, executeSend]);
 
   const abort = useCallback(() => {
     try { wsRef.current?.send(JSON.stringify({ action: 'abort', session_id: effSession })); } catch {}
@@ -245,9 +405,16 @@ export const AgentModeView: React.FC = () => {
             </div>
             <div className="text-[10px] text-gray-500">{project?.title || '未选择项目'} · {shots.length}镜 · 独立页面（悬浮窗不受影响）</div>
           </div>
-          <div className="ml-auto flex items-center rounded-xl bg-surface border border-border p-1">
-            <button onClick={() => setMode('chat')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${mode === 'chat' ? 'bg-accent-green/20 text-accent-green' : 'text-gray-500 hover:text-white'}`}>问答</button>
-            <button onClick={() => setMode('execute')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${mode === 'execute' ? 'bg-brand/20 text-brand-light' : 'text-gray-500 hover:text-white'}`}>执行</button>
+          <div className="ml-auto flex items-center gap-2">
+            <div className="flex items-center rounded-xl bg-surface border border-border p-1" title="运行模式：审批=每步确认 / 自动=高风险才拦 / 创造=先造能力">
+              <button onClick={() => setRunMode('approve')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${runMode === 'approve' ? 'bg-amber-500/20 text-amber-300' : 'text-gray-500 hover:text-white'}`}>审批</button>
+              <button onClick={() => setRunMode('auto')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${runMode === 'auto' ? 'bg-brand/20 text-brand-light' : 'text-gray-500 hover:text-white'}`}>自动</button>
+              <button onClick={() => setRunMode('create')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${runMode === 'create' ? 'bg-violet-500/20 text-violet-300' : 'text-gray-500 hover:text-white'}`}>创造</button>
+            </div>
+            <div className="flex items-center rounded-xl bg-surface border border-border p-1">
+              <button onClick={() => setMode('chat')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${mode === 'chat' ? 'bg-accent-green/20 text-accent-green' : 'text-gray-500 hover:text-white'}`}>问答</button>
+              <button onClick={() => setMode('execute')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${mode === 'execute' ? 'bg-brand/20 text-brand-light' : 'text-gray-500 hover:text-white'}`}>执行</button>
+            </div>
           </div>
         </div>
 
@@ -263,6 +430,50 @@ export const AgentModeView: React.FC = () => {
                 </div>
                 {m.thinking && <div className="mb-2 text-[10px] text-gray-500 whitespace-pre-wrap max-h-24 overflow-y-auto custom-scrollbar border-l-2 border-brand/40 pl-2">{m.thinking}</div>}
                 {m.sender === 'agent' ? <MarkdownText text={m.text || (thinking && m.id === curIdRef.current ? '思考中…' : '')} /> : <div className="whitespace-pre-wrap">{m.text}</div>}
+                {m.sender === 'agent' && m.plan && m.plan.steps.length > 0 && !m.planConfirmed && (
+                  <PlanCard plan={m.plan} onConfirm={() => confirmPlan(m.id)} onCancel={() => cancelPlan(m.id)} confirming={thinking} />
+                )}
+                {m.sender === 'agent' && (m.plan as any)?.creator_proposal && (
+                  <CapabilityProposalCard
+                    proposal={(m.plan as any).creator_proposal}
+                    busy={proposalBusy[(m.plan as any).creator_proposal.proposal_id] || null}
+                    onStart={() => proposalAction(m.id, (m.plan as any).creator_proposal.proposal_id, 'start')}
+                    onFinalize={(a) => proposalAction(m.id, (m.plan as any).creator_proposal.proposal_id, a)}
+                  />
+                )}
+                {m.sender === 'agent' && m.plan && m.planConfirmed && (
+                  <div className="mt-1.5 text-[10px] text-emerald-300">✓ 计划已确认，正在执行…</div>
+                )}
+                {(m.artifacts?.length || 0) > 0 && (
+                  <div className="space-y-1.5">
+                    {m.artifacts!.map((a, i) => (
+                      <ArtifactCard
+                        key={`${m.id}-a${i}-${a.url.slice(-16)}`}
+                        kind={a.kind} url={a.url} tool={a.tool} label={a.label}
+                        shotLabel={active ? `#${active.shot_index}` : undefined}
+                        applied={a.applied}
+                        onApply={() => {
+                          if (!activeShotId) return;
+                          const patch: any = { status: 'completed' };
+                          if (a.kind === 'image') { patch.image_url = a.url; patch.image_provider = a.tool; }
+                          if (a.kind === 'video') { patch.video_url = a.url; patch.video_provider = a.tool; }
+                          if (a.kind === 'audio') { patch.audio_url = a.url; patch.audio_provider = a.tool; }
+                          try { useProjectStore.getState().updateShot(activeShotId, patch); } catch {}
+                          setMessages((prev) => prev.map((mm) => (mm.id === m.id
+                            ? { ...mm, artifacts: (mm.artifacts || []).map((x, xi) => (xi === i ? { ...x, applied: true } : x)) }
+                            : mm)));
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
+                {(m.errors?.length || 0) > 0 && (
+                  <div className="space-y-1.5">
+                    {m.errors!.map((e, i) => (
+                      <ErrorCard key={`${m.id}-e${i}`} what={e.what} why={e.why} next={e.next} />
+                    ))}
+                  </div>
+                )}
                 {(m.steps?.length || 0) > 0 && (
                   <div className="mt-2 rounded-xl border border-border overflow-hidden">
                     <button onClick={() => setShowSteps((p) => ({ ...p, [m.id]: !p[m.id] }))} className="w-full px-2.5 py-1.5 flex items-center gap-1.5 text-[10px] font-bold text-gray-300 hover:bg-white/5">
@@ -319,6 +530,11 @@ export const AgentModeView: React.FC = () => {
           <div className={`text-[11px] leading-4 p-2 rounded-xl ${mode === 'chat' ? 'bg-accent-green/10 text-accent-green' : 'bg-brand/10 text-brand-light'}`}>
             {mode === 'chat' ? '问答：纯LLM讲解，不进工具循环，零副作用不烧生成费用。' : '执行：ReAct循环调全部工具，可并行；删源/写文件/跑命令会弹窗确认，120s超时自动拒绝。'}
           </div>
+          <div className="text-[11px] leading-4 p-2 rounded-xl bg-surface-secondary border border-border text-gray-300">
+            {runMode === 'approve' && '审批模式：变异动作先审后干，Plan必确认（默认）。'}
+            {runMode === 'auto' && '自动模式：低/中风险直跑+Undo，仅高风险/删源拦截。'}
+            {runMode === 'create' && '创造模式：缺能力先提案，Start试跑→持久化/丢弃，默认不写生产。'}
+          </div>
           <div className="flex gap-2">
             <button onClick={clearAll} className="flex-1 py-1.5 rounded-lg bg-surface-secondary border border-border text-[11px] text-gray-300 hover:text-white flex items-center justify-center gap-1"><Trash2 className="w-3 h-3" />清空记忆</button>
             <button onClick={abort} className="flex-1 py-1.5 rounded-lg bg-surface-secondary border border-border text-[11px] text-gray-300 hover:text-white">暂停</button>
@@ -351,8 +567,8 @@ export const AgentModeView: React.FC = () => {
         </div>
 
         <div className="rounded-2xl border border-border bg-surface p-3 space-y-2">
-          <div className="text-xs font-bold text-white">快捷指令</div>
-          {(mode === 'chat' ? QUICK_ASK : QUICK_DO).map((q) => (
+          <div className="text-xs font-bold text-white">快捷指令{runMode === 'create' ? ' · 创造' : ''}</div>
+          {(mode === 'chat' ? QUICK_ASK : runMode === 'create' ? QUICK_CREATE : QUICK_DO).map((q) => (
             <button key={q} onClick={() => send(q)} className="w-full text-left px-2.5 py-1.5 rounded-lg bg-surface-secondary border border-border text-[11px] text-gray-300 hover:border-brand hover:text-white">{q}</button>
           ))}
         </div>

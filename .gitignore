@@ -40,6 +40,12 @@ storage/*.mp3
 storage/*.wav
 storage/*.png
 storage/__pycache__/
+storage/videos/*
+!storage/videos/.gitkeep
+storage/agent_traces/*
+!storage/agent_traces/.gitkeep
+storage/agent_proposals/*
+!storage/agent_proposals/.gitkeep
 exports/_assets/
 exports/MiniMax_Draft_*/
 exports/Orchestrated_Drama_*/
