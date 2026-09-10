@@ -4,9 +4,236 @@
   "canvases": {
     "default": {
       "name": "默认画布",
-      "nodes": [],
+      "nodes": [
+        {
+          "id": "image_1788940941809_1",
+          "type": "image",
+          "position": {
+            "x": 696,
+            "y": 253
+          },
+          "data": {
+            "prompt": "生成人物三视图",
+            "provider_id": "comfyui_wf_4a19b2a2",
+            "provider": "comfyui_wf_4a19b2a2",
+            "params": {
+              "exp_29_filename_prefix": "Krea2_turbo",
+              "combo_49_aspect_ratio": "1:1 (Square)",
+              "num_49_megapixels": 1,
+              "num_49_multiple": 8,
+              "num_30:5_batch_size": 1,
+              "num_30:3_steps": 8,
+              "num_30:3_cfg": 1,
+              "combo_30:3_sampler_name": "euler",
+              "combo_30:3_scheduler": "simple",
+              "num_30:3_denoise": 1,
+              "combo_30:10_unet_name": "krea2_turbo_fp8_scaled.safetensors",
+              "exp_30:11_clip_name": "qwen3vl_4b_fp8_scaled.safetensors",
+              "exp_30:11_type": "krea2",
+              "exp_30:11_device": "default",
+              "combo_30:12_vae_name": "qwen_image_vae.safetensors",
+              "combo_30:15_lora_name": "krea2_darkbrush.safetensors",
+              "num_30:15_strength_model": 0.8,
+              "exp_30:16_max_length": 512,
+              "exp_30:16_sampling_mode": "on",
+              "exp_30:16_thinking": true,
+              "exp_30:16_use_default_template": true,
+              "exp_30:16_sampling_mode.temperature": 0.7,
+              "exp_30:16_sampling_mode.top_k": 64,
+              "exp_30:16_sampling_mode.top_p": 0.95,
+              "exp_30:16_sampling_mode.min_p": 0.05,
+              "exp_30:16_sampling_mode.repetition_penalty": 1.05,
+              "exp_30:16_sampling_mode.seed": 0,
+              "exp_30:16_sampling_mode.presence_penalty": 0,
+              "txt_30:18": "You are an expert prompt engineer for text-to-image models. Your task is to expand the user's prompt into a highly effective image-generation prompt.\n\nThink step by step about the request before writing the answer:\n- What is the subject and mood?\n- What visual styles, mediums, and lighting options would fit? Consider two or three alternatives and pick the one that best serves the caption.\n- What composition, framing, and grounded details will help the text-to-image model?\n\nThen output a single expanded prompt paragraph.\n\nFollow these rules strictly:\n1. **Faithfulness First:** Preserve all original subjects, actions, colors, and spatial relationships. Do not add new objects, props, characters, or animals unless the user clearly implies them.\n2. **Practical T2I Structure:** Write a prompt that a text-to-image model can parse cleanly. Group subjects with their own attributes and actions. Use grounded phrasing for poses, interactions, and spatial layout.\n3. **Style Planning Stays Internal:** Use your internal reasoning to choose style, medium, framing, and lighting. Do not emit planning tags or wrappers in the visible answer body.\n4. **Text Rendering:** If the user requests visible text, quotes, labels, or typography, specify the exact text clearly and wrap requested words in quotes.\n5. **Avoid Over-Specification:** Do not invent highly specific clothing, colors, materials, or scene details unless the input supports them.\n6. **Structure:** Write one cohesive paragraph after the thinking block. No bullets, JSON, or markdown.\n7. **Respect Existing Detail:** If the user's prompt is already detailed, lightly polish and finalize rather than heavily expanding — preserve their phrasing and direction.\n8. **Respect the Human Form:** Treat depictions of people with dignity. Assume clothing covers genitals and intimate anatomy.\n9. **Preserve User Medium:** When the user explicitly requests a medium (e.g. \"photo of\", \"photograph of\", \"illustration of\", \"painting of\", \"sketch of\", \"3D render of\"), honor it. Do not pivot to a different medium to avoid difficulty — match the user's stated intent.\n\nUser's Input:\n\n",
+              "exp_30:23_value": false,
+              "exp_30:24_value": true,
+              "txt_30:27_string_b": "muted minimalist sketch style"
+            },
+            "provider_params": {
+              "exp_29_filename_prefix": "Krea2_turbo",
+              "combo_49_aspect_ratio": "1:1 (Square)",
+              "num_49_megapixels": 1,
+              "num_49_multiple": 8,
+              "num_30:5_batch_size": 1,
+              "num_30:3_steps": 8,
+              "num_30:3_cfg": 1,
+              "combo_30:3_sampler_name": "euler",
+              "combo_30:3_scheduler": "simple",
+              "num_30:3_denoise": 1,
+              "combo_30:10_unet_name": "krea2_turbo_fp8_scaled.safetensors",
+              "exp_30:11_clip_name": "qwen3vl_4b_fp8_scaled.safetensors",
+              "exp_30:11_type": "krea2",
+              "exp_30:11_device": "default",
+              "combo_30:12_vae_name": "qwen_image_vae.safetensors",
+              "combo_30:15_lora_name": "krea2_darkbrush.safetensors",
+              "num_30:15_strength_model": 0.8,
+              "exp_30:16_max_length": 512,
+              "exp_30:16_sampling_mode": "on",
+              "exp_30:16_thinking": true,
+              "exp_30:16_use_default_template": true,
+              "exp_30:16_sampling_mode.temperature": 0.7,
+              "exp_30:16_sampling_mode.top_k": 64,
+              "exp_30:16_sampling_mode.top_p": 0.95,
+              "exp_30:16_sampling_mode.min_p": 0.05,
+              "exp_30:16_sampling_mode.repetition_penalty": 1.05,
+              "exp_30:16_sampling_mode.seed": 0,
+              "exp_30:16_sampling_mode.presence_penalty": 0,
+              "txt_30:18": "You are an expert prompt engineer for text-to-image models. Your task is to expand the user's prompt into a highly effective image-generation prompt.\n\nThink step by step about the request before writing the answer:\n- What is the subject and mood?\n- What visual styles, mediums, and lighting options would fit? Consider two or three alternatives and pick the one that best serves the caption.\n- What composition, framing, and grounded details will help the text-to-image model?\n\nThen output a single expanded prompt paragraph.\n\nFollow these rules strictly:\n1. **Faithfulness First:** Preserve all original subjects, actions, colors, and spatial relationships. Do not add new objects, props, characters, or animals unless the user clearly implies them.\n2. **Practical T2I Structure:** Write a prompt that a text-to-image model can parse cleanly. Group subjects with their own attributes and actions. Use grounded phrasing for poses, interactions, and spatial layout.\n3. **Style Planning Stays Internal:** Use your internal reasoning to choose style, medium, framing, and lighting. Do not emit planning tags or wrappers in the visible answer body.\n4. **Text Rendering:** If the user requests visible text, quotes, labels, or typography, specify the exact text clearly and wrap requested words in quotes.\n5. **Avoid Over-Specification:** Do not invent highly specific clothing, colors, materials, or scene details unless the input supports them.\n6. **Structure:** Write one cohesive paragraph after the thinking block. No bullets, JSON, or markdown.\n7. **Respect Existing Detail:** If the user's prompt is already detailed, lightly polish and finalize rather than heavily expanding — preserve their phrasing and direction.\n8. **Respect the Human Form:** Treat depictions of people with dignity. Assume clothing covers genitals and intimate anatomy.\n9. **Preserve User Medium:** When the user explicitly requests a medium (e.g. \"photo of\", \"photograph of\", \"illustration of\", \"painting of\", \"sketch of\", \"3D render of\"), honor it. Do not pivot to a different medium to avoid difficulty — match the user's stated intent.\n\nUser's Input:\n\n",
+              "exp_30:23_value": false,
+              "exp_30:24_value": true,
+              "txt_30:27_string_b": "muted minimalist sketch style"
+            },
+            "_polling": false,
+            "skill_id": "text_to_image",
+            "reference_images": [],
+            "idea": "生成人物三视图",
+            "text": "生成人物三视图",
+            "agent_state": {
+              "status": "failed",
+              "provider_id": "comfyui_wf_3d96b356",
+              "error": "请求失败 (HTTP 500)",
+              "updated_at": "2026-09-09T09:05:22.312Z"
+            }
+          },
+          "measured": {
+            "width": 360,
+            "height": 405
+          },
+          "selected": true
+        }
+      ],
       "edges": [],
-      "updated_at": "2026-09-08 21:58:12"
+      "updated_at": "2026-09-09 17:06:58"
+    },
+    "cv_mttom7vo": {
+      "name": "分镜#10画布",
+      "nodes": [
+        {
+          "id": "prompt_1788933165001_1",
+          "type": "prompt",
+          "position": {
+            "x": 120,
+            "y": 120
+          },
+          "data": {
+            "prompt": "林川盯着选项，瞳孔猛然收缩，内心决断。",
+            "text": "林川盯着选项，瞳孔猛然收缩，内心决断。"
+          },
+          "measured": {
+            "width": 360,
+            "height": 253
+          }
+        },
+        {
+          "id": "director3d_1788933165001_2",
+          "type": "director3d",
+          "position": {
+            "x": 120,
+            "y": 360
+          },
+          "data": {
+            "framing": "close_up",
+            "motion": "push_in",
+            "pose": "stand",
+            "focal_length_mm": 35,
+            "camera_roll_deg": 0,
+            "cast_layout": "solo",
+            "speed": "1.0x",
+            "ai_directive": ""
+          },
+          "measured": {
+            "width": 360,
+            "height": 253
+          }
+        },
+        {
+          "id": "image_1788933165001_3",
+          "type": "image",
+          "position": {
+            "x": 162.44006386229114,
+            "y": 734.8987744194253
+          },
+          "data": {
+            "prompt": "japanese_anime, Makoto Shinkai style, close up of young man's eyes contracting, screen light reflecting, intense excitement, 4k anime visual, 9:16"
+          },
+          "measured": {
+            "width": 360,
+            "height": 405
+          },
+          "selected": true,
+          "dragging": false
+        },
+        {
+          "id": "video_1788933165001_4",
+          "type": "video",
+          "position": {
+            "x": 1278,
+            "y": 570
+          },
+          "data": {
+            "prompt": "林川盯着选项，瞳孔猛然收缩，内心决断。",
+            "duration": 4,
+            "provider_id": "prov_6131876a",
+            "camera_prompt": "",
+            "provider": "prov_6131876a",
+            "params": {
+              "resolution": "768p竖",
+              "duration": 5
+            },
+            "provider_params": {
+              "resolution": "768p竖",
+              "duration": 5
+            },
+            "_polling": false
+          },
+          "measured": {
+            "width": 360,
+            "height": 405
+          },
+          "dragging": false,
+          "selected": false
+        }
+      ],
+      "edges": [
+        {
+          "id": "e_prompt_1788933165001_1_video_1788933165001_4_prompt_prompt",
+          "source": "prompt_1788933165001_1",
+          "target": "video_1788933165001_4",
+          "sourceHandle": "prompt",
+          "targetHandle": "prompt",
+          "type": "smoothstep",
+          "animated": true
+        },
+        {
+          "id": "e_director3d_1788933165001_2_video_1788933165001_4_camera_prompt_camera_prompt",
+          "source": "director3d_1788933165001_2",
+          "target": "video_1788933165001_4",
+          "sourceHandle": "camera_prompt",
+          "targetHandle": "camera_prompt",
+          "type": "smoothstep",
+          "animated": true
+        },
+        {
+          "id": "e_prompt_1788933165001_1_image_1788933165001_3_prompt_prompt",
+          "source": "prompt_1788933165001_1",
+          "target": "image_1788933165001_3",
+          "sourceHandle": "prompt",
+          "targetHandle": "prompt",
+          "type": "smoothstep",
+          "animated": true
+        },
+        {
+          "id": "e_image_1788933165001_3_video_1788933165001_4_image_first_frame",
+          "source": "image_1788933165001_3",
+          "target": "video_1788933165001_4",
+          "sourceHandle": "image",
+          "targetHandle": "first_frame",
+          "type": "smoothstep",
+          "animated": true
+        }
+      ],
+      "updated_at": "2026-09-09 13:53:31"
     }
   }
 }

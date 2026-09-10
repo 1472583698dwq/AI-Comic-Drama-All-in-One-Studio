@@ -220,7 +220,7 @@ export const ScriptImportView: React.FC<ScriptImportViewProps> = ({ isOpen, onCl
         <div className="h-16 px-6 border-t border-border bg-surface-secondary/50 flex items-center justify-between">
           <div className="flex flex-col space-y-1">
             <span className="text-[11px] text-gray-400 flex items-center gap-2">
-              {isLoading ? loadingMessage : '⚡ 调用 MiniMax LLM 拆解角色/分镜/配音'}
+              {isLoading ? loadingMessage : '⚡ 调用 AI 大模型拆解角色/分镜/配音'}
               {activeProjectId && <label className="flex items-center gap-1 text-[10px] text-gray-300 cursor-pointer"><input type="checkbox" checked={saveToProject} onChange={e=>setSaveToProject(e.target.checked)} /> 保存到当前项目</label>}
               {!activeProjectId && <span className="text-[10px] text-amber-300">未选择项目，将仅本地预览（请先在项目看板创建/打开项目）</span>}
             </span>

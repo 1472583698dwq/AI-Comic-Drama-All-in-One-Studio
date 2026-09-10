@@ -278,3 +278,36 @@ async def delete_project_canvas(project_id: str, canvas_id: str):
         raise HTTPException(status_code=404 if isinstance(e, FileNotFoundError) else 400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"删除失败: {e}")
+
+
+@router.get("/projects/{project_id}/agent-sessions")
+async def get_project_agent_sessions(project_id: str):
+    meta = project_manager.get_meta(project_id)
+    if not meta:
+        raise HTTPException(status_code=404, detail=f"项目不存在: {project_id}")
+    sessions = project_manager.get_agent_sessions(project_id)
+    return {"project_id": project_id, "sessions": sessions}
+
+
+@router.put("/projects/{project_id}/agent-sessions")
+async def save_project_agent_sessions(project_id: str, body: dict):
+    try:
+        sessions = body.get("sessions") if isinstance(body, dict) and "sessions" in body else body
+        if not isinstance(sessions, list):
+            sessions = []
+        saved = project_manager.save_agent_sessions(project_id, sessions)
+        return {"status": "saved", "project_id": project_id, "sessions": saved}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"保存会话失败: {e}")
+
+
+@router.delete("/projects/{project_id}/agent-sessions/{session_id}")
+async def delete_project_agent_session(project_id: str, session_id: str):
+    try:
+        return project_manager.delete_agent_session(project_id, session_id)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除会话失败: {e}")

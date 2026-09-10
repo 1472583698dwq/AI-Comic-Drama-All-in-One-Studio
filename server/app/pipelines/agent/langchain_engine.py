@@ -26,7 +26,7 @@ from typing import Dict, Any, List, Optional
 from collections import defaultdict
 
 from app.core.config import settings
-from app.pipelines.llm_service import llm_service, LLMServiceError, extract_json_from_text, strip_think_tags
+from app.pipelines.llm_service import llm_service, LLMServiceError, extract_json_from_text, strip_think_tags, extract_think_tags
 from app.mcp.server import mcp_registry
 
 try:
@@ -130,15 +130,18 @@ def get_chat_model(streaming: bool = True):
             if base_url.endswith("/chat/completions"):
                 base_url = base_url[:-len("/chat/completions")].rstrip("/")
             model = settings.OPENAI_MODEL or "deepseek-chat"
+            from app.pipelines.llm_service import llm_service
+            custom_headers = llm_service._get_custom_headers()
             return ChatOpenAI(
                 model=model,
                 api_key=settings.OPENAI_API_KEY,
                 base_url=base_url,
                 temperature=0.3,
                 streaming=streaming,
-                max_tokens=int(os.environ.get("AGENT_MAX_TOKENS") or 65536),
+                max_tokens=int(os.environ.get("AGENT_MAX_TOKENS") or 4096),
                 timeout=300,
                 max_retries=2,
+                default_headers=custom_headers if custom_headers else None,
             )
         except Exception as e:
             print(f"[DirectorAgent] ChatOpenAI init failed: {e}，回退到 StudioChatModel")
@@ -438,24 +441,50 @@ async def run_agent_with_langchain(
     streaming: bool = True,
     mode: str = "execute",
 ) -> Dict[str, Any]:
+    async def _safe_send(ev: Dict[str, Any]):
+        if not websocket:
+            return
+        try:
+            await asyncio.wait_for(websocket.send_json(ev), timeout=2)
+        except Exception:
+            pass
+
     # P0双模式：chat纯问答不进循环（省token/零副作用），execute走ReAct
     _mode = (mode or "execute").strip().lower()
     if _mode == "chat":
         reply = await llm_service.chat_completion(
             messages=[
-                {"role": "system", "content": "你是AI漫剧导演顾问，只做问答讲解，不调用任何工具。用中文简洁回答。"},
+                {"role": "system", "content": "你是AI漫剧导演顾问，只做问答讲解，不调用任何工具。请在 <think> ... </think> 标签内展示专业导演的思考推演过程，再用中文回答。"},
                 {"role": "user", "content": (prompt or "")[:4000]},
             ],
             temperature=0.5,
         )
+        th = extract_think_tags(reply or "").strip()
+        clean_reply = strip_think_tags(reply or "").strip()
+        if not th:
+            th = f"【导演顾问思考推演】\n- 意图分析：用户询问「{prompt[:60]}」\n- 解答路径：梳理漫剧影视创作知识库，输出条理清晰的专业指导建议。"
+        if websocket:
+            try:
+                await _safe_send({"event": "agent_thinking_start"})
+                for i in range(0, len(th), 8):
+                    await _safe_send({"event": "agent_thinking_chunk", "delta": th[i:i+8]})
+                    await asyncio.sleep(0.005)
+                await _safe_send({"event": "agent_thinking_end"})
+                if clean_reply and streaming:
+                    await _safe_send({"event": "agent_stream_start"})
+                    for i in range(0, len(clean_reply), 6):
+                        await _safe_send({"event": "agent_stream_chunk", "delta": clean_reply[i:i+6]})
+                        await asyncio.sleep(0.015)
+            except Exception:
+                pass
         try:
             async with _get_session_lock(session_id):
                 SESSION_MEMORY[session_id].append(HumanMessage(content=f"指令: {prompt}"))
-                SESSION_MEMORY[session_id].append(AIMessage(content=reply))
+                SESSION_MEMORY[session_id].append(AIMessage(content=clean_reply))
                 SESSION_MEMORY[session_id] = _trim_history(SESSION_MEMORY[session_id])
         except Exception:
             pass
-        return {"reply": reply, "suggested_actions": ["切换到执行模式让我直接做"], "executed_tools": [], "mode": "chat"}
+        return {"reply": clean_reply, "thinking": th, "suggested_actions": ["切换到执行模式让我直接做"], "executed_tools": [], "mode": "chat"}
     # execute预算：mode未指定max时用P0默认值12（引擎安全上限30不变）
     try:
         from app.agent.loop import MODE_BUDGETS
@@ -524,16 +553,22 @@ async def run_agent_with_langchain(
         _trace_log(_run_id, "run_start", {"prompt": (prompt or "")[:500], "session_id": session_id, "intent": _det, "mode": _mode})
     except Exception:
         _trace_log = None  # type: ignore
-    # 心跳：LLM 超时时前端会卡在紫色竖条，定时推送 thinking 保活
-    async def _safe_send(ev: Dict[str, Any]):
-        if not websocket:
-            return
-        try:
-            await asyncio.wait_for(websocket.send_json(ev), timeout=2)
-        except Exception:
-            pass
+    accumulated_thoughts: List[str] = []
+    init_thought = f"【导演意图感知】接收指令：「{prompt[:100]}」\n- 会话上下文：{session_id}\n- 项目状态：{'已加载工程' if context and context.get('project_title') else '全局就绪'}"
+    if context and context.get("active_shot"):
+        ashot = context["active_shot"]
+        init_thought += f"\n- 当前分镜 #{ashot.get('shot_index')}: {ashot.get('action_desc') or ashot.get('image_prompt') or '无描述'}"
+        if ashot.get("camera_framing") or ashot.get("camera_motion"):
+            init_thought += f"（机位: {ashot.get('camera_framing') or '默认'}, 运镜: {ashot.get('camera_motion') or '默认'}）"
+    accumulated_thoughts.append(init_thought)
 
     await _safe_send({"event": "agent_thinking", "message": f"正在解析导演指令: 「{prompt[:40]}」..."})
+    if websocket:
+        await _safe_send({"event": "agent_thinking_start"})
+        for i in range(0, len(init_thought), 8):
+            await _safe_send({"event": "agent_thinking_chunk", "delta": init_thought[i:i+8]})
+            await asyncio.sleep(0.005)
+        await _safe_send({"event": "agent_thinking_end"})
 
     iteration = 0
     safety_cap = 30  # 重构后实用上限 30 轮足够完成任意画布编排，旧 200 过高易失控
@@ -671,13 +706,46 @@ async def run_agent_with_langchain(
 
         tool_calls = _deduplicate_tool_calls(tool_calls)
 
+        # ── 提取推理/思考推演内容（reasoning_content 或 <think> 标签）──
+        ak = getattr(llm_result, "additional_kwargs", {}) or {}
+        rc = str(ak.get("reasoning_content") or "").strip()
+        tag_think = extract_think_tags(content or "").strip()
+        iter_thought = ""
+        if rc:
+            iter_thought = rc
+        if tag_think:
+            iter_thought = f"{iter_thought}\n\n{tag_think}".strip() if iter_thought else tag_think
+
+        clean_content = strip_think_tags(content or "").strip()
+
         # ── 有工具调用 → 执行 ──
         if tool_calls:
-            if content and content.strip() and websocket:
+            # 聚合思考过程：若模型自带推理/think则优先采用，否则由导演引擎自动生成结构化决策推演
+            if iter_thought:
+                tc_thought = iter_thought
+            else:
+                tool_names_str = "、".join([tc.get("name") or "工具" for tc in tool_calls])
+                reasoning_lines = [
+                    f"【第 {iteration} 轮推演与动作决策】",
+                    f"- 意图分析：根据导演目标，调度 [{tool_names_str}] 执行专项操作",
+                ]
+                for tc in tool_calls[:3]:
+                    t_name = tc.get("name") or ""
+                    t_args = tc.get("args") or {}
+                    arg_keys = [f"{k}={str(v)[:30]}" for k, v in list(t_args.items())[:3]]
+                    reasoning_lines.append(f"  * 调度 `{t_name}`（{', '.join(arg_keys) if arg_keys else '默认参数'}）")
+                reasoning_lines.append("- 执行预期：推进影视资产与分镜编排，等待工具产物回填")
+                tc_thought = "\n".join(reasoning_lines)
+
+            if clean_content and clean_content not in tc_thought:
+                tc_thought = f"{tc_thought}\n\n{clean_content}".strip()
+
+            accumulated_thoughts.append(tc_thought)
+            if websocket:
                 await _safe_send({"event": "agent_thinking_start"})
-                for i in range(0, len(content), 6):
-                    await _safe_send({"event": "agent_thinking_chunk", "delta": content[i:i+6]})
-                    await asyncio.sleep(0.01)
+                for i in range(0, len(tc_thought), 8):
+                    await _safe_send({"event": "agent_thinking_chunk", "delta": tc_thought[i:i+8]})
+                    await asyncio.sleep(0.006)
                 await _safe_send({"event": "agent_thinking_end"})
             # 空转检测：同批工具连续 3 次
             sig = json.dumps([[tc.get("name") or "", json.dumps(tc.get("args") or {}, ensure_ascii=False, sort_keys=True, default=str)] for tc in tool_calls], ensure_ascii=False)
@@ -752,23 +820,48 @@ async def run_agent_with_langchain(
             continue
 
         # ── 无工具调用 → 收尾或防早停 ──
-        stripped = strip_think_tags(content or "")
-        if not stripped.strip():
-            ak = getattr(llm_result, "additional_kwargs", {}) or {}
-            rc = str(ak.get("reasoning_content") or "")
-            if len(rc.strip()) > 40:
-                content = rc
-                stripped = rc
-        if not stripped.strip():
-            if executed_tools and not nudged_empty:
+        stripped = clean_content
+        if not stripped:
+            if iter_thought and len(iter_thought) > 40:
+                stripped = iter_thought
+                iter_thought = ""
+            elif executed_tools and not nudged_empty:
                 nudged_empty = True
                 messages.append(HumanMessage(content="请基于以上已执行工具的结果，直接给出最终中文总结与答案，不要返回空内容。"))
                 continue
-            if executed_tools:
+            elif executed_tools:
                 names = "、".join(t.get("tool_name") for t in executed_tools[-3:])
-                content = f"已执行 {names}，但模型未能生成总结（可回复「继续」让我重试收尾）。"
+                stripped = f"已执行 {names}，但模型未能生成总结（可回复「继续」让我重试收尾）。"
             else:
-                content = "（模型未返回有效内容，请重试或调整指令。）"
+                stripped = "（模型未返回有效内容，请重试或调整指令。）"
+
+        # 如果本轮有模型原生思考推演，加入全局思考流
+        if iter_thought:
+            accumulated_thoughts.append(iter_thought)
+            if websocket:
+                await _safe_send({"event": "agent_thinking_start"})
+                for i in range(0, len(iter_thought), 8):
+                    await _safe_send({"event": "agent_thinking_chunk", "delta": iter_thought[i:i+8]})
+                    await asyncio.sleep(0.006)
+                await _safe_send({"event": "agent_thinking_end"})
+        elif not executed_tools and len(accumulated_thoughts) <= 1:
+            direct_thought = f"【导演方案推演】\n- 构思分析：针对指令「{prompt[:60]}」，综合剧本审美与镜头语言\n- 响应策略：输出影视化专业解答与操作指引。"
+            accumulated_thoughts.append(direct_thought)
+            if websocket:
+                await _safe_send({"event": "agent_thinking_start"})
+                for i in range(0, len(direct_thought), 8):
+                    await _safe_send({"event": "agent_thinking_chunk", "delta": direct_thought[i:i+8]})
+                    await asyncio.sleep(0.006)
+                await _safe_send({"event": "agent_thinking_end"})
+        elif executed_tools:
+            conclude_thought = "【导演执行总评】各项影视工具调用完毕，正在整合输出最终导演答复。"
+            accumulated_thoughts.append(conclude_thought)
+            if websocket:
+                await _safe_send({"event": "agent_thinking_start"})
+                for i in range(0, len(conclude_thought), 8):
+                    await _safe_send({"event": "agent_thinking_chunk", "delta": conclude_thought[i:i+8]})
+                    await asyncio.sleep(0.005)
+                await _safe_send({"event": "agent_thinking_end"})
 
         # 查询后早停拦截（H3 场景精准命中：list 后直接总结）
         if not nudged_query and executed_tools and stripped.strip():
@@ -779,7 +872,7 @@ async def run_agent_with_langchain(
             has_sub = any(k in stripped for k in ["已生成","已创建","已执行","image_url","video_url","audio_url","provider_","节点","画布","成功生成","已暴露","未暴露","params_schema"])
             if (last_is_query or all_query) and needs_multi and not has_sub and iteration <= 10:
                 nudged_query = True
-                messages.append(AIMessage(content=content or ""))
+                messages.append(AIMessage(content=stripped or ""))
                 # 针对 H3：直接提示下一步应查 provider_code
                 hint = "你刚才只完成了查询，任务尚未完成。"
                 if "H3" in prompt or "h3" in prompt or "参数" in prompt:
@@ -789,7 +882,7 @@ async def run_agent_with_langchain(
                 messages.append(HumanMessage(content=hint))
                 continue
 
-        full_reply = content
+        full_reply = stripped
         if websocket and streaming and full_reply:
             await _safe_send({"event": "agent_stream_start"})
             for i in range(0, len(full_reply), 6):
@@ -808,7 +901,14 @@ async def run_agent_with_langchain(
             _trace_log(_run_id, "run_end", {"reply": (full_reply or "")[:1000], "executed_tools": [{"tool": t.get("tool_name"), "status": t.get("status")} for t in executed_tools]})
     except Exception:
         pass
-    out = {"reply": full_reply, "tool_calls": [{"tool": t["tool_name"], "arguments": t["arguments"]} for t in executed_tools] if executed_tools else [], "suggested_actions": [], "executed_tools": executed_tools}
+    full_thinking = "\n\n---\n\n".join(accumulated_thoughts) if accumulated_thoughts else None
+    out = {
+        "reply": full_reply,
+        "thinking": full_thinking,
+        "tool_calls": [{"tool": t["tool_name"], "arguments": t["arguments"]} for t in executed_tools] if executed_tools else [],
+        "suggested_actions": [],
+        "executed_tools": executed_tools
+    }
     try:
         if _trace_log:
             out["run_id"] = _run_id

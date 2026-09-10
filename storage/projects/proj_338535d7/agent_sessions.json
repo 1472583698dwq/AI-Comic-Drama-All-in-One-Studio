@@ -1,0 +1,18 @@
+[
+  {
+    "id": "sess_beta_1",
+    "title": "Beta独立分镜讨论",
+    "created_at": "2026-09-10T12:20:00Z",
+    "updated_at": "2026-09-10T12:20:00Z",
+    "messages": [
+      {
+        "id": "mb1",
+        "sender": "user",
+        "text": "Beta项目讨论",
+        "time": "12:20"
+      }
+    ],
+    "mode": "execute",
+    "run_mode": "approve"
+  }
+]

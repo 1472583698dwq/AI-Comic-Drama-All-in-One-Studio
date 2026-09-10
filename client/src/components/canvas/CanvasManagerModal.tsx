@@ -7,6 +7,7 @@ import React, { useEffect, useState } from 'react';
 import { X, Plus, Trash2, Pencil, FolderOpen, Film } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { useProjectStore } from '../../stores/useProjectStore';
+import { confirmAsync, toast } from '../../stores/useDialogStore';
 
 interface CanvasInfo { id: string; name: string; updated_at: string; node_count: number }
 interface Props {
@@ -72,15 +73,23 @@ export const CanvasManagerModal: React.FC<Props> = ({ isOpen, onClose, projectId
 
   const handleDelete = async (cid: string, name: string) => {
     if (!projectId) return;
-    if (list.length <= 1) { alert('至少保留一个画布'); return; }
-    if (!confirm(`删除画布「${name}」？节点将丢失，隶属分镜不受影响`)) return;
+    if (list.length <= 1) { toast.warning('至少保留一个画布'); return; }
+    const confirmed = await confirmAsync({
+      title: '删除画布',
+      message: `确定要删除画布「${name}」吗？\n画布内的节点编排将丢失，已关联的镜头不受影响。`,
+      isDanger: true,
+      confirmText: '确认删除',
+      cancelText: '取消'
+    });
+    if (!confirmed) return;
     try {
       const r: any = await apiService.deleteProjectCanvas(projectId, cid);
+      toast.success(`已删除画布「${name}」`);
       await refresh();
       onChanged();
       if (cid === currentId) onSwitch(r?.active_canvas_id || 'default', { skipSave: true });
       onClose();
-    } catch (e: any) { alert(e.message); }
+    } catch (e: any) { toast.error(e.message || '删除失败'); }
   };
 
   return (

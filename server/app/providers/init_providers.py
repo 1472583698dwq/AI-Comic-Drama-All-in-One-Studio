@@ -97,6 +97,41 @@ def _make_provider(definition):
                             elif idx == 0 and std_refs and std_refs[0]:
                                 dyn[k] = std_refs[0]
                         req.dynamic_inputs = dyn
+
+                    # 视频映射 (reference_videos)
+                    std_vids = getattr(req, "reference_videos", None)
+                    if not std_vids: std_vids = dyn.get("reference_videos")
+                    vid_slots = [e for e in (_exposed or []) if e.get("type") == "video"]
+                    if std_vids and vid_slots:
+                        if isinstance(std_vids, str): std_vids = [std_vids]
+                        dyn.pop("reference_videos", None)
+                        for idx, exp in enumerate(vid_slots):
+                            k = exp.get("id")
+                            if k in dyn:
+                                continue
+                            if idx < len(std_vids) and std_vids[idx]:
+                                dyn[k] = std_vids[idx]
+                            elif idx == 0 and std_vids and std_vids[0]:
+                                dyn[k] = std_vids[0]
+                        req.dynamic_inputs = dyn
+
+                    # 音频映射 (reference_audios)
+                    std_auds = getattr(req, "reference_audios", None)
+                    if not std_auds: std_auds = dyn.get("reference_audios")
+                    aud_slots = [e for e in (_exposed or []) if e.get("type") == "audio"]
+                    if std_auds and aud_slots:
+                        if isinstance(std_auds, str): std_auds = [std_auds]
+                        dyn.pop("reference_audios", None)
+                        for idx, exp in enumerate(aud_slots):
+                            k = exp.get("id")
+                            if k in dyn:
+                                continue
+                            if idx < len(std_auds) and std_auds[idx]:
+                                dyn[k] = std_auds[idx]
+                            elif idx == 0 and std_auds and std_auds[0]:
+                                dyn[k] = std_auds[0]
+                        req.dynamic_inputs = dyn
+
                     # 标准 params → 工作流具体 id
                     for std_key, exp_id in _map.items():
                         val = getattr(req, std_key, None)
@@ -141,7 +176,6 @@ def _make_provider(definition):
                     img_slots = [e for e in (_exposed or []) if e.get("type")=="image"]
                     if std_refs and img_slots:
                         if isinstance(std_refs, str): std_refs = [std_refs]
-                        dyn.pop("reference_images", None); dyn.pop("reference", None)
                         for idx, exp in enumerate(img_slots):
                             k = exp.get("id")
                             if k in dyn:
@@ -151,6 +185,7 @@ def _make_provider(definition):
                             elif idx == 0 and std_refs and std_refs[0]:
                                 dyn[k] = std_refs[0]
                         req.dynamic_inputs = dyn
+                        req.reference_images = std_refs
                     # 标准 params → 具体 id
                     for std_key, exp_id in _map.items():
                         val = getattr(req, std_key, None)

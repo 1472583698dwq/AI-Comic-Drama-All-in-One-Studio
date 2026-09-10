@@ -17,6 +17,8 @@ import { AgentModeView } from './views/AgentModeView';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
 import { ProviderManagerModal } from './components/provider/ProviderManagerModal';
 import { GlobalAiPolish } from './components/ui/GlobalAiPolish';
+import { GlobalDialogContainer } from './components/ui/GlobalDialogContainer';
+import { installGlobalDialogPatch } from './stores/useDialogStore';
 const CreativeCanvas = React.lazy(()=> import('./components/canvas/CreativeCanvas').then(m=> ({default: m.CreativeCanvas})));
 import { useProjectStore } from './stores/useProjectStore';
 import { useMcpStore } from './stores/useMcpStore';
@@ -33,12 +35,20 @@ export function App() {
   const [mcpError, setMcpError] = useState<string | null>(null);
 
   useEffect(() => {
+    installGlobalDialogPatch();
     fetchTools().catch((e: any) => setMcpError(e?.message || 'MCP 服务连接失败'));
     useProjectStore.getState().loadActiveProject();
     const h = () => setIsProviderOpen(true);
     window.addEventListener('open-provider-manager', h as any);
     return () => window.removeEventListener('open-provider-manager', h as any);
   }, []);
+
+  // 严格 UI 准入拦截：未选择或创建项目时，禁止停留在任何项目内部功能页，自动重定向至项目看板
+  useEffect(() => {
+    if (!project && activeTab !== 'projects' && activeTab !== 'config') {
+      useProjectStore.getState().setActiveTab('projects');
+    }
+  }, [project, activeTab]);
 
   return (
     <div className="h-screen w-screen flex flex-col bg-background text-gray-100 overflow-hidden select-none">
@@ -66,107 +76,60 @@ export function App() {
         </div>
       )}
 
-      {/* 2. Config View (Universal Fullscreen Tab) */}
+      {/* 2. Fullscreen Tabs with Strict Project Gating */}
       {activeTab === 'config' ? (
         <main className="flex-1 flex flex-col overflow-hidden relative">
-          <ConfigView />
+          <ErrorBoundary name="系统配置中心">
+            <ConfigView />
+          </ErrorBoundary>
         </main>
-      ) : workspace === 'creative' ? (
+      ) : (!project || activeTab === 'projects') ? (
+        <main className="flex-1 flex flex-col overflow-hidden relative">
+          <ProjectDashboard />
+        </main>
+      ) : activeTab === 'canvas' ? (
         <main className="flex-1 flex flex-col overflow-hidden relative">
           <Suspense fallback={<div className="flex-1 flex items-center justify-center text-xs text-gray-500">画布加载中…</div>}>
             <CreativeCanvas />
           </Suspense>
         </main>
+      ) : activeTab === 'agent' ? (
+        <main className="flex-1 flex flex-col overflow-hidden relative">
+          <ErrorBoundary name="Agent模式页">
+            <AgentModeView />
+          </ErrorBoundary>
+        </main>
+      ) : activeTab === 'characters' ? (
+        <main className="flex-1 flex flex-col overflow-hidden relative">
+          <CharacterStudio />
+        </main>
+      ) : activeTab === 'assets' ? (
+        <main className="flex-1 flex flex-col overflow-hidden relative">
+          <AssetLibrary />
+        </main>
       ) : (
-        <>
-          {/* P0: 项目看板（无需 project 即可访问） */}
-          {activeTab === 'projects' && (
-            <main className="flex-1 flex flex-col overflow-hidden relative">
-              <ProjectDashboard />
-            </main>
-          )}
-          {/* Agent独立模式页（无需 project 即可访问，对话调工具生成） */}
-          {activeTab === 'agent' && (
-            <main className="flex-1 flex flex-col overflow-hidden relative">
-              <ErrorBoundary name="Agent模式页">
-                <AgentModeView />
-              </ErrorBoundary>
-            </main>
-          )}
-          {/* 无项目时的引导：仅在 production 非 projects/assets 时显示 */}
-          {!project && activeTab !== 'assets' && activeTab !== 'characters' && activeTab !== 'projects' && activeTab !== 'agent' && (
-            <div className="flex-1 flex flex-col items-center justify-center bg-background p-8 text-center space-y-4">
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-brand to-accent-pink flex items-center justify-center text-3xl shadow-xl shadow-brand/20">
-                🎬
+        <main className="flex-1 flex flex-col overflow-hidden relative">
+          {platformMode === 'desktop' ? (
+            /* Desktop Professional Studio */
+            <div className="flex-1 flex flex-col overflow-hidden">
+              {/* Top Workspace Area */}
+              <div className="flex-1 flex overflow-hidden">
+                {(activeTab === 'studio' || activeTab === 'timeline') && <ShotInspector />}
+                {activeTab === 'director3d' && <Director3DStage />}
               </div>
-              <h2 className="text-lg font-bold text-white">选择或创建项目以开始</h2>
-              <p className="text-xs text-gray-400 max-w-md">
-                项目隔离素材与分镜，支持空白创建、导入小说或导入项目包。素材可设为全局或共享到其他项目。
-              </p>
-              <div className="flex items-center space-x-3 pt-2">
-                <button
-                  onClick={() => useProjectStore.getState().setActiveTab('projects')}
-                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-brand to-brand-blue text-white text-xs font-semibold hover:opacity-90 shadow-lg shadow-brand/20 transition-all"
-                >
-                  打开项目看板
-                </button>
-                <button
-                  onClick={() => setIsImportOpen(true)}
-                  className="px-5 py-2.5 rounded-xl bg-surface-secondary border border-border text-gray-200 hover:text-white hover:border-brand text-xs font-semibold transition-all"
-                >
-                  导入小说拆解
-                </button>
-              </div>
+
+              {/* Bottom Multi-track Timeline */}
+              <MultiTrackTimeline />
             </div>
+          ) : (
+            /* Mobile App Card-Flow View (Xiaoyunque Style) — same component, real API */
+            <MobileCardFlow onOpenExport={() => setIsExportOpen(true)} />
           )}
-
-          {/* Character Studio - Project Character Management & Turnaround Matrix */}
-          {activeTab === 'characters' && (
-            <main className="flex-1 flex flex-col overflow-hidden relative">
-              <CharacterStudio />
-            </main>
-          )}
-
-          {/* Asset Library - Global & Project Media Asset Center */}
-          {activeTab === 'assets' && (
-            <main className="flex-1 flex flex-col overflow-hidden relative">
-              <AssetLibrary />
-            </main>
-          )}
-
-          {/* Main Workspace Layout when project loaded */}
-          {project && activeTab !== 'assets' && activeTab !== 'characters' && activeTab !== 'projects' && activeTab !== 'agent' && (
-            <main className="flex-1 flex flex-col overflow-hidden relative">
-              {platformMode === 'desktop' ? (
-                /* Desktop Professional Studio */
-                <div className="flex-1 flex flex-col overflow-hidden">
-                  {/* Top Workspace Area */}
-                  <div className="flex-1 flex overflow-hidden">
-                    {activeTab === 'studio' && <ShotInspector />}
-                    {activeTab === 'director3d' && <Director3DStage />}
-                    {activeTab === 'timeline' && (
-                      <div className="flex-1 flex flex-col">
-                        <div className="flex-1 flex items-center justify-center bg-surface">
-                          <ShotInspector />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Bottom Multi-track Timeline */}
-                  <MultiTrackTimeline />
-                </div>
-              ) : (
-                /* Mobile App Card-Flow View (Xiaoyunque Style) — same component, real API */
-                <MobileCardFlow onOpenExport={() => setIsExportOpen(true)} />
-              )}
-            </main>
-          )}
-        </>
+        </main>
       )}
 
-      {/* 3. Floating Multi-Modal Director Agent */}
-      <AgentChatDrawer />
+      {/* 3. Floating Multi-Modal Director Agent (仅当存在有效项目时启用) */}
+      {project && <AgentChatDrawer />}
 
       {/* 3.1 Global AI Polish (covers all textareas) */}
       <GlobalAiPolish />
@@ -196,6 +159,9 @@ export function App() {
         isOpen={isProviderOpen}
         onClose={() => setIsProviderOpen(false)}
       />
+
+      {/* Modern Global Toast / Confirm / Prompt Dialogs */}
+      <GlobalDialogContainer />
     </div>
   );
 }

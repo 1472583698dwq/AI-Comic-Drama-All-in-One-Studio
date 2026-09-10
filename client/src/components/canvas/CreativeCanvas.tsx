@@ -9,6 +9,7 @@ import { useThemeStore } from '../../stores/useThemeStore';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { useCanvasStore } from '../../stores/useCanvasStore';
 import { apiService } from '../../services/api';
+import { confirmAsync, promptAsync, toast } from '../../stores/useDialogStore';
 import { useCanvasSync } from './hooks/useCanvasSync';
 import { executeAgentNode } from './hooks/nodeAgentExecutor';
 import { ShotCardNode } from './nodes/ShotCardNode';
@@ -1077,23 +1078,36 @@ const InnerCanvas: React.FC = () => {
               onChanged={() => { if (pid) apiService.listProjectCanvases(pid).then(r => setCanvasList(r.canvases || [])).catch(() => {}); }}
             />
 
-            <button onClick={async()=>{ const n = canvasList.length + 1; const cid = await createCanvas(`画布${n}`); if (cid) alert(`已新建${`画布${n}`}并切换`); }} className="px-3 py-1 rounded-full bg-surface-secondary border border-border text-xs font-medium [color:var(--color-text-main)] hover:bg-surface-tertiary transition-colors">+ 新画布</button>
+            <button onClick={async()=>{ const n = canvasList.length + 1; const cid = await createCanvas(`画布${n}`); if (cid) toast.success(`已新建画布${n}并切换`); }} className="px-3 py-1 rounded-full bg-surface-secondary border border-border text-xs font-medium [color:var(--color-text-main)] hover:bg-surface-tertiary transition-colors">+ 新画布</button>
             <button onClick={async()=>{
               if (!pid) return;
               const cur = canvasList.find(c => c.id === canvasIdRef.current);
-              const nv = prompt('重命名画布', cur?.name || currentCanvasName);
+              const nv = await promptAsync({
+                title: '重命名画布',
+                message: '请输入新的画布名称：',
+                defaultValue: cur?.name || currentCanvasName,
+                placeholder: '画布名称'
+              });
               if (!nv || !nv.trim()) return;
               try {
                 await apiService.renameProjectCanvas(pid, canvasIdRef.current, nv.trim());
                 const r = await apiService.listProjectCanvases(pid).catch(() => null);
                 if (r) setCanvasList(r.canvases || []);
-              } catch (e: any) { alert(e.message); }
+                toast.success(`画布已更名为「${nv.trim()}」`);
+              } catch (e: any) { toast.error(e.message || '重命名失败'); }
             }} className="px-3 py-1 rounded-full bg-surface-secondary border border-border text-xs font-medium [color:var(--color-text-main)] hover:bg-surface-tertiary transition-colors" title="重命名当前画布">✎</button>
             <button onClick={async()=>{
               if (!pid) return;
-              if (canvasList.length <= 1) { alert('至少保留一个画布'); return; }
+              if (canvasList.length <= 1) { toast.warning('至少保留一个画布'); return; }
               const cur = canvasList.find(c => c.id === canvasIdRef.current)?.name || currentCanvasName;
-              if (!confirm(`删除画布「${cur}」？节点将丢失`)) return;
+              const confirmed = await confirmAsync({
+                title: '删除画布',
+                message: `确定要删除画布「${cur}」吗？\n画布内的所有节点与编排数据将丢失且无法撤销。`,
+                isDanger: true,
+                confirmText: '确认删除',
+                cancelText: '取消'
+              });
+              if (!confirmed) return;
               try {
                 const r: any = await apiService.deleteProjectCanvas(pid, canvasIdRef.current);
                 const list = await apiService.listProjectCanvases(pid).catch(() => null);
@@ -1102,10 +1116,20 @@ const InnerCanvas: React.FC = () => {
                 suppressSaveRef.current = true;
                 setNodes([]); setEdges([]); setSelectedNodeId(null);
                 setCanvasId(next);
-              } catch (e: any) { alert(e.message); }
+                toast.success(`已删除画布「${cur}」`);
+              } catch (e: any) { toast.error(e.message || '删除失败'); }
             }} className="w-7 h-7 rounded-full bg-surface-secondary border border-border text-[color:var(--color-text-muted)] hover:text-red-400 flex items-center justify-center transition-colors" title="删除当前画布">🗑</button>
             <button onClick={() => setNodes(nds => nds.map((n, i) => ({ ...n, position: { x: 120 + i * 400, y: 120 } })))} className="px-3 py-1 rounded-full bg-surface-secondary border border-border text-xs font-medium [color:var(--color-text-main)] hover:bg-surface-tertiary transition-colors">横向排布</button>
-            <button onClick={() => { if (confirm('清空画布？')) { setNodes([]); setEdges([]); setSelectedNodeId(null); } }} className="w-7 h-7 rounded-full bg-surface-secondary border border-border text-[color:var(--color-text-muted)] hover:text-red-400 flex items-center justify-center transition-colors" title="清空">×</button>
+            <button onClick={async () => { 
+              const ok = await confirmAsync({
+                title: '清空画布',
+                message: '确定要清空当前画布上的所有节点和连线吗？',
+                isDanger: true,
+                confirmText: '确认清空',
+                cancelText: '取消'
+              });
+              if (ok) { setNodes([]); setEdges([]); setSelectedNodeId(null); toast.info('画布已清空'); } 
+            }} className="w-7 h-7 rounded-full bg-surface-secondary border border-border text-[color:var(--color-text-muted)] hover:text-red-400 flex items-center justify-center transition-colors" title="清空">×</button>
           </div>
         </div>
 

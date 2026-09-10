@@ -271,13 +271,27 @@ OUTPUT_NODE_CLASSES = {
     "SaveAudio", "ImageSave", "SaveImageAdvanced",
 }
 
+# 媒体参数名与媒体输入节点类型：属于动态外部文件或用户上传，严禁受静态 object_info 枚举拦截
+MEDIA_PARAM_NAMES = {
+    "image", "audio", "video", "filename", "file", "media",
+    "image_path", "video_path", "audio_path", "first_frame", "last_frame",
+}
+MEDIA_NODE_CLASSES = {
+    "LoadImage", "LoadImageMask", "LoadImageForInpaint", "ImageLoad", "LoadImageFromPath", "LoadImageOutput",
+    "LoadAudio", "LoadAudio2", "AudioLoad", "VHS_LoadAudio", "VHS_LoadAudioUpload",
+    "LoadVideo", "VHS_LoadVideo", "VHS_LoadVideoPath", "VideoLoad", "VHS_LoadImages", "VHS_LoadImagesPath",
+}
+
 
 def _combo_choices_from_oi(ct: str, pname: str, current: Any = None) -> Optional[List[str]]:
     """
     从 ComfyUI object_info 取某节点某参数的真实下拉枚举。
     兼容两种 schema：旧式 (choices_list, {...}) 与新式 ("COMBO", {"options": [...], ...})。
     ComfyUI 离线或参数无枚举时返回 None（调用方回退到内置预设）。
+    媒体输入节点与媒体参数动态上传，无固定枚举，返回 None。
     """
+    if ct in MEDIA_NODE_CLASSES or pname.lower() in MEDIA_PARAM_NAMES or any(pname.lower().endswith(s) for s in ("_image", "_video", "_audio", "_file", "_path")):
+        return None
     oi = _fetch_object_info()
     if not oi:
         return None
@@ -330,18 +344,24 @@ def _set_input_guarded(wf: Dict[str, Any], nid: str, pname: str, val: Any) -> No
     带枚举护栏的参数写入：值不在 ComfyUI 真实枚举内时尝试自动映射，仍不匹配则拒绝写入。
     背景：新版 ComfyUI 对非法 combo 值不报错，而是把整条输出分支软剪枝（状态仍 success），
     表现为"工作流已完成但未捕获到图像输出"。离线（拿不到 object_info）时不拦截。
+    媒体参数（LoadImage、image/audio/video）为动态上传文件，豁免枚举校验。
     """
     node = wf.get(str(nid))
     if not isinstance(node, dict):
         return
-    valid = _combo_choices_from_oi(str(node.get("class_type", "")), pname)
+    ct = str(node.get("class_type", ""))
+    # 媒体节点或媒体入参（LoadImage、image/video/audio 等）：为动态媒体/用户上传路径，严禁枚举检查
+    if ct in MEDIA_NODE_CLASSES or pname.lower() in MEDIA_PARAM_NAMES or any(pname.lower().endswith(s) for s in ("_image", "_video", "_audio", "_file", "_path")):
+        node.setdefault("inputs", {})[pname] = val
+        return
+    valid = _combo_choices_from_oi(ct, pname)
     if valid is not None and str(val) not in valid:
         mapped = _normalize_combo_value(val, valid)
         if mapped is not None and mapped in valid:
-            print(f"[Workflow] 枚举自动映射: #{nid} {node.get('class_type')}.{pname} {val!r} → {mapped!r}")
+            print(f"[Workflow] 枚举自动映射: #{nid} {ct}.{pname} {val!r} → {mapped!r}")
             val = mapped
         else:
-            print(f"[Workflow] 已拦截非法枚举注入: #{nid} {node.get('class_type')}.{pname} = {val!r}（不在 ComfyUI 枚举内，避免输出分支被剪枝）")
+            print(f"[Workflow] 已拦截非法枚举注入: #{nid} {ct}.{pname} = {val!r}（不在 ComfyUI 枚举内，避免输出分支被剪枝）")
             return
     node.setdefault("inputs", {})[pname] = val
 
@@ -468,7 +488,7 @@ def _apply_dynamic_inputs(wf: Dict[str, Any], dynamic_inputs: Optional[Dict[str,
         return
 
     def _nid_param(rest: str) -> Optional[tuple]:
-        for existing_nid in wf.keys():
+        for existing_nid in sorted(wf.keys(), key=lambda x: len(str(x)), reverse=True):
             if rest.startswith(f"{existing_nid}_"):
                 pname = rest[len(f"{existing_nid}_"):]
                 if pname and pname != "undefined":
@@ -486,6 +506,8 @@ def _apply_dynamic_inputs(wf: Dict[str, Any], dynamic_inputs: Optional[Dict[str,
                     if pv is not None:
                         _set_input_guarded(wf, ks, pk, pv)
             continue
+        # 如果是单项列表且目标不是明确要求列表的参数，解包出首项
+        media_val = val[0] if (isinstance(val, list) and len(val) > 0 and isinstance(val[0], str)) else val
         if ks.startswith(("exp_", "combo_", "num_")):
             parsed = _nid_param(ks.split("_", 1)[1]) if "_" in ks else None
             if parsed:
@@ -496,7 +518,7 @@ def _apply_dynamic_inputs(wf: Dict[str, Any], dynamic_inputs: Optional[Dict[str,
             # 先按 {节点}_{参数} 解析，解析不出再把 rest 整体当节点 id。
             parsed_media = _nid_param(rest)
             if parsed_media:
-                _write_exposed(wf, parsed_media[0], parsed_media[1], val)
+                _write_exposed(wf, parsed_media[0], parsed_media[1], media_val)
                 continue
             target_nid = rest
             node = wf.get(target_nid)
@@ -504,21 +526,21 @@ def _apply_dynamic_inputs(wf: Dict[str, Any], dynamic_inputs: Optional[Dict[str,
                 continue
             n_inps = node.setdefault("inputs", {})
             if prefix == "img":
-                _set_input_guarded(wf, target_nid, "image", val)
+                _set_input_guarded(wf, target_nid, "image", media_val)
             elif prefix == "aud":
                 target = "audio" if "audio" in n_inps else "reference_audio" if "reference_audio" in n_inps else "audio"
-                _set_input_guarded(wf, target_nid, target, val)
+                _set_input_guarded(wf, target_nid, target, media_val)
             elif prefix == "vid":
                 target = "video" if "video" in n_inps else "image" if "image" in n_inps else "video"
-                _set_input_guarded(wf, target_nid, target, val)
+                _set_input_guarded(wf, target_nid, target, media_val)
             else:  # txt：优先写入节点已有的文本参数（PrimitiveString* 用 value，CLIPTextEncode 用 text）
                 target = next((c for c in ("value", "text", "string") if c in n_inps), "text")
-                _set_input_guarded(wf, target_nid, target, val)
+                _set_input_guarded(wf, target_nid, target, media_val)
         elif ks in wf:
             n_inps = wf[ks].setdefault("inputs", {})
             target = next((c for c in ("image", "audio", "video", "text", "string", "value") if c in n_inps), None)
             if target:
-                _set_input_guarded(wf, ks, target, val)
+                _set_input_guarded(wf, ks, target, media_val)
 
 
 COMMON_WIDGET_ORDER: Dict[str, List[str]] = {
@@ -1059,7 +1081,7 @@ def auto_generate_mapping(analysis: Dict[str, Any]) -> Dict[str, str]:
 async def upload_image_to_comfyui(image_source: str, server_url: Optional[str] = None) -> str:
     """
     将本地文件、/storage/ 相对路径、网络 URL 或 base64 数据上传至 ComfyUI /upload/image
-    返回 ComfyUI 内部引用的文件名 (如 upload_abc123.png)
+    支持图片、音频、视频文件，返回 ComfyUI 内部引用的文件名 (如 upload_abc123.png)
     """
     if not image_source:
         return ""
@@ -1070,21 +1092,34 @@ async def upload_image_to_comfyui(image_source: str, server_url: Optional[str] =
     import httpx
     import base64
     import uuid as uuidlib
+    import mimetypes
 
     filename = f"upload_{uuidlib.uuid4().hex[:8]}.png"
     file_bytes = None
+    mime_type = "image/png"
 
-    if image_source.startswith("data:image/"):
-        # Base64 Data URL
+    if image_source.startswith("data:"):
+        # Base64 Data URL (image/audio/video)
         try:
             header, b64data = image_source.split(",", 1)
             file_bytes = base64.b64decode(b64data)
-            if "image/jpeg" in header or "image/jpg" in header:
-                filename = f"upload_{uuidlib.uuid4().hex[:8]}.jpg"
-            elif "image/webp" in header:
-                filename = f"upload_{uuidlib.uuid4().hex[:8]}.webp"
+            header_mime = header.split(";")[0].replace("data:", "").strip().lower()
+            if header_mime:
+                mime_type = header_mime
+                ext = mimetypes.guess_extension(header_mime) or ""
+                if not ext:
+                    if "wav" in header_mime: ext = ".wav"
+                    elif "mp3" in header_mime: ext = ".mp3"
+                    elif "mp4" in header_mime: ext = ".mp4"
+                    elif "webp" in header_mime: ext = ".webp"
+                    elif "jpeg" in header_mime or "jpg" in header_mime: ext = ".jpg"
+                    elif "webm" in header_mime: ext = ".webm"
+                    elif "ogg" in header_mime: ext = ".ogg"
+                    else: ext = ".png"
+                if ext == ".jpe": ext = ".jpg"
+                filename = f"upload_{uuidlib.uuid4().hex[:8]}{ext}"
         except Exception as e:
-            raise ValueError(f"解析 Base64 图片失败: {e}")
+            raise ValueError(f"解析 Base64 媒体数据失败: {e}")
     elif image_source.startswith("/storage/"):
         # 本地存储相对路径
         rel = image_source[len("/storage/"):]
@@ -1093,6 +1128,7 @@ async def upload_image_to_comfyui(image_source: str, server_url: Optional[str] =
             with open(local_path, "rb") as f:
                 file_bytes = f.read()
             filename = os.path.basename(local_path)
+            mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
         else:
             raise FileNotFoundError(f"本地素材不存在: {image_source}")
     elif os.path.exists(image_source) and os.path.isfile(image_source):
@@ -1100,26 +1136,35 @@ async def upload_image_to_comfyui(image_source: str, server_url: Optional[str] =
         with open(image_source, "rb") as f:
             file_bytes = f.read()
         filename = os.path.basename(image_source)
+        mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
     elif image_source.startswith("http://") or image_source.startswith("https://"):
         # 远程 HTTP URL
         async with httpx.AsyncClient(timeout=30.0) as client:
             r = await client.get(image_source)
             r.raise_for_status()
             file_bytes = r.content
-            filename = os.path.basename(image_source.split("?")[0]) or filename
+            clean_url = image_source.split("?")[0]
+            filename = os.path.basename(clean_url) or filename
+            mime_type = r.headers.get("content-type") or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+            if ";" in mime_type:
+                mime_type = mime_type.split(";")[0].strip()
     else:
         # 已是纯文件名 (如已经在 ComfyUI input 目录中)
         return image_source
 
     if not file_bytes:
-        raise ValueError(f"无法读取图片内容: {image_source}")
+        raise ValueError(f"无法读取媒体内容: {image_source}")
 
     async with httpx.AsyncClient(timeout=30.0) as client:
-        files = {"image": (filename, file_bytes, "image/png")}
-        r = await client.post(f"{server_url}/upload/image", files=files)
+        files = {"image": (filename, file_bytes, mime_type)}
+        data = {"overwrite": "true"}
+        r = await client.post(f"{server_url}/upload/image", files=files, data=data)
         r.raise_for_status()
         res_data = r.json()
-        return res_data.get("name") or filename
+        name = res_data.get("name") or filename
+        sub = res_data.get("subfolder") or ""
+        return f"{sub}/{name}" if sub else name
+
 
 
 def auto_detect_exposed_inputs(clean_wf: Dict[str, Any], mapping: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
@@ -1433,9 +1478,10 @@ def resolve_exposed_inputs(clean_wf: Dict[str, Any], meta: Optional[Dict[str, An
 
 def _resolve_exposed_raw(clean_wf: Dict[str, Any], meta: Optional[Dict[str, Any]] = None) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
     """
-    以 auto_detect 的新鲜清单为基准（保证 combo/number 等控件类型不退化），
-    已保存的白名单仅用于保留用户编辑的 label/别名/描述/默认值。
-    inspect_workflow_nodes 与 _build_provider_schemas_from_workflow 共用，杜绝"参数与暴露"改了但生成源没变。
+    用户已保存的 exposed_inputs 为权威白名单（保存在 meta.json 中）。
+    仅当 meta 中尚未配置 exposed_inputs 时，以 auto_detect 的新鲜清单作为默认值。
+    对于白名单内的条目，与 fresh_exposed 对齐更新真实控件类型、步长/范围与枚举项，
+    同时保留用户自定义的 label/别名/描述/默认值/分组/排序；绝不倒灌未勾选的参数！
     """
     meta = meta or {}
     try:
@@ -1450,66 +1496,47 @@ def _resolve_exposed_raw(clean_wf: Dict[str, Any], meta: Optional[Dict[str, Any]
     if saved_exposed is None or len(saved_exposed) == 0:
         return fresh_exposed, current_mapping
 
-    has_dirty = any(e.get('param_name') == 'undefined' or str(e.get('id', '')).endswith('_undefined') for e in saved_exposed)
-    need_merge = has_dirty or any(
-        any(se.get('node_id') == fe['node_id'] and se.get('param_name') == fe['param_name'] and se.get('type') != fe.get('type') for se in saved_exposed)
-        for fe in fresh_exposed
-    )
-    if has_dirty or need_merge or len(saved_exposed) < 4:
-        saved_map = {f"{e['node_id']}_{e['param_name']}": e for e in saved_exposed if e.get('param_name') and e.get('param_name') != 'undefined'}
-        keep_user_keys = ('label', 'alias', 'description', 'default_value', 'required')
-        exposed_inputs: List[Dict[str, Any]] = []
-        for fe in fresh_exposed:
-            key = f"{fe['node_id']}_{fe['param_name']}"
-            if key in saved_map:
-                se = saved_map[key]
-                merged = {**fe}
-                for k in keep_user_keys:
-                    v = se.get(k)
-                    if v not in (None, ''):
-                        merged[k] = v
-                # ComfyUI 离线时新鲜探测会把 combo/number 退化成 text（id 前缀也随之从 combo_ 掉成 exp_），
-                # 此时必须保留已存条目的类型与 id，否则下拉框会整体退化为手填输入。
-                if fe.get('type') == 'text' and se.get('type') in ('combo', 'number', 'boolean'):
-                    merged['type'] = se['type']
-                    if se.get('id'):
-                        merged['id'] = se['id']
-                fresh_opts = [str(o) for o in (fe.get('options') or fe.get('choices') or [])]
-                user_opts = [str(o) for o in (se.get('options') or se.get('choices') or []) if o not in fresh_opts]
-                opts = list(dict.fromkeys(fresh_opts + user_opts))
-                if opts:
-                    merged['options'] = opts
-                    merged['choices'] = opts
-                exposed_inputs.append(merged)
-            else:
-                exposed_inputs.append(fe)
-        fresh_keys = {f"{e['node_id']}_{e['param_name']}" for e in fresh_exposed}
-        for se in saved_exposed:
-            key = f"{se['node_id']}_{se['param_name']}"
-            if key not in fresh_keys and se.get('param_name') != 'undefined':
-                exposed_inputs.append(se)
-        return exposed_inputs, current_mapping
+    # 过滤掉 undefined 脏项
+    valid_saved = [
+        e for e in saved_exposed
+        if isinstance(e, dict) and e.get('param_name') and e.get('param_name') != 'undefined' and not str(e.get('id', '')).endswith('_undefined')
+    ]
+    if not valid_saved:
+        return fresh_exposed, current_mapping
 
-    # 白名单有效：type / 数值范围 / 下拉选项以 fresh 为准，其余保留用户编辑
-    type_fix_map = {f"{e['node_id']}_{e['param_name']}": e for e in fresh_exposed}
-    exposed_inputs = []
-    for se in saved_exposed:
-        key = f"{se['node_id']}_{se['param_name']}"
+    # 用户已保存的 exposed_inputs 即为唯一的权威白名单！
+    type_fix_map = {f"{e['node_id']}_{e['param_name']}": e for e in fresh_exposed if isinstance(e, dict)}
+    keep_user_keys = ('label', 'alias', 'description', 'default_value', 'required', 'display_order', 'group', 'declared', 'app_order')
+    exposed_inputs: List[Dict[str, Any]] = []
+
+    for se in valid_saved:
+        key = f"{se.get('node_id')}_{se.get('param_name')}"
         fe = type_fix_map.get(key)
         if fe:
-            merged = {**se, "type": fe.get("type", se.get("type"))}
-            fresh_opts = [str(o) for o in (fe.get("options") or fe.get("choices") or [])]
-            user_opts = [str(o) for o in (se.get("options") or se.get("choices") or []) if o not in fresh_opts]
+            merged = {**fe}
+            for k in keep_user_keys:
+                v = se.get(k)
+                if v not in (None, ''):
+                    merged[k] = v
+            # ComfyUI 离线时新鲜探测会把 combo/number 退化成 text（id 前缀也随之从 combo_ 掉成 exp_），
+            # 此时必须保留已存条目的类型与 id，否则下拉框会整体退化为手填输入。
+            if fe.get('type') == 'text' and se.get('type') in ('combo', 'number', 'boolean', 'image', 'video', 'audio'):
+                merged['type'] = se['type']
+                if se.get('id'):
+                    merged['id'] = se['id']
+            fresh_opts = [str(o) for o in (fe.get('options') or fe.get('choices') or [])]
+            user_opts = [str(o) for o in (se.get('options') or se.get('choices') or []) if o not in fresh_opts]
             opts = list(dict.fromkeys(fresh_opts + user_opts))
             if opts:
-                merged["options"] = opts
-                merged["choices"] = opts
+                merged['options'] = opts
+                merged['choices'] = opts
             for mk in ("min", "max", "step"):
                 if fe.get(mk) is not None:
                     merged[mk] = fe[mk]
             exposed_inputs.append(merged)
         else:
             exposed_inputs.append(se)
+
     return exposed_inputs, current_mapping
 
 
@@ -2473,6 +2500,61 @@ class ComfyWorkflowManager:
                         n["inputs"]["steps"] = int(params["steps"])
                     if params.get("cfg") is not None and "cfg" in n["inputs"] and not isinstance(n["inputs"]["cfg"], list):
                         n["inputs"]["cfg"] = float(params["cfg"])
+
+        # 6.5 图像输入注入 (参考生图/图生图/多参考图/垫图)
+        ref_imgs: List[str] = []
+        if params.get("image_url"):
+            ref_imgs.append(str(params["image_url"]))
+        elif params.get("image"):
+            ref_imgs.append(str(params["image"]))
+        if params.get("reference_images") and isinstance(params["reference_images"], (list, tuple)):
+            for r in params["reference_images"]:
+                if r and str(r) not in ref_imgs:
+                    ref_imgs.append(str(r))
+        if dynamic_inputs and dynamic_inputs.get("reference_images") and isinstance(dynamic_inputs["reference_images"], (list, tuple)):
+            for r in dynamic_inputs["reference_images"]:
+                if r and str(r) not in ref_imgs:
+                    ref_imgs.append(str(r))
+
+        if ref_imgs:
+            img_nodes: List[str] = []
+            for nid, node in wf.items():
+                if not isinstance(node, dict):
+                    continue
+                ct = node.get("class_type", "")
+                if ct in ("LoadImage", "LoadImageMask", "LoadImageForInpaint", "ImageLoad", "LoadImageOutput"):
+                    img_nodes.append(str(nid))
+
+            assigned_nids = set()
+            if dynamic_inputs:
+                for k in dynamic_inputs.keys():
+                    ks = str(k)
+                    if ks.startswith("img_"):
+                        assigned_nids.add(ks.split("_", 1)[1].split("_")[0])
+                    elif ks in wf:
+                        assigned_nids.add(ks)
+            if node_overrides:
+                for nid in node_overrides.keys():
+                    assigned_nids.add(str(nid))
+
+            unassigned_img_nodes = [nid for nid in img_nodes if nid not in assigned_nids]
+
+            img_idx = 0
+            primary_img_nid = mapping.get("image_node")
+            if primary_img_nid and str(primary_img_nid) in wf and str(primary_img_nid) not in assigned_nids:
+                wf[str(primary_img_nid)].setdefault("inputs", {})["image"] = ref_imgs[0]
+                img_idx += 1
+                if str(primary_img_nid) in unassigned_img_nodes:
+                    unassigned_img_nodes.remove(str(primary_img_nid))
+
+            for nid in unassigned_img_nodes:
+                if img_idx < len(ref_imgs):
+                    inp = wf[nid].setdefault("inputs", {})
+                    if is_api_frugally and isinstance(inp.get("image"), list) and len(inp["image"]) == 2:
+                        continue
+                    inp["image"] = ref_imgs[img_idx]
+                    img_idx += 1
+
         # 7. 最后应用外部动态输入（暴露输入优先；带枚举护栏与 combo_/num_/aud_/vid_ 解析）
         _apply_dynamic_inputs(wf, dynamic_inputs)
         return wf
@@ -2519,10 +2601,7 @@ class ComfyWorkflowManager:
                                     v = v["__value__"]
                             _set_input_guarded(wf, str(nid), k, v)
 
-        # 2. 动态输入（若提供，已在上层完成上传；统一走带枚举护栏的解析）
-        _apply_dynamic_inputs(wf, dynamic_inputs)
-
-        # 3. Prompt 注入（视频运动描述）
+        # 2. Prompt 注入（视频运动描述）
         if params.get("prompt"):
             prompt_text = params["prompt"]
             if _HAS_CLI_CONVERTER and isinstance(prompt_text, str) and "{" in prompt_text and "|" in prompt_text:
@@ -2594,9 +2673,20 @@ class ComfyWorkflowManager:
             if nn and str(nn) in wf and "text" in wf[str(nn)].get("inputs", {}):
                 wf[str(nn)]["inputs"]["text"] = params["negative_prompt"] or ""
 
-        # 4. 图像注入：I2V/R2V 适配
-        # first_frame_url 已在上层上传为文件名，params 中以 image 名称形式传入
-        # 尝试匹配所有 LoadImage / LoadImageMask / CreateVideo image 等
+        # 收集被 dynamic_inputs 或 node_overrides 显式指定的节点，避免顺序分配覆盖
+        assigned_nids = set()
+        if dynamic_inputs:
+            for k in dynamic_inputs.keys():
+                ks = str(k)
+                if ks.startswith(("img_", "vid_", "aud_")):
+                    assigned_nids.add(ks.split("_", 1)[1].split("_")[0])
+                elif ks in wf:
+                    assigned_nids.add(ks)
+        if node_overrides:
+            for nid in node_overrides.keys():
+                assigned_nids.add(str(nid))
+
+        # 4. 图像注入：I2V/R2V 适配（仅针对 LoadImage 与 Wan 图像输入，绝不向视频/音频节点乱填）
         image_sources = []
         if params.get("first_frame_url"):
             image_sources.append(("first", params["first_frame_url"]))
@@ -2607,45 +2697,42 @@ class ComfyWorkflowManager:
                 image_sources.append((f"ref_{idx}", ref))
 
         if image_sources:
-            # 收集所有可注入图像的节点
-            load_nodes = []
+            img_nodes = []
+            wan_img_nodes = []
             for nid, node in wf.items():
+                if str(nid) in assigned_nids:
+                    continue
                 ct = node.get("class_type", "")
                 inputs = node.get("inputs", {})
-                # 常见图像输入节点
-                if ct in ("LoadImage", "LoadImageMask", "LoadImageOutput", "ImageLoad", "VHS_LoadVideo", "LoadVideo"):
-                    if "image" in inputs or "video" in inputs:
-                        load_nodes.append(nid)
-                elif ct in ("WanImageToVideo", "WanVaceToVideo", "WanFirstMiddleLastFrameToVideo", "CreateVideo"):
-                    # 这些节点直接接受 image/video 输入
-                    if any(k in inputs for k in ("image", "first_frame", "last_frame", "reference_image", "start_image")):
-                        load_nodes.append(nid)
-            # 优先按 order 分配
-            # I2V:首帧 -> 第一个 LoadImage
-            # R2V:多参考 -> 依次分配
-            # 若工作流本身只有 1 个 LoadImage 但传入多张参考，则后续参考将通过 dynamic_inputs 注入（已处理），此处仅处理首帧
-            for idx, (role, img_name) in enumerate(image_sources):
-                if idx < len(load_nodes):
-                    nid = load_nodes[idx]
-                    node = wf[nid]
-                    # 选择正确的输入键
-                    inputs = node["inputs"]
+                if ct in ("LoadImage", "LoadImageMask", "LoadImageOutput", "ImageLoad", "LoadImageForInpaint"):
                     if "image" in inputs:
-                        # 若已是连线，跳过（节俭模式保留连线）
-                        if is_api_frugally and isinstance(inputs["image"], list) and len(inputs["image"]) == 2:
-                            continue
-                        inputs["image"] = img_name
-                    elif "first_frame" in inputs and role == "first":
+                        img_nodes.append(str(nid))
+                elif ct in ("WanImageToVideo", "WanVaceToVideo", "WanFirstMiddleLastFrameToVideo", "CreateVideo"):
+                    if any(k in inputs for k in ("image", "first_frame", "last_frame", "reference_image", "start_image")):
+                        wan_img_nodes.append(str(nid))
+
+            for idx, (role, img_name) in enumerate(image_sources):
+                if idx < len(img_nodes):
+                    nid = img_nodes[idx]
+                    node = wf[nid]
+                    inputs = node.setdefault("inputs", {})
+                    if is_api_frugally and isinstance(inputs.get("image"), list) and len(inputs["image"]) == 2:
+                        continue
+                    inputs["image"] = img_name
+                elif idx < len(img_nodes) + len(wan_img_nodes):
+                    w_idx = idx - len(img_nodes)
+                    nid = wan_img_nodes[w_idx]
+                    node = wf[nid]
+                    inputs = node.setdefault("inputs", {})
+                    if "first_frame" in inputs and role == "first":
                         inputs["first_frame"] = img_name
                     elif "last_frame" in inputs and role == "last":
                         inputs["last_frame"] = img_name
                     elif "reference_image" in inputs:
                         inputs["reference_image"] = img_name
-                    elif "video" in inputs:
-                        inputs["video"] = img_name
+                    elif "image" in inputs:
+                        inputs["image"] = img_name
                 elif not is_api_frugally:
-                    # 全量模式：若仍有剩余参考图，尝试创建虚拟注入到首个可接受多图的节点
-                    # 例如 WanVaceToVideo 的 reference_images 为列表
                     for nid, node in wf.items():
                         if node.get("class_type") in ("WanVaceToVideo", "WanImageToVideo"):
                             if "reference_images" in node.get("inputs", {}):
@@ -2657,6 +2744,65 @@ class ComfyWorkflowManager:
                                 else:
                                     node["inputs"]["reference_images"].append(img_name)
                                 break
+
+        # 4.1 视频注入 (Video-to-Video / 动作参考 / VHS_LoadVideo)
+        video_sources = []
+        if params.get("video_url"):
+            video_sources.append(params["video_url"])
+        if params.get("reference_videos"):
+            for v in params["reference_videos"]:
+                if v and v not in video_sources:
+                    video_sources.append(v)
+
+        if video_sources:
+            vid_nodes = []
+            for nid, node in wf.items():
+                if str(nid) in assigned_nids:
+                    continue
+                ct = node.get("class_type", "")
+                inputs = node.get("inputs", {})
+                if ct in ("VHS_LoadVideo", "LoadVideo", "VideoLoad"):
+                    if "video" in inputs or "image" in inputs:
+                        vid_nodes.append(str(nid))
+            for idx, vid_name in enumerate(video_sources):
+                if idx < len(vid_nodes):
+                    nid = vid_nodes[idx]
+                    node = wf[nid]
+                    inputs = node.setdefault("inputs", {})
+                    if "video" in inputs:
+                        if not (is_api_frugally and isinstance(inputs["video"], list) and len(inputs["video"]) == 2):
+                            inputs["video"] = vid_name
+                    elif "image" in inputs:
+                        if not (is_api_frugally and isinstance(inputs["image"], list) and len(inputs["image"]) == 2):
+                            inputs["image"] = vid_name
+
+        # 4.2 音频注入 (配音 / 对齐 / LoadAudio)
+        audio_sources = []
+        if params.get("audio_url"):
+            audio_sources.append(params["audio_url"])
+        if params.get("reference_audios"):
+            for a in params["reference_audios"]:
+                if a and a not in audio_sources:
+                    audio_sources.append(a)
+
+        if audio_sources:
+            aud_nodes = []
+            for nid, node in wf.items():
+                if str(nid) in assigned_nids:
+                    continue
+                ct = node.get("class_type", "")
+                inputs = node.get("inputs", {})
+                if ct in ("LoadAudio", "LoadAudio2", "AudioLoad"):
+                    if "audio" in inputs or "reference_audio" in inputs:
+                        aud_nodes.append(str(nid))
+            for idx, aud_name in enumerate(audio_sources):
+                if idx < len(aud_nodes):
+                    nid = aud_nodes[idx]
+                    node = wf[nid]
+                    inputs = node.setdefault("inputs", {})
+                    target_key = "audio" if "audio" in inputs else "reference_audio"
+                    if not (is_api_frugally and isinstance(inputs.get(target_key), list) and len(inputs[target_key]) == 2):
+                        inputs[target_key] = aud_name
 
         # 5. 分辨率/尺寸注入
         # 支持 720p/1080p -> 具体宽高，或直接 width/height
@@ -2781,6 +2927,8 @@ class ComfyWorkflowManager:
             if ref_count > load_count:
                 logger.warning(f"[VideoInject] R2V 传入 {ref_count} 张参考图，但工作流仅有 {load_count} 个可注入节点")
 
+        # 9. 最后应用外部动态输入（暴露输入优先；带枚举护栏与 combo_/num_/aud_/vid_ 解析）
+        _apply_dynamic_inputs(wf, dynamic_inputs)
         return wf
 
     def inspect_workflow_nodes(self, workflow_id: str) -> Dict[str, Any]:
@@ -3275,17 +3423,29 @@ def _workflow_provider_id(workflow_id: str) -> str:
 
 
 def _detect_workflow_kind(workflow: Dict[str, Any], meta: Optional[Dict[str, Any]] = None) -> str:
-    # 依据节点类型判定 image/video
+    # 依据节点类型判定 image/video/audio
     video_hints = ("VHS_", "VideoCombine", "SaveAnimated", "Wan", "AnimateDiff", "Video", "CreateVideo")
+    audio_hints = ("SaveAudio", "AudioSave", "CosyVoice", "F5TTS", "AudioOutput", "LoadAudio")
+    is_video = False
+    is_audio = False
     for node in workflow.values():
         if not isinstance(node, dict):
             continue
         ct = str(node.get("class_type", ""))
         if any(h in ct for h in video_hints):
-            return "video"
-    # meta 中若含 video 字样亦判 video
-    if meta and any("video" in str(v).lower() for v in [meta.get("name",""), meta.get("description","")]):
+            is_video = True
+        if any(h in ct for h in audio_hints):
+            is_audio = True
+    if is_video:
         return "video"
+    if is_audio:
+        return "audio"
+    if meta:
+        desc = f"{meta.get('name','')} {meta.get('description','')}".lower()
+        if any(k in desc for k in ("video", "视频", "i2v", "t2v", "r2v")):
+            return "video"
+        if any(k in desc for k in ("audio", "voice", "sound", "tts", "音频", "声音", "配音")):
+            return "audio"
     return "image"
 
 
@@ -3298,6 +3458,8 @@ MEDIA_ROLE_KEYWORDS: List[Tuple[str, Tuple[str, ...]]] = [
     ("control_ref",  ("控制", "controlnet", "canny", "lineart", "scribble", "mask")),
     ("style_ref",    ("风格", "style", "参考风格", "垫图风格")),
     ("ipadapter_ref", ("ipadapter", "ip_adapter", "一致性")),
+    ("audio_ref",    ("音频", "语音", "声音", "配音", "audio", "voice", "speech", "sound", "wav", "mp3")),
+    ("video_ref",    ("视频", "video", "motion", "动图", "动态", "vhs", "mp4")),
 ]
 
 
@@ -3306,15 +3468,31 @@ def infer_media_role(exp: Dict[str, Any]) -> str:
     推断媒体暴露项的语义角色。作者命名（label/alias）优先，其次参数名（如 mask）；
     不使用自动探测的通用描述做判据 —— 所有 LoadImage 共用一段"支持上传角色立绘、构图草图…"文案，
     用它会让多参考工作流的每个槽都被判成同一角色。
+    若声明了音频/视频类型，优先归入对应媒体角色，避免被图像角色（如角色配音->character_ref）误拦截。
     """
     strong = f"{exp.get('label','')} {exp.get('alias','')}".lower()
     weak = str(exp.get('param_name', '') or "").lower()
+    etype = str(exp.get("type") or "").lower()
+
+    # 音频专属优先拦截（如“角色配音”归入 audio_ref，而非 character_ref）
+    if any(k in strong or k in weak for k in ("音频", "语音", "声音", "配音", "audio", "voice", "speech", "sound")):
+        return "audio_ref"
+
+    # 视频专属优先拦截（如“动作参考视频”归入 video_ref，而非 pose_ref）
+    if any(k in strong or k in weak for k in ("视频", "video", "motion", "vhs", "动图", "动态")):
+        return "video_ref"
+
     for role, kws in MEDIA_ROLE_KEYWORDS:
         if any(k.lower() in strong for k in kws):
             return role
     for role, kws in MEDIA_ROLE_KEYWORDS:
         if any(k.lower() in weak for k in kws):
             return role
+
+    if etype == "audio":
+        return "reference_audios"
+    if etype == "video":
+        return "reference_videos"
     return "reference_images"
 
 
@@ -3322,7 +3500,7 @@ def _build_provider_schemas_from_workflow(workflow: Dict[str, Any], meta: Option
     """
     工作流 → 生成源 schema（全量同源，零固定模板）
 
-    - input_schema：仅标准句柄（prompt / reference_images / first_frame / last_frame），供画布连线与
+    - input_schema：仅标准句柄（prompt / reference_images / first_frame / last_frame / reference_videos / reference_audios），供画布连线与
       节点 Agent 自动装配；prompt 的展示名取自该工作流真实文本入口，不再假设"所有源都有一个正向提示词"。
     - params_schema：**逐条**来自暴露清单（number/combo/boolean/text 全收），key 一律使用暴露项原生 id
       （num_30:3_steps / combo_49_aspect_ratio / txt_30:18），这样前端填的值可被 _apply_dynamic_inputs
@@ -3342,6 +3520,14 @@ def _build_provider_schemas_from_workflow(workflow: Dict[str, Any], meta: Option
             "first_frame": {"type": "string", "format": "uri", "description": "首帧", "x-handle": "image", "x-slot": "first_frame"},
             "last_frame": {"type": "string", "format": "uri", "description": "尾帧", "x-handle": "image", "x-slot": "last_frame"},
             "reference_images": {"type": "array", "items": {"type": "string", "format": "uri"}, "description": "参考图组", "x-handle": "image", "x-slot": "reference_images"},
+            "reference_videos": {"type": "array", "items": {"type": "string", "format": "uri"}, "description": "参考视频组", "x-handle": "video", "x-slot": "reference_videos"},
+            "reference_audios": {"type": "array", "items": {"type": "string", "format": "uri"}, "description": "参考音频组", "x-handle": "audio", "x-slot": "reference_audios"},
+        }
+        input_required = ["prompt"]
+    elif kind == "audio":
+        input_props = {
+            "prompt": {"type": "string", "description": "语音文本/提示词", "x-handle": "text", "x-role": "prompt"},
+            "reference_audios": {"type": "array", "items": {"type": "string", "format": "uri"}, "description": "参考音频", "x-handle": "audio", "x-slot": "reference_audios"},
         }
         input_required = ["prompt"]
     elif kind == "image":
@@ -3391,7 +3577,7 @@ def _build_provider_schemas_from_workflow(workflow: Dict[str, Any], meta: Option
 
     # 存在独立槽位时，把标准聚合句柄标记为 x-aggregate，前端据此不再重复画一个泛化多选槽
     if has_per_node_media:
-        for agg in ("reference_images", "first_frame", "last_frame"):
+        for agg in ("reference_images", "first_frame", "last_frame", "reference_videos", "reference_audios"):
             if agg in input_props:
                 input_props[agg]["x-aggregate"] = True
 
@@ -3475,6 +3661,8 @@ def _build_provider_schemas_from_workflow(workflow: Dict[str, Any], meta: Option
     params_schema = {"type": "object", "properties": params_props}
     if kind == "video":
         output_schema = {"type": "object", "properties": {"video_url": {"type": "string", "format": "uri", "x-handle": "video"}}, "required": ["video_url"]}
+    elif kind == "audio":
+        output_schema = {"type": "object", "properties": {"audio_url": {"type": "string", "format": "uri", "x-handle": "audio"}}, "required": ["audio_url"]}
     else:
         output_schema = {"type": "object", "properties": {"image_url": {"type": "string", "format": "uri", "x-handle": "image"}}, "required": ["image_url"]}
     return kind, input_schema, params_schema, output_schema, exposed
@@ -3484,11 +3672,11 @@ def _persist_exposed_baseline(workflow_id: str, meta: Optional[Dict[str, Any]], 
     """
     把工作流暴露清单写入 meta 作为基线（供 ComfyUI 离线启动时复用），并用新 meta 重算 schema。
     返回重算后的 (kind, input_schema, params_schema, output_schema, exposed)；
-    meta 已包含同等或更完整清单时返回 None，由调用方决定沿用现状。
+    若 meta 已包含已保存的白名单（哪怕仅 1 项），禁止覆盖并返回 None。
     """
     if not exposed:
         return None
-    if len((meta or {}).get("exposed_inputs") or []) >= len(exposed):
+    if (meta or {}).get("exposed_inputs") is not None:
         return None
     try:
         mpath = _meta_path(workflow_id)
@@ -3496,6 +3684,8 @@ def _persist_exposed_baseline(workflow_id: str, meta: Optional[Dict[str, Any]], 
             return None
         with open(mpath, "r", encoding="utf-8") as f:
             m = json.load(f)
+        if m.get("exposed_inputs") is not None:
+            return None
         m["exposed_inputs"] = exposed
         with open(mpath, "w", encoding="utf-8") as f:
             json.dump(m, f, ensure_ascii=False, indent=2)
@@ -3509,7 +3699,7 @@ def _persist_exposed_baseline(workflow_id: str, meta: Optional[Dict[str, Any]], 
 
 # 工作流→生成源的 Schema 生成规则版本：resolve/auto_detect/_build_* 等规则变更时 +1，
 # 存量源在下次启动时自动重建一次。启动 fast path 靠它判断，未变更时全程零网络。
-WORKFLOW_SCHEMA_VERSION = 1
+WORKFLOW_SCHEMA_VERSION = 2
 
 
 def sync_workflow_provider(workflow_id: str):
@@ -3543,18 +3733,8 @@ def sync_workflow_provider(workflow_id: str):
         kind, input_schema, params_schema, output_schema, exposed = _build_provider_schemas_from_workflow(wf, meta)
         # 构造 ProviderDefinition
         from app.models.provider_definition import ProviderDefinition
-        saved_exp = list(getattr(existing, "workflow_exposed", None) or []) if existing else []
-        baseline = saved_exp if len(saved_exp) > len(exposed) else []
-        if baseline and content_hash and getattr(existing, "workflow_hash", None) != content_hash:
-            baseline = []  # 工作流内容已变，旧清单不再可信
-        if baseline:
-            rebuilt = _persist_exposed_baseline(workflow_id, meta, baseline)
-            if rebuilt:
-                kind, input_schema, params_schema, output_schema, exposed = rebuilt
-            elif len(saved_exp) > len(exposed):
-                return existing
-        elif exposed and len(exposed) > len((meta or {}).get("exposed_inputs") or []):
-            # 本次探测比 meta 基线更完整（ComfyUI 在线）→ 固化，供后续离线启动复用
+        # 仅当 meta 从未配置过 exposed_inputs 时，才尝试固化基线供离线使用
+        if (meta or {}).get("exposed_inputs") is None and exposed:
             _persist_exposed_baseline(workflow_id, meta, exposed)
         # 已存在且 hash、暴露清单、输入与参数 schema、规则版本全部未变才跳过
         # （schema 规则升级后需自动重建存量源；版本不一致时落到下方重新保存以盖戳）

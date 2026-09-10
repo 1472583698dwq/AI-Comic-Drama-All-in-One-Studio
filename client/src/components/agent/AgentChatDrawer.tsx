@@ -330,11 +330,27 @@ export const AgentChatDrawer: React.FC = () => {
           const event = data.event;
           const curId = currentStreamingIdRef.current;
 
-          if (event === 'agent_thinking_start') {
+          if (event === 'agent_thinking') {
             setIsThinking(true);
             if (curId) {
               setMessages((prev) =>
-                prev.map((m) => (m.id === curId ? { ...m, isThinkingStreaming: true, thinking: '' } : m))
+                prev.map((m) =>
+                  m.id === curId
+                    ? {
+                        ...m,
+                        isThinkingStreaming: true,
+                        thinking: (m.thinking ? m.thinking + '\n' : '') + data.message,
+                      }
+                    : m
+                )
+              );
+              setExpandedThinkingIds((prev) => ({ ...prev, [curId]: true }));
+            }
+          } else if (event === 'agent_thinking_start') {
+            setIsThinking(true);
+            if (curId) {
+              setMessages((prev) =>
+                prev.map((m) => (m.id === curId ? { ...m, isThinkingStreaming: true, thinking: m.thinking || '' } : m))
               );
               setExpandedThinkingIds((prev) => ({ ...prev, [curId]: true }));
             }
@@ -348,6 +364,7 @@ export const AgentChatDrawer: React.FC = () => {
                     : m
                 )
               );
+              setExpandedThinkingIds((prev) => ({ ...prev, [curId]: true }));
             }
           } else if (event === 'agent_thinking_end') {
             if (curId) {
@@ -424,6 +441,7 @@ export const AgentChatDrawer: React.FC = () => {
                     ? {
                         ...m,
                         text: data.message || m.text,
+                        thinking: data.thinking !== undefined ? (data.thinking || m.thinking) : m.thinking,
                         isStreaming: false,
                         isThinkingStreaming: false,
                         suggestedActions: data.suggested_actions,
@@ -558,11 +576,22 @@ export const AgentChatDrawer: React.FC = () => {
       abortControllerRef.current = controller;
       try {
         await apiService.agentChatStream(text, contextPayload, effectiveSessionId, (event, data) => {
-          if (event === 'agent_thinking_start') {
+          if (event === 'agent_thinking') {
             setIsThinking(true);
             setMessages((prev) =>
-              prev.map((m) => (m.id === agentMsgId ? { ...m, isThinkingStreaming: true, thinking: '' } : m))
+              prev.map((m) =>
+                m.id === agentMsgId
+                  ? { ...m, isThinkingStreaming: true, thinking: (m.thinking ? m.thinking + '\n' : '') + data.message }
+                  : m
+              )
             );
+            setExpandedThinkingIds((prev) => ({ ...prev, [agentMsgId]: true }));
+          } else if (event === 'agent_thinking_start') {
+            setIsThinking(true);
+            setMessages((prev) =>
+              prev.map((m) => (m.id === agentMsgId ? { ...m, isThinkingStreaming: true, thinking: m.thinking || '' } : m))
+            );
+            setExpandedThinkingIds((prev) => ({ ...prev, [agentMsgId]: true }));
           } else if (event === 'agent_thinking_chunk') {
             setIsThinking(true);
             setMessages((prev) =>
@@ -572,6 +601,7 @@ export const AgentChatDrawer: React.FC = () => {
                   : m
               )
             );
+            setExpandedThinkingIds((prev) => ({ ...prev, [agentMsgId]: true }));
           } else if (event === 'agent_thinking_end') {
             setMessages((prev) =>
               prev.map((m) => (m.id === agentMsgId ? { ...m, isThinkingStreaming: false } : m))
@@ -623,6 +653,7 @@ export const AgentChatDrawer: React.FC = () => {
                   ? {
                       ...m,
                       text: data.message || m.text,
+                      thinking: data.thinking !== undefined ? (data.thinking || m.thinking) : m.thinking,
                       isStreaming: false,
                       isThinkingStreaming: false,
                       suggestedActions: data.suggested_actions,
@@ -638,7 +669,7 @@ export const AgentChatDrawer: React.FC = () => {
                 m.id === agentMsgId
                   ? {
                       ...m,
-                      text: m.text ? m.text + `\n\n⚠️ ${data.message}` : `⚠️ 指令异常: ${data.message}`,
+                      text: m.text ? m.text + `\n\n⚠️ 异常: ${data.message}` : `⚠️ 指令执行异常: ${data.message}`,
                       isStreaming: false,
                       isThinkingStreaming: false,
                     }
@@ -687,6 +718,7 @@ export const AgentChatDrawer: React.FC = () => {
                 ? {
                     ...m,
                     text: res.reply || '指令已执行完成。',
+                    thinking: res.thinking || m.thinking,
                     isStreaming: false,
                     isThinkingStreaming: false,
                     toolCalls: tools,
@@ -925,7 +957,7 @@ export const AgentChatDrawer: React.FC = () => {
               const isUser = m.sender === 'user';
               const isAgent = m.sender === 'agent';
               const showThinking = !!(m.thinking || m.isThinkingStreaming);
-              const isThinkingOpen = !!expandedThinkingIds[m.id];
+              const isThinkingOpen = expandedThinkingIds[m.id] !== undefined ? expandedThinkingIds[m.id] : true;
 
               return (
                 <div
@@ -973,7 +1005,7 @@ export const AgentChatDrawer: React.FC = () => {
                         </button>
 
                         {isThinkingOpen && (
-                          <div className="p-2.5 pt-0 text-[10px] leading-relaxed [color:var(--color-text-secondary)] whitespace-pre-wrap font-mono max-h-36 overflow-y-auto custom-scrollbar border-t border-brand/10 allow-select select-text">
+                          <div className="p-2.5 pt-0 text-[10px] leading-relaxed [color:var(--color-text-secondary)] whitespace-pre-wrap font-mono max-h-56 overflow-y-auto custom-scrollbar border-t border-brand/10 allow-select select-text">
                             {m.thinking || '正在感知分镜机位与剧情节拍...'}
                             {m.isThinkingStreaming && (
                               <span className="inline-block w-1.5 h-3 bg-brand ml-1 animate-pulse align-middle" />

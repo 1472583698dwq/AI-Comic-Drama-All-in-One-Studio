@@ -123,7 +123,7 @@ def launch_app_browser_mode():
 
 def main():
     safe_log("========================================================")
-    safe_log("  MiniMax AI 漫剧 Studio (Windows 桌面版)")
+    safe_log("  AI 漫剧 Studio (Windows 桌面版)")
     safe_log("  正在初始化漫剧引擎与 3D 虚拟导演台...")
     safe_log("========================================================")
 
@@ -147,7 +147,7 @@ def main():
     try:
         import webview
         window = webview.create_window(
-            title="MiniMax AI 漫剧 Studio (Desktop + Mobile 双端工作台)",
+            title="AI 漫剧 Studio (Desktop + Mobile 双端工作台)",
             url=URL,
             width=1440,
             height=920,

@@ -17,6 +17,7 @@ import { Character } from '../../types';
 import { apiService } from '../../services/api';
 import { AiPolishButton } from '../ui/AiPolishButton';
 import { AssetPickerModal } from '../asset/AssetPickerModal';
+import { confirmAsync, toast } from '../../stores/useDialogStore';
 
 export const CharacterStudio: React.FC = () => {
   const { project, updateCharacter, addCharacter, deleteCharacter } = useProjectStore();
@@ -68,14 +69,22 @@ export const CharacterStudio: React.FC = () => {
     setSelectedCharId(newId);
   };
 
-  const handleDeleteCurrentChar = () => {
+  const handleDeleteCurrentChar = async () => {
     if (!selectedChar) return;
     if (characters.length <= 1) {
-      alert('项目中至少保留一个角色');
+      toast.warning('项目中至少保留一个角色');
       return;
     }
-    if (confirm(`确认删除角色 "${selectedChar.name}" 吗？`)) {
+    const confirmed = await confirmAsync({
+      title: '删除角色',
+      message: `确定要删除角色「${selectedChar.name}」吗？\n删除后该角色的立绘和分镜关联将失效。`,
+      isDanger: true,
+      confirmText: '确认删除',
+      cancelText: '取消'
+    });
+    if (confirmed) {
       deleteCharacter(selectedChar.id);
+      toast.success(`角色「${selectedChar.name}」已删除`);
     }
   };
 

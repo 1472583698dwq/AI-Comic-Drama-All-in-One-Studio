@@ -29,6 +29,7 @@ async def generate(ctx, api):
     headers = {
         "Authorization": f"Bearer {ctx['api_key']}",
         "Content-Type": "application/json",
+        **(ctx.get("headers") or {}),
     }
     # 分辨率/比例 独立控件 -> 映射为 size/width/height，解决“工作流内是下拉，映射出来却是手填”
     RES_MAP = {
@@ -91,6 +92,7 @@ async def generate(ctx, api):
     headers = {
         "Authorization": f"Bearer {ctx['api_key']}",
         "Content-Type": "application/json",
+        **(ctx.get("headers") or {}),
     }
     payload = {
         "prompt": ctx["prompt"],
@@ -148,6 +150,7 @@ async def generate(ctx, api):
     headers = {
         "Authorization": f"Bearer {ctx['api_key']}",
         "Content-Type": "application/json",
+        **(ctx.get("headers") or {}),
     }
     payload = {
         "text": ctx["text"],
@@ -177,7 +180,7 @@ async def generate(ctx, api):
 '''
 
 JS_IMAGE_TEMPLATE = '''async function generate(ctx, api) {
-  // ctx: {prompt, width, height, size, aspect_ratio, resolution, steps, cfg, model, api_key, reference_images}
+  // ctx: {prompt, width, height, size, aspect_ratio, resolution, steps, cfg, model, api_key, reference_images, headers}
   // 独立控件：aspect_ratio[9:16/16:9/1:1] resolution[480p/720p/1080p] 为下拉，不再手填 size
   const RES_MAP = {
     "480p": {"9:16": [480,832], "16:9": [832,480], "1:1": [480,480]},
@@ -190,6 +193,7 @@ JS_IMAGE_TEMPLATE = '''async function generate(ctx, api) {
   const headers = {
     "Authorization": `Bearer ${ctx.api_key}`,
     "Content-Type": "application/json",
+    ...(ctx.headers || {}),
   };
   const payload = {
     model: ctx.model || "default",
@@ -212,8 +216,12 @@ module.exports = { generate };
 '''
 
 JS_VIDEO_TEMPLATE = '''async function generate(ctx, api) {
-  // ctx: {prompt, duration, resolution, aspect_ratio, fps, mode, first_frame_url, reference_images}
-  const headers = { "Authorization": `Bearer ${ctx.api_key}`, "Content-Type": "application/json" };
+  // ctx: {prompt, duration, resolution, aspect_ratio, fps, mode, first_frame_url, reference_images, headers}
+  const headers = {
+    "Authorization": `Bearer ${ctx.api_key}`,
+    "Content-Type": "application/json",
+    ...(ctx.headers || {}),
+  };
   const payload = { prompt: ctx.prompt, duration: ctx.duration||5, resolution: ctx.resolution||"720p", aspect_ratio: ctx.aspect_ratio||"9:16", fps: ctx.fps||24, mode: ctx.mode||"i2v" };
   if (ctx.first_frame_url) payload.first_frame_url = ctx.first_frame_url;
   if (ctx.reference_images) payload.reference_images = ctx.reference_images;
@@ -417,6 +425,8 @@ def create_code_source(
     provider_id: Optional[str] = None,
     icon: str = "Zap",
     trusted: bool = False,
+    headers: Optional[Dict[str, str]] = None,
+    custom_headers: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
     动态生成源统一创建入口（MCP 直建/带定义/文档 LLM 生成、/providers/import 共用）：
@@ -447,6 +457,9 @@ def create_code_source(
         "scope": scope or "global", "enabled": True,
         "doc_text": (doc_text or "")[:4000], "raw_api_doc": (doc_text or "")[:4000],
     }
+    hdrs = headers if headers is not None else custom_headers
+    if hdrs:
+        data["headers"] = hdrs
     if doc_url:
         data["doc_url"] = doc_url
     if models:
@@ -709,6 +722,10 @@ class ProviderCreateRequest(BaseModel):
     raw_api_doc: Optional[str] = None
     enabled: bool = True
     api_key: Optional[str] = None
+    # 自定义请求头 (Custom Headers)
+    headers: Optional[Dict[str, str]] = None
+    custom_headers: Optional[Dict[str, str]] = None
+
 
 
 def _save_api_key(provider_id: str, api_key: str):
@@ -756,6 +773,9 @@ async def create_provider(req: ProviderCreateRequest):
         except SyntaxError as e:
             raise HTTPException(status_code=400, detail=f"Python 语法错误: {e}")
     data: Dict[str, Any] = req.model_dump(exclude={"api_key"})
+    hdrs = req.headers if req.headers is not None else req.custom_headers
+    if hdrs is not None:
+        data["headers"] = hdrs
     data["language"] = "javascript" if req.language == "js" else req.language
     data["provider_type"] = "code"
     data["legacy_json_mode"] = False
@@ -884,6 +904,14 @@ async def update_provider(provider_id: str, body: Dict[str, Any] = Body(...)):
             current[k] = {**(current.get(k) or {}), **v}
         else:
             current[k] = v
+    if "headers" in body or "custom_headers" in body:
+        new_hdrs = body.get("headers") if "headers" in body else body.get("custom_headers")
+        from app.models.provider_definition import normalize_headers
+        cleaned_hdrs = normalize_headers(new_hdrs)
+        current["headers"] = cleaned_hdrs
+        if "transport" in current and isinstance(current["transport"], dict):
+            current["transport"]["headers"] = cleaned_hdrs
+
     # 若更新了 code 且未显式传 params_schema，尝试从新 code 尾注释提取真实 schema 覆盖通用残留
     if "code" in body and "params_schema" not in body:
         try:

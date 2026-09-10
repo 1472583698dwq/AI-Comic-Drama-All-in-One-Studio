@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Plug, Globe, Video, Mic, Cpu, Search, Trash2, Edit3, Activity, Plus, FileText, Save, X, KeyRound, Settings, Code2, Languages, FileCode, ArrowUpCircle, Copy } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { DynamicControl } from '../../components/canvas/controls/DynamicControl';
+import { confirmAsync, promptAsync, toast } from '../../stores/useDialogStore';
+import { CustomHeadersEditor } from '../../components/provider/CustomHeadersEditor';
 
 const kindIcon: any = { image: Globe, video: Video, audio: Mic, llm: Cpu };
 const kindColor: any = { image: 'text-violet-400', video: 'text-orange-400', audio: 'text-pink-400', llm: 'text-cyan-400' };
@@ -36,15 +38,42 @@ export const ProvidersHubView: React.FC<{
   const customCount = providers.filter(p=>!p.builtin).length;
 
   const handleDelete = async (id:string)=>{
-    if(!confirm(`删除自定义源 ${id}？`)) return;
-    try { await apiService.deleteProvider(id); onRefresh(); window.dispatchEvent(new Event('provider-list-refresh')); } catch(e:any){ alert(e.message); }
+    const confirmed = await confirmAsync({
+      title: '删除生成源',
+      message: `确定要删除自定义源 ${id} 吗？\n依赖该源的画布节点可能将无法正常调用。`,
+      isDanger: true,
+      confirmText: '确认删除',
+      cancelText: '取消'
+    });
+    if(!confirmed) return;
+    try { 
+      await apiService.deleteProvider(id); 
+      toast.success(`已删除生成源 ${id}`);
+      onRefresh(); 
+      window.dispatchEvent(new Event('provider-list-refresh')); 
+    } catch(e:any){ toast.error(e.message || '删除失败'); }
   };
   const handleTest = async (id:string)=>{
-    try { const r=await apiService.testProvider(id); alert(r.ok?`✓ ${id} 连通正常`:`✗ ${r.detail||JSON.stringify(r)}`);} catch(e:any){ alert(e.message); }
+    try { 
+      const r=await apiService.testProvider(id); 
+      if (r.ok) toast.success(`✓ ${id} 连通正常`);
+      else toast.error(`✗ ${id} 连接异常: ${r.detail||JSON.stringify(r)}`);
+    } catch(e:any){ toast.error(e.message || '测试失败'); }
   };
   const handleUpgrade = async (id:string)=>{
-    if(!confirm(`将 ${id} 的 JSON 模板升级为代码模式？`)) return;
-    try { const r=await apiService.upgradeProviderToCode(id, 'python'); alert(`✓ 已升级为代码模式`); onRefresh(); window.dispatchEvent(new Event('provider-list-refresh')); } catch(e:any){ alert(e.message); }
+    const confirmed = await confirmAsync({
+      title: '升级为代码模式',
+      message: `确定将 ${id} 的 JSON 模板升级为 Python 代码沙盒模式？`,
+      confirmText: '确认升级',
+      cancelText: '取消'
+    });
+    if(!confirmed) return;
+    try { 
+      await apiService.upgradeProviderToCode(id, 'python'); 
+      toast.success(`✓ 已将 ${id} 升级为代码模式`); 
+      onRefresh(); 
+      window.dispatchEvent(new Event('provider-list-refresh')); 
+    } catch(e:any){ toast.error(e.message || '升级失败'); }
   };
   const openEdit = async (p:any)=>{
     // 若列表未返回完整 code/params_schema，则单独拉取
@@ -72,6 +101,7 @@ export const ProvidersHubView: React.FC<{
         kind: editing.kind,
         params_schema: editing.params_schema,
         default_params: editing.default_params,
+        headers: editing.headers || editing.custom_headers || {},
       };
       if(editing.models){
         payload.models = typeof editing.models==='string' ? editing.models.split(',').map((s:string)=>s.trim()).filter(Boolean) : editing.models;
@@ -208,24 +238,38 @@ export const ProvidersHubView: React.FC<{
                 <div className="text-xs font-bold text-white mt-2">模型</div>
                 <input value={Array.isArray(editing.models)?editing.models.join(','):editing.models||''} onChange={e=> setEditing({...editing, models:e.target.value.split(',').map((s:string)=>s.trim()).filter(Boolean)})} placeholder="models 逗号分隔" className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white font-mono" disabled={editing.builtin}/>
                 <input value={editing.default_model||''} onChange={e=> setEditing({...editing, default_model:e.target.value})} placeholder="default_model" className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white font-mono" disabled={editing.builtin}/>
+                <div className="space-y-1">
+                  <div className="text-xs font-bold text-white">自定义请求头 (OpenCode)</div>
+                  <CustomHeadersEditor
+                    headers={editing.headers || editing.custom_headers || {}}
+                    onChange={h => setEditing({ ...editing, headers: h, custom_headers: h })}
+                    disabled={editing.builtin}
+                  />
+                </div>
                 {/* 独立参数：每源独立 DynamicControl，不再共享 JSON 手填 */}
                 <div className="rounded-xl bg-white border border-zinc-200 p-2.5 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-zinc-900">独立参数</span>
-                    {!editing.builtin && <button onClick={()=>{
-                      const pname = prompt('参数名 (英文，如 aspect_ratio)');
-                      if(!pname) return;
-                      const title = prompt('显示名', pname) || pname;
-                      const type = prompt('类型 combo/number/text/boolean', 'text') || 'text';
-                      const def = prompt('默认值', '');
-                      const optsRaw = type==='combo' ? prompt('枚举逗号分隔，如 9:16,16:9,1:1', '') : '';
+                    {!editing.builtin && <button onClick={async ()=>{
+                      const pname = await promptAsync({
+                        title: '添加独立参数',
+                        message: '请输入英文参数名（例如 aspect_ratio、cfg、duration 等）：',
+                        placeholder: 'aspect_ratio'
+                      });
+                      if(!pname || !pname.trim()) return;
+                      const cleanPname = pname.trim();
+                      const title = await promptAsync({
+                        title: '参数显示名',
+                        message: '请输入前端控件标题：',
+                        defaultValue: cleanPname,
+                        placeholder: cleanPname
+                      }) || cleanPname;
                       const cur = editing.params_schema || {type:'object', properties:{}};
                       const props = {...(cur.properties||{})};
-                      const schema:any = {type, title, description: title, default: def};
-                      if(type==='combo' && optsRaw) schema.enum = optsRaw.split(',').map((s:string)=>s.trim()).filter(Boolean);
-                      if(type==='number') { schema.minimum=0; schema.maximum=100; }
-                      props[pname]=schema;
+                      const schema:any = {type: 'string', title, description: title, default: ''};
+                      props[cleanPname]=schema;
                       setEditing({...editing, params_schema:{...cur, properties: props}});
+                      toast.success(`已添加参数 ${cleanPname}`);
                     }} className="text-[11px] px-2 py-1 rounded-full bg-violet-600 text-white hover:bg-violet-700">+ 添加</button>}
                   </div>
                   <div className="text-[11px] text-zinc-500">每个参数独立控件类型自动匹配（combo→下拉 number→滑杆 image→上传），按源独立，与 ComfyUI 节点一致。</div>
@@ -255,13 +299,27 @@ export const ProvidersHubView: React.FC<{
                             }} />
                             {!editing.builtin && (
                               <div className="flex gap-1 mt-1">
-                                <button onClick={()=>{
-                                  const np = prompt('重命名显示名', spec.label) || spec.label;
-                                  const props = {...editing.params_schema.properties, [pname]: {...pdef, title: np}};
+                                <button onClick={async ()=>{
+                                  const np = await promptAsync({
+                                    title: '重命名显示名',
+                                    message: `修改参数 ${pname} 的前台展示标签：`,
+                                    defaultValue: spec.label,
+                                    placeholder: '显示名'
+                                  });
+                                  if (!np || !np.trim()) return;
+                                  const props = {...editing.params_schema.properties, [pname]: {...pdef, title: np.trim()}};
                                   setEditing({...editing, params_schema:{...editing.params_schema, properties: props}});
+                                  toast.success('显示名已修改');
                                 }} className="text-[10px] px-1.5 py-0.5 rounded bg-white border border-zinc-200 hover:border-violet-300">✎ 重命名</button>
-                                <button onClick={()=>{
-                                  if(!confirm(`删除参数 ${pname}?`)) return;
+                                <button onClick={async ()=>{
+                                  const confirmed = await confirmAsync({
+                                    title: '删除参数',
+                                    message: `确定要删除参数 ${pname} 吗？`,
+                                    isDanger: true,
+                                    confirmText: '删除',
+                                    cancelText: '取消'
+                                  });
+                                  if(!confirmed) return;
                                   const props = {...editing.params_schema.properties}; delete props[pname];
                                   const nd = {...editing.default_params}; delete nd[pname];
                                   setEditing({...editing, params_schema:{...editing.params_schema, properties: props}, default_params: nd});
@@ -298,9 +356,18 @@ export const ProvidersHubView: React.FC<{
                     <SetKeyInline providerId={editing.id} />
                   </div>
                 )}
-                <button onClick={()=>{
+                <button onClick={async ()=>{
                   const tmpl = CODE_TEMPLATES_FALLBACK[`${editLang}:${editing.kind}`] || CODE_TEMPLATES_FALLBACK["python:image"];
-                  if(confirm('用模板覆盖当前代码？')) setEditCode(tmpl);
+                  const ok = await confirmAsync({
+                    title: '覆盖代码',
+                    message: '确定要使用标准模板覆盖当前代码吗？已有的自定义修改将被替换。',
+                    confirmText: '确认覆盖',
+                    cancelText: '取消'
+                  });
+                  if(ok) {
+                    setEditCode(tmpl);
+                    toast.info('已填充代码模板');
+                  }
                 }} className="w-full py-2 rounded-xl bg-zinc-800 border border-zinc-700 text-xs text-white hover:bg-zinc-700 flex items-center justify-center gap-1" disabled={editing.builtin}><Copy className="w-3 h-3"/> 填充模板</button>
               </div>
             </div>
@@ -339,6 +406,7 @@ const SetKeyInline: React.FC<{providerId:string}> = ({ providerId })=>{
 const CreateCodeForm: React.FC<{onClose:()=>void, onCreated:()=>void}> = ({ onClose, onCreated })=>{
   const [form, setForm] = useState<any>({ name:'', kind:'image', language:'python', description:'', code:'', code_entry:'generate', models:'', default_model:'' });
   const [apiKey, setApiKey] = useState('');
+  const [headers, setHeaders] = useState<Record<string, string>>({});
   const [loadingTmpl, setLoadingTmpl] = useState(false);
   const loadTemplate = async ()=>{
     setLoadingTmpl(true);
@@ -366,6 +434,7 @@ const CreateCodeForm: React.FC<{onClose:()=>void, onCreated:()=>void}> = ({ onCl
         default_model: form.default_model||undefined,
       };
       if(apiKey) payload.api_key = apiKey;
+      if(Object.keys(headers).length > 0) payload.headers = headers;
       await apiService.createProvider(payload);
       onCreated();
     }catch(e:any){ alert(e.message); }
@@ -396,6 +465,10 @@ const CreateCodeForm: React.FC<{onClose:()=>void, onCreated:()=>void}> = ({ onCl
           <input value={form.models} onChange={e=> setForm({...form, models:e.target.value})} placeholder="models 逗号分隔，可空" className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-500"/>
           <input value={form.default_model} onChange={e=> setForm({...form, default_model:e.target.value})} placeholder="default_model，可空" className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-500"/>
           <input value={apiKey} onChange={e=> setApiKey(e.target.value)} placeholder="API Key（可选）" className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white font-mono placeholder-zinc-500"/>
+          <div className="space-y-1">
+            <div className="text-xs font-bold text-white">自定义请求头 (OpenCode)</div>
+            <CustomHeadersEditor headers={headers} onChange={setHeaders} />
+          </div>
         </div>
       </div>
       <div className="p-3 border-t border-zinc-800 flex justify-end gap-2 shrink-0 bg-[#18181b]">

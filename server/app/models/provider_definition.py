@@ -3,9 +3,35 @@ ProviderDefinition - 生成源定义（解耦：每个生成源为独立节点�
 支持 ComfyUI 本地 + 任意 HTTP API 扩展（由导演自动生成）
 """
 from typing import Optional, List, Dict, Any, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from datetime import datetime
 import uuid
+
+
+def normalize_headers(headers: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    """
+    遵循 OpenCode 与 RFC HTTP 规范进行大小写不敏感清洗去重。
+    保留最后写入的键值对，并剔除空键与非字符串值。
+    """
+    if not headers or not isinstance(headers, dict):
+        return {}
+    normalized: Dict[str, str] = {}
+    lower_map: Dict[str, str] = {}
+    for k, v in headers.items():
+        if k is None or v is None:
+            continue
+        key_str = str(k).strip()
+        if not key_str:
+            continue
+        lower_key = key_str.lower()
+        val_str = str(v)
+        if lower_key in lower_map:
+            old_orig_key = lower_map[lower_key]
+            if old_orig_key in normalized and old_orig_key != key_str:
+                del normalized[old_orig_key]
+        lower_map[lower_key] = key_str
+        normalized[key_str] = val_str
+    return normalized
 
 
 ProviderKind = Literal['image', 'video', 'audio', 'llm']
@@ -89,6 +115,27 @@ class ProviderDefinition(BaseModel):
     # 废弃标记
     legacy_json_mode: bool = False
 
+    # 自定义请求头 (Custom Headers) - 对齐 OpenCode 规范，用于 AI Gateway、反代、认证等
+    headers: Dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _sync_headers_compat(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            hdrs = data.get("headers")
+            if hdrs is None:
+                hdrs = data.get("custom_headers")
+            if not hdrs and isinstance(data.get("transport"), dict):
+                hdrs = data["transport"].get("headers")
+            if hdrs and isinstance(hdrs, dict):
+                cleaned = normalize_headers(hdrs)
+                data["headers"] = cleaned
+                if "transport" not in data or not isinstance(data["transport"], dict):
+                    data["transport"] = {}
+                data["transport"]["headers"] = {**data["transport"].get("headers", {}), **cleaned}
+        return data
+
+
     # 模型与参数 Schema（驱动前端动态表单）
     models: List[str] = Field(default_factory=list)
     default_model: Optional[str] = None
@@ -155,6 +202,8 @@ class ProviderDefinition(BaseModel):
             "schema_version": self.schema_version,
             "capabilities": list(self.capabilities or []),
             "transport": self.transport.model_dump(),
+            "headers": self.headers or (self.transport.headers if self.transport else {}) or {},
+            "custom_headers": self.headers or (self.transport.headers if self.transport else {}) or {},
             "auth": {**self.auth.model_dump(), "has_key": bool(self.auth.key_env)},
             "health_check": self.health_check.model_dump(),
             "doc_url": self.doc_url,

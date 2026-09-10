@@ -250,22 +250,45 @@ class ComfyUIProvider(ImageProvider):
                     # 若工作流本身为 API 格式且未经过自动转换，则视为节俭；否则（UI 转换而来）全量
                     is_api_frugally = (not auto_conv) and bool(is_api)
 
-                # 处理外部表单动态输入的图片上传
+                # 收集并上传 req.reference_images
+                uploaded_refs: List[str] = []
+                if getattr(req, "reference_images", None):
+                    for ref in req.reference_images:
+                        if ref:
+                            if isinstance(ref, str) and (ref.startswith("data:") or ref.startswith("/storage/") or ref.startswith("http") or os.path.isabs(ref)):
+                                try:
+                                    uploaded_refs.append(await upload_image_to_comfyui(ref, self.server_url))
+                                except Exception as upload_err:
+                                    print(f"[ComfyUI] 自动上传参考图失败: {upload_err}")
+                            else:
+                                uploaded_refs.append(ref)
+
+                # 处理外部表单动态输入的图片/音频/视频上传 (支持 dict、list、单项路径/URL/Base64)
                 processed_dynamic_inputs = copy.deepcopy(req.dynamic_inputs or {})
                 for k, v in list(processed_dynamic_inputs.items()):
-                    if isinstance(v, dict):
-                        for sub_k, sub_v in list(v.items()):
-                            if sub_k == "image" and isinstance(sub_v, str) and (sub_v.startswith("data:image/") or sub_v.startswith("/storage/") or sub_v.startswith("http") or os.path.isabs(sub_v)):
+                    if isinstance(v, list):
+                        new_list = []
+                        for item in v:
+                            if isinstance(item, str) and (item.startswith("data:") or item.startswith("/storage/") or item.startswith("http") or os.path.isabs(item)):
                                 try:
-                                    uploaded_name = await upload_image_to_comfyui(sub_v, self.server_url)
-                                    v[sub_k] = uploaded_name
+                                    new_list.append(await upload_image_to_comfyui(item, self.server_url))
+                                except Exception as upload_err:
+                                    print(f"[ComfyUI] 自动上传动态输入列表项失败: {upload_err}")
+                                    new_list.append(item)
+                            else:
+                                new_list.append(item)
+                        processed_dynamic_inputs[k] = new_list
+                    elif isinstance(v, dict):
+                        for sub_k, sub_v in list(v.items()):
+                            if isinstance(sub_v, str) and (sub_v.startswith("data:") or sub_v.startswith("/storage/") or sub_v.startswith("http") or os.path.isabs(sub_v)):
+                                try:
+                                    v[sub_k] = await upload_image_to_comfyui(sub_v, self.server_url)
                                 except Exception as upload_err:
                                     print(f"[ComfyUI] 自动上传垫图失败: {upload_err}")
-                    elif isinstance(v, str) and (str(k).startswith("img_") or "image" in str(k).lower()):
-                        if v.startswith("data:image/") or v.startswith("/storage/") or v.startswith("http") or os.path.isabs(v):
+                    elif isinstance(v, str) and (str(k).startswith(("img_", "aud_", "vid_")) or "image" in str(k).lower() or v.startswith("data:") or v.startswith("/storage/")):
+                        if v.startswith("data:") or v.startswith("/storage/") or v.startswith("http") or os.path.isabs(v):
                             try:
-                                uploaded_name = await upload_image_to_comfyui(v, self.server_url)
-                                processed_dynamic_inputs[k] = uploaded_name
+                                processed_dynamic_inputs[k] = await upload_image_to_comfyui(v, self.server_url)
                             except Exception as upload_err:
                                 print(f"[ComfyUI] 自动上传垫图失败: {upload_err}")
 
@@ -285,6 +308,7 @@ class ComfyUIProvider(ImageProvider):
                         "steps": custom_steps,
                         "cfg": custom_cfg,
                         "style_suffix": style_suffix,
+                        "reference_images": uploaded_refs,
                     },
                     node_overrides=node_overrides,
                     dynamic_inputs=processed_dynamic_inputs,

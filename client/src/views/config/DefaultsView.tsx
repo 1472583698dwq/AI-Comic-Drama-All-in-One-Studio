@@ -59,13 +59,12 @@ export const DefaultsView: React.FC<{
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-white flex items-center gap-1.5"><Cpu className="w-3.5 h-3.5 text-cyan-400"/> 大模型默认 LLM_PROVIDER <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-secondary border border-border text-gray-400 font-mono">LLM_PROVIDER</span></span>
           </div>
-          <div className="text-[11px] text-gray-400">剧本拆解 / 导演Agent 的 LLM 通道（openai_compatible / deepseek / qwen / minimax 等）</div>
+          <div className="text-[11px] text-gray-400">剧本拆解 / 导演Agent 的 LLM 通道（openai_compatible / opencode / deepseek / qwen 等）</div>
           <select value={form.LLM_PROVIDER || 'openai_compatible'} onChange={e=> setField('LLM_PROVIDER', e.target.value)} className="w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-brand">
-            <option value="openai_compatible">openai_compatible</option>
+            <option value="openai_compatible">openai_compatible (OpenCode / 兼容源)</option>
             <option value="deepseek">deepseek</option>
             <option value="qwen">qwen</option>
             <option value="siliconflow">siliconflow</option>
-            <option value="minimax">minimax</option>
             <option value="responses_api">responses_api</option>
           </select>
           <div className="text-[11px] text-gray-500">详细 Key/URL 请到“基础设施”或“生成源(llm)”配置，此处仅路由。</div>

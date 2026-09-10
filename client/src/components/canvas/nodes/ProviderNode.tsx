@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 import { Plug, Cpu, Globe, Mic, Video, Settings, Activity, Trash2, Edit3, Plus, Zap, Key } from 'lucide-react';
 import { apiService } from '../../../services/api';
+import { confirmAsync, toast } from '../../../stores/useDialogStore';
 
 const API_ORIGIN = window.location.port === '5173' ? 'http://127.0.0.1:8000' : '';
 
@@ -288,13 +289,26 @@ export const ProviderNode: React.FC<NodeProps> = ({ data, id, type }) => {
             )}
             <div className="flex gap-1.5">
               <button onClick={handleTest} disabled={testing || !selectedId} className="flex-1 py-1.5 rounded-lg bg-surface border border-border text-xs [color:var(--color-text-main)] flex items-center justify-center gap-1 disabled:opacity-40 hover:bg-surface-secondary"><Activity className="w-3 h-3 text-brand"/>{testing?'检测中…':'测试连通'}</button>
-              {!isBuiltin && <button onClick={()=>{
-                if(confirm(`删除 Provider ${selectedId}？`)){
-                  fetch(`${API_ORIGIN || ''}/api/v1/providers/${selectedId}`, {method:'DELETE'}).then(r=>r.json()).then(r=>{
-                    if(r.status==='deleted'){ alert('已删除'); setSelectedId(''); setSelectedDef(null); fetchProviders(); (d.onUpdate as any)?.(id, {provider_id:'', definition:null}); }
-                    else alert(JSON.stringify(r));
-                  }).catch(e=>alert(e.message));
-                }
+              {!isBuiltin && <button onClick={async ()=>{
+                const ok = await confirmAsync({
+                  title: '删除生成源',
+                  message: `确定要删除生成源 ${selectedId} 吗？`,
+                  isDanger: true,
+                  confirmText: '确认删除',
+                  cancelText: '取消'
+                });
+                if(!ok) return;
+                fetch(`${API_ORIGIN || ''}/api/v1/providers/${selectedId}`, {method:'DELETE'}).then(r=>r.json()).then(r=>{
+                  if(r.status==='deleted'){ 
+                    toast.success(`生成源 ${selectedId} 已删除`); 
+                    setSelectedId(''); 
+                    setSelectedDef(null); 
+                    fetchProviders(); 
+                    (d.onUpdate as any)?.(id, {provider_id:'', definition:null}); 
+                  } else {
+                    toast.error(JSON.stringify(r));
+                  }
+                }).catch(e=>toast.error(e.message || '删除失败'));
               }} className="px-2.5 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-500 flex items-center gap-1 text-xs hover:bg-red-500/20"><Trash2 className="w-3 h-3"/>删</button>}
             </div>
             {health && <div className={`text-[11px] px-2 py-1 rounded-lg border font-medium ${health.ok ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-300' : 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300'}`}>{health.detail || (health.ok?'正常':'异常')}</div>}

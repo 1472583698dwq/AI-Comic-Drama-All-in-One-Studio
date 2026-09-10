@@ -18,7 +18,7 @@ from app.pipelines.consistency_engine import consistency_engine
 from app.pipelines.unified_orchestrator import unified_orchestrator
 from app.mcp.server import mcp_registry
 from app.skills.engine import skill_engine, SkillDefinition, SkillExecutionResult
-from app.core.config import settings, read_env_file, write_env_file, MANAGED_KEYS
+from app.core.config import settings, read_env_file, write_env_file, MANAGED_KEYS, get_primary_env_file, JSON_CONFIG_FILE
 from pydantic import BaseModel, Field
 import httpx
 # LangChain Agent 引擎（带记忆、循环、流式）
@@ -384,6 +384,7 @@ async def generate_image(req: ImageGenerateRequest):
             cfg=req.cfg if req.cfg is not None else extra.get('cfg'),
             fps=getattr(req, 'fps', None) or extra.get('fps'),
             duration=getattr(req, 'duration', None) or extra.get('duration'),
+            reference_images=getattr(req, 'reference_images', None),
             dynamic_inputs=req.dynamic_inputs,
             extra=extra or None,
         )
@@ -803,6 +804,7 @@ async def generate_video(req: VideoGenerateRequestPayload):
             last_frame_url=req.last_frame_url,
             reference_images=req.reference_images,
             reference_videos=req.reference_videos,
+            reference_audios=getattr(req, 'reference_audios', None),
             duration=req.duration or 5,
             resolution=req.resolution or extra.get("resolution") or "720p",
             aspect_ratio=req.aspect_ratio or extra.get("aspect_ratio") or "9:16",
@@ -958,9 +960,9 @@ AGENT_SYSTEM_PROMPT_BODY = """你是「AI漫剧导演 Agent」，运行在 MiniM
 - 严禁在目标未完成时提前汇报；每轮自问："用户的目标全部达成了吗？还有哪一步没做？"
 - 工具返回 error 时，分析原因并尝试修正参数重试，或改用其它工具达成同一目标
 - 单轮可并行调用多个相互独立的工具以提高效率（按需而定，无硬性上限）
-- 【关键】查询类工具 list_* / canvas_query / list_assets / list_comfyui_workflows 仅是"侦察"，绝不能查询后直接总结收工：必须在同一轮对话内立即基于查询结果执行下一步 generate_image/generate_voice/canvas_create_node/canvas_connect/canvas_execute 等实质动作，查而不做视为未完成
-- 典型两阶段范式：①先 list_* 查可用源/工作流/音色/画布状态 ②再 generate_* 或 画布编排，必须连续完成；禁止把查询和执行拆成两次用户对话
-- 每轮输出前强制自检：列出"目标步骤清单→已完成→下一步"，清单未清零就必须继续 tool_calls，只有清单全完成才允许纯文本 reply"""
+- 每轮输出前强制自检：列出"目标步骤清单→已完成→下一步"，清单未清零就必须继续 tool_calls，只有清单全完成才允许纯文本 reply
+- 【思考推演规范】在做出任何动作决策或输出答复前，请务必先展开深度、专业的导演推演（分析用户核心意图、当前分镜镜头景别与运镜节拍、为何选择特定工具及参数推导逻辑）。若支持思维链或标签，请优先使用 <think> ... </think> 完整呈现思考链，系统会将其无缝呈现在导演思考卡片中。"""
+
 
 # 单轮 JSON 兜底模式（llm_service.chat_json，无 LangChain/ainvoke 失败时）使用的提示词：保留 JSON 输出约束
 AGENT_SYSTEM_PROMPT = AGENT_SYSTEM_PROMPT_BODY + """
@@ -1153,15 +1155,37 @@ async def websocket_agent_endpoint(websocket: WebSocket):
                 _wmode = "execute"
             if _wmode == "chat":
                 try:
-                    await websocket.send_json({"event": "agent_thinking", "message": "问答模式思考中（不调工具）…"})
+                    await websocket.send_json({"event": "agent_thinking", "message": "正在深入思考问答推演…"})
                     reply = await llm_service.chat_completion(
                         messages=[
-                            {"role": "system", "content": "你是AI漫剧导演顾问，只做问答讲解，不调用任何工具。用中文简洁回答。"},
+                            {"role": "system", "content": "你是AI漫剧导演顾问，只做问答讲解，不调用任何工具。请先展现思考推演过程，再用中文回答。"},
                             {"role": "user", "content": prompt_text[:4000]},
                         ],
                         temperature=0.5,
                     )
-                    await websocket.send_json({"event": "agent_response", "message": reply, "suggested_actions": ["切换到执行模式让我直接做"], "executed_tools": [], "mode": "chat"})
+                    from app.pipelines.llm_service import extract_think_tags, strip_think_tags
+                    th = extract_think_tags(reply or "").strip()
+                    clean_reply = strip_think_tags(reply or "").strip()
+                    if not th:
+                        th = f"【导演顾问思考推演】\n- 意图分析：用户询问「{prompt_text[:60]}」\n- 解答路径：梳理漫剧影视创作知识库，输出条理清晰的专业指导建议。"
+                    await websocket.send_json({"event": "agent_thinking_start"})
+                    for i in range(0, len(th), 8):
+                        await websocket.send_json({"event": "agent_thinking_chunk", "delta": th[i:i+8]})
+                        await asyncio.sleep(0.005)
+                    await websocket.send_json({"event": "agent_thinking_end"})
+                    if clean_reply:
+                        await websocket.send_json({"event": "agent_stream_start"})
+                        for i in range(0, len(clean_reply), 6):
+                            await websocket.send_json({"event": "agent_stream_chunk", "delta": clean_reply[i:i+6]})
+                            await asyncio.sleep(0.015)
+                    await websocket.send_json({
+                        "event": "agent_response",
+                        "message": clean_reply,
+                        "thinking": th,
+                        "suggested_actions": ["切换到执行模式让我直接做"],
+                        "executed_tools": [],
+                        "mode": "chat"
+                    })
                 except Exception as e:
                     await websocket.send_json({"event": "error", "message": str(e)})
                 continue
@@ -1187,6 +1211,7 @@ async def websocket_agent_endpoint(websocket: WebSocket):
                         await websocket.send_json({
                             "event": "agent_response",
                             "message": result.get("reply", "指令已执行。"),
+                            "thinking": result.get("thinking"),
                             "suggested_actions": result.get("suggested_actions") or [],
                             "executed_tools": result.get("executed_tools") or [],
                             "mode": "execute",
@@ -1196,12 +1221,17 @@ async def websocket_agent_endpoint(websocket: WebSocket):
                         raise
                     except LLMServiceError as e:
                         try:
-                            await websocket.send_json({"event": "error", "message": str(e)})
+                            await websocket.send_json({"event": "error", "message": str(e) or "大模型接口异常"})
                         except Exception:
                             pass
                     except Exception as e:
+                        err_text = str(e)
+                        if not err_text and isinstance(e, asyncio.TimeoutError):
+                            err_text = "等待大模型响应超时（90s），请检查网络或模型服务状态"
+                        elif not err_text:
+                            err_text = type(e).__name__
                         try:
-                            await websocket.send_json({"event": "error", "message": f"Agent 执行失败: {e}"})
+                            await websocket.send_json({"event": "error", "message": f"Agent 执行失败: {err_text}"})
                         except Exception:
                             pass
 
@@ -1292,6 +1322,8 @@ async def websocket_agent_endpoint(websocket: WebSocket):
 # ============================================================
 
 class ConfigUpdateRequest(BaseModel):
+    model_config = {"extra": "allow"}
+
     # MiniMax
     MINIMAX_API_KEY: Optional[str] = Field(default="")
     MINIMAX_GROUP_ID: Optional[str] = Field(default="")
@@ -1306,6 +1338,7 @@ class ConfigUpdateRequest(BaseModel):
     OPENAI_API_KEY: Optional[str] = Field(default="")
     OPENAI_BASE_URL: Optional[str] = Field(default="https://api.deepseek.com/v1")
     OPENAI_MODEL: Optional[str] = Field(default="deepseek-chat")
+    OPENAI_CUSTOM_HEADERS: Optional[str] = Field(default="")
     RESPONSES_API_URL: Optional[str] = Field(default="https://api.openai.com/v1/responses")
     RESPONSES_API_KEY: Optional[str] = Field(default="")
     RESPONSES_MODEL: Optional[str] = Field(default="gpt-4o")
@@ -1316,6 +1349,7 @@ class ConfigUpdateRequest(BaseModel):
     COMFYUI_CHECKPOINT: Optional[str] = Field(default="")
     COMFYUI_TIMEOUT_SECONDS: Optional[str] = Field(default="240")
     COMFYUI_WORKFLOWS_DIR: Optional[str] = Field(default="")
+    COMFYUI_DEFAULT_IMAGE_WORKFLOW: Optional[str] = Field(default="")
     SILICONFLOW_API_KEY: Optional[str] = Field(default="")
     SILICONFLOW_IMAGE_MODEL: Optional[str] = Field(default="black-forest-labs/FLUX.1-schnell")
     DASHSCOPE_API_KEY: Optional[str] = Field(default="")
@@ -1332,11 +1366,15 @@ class ConfigUpdateRequest(BaseModel):
 
     # Video Generation
     VIDEO_PROVIDER: Optional[str] = Field(default="minimax")
+    COMFYUI_DEFAULT_VIDEO_WORKFLOW: Optional[str] = Field(default="")
     KLING_API_KEY: Optional[str] = Field(default="")
     VIDU_API_KEY: Optional[str] = Field(default="")
 
     # JianYing Draft Custom Location
     JIANYIN_DRAFT_PATH: Optional[str] = Field(default="")
+
+    # Trusted Mode 总闸（A档）
+    STUDIO_TRUSTED_MODE: Optional[str] = Field(default="0")
 
 class ConfigTestRequest(BaseModel):
     target: str = Field(description="openai | responses_api | deepseek | qwen | minimax | comfyui | siliconflow | dashscope | elevenlabs | cosyvoice | gpt_sovits | jianyin | openai_compat")
@@ -1356,7 +1394,6 @@ def _is_masked_placeholder(v: str) -> bool:
 @router.get("/config")
 async def get_config(unmask: bool = True):
     """返回当前生效配置。本地桌面端默认提供明文供用户编辑查看，可通过 unmask=false 脱敏。"""
-    from app.core.config import get_primary_env_file, JSON_CONFIG_FILE
     primary_env = get_primary_env_file()
     raw_configs = read_env_file(unmask=True)
     masked_configs = read_env_file(unmask=False)
@@ -1465,10 +1502,28 @@ async def test_config_connection(req: ConfigTestRequest):
         if not api_key:
             return {"target": "openai", "ok": False, "detail": "OPENAI_API_KEY 未配置"}
         try:
+            req_headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+            custom_raw = cfg.get("OPENAI_CUSTOM_HEADERS") or getattr(settings, "OPENAI_CUSTOM_HEADERS", "")
+            if custom_raw:
+                try:
+                    import json
+                    parsed_headers = json.loads(custom_raw) if isinstance(custom_raw, str) else custom_raw
+                    if isinstance(parsed_headers, dict):
+                        for k, v in parsed_headers.items():
+                            req_headers[str(k).strip()] = str(v).strip()
+                except Exception:
+                    pass
+
+            # 兼容 OpenCode 等网关：若缺少 x-opencode-session 则自动补充默认 session 标识避免 400
+            if "opencode.ai" in base_url.lower():
+                if not any(k.lower() == "x-opencode-session" for k in req_headers):
+                    import uuid
+                    req_headers["x-opencode-session"] = f"session_{uuid.uuid4().hex[:12]}"
+
             async with httpx.AsyncClient(timeout=12.0) as client:
                 r = await client.post(
                     f"{base_url}/chat/completions",
-                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    headers=req_headers,
                     json={
                         "model": model,
                         "messages": [{"role": "user", "content": "hi"}],
@@ -1604,12 +1659,17 @@ async def http_agent_chat(req: AgentChatRequest):
         try:
             reply = await llm_service.chat_completion(
                 messages=[
-                    {"role": "system", "content": "你是AI漫剧导演顾问，只做问答讲解，不调用任何工具。用中文简洁回答，涉及操作时给出步骤。"},
+                    {"role": "system", "content": "你是AI漫剧导演顾问，只做问答讲解，不调用任何工具。请在 <think> ... </think> 标签内展示专业导演的思考推演过程，再用中文回答。"},
                     {"role": "user", "content": prompt_text[:4000]},
                 ],
                 temperature=0.5,
             )
-            return {"reply": reply, "suggested_actions": ["切换到执行模式让我直接做", "继续追问细节"], "executed_tools": [], "mode": "chat"}
+            from app.pipelines.llm_service import extract_think_tags, strip_think_tags
+            th = extract_think_tags(reply or "").strip()
+            clean_reply = strip_think_tags(reply or "").strip()
+            if not th:
+                th = f"【导演顾问思考推演】\n- 意图分析：用户询问「{prompt_text[:60]}」\n- 解答路径：梳理漫剧影视创作知识库，输出条理清晰的专业指导建议。"
+            return {"reply": clean_reply, "thinking": th, "suggested_actions": ["切换到执行模式让我直接做", "继续追问细节"], "executed_tools": [], "mode": "chat"}
         except LLMServiceError as e:
             raise HTTPException(status_code=503, detail=str(e))
     # 若请求要求流式，则走 SSE
@@ -1628,6 +1688,7 @@ async def http_agent_chat(req: AgentChatRequest):
             )
             return {
                 "reply": result.get("reply", "指令已执行。"),
+                "thinking": result.get("thinking"),
                 "suggested_actions": result.get("suggested_actions") or [],
                 "executed_tools": result.get("executed_tools") or [],
             }
@@ -1689,12 +1750,27 @@ async def http_agent_chat_stream(req: AgentChatRequest):
             try:
                 reply = await llm_service.chat_completion(
                     messages=[
-                        {"role": "system", "content": "你是AI漫剧导演顾问，只做问答讲解，不调用任何工具。用中文简洁回答。"},
+                        {"role": "system", "content": "你是AI漫剧导演顾问，只做问答讲解，不调用任何工具。请在 <think> ... </think> 标签内展示专业导演的思考推演过程，再用中文回答。"},
                         {"role": "user", "content": prompt_text[:4000]},
                     ],
                     temperature=0.5,
                 )
-                yield f"data: {json.dumps({'event':'agent_response','message':reply,'suggested_actions':['切换到执行模式让我直接做'],'mode':'chat'}, ensure_ascii=False)}\n\n"
+                from app.pipelines.llm_service import extract_think_tags, strip_think_tags
+                th = extract_think_tags(reply or "").strip()
+                clean_reply = strip_think_tags(reply or "").strip()
+                if not th:
+                    th = f"【导演顾问思考推演】\n- 意图分析：用户询问「{prompt_text[:60]}」\n- 解答路径：梳理漫剧影视创作知识库，输出条理清晰的专业指导建议。"
+                yield f"data: {json.dumps({'event':'agent_thinking_start'}, ensure_ascii=False)}\n\n"
+                for i in range(0, len(th), 8):
+                    yield f"data: {json.dumps({'event':'agent_thinking_chunk','delta':th[i:i+8]}, ensure_ascii=False)}\n\n"
+                    await asyncio.sleep(0.005)
+                yield f"data: {json.dumps({'event':'agent_thinking_end'}, ensure_ascii=False)}\n\n"
+                if clean_reply:
+                    yield f"data: {json.dumps({'event':'agent_stream_start'}, ensure_ascii=False)}\n\n"
+                    for i in range(0, len(clean_reply), 6):
+                        yield f"data: {json.dumps({'event':'agent_stream_chunk','delta':clean_reply[i:i+6]}, ensure_ascii=False)}\n\n"
+                        await asyncio.sleep(0.015)
+                yield f"data: {json.dumps({'event':'agent_response','message':clean_reply,'thinking':th,'suggested_actions':['切换到执行模式让我直接做'],'mode':'chat'}, ensure_ascii=False)}\n\n"
                 yield "data: [DONE]\n\n"
             except Exception as e:
                 yield f"data: {json.dumps({'event':'error','message':str(e)}, ensure_ascii=False)}\n\n"
@@ -1765,10 +1841,16 @@ async def http_agent_chat_stream(req: AgentChatRequest):
                             yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
                         break
                     continue
-            # 任务结束，检查异常
+            # 任务结束，检查异常并推送最终 agent_response
             if task.done():
                 try:
-                    task.result()
+                    res = task.result()
+                    if isinstance(res, dict):
+                        final_reply = res.get("reply", "指令已执行。")
+                        final_thinking = res.get("thinking")
+                        final_tools = res.get("executed_tools") or []
+                        final_actions = res.get("suggested_actions") or []
+                        yield f"data: {json.dumps({'event':'agent_response','message':final_reply,'thinking':final_thinking,'executed_tools':final_tools,'suggested_actions':final_actions,'mode':_smode}, ensure_ascii=False)}\n\n"
                 except Exception as e:
                     yield f"data: {json.dumps({'event':'error','message':str(e)}, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
@@ -1829,7 +1911,7 @@ async def agent_plan_preview(req: AgentPlanPreviewRequest):
         if mode == "create":
             from app.agent import creator as _creator
             goal = (req.prompt or "")[:500]
-            if any(k in goal for k in ["补", "暴露", "参数", "模板", "Skill", "skill", "接入", "源", "H3", "h3", "first_frame"]):
+            if any(k in goal for k in ["插件", "插件包", "plugin", "package", "扩展包", "补", "暴露", "参数", "模板", "Skill", "skill", "接入", "源", "H3", "h3", "first_frame"]):
                 prop = _creator.propose_capability(goal, req.context or {})
                 plan["creator_proposal"] = prop
     except Exception as e:

@@ -1346,8 +1346,15 @@ class MCPServerRegistry:
                     reg = _lazy_image_registry()
                     # 将异构参数透传：prompt + 请求模型显式字段，其余全部进 dynamic_inputs（不锁死键名名单，媒体键由 input_schema 决定）
                     prompt = arguments.get("prompt") or arguments.get("text") or ""
-                    _explicit = ("prompt","text","model","workflow_id","aspect_ratio","resolution","steps","cfg","seed","style_preset","negative_prompt","width","height")
+                    ref_imgs = arguments.get("reference_images")
+                    if isinstance(ref_imgs, str):
+                        ref_imgs = [ref_imgs]
+                    elif not isinstance(ref_imgs, list) and ref_imgs:
+                        ref_imgs = [str(ref_imgs)]
+                    _explicit = ("prompt","text","model","workflow_id","aspect_ratio","resolution","steps","cfg","seed","style_preset","negative_prompt","width","height","reference_images")
                     dyn = {k: v for k, v in arguments.items() if k not in _explicit and v not in (None, "")}
+                    if ref_imgs and "reference_images" not in dyn:
+                        dyn["reference_images"] = ref_imgs
                     req = ImageGenerateRequest(
                         prompt=prompt,
                         negative_prompt=arguments.get("negative_prompt") or "",
@@ -1361,6 +1368,7 @@ class MCPServerRegistry:
                         cfg=arguments.get("cfg"),
                         workflow_id=arguments.get("workflow_id"),
                         model=arguments.get("model"),
+                        reference_images=ref_imgs if ref_imgs else None,
                         dynamic_inputs=dyn if dyn else None,
                         extra={k: arguments.get(k) for k in ("aspect_ratio","resolution","steps","cfg","model") if arguments.get(k) not in (None,"")},
                     )
@@ -1612,6 +1620,7 @@ class MCPServerRegistry:
                 openapi_url = arguments.get("openapi_url") or ""
                 api_key = arguments.get("api_key") or ""
                 definition = arguments.get("definition")
+                headers = arguments.get("headers") or arguments.get("custom_headers")
                 # 分支1：直接提供 code（导演编辑后回写或用户粘贴）—— 统一创建入口
                 _trusted_arg = arguments.get("trusted")
                 _trusted_bool = bool(_trusted_arg) if not isinstance(_trusted_arg, str) else _trusted_arg.strip().lower() in ("1", "true", "yes", "on")
@@ -1625,6 +1634,7 @@ class MCPServerRegistry:
                         api_key=api_key or None,
                         doc_text=doc_text, doc_url=doc_url,
                         trusted=_trusted_bool,
+                        headers=headers,
                     )
                     result = {"status": "success" if _created["compile_check"].get("ok") else "compile_failed",
                               "provider": _created["provider"], "mode": "direct_code",
@@ -1657,6 +1667,7 @@ class MCPServerRegistry:
                         default_model=definition.get("default_model"),
                         provider_id=definition.get("id"),
                         trusted=bool(_def_trusted),
+                        headers=definition.get("headers") or definition.get("custom_headers") or headers,
                     )
                     result = {"status": "success" if _created["compile_check"].get("ok") else "compile_failed",
                               "provider": _created["provider"], "mode": "direct_definition",
@@ -1706,6 +1717,7 @@ class MCPServerRegistry:
                         description=f"由导演从文档自动生成（{language}）",
                         api_key=api_key or None, doc_text=full_doc, doc_url=doc_url or "",
                         trusted=_trusted_bool,
+                        headers=headers,
                     )
                     result = {"status": "success" if _created["compile_check"].get("ok") else "compile_failed",
                               "provider": _created["provider"], "mode": "llm_code", "code": _created["code"],

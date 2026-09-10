@@ -28,8 +28,18 @@ def strip_think_tags(text: str) -> str:
     """去除推理模型输出的 <think>...</think> 或 <thought>...</thought> 标签"""
     if not text:
         return ""
-    cleaned = re.sub(r"<(think|thought)>[\s\S]*?</\1>", "", text, flags=re.IGNORECASE)
+    cleaned = re.sub(r"<(think|thought)>[\s\S]*?(?:</\1>|$)", "", text, flags=re.IGNORECASE)
     return cleaned.strip()
+
+
+def extract_think_tags(text: str) -> str:
+    """提取推理模型输出的 <think>...</think> 或 <thought>...</thought> 思考内容"""
+    if not text:
+        return ""
+    matches = re.findall(r"<(think|thought)>([\s\S]*?)(?:</\1>|$)", text, flags=re.IGNORECASE)
+    if matches:
+        return "\n\n".join(m[1].strip() for m in matches if m[1].strip()).strip()
+    return ""
 
 
 def extract_json_from_text(text: str) -> Dict[str, Any]:
@@ -88,12 +98,43 @@ class LLMService:
             return target[:-17] + "/responses"
         return f"{target}/responses"
 
+    def _get_custom_headers(self) -> Dict[str, str]:
+        """读取并解析全局/环境变量中配置的大模型自定义请求头 (支持 JSON 或 key:val 行)"""
+        raw = os.getenv("OPENAI_CUSTOM_HEADERS") or getattr(settings, "OPENAI_CUSTOM_HEADERS", "") or ""
+        if not raw or not str(raw).strip():
+            return {}
+        try:
+            val = json.loads(raw)
+            if isinstance(val, dict):
+                return {str(k): str(v) for k, v in val.items()}
+        except Exception:
+            pass
+        hdrs: Dict[str, str] = {}
+        for line in str(raw).split("\n"):
+            line = line.strip()
+            if ":" in line:
+                k, v = line.split(":", 1)
+                hdrs[k.strip()] = v.strip()
+            elif "=" in line:
+                k, v = line.split("=", 1)
+                hdrs[k.strip()] = v.strip()
+
+        # 兼容 OpenCode 会话路由
+        base_url = os.getenv("OPENAI_BASE_URL") or getattr(settings, "OPENAI_BASE_URL", "") or ""
+        if "opencode.ai" in str(base_url).lower():
+            if not any(k.lower() == "x-opencode-session" for k in hdrs):
+                import uuid
+                hdrs["x-opencode-session"] = f"session_{uuid.uuid4().hex[:12]}"
+
+        return hdrs
+
     async def chat_stream(
         self,
         messages: List[Dict[str, str]],
         temperature: float = 0.3,
         max_tokens: int = 4096,
         timeout: float = 120.0,
+        extra_headers: Optional[Dict[str, str]] = None,
     ) -> AsyncGenerator[str, None]:
         """全模型统一流式 Token 生成器 (SSE Async Generator)，支持自动降级容错"""
         provider = (settings.LLM_PROVIDER or "openai_compatible").lower()
@@ -114,6 +155,10 @@ class LLMService:
                 "Content-Type": "application/json",
                 "Accept": "text/event-stream",
             }
+            headers.update(self._get_custom_headers())
+            if extra_headers:
+                headers.update(extra_headers)
+
             input_items = []
             instructions = ""
             for m in messages:
@@ -192,6 +237,7 @@ class LLMService:
                 temperature=temperature,
                 max_tokens=max_tokens,
                 timeout=timeout,
+                extra_headers=extra_headers,
             ):
                 yield chunk
             return
@@ -214,6 +260,7 @@ class LLMService:
                 temperature=temperature,
                 max_tokens=max_tokens,
                 timeout=timeout,
+                extra_headers=extra_headers,
             ):
                 yield chunk
             return
@@ -229,6 +276,9 @@ class LLMService:
             "Content-Type": "application/json",
             "Accept": "text/event-stream",
         }
+        headers.update(self._get_custom_headers())
+        if extra_headers:
+            headers.update(extra_headers)
         payload = {
             "model": settings.LLM_MODEL or "abab6.5s-chat",
             "messages": messages,
@@ -254,6 +304,7 @@ class LLMService:
         temperature: float = 0.3,
         max_tokens: int = 4096,
         timeout: float = 120.0,
+        extra_headers: Optional[Dict[str, str]] = None,
     ) -> AsyncGenerator[str, None]:
         """执行标准 OpenAI /chat/completions SSE 传输"""
         endpoint = self._normalize_chat_completions_url(base_url)
@@ -262,6 +313,9 @@ class LLMService:
             "Content-Type": "application/json",
             "Accept": "text/event-stream",
         }
+        headers.update(self._get_custom_headers())
+        if extra_headers:
+            headers.update(extra_headers)
         payload: Dict[str, Any] = {
             "model": model,
             "messages": messages,
@@ -329,12 +383,13 @@ class LLMService:
         max_tokens: int = 4096,
         timeout: float = 120.0,
         response_format: Optional[Dict[str, str]] = None,
+        extra_headers: Optional[Dict[str, str]] = None,
     ) -> str:
         """非流式完整响应接口（优先流式聚合，具备自愈回退与错误提示）"""
         chunks = []
         stream_error = None
         try:
-            async for chunk in self.chat_stream(messages, temperature=temperature, max_tokens=max_tokens, timeout=timeout):
+            async for chunk in self.chat_stream(messages, temperature=temperature, max_tokens=max_tokens, timeout=timeout, extra_headers=extra_headers):
                 chunks.append(chunk)
             if chunks:
                 return "".join(chunks).strip()
@@ -351,6 +406,9 @@ class LLMService:
             endpoint = self._normalize_responses_url(settings.RESPONSES_API_URL or settings.OPENAI_BASE_URL)
             model = settings.RESPONSES_MODEL or settings.OPENAI_MODEL or "gpt-4o"
             headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+            headers.update(self._get_custom_headers())
+            if extra_headers:
+                headers.update(extra_headers)
             
             input_items = []
             instructions = ""
@@ -387,6 +445,9 @@ class LLMService:
         endpoint = self._normalize_chat_completions_url(settings.OPENAI_BASE_URL or settings.RESPONSES_API_URL or "https://api.openai.com/v1")
         model = settings.OPENAI_MODEL or settings.RESPONSES_MODEL or "deepseek-chat"
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        headers.update(self._get_custom_headers())
+        if extra_headers:
+            headers.update(extra_headers)
         payload = {"model": model, "messages": messages, "temperature": temperature}
         
         try:
@@ -407,6 +468,7 @@ class LLMService:
         temperature: float = 0.2,
         timeout: float = 120.0,
         max_tokens: int = 16384,
+        extra_headers: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """请求大模型生成严格结构化 JSON 并解析"""
         content = await self.chat_completion(
@@ -417,6 +479,7 @@ class LLMService:
             temperature=temperature,
             timeout=timeout,
             max_tokens=max_tokens,
+            extra_headers=extra_headers,
         )
         return extract_json_from_text(content)
 

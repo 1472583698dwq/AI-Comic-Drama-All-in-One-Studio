@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { X, Plus, Plug, Globe, Video, Mic, Cpu, Trash2, Edit3, Activity, Save, Upload, FileText, Link2, TestTube } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { CAPABILITIES_BY_KIND, getCapabilities } from './providerCapabilities';
+import { confirmAsync, toast } from '../../stores/useDialogStore';
+import { CustomHeadersEditor } from './CustomHeadersEditor';
 
 interface Props { isOpen: boolean; onClose: ()=>void; }
 
@@ -47,19 +49,28 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const customCount = providers.filter(p=> !p.builtin).length;
 
   const handleDelete = async (id:string)=>{
-    if (!confirm(`删除自定义源 ${id}？`)) return;
+    const confirmed = await confirmAsync({
+      title: '删除生成源',
+      message: `确定要删除自定义源 ${id} 吗？\n删除后相关引用的节点可能需要重新指定生成源。`,
+      isDanger: true,
+      confirmText: '确认删除',
+      cancelText: '取消'
+    });
+    if (!confirmed) return;
     try {
       await apiService.deleteProvider(id);
+      toast.success(`生成源 ${id} 已删除`);
       await fetchAll();
       window.dispatchEvent(new Event('provider-list-refresh'));
-    } catch(e:any){ alert(e.message); }
+    } catch(e:any){ toast.error(e.message || '删除失败'); }
   };
   const handleTest = async (id:string)=>{
     try {
       const res = await apiService.testProvider(id);
-      alert(res.ok ? `✓ ${id} 连通正常` : `✗ ${id} 检测未通过: ${res.detail || JSON.stringify(res)}`);
+      if (res.ok) toast.success(`✓ ${id} 连通正常`);
+      else toast.error(`✗ ${id} 检测未通过: ${res.detail || JSON.stringify(res)}`);
       await fetchAll();
-    } catch(e:any){ alert(e.message); }
+    } catch(e:any){ toast.error(e.message || '测试失败'); }
   };
   const handleSaveEdit = async ()=>{
     if (!editing) return;
@@ -68,12 +79,13 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose }) => {
       // 清理只读字段
       delete payload.health;
       // 处理 JSON 字符串字段
-      for (const k of ['params_schema','input_schema','output_schema','default_params','transport','auth','mapping']) {
+      for (const k of ['params_schema','input_schema','output_schema','default_params','transport','auth','mapping','headers']) {
         if (typeof payload[k] === 'string' && payload[k].trim()) {
           try { payload[k] = JSON.parse(payload[k]); } catch { alert(`${k} JSON 格式错误`); return; }
         }
         if (payload[k]==='' || payload[k]==='null') delete payload[k];
       }
+      if (editing.headers) payload.headers = editing.headers;
       await apiService.updateProvider(editing.id, payload);
       setEditing(null);
       await fetchAll();
@@ -278,6 +290,7 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose }) => {
                   {k:'name', label:'名称', type:'text'},
                   {k:'kind', label:'类型 kind (image|video|audio)', type:'select', opts:['image','video','audio','llm']},
                   {k:'capabilities', label:'能力细分（多选；不选=按插槽自动推断）', type:'caps'},
+                  {k:'headers', label:'自定义请求头 (Custom Headers)', type:'custom_headers'},
                   {k:'description', label:'描述', type:'textarea'},
                   {k:'code', label:'code (python/javascript, 完整 generate)', type:'code'},
                   {k:'input_schema', label:'input_schema JSON (文件插槽: prompt/首帧/参考图/参考音频)', type:'json'},
@@ -299,11 +312,18 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose }) => {
                         <textarea value={display} onChange={e=> setEditing({...editing, [f.k]: e.target.value})} rows={2} className="w-full bg-black/40 border border-border rounded-lg p-2 font-mono text-xs text-white focus:outline-none focus:border-brand" disabled={editing.builtin}/>
                       ) : f.type==='code' ? (
                         <textarea value={display} onChange={e=> setEditing({...editing, [f.k]: e.target.value})} rows={10} className="w-full bg-black/40 border border-border rounded-lg p-2 font-mono text-[11px] text-white focus:outline-none focus:border-brand" disabled={editing.builtin} placeholder="async def generate(ctx, api): ... # 末尾可追加 # PARAMS_SCHEMA: {...}"/>
+                      ) : f.type==='custom_headers' ? (
+                        <CustomHeadersEditor
+                          headers={editing.headers || editing.custom_headers || {}}
+                          onChange={h => setEditing({ ...editing, headers: h, custom_headers: h })}
+                          disabled={editing.builtin}
+                        />
                       ) : f.type==='json' ? (
                         <textarea value={display} onChange={e=> setEditing({...editing, [f.k]: e.target.value})} rows={4} className="w-full bg-black/40 border border-border rounded-lg p-2 font-mono text-[11px] text-white focus:outline-none focus:border-brand" disabled={editing.builtin}/>
                       ) : f.type==='select' ? (
                         <select value={val||''} onChange={e=> setEditing({...editing, [f.k]: e.target.value})} className="w-full bg-surface-secondary border border-border rounded-lg px-2 py-1.5 text-xs text-white" disabled={editing.builtin}>
-                          {f.opts?.map((o:string)=> <option key={o} value={o}>{o}</option>)}
+                          {f.opts?.map((o:string)=> <option key={o} value={o}>{o}</option>
+                          )}
                         </select>
                       ) : f.type==='caps' ? (
                         <div className="flex flex-wrap gap-1.5 p-2 rounded-lg bg-black/40 border border-border">
@@ -350,6 +370,7 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose }) => {
 const CreateForm: React.FC<{onClose:()=>void, onCreated:()=>void}> = ({ onClose, onCreated })=>{
   const [form, setForm] = useState<any>({ name:'', kind:'image', description:'', transport: { method:'POST', url:'', headers:{'Content-Type':'application/json'}, timeout:60 }, auth:{type:'bearer'}, models:[], default_model:'', params_schema:'', default_params:'', capabilities: [] });
   const [apiKey, setApiKey] = useState('');
+  const [headers, setHeaders] = useState<Record<string, string>>({});
   const toggleCap = (id: string)=>{
     const cur: string[] = Array.isArray(form.capabilities) ? form.capabilities : [];
     setForm({ ...form, capabilities: cur.includes(id) ? cur.filter(c=>c!==id) : [...cur, id] });
@@ -366,6 +387,7 @@ const CreateForm: React.FC<{onClose:()=>void, onCreated:()=>void}> = ({ onClose,
         if (payload[k]==='') delete payload[k];
       });
       if (apiKey) payload.api_key = apiKey;
+      if (Object.keys(headers).length > 0) payload.headers = headers;
       await apiService.createProvider(payload);
       onCreated();
     } catch(e:any){ alert(e.message); }
@@ -387,6 +409,10 @@ const CreateForm: React.FC<{onClose:()=>void, onCreated:()=>void}> = ({ onClose,
         </div>
       </div>
       <textarea value={form.description} onChange={e=> setForm({...form, description:e.target.value})} placeholder="描述" rows={2} className="w-full bg-surface-secondary border border-border rounded-lg p-2 text-xs text-white"/>
+      <div className="space-y-1">
+        <label className="text-[11px] font-semibold text-gray-300">自定义请求头 (Custom Headers / OpenCode 规范)</label>
+        <CustomHeadersEditor headers={headers} onChange={setHeaders} />
+      </div>
       <textarea value={typeof form.transport==='string'?form.transport:JSON.stringify(form.transport, null, 2)} onChange={e=> setForm({...form, transport:e.target.value})} rows={4} placeholder='transport JSON，如 {"method":"POST","url":"https://...","headers":{"Content-Type":"application/json"}}' className="w-full bg-black/40 border border-border rounded-lg p-2 font-mono text-[11px] text-white"/>
       <textarea value={typeof form.auth==='string'?form.auth:JSON.stringify(form.auth, null, 2)} onChange={e=> setForm({...form, auth:e.target.value})} rows={2} placeholder='auth JSON，如 {"type":"bearer"}' className="w-full bg-black/40 border border-border rounded-lg p-2 font-mono text-[11px] text-white"/>
       <input value={Array.isArray(form.models)?form.models.join(','):form.models} onChange={e=> setForm({...form, models:e.target.value})} placeholder="models 逗号分隔，可空" className="w-full bg-surface-secondary border border-border rounded-lg px-3 py-2 text-xs text-white"/>

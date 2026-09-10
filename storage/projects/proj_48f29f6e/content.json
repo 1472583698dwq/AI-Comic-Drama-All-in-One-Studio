@@ -1,0 +1,23 @@
+{
+  "id": "proj_48f29f6e",
+  "title": "测试项目Alpha",
+  "original_novel": "",
+  "style_preset": "donghua_xianxia",
+  "aspect_ratio": "9:16",
+  "characters": [],
+  "scenes": [
+    {
+      "id": "scene-1",
+      "scene_index": 1,
+      "title": "场景 1",
+      "location": "",
+      "time_of_day": "day",
+      "atmosphere": "epic",
+      "shots": []
+    }
+  ],
+  "bgm_name": "Epic_Battle_Orchestra.mp3",
+  "created_at": "2026-09-10T05:13:09.495Z",
+  "updated_at": "2026-09-10T05:13:09.512Z",
+  "engine": null
+}

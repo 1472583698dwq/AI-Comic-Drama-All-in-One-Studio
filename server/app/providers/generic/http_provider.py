@@ -357,7 +357,8 @@ class GenericHttpImageProvider(ImageProvider):
                 context[k] = v
 
         # 渲染 headers / query
-        headers = _render_template(definition.transport.headers or {}, context, api_key)
+        merged_hdrs = {**(definition.transport.headers or {}), **(getattr(definition, "headers", {}) or {})}
+        headers = _render_template(merged_hdrs, context, api_key)
         query = _render_template(definition.transport.query or {}, context, api_key)
         # 渲染 auth 头
         if definition.auth.type == "bearer":
@@ -584,7 +585,8 @@ class GenericHttpAudioProvider(AudioProvider):
             "model": req.model or definition.default_model or "",
             "api_key": api_key,
         }
-        headers = _render_template(definition.transport.headers or {}, context, api_key)
+        merged_hdrs = {**(definition.transport.headers or {}), **(getattr(definition, "headers", {}) or {})}
+        headers = _render_template(merged_hdrs, context, api_key)
         query = _render_template(definition.transport.query or {}, context, api_key)
         if definition.auth.type == "bearer":
             headers["Authorization"] = f"{definition.auth.prefix}{api_key}"
@@ -770,7 +772,8 @@ class GenericHttpVideoProvider(VideoProvider):
                     continue
                 if k not in context:
                     context[k] = v
-        headers = _render_template(definition.transport.headers or {}, context, api_key)
+        merged_hdrs = {**(definition.transport.headers or {}), **(getattr(definition, "headers", {}) or {})}
+        headers = _render_template(merged_hdrs, context, api_key)
         query = _render_template(definition.transport.query or {}, context, api_key)
         if definition.auth.type == "bearer":
             headers["Authorization"] = f"{definition.auth.prefix}{api_key}"

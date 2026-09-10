@@ -1,6 +1,7 @@
 import React from 'react';
 import { Upload, Image as ImageIcon } from 'lucide-react';
 import { AiPolishButton } from '../../ui/AiPolishButton';
+import { promptAsync } from '../../../stores/useDialogStore';
 
 export type ControlSpec = {
   id: string;
@@ -60,8 +61,13 @@ export const DynamicControl: React.FC<{
           <span className="truncate">{label} <span className="[color:var(--color-text-muted)] font-normal">· {spec.param_name}</span> {spec.required && <span className="text-red-500">*</span>}</span>
           {ag && <span className={`shrink-0 text-[9px] px-1 py-0.5 rounded border font-medium ${ag.cls}`} title={ag.title}>{ag.label}</span>}
         </span>
-        {onAliasChange && <button onClick={()=>{
-          const nv = prompt('重命名/注释（显示名）', label);
+        {onAliasChange && <button onClick={async ()=>{
+          const nv = await promptAsync({
+            title: '修改别名 / 显示名',
+            message: `当前参数名：${spec.param_name}`,
+            defaultValue: label,
+            placeholder: '输入显示名'
+          });
           if(nv && nv!==label) onAliasChange(nv);
         }} className="text-[10px] text-brand hover:underline shrink-0 font-medium">✎ 别名</button>}
       </div>

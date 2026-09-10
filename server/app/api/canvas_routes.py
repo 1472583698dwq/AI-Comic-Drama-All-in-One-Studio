@@ -2,6 +2,7 @@
 """
 Canvas API Routes - 画布 DAG 执行与动态技能调度
 """
+import os
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -83,7 +84,17 @@ async def canvas_agent_generate(req: CanvasAgentGenerateRequest):
     # 插槽零映射：前端已按该源 input_schema 声明的键（归一键+源原始键）打包，这里原样透传给 provider Tool
     def _is_media_val(v: Any) -> bool:
         if isinstance(v, str):
-            return v.startswith(("http://", "https://", "data:", "/storage", "storage", "/"))
+            s = v.strip()
+            if not s:
+                return False
+            if s.startswith(("http://", "https://", "data:", "/storage", "storage", "/")):
+                return True
+            if os.path.isabs(s) or os.path.exists(s):
+                return True
+            low = s.lower()
+            if any(low.endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".mov", ".webm", ".avi", ".wav", ".mp3", ".flac", ".ogg")):
+                return True
+            return False
         if isinstance(v, list):
             return bool(v) and all(_is_media_val(x) for x in v)
         return False

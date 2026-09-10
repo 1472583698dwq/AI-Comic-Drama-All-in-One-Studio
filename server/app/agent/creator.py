@@ -71,6 +71,8 @@ def inspect_runtime(context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
 
 def _classify_goal(goal: str) -> str:
     g = (goal or "")
+    if any(k in g for k in ["插件", "插件包", "plugin", "package", "扩展包"]):
+        return "new_plugin"
     if any(k in g for k in ["参数", "暴露", "补", "first_frame", "插槽", "input_schema", "params_schema", "H3", "h3"]):
         return "patch_provider"
     if any(k in g for k in ["模板", "画布", "节点编排", "工作流模板"]):
@@ -82,13 +84,114 @@ def _classify_goal(goal: str) -> str:
     return "patch_provider"
 
 
+def _generate_plugin_spec(goal: str, pid: str) -> Dict[str, Any]:
+    import re as _re
+    g = (goal or "").strip()
+    base_slug = _slug(g, f"pack-{pid[-6:]}")
+    clean_id = _re.sub(r"[^a-z0-9\-]", "", base_slug.lower()).strip("-")
+    if not clean_id or clean_id[0] not in "abcdefghijklmnopqrstuvwxyz0123456789":
+        clean_id = f"pack-{pid[-6:]}"
+    plugin_id = clean_id[:48]
+    name_clean = g.split("包")[0].split("插件")[0].strip() if ("包" in g or "插件" in g) else g[:20].strip()
+    plugin_name = (name_clean[:24] if name_clean else "漫剧定制扩展包") + "包"
+
+    skill_slug = f"{plugin_id}-skill"
+    skill_rel = f"skills/{skill_slug}/SKILL.md"
+    skill_content = (
+        f"---\n"
+        f"name: {skill_slug}\n"
+        f"description: {plugin_name}专属技能：针对【{g[:80]}】的分镜打磨、镜头机位设计与情绪视效提示词增强\n"
+        f"version: 1.0.0\n"
+        f"author: Creator Agent\n"
+        f"category: drama-pack\n"
+        f"tools: [generate_image, generate_video, generate_voice, director_3d_stage_plan]\n"
+        f"---\n\n"
+        f"# {plugin_name} · 导演执行规范\n\n"
+        f"来源：由导演 Agent 创造模式根据指令自动生成（目标：{g[:120]}）。\n\n"
+        f"## 核心导演法则\n"
+        f"1. **视觉定调**：围绕镜头的情绪张力与环境光影展开，提取主体、核心动作、环境与光照氛围。\n"
+        f"2. **视听对齐**：生图首帧需严格锁定角色特写与景深关系，视频生成保持运镜平稳，旁白/对白精准同步时间码。\n"
+        f"3. **质检门验收**：产物必须回写至分镜与时间轴监视器，失败按结构化错误提示原因。\n"
+    )
+
+    tool_rel = "mcp_tools/scene_tools.py"
+    tool_content = (
+        f"# -*- coding: utf-8 -*-\n"
+        f'"""[插件 {plugin_id}] 漫剧分镜与节奏分析工具 (FastMCP 契约)"""\n\n'
+        f"PLUGIN_TOOLS = [\n"
+        f"    {{\n"
+        f'        "name": "analyze_drama_scene",\n'
+        f'        "description": "分析镜头剧本台词的节奏速度、字数时长匹配度与情绪张力",\n'
+        f'        "input_schema": {{\n'
+        f'            "type": "object",\n'
+        f'            "properties": {{\n'
+        f'                "text": {{"type": "string", "description": "分镜台词或画面动作描述"}},\n'
+        f'                "pacing_hint": {{"type": "string", "description": "节奏预期(fast/slow/normal)", "default": "normal"}}\n'
+        f'            }},\n'
+        f'            "required": ["text"]\n'
+        f'        }},\n'
+        f'        "entry": "analyze_drama_scene"\n'
+        f"    }}\n"
+        f"]\n\n\n"
+        f"def analyze_drama_scene(args: dict, ctx: dict) -> dict:\n"
+        f'    text = str((args or {{}}).get("text") or "")\n'
+        f'    pacing = str((args or {{}}).get("pacing_hint") or "normal")\n'
+        f"    char_count = len(text)\n"
+        f"    estimated_seconds = round(max(1.0, char_count * 0.24), 1)\n"
+        f"    return {{\n"
+        f'        "plugin": "{plugin_id}",\n'
+        f'        "char_count": char_count,\n'
+        f'        "estimated_seconds": estimated_seconds,\n'
+        f'        "pacing": "fast" if char_count < 15 else "normal",\n'
+        f'        "status": "success"\n'
+        f"    }}\n"
+    )
+
+    manifest = {
+        "id": plugin_id,
+        "name": plugin_name,
+        "version": "1.0.0",
+        "description": f"由导演 Agent 创造模式根据需求【{g[:100]}】自动构建的漫剧功能扩展包",
+        "author": "Creator Agent",
+        "license": "MIT",
+        "extensionPoints": {
+            "providers": [],
+            "skills": [f"skills/{skill_slug}/SKILL.md"],
+            "workflows": [],
+            "mcp_tools": [tool_rel],
+            "custom_nodes": []
+        }
+    }
+
+    files = {
+        "plugin.json": json.dumps(manifest, ensure_ascii=False, indent=2),
+        skill_rel: skill_content,
+        tool_rel: tool_content,
+    }
+
+    return {
+        "manifest": manifest,
+        "files": files,
+        "plugin_id": plugin_id,
+        "plugin_name": plugin_name,
+    }
+
+
 def propose_capability(goal: str, context: Optional[Dict[str, Any]] = None, run_id: str = "") -> Dict[str, Any]:
     """生成临时提案（不生效）。返回提案卡所需全部字段：diff_preview/风险/试跑计划/可逆性声明。"""
     ctx = context or {}
     kind = _classify_goal(goal or "")
     pid = f"prop_{int(time.time())}_{uuid.uuid4().hex[:6]}"
     runtime = inspect_runtime(ctx)
-    if kind == "patch_provider":
+    plugin_spec = None
+    if kind == "new_plugin":
+        plugin_spec = _generate_plugin_spec(goal, pid)
+        manifest = plugin_spec["manifest"]
+        title = f"新建插件包（{manifest['name']}）"
+        diff_preview = f"new plugin {manifest['id']}@1.0.0：包含 {len(plugin_spec['files'])-1} 个扩展组件（{list(plugin_spec['files'].keys())}），落盘至 storage/plugins/{manifest['id']}/"
+        test_plan = ["校验 plugin.json 结构与必填字段", "验证插件 ID 与 Semver 规范", "AST 静态分析 mcp_tools Python 脚本", "验证 SKILL.md Frontmatter 规范"]
+        risk, reversible = "low", "可逆：持久化后向系统插件中心注册，支持随时一键回滚或在插件中心直接卸载"
+    elif kind == "patch_provider":
         title = "补齐生成源参数暴露"
         diff_preview = "patch params_schema/input_schema: 补 x-category/x-visibility/x-agent + 缺失插槽（如 first_frame/reference_images），存量 code 不动"
         test_plan = ["get_provider_code 看现状", "内存试算新 schema", "test_custom_provider 连通试跑（只读/小参）"]
@@ -115,6 +218,8 @@ def propose_capability(goal: str, context: Optional[Dict[str, Any]] = None, run_
         "runtime_snapshot": {k: (str(v)[:400]) for k, v in runtime.items()},
         "created_at": time.time(), "run_id": run_id,
     }
+    if plugin_spec:
+        proposal["plugin_spec"] = plugin_spec
     try:
         (_proposal_dir() / f"{pid}.json").write_text(json.dumps(proposal, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
@@ -382,7 +487,46 @@ async def start_test(proposal_id: str, context: Optional[Dict[str, Any]] = None,
                 report["checks"].append({"name": "provider_tools_visible", "ok": True, "detail": f"可见 provider_* 工具（前5: {tools}）"})
             except Exception as e:
                 report["checks"].append({"name": "provider_tools_visible", "ok": False, "detail": str(e)[:200]})
-        if kind == "patch_provider":
+        if kind == "new_plugin":
+            spec = prop.get("plugin_spec") or {}
+            manifest = spec.get("manifest") or {}
+            files = spec.get("files") or {}
+            
+            try:
+                from app.plugins.models import PluginManifest
+                PluginManifest.model_validate(manifest)
+                report["checks"].append({"name": "manifest_schema", "ok": True, "detail": f"Manifest 结构符合 PluginManifest 规范 (id={manifest.get('id')})"})
+            except Exception as e:
+                report["checks"].append({"name": "manifest_schema", "ok": False, "detail": f"Manifest 校验失败: {e}"})
+
+            try:
+                from app.plugins.manager import _ID_RE, _VER_RE
+                if not _ID_RE.match(manifest.get("id", "")):
+                    raise ValueError(f"插件 ID 非法: {manifest.get('id')}")
+                if not _VER_RE.match(manifest.get("version", "")):
+                    raise ValueError(f"版本号非法: {manifest.get('version')}")
+                report["checks"].append({"name": "id_version_format", "ok": True, "detail": f"插件 ID ({manifest.get('id')}) 与 Semver 命名合规"})
+            except Exception as e:
+                report["checks"].append({"name": "id_version_format", "ok": False, "detail": str(e)})
+
+            ast_ok = True
+            for fpath, content in files.items():
+                if fpath.endswith(".py"):
+                    import ast
+                    try:
+                        ast.parse(content)
+                    except SyntaxError as se:
+                        ast_ok = False
+                        report["checks"].append({"name": f"syntax_{fpath}", "ok": False, "detail": f"Python 语法错误: {se}"})
+                elif fpath.endswith(".md"):
+                    if not content.startswith("---"):
+                        report["checks"].append({"name": f"frontmatter_{fpath}", "ok": False, "detail": "缺少 YAML frontmatter"})
+            if ast_ok:
+                report["checks"].append({"name": "code_ast_check", "ok": True, "detail": f"所有扩展组件代码通过静态语法与 AST 格式分析 (共 {len(files)} 个文件)"})
+
+            all_ok = all(c.get("ok") for c in report["checks"])
+            prop["status"] = "tested" if all_ok else "test_failed"
+        elif kind == "patch_provider":
             resolved = _resolve_target_provider(prop.get("goal", ""))
             pd = resolved.get("provider")
             if not pd:
@@ -620,6 +764,65 @@ def _rollback_canvas_template(prop: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": False, "note": str(e)[:200]}
 
 
+def _persist_new_plugin(prop: Dict[str, Any], run_id: str) -> Dict[str, Any]:
+    import tempfile
+    from app.plugins import manager as pm
+    spec = prop.get("plugin_spec") or {}
+    manifest = spec.get("manifest") or {}
+    files = spec.get("files") or {}
+    pid = spec.get("plugin_id") or manifest.get("id")
+    if not pid or not manifest:
+        raise ValueError("提案缺少合法的 plugin_spec")
+
+    # 创建临时构建目录打包
+    with tempfile.TemporaryDirectory(prefix="creator_plugin_") as tmp:
+        for rel, content in files.items():
+            fpath = Path(tmp) / rel
+            fpath.parent.mkdir(parents=True, exist_ok=True)
+            fpath.write_text(content, encoding="utf-8")
+
+        try:
+            pm.uninstall(pid)
+        except Exception:
+            pass
+
+        try:
+            pm.install_from_dir(tmp)
+        except Exception as e:
+            raise RuntimeError(f"插件安装失败: {e}")
+
+    try:
+        en_res = pm.enable(pid)
+    except Exception as e:
+        try:
+            pm.uninstall(pid)
+        except Exception:
+            pass
+        raise RuntimeError(f"插件启用加载失败，已自动回滚卸载: {e}")
+
+    prop["plugin_id"] = pid
+    root_dir = pm._plugins_root()
+    dest = Path(root_dir) / pid
+    return {
+        "plugin_id": pid,
+        "path": str(dest),
+        "enable_summary": en_res,
+        "note": f"插件包 {pid} 已成功安装并启用，扩展能力（技能/MCP工具）已全量挂载生效"
+    }
+
+
+def _rollback_new_plugin(prop: Dict[str, Any]) -> Dict[str, Any]:
+    from app.plugins import manager as pm
+    pid = prop.get("plugin_id") or (prop.get("plugin_spec") or {}).get("plugin_id")
+    if not pid:
+        return {"ok": False, "note": "无插件 ID 记录，无法回滚"}
+    try:
+        pm.uninstall(pid)
+        return {"ok": True, "plugin_id": pid, "note": f"插件包 {pid} 已彻底卸载并反注册"}
+    except Exception as e:
+        return {"ok": False, "note": f"插件卸载异常: {e}"}
+
+
 async def finalize(proposal_id: str, action: str = "persist", context: Optional[Dict[str, Any]] = None, run_id: str = "") -> Dict[str, Any]:
     """persist 真写生产（备份→写入→热重载→试跑，失败自回滚）/ discard 卸载 / rollback 按备份恢复。"""
     prop = _load(proposal_id)
@@ -643,6 +846,8 @@ async def finalize(proposal_id: str, action: str = "persist", context: Optional[
             r = _rollback_new_skill(prop)
         elif kind == "canvas_template":
             r = _rollback_canvas_template(prop)
+        elif kind == "new_plugin":
+            r = _rollback_new_plugin(prop)
         else:
             return {"proposal_id": proposal_id, "status": prop.get("status"), "note": "该类型无备份可回滚"}
         if r.get("ok"):
@@ -653,6 +858,15 @@ async def finalize(proposal_id: str, action: str = "persist", context: Optional[
     # persist
     kind = prop.get("kind", "")
     try:
+        if kind == "new_plugin":
+            if prop.get("status") != "tested":
+                raise ValueError("请先 Start 试跑通过后再持久化")
+            r = _persist_new_plugin(prop, run_id)
+            prop["status"] = "persisted"
+            _save(prop)
+            _trace(run_id, "proposal_persisted", {"proposal_id": proposal_id, "kind": kind, "plugin_id": r.get("plugin_id")})
+            return {"proposal_id": proposal_id, "status": "persisted", "plugin_id": r.get("plugin_id"),
+                    "path": r.get("path"), "note": r.get("note")}
         if kind == "patch_provider":
             if prop.get("status") != "tested" or not prop.get("patch"):
                 raise ValueError("请先 Start 试跑通过后再持久化")

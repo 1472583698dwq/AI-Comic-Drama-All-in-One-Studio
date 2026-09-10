@@ -343,10 +343,10 @@
         "x-std-key": "steps"
       },
       "num_9_cfg": {
-        "type": "number",
+        "type": "integer",
         "title": "CFG (KSampler)",
         "description": "CFG 1-15",
-        "default": 1.0,
+        "default": 1,
         "minimum": 1,
         "maximum": 15,
         "step": 0.5,
@@ -438,10 +438,10 @@
         "x-std-key": "scheduler"
       },
       "num_9_denoise": {
-        "type": "number",
+        "type": "integer",
         "title": "去噪 (KSampler)",
         "description": "去噪 0-1",
-        "default": 1.0,
+        "default": 1,
         "minimum": 0,
         "maximum": 1,
         "step": 0.05,
@@ -563,10 +563,10 @@
         "x-std-key": "lora_name"
       },
       "num_6_strength_model": {
-        "type": "number",
+        "type": "integer",
         "title": "LoRA强度-模型 (Load LoRA)",
         "description": "0-2",
-        "default": 1.0,
+        "default": 1,
         "minimum": 0,
         "maximum": 2,
         "step": 0.05,
@@ -652,6 +652,16 @@
         "qwen3vl_4b_fp8_scaled.safetensors",
         "qwen_3_4b.safetensors",
         "text_encoders\\ltx-2.3-22b-dev_embeddings_connectors.safetensors"
+      ],
+      "choices": [
+        "Huihui-Qwen3-VL-4B-Instruct-abliterated-fp8_scaled.safetensors",
+        "clip_l.safetensors",
+        "gemma4_e4b_it_fp8_scaled.safetensors",
+        "qwen3-vl-4b-heretic_nvfp4.safetensors",
+        "qwen3vl_32b_heretic_minimax_h3_nvfp4.safetensors",
+        "qwen3vl_4b_fp8_scaled.safetensors",
+        "qwen_3_4b.safetensors",
+        "text_encoders\\ltx-2.3-22b-dev_embeddings_connectors.safetensors"
       ]
     },
     {
@@ -692,6 +702,36 @@
         "joyimage",
         "mage",
         "minimax"
+      ],
+      "choices": [
+        "stable_diffusion",
+        "stable_cascade",
+        "sd3",
+        "stable_audio",
+        "mochi",
+        "ltxv",
+        "pixart",
+        "cosmos",
+        "lumina2",
+        "wan",
+        "hidream",
+        "chroma",
+        "ace",
+        "omnigen2",
+        "qwen_image",
+        "hunyuan_image",
+        "flux2",
+        "ovis",
+        "longcat_image",
+        "cogvideox",
+        "lens",
+        "pixeldit",
+        "ideogram4",
+        "boogu",
+        "krea2",
+        "joyimage",
+        "mage",
+        "minimax"
       ]
     },
     {
@@ -704,6 +744,10 @@
       "default_value": "default",
       "description": "Load CLIP 的 device 参数",
       "options": [
+        "default",
+        "cpu"
+      ],
+      "choices": [
         "default",
         "cpu"
       ]
@@ -774,6 +818,14 @@
         "bicubic",
         "lanczos",
         "nvidia_rtx_vsr"
+      ],
+      "choices": [
+        "nearest-exact",
+        "bilinear",
+        "area",
+        "bicubic",
+        "lanczos",
+        "nvidia_rtx_vsr"
       ]
     },
     {
@@ -786,6 +838,16 @@
       "default_value": "resize",
       "description": "Resize Image v2 的 keep_proportion 参数",
       "options": [
+        "stretch",
+        "resize",
+        "pad",
+        "pad_edge",
+        "pad_edge_pixel",
+        "crop",
+        "pillarbox_blur",
+        "total_pixels"
+      ],
+      "choices": [
         "stretch",
         "resize",
         "pad",
@@ -821,6 +883,13 @@
         "bottom",
         "left",
         "right"
+      ],
+      "choices": [
+        "center",
+        "top",
+        "bottom",
+        "left",
+        "right"
       ]
     },
     {
@@ -843,6 +912,10 @@
       "default_value": "cpu",
       "description": "Resize Image v2 的 device 参数",
       "options": [
+        "cpu",
+        "gpu"
+      ],
+      "choices": [
         "cpu",
         "gpu"
       ]
@@ -896,6 +969,17 @@
         "vae\\ltx-2.3-22b-dev_video_vae.safetensors",
         "wan_2.1_vae.safetensors",
         "pixel_space"
+      ],
+      "choices": [
+        ".cache\\huggingface\\download\\vae\\Wan2.1_VAE.pth",
+        ".cache\\huggingface\\download\\vae\\minimax_h3_audio_vae_fp32.safetensors",
+        ".cache\\huggingface\\download\\vae\\minimax_h3_video_vae_fp16.safetensors",
+        "ae.safetensors",
+        "qwen_image_vae.safetensors",
+        "vae\\ltx-2.3-22b-dev_audio_vae.safetensors",
+        "vae\\ltx-2.3-22b-dev_video_vae.safetensors",
+        "wan_2.1_vae.safetensors",
+        "pixel_space"
       ]
     },
     {
@@ -928,7 +1012,7 @@
       "label": "CFG (KSampler)",
       "type": "number",
       "required": false,
-      "default_value": 1.0,
+      "default_value": 1,
       "description": "CFG 1-15",
       "min": 1,
       "max": 15,
@@ -944,6 +1028,52 @@
       "default_value": "euler",
       "description": "采样器",
       "options": [
+        "euler",
+        "euler_cfg_pp",
+        "euler_ancestral",
+        "euler_ancestral_cfg_pp",
+        "heun",
+        "heunpp2",
+        "exp_heun_2_x0",
+        "exp_heun_2_x0_sde",
+        "dpm_2",
+        "dpm_2_ancestral",
+        "lms",
+        "dpm_fast",
+        "dpm_adaptive",
+        "dpmpp_2s_ancestral",
+        "dpmpp_2s_ancestral_cfg_pp",
+        "dpmpp_sde",
+        "dpmpp_sde_gpu",
+        "dpmpp_2m",
+        "dpmpp_2m_cfg_pp",
+        "dpmpp_2m_sde",
+        "dpmpp_2m_sde_gpu",
+        "dpmpp_2m_sde_heun",
+        "dpmpp_2m_sde_heun_gpu",
+        "dpmpp_3m_sde",
+        "dpmpp_3m_sde_gpu",
+        "ddpm",
+        "lcm",
+        "ipndm",
+        "ipndm_v",
+        "deis",
+        "res_multistep",
+        "res_multistep_cfg_pp",
+        "res_multistep_ancestral",
+        "res_multistep_ancestral_cfg_pp",
+        "gradient_estimation",
+        "gradient_estimation_cfg_pp",
+        "er_sde",
+        "seeds_2",
+        "seeds_3",
+        "sa_solver",
+        "sa_solver_pece",
+        "ddim",
+        "uni_pc",
+        "uni_pc_bh2"
+      ],
+      "choices": [
         "euler",
         "euler_cfg_pp",
         "euler_ancestral",
@@ -1009,6 +1139,17 @@
         "normal",
         "linear_quadratic",
         "kl_optimal"
+      ],
+      "choices": [
+        "simple",
+        "sgm_uniform",
+        "karras",
+        "exponential",
+        "ddim_uniform",
+        "beta",
+        "normal",
+        "linear_quadratic",
+        "kl_optimal"
       ]
     },
     {
@@ -1018,7 +1159,7 @@
       "label": "去噪 (KSampler)",
       "type": "number",
       "required": false,
-      "default_value": 1.0,
+      "default_value": 1,
       "description": "去噪 0-1",
       "min": 0,
       "max": 1,
@@ -1054,6 +1195,10 @@
       "default_value": "fit",
       "description": "Krea2 Edit (source patch) 的 fit_mode 参数",
       "options": [
+        "fit",
+        "crop (legacy)"
+      ],
+      "choices": [
         "fit",
         "crop (legacy)"
       ]
@@ -1106,6 +1251,16 @@
         "minimax_h3_fl2va_pruned_fp8_scaled.safetensors",
         "minimax_h3_ref2va_pruned_fp8_scaled.safetensors",
         "风格化.safetensors"
+      ],
+      "choices": [
+        "MiniMax_H3_FL2VA_pruned_nvfp4.safetensors",
+        "MiniMax_H3_Ref2VA_pruned_nvfp4.safetensors",
+        "krea2GPTGrandPUSSYTruth_krea2GPT.safetensors",
+        "krea2_turbo_fp8_scaled.safetensors",
+        "krea2_turbo_nvfp4.safetensors",
+        "minimax_h3_fl2va_pruned_fp8_scaled.safetensors",
+        "minimax_h3_ref2va_pruned_fp8_scaled.safetensors",
+        "风格化.safetensors"
       ]
     },
     {
@@ -1127,6 +1282,17 @@
         "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors",
         "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
         "minimax_h3_ref2v_turbo_4step_v0.1_bf16.safetensors"
+      ],
+      "choices": [
+        "Krea2-四视图QuadView_krea2_v1.safetensors",
+        "Yoneyama_Mai_Krea2.safetensors",
+        "krea2_darkbrush.safetensors",
+        "krea2_style_reference.safetensors",
+        "minimax_h3_fl2v_turbo_4step_v0.1 (1).safetensors",
+        "minimax_h3_fl2v_turbo_4step_v0.1.safetensors",
+        "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors",
+        "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+        "minimax_h3_ref2v_turbo_4step_v0.1_bf16.safetensors"
       ]
     },
     {
@@ -1136,7 +1302,7 @@
       "label": "LoRA强度-模型 (Load LoRA)",
       "type": "number",
       "required": false,
-      "default_value": 1.0,
+      "default_value": 1,
       "description": "0-2",
       "min": 0,
       "max": 2,
@@ -1153,11 +1319,11 @@
       "description": "支持上传角色立绘、构图草图或姿态参考图，弹出文件系统"
     }
   ],
-  "schema_version": 1,
+  "schema_version": 2,
   "capabilities": [],
   "doc_url": null,
   "doc_text": null,
-  "created_at": "2026-09-06T17:47:45.991376",
-  "updated_at": "2026-09-06T17:47:45.991545",
+  "created_at": "2026-09-09T16:59:21.884479",
+  "updated_at": "2026-09-09T16:59:21.884980",
   "raw_api_doc": null
 }

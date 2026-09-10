@@ -21,6 +21,7 @@ import { useSkillStore } from '../../stores/useSkillStore';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { SkillVersionDiff } from './SkillVersionDiff';
 import { SkillDefinition } from '../../types';
+import { confirmAsync, toast } from '../../stores/useDialogStore';
 
 interface SkillStudioModalProps {
   isOpen: boolean;
@@ -69,12 +70,20 @@ export const SkillStudioModal: React.FC<SkillStudioModalProps> = ({ isOpen, onCl
   };
 
   const handleDelete = async (skillName: string) => {
-    if (!confirm(`确定删除技能 "${skillName}"？此操作将删除文件系统中的 SKILL.md`)) return;
+    const confirmed = await confirmAsync({
+      title: '删除技能',
+      message: `确定要删除技能 "${skillName}" 吗？\n此操作将从文件系统中永久删除对应的 SKILL.md。`,
+      isDanger: true,
+      confirmText: '确认删除',
+      cancelText: '取消'
+    });
+    if (!confirmed) return;
     try {
       await apiService.deleteSkill(skillName);
+      toast.success(`技能 "${skillName}" 已删除`);
       await fetchSkills();
     } catch (e: any) {
-      alert('删除失败: ' + (e?.message || String(e)));
+      toast.error('删除失败: ' + (e?.message || String(e)));
     }
   };
 

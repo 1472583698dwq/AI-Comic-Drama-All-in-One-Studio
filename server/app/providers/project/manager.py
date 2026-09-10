@@ -47,6 +47,10 @@ def _canvas_path(project_id: str) -> str:
     return os.path.join(PROJECTS_ROOT, project_id, "canvas.json")
 
 
+def _agent_sessions_path(project_id: str) -> str:
+    return os.path.join(PROJECTS_ROOT, project_id, "agent_sessions.json")
+
+
 # ===== 双 ID 兼容层 =====
 # 存储目录/index.json 用目录名 id（proj_xxx），但 split_novel_script 生成的 content.json 内部
 # project.id 是另一个 UUID。前端（及导演 Agent 的 context.project_id）常把内部 UUID 当 project_id 传入，
@@ -426,6 +430,46 @@ class ProjectManager:
         with open(p, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         return {"deleted": canvas_id, "active_canvas_id": data.get("active_canvas_id")}
+
+    def get_agent_sessions(self, project_id: str) -> List[Dict[str, Any]]:
+        project_id = _resolve_id(project_id)
+        p = _agent_sessions_path(project_id)
+        if not os.path.exists(p):
+            return []
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, list) else []
+        except Exception:
+            return []
+
+    def save_agent_sessions(self, project_id: str, sessions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        project_id = _resolve_id(project_id)
+        proj_dir = os.path.join(PROJECTS_ROOT, project_id)
+        if not os.path.exists(proj_dir):
+            raise FileNotFoundError(f"项目不存在: {project_id}")
+        p = _agent_sessions_path(project_id)
+        temp_p = p + f".tmp.{os.getpid()}"
+        with open(temp_p, "w", encoding="utf-8") as f:
+            json.dump(sessions, f, ensure_ascii=False, indent=2)
+        if os.path.exists(p):
+            try:
+                os.replace(temp_p, p)
+            except Exception:
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
+                os.rename(temp_p, p)
+        else:
+            os.rename(temp_p, p)
+        return sessions
+
+    def delete_agent_session(self, project_id: str, session_id: str) -> Dict[str, Any]:
+        sessions = self.get_agent_sessions(project_id)
+        filtered = [s for s in sessions if s.get("id") != session_id]
+        self.save_agent_sessions(project_id, filtered)
+        return {"deleted": session_id, "remaining_count": len(filtered)}
 
 
 project_manager = ProjectManager()

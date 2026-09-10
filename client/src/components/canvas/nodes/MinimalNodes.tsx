@@ -294,6 +294,12 @@ export const ImageNode: React.FC<NodeProps> = ({ id, data, selected }) => {
   const imgUrl = d.image_url || d.result_url || d.url;
   const st: any = d.agent_state;
   const aspectStyle = getNodeAspectStyle(d);
+  const refImages: string[] = Array.isArray(d.reference_images)
+    ? d.reference_images
+    : (d.reference || d.reference_image ? [d.reference || d.reference_image] : []);
+  const dynamicImgKeys = Object.keys(d).filter(k => k.startsWith('img_') && typeof d[k] === 'string' && d[k]);
+  const allRefs = Array.from(new Set([...refImages, ...dynamicImgKeys.map(k => d[k])]));
+
   return (
     <AgentShell
       id={id}
@@ -314,7 +320,10 @@ export const ImageNode: React.FC<NodeProps> = ({ id, data, selected }) => {
       {imgUrl ? (
         <div className="w-full max-h-[420px] rounded-2xl overflow-hidden bg-black/60 border border-white/10 relative group" style={aspectStyle}>
           <img src={resolveMediaUrl(imgUrl)} alt="生成的画面" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-          <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-black/60 text-[9px] font-mono text-violet-300 border border-violet-500/30">{d.skill_id || 'text_to_image'} · {d.provider || 'auto'}</div>
+          <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-black/60 text-[9px] font-mono text-violet-300 border border-violet-500/30 flex items-center gap-1">
+            <span>{d.skill_id || 'text_to_image'} · {d.provider || 'auto'}</span>
+            {allRefs.length > 0 && <span className="text-violet-400">({allRefs.length}垫图)</span>}
+          </div>
           {st?.status === 'running' && (
             <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-2">
               <div className="w-7 h-7 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
@@ -330,6 +339,18 @@ export const ImageNode: React.FC<NodeProps> = ({ id, data, selected }) => {
           <ImageIcon className="w-8 h-8 text-violet-400/50 mb-2" />
           <span className="text-xs font-bold text-white/80">待生成画面</span>
           <span className="text-[10px] text-white/30 mt-1 font-mono">{String(d.aspect_ratio || d.params?.aspect_ratio || '9:16').split(' ')[0]}</span>
+          {allRefs.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1 items-center justify-center">
+              <span className="px-2 py-0.5 rounded-full bg-violet-500/15 border border-violet-500/30 text-[10px] text-violet-300 font-mono flex items-center gap-1">
+                ✓ {allRefs.length} 参考垫图
+              </span>
+              <div className="flex -space-x-1.5 overflow-hidden py-0.5">
+                {allRefs.slice(0, 3).map((r, i) => (
+                  <img key={i} src={resolveMediaUrl(r)} alt="" className="inline-block w-5 h-5 rounded-full ring-1 ring-violet-400/40 object-cover bg-black" />
+                ))}
+              </div>
+            </div>
+          )}
           {st?.status === 'failed' && <span className="text-[10px] text-red-400 mt-1 line-clamp-2" title={st.error}>✗ {st.error}</span>}
         </div>
       )}

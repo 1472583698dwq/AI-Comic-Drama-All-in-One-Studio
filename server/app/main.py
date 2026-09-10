@@ -148,14 +148,17 @@ async def health_check():
     try:
         from app.providers.image.registry import image_registry
         from app.providers.audio.registry import audio_registry
-        # 仅返回已注册数量，不做网络探测
+        img_ids = image_registry.list_ids() if hasattr(image_registry, "list_ids") else []
+        aud_ids = audio_registry.list_ids() if hasattr(audio_registry, "list_ids") else []
         return {
             "status": "healthy",
             "comfyui_online": False,
-            "minimax_configured": bool(settings.MINIMAX_API_KEY),
+            "openai_configured": bool(settings.OPENAI_API_KEY),
             "providers": {
-                "image": len(image_registry.list_providers()) if 'image_registry' in locals() else 0,
-                "audio": len(audio_registry.list_providers()) if 'audio_registry' in locals() else 0,
+                "image": img_ids,
+                "audio": aud_ids,
+                "image_count": len(img_ids),
+                "audio_count": len(aud_ids),
             },
         }
     except Exception as e:
@@ -175,9 +178,10 @@ def system_status():
 @app.get("/mobile")
 async def mobile_app():
     mobile_html = os.path.join(CLIENT_DIST_DIR, "mobile.html")
+    headers = {"Cache-Control": "no-cache, no-store, must-revalidate"}
     if os.path.exists(mobile_html):
-        return FileResponse(mobile_html)
-    return FileResponse(os.path.join(CLIENT_DIST_DIR, "index.html"))
+        return FileResponse(mobile_html, headers=headers)
+    return FileResponse(os.path.join(CLIENT_DIST_DIR, "index.html"), headers=headers)
 
 @app.get("/{full_path:path}")
 async def serve_spa(full_path: str):
@@ -188,11 +192,12 @@ async def serve_spa(full_path: str):
     # Check if direct file in dist
     target_file = os.path.join(CLIENT_DIST_DIR, full_path)
     if full_path and os.path.isfile(target_file):
-        return FileResponse(target_file)
+        headers = {"Cache-Control": "no-cache, no-store, must-revalidate"} if target_file.endswith(".html") else {}
+        return FileResponse(target_file, headers=headers)
     
     index_html = os.path.join(CLIENT_DIST_DIR, "index.html")
     if os.path.exists(index_html):
-        return FileResponse(index_html)
+        return FileResponse(index_html, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
     
     return {
         "status": "online",

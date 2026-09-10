@@ -7,8 +7,8 @@
     "aspect_ratio": "9:16",
     "status": "draft",
     "created_at": "2026-08-26T16:04:53.230702",
-    "updated_at": "2026-09-08T21:58:32.686910",
-    "last_opened_at": "2026-09-08T21:58:32.420886",
+    "updated_at": "2026-09-10T13:42:14.007224",
+    "last_opened_at": "2026-09-10T13:42:13.730957",
     "stats": {
       "shots": 7,
       "duration": 27.0,
@@ -26,12 +26,88 @@
     "aspect_ratio": "9:16",
     "status": "draft",
     "created_at": "2026-09-06T16:50:12.496322",
-    "updated_at": "2026-09-08T21:58:37.166264",
-    "last_opened_at": "2026-09-08T21:58:36.901671",
+    "updated_at": "2026-09-09T17:04:25.747370",
+    "last_opened_at": "2026-09-09T17:04:25.478095",
     "stats": {
       "shots": 43,
       "duration": 150.0,
       "characters": 5
+    },
+    "source": "blank",
+    "description": "",
+    "engine": null
+  },
+  {
+    "id": "proj_a5fce847",
+    "title": "测试项目Alpha",
+    "cover_url": null,
+    "style_preset": "donghua_xianxia",
+    "aspect_ratio": "9:16",
+    "status": "draft",
+    "created_at": "2026-09-10T11:27:24.489350",
+    "updated_at": "2026-09-10T11:27:24.489375",
+    "last_opened_at": "2026-09-10T11:27:24.489377",
+    "stats": {
+      "shots": 0,
+      "duration": 0,
+      "characters": 0
+    },
+    "source": "blank",
+    "description": "",
+    "engine": null
+  },
+  {
+    "id": "proj_a61db2c7",
+    "title": "测试项目Beta",
+    "cover_url": null,
+    "style_preset": "modern_shishang",
+    "aspect_ratio": "16:9",
+    "status": "draft",
+    "created_at": "2026-09-10T11:27:24.490421",
+    "updated_at": "2026-09-10T11:27:24.490427",
+    "last_opened_at": "2026-09-10T11:27:24.490428",
+    "stats": {
+      "shots": 0,
+      "duration": 0,
+      "characters": 0
+    },
+    "source": "blank",
+    "description": "",
+    "engine": null
+  },
+  {
+    "id": "proj_48f29f6e",
+    "title": "测试项目Alpha",
+    "cover_url": null,
+    "style_preset": "donghua_xianxia",
+    "aspect_ratio": "9:16",
+    "status": "draft",
+    "created_at": "2026-09-10T11:27:48.371937",
+    "updated_at": "2026-09-10T13:13:09.767900",
+    "last_opened_at": "2026-09-10T13:13:09.489720",
+    "stats": {
+      "shots": 0,
+      "duration": 0,
+      "characters": 0
+    },
+    "source": "blank",
+    "description": "",
+    "engine": null
+  },
+  {
+    "id": "proj_338535d7",
+    "title": "测试项目Beta",
+    "cover_url": null,
+    "style_preset": "modern_shishang",
+    "aspect_ratio": "16:9",
+    "status": "draft",
+    "created_at": "2026-09-10T11:27:48.372868",
+    "updated_at": "2026-09-10T11:27:48.372873",
+    "last_opened_at": "2026-09-10T11:27:48.372874",
+    "stats": {
+      "shots": 0,
+      "duration": 0,
+      "characters": 0
     },
     "source": "blank",
     "description": "",

@@ -86,6 +86,7 @@ class ImageGenerateRequest(BaseModel):
     cfg: Optional[float] = None
     fps: Optional[int] = None
     duration: Optional[int] = None
+    reference_images: Optional[List[str]] = None
     dynamic_inputs: Optional[Dict[str, Any]] = None  # 外部暴露表单动态输入 (垫图/额外提示词等)
 
 class Character3ViewsRequest(BaseModel):
@@ -131,6 +132,7 @@ class VideoGenerateRequestPayload(BaseModel):
     last_frame_url: Optional[str] = None
     reference_images: Optional[List[str]] = None
     reference_videos: Optional[List[str]] = None
+    reference_audios: Optional[List[str]] = None
     duration: int = 5
     resolution: str = "720p"
     aspect_ratio: str = "9:16"

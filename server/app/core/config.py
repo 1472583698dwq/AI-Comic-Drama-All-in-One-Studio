@@ -30,6 +30,7 @@ MANAGED_KEYS = [
     "OPENAI_API_KEY",
     "OPENAI_BASE_URL",
     "OPENAI_MODEL",
+    "OPENAI_CUSTOM_HEADERS",
     "RESPONSES_API_URL",
     "RESPONSES_API_KEY",
     "RESPONSES_MODEL",
@@ -159,6 +160,7 @@ class Settings(BaseModel):
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     OPENAI_BASE_URL: str = os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com/v1")
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "deepseek-chat")
+    OPENAI_CUSTOM_HEADERS: str = os.getenv("OPENAI_CUSTOM_HEADERS", "")
     RESPONSES_API_URL: str = os.getenv("RESPONSES_API_URL", "https://api.openai.com/v1/responses")
     RESPONSES_API_KEY: str = os.getenv("RESPONSES_API_KEY", "")
     RESPONSES_MODEL: str = os.getenv("RESPONSES_MODEL", "gpt-4o")
@@ -334,6 +336,13 @@ def write_env_file(updates: Dict[str, str]) -> None:
     ]
     for k in MANAGED_KEYS:
         v = current_data.get(k, "")
+        if k == "OPENAI_CUSTOM_HEADERS" and v:
+            try:
+                parsed_json = json.loads(v)
+                v = json.dumps(parsed_json, ensure_ascii=False)
+                current_data[k] = v
+            except Exception:
+                v = str(v).replace("\r", "").replace("\n", " ").strip()
         lines.append(f"{k}={v}")
 
     env_content = "\n".join(lines) + "\n"

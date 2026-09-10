@@ -51,6 +51,7 @@ import {
 import { useProjectStore } from '../../stores/useProjectStore';
 import { useMcpStore } from '../../stores/useMcpStore';
 import { apiService } from '../../services/api';
+import { confirmAsync, toast } from '../../stores/useDialogStore';
 import {
   CameraFraming,
   CameraMotion,
@@ -1545,11 +1546,20 @@ export const Director3DStage: React.FC = () => {
   };
 
   // 截图明确设为本镜首帧（覆盖需二次确认；与“仅作参考”分离）
-  const handleSetSnapshotAsFirstFrame = () => {
+  const handleSetSnapshotAsFirstFrame = async () => {
     if (!activeShot?.previz_url) { setSnapshotMsg('请先截屏'); return; }
-    if (activeShot.image_url && !confirm('将覆盖当前 AI 首帧，继续？')) return;
+    if (activeShot.image_url) {
+      const confirmed = await confirmAsync({
+        title: '覆盖首帧画面',
+        message: '当前镜头已存在 AI 生成的首帧画面，确定要用 3D 虚拟片场当前画面覆盖它吗？',
+        confirmText: '确认覆盖',
+        cancelText: '取消'
+      });
+      if (!confirmed) return;
+    }
     updateShot(activeShot.id, { image_url: activeShot.previz_url });
     setSnapshotMsg('已设为本镜首帧');
+    toast.success('3D 虚拟片场截图已设为当前镜头首帧');
   };
 
   const dataUrlToFile = (dataUrl: string, name: string): File => {

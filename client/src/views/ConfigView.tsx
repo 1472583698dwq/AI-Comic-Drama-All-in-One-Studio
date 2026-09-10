@@ -50,23 +50,23 @@ export const ConfigView: React.FC = () => {
     }catch{}
   };
 
-  const load = async ()=>{
-    setLoading(true);
-    setMsg(null);
+  const load = async (silent: boolean = false)=>{
+    if (!silent) setLoading(true);
+    if (!silent) setMsg(null);
     try{
       const res = await apiService.getConfig();
       const loaded = res.config || {};
       setFormState(loaded);
       setEnvFile(res.env_file || '');
       setChecks(res.checks || {});
-      try{ localStorage.setItem('minimax_studio_config_backup', JSON.stringify(loaded)); }catch{}
+      try{ localStorage.setItem('ai_studio_config_backup', JSON.stringify(loaded)); }catch{}
     }catch(e:any){
       try{
-        const cached = localStorage.getItem('minimax_studio_config_backup');
-        if(cached){ setFormState(JSON.parse(cached)); setMsg({type:'error', text:'后端连接异常，已从本地缓存恢复'}); }
-        else setMsg({type:'error', text: e?.message||'加载配置失败'});
-      }catch{ setMsg({type:'error', text: e?.message||'加载配置失败'}); }
-    } finally{ setLoading(false); }
+        const cached = localStorage.getItem('ai_studio_config_backup');
+        if(cached){ setFormState(JSON.parse(cached)); if (!silent) setMsg({type:'error', text:'后端连接异常，已从本地缓存恢复'}); }
+        else if (!silent) setMsg({type:'error', text: e?.message||'加载配置失败'});
+      }catch{ if (!silent) setMsg({type:'error', text: e?.message||'加载配置失败'}); }
+    } finally{ if (!silent) setLoading(false); }
   };
 
   useEffect(()=>{ load(); loadProviders(); }, []);
@@ -84,9 +84,12 @@ export const ConfigView: React.FC = () => {
     setMsg(null);
     try{
       const res = await apiService.saveConfig({ ...form });
-      try{ localStorage.setItem('minimax_studio_config_backup', JSON.stringify(form)); }catch{}
-      setMsg({type:'success', text:`配置已持久化至 ${res.env_file||envFile||'.env'} 并热重载`});
-      await load();
+      const savedConfig = res?.config || form;
+      setFormState(savedConfig);
+      if (res?.env_file) setEnvFile(res.env_file);
+      try{ localStorage.setItem('ai_studio_config_backup', JSON.stringify(savedConfig)); }catch{}
+      setMsg({type:'success', text:`配置已成功持久化至 ${res?.env_file||envFile||'.env'} 并热重载生效！`});
+      await load(true);
       await loadProviders();
     }catch(e:any){ setMsg({type:'error', text: e?.message||'保存失败'}); } finally{ setSaving(false); }
   };
@@ -138,7 +141,7 @@ export const ConfigView: React.FC = () => {
           </div>
         </div>
         <div className="flex items-center space-x-3">
-          <button onClick={load} className="flex items-center space-x-1.5 text-xs text-gray-400 hover:text-white px-2.5 py-1 rounded-lg hover:bg-surface-secondary">
+          <button onClick={()=> load()} className="flex items-center space-x-1.5 text-xs text-gray-400 hover:text-white px-2.5 py-1 rounded-lg hover:bg-surface-secondary">
             <RefreshCw className="w-3 h-3"/><span>重载</span>
           </button>
           <button onClick={handleSave} disabled={saving} className="flex items-center space-x-1.5 px-4 py-1.5 rounded-xl bg-gradient-to-r from-brand to-brand-blue text-white text-xs font-bold shadow-md shadow-brand/25 disabled:opacity-40">
@@ -190,11 +193,11 @@ export const ConfigView: React.FC = () => {
             {tab==='plugins' && <PluginsHubView />}
             {tab==='defaults' && <DefaultsView form={form} setField={setField} onSave={handleSave} saving={saving} providers={providers} />}
             {tab==='infra' && <InfraView form={form} setField={setField} onTest={handleTest} testing={testing} testResult={testResult} onPickFolder={handlePickFolder} onOpenFolder={handleOpenFolder} onSave={handleSave} saving={saving} onMsg={setMsg} />}
-            {tab==='system' && <SystemView envFile={envFile} checks={checks} form={form} onTest={handleTest} testing={testing} testResult={testResult} onReload={load} />}
+            {tab==='system' && <SystemView envFile={envFile} checks={checks} form={form} onTest={handleTest} testing={testing} testResult={testResult} onReload={()=> load()} />}
           </div>
 
           <div className="h-14 px-6 border-t border-border bg-surface flex items-center justify-between shrink-0">
-            <button onClick={load} className="text-xs text-gray-400 hover:text-white">放弃未保存更改</button>
+            <button onClick={()=> load()} className="text-xs text-gray-400 hover:text-white">放弃未保存更改</button>
             <button onClick={handleSave} disabled={saving} className="flex items-center gap-2 px-6 py-2 rounded-xl bg-gradient-to-r from-brand to-brand-blue text-white text-xs font-bold shadow-lg shadow-brand/30 disabled:opacity-40">
               {saving?<Loader2 className="w-4 h-4 animate-spin"/>:<Save className="w-4 h-4"/>}<span>{saving?'正在写入并热重载…':'保存全部配置'}</span>
             </button>

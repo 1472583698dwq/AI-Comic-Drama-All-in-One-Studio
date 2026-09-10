@@ -16,8 +16,12 @@
       "voice_id": "male-youth-calm",
       "voice_name": "青年冷静男声",
       "emotion_preset": "neutral",
-      "avatar_url": null,
-      "three_views": {}
+      "avatar_url": "/storage/generated/gen_1788941467_2bfe2e6d.png",
+      "three_views": {
+        "front": "/storage/generated/gen_1788941467_2bfe2e6d.png",
+        "side": "/storage/generated/gen_1788941513_160b74e6.png",
+        "three_quarter": "/storage/generated/gen_1788941556_bfde6695.png"
+      }
     },
     {
       "id": "cd1125ae-c994-4f84-9d38-1de86cf73fc5",
@@ -92,8 +96,8 @@
           "camera_framing": "medium",
           "camera_motion": "static",
           "action_desc": "林川趴在办公桌，电脑亮着方案，手垂下，智能手表暗淡，桌角多肉植物。",
-          "speaker_id": null,
-          "speaker_name": "旁白",
+          "speaker_id": "c2c63767-ac4e-49fa-82ce-8ae16fd94b2a",
+          "speaker_name": "林川",
           "dialogue": "",
           "voiceover": "林川死了。死因是熬夜赶方案时，心脏骤停。",
           "emotion": "sorrow",

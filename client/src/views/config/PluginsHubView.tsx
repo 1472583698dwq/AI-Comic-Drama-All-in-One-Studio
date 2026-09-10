@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Puzzle, Upload, Power, Trash2, RefreshCw, FileJson } from 'lucide-react';
 import { apiService } from '../../services/api';
+import { confirmAsync, toast } from '../../stores/useDialogStore';
 
 export const PluginsHubView: React.FC = () => {
   const [plugins, setPlugins] = useState<any[]>([]);
@@ -37,13 +38,21 @@ export const PluginsHubView: React.FC = () => {
   };
 
   const doUninstall = async (p: any) => {
-    if (!confirm(`卸载插件 ${p.id}？（将回滚其注册的源/技能/工作流落盘）`)) return;
+    const confirmed = await confirmAsync({
+      title: '卸载插件',
+      message: `确定要卸载插件 ${p.id} 吗？\n系统将自动回滚其注册的生成源、技能及工作流落盘文件。`,
+      isDanger: true,
+      confirmText: '确认卸载',
+      cancelText: '取消'
+    });
+    if (!confirmed) return;
     setBusy(p.id);
     try {
       await apiService.uninstallPlugin(p.id);
+      toast.success(`插件 ${p.id} 已卸载`);
       await load();
     } catch (e: any) {
-      setMsg(e?.message || '卸载失败');
+      toast.error(e?.message || '卸载失败');
     } finally {
       setBusy(null);
     }

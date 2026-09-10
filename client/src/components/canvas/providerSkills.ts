@@ -49,11 +49,11 @@ const HANDLE_MEDIA: Record<string, AssetSlotDef['type']> = {
 };
 
 /**
- * 插槽 = input_schema 中声明了媒体 x-handle（或 format:uri）的属性，一一对应，零猜测。
+ * 插槽 = input_schema 中声明了媒体 x-handle（或 format:uri）的属性。
  * key 取 x-slot（归一插槽键，缺省用属性名本身），originalKey 恒为属性名（provider 真实入参键）。
- * 不再有任何按 kind 的写死兜底：源没声明 = 没有插槽。
+ * 若源未声明媒体插槽或尚未绑定生成源（Agent 自动选源模式），按 nodeKind 兜底标准媒体插槽，保证用户总能上传参考图/音视频。
  */
-export function extractSlotsFromProvider(provider: DynamicProviderInfo | null, _nodeKind?: string): AssetSlotDef[] {
+export function extractSlotsFromProvider(provider: DynamicProviderInfo | null, nodeKind?: string): AssetSlotDef[] {
   const props = provider?.input_schema?.properties || {};
   const requiredKeys: string[] = Array.isArray(provider?.input_schema?.required) ? provider!.input_schema!.required : [];
   const slots: AssetSlotDef[] = [];
@@ -94,6 +94,78 @@ export function extractSlotsFromProvider(provider: DynamicProviderInfo | null, _
       aggregate: def['x-aggregate'] === true,
     });
   }
+
+  // 兜底策略：若源未声明媒体插槽或尚未绑定具体源（Agent 自动选源模式），按节点类型提供标准媒体插槽，
+  // 确保无限画布无论切源与否均有参考图/垫图/音视频插槽表单可用。
+  if (slots.length === 0 && nodeKind) {
+    if (nodeKind === 'image') {
+      slots.push({
+        key: 'reference_images',
+        label: '参考垫图 / 角色立绘',
+        type: 'image',
+        required: false,
+        description: '支持添加角色立绘、风格垫图或姿态参考图',
+        maxCount: 9,
+        minCount: 0,
+        originalKey: 'reference_images',
+        multi: true,
+        role: 'reference',
+        aggregate: true,
+      });
+    } else if (nodeKind === 'video') {
+      slots.push({
+        key: 'first_frame',
+        label: '首帧画面',
+        type: 'image',
+        required: false,
+        description: '视频起始画面',
+        maxCount: 1,
+        minCount: 0,
+        originalKey: 'first_frame',
+        multi: false,
+        role: 'first_frame',
+      });
+      slots.push({
+        key: 'last_frame',
+        label: '尾帧画面',
+        type: 'image',
+        required: false,
+        description: '视频结束画面（选填）',
+        maxCount: 1,
+        minCount: 0,
+        originalKey: 'last_frame',
+        multi: false,
+        role: 'last_frame',
+      });
+      slots.push({
+        key: 'reference_images',
+        label: '参考图集',
+        type: 'image',
+        required: false,
+        description: '参考图或角色图',
+        maxCount: 9,
+        minCount: 0,
+        originalKey: 'reference_images',
+        multi: true,
+        role: 'reference',
+        aggregate: true,
+      });
+    } else if (nodeKind === 'audio') {
+      slots.push({
+        key: 'reference_audios',
+        label: '参考音频',
+        type: 'audio',
+        required: false,
+        description: '音色克隆/参考音频',
+        maxCount: 1,
+        minCount: 0,
+        originalKey: 'reference_audios',
+        multi: false,
+        role: 'reference',
+      });
+    }
+  }
+
   return slots;
 }
 

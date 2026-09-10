@@ -12,7 +12,9 @@ import {
   Type, 
   MessageSquare,
   Sparkles,
-  Scissors
+  Scissors,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { StoryboardShot } from '../../types';
@@ -22,6 +24,7 @@ export const MultiTrackTimeline: React.FC = () => {
     project, 
     activeShotId, 
     setActiveShotId, 
+    activeTab,
     isPlaying, 
     setIsPlaying, 
     currentTime, 
@@ -30,8 +33,15 @@ export const MultiTrackTimeline: React.FC = () => {
     updateShot
   } = useProjectStore();
 
+  const [isCollapsed, setIsCollapsed] = useState<boolean>(activeTab !== 'timeline');
   const [zoom, setZoom] = useState<number>(60); // pixels per second
   const timelineRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (activeTab === 'timeline') {
+      setIsCollapsed(false);
+    }
+  }, [activeTab]);
 
   const shots: StoryboardShot[] = project?.scenes.flatMap((s) => s.shots) || [];
 
@@ -92,10 +102,10 @@ export const MultiTrackTimeline: React.FC = () => {
   };
 
   return (
-    <div className="h-72 bg-surface border-t border-border flex flex-col select-none text-xs [color:var(--color-text-main)]">
+    <div className={`bg-surface border-t border-border flex flex-col select-none text-xs [color:var(--color-text-main)] transition-all duration-300 ease-in-out shrink-0 ${isCollapsed ? 'h-11 overflow-hidden' : 'h-72'}`}>
       {/* 1. Control Toolbar */}
-      <div className="h-10 px-4 border-b border-border flex items-center justify-between bg-surface-secondary">
-        <div className="flex items-center space-x-3">
+      <div className="h-10 px-3 sm:px-4 border-b border-border flex items-center justify-between bg-surface-secondary shrink-0">
+        <div className="flex items-center space-x-2 sm:space-x-3">
           {/* Transport Controls */}
           <button
             onClick={() => setCurrentTime(0)}
@@ -130,32 +140,60 @@ export const MultiTrackTimeline: React.FC = () => {
           </div>
         </div>
 
-        {/* Zoom Slider */}
+        {/* Collapsed State Hint */}
+        {isCollapsed && (
+          <div className="hidden lg:flex items-center gap-2 text-[11px] text-gray-400">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span>多轨已就绪 · 共 {shots.length} 个镜头 · 点击右侧展开多轨剪辑</span>
+          </div>
+        )}
+
+        {/* Zoom Slider & Collapse Toggle */}
         <div className="flex items-center space-x-2">
+          {!isCollapsed && (
+            <div className="flex items-center space-x-2 mr-2">
+              <button
+                onClick={() => setZoom(Math.max(30, zoom - 15))}
+                className="p-1 rounded [color:var(--color-text-muted)] hover:[color:var(--color-text-main)]"
+                title="缩小时间线"
+              >
+                <ZoomOut className="w-3.5 h-3.5" />
+              </button>
+              <input
+                type="range"
+                min="30"
+                max="150"
+                value={zoom}
+                onChange={(e) => setZoom(Number(e.target.value))}
+                className="w-20 lg:w-24 h-1 bg-surface-tertiary rounded-lg appearance-none cursor-pointer accent-brand"
+              />
+              <button
+                onClick={() => setZoom(Math.min(150, zoom + 15))}
+                className="p-1 rounded [color:var(--color-text-muted)] hover:[color:var(--color-text-main)]"
+                title="放大时间线"
+              >
+                <ZoomIn className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           <button
-            onClick={() => setZoom(Math.max(30, zoom - 15))}
-            className="p-1 rounded [color:var(--color-text-muted)] hover:[color:var(--color-text-main)]"
+            onClick={() => setIsCollapsed(!isCollapsed)}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all border ${
+              isCollapsed 
+                ? 'bg-brand/15 hover:bg-brand/25 border-brand/40 text-brand shadow-sm'
+                : 'bg-surface-tertiary hover:bg-surface border-border text-gray-300 hover:text-white'
+            }`}
+            title={isCollapsed ? '展开多轨剪辑时间线 (音画对齐/多轨)' : '收起时间线以获取最大视口空间'}
           >
-            <ZoomOut className="w-3.5 h-3.5" />
-          </button>
-          <input
-            type="range"
-            min="30"
-            max="150"
-            value={zoom}
-            onChange={(e) => setZoom(Number(e.target.value))}
-            className="w-24 h-1 bg-surface-tertiary rounded-lg appearance-none cursor-pointer accent-brand"
-          />
-          <button
-            onClick={() => setZoom(Math.min(150, zoom + 15))}
-            className="p-1 rounded [color:var(--color-text-muted)] hover:[color:var(--color-text-main)]"
-          >
-            <ZoomIn className="w-3.5 h-3.5" />
+            {isCollapsed ? <ChevronUp className="w-3.5 h-3.5 text-brand" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-400" />}
+            <span className="whitespace-nowrap">{isCollapsed ? '展开多轨精剪' : '收起时间线'}</span>
           </button>
         </div>
       </div>
 
       {/* 2. Multi-track Canvas Container */}
+      {!isCollapsed && (
       <div 
         ref={timelineRef}
         onClick={handleTimelineClick}
@@ -255,6 +293,7 @@ export const MultiTrackTimeline: React.FC = () => {
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 };

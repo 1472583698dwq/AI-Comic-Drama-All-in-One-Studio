@@ -62,8 +62,11 @@ print("✓ 前端构建完成 -> client/dist")
 
 # 2. PyInstaller 独立桌面端打包
 print("\n[2/4] 正在使用 PyInstaller 打包 Windows 独立应用...")
+import time
 try:
     subprocess.run(["taskkill", "/F", "/IM", "Studio.exe"], capture_output=True, shell=True)
+    subprocess.run(["taskkill", "/F", "/IM", "MiniMax_AI漫剧Studio.exe"], capture_output=True, shell=True)
+    time.sleep(2)
 except Exception:
     pass
 pyinstaller_cmd = [

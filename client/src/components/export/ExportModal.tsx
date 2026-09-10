@@ -118,7 +118,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
                   <h4 className="text-xs font-bold text-white">剪映 / CapCut 官方草稿工程</h4>
                 </div>
                 <p className="text-[11px] text-gray-400 leading-relaxed mb-4">
-                  直接导出为 <code className="text-brand-light font-mono">draft_content.json</code>，分镜画面轨、MiniMax 对白轨、旁白轨、动态字幕与 BGM 100% 自动精确对齐，可在剪映中二次精修。
+                  直接导出为 <code className="text-brand-light font-mono">draft_content.json</code>，分镜画面轨、角色对白轨、旁白轨、动态字幕与 BGM 100% 自动精确对齐，可在剪映中二次精修。
                 </p>
               </div>
 

@@ -4,6 +4,7 @@ import { useProjectListStore } from '../stores/useProjectListStore';
 import { useProjectStore } from '../stores/useProjectStore';
 import { apiService } from '../services/api';
 import { OneKeyRunModal } from '../components/workflow/OneKeyRunModal';
+import { confirmAsync, toast } from '../stores/useDialogStore';
 
 export const ProjectDashboard: React.FC = () => {
   const { projects, fetchProjects, createBlank, importProjectFile, openProject, deleteProject, duplicateProject, isLoading } = useProjectListStore();
@@ -50,7 +51,7 @@ export const ProjectDashboard: React.FC = () => {
       try { localStorage.setItem('activeProjectId', meta.id); } catch {}
       useProjectStore.getState().setActiveTab('studio');
     } catch (e: any) {
-      alert(e?.message || '创建项目失败');
+      toast.error(e?.message || '创建项目失败');
     }
   };
 
@@ -65,7 +66,7 @@ export const ProjectDashboard: React.FC = () => {
         if (data?.content?.scenes) setProject(data.content);
         useProjectStore.getState().setActiveTab('studio');
       } catch {}
-    } catch (err: any) { alert(err.message); }
+    } catch (err: any) { toast.error(err.message || '导入项目失败'); }
     e.target.value = '';
   };
 
@@ -92,7 +93,7 @@ export const ProjectDashboard: React.FC = () => {
         } as any);
         useProjectStore.getState().setActiveTab('studio');
       }
-    } catch (e:any) { alert(e.message); }
+    } catch (e:any) { toast.error(e.message || '打开项目失败'); }
   };
 
   return (
@@ -164,7 +165,24 @@ export const ProjectDashboard: React.FC = () => {
                   <div className="flex items-center gap-1.5 pt-1 mt-auto">
                     <button onClick={()=>handleOpen(p.id)} className="flex-1 py-2 rounded-full bg-brand text-white text-xs font-bold flex items-center justify-center gap-1.5 hover:bg-brand-light">打开 <ExternalLink className="w-3 h-3"/></button>
                     <button onClick={()=>duplicateProject(p.id)} className="w-8 h-8 rounded-full bg-surface-secondary border border-border hover:border-border-active text-gray-400 hover:text-white flex items-center justify-center" title="复制"><Copy className="w-3.5 h-3.5"/></button>
-                    <button onClick={async()=>{ if(confirm(`删除项目「${p.title}」？`)) await deleteProject(p.id); }} className="w-8 h-8 rounded-full bg-surface-secondary border border-border hover:border-red-500/40 text-gray-400 hover:text-red-400 flex items-center justify-center" title="删除"><Trash2 className="w-3.5 h-3.5"/></button>
+                    <button 
+                      onClick={async () => { 
+                        if (await confirmAsync({
+                          title: '删除项目',
+                          message: `确定要删除项目「${p.title}」吗？\n相关场景与分镜素材将被同步清理且无法撤销。`,
+                          isDanger: true,
+                          confirmText: '确认删除',
+                          cancelText: '保留项目'
+                        })) {
+                          await deleteProject(p.id);
+                          toast.success(`项目「${p.title}」已删除`);
+                        }
+                      }} 
+                      className="w-8 h-8 rounded-full bg-surface-secondary border border-border hover:border-red-500/40 text-gray-400 hover:text-red-400 flex items-center justify-center transition-colors" 
+                      title="删除项目"
+                    >
+                      <Trash2 className="w-3.5 h-3.5"/>
+                    </button>
                   </div>
                 </div>
               </div>

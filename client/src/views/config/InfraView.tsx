@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Cpu, FolderSearch, FolderOpen, RefreshCw, Trash2, Sliders, TestTube2, CheckCircle2, XCircle, Loader2, Layers, Film, Server, KeyRound, AlertTriangle, Eye, EyeOff, Bot } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { WorkflowInspectorModal } from '../../components/workflow/WorkflowInspectorModal';
+import { confirmAsync, toast } from '../../stores/useDialogStore';
+import { CustomHeadersEditor } from '../../components/provider/CustomHeadersEditor';
 
 export const InfraView: React.FC<{
   form: Record<string,string>;
@@ -28,16 +30,23 @@ export const InfraView: React.FC<{
   useEffect(()=>{ loadWfs(); }, []);
 
   const handleDeleteWf = async (wf:any)=>{
-    if(wf.source!=='internal'){ alert('外部直读工作流为只读，请直接在文件系统中删除'); return; }
-    if(!confirm(`删除内部工作流 ${wf.name||wf.id}？`)) return;
+    if(wf.source!=='internal'){ toast.warning('外部直读工作流为只读，请直接在文件系统中删除'); return; }
+    const confirmed = await confirmAsync({
+      title: '删除工作流',
+      message: `确定要删除内部工作流 ${wf.name||wf.id} 吗？`,
+      isDanger: true,
+      confirmText: '确认删除',
+      cancelText: '取消'
+    });
+    if(!confirmed) return;
     try{
       await apiService.deleteWorkflow(wf.id);
       setWorkflowList(prev=> prev.filter((w:any)=> w.id!==wf.id));
       if(form.COMFYUI_DEFAULT_IMAGE_WORKFLOW===wf.id) setField('COMFYUI_DEFAULT_IMAGE_WORKFLOW','');
       if(form.COMFYUI_DEFAULT_VIDEO_WORKFLOW===wf.id) setField('COMFYUI_DEFAULT_VIDEO_WORKFLOW','');
-      onMsg({type:'success', text:`已删除 ${wf.id}`});
+      toast.success(`已删除工作流 ${wf.id}`);
       loadWfs();
-    }catch(e:any){ alert(e.message); }
+    }catch(e:any){ toast.error(e.message || '删除失败'); }
   };
 
   return (
@@ -107,25 +116,54 @@ export const InfraView: React.FC<{
           </div>
           <div>
             <label className="text-xs font-medium text-gray-300">OPENAI_BASE_URL</label>
-            <input value={form.OPENAI_BASE_URL||''} onChange={e=> setField('OPENAI_BASE_URL', e.target.value)} placeholder="https://api.deepseek.com/v1" className="mt-1.5 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs font-mono text-white"/>
+            <input value={form.OPENAI_BASE_URL||''} onChange={e=> setField('OPENAI_BASE_URL', e.target.value)} placeholder="https://opencode.ai/zen/go/v1/ 或 https://api.deepseek.com/v1" className="mt-1.5 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs font-mono text-white"/>
           </div>
-          <div>
+          <div className="md:col-span-2">
             <label className="text-xs font-medium text-gray-300">OPENAI_MODEL</label>
-            <input value={form.OPENAI_MODEL||''} onChange={e=> setField('OPENAI_MODEL', e.target.value)} placeholder="deepseek-chat" className="mt-1.5 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs font-mono text-white"/>
+            <input value={form.OPENAI_MODEL||''} onChange={e=> setField('OPENAI_MODEL', e.target.value)} placeholder="hy3 / deepseek-chat / gpt-4o" className="mt-1.5 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs font-mono text-white"/>
           </div>
-          <div>
-            <label className="text-xs font-medium text-gray-300">MINIMAX_API_KEY</label>
-            <div className="mt-1.5 relative">
-              <input type={showKeys['MINIMAX_API_KEY']?'text':'password'} value={form.MINIMAX_API_KEY||''} onChange={e=> setField('MINIMAX_API_KEY', e.target.value)} placeholder="sk-..." className="w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 pr-9 text-xs font-mono text-white"/>
-              <button type="button" onClick={()=> toggleKey('MINIMAX_API_KEY')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white">{showKeys['MINIMAX_API_KEY']?<EyeOff className="w-3 h-3"/>:<Eye className="w-3 h-3"/>}</button>
+          <div className="col-span-1 md:col-span-2 pt-2">
+            <div className="p-4 rounded-2xl border-2 border-brand/50 bg-gradient-to-b from-brand/15 via-surface-secondary/40 to-surface-secondary/20 shadow-xl shadow-brand/10 space-y-3 ring-1 ring-brand/30">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-brand/20 border border-brand/40 text-brand-light shadow-sm">
+                    <Sliders className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-white flex items-center gap-2">
+                      自定义请求头 (OPENAI_CUSTOM_HEADERS)
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold">
+                        OpenCode / Gateway 专属配置
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-zinc-300 mt-0.5">
+                      💡 OpenCode.ai 用户请点击下方快捷标签 <code className="text-amber-300 bg-black/40 px-1.5 py-0.5 rounded font-mono font-bold">+ OpenCode Session (必需)</code> 即可一键生成会话标识，防止 400 拦截
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <CustomHeadersEditor
+                title="已配置的请求头清单"
+                headers={(() => {
+                  try {
+                    const raw = form.OPENAI_CUSTOM_HEADERS;
+                    if (!raw) return {};
+                    if (typeof raw === 'object') return raw;
+                    return JSON.parse(raw);
+                  } catch {
+                    return {};
+                  }
+                })()}
+                onChange={(h) => {
+                  setField('OPENAI_CUSTOM_HEADERS', Object.keys(h).length > 0 ? JSON.stringify(h) : '');
+                }}
+              />
             </div>
           </div>
         </div>
-        <div className="flex gap-2">
-          <button onClick={()=> onTest('openai')} disabled={!!testing} className="px-3 py-1.5 rounded-xl bg-surface-tertiary border border-border text-xs text-white flex items-center gap-1 disabled:opacity-40">{testing==='openai'?<Loader2 className="w-3 h-3 animate-spin"/>:<TestTube2 className="w-3 h-3"/>} 测试 OpenAI</button>
-          {testResult.openai && <span className={`text-xs flex items-center gap-1 ${testResult.openai.ok?'text-emerald-400':'text-red-400'}`}>{testResult.openai.ok?<CheckCircle2 className="w-3 h-3"/>:<XCircle className="w-3 h-3"/>}{testResult.openai.detail}</span>}
-          <button onClick={()=> onTest('minimax')} disabled={!!testing} className="px-3 py-1.5 rounded-xl bg-surface-tertiary border border-border text-xs text-white flex items-center gap-1 disabled:opacity-40"><TestTube2 className="w-3 h-3"/> 测试 MiniMax</button>
-          {testResult.minimax && <span className={`text-xs ${testResult.minimax.ok?'text-emerald-400':'text-red-400'}`}>{testResult.minimax.detail?.slice(0,40)}</span>}
+        <div className="flex items-center gap-3">
+          <button onClick={()=> onTest('openai')} disabled={!!testing} className="px-4 py-2 rounded-xl bg-surface-tertiary border border-border text-xs text-white flex items-center gap-1.5 hover:border-brand disabled:opacity-40">{testing==='openai'?<Loader2 className="w-3.5 h-3.5 animate-spin"/>:<TestTube2 className="w-3.5 h-3.5"/>} 测试 OpenAI / OpenCode 连通性</button>
+          {testResult.openai && <span className={`text-xs flex items-center gap-1 ${testResult.openai.ok?'text-emerald-400':'text-red-400'}`}>{testResult.openai.ok?<CheckCircle2 className="w-3.5 h-3.5"/>:<XCircle className="w-3.5 h-3.5"/>}{testResult.openai.detail}</span>}
         </div>
       </div>
 

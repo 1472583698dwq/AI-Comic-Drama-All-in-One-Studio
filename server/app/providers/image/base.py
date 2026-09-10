@@ -23,6 +23,7 @@ class ImageGenerateRequest:
     duration: Optional[int] = None
     workflow_id: Optional[str] = None  # 仅ComfyUI工作流模式使用
     model: Optional[str] = None  # 覆盖默认模型
+    reference_images: Optional[List[str]] = None  # 参考图/垫图 URL 列表
     dynamic_inputs: Optional[Dict[str, Any]] = None  # 外部暴露表单动态节点输入 (垫图/额外提示词等)
     extra: Optional[Dict[str, Any]] = None  # 透传扩展参数（独立控件透传）
 

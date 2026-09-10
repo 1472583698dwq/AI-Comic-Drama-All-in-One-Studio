@@ -690,6 +690,27 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
+  async getProjectAgentSessions(projectId: string): Promise<{ project_id: string; sessions: any[] }> {
+    const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/agent-sessions`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async saveProjectAgentSessions(projectId: string, sessions: any[]): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/agent-sessions`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessions }),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async deleteProjectAgentSession(projectId: string, sessionId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/agent-sessions/${encodeURIComponent(sessionId)}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
 
   // ── 素材库 Asset Library ──
   async listAssets(params?: { category?: string; status?: string; tag?: string; q?: string; project_id?: string; scope?: string; include_shared?: boolean; page?: number; limit?: number; sort?: string }): Promise<{ assets: any[]; total: number; page: number; limit: number; has_more?: boolean }> {
@@ -815,7 +836,7 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
-  async createProvider(payload: { name: string; kind: string; language?: string; code?: string; code_entry?: string; transport?: any; auth?: any; mapping?: any; models?: string[]; default_model?: string; api_key?: string; description?: string; provider_type?: string }): Promise<any> {
+  async createProvider(payload: { name: string; kind: string; language?: string; code?: string; code_entry?: string; transport?: any; auth?: any; mapping?: any; models?: string[]; default_model?: string; api_key?: string; description?: string; provider_type?: string; headers?: Record<string, string>; custom_headers?: Record<string, string>; params_schema?: any; input_schema?: any; output_schema?: any; capabilities?: string[] }): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/providers`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();

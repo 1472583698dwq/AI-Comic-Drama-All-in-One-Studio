@@ -106,7 +106,7 @@ export const DashboardView: React.FC<Props> = ({ providers, onNavigate, healthMa
       <div className="p-4 rounded-2xl bg-surface border border-border text-xs space-y-2">
         <div className="flex items-center justify-between py-1 border-b border-border"><span className="text-gray-400">后端</span><span className="font-mono text-white">http://127.0.0.1:8000</span></div>
         <div className="flex items-center justify-between py-1 border-b border-border"><span className="text-gray-400">.env 路径</span><span className="font-mono text-brand-light truncate max-w-[260px]">{envFile || 'server/.env'}</span></div>
-        <div className="flex items-center justify-between py-1"><span className="text-gray-400">LLM 就绪</span><span className={checks?.openai_configured || checks?.minimax_configured ? 'text-emerald-400' : 'text-amber-400'}>{checks?.openai_configured ? 'OpenAI/DeepSeek 已配' : checks?.minimax_configured ? 'MiniMax 已配' : '未配置'}</span></div>
+        <div className="flex items-center justify-between py-1"><span className="text-gray-400">LLM 就绪</span><span className={checks?.openai_configured ? 'text-emerald-400' : 'text-amber-400'}>{checks?.openai_configured ? 'OpenAI / 通用大模型已配' : '未配置'}</span></div>
       </div>
 
       {/* 遗留提示 */}

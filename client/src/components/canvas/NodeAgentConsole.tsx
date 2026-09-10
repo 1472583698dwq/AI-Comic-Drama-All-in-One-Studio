@@ -107,9 +107,17 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
         try { alert(`该插槽最多支持 ${max} 张，已自动保留最新的 ${max} 张`); } catch {}
       }
       writeKeys.forEach(k => { patch[k] = limited; });
+      if (pickerSlot.key === 'reference_images') {
+        patch.reference_images = limited;
+      }
     } else {
       const url = Array.isArray(urlOrUrls) ? urlOrUrls[0] : urlOrUrls;
       writeKeys.forEach(k => { patch[k] = url; });
+      if (pickerSlot.type === 'image' && pickerSlot.key.startsWith('img_')) {
+        const curRefs = Array.isArray(d.reference_images) ? [...d.reference_images] : [];
+        if (!curRefs.includes(url)) curRefs.push(url);
+        patch.reference_images = curRefs;
+      }
     }
     if (meta?.visual_prompt && !(idea || '').includes(meta.visual_prompt)) {
       const nextIdea = idea ? `${idea}, ${meta.visual_prompt}` : meta.visual_prompt;
@@ -123,6 +131,7 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
     const slot = slots.find(s => s.key === key);
     const patch: Record<string, any> = { [key]: undefined };
     if (slot?.originalKey && slot.originalKey !== key) patch[slot.originalKey] = undefined;
+    if (key === 'reference_images') patch.reference_images = [];
     updateNodeData(nodeId, patch);
   };
 
@@ -137,6 +146,16 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
       const value = isSlotMulti(slot) ? vals : vals[0];
       s[slot.key] = value;
       if (slot.originalKey && slot.originalKey !== slot.key) s[slot.originalKey] = value;
+    }
+    // 兜底保留通用参考媒体
+    if (d.reference_images && Array.isArray(d.reference_images) && d.reference_images.length > 0 && !s.reference_images) {
+      s.reference_images = d.reference_images;
+    }
+    if (d.first_frame && !s.first_frame) {
+      s.first_frame = d.first_frame;
+    }
+    if (d.last_frame && !s.last_frame) {
+      s.last_frame = d.last_frame;
     }
     return s;
   };

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { apiService } from '../../services/api';
+import { confirmAsync, toast } from '../../stores/useDialogStore';
 
 interface ParameterItem {
   name: string;
@@ -347,20 +348,25 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
 
   const handleDelete = async () => {
     if (data?.source !== 'internal') {
-      alert('外部直读工作流为只读，请直接在文件系统中删除对应的 JSON 文件');
+      toast.warning('外部直读工作流为只读，请直接在文件系统中删除对应的 JSON 文件');
       return;
     }
-    if (!confirm(`确定要永久删除内部工作流 "${data?.name || workflowId}" 吗？\n此操作将删除 storage/workflows/${workflowId}.json 与 .meta.json，且不可恢复。`)) {
-      return;
-    }
+    const confirmed = await confirmAsync({
+      title: '删除工作流',
+      message: `确定要永久删除内部工作流 "${data?.name || workflowId}" 吗？\n此操作将删除 storage/workflows/${workflowId}.json 与 .meta.json，且不可恢复。`,
+      isDanger: true,
+      confirmText: '确认删除',
+      cancelText: '取消'
+    });
+    if (!confirmed) return;
     try {
       await apiService.deleteWorkflow(workflowId);
-      alert('🗑️ 内部工作流已删除');
+      toast.success('内部工作流已删除');
       if (onDeleted) onDeleted(workflowId);
       else onSaved?.();
       onClose();
     } catch (e: any) {
-      alert(`删除失败: ${e.message || e}`);
+      toast.error(`删除失败: ${e.message || e}`);
     }
   };
 

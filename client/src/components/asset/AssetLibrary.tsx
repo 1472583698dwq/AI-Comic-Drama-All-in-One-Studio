@@ -6,6 +6,7 @@ import { useProjectListStore } from '../../stores/useProjectListStore';
 import { apiService } from '../../services/api';
 import { AssetCategory } from '../../types';
 import { WorkflowInspectorModal } from '../workflow/WorkflowInspectorModal';
+import { confirmAsync, toast } from '../../stores/useDialogStore';
 
 const CATEGORY_TABS: { key: AssetCategory | 'all'; label: string; icon: React.ReactNode }[] = [
   { key: 'all', label: '全部', icon: <Library className="w-3.5 h-3.5" /> },
@@ -242,14 +243,19 @@ export const AssetLibrary: React.FC = () => {
   };
 
   const handleMigrate = async () => {
-    if (!project?.characters?.length) { alert('当前项目无角色'); return; }
-    if (!confirm(`将项目《${project.title}》的 ${project.characters.length} 个角色迁移为人物素材？`)) return;
+    if (!project?.characters?.length) { toast.warning('当前项目无角色'); return; }
+    const confirmed = await confirmAsync({
+      title: '迁移角色为素材',
+      message: `确定要将项目《${project.title}》的 ${project.characters.length} 个角色迁移为全局人物素材吗？`,
+      confirmText: '确认迁移'
+    });
+    if (!confirmed) return;
     try {
       const data = await apiService.migrateCharacters(project.id, project.characters);
-      alert(`已迁移 ${data.migrated} 个角色`);
+      toast.success(`已迁移 ${data.migrated} 个角色到素材库`);
       fetchAssets({ category: 'character', page: 1 });
       refreshStats();
-    } catch (e: any) { alert(e.message); }
+    } catch (e: any) { toast.error(e.message || '迁移失败'); }
   };
 
   /** 确保素材对应项目角色存在（同名复用，否则创建），返回角色 id */
@@ -611,8 +617,26 @@ export const AssetLibrary: React.FC = () => {
             </div>
             <div className="grid grid-cols-3 gap-2">
               <button onClick={()=>openEdit(selected)} className="py-2 rounded-xl bg-brand/20 border border-brand/40 text-xs text-brand-light hover:bg-brand/30 hover:text-white flex items-center justify-center space-x-1 font-semibold"><Pencil className="w-3.5 h-3.5" /><span>编辑</span></button>
-              <button onClick={()=>duplicateAsset(selected.id)} className="py-2 rounded-xl bg-surface-secondary border border-border text-xs text-white flex items-center justify-center space-x-1"><Copy className="w-3.5 h-3.5" /><span>复制</span></button>
-              <button onClick={async()=>{ if(confirm('确定删除？')){ await deleteAsset(selected.id); setDetailAsset(null); selectAsset(null); } }} className="py-2 rounded-xl bg-red-500/15 border border-red-500/30 text-xs text-red-300 flex items-center justify-center space-x-1"><Trash2 className="w-3.5 h-3.5" /><span>删除</span></button>
+              <button 
+                onClick={async () => { 
+                  if (await confirmAsync({
+                    title: '删除素材',
+                    message: `确定要删除素材「${selected.name}」吗？\n删除后该素材将无法恢复。`,
+                    isDanger: true,
+                    confirmText: '确认删除',
+                    cancelText: '取消'
+                  })) { 
+                    await deleteAsset(selected.id); 
+                    setDetailAsset(null); 
+                    selectAsset(null); 
+                    toast.success('素材已删除');
+                  } 
+                }} 
+                className="py-2 rounded-xl bg-red-500/15 border border-red-500/30 hover:bg-red-500/25 text-xs text-red-300 flex items-center justify-center space-x-1 transition-colors"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>删除</span>
+              </button>
             </div>
           </div>
         </div>

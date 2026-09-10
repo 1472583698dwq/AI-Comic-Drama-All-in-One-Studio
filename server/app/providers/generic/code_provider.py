@@ -762,6 +762,10 @@ async def _execute_js_code(code: str, entry: str, ctx: Dict[str, Any], timeout: 
 async def execute_code_provider(definition: ProviderDefinition, ctx: Dict[str, Any]) -> Dict[str, Any]:
     if not definition.code or not definition.code.strip():
         raise RuntimeError(f"Provider {definition.id} has no code")
+    # 注入自定义请求头 (Custom Headers)，满足 OpenCode 网关与自定义代理规范
+    hdrs = getattr(definition, "headers", None) or (getattr(definition.transport, "headers", None) if getattr(definition, "transport", None) else {}) or {}
+    ctx.setdefault("headers", hdrs)
+    ctx.setdefault("custom_headers", hdrs)
     timeout = resolve_code_timeout(definition)
     entry = definition.code_entry or "generate"
     # 可信判定：逐源 trusted + 全局总闸，逐源要可信但总闸未开时直接明错（不静默回落沙箱）
@@ -891,6 +895,8 @@ class GenericCodeImageProvider(_CodeSourceBase, ImageProvider):
             "dynamic_inputs": req.dynamic_inputs or {},
             "reference_images": _kept_refs,
             "api_key_env": self.definition.auth.key_env,
+            "headers": self.definition.headers or (self.definition.transport.headers if self.definition.transport else {}) or {},
+            "custom_headers": self.definition.headers or (self.definition.transport.headers if self.definition.transport else {}) or {},
         }
         for k, v in user.items():
             ctx.setdefault(k, v)
@@ -967,6 +973,8 @@ class GenericCodeVideoProvider(_CodeSourceBase, VideoProvider):
             "api_key": api_key, "provider_id": self.id, "kind": "video",
             "dynamic_inputs": dyn,
             "steps": user.get("steps"), "cfg": user.get("cfg"),
+            "headers": self.definition.headers or (self.definition.transport.headers if self.definition.transport else {}) or {},
+            "custom_headers": self.definition.headers or (self.definition.transport.headers if self.definition.transport else {}) or {},
         }
         # 兼容：code 内可能用 ctx.get("reference_audios") 或 ctx.get("ref_audio") 或 ctx["dynamic_inputs"]["reference_audios"]
         # 已在上层扁平化，此处再兜底
@@ -1029,6 +1037,8 @@ class GenericCodeAudioProvider(_CodeSourceBase, AudioProvider):
             "reference_audios": _a_kept,
             "api_key": api_key, "provider_id": self.id, "kind": "audio",
             "dynamic_inputs": req.dynamic_inputs or {},
+            "headers": self.definition.headers or (self.definition.transport.headers if self.definition.transport else {}) or {},
+            "custom_headers": self.definition.headers or (self.definition.transport.headers if self.definition.transport else {}) or {},
         }
         for k, v in user.items():
             ctx.setdefault(k, v)

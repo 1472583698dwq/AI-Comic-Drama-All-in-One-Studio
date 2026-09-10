@@ -140,15 +140,17 @@ class ComfyUIVideoProvider(VideoProvider):
             raise FileNotFoundError(f"视频工作流不存在: {req.workflow_id}")
         server_url = getattr(settings, "COMFYUI_SERVER_URL", "http://127.0.0.1:8188").rstrip("/")
 
-        # 1. 上传所有输入图像到 ComfyUI，获取内部文件名（支持 I2V 首帧、尾帧、R2V多参考）
+        # 1. 上传所有输入图像/视频/音频到 ComfyUI，获取内部文件名
         uploaded_first = ""
         uploaded_last = ""
         uploaded_refs: list[str] = []
+        uploaded_vids: list[str] = []
+        uploaded_auds: list[str] = []
 
         async def _upload_one(src: str) -> str:
             if not src:
                 return ""
-            # 复用 manager 的上传工具，自动处理 /storage, http, base64, 本地路径
+            # 复用 manager 的上传工具，自动处理 /storage, http, base64, 本地路径并保留文件类型
             return await upload_image_to_comfyui(src, server_url)
 
         try:
@@ -160,11 +162,49 @@ class ComfyUIVideoProvider(VideoProvider):
                 for ref in req.reference_images:
                     if ref:
                         uploaded_refs.append(await _upload_one(ref))
+            if getattr(req, "reference_videos", None):
+                for vid in req.reference_videos:
+                    if vid:
+                        uploaded_vids.append(await _upload_one(vid))
+            if getattr(req, "reference_audios", None):
+                for aud in req.reference_audios:
+                    if aud:
+                        uploaded_auds.append(await _upload_one(aud))
             # 若 R2V 模式下未提供 first_frame 但有参考，取首张参考作为首帧兜底（兼容旧前端）
             if not uploaded_first and uploaded_refs and req.mode == "r2v":
                 uploaded_first = uploaded_refs[0]
         except Exception as e:
-            raise RuntimeError(f"上传参考图像到 ComfyUI 失败: {e}")
+            raise RuntimeError(f"上传参考媒体到 ComfyUI 失败: {e}")
+
+        # 处理外部表单动态输入的图片/视频/音频上传
+        import copy
+        processed_dynamic_inputs = copy.deepcopy(req.dynamic_inputs or {})
+        for k, v in list(processed_dynamic_inputs.items()):
+            if isinstance(v, list):
+                new_list = []
+                for item in v:
+                    if isinstance(item, str) and (item.startswith("data:") or item.startswith("/storage/") or item.startswith("http") or os.path.isabs(item)):
+                        try:
+                            new_list.append(await _upload_one(item))
+                        except Exception as upload_err:
+                            print(f"[ComfyUIVideo] 自动上传动态输入列表项失败: {upload_err}")
+                            new_list.append(item)
+                    else:
+                        new_list.append(item)
+                processed_dynamic_inputs[k] = new_list
+            elif isinstance(v, dict):
+                for sub_k, sub_v in list(v.items()):
+                    if isinstance(sub_v, str) and (sub_v.startswith("data:") or sub_v.startswith("/storage/") or sub_v.startswith("http") or os.path.isabs(sub_v)):
+                        try:
+                            v[sub_k] = await _upload_one(sub_v)
+                        except Exception as upload_err:
+                            print(f"[ComfyUIVideo] 自动上传动态输入字典项失败: {upload_err}")
+            elif isinstance(v, str) and (str(k).startswith(("img_", "aud_", "vid_")) or "image" in str(k).lower() or "video" in str(k).lower() or "audio" in str(k).lower() or v.startswith("data:") or v.startswith("/storage/")):
+                if v.startswith("data:") or v.startswith("/storage/") or v.startswith("http") or os.path.isabs(v):
+                    try:
+                        processed_dynamic_inputs[k] = await _upload_one(v)
+                    except Exception as upload_err:
+                        print(f"[ComfyUIVideo] 自动上传动态输入媒体失败: {upload_err}")
 
         # 2. 判断节俭模式 vs 全量覆盖
         #    - API 原生工作流（auto_converted=False）保持节俭，仅注入 mapping 指向节点
@@ -175,8 +215,6 @@ class ComfyUIVideoProvider(VideoProvider):
             auto_conv = meta.get("auto_converted", False)
             # 内部 API 格式且未经过转换，则节俭；外部/转换后则全量以保证 I2V/R2V 适配
             is_api_frugally = not auto_conv and meta.get("is_api_format", True) is not False
-            # 若工作流本身为外部且 is_api_format=True 且 auto_converted=False，仍视为 API 节俭
-            # 若为内部但 auto_converted=True，视为全量
 
         # 3. 准备注入参数
         # 分辨率 -> 宽高
@@ -199,6 +237,8 @@ class ComfyUIVideoProvider(VideoProvider):
             "first_frame_url": uploaded_first,
             "last_frame_url": uploaded_last,
             "reference_images": uploaded_refs,
+            "reference_videos": uploaded_vids,
+            "reference_audios": uploaded_auds,
             "width": width,
             "height": height,
             "resolution": req.resolution,
@@ -214,7 +254,7 @@ class ComfyUIVideoProvider(VideoProvider):
             mapping,
             video_params,
             node_overrides=node_overrides,
-            dynamic_inputs=req.dynamic_inputs,
+            dynamic_inputs=processed_dynamic_inputs,
             is_api_frugally=is_api_frugally,
         )
 

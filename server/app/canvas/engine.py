@@ -215,6 +215,57 @@ def collect_upstream_data(node_id: str, nodes: List[Dict], edges: List[Dict], re
                     data.setdefault("audio_url", url)
             if url:
                 continue
+        # 针对具体暴露插槽（如 ComfyUI 或 Custom Provider 的动态 Handle: img_5, aud_3, vid_1, txt_2 等）
+        if tgt_handle.startswith("img_") or tgt_handle.endswith(("_image", "_img")):
+            url = _extract_url_from_src(src_res, src_data, ("image_url", "result_url", "file_url", "thumb_url"))
+            if url:
+                data[tgt_handle] = url
+                data.setdefault("dynamic_inputs", {})[tgt_handle] = url
+                data.setdefault("reference_images", [])
+                if url not in data["reference_images"]:
+                    data["reference_images"].append(url)
+                data.setdefault("image_url", url)
+            continue
+        if tgt_handle.startswith("aud_") or tgt_handle.endswith(("_audio", "_aud")):
+            url = _extract_url_from_src(src_res, src_data, ("audio_url", "file_url"))
+            if url:
+                data[tgt_handle] = url
+                data.setdefault("dynamic_inputs", {})[tgt_handle] = url
+                data.setdefault("reference_audios", [])
+                if url not in data["reference_audios"]:
+                    data["reference_audios"].append(url)
+                data.setdefault("audio_url", url)
+            continue
+        if tgt_handle.startswith("vid_") or tgt_handle.endswith(("_video", "_vid")):
+            url = _extract_url_from_src(src_res, src_data, ("video_url", "file_url"))
+            if url:
+                data[tgt_handle] = url
+                data.setdefault("dynamic_inputs", {})[tgt_handle] = url
+                data.setdefault("reference_videos", [])
+                if url not in data["reference_videos"]:
+                    data["reference_videos"].append(url)
+                data.setdefault("video_url", url)
+            continue
+        if tgt_handle.startswith("txt_") or tgt_handle.endswith(("_text", "_prompt")):
+            txt = None
+            if src_res:
+                txt = src_res.get("prompt") or src_res.get("text") or src_res.get("brief") or src_res.get("image_prompt") or src_res.get("video_prompt")
+            if not txt:
+                txt = src_data.get("prompt") or src_data.get("text") or src_data.get("brief") or src_data.get("image_prompt")
+            if txt and isinstance(txt, str) and txt.strip():
+                data[tgt_handle] = txt.strip()
+                data.setdefault("dynamic_inputs", {})[tgt_handle] = txt.strip()
+            continue
+        if tgt_handle.startswith(("num_", "combo_", "exp_")):
+            val = None
+            if src_res:
+                val = src_res.get("value") if "value" in src_res else src_res.get("result") if "result" in src_res else src_res.get(tgt_handle)
+            if val is None:
+                val = src_data.get("value") if "value" in src_data else src_data.get(tgt_handle)
+            if val is not None:
+                data[tgt_handle] = val
+                data.setdefault("dynamic_inputs", {})[tgt_handle] = val
+            continue
         if tgt_handle in ("provider", "provider_video", "provider_image", "provider_audio"):
             pass
         if not src_res:
@@ -534,6 +585,7 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
                 steps=extra.get("steps") or merged.get("steps"),
                 cfg=extra.get("cfg") or merged.get("cfg"),
                 workflow_id=merged.get("workflow_id") or extra.get("workflow_id"),
+                reference_images=dyn.get("reference_images") or (uniq_refs if uniq_refs else None),
                 dynamic_inputs=dyn if dyn else None,
                 model=model or extra.get("model"),
                 extra=extra if extra else None,
@@ -604,6 +656,7 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
                 steps=extra.get("steps") or merged.get("steps"),
                 cfg=extra.get("cfg") or merged.get("cfg"),
                 workflow_id=wf_id,
+                reference_images=dyn.get("reference_images"),
                 dynamic_inputs=dyn if dyn else merged.get("dynamic_inputs"),
                 extra=extra if extra else None,
             )
@@ -620,6 +673,16 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
                 ref_imgs = [ref_imgs.strip()]
             elif not isinstance(ref_imgs, list):
                 ref_imgs = None
+            ref_vids = merged.get("reference_videos") or upstream.get("reference_videos")
+            if isinstance(ref_vids, str) and ref_vids.strip():
+                ref_vids = [ref_vids.strip()]
+            elif not isinstance(ref_vids, list):
+                ref_vids = None
+            ref_auds = merged.get("reference_audios") or upstream.get("reference_audios")
+            if isinstance(ref_auds, str) and ref_auds.strip():
+                ref_auds = [ref_auds.strip()]
+            elif not isinstance(ref_auds, list):
+                ref_auds = None
             skill_id = data.get("skill_id") or merged.get("skill_id")
             if skill_id == "all_round_reference" or (ref_imgs and not first_frame):
                 mode = "r2v"
@@ -661,6 +724,8 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
                 first_frame_url=first_frame if isinstance(first_frame, str) and first_frame.strip() else None,
                 last_frame_url=last_frame if isinstance(last_frame, str) and last_frame.strip() else None,
                 reference_images=ref_imgs if isinstance(ref_imgs, list) and ref_imgs else None,
+                reference_videos=ref_vids if isinstance(ref_vids, list) and ref_vids else None,
+                reference_audios=ref_auds if isinstance(ref_auds, list) and ref_auds else None,
                 duration=duration,
                 resolution=resolution,
                 aspect_ratio=aspect_ratio,

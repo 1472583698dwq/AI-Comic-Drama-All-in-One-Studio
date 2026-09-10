@@ -17,6 +17,7 @@ interface ProjectState {
   apiError: string | null;
 
   loadActiveProject: (projectId?: string) => Promise<void>;
+  closeProject: () => void;
   // Actions
   setProject: (project: Project) => void;
   setActiveShotId: (shotId: string | null) => void;
@@ -69,7 +70,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   project: null,
   activeProjectId: localStorage.getItem('activeProjectId') || null,
   activeShotId: null,
-  activeTab: (localStorage.getItem('app_active_tab') as any) || 'projects',
+  activeTab: (localStorage.getItem('activeProjectId') ? ((localStorage.getItem('app_active_tab') as any) || 'projects') : 'projects'),
   workspace: (localStorage.getItem('app_workspace') as any) || 'production',
   platformMode: (localStorage.getItem('app_platform_mode') as any) || 'desktop',
   isPlaying: false,
@@ -90,12 +91,30 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const content = (p as any)?.content ?? (p as any)?.project ?? p;
       if (content && Array.isArray(content.scenes)) {
         get().setProject(content as any);
+      } else {
+        get().closeProject();
       }
     } catch (e: any) {
       console.warn('Failed to auto-load active project:', e);
+      get().closeProject();
     } finally {
       set({ isLoading: false, loadingMessage: '' });
     }
+  },
+
+  closeProject: () => {
+    localStorage.removeItem('activeProjectId');
+    localStorage.setItem('app_active_tab', 'projects');
+    set({
+      project: null,
+      activeProjectId: null,
+      activeShotId: null,
+      activeTab: 'projects',
+      isPlaying: false,
+      currentTime: 0,
+      totalDuration: 0,
+      apiError: null,
+    });
   },
 
   setProject: (project) => {
@@ -132,12 +151,33 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ activeShotId: shotId });
   },
   setActiveTab: (tab) => {
+    // 未选择项目时，严禁切换到项目内部功能（只允许 projects 和 config）
+    if (!get().project && tab !== 'projects' && tab !== 'config') {
+      return;
+    }
     localStorage.setItem('app_active_tab', tab);
-    set({ activeTab: tab });
+    if (tab === 'canvas') {
+      localStorage.setItem('app_workspace', 'creative');
+      set({ activeTab: tab, workspace: 'creative' });
+    } else if (['projects', 'studio', 'director3d', 'timeline', 'characters', 'assets', 'agent'].includes(tab)) {
+      localStorage.setItem('app_workspace', 'production');
+      set({ activeTab: tab, workspace: 'production' });
+    } else {
+      set({ activeTab: tab });
+    }
   },
   setWorkspace: (workspace) => {
+    if (!get().project) return;
     localStorage.setItem('app_workspace', workspace);
-    set({ workspace });
+    if (workspace === 'creative') {
+      localStorage.setItem('app_active_tab', 'canvas');
+      set({ workspace, activeTab: 'canvas' });
+    } else {
+      const currentTab = get().activeTab;
+      const nextTab = currentTab === 'canvas' ? 'studio' : currentTab;
+      localStorage.setItem('app_active_tab', nextTab);
+      set({ workspace, activeTab: nextTab });
+    }
   },
   setPlatformMode: (platformMode) => {
     localStorage.setItem('app_platform_mode', platformMode);
@@ -148,7 +188,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   clearApiError: () => set({ apiError: null }),
 
   importNovelScript: async (text, style = 'donghua_xianxia', ratio = '9:16') => {
-    set({ isLoading: true, loadingMessage: '正在调用 MiniMax LLM 拆解小说剧情与角色关系...', apiError: null });
+    set({ isLoading: true, loadingMessage: '正在调用大模型拆解小说剧情与角色关系...', apiError: null });
     try {
       const proj = await apiService.parseScript(text, style, ratio);
       // 导入即绑定：说话人 + 正文提及自动填充 character_ids，免逐镜手绑（已有绑定不动）
