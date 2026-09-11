@@ -184,7 +184,7 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
         updateNodeData(nodeId, { _taskId: result.task_id, _polling: true });
         let url = '';
         let lastErr = '';
-        for (let i = 0; i < 140; i++) {
+        for (let i = 0; i < 500; i++) {
           await new Promise((r) => setTimeout(r, 3000));
           try {
             const st: any = await apiService.getVideoTaskStatus(result.task_id);

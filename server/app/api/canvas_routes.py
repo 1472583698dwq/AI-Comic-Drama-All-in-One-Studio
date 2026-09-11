@@ -137,7 +137,7 @@ async def canvas_agent_generate(req: CanvasAgentGenerateRequest):
     if node_type == "video" and not result.get("video_url") and result.get("task_id") and not _is_code_pid:
         import asyncio
         from app.providers.generic.http_provider import get_custom_video_task
-        for _ in range(140):
+        for _ in range(500):
             await asyncio.sleep(3)
             try:
                 st = get_custom_video_task(result["task_id"])

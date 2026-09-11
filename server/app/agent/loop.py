@@ -12,10 +12,13 @@ from typing import Any, Dict, List, Optional
 
 AGENT_MODES = ("chat", "execute")
 
-# 预算：问答0步，执行默认10步（langchain_engine内安全上限30不变，此处为模式默认值）
+# 预算：问答0步，执行默认 200 步（旧值 12 会在大任务中途掐断；可用 AGENT_MAX_ITERATIONS 覆盖）
+# 工具窗口：至少 20 分钟（1200s），长任务（视频/批量生成）不再被提前掐断
 MODE_BUDGETS: Dict[str, Dict[str, Any]] = {
-    "chat": {"max_steps": 0, "deadline_s": 60, "allow_tools": False},
-    "execute": {"max_steps": 12, "deadline_s": 150, "allow_tools": True},
+    "chat": {"max_steps": 0, "deadline_s": 1200, "allow_tools": False},
+    "execute": {"max_steps": 200, "deadline_s": 1200, "allow_tools": True},
+    # 计划模式：只读侦察 + 产出计划（工具由引擎绑定层硬门控）
+    "plan": {"max_steps": 60, "deadline_s": 1200, "allow_tools": True, "readonly": True},
 }
 
 # 破坏性工具：执行前建议HITL确认（前端可据此弹确认，P0仅标记）
@@ -85,6 +88,13 @@ def search_tools(query: str, limit: int = 12) -> List[Dict[str, Any]]:
                     score += 2
                 if any(k in tok for k in ("素材", "asset")) and ("asset" in name):
                     score += 2
+                # 自定义代码节点 / 插件工具：关键词直投，避免自定义能力"存在但检索不到"
+                if any(k in tok for k in ("自定义", "节点", "超分", "处理", "插件", "custom", "plugin")) and (
+                    "customnode" in name or "plugin" in name or "custom" in desc
+                ):
+                    score += 3
+                if any(k in tok for k in ("源", "provider", "生成源", "生成通道")) and ("provider_" in name):
+                    score += 1
         if score > 0 or t.name in CORE_TOOLS:
             scored.append({"name": t.name, "description": t.description or "", "category": t.category or "", "score": score})
     scored.sort(key=lambda x: (-x["score"], x["name"]))

@@ -9,7 +9,7 @@
 生命周期：discover → validate → install → enable ⇄ disable → uninstall
 安全：id/版本白名单、路径围栏（禁.. /绝对路径）、单文件≤1MB/包≤20MB、数量上限；
       provider走custom沙箱体检，skill走通用LLM分支（零代码）；
-      mcp_tools查壳函数仅在trusted总闸开启后执行（与fs_file/shell_exec同闸），30s超时+结果截断。
+      mcp_tools查壳函数仅在trusted总闸开启后执行（与fs_file/shell_exec同闸），20分钟超时+结果截断。
 """
 import asyncio
 import glob
@@ -33,7 +33,7 @@ _TOOL_RE = re.compile(MCP_TOOL_NAME_RE)
 _MAX_FILE = 1_000_000
 _MAX_TOTAL = 20_000_000
 _MAX_PER_KIND = 20
-_PLUGIN_TOOL_TIMEOUT = 30
+_PLUGIN_TOOL_TIMEOUT = 1200  # 单工具执行超时：20 分钟（长任务可自取任务号，但整体不早退）
 _PLUGIN_TOOL_MAX_OUT = 20000
 
 # 生命周期并发锁：install / enable / disable / uninstall / reload 串行化
@@ -433,7 +433,7 @@ def _unregister_plugin_tools(tool_names: List[str]) -> None:
 
 
 async def run_plugin_tool(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-    """执行查壳插件工具：trusted总闸 + 必填校验 + 30s超时 + 结果截断。供mcp execute_tool分支调用。"""
+    """执行查壳插件工具：trusted总闸 + 必填校验 + 20分钟超时 + 结果截断。供mcp execute_tool分支调用。"""
     from app.mcp.server import _trusted_gate_or_raise
     from app.extensions import telemetry
     started = time.time()

@@ -102,7 +102,7 @@ class CosyVoiceProvider(AudioProvider):
 
         audio_bytes = None
         last_err = ""
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=1200.0) as client:
             for att in attempts:
                 try:
                     if att["method"] == "POST":

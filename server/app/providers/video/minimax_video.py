@@ -103,7 +103,7 @@ class CloudVideoProvider(VideoProvider):
             "resolution": req.resolution or "720p",
         }
 
-        async with httpx.AsyncClient(timeout=45.0) as client:
+        async with httpx.AsyncClient(timeout=1200.0) as client:
             r = await client.post(url, headers=headers, json=payload)
             if r.status_code not in (200, 201):
                 raise RuntimeError(f"MiniMax 视频提交失败 HTTP {r.status_code}: {r.text[:400]}")
@@ -145,7 +145,7 @@ class CloudVideoProvider(VideoProvider):
         out_filename = f"minimax_{task_id}.mp4"
         out_path = os.path.join(VIDEOS_DIR, out_filename)
 
-        max_attempts = 60  # 最多轮询 5 分钟
+        max_attempts = 300  # 最多轮询 25 分钟
         for _ in range(max_attempts):
             await asyncio.sleep(5.0)
             try:

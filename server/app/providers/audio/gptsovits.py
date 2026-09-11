@@ -77,13 +77,13 @@ class GPTSoVITSProvider(AudioProvider):
         # 先尝试GET
         audio_bytes = None
         last_err = ""
-        async with httpx.AsyncClient(timeout=40.0) as client:
+        async with httpx.AsyncClient(timeout=1200.0) as client:
             # 尝试1: GET /tts
             try:
                 qs = urllib.parse.urlencode(params)
                 url = f"{base}/tts?{qs}"
                 # 若启用额外参数，URL可能过长，必要时改POST
-                resp = await client.get(url, timeout=40.0)
+                resp = await client.get(url, timeout=1200.0)
                 if resp.status_code == 200:
                     ct = resp.headers.get("content-type", "")
                     if "audio" in ct or "wav" in ct or "mpeg" in ct or len(resp.content) > 500:
@@ -103,7 +103,7 @@ class GPTSoVITSProvider(AudioProvider):
             # 尝试2: POST /tts (JSON)
             if not audio_bytes:
                 try:
-                    resp = await client.post(f"{base}/tts", json=params, timeout=40.0)
+                    resp = await client.post(f"{base}/tts", json=params, timeout=1200.0)
                     if resp.status_code == 200:
                         ct = resp.headers.get("content-type", "")
                         if "audio" in ct or len(resp.content) > 500:
@@ -124,7 +124,7 @@ class GPTSoVITSProvider(AudioProvider):
             # 尝试3: POST / (部分版本根路径即tts)
             if not audio_bytes:
                 try:
-                    resp = await client.post(base, json=params, timeout=40.0)
+                    resp = await client.post(base, json=params, timeout=1200.0)
                     if resp.status_code == 200 and len(resp.content) > 500:
                         audio_bytes = resp.content
                 except Exception:

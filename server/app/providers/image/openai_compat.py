@@ -87,7 +87,7 @@ class OpenAICompatProvider(ImageProvider):
             "Content-Type": "application/json",
         }
 
-        async with httpx.AsyncClient(timeout=90.0) as client:
+        async with httpx.AsyncClient(timeout=1200.0) as client:
             resp = await client.post(url, headers=headers, json=payload)
             if resp.status_code != 200:
                 raise RuntimeError(f"OpenAI兼容生图失败 HTTP {resp.status_code}: {resp.text[:500]}")

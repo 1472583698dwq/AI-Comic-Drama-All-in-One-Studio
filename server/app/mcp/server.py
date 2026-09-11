@@ -99,8 +99,8 @@ def _resolve_trusted_path(path: str) -> str:
 _SHELL_DENY = ("rm -rf", "mkfs", "shutdown", "reboot", "halt", ":(){", "del /f /s /q c:\\", "format c:")
 
 
-def _run_trusted_shell(command: str, cwd: str = "", timeout: int = 30) -> dict:
-    """A档 shell 执行：PowerShell(Win)/bash(Posix)，输出截断，超时可配（上限120s，长任务请走异步task_id轮询）。"""
+def _run_trusted_shell(command: str, cwd: str = "", timeout: int = 1200) -> dict:
+    """A档 shell 执行：PowerShell(Win)/bash(Posix)，输出截断，超时可配（默认1200s=20分钟）。"""
     import os as _os
     import subprocess as _sp
     import sys as _sys
@@ -113,10 +113,10 @@ def _run_trusted_shell(command: str, cwd: str = "", timeout: int = 30) -> dict:
         if pat in low:
             raise ValueError(f"危险命令已拦截：{pat}")
     try:
-        timeout = int(timeout or 30)
+        timeout = int(timeout or 1200)
     except Exception:
-        timeout = 30
-    timeout = max(5, min(120, timeout))
+        timeout = 1200
+    timeout = max(5, min(1200, timeout))
     # cwd 围栏（默认仓库根）
     if cwd and str(cwd).strip():
         workdir = _resolve_trusted_path(str(cwd).strip())
@@ -474,7 +474,7 @@ class MCPServerRegistry:
             raise RuntimeError(res.error)
 
         @mcp_app.tool
-        async def shell_exec(command: str, cwd: str = "", timeout: int = 30) -> dict:
+        async def shell_exec(command: str, cwd: str = "", timeout: int = 1200) -> dict:
             """[可信命令] 执行 shell（需 STUDIO_TRUSTED_MODE=1）"""
             res = await mcp_registry.execute_tool("shell_exec", {"command": command, "cwd": cwd, "timeout": timeout})
             if res.status == "success":
@@ -1028,7 +1028,7 @@ class MCPServerRegistry:
         ))
         self.register_tool(MCPToolDefinition(
             name="shell_exec",
-            description="[可信命令] 在工作区执行 shell（Win走PowerShell，输出截断12KB，timeout 5-120s）。需 STUDIO_TRUSTED_MODE=1。用于本地curl拿task_id/ffmpeg/轮询查询（单次GET秒回），H3百秒任务请提交拿task_id后轮询，勿阻塞等终态。",
+            description="[可信命令] 在工作区执行 shell（Win走PowerShell，输出截断12KB，timeout 5-1200s，默认1200s=20分钟）。需 STUDIO_TRUSTED_MODE=1。长任务建议提交拿task_id后轮询（单次GET秒回），也可在20分钟窗口内阻塞等终态。",
             category="utility",
             icon="Terminal",
             author="Trusted Mode",
@@ -1038,7 +1038,7 @@ class MCPServerRegistry:
                 "properties": {
                     "command": {"type": "string", "description": "要执行的命令，如 curl -s https://api.../query?task_id=xxx"},
                     "cwd": {"type": "string", "description": "工作目录（围栏内，空=工作区根）"},
-                    "timeout": {"type": "integer", "default": 30, "description": "超时秒 5-120"},
+                    "timeout": {"type": "integer", "default": 1200, "description": "超时秒 5-1200（默认1200=20分钟）"},
                 },
                 "required": ["command"]
             }
@@ -1282,7 +1282,7 @@ class MCPServerRegistry:
                 except Exception as e:
                     return MCPToolCallResponse(tool_name=tool_name, status="error", result=None, error=f"search_tools失败: {e}", execution_time_ms=int((time.time()-start_time)*1000))
                 return MCPToolCallResponse(tool_name=tool_name, status="success", result=result, error=None, execution_time_ms=int((time.time()-start_time)*1000))
-            # 插件查壳工具：plugin_<id>_<name>，强制trusted总闸 + 30s超时（与fs_file/shell_exec同闸）
+            # 插件查壳工具：plugin_<id>_<name>，强制trusted总闸 + 20分钟超时（与fs_file/shell_exec同闸）
             if tool_name.startswith("plugin_"):
                 try:
                     from app.plugins.manager import run_plugin_tool
@@ -1407,7 +1407,7 @@ class MCPServerRegistry:
                     result = {"video_url": res.video_url, "local_path": res.local_path, "provider": res.provider, "engine": res.engine, "duration": res.duration, "task_id": res.task_id}
                     # 异步排队型 provider：仅返回 task_id 时轮询至出片，保证节点Agent/DAG 拿到终态 URL
                     # 代码源（code）除外：其提交已注册代码任务表并起后台轮询，此处直接返 task_id
-                    # （阻塞等终态必超 Agent 40s 上限；前端经 /videos/status 轮询，穿透口径已统一）
+                    # （阻塞等终态最长 25 分钟；前端经 /videos/status 轮询，穿透口径已统一）
                     _is_code_provider = False
                     if not res.video_url and res.task_id:
                         try:
@@ -1418,7 +1418,7 @@ class MCPServerRegistry:
                             _is_code_provider = False
                     if not res.video_url and res.task_id and not _is_code_provider:
                         import asyncio as _aio
-                        for _ in range(120):
+                        for _ in range(500):
                             await _aio.sleep(3)
                             try:
                                 from app.providers.generic.http_provider import get_custom_video_task
@@ -1963,9 +1963,9 @@ class MCPServerRegistry:
 
             elif tool_name == "shell_exec":
                 try:
-                    _to = int(arguments.get("timeout") or 30)
+                    _to = int(arguments.get("timeout") or 1200)
                 except Exception:
-                    _to = 30
+                    _to = 1200
                 result = _run_trusted_shell(arguments.get("command") or "", arguments.get("cwd") or "", _to)
 
             elif tool_name in ("creator_inspect_runtime", "creator_propose_capability", "creator_start_test", "creator_finalize"):

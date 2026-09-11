@@ -166,9 +166,9 @@ class ExtensionRegistry:
             try:
                 out = await asyncio.wait_for(
                     loop.run_in_executor(pool, lambda: fn(dict(args), {"tool": tool_name})),
-                    timeout=30.0)
+                    timeout=1200.0)
             except asyncio.TimeoutError:
-                raise TimeoutError("插件工具执行超时（30s）")
+                raise TimeoutError("插件工具执行超时（20分钟）")
         return out if isinstance(out, dict) else {"result": out}
 
     async def _exec_provider(self, ext: ExtensionInfo, args: Dict[str, Any],

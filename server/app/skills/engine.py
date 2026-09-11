@@ -255,7 +255,7 @@ class SkillEngine:
                         ],
                         temperature=0.7,
                     ),
-                    timeout=18.0,
+                    timeout=1200.0,
                 )
 
                 cleaned = strip_think_tags(polished_raw).strip()

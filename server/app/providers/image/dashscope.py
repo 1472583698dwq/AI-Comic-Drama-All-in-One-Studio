@@ -95,7 +95,7 @@ class DashScopeProvider(ImageProvider):
         # 对于 wan 模型，可能需要 prompt_enhancement
         url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis"
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=1200.0) as client:
             resp = await client.post(url, headers=headers, json=payload)
             if resp.status_code != 200:
                 # 尝试回退到 OpenAI 兼容图片接口（若用户配置了自定义模型）
@@ -158,7 +158,7 @@ class DashScopeProvider(ImageProvider):
     async def _poll_task(self, client: httpx.AsyncClient, task_id: str, headers: Dict[str, str]) -> str:
         import asyncio
         url = f"https://dashscope.aliyuncs.com/api/v1/tasks/{task_id}"
-        for _ in range(30):
+        for _ in range(600):
             await asyncio.sleep(2)
             resp = await client.get(url, headers=headers)
             if resp.status_code != 200:

@@ -284,7 +284,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (taskId) {
         // 保持 generating 状态，前端可显示排队中
         get().updateShot(shotId, { video_prompt: prompt, status: 'generating_video' } as any);
-        const maxAttempts = 120; // 最多轮询 6 分钟
+        const maxAttempts = 500; // 最多轮询 25 分钟
         for (let i = 0; i < maxAttempts; i++) {
           await new Promise(r => setTimeout(r, 3000));
           try {
@@ -312,7 +312,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             }
           }
         }
-        throw new Error("视频生成排队超时（6分钟），请稍后在任务列表或历史中查看，或重试");
+        throw new Error("视频生成排队超时（25分钟），请稍后在任务列表或历史中查看，或重试");
       }
       // 兜底：无 video_url 也无 task_id，视为失败
       if (!res.video_url) throw new Error(res.detail || "视频生成未返回视频地址");

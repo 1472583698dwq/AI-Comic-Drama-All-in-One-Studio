@@ -86,7 +86,7 @@ class MiniMaxTTSPipeline:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=1200.0) as client:
                 resp = await client.post(
                     f"{settings.MINIMAX_BASE_URL}/t2a_v2",
                     headers=headers,

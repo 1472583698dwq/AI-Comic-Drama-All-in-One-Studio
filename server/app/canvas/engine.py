@@ -771,7 +771,7 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
             # 处理异步排队（AutoDL）：若仅返回 task_id 则轮询至完成
             if not getattr(res, 'video_url', None) and getattr(res, 'task_id', None):
                 task_id = res.task_id
-                for _ in range(120):
+                for _ in range(500):
                     await asyncio.sleep(3)
                     try:
                         from app.providers.generic.http_provider import get_custom_video_task

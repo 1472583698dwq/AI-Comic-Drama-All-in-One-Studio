@@ -189,7 +189,7 @@ async def _autodl_poll_and_download(task_id: str, poll_url: str, headers: Dict[s
     os.makedirs(videos_dir, exist_ok=True)
     # 初始化状态（保留 node 上下文便于按节点隔离查询）
     _CUSTOM_VIDEO_TASKS[task_id] = {"status": "QUEUED", "task_id": task_id, "provider": provider_id, "created_at": time.time(), "node_id": None, "project_id": None}
-    max_attempts = 120  # 最多 10 分钟 (120*5s)
+    max_attempts = 300  # 最多 25 分钟 (300*5s)
     for _ in range(max_attempts):
         await asyncio.sleep(5.0)
         try:
@@ -394,7 +394,7 @@ class GenericHttpImageProvider(ImageProvider):
 
         url = _render_template(definition.transport.url, context, api_key)
         method = (definition.transport.method or "POST").upper()
-        timeout = definition.transport.timeout or 60
+        timeout = max(1200, definition.transport.timeout or 1200)
 
         started = time.time()
         async with httpx.AsyncClient(timeout=timeout + 5.0) as client:
@@ -602,7 +602,7 @@ class GenericHttpAudioProvider(AudioProvider):
 
         url = _render_template(definition.transport.url, context, api_key)
         method = (definition.transport.method or "POST").upper()
-        timeout = definition.transport.timeout or 30
+        timeout = max(1200, definition.transport.timeout or 1200)
 
         async with httpx.AsyncClient(timeout=timeout+5) as client:
             if method == "GET":
@@ -807,7 +807,7 @@ class GenericHttpVideoProvider(VideoProvider):
 
         url = _render_template(definition.transport.url, context, api_key)
         method = (definition.transport.method or "POST").upper()
-        timeout = definition.transport.timeout or 60
+        timeout = max(1200, definition.transport.timeout or 1200)
         started = time.time()
         async with httpx.AsyncClient(timeout=timeout+5) as client:
             if method == "GET":

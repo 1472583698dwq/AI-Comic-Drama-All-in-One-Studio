@@ -63,7 +63,7 @@ class PluginRecord(BaseModel):
 #                  "input_schema": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
 #                  "entry": "text_stats"}]
 # def text_stats(args: dict, ctx: dict) -> dict: return {...}
-# 注册名为 plugin_<插件id>_<name>；执行强制走 trusted 总闸 + 30s超时 + 结果截断。
+# 注册名为 plugin_<插件id>_<name>；执行强制走 trusted 总闸 + 20分钟超时 + 结果截断。
 MCP_TOOL_NAME_RE = r"^[a-z0-9_]{2,48}$"
 
 

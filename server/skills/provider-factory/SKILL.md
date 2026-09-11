@@ -98,9 +98,9 @@ tools:
 > `GET .../comfyui_workflow/result/{task_id}` 查询终态（约 100s）。以下 7 条是拿真实配额踩出来的，
 > 违反任意一条都会“提交成功但永远收不到片”。
 
-1. **提交即返，绝不在代码里阻塞等终态**。单工具 40s 即超时（`langchain_engine._exec_one`），
-   代码里 `for _ in range(300): sleep(2)` 这类 10 分钟轮询必被掐死，任务在服务端跑完了结果也回不来。
-   正确契约：提交成功立刻 `return {"video_url": None, "task_id": task_id, "status": "SUBMITTED"}`。
+1. **提交即返，绝不在代码里阻塞等终态**。单工具窗口虽已放宽到 20 分钟（`langchain_engine._exec_one`），
+   但阻塞轮询会把 Agent 白卡十几分钟且失败即整段重跑；正确契约：提交成功立刻
+   `return {"video_url": None, "task_id": task_id, "status": "SUBMITTED"}`。
    框架侧（`GenericCodeVideoProvider`→代码任务表→后台轮询→`/videos/status`）会接管后半程，
    前端分镜/画布本来就会轮询状态接口。
 2. **查询分支是另一条命，必须有且必须可达**。触发条件统一为 `task_id 非空且 prompt 为空` →
@@ -224,7 +224,7 @@ async def generate(ctx, api):
 - 画布高级抽屉空 → 说明全被标 `basic`，需至少保留 `steps/cfg` 为 `advanced`
 - 提交成功但永远收不到片（video 异步源）→ 按序查：① 代码里有没有阻塞轮询（有就删，改提交即返）② 查询分支能否进（`ctx task_id` 双路取值了吗）③ 首帧进 body 了吗（`ref_image_0`）④ 发出去的是公网 URL 或 `data:` 内联吗（框架已自动内联本地 `/storage`，若 `media_warnings` 报超限/缺失则换公网链接或压缩后重传）⑤ 提交响应的 `code/msg` 说了什么（八成是参数枚举不对，如 `720p` vs `480p竖`）
 - `参数校验失败（未发送请求）` → 用户选的值不在 `params_schema.enum` 里，说明 schema 枚举与 API 真实枚举不一致，重写 schema，不要改代码硬凑
-- Agent 调视频源 40s 超时 → 代码里一定有阻塞等待，改异步模板；不要让用户去本地跑 curl（截图事故）
+- Agent 调视频源超时（20分钟窗口仍不够）→ 代码里一定有阻塞等待，改异步模板；不要让用户去本地跑 curl（截图事故）
 - `data:null` 崩溃类报错 → 代码用了 `data["data"]["task_id"]` 硬下标，改 `.get()` 链 + 失败 `raise RuntimeError` 带出 `code/msg`
 
 ## 示例

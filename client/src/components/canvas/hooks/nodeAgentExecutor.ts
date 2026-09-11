@@ -81,7 +81,7 @@ export function buildAgentArgs(d: any, prompt: string, extraKeys: string[] = [])
 
 async function pollVideoTask(taskId: string): Promise<string> {
   let lastErr = '';
-  for (let i = 0; i < 140; i++) {
+  for (let i = 0; i < 500; i++) {
     await new Promise((r) => setTimeout(r, 3000));
     try {
       const st: any = await apiService.getVideoTaskStatus(taskId);

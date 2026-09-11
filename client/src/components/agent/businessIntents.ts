@@ -70,7 +70,7 @@ export function extractArtifact(toolName: string, result: any): ArtifactInfo | n
 /** 结构化错误：what/why/next（前端兜底，后端透传优先） */
 export function toStructuredError(toolName: string, raw: string): { what: string; why: string; next: string } {
   const e = String(raw || '未知错误');
-  if (/超时|timeout/i.test(e)) return { what: `${toolName} 执行超时`, why: '生成类任务(尤其视频)常需60~300s，单次40s窗口不够', next: '改用异步：提交返task_id后轮询，或切更小分辨率/更短时长重试' };
+  if (/超时|timeout/i.test(e)) return { what: `${toolName} 执行超时`, why: '工具窗口已放宽至20分钟；仍超时多为任务排队/服务端卡住', next: '改用异步：提交返task_id后轮询，或检查源服务负载后重试' };
   if (/未配置|API_KEY|鉴权|401/i.test(e)) return { what: `${toolName} 鉴权/配置缺失`, why: '对应Provider的Key或服务地址未填', next: '去配置页补Key后点测试连通，或换本地ComfyUI源' };
   if (/无法连接|ComfyUI|ECONN|refused/i.test(e)) return { what: '生成服务不可达', why: 'ComfyUI或云端地址不通', next: '检查服务是否启动/地址是否正确，或换硅基流动等云源' };
   if (/拒绝|超时自动拒绝|确认/i.test(e)) return { what: '敏感操作被跳过', why: '破坏性工具需人工确认', next: '在WS在线时重新下指令并在确认卡点允许' };

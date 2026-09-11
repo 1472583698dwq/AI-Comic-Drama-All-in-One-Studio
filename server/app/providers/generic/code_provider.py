@@ -313,10 +313,10 @@ async def _exec_module_guarded(code: str, g: Dict[str, Any], l: Dict[str, Any], 
         raise RuntimeError(f"code compile failed: {e}") from e
 
 
-async def _execute_python_code(code: str, entry: str, ctx: Dict[str, Any], timeout: int = 60, trusted: bool = False) -> Dict[str, Any]:
+async def _execute_python_code(code: str, entry: str, ctx: Dict[str, Any], timeout: int = 1200, trusted: bool = False) -> Dict[str, Any]:
     _validate_python_code(code, trusted=trusted)
     g, l, api = _python_sandbox(ctx, trusted=trusted)
-    await _exec_module_guarded(code, g, l)
+    await _exec_module_guarded(code, g, l, timeout=int(timeout or 1200))
     fn = l.get(entry) or g.get(entry)
     if not fn:
         candidates = [v for v in l.values() if callable(v)]
@@ -521,16 +521,21 @@ async def persist_media(url: str, kind: str, prefix: str) -> tuple:
 
 
 def resolve_code_timeout(definition) -> int:
-    """超时策略单点：显式 code_timeout > legacy transport.timeout > kind 默认（视频 600s，其余 120s）"""
+    """超时策略单点：显式 code_timeout > legacy transport.timeout > kind 默认；
+    下限 20 分钟（1200s），存量较短配置自动抬升，保证长任务不被提前掐断。"""
     explicit = getattr(definition, "code_timeout", None)
+    base = None
     if explicit:
-        return int(explicit)
-    transport = getattr(definition, "transport", None)
-    if transport is not None:
-        transport_timeout = transport.get("timeout") if isinstance(transport, dict) else getattr(transport, "timeout", None)
-        if transport_timeout:
-            return int(transport_timeout)
-    return 600 if getattr(definition, "kind", "") == "video" else 120
+        base = int(explicit)
+    else:
+        transport = getattr(definition, "transport", None)
+        if transport is not None:
+            transport_timeout = transport.get("timeout") if isinstance(transport, dict) else getattr(transport, "timeout", None)
+            if transport_timeout:
+                base = int(transport_timeout)
+    if base is None:
+        base = 600 if getattr(definition, "kind", "") == "video" else 120
+    return max(1200, base)
 
 
 # ==================== 代码视频源异步任务表（H3 等提交即返 task_id 型） ====================
@@ -540,7 +545,7 @@ def resolve_code_timeout(definition) -> int:
 _CODE_VIDEO_TASKS: Dict[str, Dict[str, Any]] = {}
 _CODE_VIDEO_POLLING: set = set()  # 已在后台轮询中的 task_id（去重：查询复用不重复起协程）
 _CODE_VIDEO_POLL_INTERVAL = 5.0
-_CODE_VIDEO_MAX_ATTEMPTS = 200  # ~16 分钟，覆盖排队+生成
+_CODE_VIDEO_MAX_ATTEMPTS = 300  # ~25 分钟，覆盖排队+生成
 _CODE_VIDEO_TERMINAL_FAIL = ("FAILED", "FAIL", "ERROR", "CANCELLED")
 
 
@@ -638,7 +643,7 @@ async def _poll_code_video_task(task_id: str, provider_id: str) -> None:
         ent.update({"status": status or "SUBMITTED", "last_poll": time.time()})
         _CODE_VIDEO_TASKS[tid] = ent
     ent = _CODE_VIDEO_TASKS.get(tid) or {"task_id": tid, "provider": provider_id}
-    ent.update({"status": "TIMEOUT", "error": "轮询超时（~16min），可携带 task_id 重新查询"})
+    ent.update({"status": "TIMEOUT", "error": "轮询超时（~25min），可携带 task_id 重新查询"})
     _CODE_VIDEO_TASKS[tid] = ent
 
 
@@ -699,7 +704,7 @@ const fs = require('fs');
 })();
 """
 
-async def _execute_js_code(code: str, entry: str, ctx: Dict[str, Any], timeout: int = 60, trusted: bool = False) -> Dict[str, Any]:
+async def _execute_js_code(code: str, entry: str, ctx: Dict[str, Any], timeout: int = 1200, trusted: bool = False) -> Dict[str, Any]:
     with tempfile.TemporaryDirectory() as tmpdir:
         user_path = os.path.join(tmpdir, "user_code.js")
         wrapper_path = os.path.join(tmpdir, "runner.js")
@@ -808,11 +813,9 @@ class _CodeSourceBase:
         self.language = definition.language or "python"
 
     def is_configured(self) -> bool:
-        if not self.definition.code or not self.definition.code.strip():
-            return False
-        if self.definition.auth.type != "none":
-            return bool(_get_api_key_for_provider(self.id, self.definition))
-        return True
+        # 代码源自行处理 Key（可能内联在代码里），不以 auth 缺 Key 判不可用——
+        # 旧逻辑用 auth.type!=none 硬拦，导致"代码自带 Key"的自定义源永远无法被调用。
+        return bool(self.definition.code and self.definition.code.strip())
 
     async def check_health(self) -> bool:
         # 仅语法级检查（不 exec，避免模块级副作用被健康检查反复触发）；深度体检走 compile_check_code（测试按钮/创建时）
@@ -857,10 +860,9 @@ class GenericCodeImageProvider(_CodeSourceBase, ImageProvider):
     FALLBACK_SIZES = {"9:16": (832, 1216), "16:9": (1216, 832), "1:1": (1024, 1024)}
 
     async def generate(self, req: ImageGenerateRequest) -> ImageGenerateResult:
-        # prompt 只是 ctx 数据之一（去模板后可来自上游连线/暴露项/为空），契约由源代码自己定义
+        # prompt 只是 ctx 数据之一（去模板后可来自上游连线/暴露项/为空），契约由源代码自己定义。
+        # 不再硬拦缺失 API Key：代码源可能内联 Key，由用户代码自行校验并给出明确错误。
         api_key = self._api_key()
-        if self.definition.auth.type != "none" and not api_key:
-            raise RuntimeError(f"Provider {self.id} missing API Key")
         user = merge_user_params(req)
         # 出网前枚举护栏：只校验用户显式选择，非法直接报错（不消耗配额）
         validate_user_params(self.definition, user)
@@ -918,9 +920,8 @@ class GenericCodeVideoProvider(_CodeSourceBase, VideoProvider):
     kind = "video"
 
     async def generate(self, req: VideoGenerateRequest) -> VideoGenerateResult:
+        # 不再硬拦缺失 API Key：代码源可能内联 Key（如 AutoDL 源），由用户代码自行校验。
         api_key = self._api_key()
-        if self.definition.auth.type != "none" and not api_key:
-            raise RuntimeError(f"Provider {self.id} missing API Key")
         user = merge_user_params(req)
         validate_user_params(self.definition, user)
         # 兼容：reference_audios/last_frame 等可能仅在 dynamic_inputs 中
@@ -1019,7 +1020,7 @@ class GenericCodeAudioProvider(_CodeSourceBase, AudioProvider):
         validate_user_params(self.definition, user)
         # 参考音频同样内联本地 /storage（音色克隆源此前收不到任何参考音频）
         from app.providers.media_refs import resolve_media_refs as _resolve_arefs
-        _dyn_a = req.dynamic_inputs or {}
+        _dyn_a = getattr(req, "dynamic_inputs", None) or {}
         _a_raw = _dyn_a.get("reference_audio") or _dyn_a.get("ref_audio") or _dyn_a.get("reference_audios") or getattr(req, "ref_audio_path", None) or (user.get("ref_audio") or user.get("reference_audio"))
         if isinstance(_a_raw, str) and _a_raw.strip():
             _a_raw = [_a_raw]
@@ -1036,7 +1037,7 @@ class GenericCodeAudioProvider(_CodeSourceBase, AudioProvider):
             "ref_audio": (_a_kept[0] if _a_kept else ""),
             "reference_audios": _a_kept,
             "api_key": api_key, "provider_id": self.id, "kind": "audio",
-            "dynamic_inputs": req.dynamic_inputs or {},
+            "dynamic_inputs": getattr(req, "dynamic_inputs", None) or {},
             "headers": self.definition.headers or (self.definition.transport.headers if self.definition.transport else {}) or {},
             "custom_headers": self.definition.headers or (self.definition.transport.headers if self.definition.transport else {}) or {},
         }

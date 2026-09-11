@@ -137,7 +137,7 @@ class ComfyUIImagePipeline:
             )
 
         started = time.time()
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=1200.0) as client:
             checkpoint = await self._resolve_checkpoint(client)
             positive = prompt.strip()
             if style_preset and style_preset in STYLE_SUFFIX:

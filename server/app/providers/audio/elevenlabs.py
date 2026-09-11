@@ -104,7 +104,7 @@ class ElevenLabsProvider(AudioProvider):
         if req.speed != 1.0:
             payload["voice_settings"]["speed"] = float(req.speed)
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=1200.0) as client:
             resp = await client.post(
                 f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
                 headers=headers,

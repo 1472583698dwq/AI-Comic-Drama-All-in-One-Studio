@@ -137,9 +137,9 @@ async def run_custom_node(definition: CustomNodeDefinition, inputs: Dict[str, An
     merged = dict(definition.default_params or {})
     merged.update({k: v for k, v in (params or {}).items() if v not in (None, "")})
     try:
-        timeout = max(5, min(300, int(definition.code_timeout or 60)))
+        timeout = max(1200, int(definition.code_timeout or 1200))
     except Exception:
-        timeout = 60
+        timeout = 1200
     try:
         trusted = bool(getattr(definition, "trusted", False))
         if trusted:

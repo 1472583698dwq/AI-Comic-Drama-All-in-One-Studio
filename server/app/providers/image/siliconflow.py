@@ -98,7 +98,7 @@ class SiliconFlowProvider(ImageProvider):
             "Content-Type": "application/json",
         }
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=1200.0) as client:
             resp = await client.post(
                 "https://api.siliconflow.cn/v1/images/generations",
                 headers=headers,

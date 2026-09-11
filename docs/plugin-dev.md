@@ -116,7 +116,7 @@ discover → validate → install → enable ⇄ disable → uninstall
 | `workflows` | ComfyUI 工作流 JSON | `save_workflow` 校验入库并 sync 为独立源 |
 | `custom_nodes` | `{input_schema, params_schema, run}` JSON | 画布代码节点 + MCP Tool |
 | `storyboard_slots` | 分镜槽声明 JSON | 分镜工作台槽宿主 |
-| `mcp_tools` | `.py`：`PLUGIN_TOOLS` 列表 + 入口函数 | `plugin_<id>_<name>`，trusted 闸 + 30s 超时 |
+| `mcp_tools` | `.py`：`PLUGIN_TOOLS` 列表 + 入口函数 | `plugin_<id>_<name>`，trusted 闸 + 20分钟超时 |
 | `canvas_nodes` / `director_packs` / `exporters` / `themes` | — | **未落地（占位）**，声明会被记录但不执行 |
 
 ### 4.1 mcp_tools 查壳函数
@@ -134,7 +134,7 @@ def text_stats(args: dict, ctx: dict) -> dict:
 ```
 
 注册名为 `plugin_<插件id>_<name>`。执行强制走 `_trusted_gate_or_raise()`，
-30s 超时，结果 20000 字符截断。
+20分钟超时，结果 20000 字符截断。
 
 ### 4.2 storyboard_slots 签名
 

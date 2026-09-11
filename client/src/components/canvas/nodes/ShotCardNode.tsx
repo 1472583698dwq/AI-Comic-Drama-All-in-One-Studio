@@ -119,7 +119,7 @@ export const ShotCardNode: React.FC<NodeProps> = ({ data, id }) => {
               if (!url && res.task_id) {
                 const taskId = res.task_id;
                 // 轮询排队任务
-                for (let i=0;i<120;i++) {
+                for (let i=0;i<500;i++) {
                   await new Promise(r=> setTimeout(r, 3000));
                   try{
                     const st:any = await apiService.getVideoTaskStatus(taskId);

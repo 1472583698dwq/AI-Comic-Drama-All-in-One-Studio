@@ -439,7 +439,20 @@ class ProjectManager:
         try:
             with open(p, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            return data if isinstance(data, list) else []
+            if not isinstance(data, list):
+                return []
+            # 清洗流式瞬态标记：断连/中止后遗留的 isThinkingStreaming=true 会让 UI 永久转圈
+            for s in data:
+                if not isinstance(s, dict):
+                    continue
+                for m in (s.get("messages") or []):
+                    if not isinstance(m, dict):
+                        continue
+                    if m.get("isThinkingStreaming"):
+                        m["isThinkingStreaming"] = False
+                    if m.get("isStreaming"):
+                        m["isStreaming"] = False
+            return data
         except Exception:
             return []
 

@@ -54,9 +54,17 @@ def _get_session_lock(session_id: str) -> asyncio.Lock:
     return SESSION_LOCKS[session_id]
 
 def _trim_history(history: List[Any]) -> List[Any]:
-    if len(history) > SESSION_MAX_HISTORY:
-        return history[-SESSION_MAX_HISTORY:]
-    return history
+    """按 turn 边界裁剪历史：绝不从 AIMessage(tool_calls)/ToolMessage 中间切开，
+    否则 OpenAI 兼容接口会因 tool_call_id 配对缺失直接 400。"""
+    if len(history) <= SESSION_MAX_HISTORY:
+        return history
+    start = len(history) - SESSION_MAX_HISTORY
+    # 前移到最近一条 HumanMessage（轮次边界）；SystemMessage 也视为安全起点
+    while start < len(history) and not isinstance(history[start], (HumanMessage, SystemMessage)):
+        start += 1
+    if start >= len(history):
+        return history[-1:]
+    return history[start:]
 
 def _clip(text: Any, n: int) -> str:
     s = str(text if text is not None else "").strip().replace("\n", " ")
@@ -238,33 +246,9 @@ def _is_destructive_call(name: str, args: Dict[str, Any]) -> bool:
 
 
 def _build_allowed_tools(query: str) -> Optional[set]:
-    """按意图裁剪bind_tools子集：检索命中 + 常驻 + 破坏性（可提请但走审批）。"""
-    try:
-        from app.agent.loop import search_tools, CORE_TOOLS
-    except Exception:
-        return None
-    try:
-        hits = search_tools(query or "", 12) or []
-    except Exception:
-        return None
-    allowed = set(CORE_TOOLS) | {"search_tools"}
-    always = {"get_provider_code", "update_custom_provider", "test_custom_provider",
-              "canvas_dispatch_skill", "canvas_query_assets", "list_custom_providers",
-              "list_comfyui_workflows", "list_voices", "list_video_providers",
-              "list_image_providers", "list_voice_providers",
-              "delete_custom_provider", "shell_exec", "fs_file",
-              "register_custom_provider", "generate_video", "generate_image",
-              "generate_voice", "generate_minimax_voice"}
-    allowed |= always
-    prov_count = 0
-    for h in hits:
-        n = h.get("name", "")
-        if n.startswith("provider_"):
-            if prov_count >= 8:
-                continue
-            prov_count += 1
-        allowed.add(n)
-    return allowed
+    """[已废弃] 旧版按意图裁剪 bind_tools 子集：8 个 provider 上限会让自定义源
+    "存在但不可调用"。现引擎全量绑定，仅保留此函数兼容外部引用。"""
+    return None
 
 
 # ─── 工具转换 ────────────────────────────────────────────
@@ -485,11 +469,13 @@ async def run_agent_with_langchain(
         except Exception:
             pass
         return {"reply": clean_reply, "thinking": th, "suggested_actions": ["切换到执行模式让我直接做"], "executed_tools": [], "mode": "chat"}
-    # execute预算：mode未指定max时用P0默认值12（引擎安全上限30不变）
+    # 计划模式：只读侦察 + 产出计划（工具在绑定层硬门控，模型无变更工具可用）
+    _plan_mode = bool((context or {}).get("plan_mode")) or str((context or {}).get("run_mode") or "").strip().lower() in ("plan", "planning")
+    # 轮次预算：plan 模式 60，execute 模式 200（均可用 AGENT_MAX_ITERATIONS 覆盖）
     try:
         from app.agent.loop import MODE_BUDGETS
         if not max_iterations:
-            max_iterations = int(MODE_BUDGETS["execute"]["max_steps"])
+            max_iterations = int((MODE_BUDGETS.get("plan") if _plan_mode else MODE_BUDGETS["execute"])["max_steps"])
     except Exception:
         pass
     async with _get_session_lock(session_id):
@@ -497,6 +483,17 @@ async def run_agent_with_langchain(
     context_block = _build_context_block(context)
     human_content = f"指令: {prompt}\n\n{context_block}" if context_block else prompt
     human_history = f"指令: {prompt}" if context_block else prompt
+    if _plan_mode:
+        human_content += ("\n\n【PLAN MODE 已开启】你只被授予只读侦察工具，变更/生成类工具未绑定、调用即失败。"
+                          "请先侦察（画布/素材/生成源/代码/项目状态），再输出完整可执行的 markdown 计划"
+                          "（以 `# 计划：` 开头，含按序编号步骤、每步工具与关键参数、风险、验收标准）。本轮不要执行任何变更。")
+    _approved = (context or {}).get("approved_plan") if isinstance(context, dict) else None
+    if _approved and not _plan_mode:
+        try:
+            _plan_text = _approved if isinstance(_approved, str) else json.dumps(_approved, ensure_ascii=False)
+        except Exception:
+            _plan_text = str(_approved)
+        human_content += f"\n\n【用户已批准的执行计划（请严格按步骤执行；如遇阻塞先尝试替代方案，偏离计划需在最终回复中说明理由）】\n{_plan_text[:6000]}"
 
     # 无 LangChain 时直接回退为轻量 JSON 单次（但本重构要求 LangChain 存在）
     if not HAS_LANGCHAIN:
@@ -514,21 +511,28 @@ async def run_agent_with_langchain(
     llm = get_chat_model(streaming=streaming)
     if llm is None:
         raise RuntimeError("无法初始化 Chat Model")
-    # P1真裁剪：按本轮意图取子集进bind_tools，非全部49个
+    # 能力优先：全部已注册工具直接绑定（含全部 provider_*/customnode_*/plugin_* 自定义能力）。
+    # Plan Mode：仅绑定只读侦察工具（绑定层硬门控，模型即使想变更也无工具可调）。
+    tools = _mcp_to_langchain_tools(None)
+    _plan_allowed: set = set()
+    if _plan_mode:
+        from app.agent.planner import PLAN_READONLY_TOOLS
+        _plan_allowed = set(PLAN_READONLY_TOOLS)
+        tools = [t for t in tools if getattr(t, "name", "") in _plan_allowed]
     try:
-        _allowed = _build_allowed_tools(prompt or "")
-    except Exception:
-        _allowed = None
-    tools = _mcp_to_langchain_tools(_allowed)
-    try:
-        print(f"[DirectorAgent] bind_tools subset: {len(tools)} (allowed={len(_allowed) if _allowed else 'all'})")
+        print(f"[DirectorAgent] bind_tools: {len(tools)} (plan_mode={_plan_mode})")
     except Exception:
         pass
     llm_with_tools = llm.bind_tools(tools) if hasattr(llm, "bind_tools") and tools else llm
 
     from app.api.routes import get_agent_system_prompt
-    system_extra = ("\n\n你是具备多轮记忆的导演 Agent，可进行多轮工具调用且无固定轮次上限——持续执行直到用户目标全部完成，请基于历史与工具结果持续推理。"
-                    "\n工具检索优先：provider_*动态源很多时，先调search_tools按意图取子集（如 生图/配音/画布/剪映），再执行，禁止把90个全量定义硬背进每轮。")
+    system_extra = ("\n\n你是具备多轮记忆的导演 Agent：轮次无实际硬上限（默认 200，可持续执行直到目标完成），请基于历史与工具结果持续推理。"
+                    "\n全部工具（含自定义生成源 provider_*/自定义代码节点 customnode_*/插件 plugin_*）已直接绑定，可直接调用；工具很多时可用 search_tools 快速定位。"
+                    "\n失败自愈铁律：工具失败时不要只汇报或停下——先尝试替代方案（换源/换参数/get_provider_code 诊断/update_custom_provider 修复/canvas_update_node 改参）继续推进，直到目标完成；"
+                    "仅当确实需要用户提供 Key/素材等外部输入时才停下提问。")
+    if _plan_mode:
+        system_extra += ("\n\n【PLAN MODE / 计划模式】当前只允许只读侦察：查询画布/素材/生成源/代码/项目状态，禁止任何生成、写盘、执行、删改动作。"
+                         "侦察充分后，输出一份完整可执行的 markdown 计划（以 `# 计划：` 开头：目标、按序步骤（工具+关键参数+产出）、风险与注意、验收标准）。不要执行。")
     messages: List[BaseMessage] = [SystemMessage(content=get_agent_system_prompt(loop=True) + system_extra)]
     for h in history:
         messages.append(h)
@@ -540,6 +544,7 @@ async def run_agent_with_langchain(
     stall_count = 0
     nudged_empty = False
     nudged_query = False
+    fail_streak: Dict[str, int] = {}  # 同一工具连续失败计数（熔断用，成功即清零）
     # P2 trace: run_id 落盘(JSONL)，供回放/审计；失败也不影响主流程
     import uuid as _trace_uuid
     _run_id = f"{session_id}_{int(time.time())}_{_trace_uuid.uuid4().hex[:6]}"
@@ -570,15 +575,23 @@ async def run_agent_with_langchain(
             await asyncio.sleep(0.005)
         await _safe_send({"event": "agent_thinking_end"})
 
-    iteration = 0
-    safety_cap = 30  # 重构后实用上限 30 轮足够完成任意画布编排，旧 200 过高易失控
-    if max_iterations:
-        safety_cap = min(safety_cap, max_iterations)
+    # 轮次：不设实际限制（默认 200，可用 AGENT_MAX_ITERATIONS 覆盖）；只作死循环兜底。
+    # 真正的空转由 同一工具连续失败熔断 / 同批重复调用检测 控制。
+    try:
+        safety_cap = int(os.environ.get("AGENT_MAX_ITERATIONS") or 200)
+    except Exception:
+        safety_cap = 200
+    if max_iterations and int(max_iterations) > 0:
+        safety_cap = max(safety_cap, int(max_iterations))
 
+    iteration = 0
     while True:
         iteration += 1
         if iteration > safety_cap:
-            full_reply = (full_reply or content if 'content' in locals() else "") + "\n\n（已达安全轮次上限 30，任务未完成可让我继续。）"
+            _tail = ""
+            if 'content' in locals() and content:
+                _tail = str(content)
+            full_reply = (full_reply or _tail) + f"\n\n（已达安全轮次上限 {safety_cap}，任务未完成可让我继续。）"
             break
         content = ""
         tool_calls: List[Dict[str, Any]] = []
@@ -644,6 +657,12 @@ async def run_agent_with_langchain(
                         for tc in _calls:
                             name = tc.get("name") or ""
                             args = tc.get("args") or {}
+                            # Plan Mode 硬门控兜底：只读工具之外一律拒绝
+                            if _plan_mode and name not in _plan_allowed:
+                                _msg = f"计划模式只允许只读工具，已拒绝 {name}（不会执行任何变更）"
+                                executed_tools.append({"tool_name": name, "arguments": args, "status": "error", "result": None, "error": _msg})
+                                messages.append(ToolMessage(content=_msg, tool_call_id=tc.get("id") or name, name=name))
+                                continue
                             # 兜底路径破坏性调用直接拒绝（避免无审批执行）
                             if _is_destructive_call(name, args):
                                 _msg = f"破坏性工具 {name} 需用户确认，兜底路径已跳过（请用WS执行模式确认后重试）"
@@ -651,7 +670,7 @@ async def run_agent_with_langchain(
                                 messages.append(ToolMessage(content=_msg, tool_call_id=tc.get("id") or name, name=name))
                                 continue
                             await _safe_send({"event": "tool_calling", "tool_name": name, "arguments": args, "status": "executing"})
-                            _res = await asyncio.wait_for(mcp_registry.execute_tool(name, args, project_context=context.get("project") if isinstance(context, dict) else None), timeout=30)
+                            _res = await asyncio.wait_for(mcp_registry.execute_tool(name, args, project_context=context.get("project") if isinstance(context, dict) else None), timeout=1200)
                             executed_tools.append({"tool_name": name, "arguments": args, "status": _res.status, "result": _res.result, "error": _res.error})
                             await _safe_send({"event": "tool_result", "tool_name": name, "status": _res.status, "result": _res.result if _res.status=="success" else None, "error": _res.error})
                             tool_str = _summarize_tool_result(name, _res.result if _res.status=="success" else {"error": _res.error}, max_chars=4000)
@@ -771,6 +790,13 @@ async def run_agent_with_langchain(
                         args = {}
                 if not name:
                     return None
+                # Plan Mode 硬门控兜底：只读工具之外一律拦截（绑定层已过滤）
+                if _plan_mode and name not in _plan_allowed:
+                    msg = f"计划模式只允许只读工具，已拦截 {name}（本轮不执行任何变更）"
+                    executed_tools.append({"tool_name": name, "arguments": args, "status": "error", "result": None, "error": msg})
+                    await _safe_send({"event": "tool_result", "tool_name": name, "status": "error", "error": msg})
+                    messages.append(ToolMessage(content=msg, tool_call_id=tc.get("id") or name, name=name))
+                    return None
                 # P1 HITL：破坏性调用先请示，无WS/超时/拒绝则跳过（HTTP无交互自动拒绝并引导走WS）
                 if _is_destructive_call(name, args):
                     if websocket is None:
@@ -798,11 +824,11 @@ async def run_agent_with_langchain(
                         _PENDING_APPROVALS.pop(_aid, None)
                 await _safe_send({"event": "tool_calling", "tool_name": name, "arguments": args, "status": "executing"})
                 try:
-                    res = await asyncio.wait_for(mcp_registry.execute_tool(name, args, project_context=context.get("project") if isinstance(context, dict) else None), timeout=40)
+                    res = await asyncio.wait_for(mcp_registry.execute_tool(name, args, project_context=context.get("project") if isinstance(context, dict) else None), timeout=1200)
                 except asyncio.CancelledError:
                     raise
                 except asyncio.TimeoutError:
-                    res = type("R", (), {"status": "error", "result": None, "error": f"工具 {name} 执行超时 40s"})()
+                    res = type("R", (), {"status": "error", "result": None, "error": f"工具 {name} 执行超时（20分钟）"})()
                 except Exception as e:
                     res = type("R", (), {"status": "error", "result": None, "error": str(e)})()
                 executed_tools.append({"tool_name": name, "arguments": args, "status": getattr(res, "status", "error"), "result": getattr(res, "result", None), "error": getattr(res, "error", None)})
@@ -811,12 +837,28 @@ async def run_agent_with_langchain(
                 return (tc, summarized, name)
 
             # 保持顺序执行以符合前端 badge 顺序，但整体仍异步
+            _before = len(executed_tools)
             for tc in tool_calls:
                 r = await _exec_one(tc)
                 if not r:
                     continue
                 orig_tc, summarized, name = r
                 messages.append(ToolMessage(content=summarized, tool_call_id=orig_tc.get("id") or name, name=name))
+            # 失败熔断：同一工具连续 3 次失败 → 停止空转，输出可诊断结论（成功即清零）
+            for _t in executed_tools[_before:]:
+                _nm = _t.get("tool_name") or ""
+                if _t.get("status") == "error":
+                    fail_streak[_nm] = fail_streak.get(_nm, 0) + 1
+                else:
+                    fail_streak[_nm] = 0
+            _hot = next((nm for nm, c in fail_streak.items() if c >= 3), "")
+            if _hot:
+                _last_err = next((str(t.get("error") or "") for t in reversed(executed_tools)
+                                  if t.get("tool_name") == _hot and t.get("status") == "error"), "")
+                full_reply = ((clean_content + "\n\n") if clean_content else "") + \
+                    f"⚠️ 工具 `{_hot}` 连续失败 3 次，已停止重试以避免无效循环。\n最后一次错误：{_last_err[:300]}\n请更换生成源/工作流/参数后，回复「继续」让我接着做。"
+                messages.append(AIMessage(content=full_reply))
+                break
             continue
 
         # ── 无工具调用 → 收尾或防早停 ──
@@ -825,9 +867,12 @@ async def run_agent_with_langchain(
             if iter_thought and len(iter_thought) > 40:
                 stripped = iter_thought
                 iter_thought = ""
-            elif executed_tools and not nudged_empty:
+            elif not nudged_empty:
                 nudged_empty = True
-                messages.append(HumanMessage(content="请基于以上已执行工具的结果，直接给出最终中文总结与答案，不要返回空内容。"))
+                if executed_tools:
+                    messages.append(HumanMessage(content="请基于以上已执行工具的结果，直接给出最终中文总结与答案，不要返回空内容。"))
+                else:
+                    messages.append(HumanMessage(content="你刚才既没有返回文本也没有调用工具。请直接给出面向用户的中文回答；若任务需要动手，请调用恰当的工具。不要返回空内容。"))
                 continue
             elif executed_tools:
                 names = "、".join(t.get("tool_name") for t in executed_tools[-3:])

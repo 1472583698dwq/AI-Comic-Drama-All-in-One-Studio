@@ -21,13 +21,25 @@ from app.skills.engine import skill_engine, SkillDefinition, SkillExecutionResul
 from app.core.config import settings, read_env_file, write_env_file, MANAGED_KEYS, get_primary_env_file, JSON_CONFIG_FILE
 from pydantic import BaseModel, Field
 import httpx
-# LangChain Agent 引擎（带记忆、循环、流式）
+
+# ── Agent 内核选择：v2 = runtime/ 单一状态机（默认），v1 = 旧 langchain_engine ──
+AGENT_ENGINE = (os.getenv("AGENT_ENGINE") or "v2").strip().lower()
+HAS_AGENT_RUNTIME = False
+try:
+    from app.agent.runtime.manager import agent_manager
+    from app.agent.runtime import events as agent_events
+    HAS_AGENT_RUNTIME = True
+except Exception as _agent_rt_err:
+    print(f"[Agent] runtime v2 加载失败（将按 AGENT_ENGINE 回退 v1）: {_agent_rt_err}")
+
 try:
     from app.pipelines.agent.langchain_engine import run_agent_with_langchain, clear_session, get_history, SESSION_MEMORY
     HAS_LANGCHAIN_AGENT = True
-except Exception as e:
+except Exception as _lc_err:
+    print(f"[Agent] langchain_engine 加载失败: {_lc_err}")
     HAS_LANGCHAIN_AGENT = False
-    print(f"[Agent] LangChain engine not available: {e}")
+
+AGENT_V2 = AGENT_ENGINE == "v2" and HAS_AGENT_RUNTIME
 
 # 延迟初始化 providers（避免循环导入）
 def get_image_registry():
@@ -981,12 +993,12 @@ AGENT_SYSTEM_PROMPT_BODY = """你是「AI漫剧导演 Agent」，运行在 MiniM
 
 **可信模式双工具（A档，需 STUDIO_TRUSTED_MODE=1，否则明错提示开启方式）：**
 25. fs_file —— 文件编辑。参数：action(list/read/write/append/delete), path(围栏 storage/exports/工作区根，禁.git等), content, encoding。示例：{"action":"read","path":"storage/providers/custom/prov_xxx.json"} / {"action":"write","path":"storage/tmp_task.txt","content":"task_id=..."}
-26. shell_exec —— 命令执行（Win走PowerShell）。参数：command, cwd(围栏内), timeout(5-120s)。示例：{"command":"curl -s https://api.../query?task_id=xxx","timeout":15}
-**H3长任务异步范式（防截图式卡死）：** 视频任务约100s，单工具40s/LLM90s必超时——必须提交即返task_id再轮询：①provider代码提交后return {"task_id":...}（勿阻塞等终态）②用shell_exec单次GET查询（秒回）或provider查询分支拿video_url ③fs_file暂存task_id ④canvas_update_node回填video_url。严禁阻塞等终态、严禁让用户本地跑curl。
+26. shell_exec —— 命令执行（Win走PowerShell）。参数：command, cwd(围栏内), timeout(5-1200s，默认1200=20分钟)。示例：{"command":"curl -s https://api.../query?task_id=xxx","timeout":15}
+**长任务异步范式（防截图式卡死）：** 单工具已放宽到20分钟，但视频/批量任务仍建议提交即返task_id再轮询：①provider代码提交后return {"task_id":...} ②用shell_exec单次GET查询（秒回）或provider查询分支拿video_url ③fs_file暂存task_id ④canvas_update_node回填video_url。20分钟内可阻塞等终态，超长任务优先异步。
 
 **无限画布（Canvas DAG，可视化编排）：**
 20. canvas_query —— 查询画布摘要与节点清单，感知当前画布状态
-21. canvas_create_node —— 创建节点。参数：type(brief/script-split/shot-card/comfy-workflow/provider-image/provider-video/provider-audio/video/tts/load-image/load-image-batch/load-video/load-audio/text-prompt/director3d/timeline-export), position{x,y}, params(可选内部参数)
+21. canvas_create_node —— 创建节点。参数：type(prompt/image/video/audio/director3d/export/custom/brief/script-split/shot-card/comfy-workflow/provider-image/provider-video/provider-audio/tts/load-image/load-image-batch/load-video/load-audio/text-prompt/timeline-export), position{x,y}, params(可选内部参数；type=custom 时 params 必带 custom_node_id，即 customnode_<id> 工具去掉前缀的 id，可直接调该工具执行)
 22. canvas_update_node —— 更新节点。参数：node_id, patch(要更新的 data 字段)
 23. canvas_connect —— 连线。参数：source, sourceHandle, target, targetHandle（类型需匹配 image/video/audio/text/provider）
 24. canvas_execute —— 执行画布 DAG。参数：target_ids(可选，仅执行选中), project_id
@@ -1068,7 +1080,11 @@ def _provider_tools_brief() -> str:
             + "\n".join(lines[:90])
             + "\n\n**编排画布时：** 用 canvas_create_node 创建 prompt/image/video/audio 节点，data 内直接写 provider_id(即Tool名去掉provider_前缀)、prompt/idea、skill_id 与挂载的 first_frame/reference_images/ref_audio；"
             "canvas_connect 按句柄(prompt/image/first_frame/last_frame/reference_images/ref_audio/text)连线后 canvas_execute 一键执行。"
-            "生成源参数异构一律按该 provider_* Tool 自己的 schema 填写，含 x-visibility/x-agent：basic/auto 可由你自动按项目画幅推断，advanced/suggest 仅在用户提及时填写，hidden/manual 绝不填。\n"
+            "生成源参数异构一律按该 provider_* Tool 自己的 schema 填写，含 x-visibility/x-agent：basic/auto 可由你自动按项目画幅推断，advanced/suggest 仅在用户提及时填写，hidden/manual 绝不填。"
+            "\n**生成源选择铁律：** 需要首帧/参考图/尾帧/参考音频时，必须选择输入参数里含对应插槽(first_frame/reference_images/last_frame/ref_audio)的源；"
+            "输入参数只有 prompt 的纯文本源不接受任何图像/音频，禁止把参考图挂给它（否则外部 API 会报参数错误）。选源前可先调 get_provider_code 查看其 input_schema 确认。"
+            "\n**自定义能力调用：** 自定义代码节点注册为 customnode_<id> 工具，可直接调用；画布编排用 canvas_create_node(type=custom, params={custom_node_id:'<id>', ...})。"
+            "插件工具名为 plugin_<插件id>_<name>，同样可直接调用。以上全部已绑定，不存在调用盲区。\n"
         )
     except Exception as e:
         print(f"[Agent] provider_tools_brief failed: {e}")
@@ -1117,6 +1133,19 @@ async def websocket_agent_endpoint(websocket: WebSocket):
     await websocket.accept()
     session_id = f"ws_{id(websocket)}"
     active_task: Optional[asyncio.Task] = None
+    _v2_attached: set = set()
+
+    async def _v2_sink(ev: Dict[str, Any]):
+        try:
+            await websocket.send_json(ev)
+        except Exception:
+            pass
+
+    async def _v2_attach(sid: str) -> None:
+        if sid in _v2_attached:
+            return
+        await agent_manager.attach(sid, _v2_sink, interactive=True)
+        _v2_attached.add(sid)
     try:
         while True:
             data_str = await websocket.receive_text()
@@ -1131,6 +1160,11 @@ async def websocket_agent_endpoint(websocket: WebSocket):
             # ── 暂停 abort ──
             if action == "abort":
                 target_sid = str(data.get("session_id") or session_id)
+                if AGENT_V2:
+                    stopped = await agent_manager.abort(target_sid)
+                    if not stopped:
+                        await websocket.send_json({"event": "agent_response", "message": "⏹️ 已暂停", "suggested_actions": [], "executed_tools": []})
+                    continue
                 if active_task and not active_task.done():
                     active_task.cancel()
                     try:
@@ -1154,12 +1188,40 @@ async def websocket_agent_endpoint(websocket: WebSocket):
 
             # ── P1 HITL审批回执 ──
             if action == "approve_tool":
+                _aid = str(data.get("approval_id") or "")
+                _ok = bool(data.get("approved", False))
+                if AGENT_V2:
+                    _sid = str(data.get("session_id") or session_id)
+                    _resolved = await agent_manager.resolve_approval(_sid, _aid, _ok)
+                    await websocket.send_json({"event": "approval_ack", "approval_id": _aid, "approved": _ok, "resolved": _resolved})
+                    continue
                 try:
                     from app.pipelines.agent.langchain_engine import resolve_approval
-                    _ok = resolve_approval(str(data.get("approval_id") or ""), bool(data.get("approved", False)))
-                    await websocket.send_json({"event": "approval_ack", "approval_id": data.get("approval_id"), "approved": bool(data.get("approved", False)), "resolved": _ok})
+                    _ok2 = resolve_approval(_aid, _ok)
+                    await websocket.send_json({"event": "approval_ack", "approval_id": _aid, "approved": _ok, "resolved": _ok2})
                 except Exception as e:
                     await websocket.send_json({"event": "error", "message": f"审批回执失败: {e}"})
+                continue
+
+            # ── v2 重连挂载：把本 socket 挂到已有会话，补发快照并续播实时事件 ──
+            if action == "attach_session":
+                if AGENT_V2:
+                    _sid = str(data.get("session_id") or session_id)
+                    session_id = _sid
+                    try:
+                        await _v2_attach(_sid)
+                        lp = agent_manager.get(_sid)
+                        if lp is not None:
+                            snap = lp.session.snapshot(tail=int(data.get("tail") or 100))
+                        else:
+                            from app.agent.runtime.session import Session as _RuntimeSession
+                            snap = _RuntimeSession.open(_sid, repair=False).snapshot(tail=int(data.get("tail") or 100))
+                        await websocket.send_json({"event": "session_snapshot", **snap})
+                    except Exception as e:
+                        try:
+                            await websocket.send_json({"event": "error", "message": f"attach 失败: {e}"})
+                        except Exception:
+                            pass
                 continue
 
             if action not in ("agent_prompt", "clear_history", "abort"):
@@ -1174,6 +1236,10 @@ async def websocket_agent_endpoint(websocket: WebSocket):
                         await active_task
                     except Exception:
                         pass
+                if AGENT_V2:
+                    await agent_manager.clear(session_id)
+                    await websocket.send_json({"event": "agent_response", "message": "已清空对话历史", "suggested_actions": []})
+                    continue
                 if HAS_LANGCHAIN_AGENT:
                     await clear_session(session_id)
                 await websocket.send_json({"event": "agent_response", "message": "已清空对话历史", "suggested_actions": []})
@@ -1181,6 +1247,15 @@ async def websocket_agent_endpoint(websocket: WebSocket):
 
             prompt_text = (data.get("prompt") or "").strip()
             context = data.get("context") or {}
+            # 运行模式透传到引擎（plan=只读规划模式）
+            try:
+                from app.agent.mode_policy import normalize_run_mode as _nrm
+                _rm = _nrm(str(data.get("run_mode") or (context.get("run_mode") if isinstance(context, dict) else "") or "approve"))
+            except Exception:
+                _rm = "approve"
+            if isinstance(context, dict):
+                context["run_mode"] = _rm
+                context["plan_mode"] = (_rm == "plan")
             if data.get("session_id"):
                 session_id = str(data.get("session_id"))
             elif context.get("project_id"):
@@ -1190,16 +1265,34 @@ async def websocket_agent_endpoint(websocket: WebSocket):
                 await websocket.send_json({"event": "error", "message": "指令不能为空"})
                 continue
 
-            if active_task and not active_task.done():
-                await websocket.send_json({"event": "error", "message": "已有任务运行中，请先暂停再发新指令"})
-                continue
-
             # Agent双模式：chat纯问答 / execute调工具（P0）
             try:
                 from app.agent.loop import normalize_mode as _nmode
                 _wmode = _nmode(data.get("mode"))
             except Exception:
                 _wmode = "execute"
+
+            # ── v2 单一内核：Inbox 排队 + 事件订阅，同一会话并发输入自动 followup/steer ──
+            if AGENT_V2:
+                try:
+                    await _v2_attach(session_id)
+                    await agent_manager.prompt(
+                        session_id, prompt_text,
+                        context=context if isinstance(context, dict) else {},
+                        mode=_wmode, run_mode=_rm,
+                        interactive=True, sink=None,
+                    )
+                except Exception as e:
+                    try:
+                        await websocket.send_json({"event": "error", "message": f"Agent 启动失败: {e}"})
+                    except Exception:
+                        pass
+                continue
+
+            if active_task and not active_task.done():
+                await websocket.send_json({"event": "error", "message": "已有任务运行中，请先暂停再发新指令"})
+                continue
+
             if _wmode == "chat":
                 try:
                     await websocket.send_json({"event": "agent_thinking", "message": "正在深入思考问答推演…"})
@@ -1353,11 +1446,13 @@ async def websocket_agent_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         if 'active_task' in locals() and active_task and not active_task.done():
             active_task.cancel()
-        pass
+        for _sid in _v2_attached:
+            agent_manager.detach(_sid, _v2_sink)
     except asyncio.CancelledError:
         if 'active_task' in locals() and active_task and not active_task.done():
             active_task.cancel()
-        pass
+        for _sid in _v2_attached:
+            agent_manager.detach(_sid, _v2_sink)
     except json.JSONDecodeError:
         try:
             await websocket.send_json({"event": "error", "message": "消息格式错误（需 JSON）"})
@@ -1394,7 +1489,7 @@ class ConfigUpdateRequest(BaseModel):
     IMAGE_PROVIDER: Optional[str] = Field(default="comfyui")
     COMFYUI_SERVER_URL: Optional[str] = Field(default="http://127.0.0.1:8188")
     COMFYUI_CHECKPOINT: Optional[str] = Field(default="")
-    COMFYUI_TIMEOUT_SECONDS: Optional[str] = Field(default="240")
+    COMFYUI_TIMEOUT_SECONDS: Optional[str] = Field(default="1200")
     COMFYUI_WORKFLOWS_DIR: Optional[str] = Field(default="")
     COMFYUI_DEFAULT_IMAGE_WORKFLOW: Optional[str] = Field(default="")
     SILICONFLOW_API_KEY: Optional[str] = Field(default="")
@@ -1743,6 +1838,51 @@ async def http_agent_chat(req: AgentChatRequest):
         _mode = normalize_mode(getattr(req, "mode", "execute"))
     except Exception:
         _mode = "execute"
+
+    # ── v2 单一内核（无交互通道：审批 fail-closed 自动拒绝）──
+    if AGENT_V2:
+        try:
+            from app.agent.mode_policy import normalize_run_mode as _nrm_v2
+            _rm_v2 = _nrm_v2(getattr(req, "run_mode", "approve"))
+        except Exception:
+            _rm_v2 = "approve"
+        events: List[Dict[str, Any]] = []
+        done = asyncio.Event()
+
+        async def _sink(ev: Dict[str, Any]):
+            events.append(ev)
+            if ev.get("event") in ("agent_response", "error"):
+                done.set()
+
+        try:
+            await agent_manager.prompt(
+                session_id, prompt_text, context=dict(req.context or {}),
+                mode=_mode, run_mode=_rm_v2, interactive=False, sink=_sink,
+            )
+            try:
+                await asyncio.wait_for(done.wait(), timeout=float(os.environ.get("AGENT_HTTP_TIMEOUT") or 900))
+            except asyncio.TimeoutError:
+                pass
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Agent 执行失败: {e}")
+        finally:
+            agent_manager.detach(session_id, _sink)
+
+        reply = next((e.get("message") for e in reversed(events) if e.get("event") == "agent_response"), "") or "指令已执行。"
+        executed: List[Dict[str, Any]] = []
+        for ev in events:
+            if ev.get("event") == "tool_calling":
+                executed.append({"tool_name": ev.get("tool_name"), "arguments": ev.get("arguments") or {},
+                                 "status": "running", "result": None, "error": None})
+            elif ev.get("event") == "tool_result":
+                for item in reversed(executed):
+                    if item["tool_name"] == ev.get("tool_name") and item["status"] == "running":
+                        item["status"] = ev.get("status") or "error"
+                        item["result"] = ev.get("result")
+                        item["error"] = ev.get("error")
+                        break
+        return {"reply": reply, "thinking": None, "suggested_actions": [], "executed_tools": executed, "mode": _mode}
+
     if _mode == "chat":
         try:
             reply = await llm_service.chat_completion(
@@ -1767,9 +1907,17 @@ async def http_agent_chat(req: AgentChatRequest):
 
     if HAS_LANGCHAIN_AGENT:
         try:
+            _ctx = dict(req.context or {})
+            try:
+                from app.agent.mode_policy import normalize_run_mode as _nrm2
+                _rm2 = _nrm2(getattr(req, "run_mode", "approve"))
+            except Exception:
+                _rm2 = "approve"
+            _ctx["run_mode"] = _rm2
+            _ctx["plan_mode"] = (_rm2 == "plan")
             result = await run_agent_with_langchain(
                 prompt=prompt_text,
-                context=req.context or {},
+                context=_ctx,
                 session_id=session_id,
                 websocket=None,
                 streaming=False,
@@ -1832,8 +1980,45 @@ async def http_agent_chat_stream(req: AgentChatRequest):
         _smode = _nm(getattr(req, "mode", "execute"))
     except Exception:
         _smode = "execute"
+    try:
+        from app.agent.mode_policy import normalize_run_mode as _nrm_sse
+        _rmode_sse = _nrm_sse(getattr(req, "run_mode", "approve"))
+    except Exception:
+        _rmode_sse = "approve"
 
     async def event_generator():
+        # ── v2 单一内核：队列桥接 loop 事件（无交互通道，审批 fail-closed）──
+        if AGENT_V2:
+            queue: asyncio.Queue = asyncio.Queue()
+
+            async def _sink(ev: Dict[str, Any]):
+                await queue.put(ev)
+
+            try:
+                await agent_manager.prompt(
+                    session_id, prompt_text, context=dict(req.context or {}),
+                    mode=_smode, run_mode=_rmode_sse, interactive=False, sink=_sink,
+                )
+            except Exception as e:
+                yield f"data: {json.dumps({'event': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+            try:
+                idle_deadline = float(os.environ.get("AGENT_SSE_IDLE_TIMEOUT") or 1800)
+                while True:
+                    try:
+                        ev = await asyncio.wait_for(queue.get(), timeout=idle_deadline)
+                    except asyncio.TimeoutError:
+                        yield f"data: {json.dumps({'event': 'error', 'message': '等待 Agent 事件超时'}, ensure_ascii=False)}\n\n"
+                        break
+                    yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+                    if ev.get("event") in ("agent_response", "error"):
+                        break
+            finally:
+                agent_manager.detach(session_id, _sink)
+            yield "data: [DONE]\n\n"
+            return
+
         if _smode == "chat":
             try:
                 reply = await llm_service.chat_completion(
@@ -1905,10 +2090,19 @@ async def http_agent_chat_stream(req: AgentChatRequest):
                 await queue.put(data)
 
         bridge = SSEBridge()
+        # 运行模式透传（plan=只读规划模式）
+        _ctx_s = dict(req.context or {})
+        try:
+            from app.agent.mode_policy import normalize_run_mode as _nrm3
+            _rm3 = _nrm3(getattr(req, "run_mode", "approve"))
+        except Exception:
+            _rm3 = "approve"
+        _ctx_s["run_mode"] = _rm3
+        _ctx_s["plan_mode"] = (_rm3 == "plan")
         # 启动后台任务执行 agent
         task = asyncio.create_task(run_agent_with_langchain(
             prompt=prompt_text,
-            context=req.context or {},
+            context=_ctx_s,
             session_id=session_id,
             websocket=bridge,  # 复用 websocket 接口（send_json）
             streaming=True,
@@ -1957,7 +2151,17 @@ async def http_agent_chat_stream(req: AgentChatRequest):
 
 @router.get("/agent/history")
 async def get_agent_history(session_id: str = "http_default"):
-    """获取指定会话的 LangChain 记忆历史"""
+    """获取指定会话的历史（v2：从事件日志投影；v1：LangChain 记忆）"""
+    if AGENT_V2:
+        lp = agent_manager.get(session_id)
+        if lp is not None:
+            return {"session_id": session_id, "history": lp.session.derive_messages(), "has_langchain": False, "engine": "v2", "seq": lp.session.seq}
+        try:
+            from app.agent.runtime.session import Session
+            s = Session.open(session_id)
+            return {"session_id": session_id, "history": s.derive_messages(), "has_langchain": False, "engine": "v2", "seq": s.seq}
+        except Exception as e:
+            return {"session_id": session_id, "history": [], "has_langchain": False, "engine": "v2", "error": str(e)[:200]}
     if not HAS_LANGCHAIN_AGENT:
         return {"session_id": session_id, "history": [], "has_langchain": False}
     history = get_history(session_id)
@@ -1971,10 +2175,78 @@ async def get_agent_history(session_id: str = "http_default"):
     return {"session_id": session_id, "history": serialized, "count": len(serialized), "has_langchain": True}
 
 
+@router.post("/agent/session/{session_id}/steer")
+async def agent_session_steer(session_id: str, req: AgentChatRequest):
+    """运行中插话：进入当前轮的下一步（v2）。"""
+    if not AGENT_V2:
+        raise HTTPException(status_code=400, detail="仅 v2 内核支持 steer")
+    ok = await agent_manager.steer(session_id, req.prompt or "")
+    return {"status": "accepted" if ok else "no_session", "session_id": session_id}
+
+
+@router.get("/agent/session/{session_id}/snapshot")
+async def agent_session_snapshot(session_id: str, tail: int = 200):
+    """一致性快照：断线重连后按 as_of_seq 续播（v2）。"""
+    if not AGENT_V2:
+        raise HTTPException(status_code=400, detail="仅 v2 内核支持 snapshot")
+    lp = agent_manager.get(session_id)
+    if lp is not None:
+        return lp.session.snapshot(tail=tail)
+    from app.agent.runtime.session import Session
+    return Session.open(session_id, repair=False).snapshot(tail=tail)
+
+
+@router.post("/agent/approve")
+async def agent_approve_http(body: Dict[str, Any] = {}):
+    """HTTP/SSE 传输的审批回执入口（交互通道缺失时审批默认 fail-closed）。"""
+    if not AGENT_V2:
+        raise HTTPException(status_code=400, detail="仅 v2 内核支持")
+    ok = await agent_manager.resolve_approval(
+        str(body.get("session_id") or ""),
+        str(body.get("approval_id") or ""),
+        bool(body.get("approved", False)),
+    )
+    return {"resolved": ok}
+
+
+class AgentGoalRequest(BaseModel):
+    objective: str = ""
+    max_rounds: Optional[int] = None
+
+
+@router.post("/agent/session/{session_id}/goal")
+async def agent_set_goal(session_id: str, req: AgentGoalRequest):
+    """设定长期目标（整集批量/一键成片）：自动按轮次续跑，完成后停止。"""
+    if not AGENT_V2:
+        raise HTTPException(status_code=400, detail="仅 v2 内核支持")
+    if not (req.objective or "").strip():
+        raise HTTPException(status_code=400, detail="objective 不能为空")
+    goal = await agent_manager.set_goal(session_id, req.objective, req.max_rounds)
+    return {"status": "accepted", "goal": goal}
+
+
+@router.get("/agent/session/{session_id}/goal")
+async def agent_get_goal(session_id: str):
+    if not AGENT_V2:
+        raise HTTPException(status_code=400, detail="仅 v2 内核支持")
+    return {"goal": await agent_manager.get_goal(session_id)}
+
+
+@router.delete("/agent/session/{session_id}/goal")
+async def agent_clear_goal(session_id: str):
+    if not AGENT_V2:
+        raise HTTPException(status_code=400, detail="仅 v2 内核支持")
+    ok = await agent_manager.clear_goal(session_id)
+    return {"cleared": ok}
+
+
 @router.post("/agent/clear")
 async def clear_agent_history(body: Dict[str, Any] = {}):
     """清空指定会话的记忆"""
     session_id = body.get("session_id") or "http_default"
+    if AGENT_V2:
+        await agent_manager.clear(session_id)
+        return {"status": "cleared", "session_id": session_id, "engine": "v2"}
     if HAS_LANGCHAIN_AGENT:
         await clear_session(session_id)
         return {"status": "cleared", "session_id": session_id}
@@ -1989,10 +2261,10 @@ class AgentPlanPreviewRequest(BaseModel):
 
 @router.post("/agent/plan/preview")
 async def agent_plan_preview(req: AgentPlanPreviewRequest):
-    """业务意图Plan预览(确定性规则，无LLM)：意图路由 + 可编辑步骤 + 是否需确认 + 预估耗时（含三模式闸）"""
-    from app.agent.business import build_plan
+    """LLM Planner 生成结构化执行计划（失败自动回退关键词规则）：意图 + 可编辑步骤 + 是否需确认 + 预估耗时（含模式闸）"""
+    from app.agent.planner import llm_plan
     from app.agent.mode_policy import normalize_run_mode, apply_to_plan
-    plan = build_plan(req.prompt or "", req.context or {})
+    plan = await llm_plan(req.prompt or "", req.context or {})
     # 创造模式：若命中补源/新能力意图，附带一份临时提案（不生效，需人Start）
     mode = normalize_run_mode(req.run_mode)
     try:

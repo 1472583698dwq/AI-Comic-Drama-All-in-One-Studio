@@ -260,7 +260,7 @@ class ComfyUIVideoProvider(VideoProvider):
 
         # 5. 提交到 ComfyUI（已完成 I2V/R2V 图像上传与参数注入，支持节俭/API 与全量/UI 双模式）
         if True:
-            async with httpx.AsyncClient(timeout=20.0) as client:
+            async with httpx.AsyncClient(timeout=1200.0) as client:
                 # 提交前最后一道防线：剥离装饰/孤立未知节点；真实缺插件则提前抛友好错误
                 try:
                     injected_wf, _stripped = workflow_manager.strip_unsupported_nodes(injected_wf)
@@ -295,8 +295,8 @@ class ComfyUIVideoProvider(VideoProvider):
                     raise RuntimeError(f"ComfyUI 视频工作流提交失败 HTTP {r.status_code}: {detail}")
 
                 prompt_id = r.json()["prompt_id"]
-                # 轮询 history
-                deadline = time.time() + 120
+                # 轮询 history（至少 20 分钟窗口，覆盖高清/长视频工作流）
+                deadline = time.time() + 1200
                 while time.time() < deadline:
                     await asyncio.sleep(1.5)
                     hr = await client.get(f"{server_url}/history/{prompt_id}")

@@ -1,9 +1,9 @@
 import React from 'react';
 import { ClipboardList, Image as ImageIcon, Film, Mic, AlertTriangle, ExternalLink, Copy, Check, Wand2, Lightbulb, FlaskConical, PackageCheck, Trash2 } from 'lucide-react';
+import type { PlanPreview, CreatorProposal } from './agentTypes';
 
-export interface PlanStep { id: string; title: string; tool: string; args_preview?: Record<string, any>; risk: string; est_s: number; target?: string }
-export interface PlanPreview { intent: string; label: string; confidence: string; risk: string; reason?: string; steps: PlanStep[]; needs_confirm: boolean; est_total_s: number; autonomy_hint?: string; run_mode?: string; creator_proposal?: CreatorProposal }
-export interface CreatorProposal { proposal_id: string; kind: string; title: string; goal?: string; diff_preview: string; test_plan: string[]; risk: string; reversible: string; status: string }
+// 兼容旧引用：类型口径已收敛到 agentTypes.ts
+export type { PlanStep, PlanPreview, CreatorProposal } from './agentTypes';
 
 /** Plan预览卡：可编辑前置确认，高风险必须确认才执行 */
 export const PlanCard: React.FC<{

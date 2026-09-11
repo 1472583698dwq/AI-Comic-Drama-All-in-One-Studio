@@ -178,7 +178,7 @@ class Settings(BaseModel):
     IMAGE_PROVIDER: str = os.getenv("IMAGE_PROVIDER", "comfyui")
     COMFYUI_SERVER_URL: str = os.getenv("COMFYUI_SERVER_URL", "http://127.0.0.1:8188")
     COMFYUI_CHECKPOINT: str = os.getenv("COMFYUI_CHECKPOINT", "")
-    COMFYUI_TIMEOUT_SECONDS: int = int(os.getenv("COMFYUI_TIMEOUT_SECONDS", "240"))
+    COMFYUI_TIMEOUT_SECONDS: int = int(os.getenv("COMFYUI_TIMEOUT_SECONDS", "1200"))
     COMFYUI_WORKFLOWS_DIR: str = os.getenv("COMFYUI_WORKFLOWS_DIR", "")
     COMFYUI_DEFAULT_IMAGE_WORKFLOW: str = os.getenv("COMFYUI_DEFAULT_IMAGE_WORKFLOW", os.getenv("COMFYUI_WORKFLOW_ID", ""))
     SILICONFLOW_API_KEY: str = os.getenv("SILICONFLOW_API_KEY", "")

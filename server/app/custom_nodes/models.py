@@ -32,7 +32,7 @@ class CustomNodeDefinition(BaseModel):
     language: str = "python"  # python | javascript
     code: str = ""
     code_entry: str = "run"
-    code_timeout: int = 60
+    code_timeout: int = 1200
     trusted: bool = False
     input_schema: Optional[Dict] = None
     params_schema: Optional[Dict] = None

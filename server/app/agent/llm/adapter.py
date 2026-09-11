@@ -1,0 +1,280 @@
+# -*- coding: utf-8 -*-
+"""Agent LLM 适配器 — 单一 stream() 接缝，对标 dsh 的 llm 语义。
+
+- 统一 chunk 词汇：text / reasoning / tool_call_delta / usage / finish。
+- 工具调用全程保留原始 JSON 字符串，解析失败不静默吞掉（保留原文供模型修正）。
+- provider 选择沿用项目现有配置（OpenAI 兼容 / MiniMax），Responses API 自动走 chat/completions
+  （工具调用要求 chat/completions 协议）。
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+from dataclasses import dataclass, field
+from typing import Any, AsyncIterator, Dict, List, Optional
+
+import httpx
+
+from app.core.config import settings
+
+
+class LLMTransportError(RuntimeError):
+    """可重试：网络/超时/限流/5xx。"""
+
+    def __init__(self, message: str, status: Optional[int] = None, retryable: bool = True):
+        super().__init__(message)
+        self.status = status
+        self.retryable = retryable
+
+
+class LLMConfigError(RuntimeError):
+    """不可重试：缺 Key/参数错误/4xx。"""
+
+
+@dataclass
+class ToolCall:
+    id: str
+    name: str
+    arguments: str  # 原始 JSON 字符串（模型输出，不保证合法）
+    parsed: Dict[str, Any] = field(default_factory=dict)
+
+    def to_openai(self) -> Dict[str, Any]:
+        return {"id": self.id, "type": "function", "function": {"name": self.name, "arguments": self.arguments}}
+
+
+@dataclass
+class LLMChunk:
+    kind: str  # text | reasoning | tool_call_delta | usage | finish
+    text: str = ""
+    index: int = 0
+    tool_call_id: str = ""
+    tool_name: str = ""
+    arguments_delta: str = ""
+    usage: Optional[Dict[str, Any]] = None
+    finish_reason: str = ""
+
+
+@dataclass
+class AssistantReply:
+    content: str = ""
+    reasoning: str = ""
+    tool_calls: List[ToolCall] = field(default_factory=list)
+    usage: Dict[str, Any] = field(default_factory=dict)
+    finish_reason: str = "stop"
+
+    @property
+    def has_tool_calls(self) -> bool:
+        return bool(self.tool_calls)
+
+
+def _parse_tool_arguments(raw: str) -> Dict[str, Any]:
+    s = (raw or "").strip()
+    if not s:
+        return {}
+    try:
+        v = json.loads(s)
+        return v if isinstance(v, dict) else {"value": v}
+    except Exception:
+        # 容错：去掉尾随垃圾 / 中文标点
+        try:
+            import re
+            fixed = re.sub(r",\s*([}\]])", r"\1", s)
+            v = json.loads(fixed)
+            return v if isinstance(v, dict) else {"value": v}
+        except Exception:
+            return {}
+
+
+class OpenAICompatAdapter:
+    """OpenAI 兼容 /chat/completions 流式适配器（含 tool_calls 增量组装）。"""
+
+    def resolve(self) -> Dict[str, str]:
+        provider = (getattr(settings, "LLM_PROVIDER", "") or "openai_compatible").lower()
+        api_type = (getattr(settings, "LLM_API_TYPE", "") or "chat_completions").lower()
+        if provider == "minimax" and not getattr(settings, "OPENAI_API_KEY", ""):
+            base = (getattr(settings, "MINIMAX_BASE_URL", "") or "https://api.minimax.chat/v1").rstrip("/")
+            return {
+                "endpoint": f"{base}/text/chatcompletion_v2",
+                "api_key": getattr(settings, "MINIMAX_API_KEY", "") or "",
+                "model": getattr(settings, "LLM_MODEL", "") or "abab6.5s-chat",
+            }
+        base = (getattr(settings, "OPENAI_BASE_URL", "") or "https://api.deepseek.com/v1").rstrip("/")
+        if base.endswith("/chat/completions"):
+            endpoint = base
+        elif base.endswith("/responses"):
+            endpoint = base[: -len("/responses")] + "/chat/completions"
+        else:
+            endpoint = f"{base}/chat/completions"
+        model = getattr(settings, "OPENAI_MODEL", "") or "deepseek-chat"
+        if provider == "responses_api" or api_type == "responses_api":
+            # 工具调用必须走 chat/completions；沿用同站点
+            pass
+        return {
+            "endpoint": endpoint,
+            "api_key": getattr(settings, "OPENAI_API_KEY", "") or "",
+            "model": model,
+        }
+
+    def _headers(self, api_key: str) -> Dict[str, str]:
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        try:
+            from app.pipelines.llm_service import llm_service
+            headers.update(llm_service._get_custom_headers() or {})
+        except Exception:
+            pass
+        return headers
+
+    def _build_payload(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]],
+                       temperature: float, max_tokens: int, model: str, include_usage: bool = True) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {"model": model, "messages": messages, "stream": True}
+        if include_usage:
+            payload["stream_options"] = {"include_usage": True}
+        is_reasoning = any(k in (model or "").lower() for k in ("o1", "o3", "reasoner", "qwq", "r1"))
+        if is_reasoning:
+            payload["max_completion_tokens"] = max_tokens
+        else:
+            payload["temperature"] = temperature
+            payload["max_tokens"] = max_tokens
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+        return payload
+
+    async def stream(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        temperature: float = 0.3,
+        max_tokens: int = 4096,
+        timeout: float = 300.0,
+    ) -> AsyncIterator[LLMChunk]:
+        cfg = self.resolve()
+        if not cfg["api_key"]:
+            raise LLMConfigError("未配置大模型 API Key（OPENAI_API_KEY / MINIMAX_API_KEY）")
+        headers = self._headers(cfg["api_key"])
+        payload = self._build_payload(messages, tools, temperature, max_tokens, cfg["model"])
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=min(30.0, timeout))) as client:
+            for attempt_plain in (False, True):
+                p = dict(payload)
+                if attempt_plain:
+                    # 部分网关不认 stream_options/temperature：剥离后重试一次
+                    p.pop("stream_options", None)
+                try:
+                    async with client.stream("POST", cfg["endpoint"], headers=headers, json=p) as resp:
+                        if resp.status_code != 200:
+                            body = (await resp.aread()).decode(errors="ignore")[:400]
+                            retryable = resp.status_code in (408, 409, 425, 429) or resp.status_code >= 500
+                            if not attempt_plain and resp.status_code == 400:
+                                continue  # 用剥离版重试
+                            if retryable:
+                                raise LLMTransportError(f"LLM HTTP {resp.status_code}: {body}", status=resp.status_code)
+                            raise LLMConfigError(f"LLM HTTP {resp.status_code}: {body}")
+                        async for chunk in self._parse_sse(resp):
+                            yield chunk
+                        return
+                except (httpx.TimeoutException, httpx.TransportError) as e:
+                    if attempt_plain:
+                        raise LLMTransportError(f"LLM 传输失败: {e}") from e
+                    continue
+        raise LLMTransportError("LLM 请求失败：流未建立")
+
+    async def _parse_sse(self, response: httpx.Response) -> AsyncIterator[LLMChunk]:
+        async for line in response.aiter_lines():
+            line = (line or "").strip()
+            if not line or line.startswith(":"):
+                continue
+            if not line.startswith("data:"):
+                continue
+            data_str = line[5:].strip()
+            if data_str == "[DONE]":
+                return
+            try:
+                data = json.loads(data_str)
+            except Exception:
+                continue
+            if not isinstance(data, dict):
+                continue
+
+            usage = data.get("usage")
+            if usage:
+                yield LLMChunk(kind="usage", usage=usage)
+
+            choices = data.get("choices") or []
+            if not choices:
+                continue
+            ch = choices[0] or {}
+            delta = ch.get("delta") or {}
+            if isinstance(delta, str):  # 个别网关把 delta 当字符串
+                if delta:
+                    yield LLMChunk(kind="text", text=delta)
+                delta = {}
+            content = delta.get("content")
+            if content:
+                yield LLMChunk(kind="text", text=str(content))
+            reasoning = delta.get("reasoning_content") or delta.get("reasoning")
+            if reasoning:
+                yield LLMChunk(kind="reasoning", text=str(reasoning))
+            for tcd in (delta.get("tool_calls") or []):
+                if not isinstance(tcd, dict):
+                    continue
+                fn = tcd.get("function") or {}
+                yield LLMChunk(
+                    kind="tool_call_delta",
+                    index=int(tcd.get("index") or 0),
+                    tool_call_id=str(tcd.get("id") or ""),
+                    tool_name=str(fn.get("name") or ""),
+                    arguments_delta=str(fn.get("arguments") or ""),
+                )
+            finish = ch.get("finish_reason")
+            if finish:
+                yield LLMChunk(kind="finish", finish_reason=str(finish))
+
+    async def complete(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        temperature: float = 0.3,
+        max_tokens: int = 4096,
+        timeout: float = 300.0,
+        on_chunk: Optional[Any] = None,
+    ) -> AssistantReply:
+        """聚合一次完整调用。on_chunk 可为 async 回调（用于实时转发流式增量）。"""
+        reply = AssistantReply()
+        tc_map: Dict[int, Dict[str, str]] = {}
+        async for chunk in self.stream(messages, tools=tools, temperature=temperature,
+                                       max_tokens=max_tokens, timeout=timeout):
+            if chunk.kind == "text":
+                reply.content += chunk.text
+            elif chunk.kind == "reasoning":
+                reply.reasoning += chunk.text
+            elif chunk.kind == "tool_call_delta":
+                entry = tc_map.setdefault(chunk.index, {"id": "", "name": "", "arguments": ""})
+                if chunk.tool_call_id:
+                    entry["id"] = chunk.tool_call_id
+                if chunk.tool_name:
+                    if not entry["name"]:
+                        entry["name"] = chunk.tool_name
+                    elif not entry["name"].endswith(chunk.tool_name):
+                        entry["name"] += chunk.tool_name
+                entry["arguments"] += chunk.arguments_delta
+            elif chunk.kind == "usage":
+                reply.usage = chunk.usage or {}
+            elif chunk.kind == "finish":
+                reply.finish_reason = chunk.finish_reason or reply.finish_reason
+            if on_chunk is not None:
+                await on_chunk(chunk)
+        for idx in sorted(tc_map):
+            e = tc_map[idx]
+            if not e["name"]:
+                continue
+            reply.tool_calls.append(ToolCall(
+                id=e["id"] or f"call_{idx}",
+                name=e["name"],
+                arguments=e["arguments"],
+                parsed=_parse_tool_arguments(e["arguments"]),
+            ))
+        return reply
+
+
+adapter = OpenAICompatAdapter()

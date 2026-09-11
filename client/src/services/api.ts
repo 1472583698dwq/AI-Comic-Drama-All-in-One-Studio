@@ -505,6 +505,36 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
+  // v2 内核：一致性快照 / 运行中插话 / HTTP 审批回执 / 长期目标
+  async agentSessionSnapshot(sessionId: string, tail = 200): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/agent/session/${encodeURIComponent(sessionId)}/snapshot?tail=${tail}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async agentSteer(sessionId: string, prompt: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/agent/session/${encodeURIComponent(sessionId)}/steer`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, context: {} }),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async agentApprove(sessionId: string, approvalId: string, approved: boolean): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/agent/approve`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, approval_id: approvalId, approved }),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async agentSetGoal(sessionId: string, objective: string, maxRounds?: number): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/agent/session/${encodeURIComponent(sessionId)}/goal`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ objective, max_rounds: maxRounds }),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
   async agentPlanPreview(prompt: string, context?: any, runMode?: string): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/agent/plan/preview`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },

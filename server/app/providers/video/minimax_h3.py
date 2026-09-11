@@ -170,7 +170,7 @@ class MiniMaxH3VideoProvider(VideoProvider):
         payload = {"model": model, "content": content, "resolution": resolution, "duration": duration, "ratio": ratio}
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         url = f"{base}/v2/video_generation"
-        async with httpx.AsyncClient(timeout=45.0) as client:
+        async with httpx.AsyncClient(timeout=1200.0) as client:
             r = await client.post(url, headers=headers, json=payload)
             if r.status_code not in (200, 201):
                 raise RuntimeError(f"MiniMax H3 提交失败 HTTP {r.status_code}: {r.text[:500]}")
@@ -194,7 +194,7 @@ class MiniMaxH3VideoProvider(VideoProvider):
         out_filename = f"h3_{task_id}.mp4"
         out_path = os.path.join(VIDEOS_DIR, out_filename)
         query_url = f"{base}/v2/query/video_generation/{task_id}"
-        for _ in range(90):  # ~15min
+        for _ in range(150):  # ~25min
             await asyncio.sleep(10.0)
             try:
                 async with httpx.AsyncClient(timeout=30.0) as client:
@@ -221,7 +221,7 @@ class MiniMaxH3VideoProvider(VideoProvider):
                         return
             except Exception as e:
                 print(f"[MiniMaxH3] 轮询 {task_id} 异常: {e}")
-        _TASK_STORE[task_id] = {"status": "failed", "task_id": task_id, "error": "轮询超时(15min)"}
+        _TASK_STORE[task_id] = {"status": "failed", "task_id": task_id, "error": "轮询超时(25min)"}
 
     @classmethod
     def get_task_status(cls, task_id: str) -> Dict[str, Any]:

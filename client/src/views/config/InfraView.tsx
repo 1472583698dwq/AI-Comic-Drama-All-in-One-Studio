@@ -74,7 +74,7 @@ export const InfraView: React.FC<{
           </div>
           <div>
             <label className="text-xs font-medium text-gray-300">COMFYUI_TIMEOUT_SECONDS</label>
-            <input type="number" value={form.COMFYUI_TIMEOUT_SECONDS||'240'} onChange={e=> setField('COMFYUI_TIMEOUT_SECONDS', e.target.value)} className="mt-1.5 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs font-mono text-white"/>
+            <input type="number" value={form.COMFYUI_TIMEOUT_SECONDS||'1200'} onChange={e=> setField('COMFYUI_TIMEOUT_SECONDS', e.target.value)} className="mt-1.5 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs font-mono text-white"/>
           </div>
           <div>
             <label className="text-xs font-medium text-gray-300">COMFYUI_CHECKPOINT (首选底模)</label>

@@ -69,7 +69,7 @@ async def generate(ctx, api):
             payload[k] = ctx[k]
 
     url = "https://api.example.com/v1/images/generations"  # TODO: 替换为真实 API 地址
-    async with httpx.AsyncClient(timeout=60) as client:
+    async with httpx.AsyncClient(timeout=1200) as client:
         resp = await client.post(url, headers=headers, json=payload)
         resp.raise_for_status()
         data = resp.json()
@@ -109,7 +109,7 @@ async def generate(ctx, api):
         payload["reference_images"] = ctx["reference_images"]
 
     url = "https://api.example.com/v1/videos/generations"  # TODO
-    async with httpx.AsyncClient(timeout=60) as client:
+    async with httpx.AsyncClient(timeout=1200) as client:
         resp = await client.post(url, headers=headers, json=payload)
         resp.raise_for_status()
         data = resp.json()
@@ -121,9 +121,9 @@ async def generate(ctx, api):
         task_id = data.get("task_id") or data.get("data", {}).get("task_id") or data.get("id")
         if not task_id:
             raise RuntimeError(f"未找到 video_url/task_id: {str(data)[:600]}")
-        # 轮询
+        # 轮询（20分钟窗口）
         poll_url = f"https://api.example.com/v1/videos/status/{task_id}"
-        for _ in range(40):
+        for _ in range(400):
             await asyncio.sleep(3)
             pr = await client.get(poll_url, headers=headers)
             pr.raise_for_status()
@@ -161,7 +161,7 @@ async def generate(ctx, api):
         "model": ctx.get("model") or "default",
     }
     url = "https://api.example.com/v1/audio/speech"  # TODO
-    async with httpx.AsyncClient(timeout=40) as client:
+    async with httpx.AsyncClient(timeout=1200) as client:
         resp = await client.post(url, headers=headers, json=payload)
         # 部分API直接返回二进制
         if resp.headers.get("content-type","").startswith("audio"):
@@ -235,7 +235,7 @@ JS_VIDEO_TEMPLATE = '''async function generate(ctx, api) {
   let task_id = data.task_id || data?.data?.task_id || data.id;
   if (!task_id) throw new Error("未找到 video_url/task_id");
   const poll_url = `https://api.example.com/v1/videos/status/${task_id}`;
-  for(let i=0;i<40;i++){
+  for(let i=0;i<400;i++){
     await new Promise(r=> setTimeout(r, 3000));
     let pr = await fetch(poll_url, { headers });
     let pj = await pr.json();
@@ -452,7 +452,7 @@ def create_code_source(
         "id": pid, "name": name or f"自定义{kind}源", "kind": kind,
         "provider_type": "code", "language": lang, "code": code,
         "code_entry": code_entry or "generate",
-        "code_timeout": code_timeout or (600 if kind == "video" else 120),
+        "code_timeout": max(1200, code_timeout or (600 if kind == "video" else 120)),
         "trusted": bool(trusted),
         "description": description or "动态代码生成源", "icon": icon,
         "scope": scope or "global", "enabled": True,
@@ -715,7 +715,7 @@ class ProviderCreateRequest(BaseModel):
     language: str = "python"  # python | javascript
     code: str = ""
     code_entry: str = "generate"
-    code_timeout: int = 60
+    code_timeout: int = 1200
     trusted: bool = False  # A档可信开关：True=跳出沙箱（需全局 STUDIO_TRUSTED_MODE=1）
     # 可选元数据
     models: List[str] = Field(default_factory=list)

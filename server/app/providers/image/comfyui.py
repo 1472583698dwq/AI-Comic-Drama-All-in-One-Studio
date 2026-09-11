@@ -221,7 +221,7 @@ class ComfyUIProvider(ImageProvider):
             )
 
         started = time.time()
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=1200.0) as client:
             # 决定工作流来源：优先显式指定，否则使用系统默认配置的工作流
             target_wf_id = req.workflow_id or getattr(settings, "COMFYUI_DEFAULT_IMAGE_WORKFLOW", "")
             if target_wf_id:

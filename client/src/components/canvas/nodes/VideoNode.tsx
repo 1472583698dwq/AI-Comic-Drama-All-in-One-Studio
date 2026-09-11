@@ -45,7 +45,7 @@ export const VideoNode: React.FC<NodeProps> = ({ data, id }) => {
         const taskId = res.task_id;
         // 提示排队中
         (d.onUpdate as any)?.(id, { video_url: "", _taskId: taskId, _polling: true });
-        for (let i = 0; i < 120; i++) {
+        for (let i = 0; i < 500; i++) {
           await new Promise(r => setTimeout(r, 3000));
           try {
             const st: any = await apiService.getVideoTaskStatus(taskId);

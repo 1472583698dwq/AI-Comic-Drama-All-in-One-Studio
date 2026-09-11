@@ -55,7 +55,7 @@ class ProviderTransport(BaseModel):
     url: str = ""  # e.g. https://api.xxx.com/v1/images/generations
     headers: Dict[str, str] = Field(default_factory=dict)  # 支持 {{api_key}} 模板
     query: Dict[str, str] = Field(default_factory=dict)
-    timeout: int = 60
+    timeout: int = 1200
 
 
 class ProviderMapping(BaseModel):
@@ -82,7 +82,7 @@ class ProviderCodeConfig(BaseModel):
     language: CodeLanguage = "python"  # python | javascript
     code: str = ""  # 完整携程源码，需导出 async def generate(ctx, api) 或 module.exports
     entry: str = "generate"  # 入口函数名
-    timeout: int = 60  # 单次执行超时秒
+    timeout: int = 1200  # 单次执行超时秒（至少20分钟）
 
 
 class ProviderDefinition(BaseModel):
@@ -102,7 +102,7 @@ class ProviderDefinition(BaseModel):
     language: CodeLanguage = "python"
     code: Optional[str] = None  # 完整源码
     code_entry: str = "generate"
-    code_timeout: int = 60
+    code_timeout: int = 1200
     # === 可信模式（A档最小闭环）：trusted=True 时跳出受限沙箱，可执行任意代码 ===
     # 需同时满足全局开关 STUDIO_TRUSTED_MODE=1，否则回落沙箱并报错提示。
     trusted: bool = False

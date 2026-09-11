@@ -172,7 +172,7 @@ class SeedanceVideoProvider(VideoProvider):
                    "generate_audio": bool(gen_audio), "watermark": bool(watermark)}
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         url = f"{base}/contents/generations/tasks"
-        async with httpx.AsyncClient(timeout=45.0) as client:
+        async with httpx.AsyncClient(timeout=1200.0) as client:
             r = await client.post(url, headers=headers, json=payload)
             if r.status_code not in (200, 201):
                 raise RuntimeError(f"Seedance 提交失败 HTTP {r.status_code}: {r.text[:500]}")
@@ -196,7 +196,7 @@ class SeedanceVideoProvider(VideoProvider):
         out_filename = f"seedance_{task_id}.mp4"
         out_path = os.path.join(VIDEOS_DIR, out_filename)
         query_url = f"{base}/contents/generations/tasks/{task_id}"
-        for _ in range(90):
+        for _ in range(150):
             await asyncio.sleep(10.0)
             try:
                 async with httpx.AsyncClient(timeout=30.0) as client:
@@ -223,7 +223,7 @@ class SeedanceVideoProvider(VideoProvider):
                         return
             except Exception as e:
                 print(f"[Seedance] 轮询 {task_id} 异常: {e}")
-        _TASK_STORE[task_id] = {"status": "failed", "task_id": task_id, "error": "轮询超时(15min)"}
+        _TASK_STORE[task_id] = {"status": "failed", "task_id": task_id, "error": "轮询超时(25min)"}
 
     @classmethod
     def get_task_status(cls, task_id: str) -> Dict[str, Any]:
