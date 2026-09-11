@@ -58,7 +58,7 @@ export const AssetLibrary: React.FC = () => {
 
   useEffect(() => {
     if (showGenerate) {
-      apiService.listImageProviders().then(d => setProviders(d.providers || d || [])).catch(() => {});
+      apiService.listImageProviders().then(d => setProviders((d.providers || d || []).filter((p:any)=> p.production_ready === true))).catch(() => {});
       apiService.listWorkflows('all').then(d => {
         const wfs = d.workflows || d || [];
         setWorkflows(wfs);

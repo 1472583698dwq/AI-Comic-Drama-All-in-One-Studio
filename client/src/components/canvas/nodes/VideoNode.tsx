@@ -22,7 +22,7 @@ export const VideoNode: React.FC<NodeProps> = ({ data, id }) => {
   }, [d.provider, d.provider_id, d.provider_video]);
 
   // 视频源列表 = 生成源接口（不再写死 comfyui_video/minimax_video/kling）
-  React.useEffect(()=> { apiService.listProviders({ kind: 'video' } as any).then((r:any)=> setProviders(r?.providers||[])).catch(()=>{}); }, []);
+  React.useEffect(()=> { apiService.listProviders({ kind: 'video', production_only: true } as any).then((r:any)=> setProviders(r?.providers||[])).catch(()=>{}); }, []);
 
   const handleGenerate = async () => {
     const p = prompt || d.action_desc || 'cinematic motion';

@@ -15,6 +15,8 @@ interface ProviderPickerProps {
   compact?: boolean;
   /** 能力过滤（如 video 选 'i2v' 则只列出图生视频源；不传则不过滤） */
   capability?: string;
+  /** 配置端显示全部（含未验证）；生产端默认只显示已验证源 */
+  includeUnverified?: boolean;
 }
 
 const kindMeta: Record<Kind, {icon:any, color:string, bg:string, label:string}> = {
@@ -24,7 +26,7 @@ const kindMeta: Record<Kind, {icon:any, color:string, bg:string, label:string}> 
   llm:   {icon: Cpu, color: 'text-cyan-400', bg: 'bg-cyan-500/10 border-cyan-500/20', label: 'LLM'},
 };
 
-export const ProviderPicker: React.FC<ProviderPickerProps> = ({ kind, value, onChange, placeholder, compact=false, capability }) => {
+export const ProviderPicker: React.FC<ProviderPickerProps> = ({ kind, value, onChange, placeholder, compact=false, capability, includeUnverified=false }) => {
   const [providers, setProviders] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -47,10 +49,15 @@ export const ProviderPicker: React.FC<ProviderPickerProps> = ({ kind, value, onC
   }, [kind]);
 
   const selected = providers.find(p=> p.id===value);
-  // 能力过滤：当前选中即使不符合也保留（避免切换模式时选中丢失），其余按能力列出
-  const visibleProviders = capability
-    ? providers.filter(p=> p.id===value || hasCapability(p, capability))
-    : providers;
+  // 生产端只显示「已配置 + 测试联通」的源；配置端(includeUnverified)显示全部。
+  const pool = includeUnverified ? providers : providers.filter(p=> p.production_ready === true);
+  const pendingCount = includeUnverified ? 0 : providers.filter(p=> p.production_ready !== true).length;
+  const visibleProviders = pool.filter(p=> p.id===value
+    || (capability ? hasCapability(p, capability) : true));
+  if (value && !visibleProviders.some(p=> p.id===value)) {
+    const sel = providers.find(p=> p.id===value);
+    if (sel) visibleProviders.unshift(sel);
+  }
   const meta = kindMeta[kind] || kindMeta.image;
   const Icon = meta.icon;
 
@@ -91,7 +98,12 @@ export const ProviderPicker: React.FC<ProviderPickerProps> = ({ kind, value, onC
           {selected.health?.ok !== undefined && <span className={`w-2 h-2 rounded-full ${selected.health.ok ? 'bg-emerald-500' : 'bg-amber-500'}`} />}
         </div>
       )}
-      {providers.length===0 && !loading && <div className="text-[10px] text-gray-500 text-center py-1">暂无{meta.label}源，请去设置或让导演接入</div>}
+      {visibleProviders.length===0 && !loading && (
+        <div className="text-[10px] text-amber-400/90 bg-amber-500/10 border border-amber-500/20 rounded-lg px-2 py-1.5 leading-4">
+          暂无已验证的{meta.label}源。请到 <span className="font-bold">设置 → 生成源</span> 配置并点击「测试」联通后，才会在生产端出现。
+          {pendingCount > 0 && <span className="text-gray-500">（当前有 {pendingCount} 个源待验证）</span>}
+        </div>
+      )}
     </div>
   );
 };

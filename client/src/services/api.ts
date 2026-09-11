@@ -417,6 +417,19 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
+  async setupStatus(): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/system/setup-status`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async setupComplete(done: boolean = true): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/system/setup-complete`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ done }),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
   async saveConfig(config: Record<string, string>): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/config`, {
       method: 'PUT',
@@ -426,8 +439,7 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
-  async testConfig(
-    target: 'openai' | 'responses_api' | 'deepseek' | 'qwen' | 'minimax' | 'comfyui' | 'siliconflow' | 'dashscope' | 'elevenlabs' | 'cosyvoice' | 'gptsovits' | 'jianyin' | 'openai_compat',
+  async testConfig(    target: 'openai' | 'responses_api' | 'deepseek' | 'qwen' | 'minimax' | 'minimax_h3' | 'seedance' | 'kling' | 'wan3' | 'comfyui' | 'siliconflow' | 'dashscope' | 'elevenlabs' | 'cosyvoice' | 'gptsovits' | 'jianyin' | 'openai_compat',
     config?: Record<string, string>
   ): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/config/test`, {
@@ -524,6 +536,26 @@ export const apiService = {
   },
   async listCreatorTemplates(): Promise<{ templates: any[] }> {
     const res = await fetch(`${API_BASE_URL}/agent/creator/templates`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  // 分镜槽（storyboard_slots 聚合 + 项目覆盖 + 裸件 CRUD）
+  async listStoryboardSlots(projectId?: string): Promise<any> {
+    const qs = projectId ? `?project_id=${encodeURIComponent(projectId)}` : '';
+    const res = await fetch(`${API_BASE_URL}/storyboard/slots${qs}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async saveStoryboardOverrides(projectId: string, disabled: string[], order: Record<string, number>): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/storyboard/slots/project`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: projectId, disabled, order }),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async deleteCustomStoryboardSlot(slot: string, sid: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/storyboard/slots/custom/${encodeURIComponent(slot)}/${encodeURIComponent(sid)}`, { method: 'DELETE' });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
@@ -822,11 +854,12 @@ export const apiService = {
   },
 
   // ── Provider 多源解耦 (P 新增) ──
-  async listProviders(params?: { kind?: string; include_builtin?: boolean; scope?: string }): Promise<{ providers: any[]; total: number }> {
+  async listProviders(params?: { kind?: string; include_builtin?: boolean; scope?: string; production_only?: boolean }): Promise<{ providers: any[]; total: number }> {
     const qs = new URLSearchParams();
     if (params?.kind) qs.set('kind', params.kind);
     if (params?.include_builtin === false) qs.set('include_builtin', 'false');
     if (params?.scope) qs.set('scope', params.scope);
+    if (params?.production_only) qs.set('production_only', 'true');
     const res = await fetch(`${API_BASE_URL}/providers?${qs.toString()}`);
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
@@ -866,6 +899,53 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
+  // 统一扩展注册表（聚合查看 + 统一执行 + 统一启停）
+  async listExtensions(params?: { kind?: string; source?: string; q?: string; projectId?: string }): Promise<any> {
+    const qs = new URLSearchParams();
+    if (params?.kind) qs.set('kind', params.kind);
+    if (params?.source) qs.set('source', params.source);
+    if (params?.q) qs.set('q', params.q);
+    if (params?.projectId) qs.set('project_id', params.projectId);
+    const res = await fetch(`${API_BASE_URL}/extensions${qs.toString() ? `?${qs}` : ''}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async getExtension(extId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/extensions/${encodeURIComponent(extId)}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async executeExtension(extId: string, args?: Record<string, any>, entry?: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/extensions/execute`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: extId, args: args || {}, entry }),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async setExtensionEnabled(extId: string, enabled: boolean, projectId?: string): Promise<any> {
+    const qs = projectId ? `?project_id=${encodeURIComponent(projectId)}` : '';
+    const res = await fetch(`${API_BASE_URL}/extensions/${encodeURIComponent(extId)}/${enabled ? 'enable' : 'disable'}${qs}`, { method: 'POST' });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async uninstallExtension(extId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/extensions/${encodeURIComponent(extId)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async extensionHealth(): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/extensions/health`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async checkExtensionId(kind: string, localId: string, publisher?: string): Promise<any> {
+    const qs = new URLSearchParams({ kind, local_id: localId });
+    if (publisher) qs.set('publisher', publisher);
+    const res = await fetch(`${API_BASE_URL}/extensions/check-id?${qs}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
   async importProvider(payload: { kind: string; name?: string; doc_text?: string; doc_url?: string; curl?: string; openapi_url?: string; api_key?: string; definition?: any; language?: string; code?: string }): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/providers/import`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
@@ -901,6 +981,16 @@ export const apiService = {
   },
   async uninstallPlugin(id: string): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/plugins/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async reloadPlugin(id: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/plugins/${encodeURIComponent(id)}/reload`, { method: 'POST' });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async pluginsHealth(): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/plugins/health`);
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },

@@ -38,6 +38,7 @@ class AudioProviderRegistry:
 
     def get_active_provider(self, preferred: Optional[str] = None) -> AudioProvider:
         from app.core.config import settings
+        from app.providers import verification
         if preferred:
             prov = self.get(preferred)
             if not prov:
@@ -45,6 +46,11 @@ class AudioProviderRegistry:
             return prov
         pid = getattr(settings, "TTS_PROVIDER", "minimax")
         prov = self.get(pid)
+        # 生产可用优先：已配置 且 已验证（测试联通）
+        for oid in self._order:
+            p = self._providers[oid]
+            if p.is_configured() and verification.is_verified(oid):
+                return p
         if prov and prov.is_configured():
             return prov
         for oid in self._order:
@@ -65,6 +71,9 @@ class AudioProviderRegistry:
     async def generate(self, req: AudioGenerateRequest, provider_id: Optional[str] = None) -> AudioGenerateResult:
         extra_provider = (req.extra.get("provider") if req.extra and isinstance(req.extra, dict) else None)
         prov = self.get_active_provider(provider_id or extra_provider)
+        from app.extensions import guard
+        _pid = (req.extra.get("project_id") if req.extra and isinstance(req.extra, dict) else None)
+        guard.ensure_provider_enabled(getattr(prov, "id", provider_id or ""), _pid)
         return await prov.generate(req)
 
     async def check_health_all(self) -> Dict[str, Any]:

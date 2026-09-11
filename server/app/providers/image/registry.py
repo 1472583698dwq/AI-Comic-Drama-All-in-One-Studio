@@ -7,6 +7,9 @@ import time
 
 from .base import ImageProvider, ImageGenerateRequest, ImageGenerateResult
 
+# “永远自认为已配置”的本地占位源：不能被默认路由自动选中，需显式指定或测试通过
+_LOCAL_PLACEHOLDER = {"comfyui"}
+
 
 class ImageProviderRegistry:
     def __init__(self):
@@ -39,9 +42,9 @@ class ImageProviderRegistry:
         return self._providers.get(provider_id)
 
     def get_active_provider(self, preferred: Optional[str] = None) -> ImageProvider:
-        """获取当前生效的provider：优先preferred，其次settings.IMAGE_PROVIDER，最后首个已配置的"""
+        """获取当前生效的 provider：优先 preferred；否则优先「已验证+已配置」，再首个已配置云端源，最后兜底默认。"""
         from app.core.config import settings
-        # 若显式指定 preferred，严格返回该provider（即使未配置，调用时会抛明确错误）
+        from app.providers import verification
         if preferred:
             prov = self.get(preferred)
             if not prov:
@@ -49,14 +52,21 @@ class ImageProviderRegistry:
             return prov
         pid = getattr(settings, "IMAGE_PROVIDER", "comfyui")
         prov = self.get(pid)
-        if prov and prov.is_configured():
-            return prov
-        # fallback to first configured
+        # 1) 生产可用优先：已配置 且 已验证（测试联通）
         for oid in self._order:
+            p = self._providers[oid]
+            if p.is_configured() and verification.is_verified(oid):
+                return p
+        # 2) 默认若为“真实云端源”且已配置，直接用（本地占位源 comfyui 恒真，不算）
+        if pid not in _LOCAL_PLACEHOLDER and prov and prov.is_configured():
+            return prov
+        for oid in self._order:
+            if oid in _LOCAL_PLACEHOLDER:
+                continue
             p = self._providers[oid]
             if p.is_configured():
                 return p
-        # fallback to requested even if not configured (will error with clear msg)
+        # 3) 兜底：请求的源（会给出明确错误）
         if prov:
             return prov
         raise RuntimeError(f"未找到图片Provider: {pid}，已注册: {list(self._providers.keys())}")
@@ -76,6 +86,9 @@ class ImageProviderRegistry:
             target_provider = "comfyui"
         extra_provider = (req.extra.get("provider") if req.extra and isinstance(req.extra, dict) else None)
         prov = self.get_active_provider(target_provider or extra_provider)
+        from app.extensions import guard
+        _pid = (req.extra.get("project_id") if req.extra and isinstance(req.extra, dict) else None)
+        guard.ensure_provider_enabled(getattr(prov, "id", target_provider or ""), _pid)
         return await prov.generate(req)
 
     async def check_health_all(self) -> Dict[str, Any]:

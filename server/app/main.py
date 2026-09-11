@@ -37,6 +37,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# 项目作用域传播：从 query/header 读 project_id 注入 contextvar，
+# 供扩展停用审计切面（app.extensions.guard）在深层引擎处强制项目级停用。
+@app.middleware("http")
+async def _extension_project_scope(request, call_next):
+    pid = request.query_params.get("project_id") or request.headers.get("x-project-id") or ""
+    try:
+        from app.extensions import guard
+        token = guard.set_project_context(pid)
+    except Exception:
+        token = None
+    try:
+        return await call_next(request)
+    finally:
+        if token is not None:
+            try:
+                from app.extensions import guard
+                guard.reset_project_context(token)
+            except Exception:
+                pass
+
 # Mount API routes
 app.include_router(router, prefix=settings.API_V1_STR)
 # 资产库路由
@@ -74,6 +95,20 @@ try:
     print("[Main] OneKey routes mounted at /api/v1/onekey")
 except Exception as e:
     print(f"[Main] OneKey routes mount failed: {e}")
+# 分镜槽路由（storyboard_slots 聚合 + 项目覆盖 + 裸件 CRUD）
+try:
+    from app.api.storyboard_slot_routes import router as storyboard_slot_router
+    app.include_router(storyboard_slot_router, prefix=settings.API_V1_STR)
+    print("[Main] StoryboardSlot routes mounted at /api/v1/storyboard/slots")
+except Exception as e:
+    print(f"[Main] StoryboardSlot routes mount failed: {e}")
+# 统一扩展注册表路由（聚合查看 + 统一执行 + 统一启停）
+try:
+    from app.api.extension_routes import router as extension_router
+    app.include_router(extension_router, prefix=settings.API_V1_STR)
+    print("[Main] Extension routes mounted at /api/v1/extensions")
+except Exception as e:
+    print(f"[Main] Extension routes mount failed: {e}")
 # 插件系统路由（P1：providers/skills/workflows/mcp_tools 四类扩展点）
 try:
     from app.api.plugin_routes import router as plugin_router
@@ -88,6 +123,13 @@ try:
     print("[Main] CustomNode routes mounted at /api/v1/custom-nodes")
 except Exception as e:
     print(f"[Main] CustomNode routes mount failed: {e}")
+# 首次启动引导路由（安装向导状态）
+try:
+    from app.api.setup_routes import router as setup_router
+    app.include_router(setup_router, prefix=settings.API_V1_STR)
+    print("[Main] Setup routes mounted at /api/v1/system/setup-status")
+except Exception as e:
+    print(f"[Main] Setup routes mount failed: {e}")
 # 自定义代码节点 MCP Tool 注册（一节点一Tool）
 try:
     from app.mcp.server import mcp_registry as _mcp_reg
@@ -106,6 +148,14 @@ try:
         print(f"[Main] Plugin restore note: {_w}")
 except Exception as e:
     print(f"[Main] Plugin restore failed: {e}")
+# 插件文件监听（热重载）：插件目录变化自动重载启用中的插件（STUDIO_PLUGIN_WATCH=0 关闭）
+try:
+    from app.plugins.manager import start_plugin_watcher
+    _watch = start_plugin_watcher()
+    if _watch.get("started"):
+        print(f"[Main] Plugin file watcher started (interval={_watch.get('interval')}s)")
+except Exception as e:
+    print(f"[Main] Plugin watcher start failed: {e}")
 
 # Mount standard MCP protocol server (Streamable HTTP)
 if mcp_http_app:

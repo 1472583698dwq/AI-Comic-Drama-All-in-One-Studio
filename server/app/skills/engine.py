@@ -107,6 +107,14 @@ class SkillEngine:
         执行指定真实系统 Skill，自动调度其声明的 MCP 工具链与 SKILL.md 实际专业指引
         """
         start_time = time.time()
+        from app.extensions import guard
+        if not guard.is_enabled("skill", skill_name):
+            return SkillExecutionResult(
+                skill_name=skill_name,
+                status="error",
+                execution_time_ms=0,
+                result_message=f"技能已被停用：{skill_name}（可在设置中心·扩展中心启用）",
+            )
         skill = self.get_skill(skill_name)
         if not skill:
             return SkillExecutionResult(

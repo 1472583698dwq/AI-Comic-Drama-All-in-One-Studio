@@ -23,7 +23,7 @@ export const TTSNode: React.FC<NodeProps> = ({ data, id }) => {
   }, [d.provider, d.provider_id, d.provider_audio, d.audio_provider]);
 
   // 语音源列表 = 生成源接口（不再写死 minimax/elevenlabs/...）
-  useEffect(()=> { apiService.listProviders({ kind: 'audio' } as any).then((r:any)=> setProviders(r?.providers||[])).catch(()=>{}); }, []);
+  useEffect(()=> { apiService.listProviders({ kind: 'audio', production_only: true } as any).then((r:any)=> setProviders(r?.providers||[])).catch(()=>{}); }, []);
 
   useEffect(()=> {
     apiService.listTtsVoices(provider).then(r=> setVoices(r.voices||[])).catch(()=>{});

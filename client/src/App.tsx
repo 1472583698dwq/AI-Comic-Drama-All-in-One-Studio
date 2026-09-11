@@ -1,5 +1,6 @@
 import React, { useState, useEffect, Suspense } from 'react';
 import { Header } from './components/navbar/Header';
+import { Sidebar } from './components/navbar/Sidebar';
 import { ShotInspector } from './components/storyboard/ShotInspector';
 import { Director3DStage } from './components/director3d/Director3DStage';
 import { MultiTrackTimeline } from './components/timeline/MultiTrackTimeline';
@@ -18,13 +19,14 @@ import { ErrorBoundary } from './components/ui/ErrorBoundary';
 import { ProviderManagerModal } from './components/provider/ProviderManagerModal';
 import { GlobalAiPolish } from './components/ui/GlobalAiPolish';
 import { GlobalDialogContainer } from './components/ui/GlobalDialogContainer';
+import { FirstRunWizard } from './components/onboarding/FirstRunWizard';
 import { installGlobalDialogPatch } from './stores/useDialogStore';
 const CreativeCanvas = React.lazy(()=> import('./components/canvas/CreativeCanvas').then(m=> ({default: m.CreativeCanvas})));
 import { useProjectStore } from './stores/useProjectStore';
 import { useMcpStore } from './stores/useMcpStore';
 
 export function App() {
-  const { project, activeTab, workspace, platformMode, apiError, clearApiError } = useProjectStore();
+  const { project, activeTab, platformMode, apiError, clearApiError } = useProjectStore();
   const { fetchTools } = useMcpStore();
 
   const [isImportOpen, setIsImportOpen] = useState(false);
@@ -76,57 +78,47 @@ export function App() {
         </div>
       )}
 
-      {/* 2. Fullscreen Tabs with Strict Project Gating */}
-      {activeTab === 'config' ? (
-        <main className="flex-1 flex flex-col overflow-hidden relative">
-          <ErrorBoundary name="系统配置中心">
-            <ConfigView />
-          </ErrorBoundary>
-        </main>
-      ) : (!project || activeTab === 'projects') ? (
-        <main className="flex-1 flex flex-col overflow-hidden relative">
-          <ProjectDashboard />
-        </main>
-      ) : activeTab === 'canvas' ? (
-        <main className="flex-1 flex flex-col overflow-hidden relative">
-          <Suspense fallback={<div className="flex-1 flex items-center justify-center text-xs text-gray-500">画布加载中…</div>}>
-            <CreativeCanvas />
-          </Suspense>
-        </main>
-      ) : activeTab === 'agent' ? (
-        <main className="flex-1 flex flex-col overflow-hidden relative">
-          <ErrorBoundary name="Agent模式页">
-            <AgentModeView />
-          </ErrorBoundary>
-        </main>
-      ) : activeTab === 'characters' ? (
-        <main className="flex-1 flex flex-col overflow-hidden relative">
-          <CharacterStudio />
-        </main>
-      ) : activeTab === 'assets' ? (
-        <main className="flex-1 flex flex-col overflow-hidden relative">
-          <AssetLibrary />
-        </main>
-      ) : (
-        <main className="flex-1 flex flex-col overflow-hidden relative">
-          {platformMode === 'desktop' ? (
-            /* Desktop Professional Studio */
+      {/* 2. 左侧主导航 + 内容区（设置页为全屏，自带子导航） */}
+      <div className="flex-1 flex overflow-hidden">
+        {activeTab !== 'config' && (
+          <Sidebar
+            onOpenMcp={() => setIsMcpOpen(true)}
+            onOpenSkills={() => setIsSkillsOpen(true)}
+            onOpenProvider={() => setIsProviderOpen(true)}
+          />
+        )}
+        <main className="flex-1 flex flex-col overflow-hidden relative min-w-0">
+          {activeTab === 'config' ? (
+            <ErrorBoundary name="系统配置中心">
+              <ConfigView />
+            </ErrorBoundary>
+          ) : (!project || activeTab === 'projects') ? (
+            <ProjectDashboard />
+          ) : activeTab === 'canvas' ? (
+            <Suspense fallback={<div className="flex-1 flex items-center justify-center text-xs text-gray-500">画布加载中…</div>}>
+              <CreativeCanvas />
+            </Suspense>
+          ) : activeTab === 'agent' ? (
+            <ErrorBoundary name="Agent模式页">
+              <AgentModeView />
+            </ErrorBoundary>
+          ) : activeTab === 'characters' ? (
+            <CharacterStudio />
+          ) : activeTab === 'assets' ? (
+            <AssetLibrary />
+          ) : platformMode === 'desktop' ? (
             <div className="flex-1 flex flex-col overflow-hidden">
-              {/* Top Workspace Area */}
               <div className="flex-1 flex overflow-hidden">
                 {(activeTab === 'studio' || activeTab === 'timeline') && <ShotInspector />}
                 {activeTab === 'director3d' && <Director3DStage />}
               </div>
-
-              {/* Bottom Multi-track Timeline */}
               <MultiTrackTimeline />
             </div>
           ) : (
-            /* Mobile App Card-Flow View (Xiaoyunque Style) — same component, real API */
             <MobileCardFlow onOpenExport={() => setIsExportOpen(true)} />
           )}
         </main>
-      )}
+      </div>
 
       {/* 3. Floating Multi-Modal Director Agent (仅当存在有效项目时启用) */}
       {project && <AgentChatDrawer />}
@@ -162,6 +154,9 @@ export function App() {
 
       {/* Modern Global Toast / Confirm / Prompt Dialogs */}
       <GlobalDialogContainer />
+
+      {/* 首次启动安装向导（未完成引导时自动弹出；可通过事件重新打开） */}
+      <FirstRunWizard />
     </div>
   );
 }

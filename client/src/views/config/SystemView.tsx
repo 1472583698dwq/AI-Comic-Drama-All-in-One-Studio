@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Info, RefreshCw, CheckCircle2, XCircle, Loader2, TestTube2, Copy } from 'lucide-react';
+import { Info, RefreshCw, CheckCircle2, XCircle, Loader2, TestTube2, Copy, Sparkles } from 'lucide-react';
 import { toast } from '../../stores/useDialogStore';
 
 export const SystemView: React.FC<{
@@ -61,6 +61,7 @@ export const SystemView: React.FC<{
         <div className="flex items-center justify-between py-2 border-b border-border"><span className="text-gray-400">.env 路径</span><span className="font-mono text-brand-light truncate max-w-[260px]">{envFile||'server/.env'}</span></div>
         <div className="flex items-center justify-between py-2"><span className="text-gray-400">LLM 就绪</span><span className={checks?.openai_configured?'text-emerald-400':'text-amber-400'}>{checks?.openai_configured?'OpenAI / 通用大模型已配':'未配置'}</span></div>
         <button onClick={onReload} className="text-[11px] text-gray-400 hover:text-white flex items-center gap-1"><RefreshCw className="w-3 h-3"/> 重载配置</button>
+        <button onClick={()=> window.dispatchEvent(new Event('open-first-run-wizard'))} className="text-[11px] text-brand-light hover:underline flex items-center gap-1"><Sparkles className="w-3 h-3"/> 重新运行安装向导（配置 Key 并测试联通）</button>
       </div>
 
       <div className="bg-surface rounded-2xl border border-border p-4 space-y-3">

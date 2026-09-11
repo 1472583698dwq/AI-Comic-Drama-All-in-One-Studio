@@ -32,7 +32,7 @@ export const NodeAgentBar: React.FC<{ nodeId: string; kind: GenKind }> = ({ node
   const fetchProviders = useCallback(async () => {
     setLoading(true);
     try {
-      const res: any = await apiService.listProviders({ kind, include_builtin: true } as any).catch(() => null);
+      const res: any = await apiService.listProviders({ kind, include_builtin: true, production_only: true } as any).catch(() => null);
       setProviders(res?.providers || []);
     } finally {
       setLoading(false);

@@ -83,7 +83,14 @@ async def list_skills():
 @router.post("/skills/execute", response_model=SkillExecutionResult)
 async def execute_skill(req: SkillExecuteRequest):
     """执行指定 Skill 并自动触发其声明的 MCP 工具链与系统能力"""
-    return await skill_engine.execute_skill(req.skill_name, req.context, req.user_prompt)
+    from app.extensions import guard
+    _pid = (req.context or {}).get("project_id")
+    _tok = guard.set_project_context(_pid) if _pid else None
+    try:
+        return await skill_engine.execute_skill(req.skill_name, req.context, req.user_prompt)
+    finally:
+        if _tok is not None:
+            guard.reset_project_context(_tok)
 
 @router.post("/skills/import")
 async def import_skill(
@@ -243,13 +250,18 @@ async def parse_script(req: ScriptParseRequest):
 # ============================================================
 
 @router.get("/tts/providers")
-async def list_tts_providers():
+async def list_tts_providers(production_only: bool = False):
     """列出所有音频Providers及健康状态"""
     reg = get_audio_registry()
     providers = reg.list_providers()
     health = await reg.check_health_all()
+    from app.providers import verification
     for p in providers:
         p["health"] = health.get(p["id"], {})
+        p["verified"] = verification.is_verified(p["id"])
+        p["production_ready"] = bool(p.get("is_configured", True)) and p["verified"]
+    if production_only:
+        providers = [p for p in providers if p.get("production_ready")]
     return {"providers": providers}
 
 @router.get("/tts/voices")
@@ -322,13 +334,18 @@ async def generate_speech(req: TTSGenerateRequest):
 # ============================================================
 
 @router.get("/images/providers")
-async def list_image_providers():
+async def list_image_providers(production_only: bool = False):
     """列出所有图片Providers及健康状态"""
     reg = get_image_registry()
     providers = reg.list_providers()
     health = await reg.check_health_all()
+    from app.providers import verification
     for p in providers:
         p["health"] = health.get(p["id"], {})
+        p["verified"] = verification.is_verified(p["id"])
+        p["production_ready"] = bool(p.get("is_configured", True)) and p["verified"]
+    if production_only:
+        providers = [p for p in providers if p.get("production_ready")]
     return {"providers": providers}
 
 @router.get("/images/health")
@@ -753,10 +770,17 @@ async def compose_workflow_from_fragments(body: Dict[str, Any]):
 # ============================================================
 
 @router.get("/videos/providers")
-async def list_video_providers():
+async def list_video_providers(production_only: bool = False):
     """获取所有已注册的视频 Provider 列表及其特性 (I2V/R2V/T2V)"""
     reg = get_video_registry()
-    return reg.list_providers()
+    providers = reg.list_providers()
+    from app.providers import verification
+    for p in providers:
+        p["verified"] = verification.is_verified(p.get("id"))
+        p["production_ready"] = bool(p.get("is_configured", True)) and p["verified"]
+    if production_only:
+        providers = [p for p in providers if p.get("production_ready")]
+    return providers
 
 @router.get("/videos/health")
 async def check_videos_health():
@@ -766,13 +790,36 @@ async def check_videos_health():
 
 @router.get("/videos/status/{task_id}")
 async def get_video_task_status(task_id: str):
-    """查询异步视频生成任务状态（兼容云端与自定义 AutoDL）"""
+    """查询异步视频生成任务状态（聚合全部内置视频源 + 自定义 AutoDL）"""
     # 优先查自定义 AutoDL 任务
     try:
         from app.providers.generic.http_provider import get_custom_video_task
         custom = get_custom_video_task(task_id)
         if custom is not None:
             return custom
+    except Exception:
+        pass
+    # 聚合查询全部已注册视频源 (h3/seedance/kling/wan3/comfyui/旧通道)
+    try:
+        reg = get_video_registry()
+        for pid in reg.list_ids():
+            prov = reg.get(pid)
+            if prov and hasattr(prov, "get_task_status"):
+                try:
+                    st = prov.get_task_status(task_id)
+                    if isinstance(st, dict) and st.get("status") not in (None, "not_found"):
+                        return st
+                except Exception:
+                    continue
+            # classmethod 兜底 (按类名)
+            try:
+                cls = prov.__class__ if prov else None
+                if cls and hasattr(cls, "get_task_status"):
+                    st = cls.get_task_status(task_id)
+                    if isinstance(st, dict) and st.get("status") not in (None, "not_found"):
+                        return st
+            except Exception:
+                continue
     except Exception:
         pass
     from app.providers.video.minimax_video import CloudVideoProvider
@@ -1368,7 +1415,16 @@ class ConfigUpdateRequest(BaseModel):
     VIDEO_PROVIDER: Optional[str] = Field(default="minimax")
     COMFYUI_DEFAULT_VIDEO_WORKFLOW: Optional[str] = Field(default="")
     KLING_API_KEY: Optional[str] = Field(default="")
+    KLING_BASE_URL: Optional[str] = Field(default="https://api-beijing.klingai.com")
+    KLING_MODEL: Optional[str] = Field(default="kling-v3")
     VIDU_API_KEY: Optional[str] = Field(default="")
+    MINIMAX_H3_MODEL: Optional[str] = Field(default="MiniMax-H3")
+    MINIMAX_H3_BASE_URL: Optional[str] = Field(default="https://api.minimax.chat")
+    SEEDANCE_API_KEY: Optional[str] = Field(default="")
+    SEEDANCE_BASE_URL: Optional[str] = Field(default="https://ark.cn-beijing.volces.com/api/v3")
+    SEEDANCE_MODEL: Optional[str] = Field(default="doubao-seedance-2-0-260128")
+    WAN3_MODEL: Optional[str] = Field(default="wan3.0-video")
+    WAN3_BASE_URL: Optional[str] = Field(default="https://dashscope.aliyuncs.com")
 
     # JianYing Draft Custom Location
     JIANYIN_DRAFT_PATH: Optional[str] = Field(default="")
@@ -1637,7 +1693,39 @@ async def test_config_connection(req: ConfigTestRequest):
             return {"target": "jianyin", "ok": True, "detail": f"剪映草稿目录有效：{jy_path}"}
         return {"target": "jianyin", "ok": False, "detail": f"路径不存在或不可读：{jy_path}"}
 
-    raise HTTPException(status_code=400, detail="target 不支持，支持: openai | responses_api | deepseek | qwen | minimax | comfyui | siliconflow | dashscope | elevenlabs | cosyvoice | gpt_sovits | jianyin")
+    if target in ["minimax_h3", "h3"]:
+        api_key = cfg.get("MINIMAX_API_KEY") or settings.MINIMAX_API_KEY
+        if _is_masked_placeholder(api_key):
+            api_key = settings.MINIMAX_API_KEY
+        if not api_key:
+            return {"target": "minimax_h3", "ok": False, "detail": "MINIMAX_API_KEY 未配置 (H3 与 MiniMax 同Key, 需按量计费)"}
+        return {"target": "minimax_h3", "ok": True, "detail": "MiniMax H3 Key 已配置 (MiniMax-H3, 768P/2K 4-15s, 真实生成时校验)"}
+
+    if target == "seedance":
+        api_key = cfg.get("SEEDANCE_API_KEY") or settings.SEEDANCE_API_KEY
+        if _is_masked_placeholder(api_key):
+            api_key = settings.SEEDANCE_API_KEY
+        if not api_key:
+            return {"target": "seedance", "ok": False, "detail": "SEEDANCE_API_KEY 未配置 (火山引擎Ark)"}
+        return {"target": "seedance", "ok": True, "detail": "Seedance Key 已配置 (真实生成时校验模型/配额)"}
+
+    if target == "kling":
+        api_key = cfg.get("KLING_API_KEY") or settings.KLING_API_KEY
+        if _is_masked_placeholder(api_key):
+            api_key = settings.KLING_API_KEY
+        if not api_key:
+            return {"target": "kling", "ok": False, "detail": "KLING_API_KEY 未配置"}
+        return {"target": "kling", "ok": True, "detail": "可灵 Kling Key 已配置 (真实生成时校验)"}
+
+    if target in ["wan3", "wan"]:
+        api_key = cfg.get("DASHSCOPE_API_KEY") or settings.DASHSCOPE_API_KEY
+        if _is_masked_placeholder(api_key):
+            api_key = settings.DASHSCOPE_API_KEY
+        if not api_key:
+            return {"target": "wan3", "ok": False, "detail": "DASHSCOPE_API_KEY 未配置 (Wan3.0 复用此Key)"}
+        return {"target": "wan3", "ok": True, "detail": "Wan3.0 Key 已配置 (wan3.0-video, 真实生成时校验)"}
+
+    raise HTTPException(status_code=400, detail="target 不支持，支持: openai | responses_api | deepseek | qwen | minimax | minimax_h3 | seedance | kling | wan3 | comfyui | siliconflow | dashscope | elevenlabs | cosyvoice | gpt_sovits | jianyin")
 
 @router.post("/agent/chat")
 async def http_agent_chat(req: AgentChatRequest):

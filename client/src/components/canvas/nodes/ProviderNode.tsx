@@ -38,7 +38,8 @@ export const ProviderNode: React.FC<NodeProps> = ({ data, id, type }) => {
       // fallback to apiService providers? use image providers
       const alt = await apiService.listImageProviders().catch(()=>null);
       if (alt?.providers) {
-        const filtered = alt.providers.filter((p:any)=> true);
+        // 生产端只显示已验证源
+        const filtered = alt.providers.filter((p:any)=> p.production_ready === true);
         setProviders(filtered);
       }
     } catch {}

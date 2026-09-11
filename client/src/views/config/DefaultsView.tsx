@@ -31,7 +31,7 @@ export const DefaultsView: React.FC<{
           {current && <button onClick={()=> test(current)} className="text-[11px] px-2.5 py-1 rounded-full bg-surface-secondary border border-border text-white hover:border-brand">测试</button>}
         </div>
         <div className="text-[11px] text-gray-400">{desc}</div>
-        <ProviderPicker kind={kind} value={current} onChange={(pid)=> setField(key, pid)} />
+        <ProviderPicker kind={kind} value={current} onChange={(pid)=> setField(key, pid)} includeUnverified />
         {def && (
           <div className="flex items-center gap-2 text-[11px] text-gray-500">
             <span className="px-1.5 py-0.5 rounded bg-black/30 text-gray-300 truncate max-w-[180px]">{def.display_name || def.name}</span>

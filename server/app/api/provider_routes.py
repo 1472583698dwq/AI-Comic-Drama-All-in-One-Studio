@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from app.models.provider_definition import ProviderDefinition
 from app.providers.custom.manager import custom_provider_manager
+from app.providers import verification
 from app.core.config import settings
 
 router = APIRouter()
@@ -604,7 +605,7 @@ def _default_params_schema(kind: str) -> Dict[str, Any]:
 
 
 @router.get("/providers")
-async def list_providers(kind: Optional[str] = None, scope: Optional[str] = None, include_builtin: bool = True, project_id: Optional[str] = None):
+async def list_providers(kind: Optional[str] = None, scope: Optional[str] = None, include_builtin: bool = True, project_id: Optional[str] = None, production_only: bool = False):
     result: List[Dict[str, Any]] = []
     if include_builtin:
         try:
@@ -631,6 +632,9 @@ async def list_providers(kind: Optional[str] = None, scope: Optional[str] = None
                     info["builtin"] = True
                     info["provider_type"] = "builtin"
                     info["enabled"] = True
+                    # 生产可用 = 已配置 且 已验证（测试联通）。未验证的源只在配置端可见。
+                    info["verified"] = verification.is_verified(pid)
+                    info["production_ready"] = bool(info.get("is_configured", True)) and info["verified"]
                     # 内置源也补 x-*，保证画布/分镜分组与人机徽标一致
                     try:
                         raw_ps = info.get("params_schema")
@@ -653,9 +657,14 @@ async def list_providers(kind: Optional[str] = None, scope: Optional[str] = None
         for pd in customs:
             if scope and pd.scope != scope:
                 continue
-            result.append(_sanitize_for_frontend(pd))
+            info = _sanitize_for_frontend(pd)
+            info["verified"] = verification.is_verified(pd.id)
+            info["production_ready"] = bool(getattr(pd, "enabled", True)) and info["verified"]
+            result.append(info)
     except Exception as e:
         print(f"[ProviderRoutes] custom list failed: {e}")
+    if production_only:
+        result = [p for p in result if p.get("production_ready")]
     order = {"image": 0, "video": 1, "audio": 2, "llm": 3}
     result.sort(key=lambda x: (order.get(x.get("kind", "image"), 99), x.get("id", "")))
     return {"providers": result, "total": len(result)}
@@ -946,6 +955,7 @@ async def update_provider(provider_id: str, body: Dict[str, Any] = Body(...)):
         register_single_custom_provider(saved)
     except Exception as e:
         print(f"[ProviderRoutes] hot reload failed: {e}")
+    verification.clear(provider_id)  # 定义变更 → 需重新测试才可作为生产源
     return {"status": "success", "provider": _sanitize_for_frontend(saved)}
 
 
@@ -1011,8 +1021,9 @@ async def test_provider(provider_id: str, body: Optional[Dict[str, Any]] = Body(
             cc = compile_check_code(pd.language or "python", pd.code, pd.code_entry or "generate")
             compile_check = cc
             if not cc.get("ok"):
+                verification.mark(provider_id, False, f"代码体检未通过: {cc.get('error')}", kind or "")
                 return {"provider_id": provider_id, "ok": False, "is_configured": True, "kind": kind,
-                        "detail": f"代码体检未通过: {cc.get('error')}", "compile_check": cc}
+                        "detail": f"代码体检未通过: {cc.get('error')}", "compile_check": cc, "verified": False}
         # 兼容：若仍是 legacy JSON 且无 code，尝试用 http_provider
         if not pd.code and pd.legacy_json_mode:
             try:
@@ -1042,12 +1053,21 @@ async def test_provider(provider_id: str, body: Optional[Dict[str, Any]] = Body(
     try:
         ok = await prov.check_health()
         is_configured = prov.is_configured() if hasattr(prov, "is_configured") else True
-        resp = {"provider_id": provider_id, "ok": ok, "is_configured": is_configured, "kind": kind or getattr(prov, "kind", "unknown"), "detail": "连通正常" if ok else "检测未通过（检查代码/ Key/地址）"}
+        # 测试联通即授予“生产可用”资格；失败则撤销，未验证的源不会出现在生产端
+        verified = bool(ok and is_configured)
+        verification.mark(provider_id, verified,
+                         "连通正常" if ok else "检测未通过（检查代码/ Key/地址）",
+                         kind or getattr(prov, "id", ""))
+        resp = {"provider_id": provider_id, "ok": ok, "is_configured": is_configured,
+                "verified": verified,
+                "kind": kind or getattr(prov, "kind", "unknown"),
+                "detail": "连通正常" if ok else "检测未通过（检查代码/ Key/地址）"}
         if compile_check is not None:
             resp["compile_check"] = compile_check
         return resp
     except Exception as e:
-        return {"provider_id": provider_id, "ok": False, "detail": f"检测异常: {e}"}
+        verification.mark(provider_id, False, f"检测异常: {e}", kind or "")
+        return {"provider_id": provider_id, "ok": False, "verified": False, "detail": f"检测异常: {e}"}
 
 
 class ProviderImportRequest(BaseModel):
@@ -1173,6 +1193,7 @@ async def set_provider_api_key(provider_id: str, body: Dict[str, Any] = Body(...
     if not api_key or not str(api_key).strip():
         raise HTTPException(status_code=400, detail="api_key 不能为空")
     _save_api_key(provider_id, str(api_key).strip())
+    verification.clear(provider_id)  # Key 变更 → 需重新测试
     if not pd.auth.key_env:
         pd.auth.key_env = f"CUSTOM_PROVIDER_{provider_id}"
         custom_provider_manager.save_definition(pd)

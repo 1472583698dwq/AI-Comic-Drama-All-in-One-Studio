@@ -49,6 +49,24 @@ async def reload_plugins():
         raise HTTPException(status_code=500, detail=f"重扫失败: {e}")
 
 
+@router.get("/plugins/health")
+async def plugins_health():
+    """插件可观测：执行次数/错误/超时/近因 + 已知扩展数。"""
+    try:
+        from app.extensions.registry import extension_registry
+        return {"status": "ok", **extension_registry.health()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"健康查询失败: {e}")
+
+
+@router.post("/plugins/{pid}/reload")
+async def reload_plugin(pid: str):
+    try:
+        return {"status": "ok", **pm.reload_plugin(pid)}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"热重载失败: {e}")
+
+
 @router.post("/plugins/{pid}/enable")
 async def enable_plugin(pid: str):
     try:

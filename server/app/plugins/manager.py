@@ -20,6 +20,7 @@ import re
 import shutil
 import sys
 import tempfile
+import threading
 import time
 import zipfile
 from typing import Any, Dict, List, Optional, Tuple
@@ -35,8 +36,93 @@ _MAX_PER_KIND = 20
 _PLUGIN_TOOL_TIMEOUT = 30
 _PLUGIN_TOOL_MAX_OUT = 20000
 
+# 生命周期并发锁：install / enable / disable / uninstall / reload 串行化
+_LOCK = threading.RLock()
+
 # 查壳工具运行时注册表：tool_name -> {"pid","file","entry","input_schema"}
 _PLUGIN_TOOL_HANDLERS: Dict[str, Dict[str, Any]] = {}
+
+# 文件监听（热重载）：pid -> 最近一次扫描到的目录 mtime
+_WATCH_SNAPSHOT: Dict[str, float] = {}
+_watcher_thread: Optional[threading.Thread] = None
+_watcher_stop = threading.Event()
+
+
+def _parse_ver(v: str) -> Optional[Tuple[int, int, int]]:
+    m = re.match(r"^(\d+)\.(\d+)\.(\d+)", str(v or ""))
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else None
+
+
+def _satisfies(version: str, constraint: str) -> bool:
+    """轻量 semver 约束：* / = / > / >= / < / <= / ^ / ~，缺省 =。"""
+    c = str(constraint or "*").strip()
+    if c in ("", "*", "latest"):
+        return True
+    v = _parse_ver(version)
+    if not v:
+        return False
+    m = re.match(r"^(>=|<=|>|<|=|\^|~)?\s*v?(\d+)\.(\d+)\.(\d+)", c)
+    if not m:
+        return False
+    op = m.group(1) or "="
+    t = (int(m.group(2)), int(m.group(3)), int(m.group(4)))
+    if op in ("=", "=="):
+        return v == t
+    if op == ">=":
+        return v >= t
+    if op == "<=":
+        return v <= t
+    if op == ">":
+        return v > t
+    if op == "<":
+        return v < t
+    if op == "^":
+        return v[0] == t[0] and v >= t
+    if op == "~":
+        return v[0] == t[0] and v[1] == t[1] and v >= t
+    return False
+
+
+def _check_dependencies(m: PluginManifest, require_enabled: bool = False) -> Dict[str, List[str]]:
+    """校验 dependsOn。返回 {missing, mismatch, disabled}，均为人类可读字符串列表。"""
+    idx = (_load_index().get("plugins") or {})
+    missing: List[str] = []
+    mismatch: List[str] = []
+    disabled: List[str] = []
+    for dep_id, constraint in (m.dependsOn or {}).items():
+        rec = idx.get(dep_id)
+        spec = f"{dep_id}" + (f"@{constraint}" if constraint not in ("", "*") else "")
+        if not rec:
+            missing.append(spec)
+            continue
+        if not _satisfies(rec.get("version", ""), constraint):
+            mismatch.append(f"{dep_id} 需要 {constraint or '*'}，已装 {rec.get('version') or '?'}")
+        elif require_enabled and not rec.get("enabled"):
+            disabled.append(dep_id)
+    return {"missing": missing, "mismatch": mismatch, "disabled": disabled}
+
+
+def _namespace_skill_name(content: str, native_name: str) -> str:
+    """把 SKILL.md 的 frontmatter ``name`` 重写为命名空间化名称。
+
+    - 有 frontmatter：替换/补写 name（技能引擎以 frontmatter name 为键，物理隔离靠它）；
+    - 无 frontmatter：引擎本就不会加载，原样返回。
+    """
+    m = re.match(r"^---\s*\n(.*?)\n---\s*\n(.*)$", content, re.DOTALL)
+    if not m:
+        return content
+    fm, body = m.group(1), m.group(2)
+    lines = fm.splitlines()
+    out_lines, found = [], False
+    for ln in lines:
+        if re.match(r"^\s*name\s*:", ln):
+            out_lines.append(f"name: {native_name}")
+            found = True
+        else:
+            out_lines.append(ln)
+    if not found:
+        out_lines.insert(0, f"name: {native_name}")
+    return "---\n" + "\n".join(out_lines) + "\n---\n" + body
 
 
 def _pid_norm(pid: str) -> str:
@@ -110,7 +196,7 @@ def validate_manifest_dict(data: Dict[str, Any]) -> PluginManifest:
         raise ValueError("版本非法：须为semver，如 1.0.0")
     eps = m.extensionPoints
     for rel in (eps.providers + eps.skills + eps.workflows + eps.mcp_tools
-                + eps.custom_nodes
+                + eps.custom_nodes + eps.storyboard_slots
                 + eps.canvas_nodes + eps.director_packs + eps.exporters + eps.themes):
         _safe_rel("<manifest>", rel)
     return m
@@ -157,6 +243,8 @@ def discover() -> List[Dict[str, Any]]:
         out.append({
             "id": m.id, "name": m.name, "version": m.version,
             "description": m.description, "author": m.author, "license": m.license,
+            "publisher": m.publisher or m.author or m.id,
+            "dependsOn": dict(m.dependsOn or {}),
             "enabled": bool(rec.get("enabled", False)),
             "installed_at": rec.get("installed_at", ""),
             "contributions": {
@@ -165,6 +253,7 @@ def discover() -> List[Dict[str, Any]]:
                 "workflows": _glob_kind(pdir, eps.workflows),
                 "mcp_tools": _glob_kind(pdir, eps.mcp_tools),
                 "custom_nodes": _glob_kind(pdir, eps.custom_nodes),
+                "storyboard_slots": _glob_kind(pdir, eps.storyboard_slots),
             },
             "deferred": {
                 k: getattr(eps, k) for k in ("canvas_nodes", "director_packs", "exporters", "themes")
@@ -178,22 +267,36 @@ def install_from_dir(src_dir: str) -> PluginManifest:
     m = _read_manifest(src_dir)
     root = _plugins_root()
     dest = os.path.join(root, m.id)
-    if os.path.exists(dest):
-        raise ValueError(f"插件已存在: {m.id}（请先卸载或删除旧版）")
+    # 依赖校验（安装时要求依赖已安装且版本满足；启用时再要求已启用）
+    deps = _check_dependencies(m, require_enabled=False)
+    if deps["missing"]:
+        raise ValueError(f"缺少依赖插件: {', '.join(deps['missing'])}")
+    if deps["mismatch"]:
+        raise ValueError("依赖版本不满足: " + "；".join(deps["mismatch"]))
     # 体积 guard：payload 全量文件
     all_files = []
     for _dp, _dn, fns in os.walk(src_dir):
         for fn in fns:
             all_files.append(os.path.join(_dp, fn))
     _size_guard(all_files)
-    shutil.copytree(src_dir, dest)
-    idx = _load_index()
-    idx.setdefault("plugins", {})[m.id] = {
-        "version": m.version, "enabled": False, "installed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "installed_files": [], "provider_ids": [], "skill_names": [], "workflow_ids": [], "mcp_tools": [],
-        "custom_nodes": [],
-    }
-    _save_index(idx)
+    with _LOCK:
+        if os.path.exists(dest):
+            raise ValueError(f"插件已存在: {m.id}（请先卸载或删除旧版）")
+        # 原子安装：先复制到 staging，再 rename 落位；失败清理 staging
+        staging = os.path.join(root, f".staging-{m.id}-{os.getpid()}-{int(time.time() * 1000)}")
+        try:
+            shutil.copytree(src_dir, staging)
+            os.replace(staging, dest)
+        except Exception:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
+        idx = _load_index()
+        idx.setdefault("plugins", {})[m.id] = {
+            "version": m.version, "enabled": False, "installed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "installed_files": [], "provider_ids": [], "skill_names": [], "workflow_ids": [], "mcp_tools": [],
+            "custom_nodes": [],
+        }
+        _save_index(idx)
     return m
 
 
@@ -332,30 +435,43 @@ def _unregister_plugin_tools(tool_names: List[str]) -> None:
 async def run_plugin_tool(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     """执行查壳插件工具：trusted总闸 + 必填校验 + 30s超时 + 结果截断。供mcp execute_tool分支调用。"""
     from app.mcp.server import _trusted_gate_or_raise
+    from app.extensions import telemetry
+    started = time.time()
+    ext_id = f"mcp_tool:{tool_name}"
     h = _PLUGIN_TOOL_HANDLERS.get(tool_name)
     if not h:
+        telemetry.record(ext_id, False, 0, kind="mcp_tool", error="未注册")
         raise ValueError(f"插件工具未注册（插件可能被禁用）: {tool_name}")
-    _trusted_gate_or_raise()
-    schema = h.get("input_schema") or {}
-    required = schema.get("required") or []
-    args = dict(arguments or {})
-    missing = [k for k in required if args.get(k) in (None, "")]
-    if missing:
-        raise ValueError(f"缺少必填参数: {missing}")
-    mod = _load_plugin_module(h["pid"], h["file"])
-    fn = getattr(mod, h["entry"], None)
-    if not callable(fn):
-        raise ValueError(f"入口函数丢失: {h['entry']}")
-    ctx = {"plugin_id": h["pid"], "tool": tool_name}
-    result = await asyncio.wait_for(asyncio.to_thread(fn, args, ctx), timeout=_PLUGIN_TOOL_TIMEOUT)
     try:
-        s = json.dumps(result, ensure_ascii=False, default=str)
-    except Exception:
-        s = str(result)
-        result = {"output": s}
-    if len(s) > _PLUGIN_TOOL_MAX_OUT:
-        return {"output": s[:_PLUGIN_TOOL_MAX_OUT] + "…[截断]", "truncated": True}
-    return result if isinstance(result, dict) else {"output": result}
+        from app.extensions import guard
+        guard.ensure_enabled("mcp_tool", tool_name)
+        _trusted_gate_or_raise()
+        schema = h.get("input_schema") or {}
+        required = schema.get("required") or []
+        args = dict(arguments or {})
+        missing = [k for k in required if args.get(k) in (None, "")]
+        if missing:
+            raise ValueError(f"缺少必填参数: {missing}")
+        mod = _load_plugin_module(h["pid"], h["file"])
+        fn = getattr(mod, h["entry"], None)
+        if not callable(fn):
+            raise ValueError(f"入口函数丢失: {h['entry']}")
+        ctx = {"plugin_id": h["pid"], "tool": tool_name}
+        result = await asyncio.wait_for(asyncio.to_thread(fn, args, ctx), timeout=_PLUGIN_TOOL_TIMEOUT)
+        try:
+            s = json.dumps(result, ensure_ascii=False, default=str)
+        except Exception:
+            s = str(result)
+            result = {"output": s}
+        out = ({"output": s[:_PLUGIN_TOOL_MAX_OUT] + "…[截断]", "truncated": True}
+               if len(s) > _PLUGIN_TOOL_MAX_OUT
+               else (result if isinstance(result, dict) else {"output": result}))
+        telemetry.record(ext_id, True, int((time.time() - started) * 1000), kind="mcp_tool")
+        return out
+    except Exception as e:
+        telemetry.record(ext_id, False, int((time.time() - started) * 1000), kind="mcp_tool",
+                         error=e, timeout=isinstance(e, (asyncio.TimeoutError, TimeoutError)))
+        raise
 
 
 def restore_enabled_plugins() -> Dict[str, Any]:
@@ -385,6 +501,11 @@ def restore_enabled_plugins() -> Dict[str, Any]:
 
 
 def enable(pid: str) -> Dict[str, Any]:
+    with _LOCK:
+        return _enable_locked(pid)
+
+
+def _enable_locked(pid: str) -> Dict[str, Any]:
     root = _plugins_root()
     pdir = os.path.join(root, pid)
     if not os.path.isdir(pdir):
@@ -392,6 +513,13 @@ def enable(pid: str) -> Dict[str, Any]:
     m = _read_manifest(pdir)
     if m.id != pid:
         raise ValueError("目录名与manifest id不一致")
+    deps = _check_dependencies(m, require_enabled=True)
+    if deps["missing"]:
+        raise ValueError(f"缺少依赖插件: {', '.join(deps['missing'])}")
+    if deps["mismatch"]:
+        raise ValueError("依赖版本不满足: " + "；".join(deps["mismatch"]))
+    if deps["disabled"]:
+        raise ValueError(f"依赖插件尚未启用: {', '.join(deps['disabled'])}")
     idx = _load_index()
     rec = idx.setdefault("plugins", {}).setdefault(pid, {"version": m.version, "enabled": False, "installed_at": "", "installed_files": [], "provider_ids": [], "skill_names": [], "workflow_ids": [], "mcp_tools": [], "custom_nodes": []})
     if rec.get("enabled"):
@@ -428,23 +556,37 @@ def enable(pid: str) -> Dict[str, Any]:
         except Exception as e:
             summary["warnings"].append(f"provider失败 {rel}: {e}")
 
-    # —— skills：拷贝到 server/skills/.plugins/<pid>/ + reload ——
+    # —— skills：拷贝到 server/skills/.plugins/<pid>/<pid>__<name>/，并物理命名空间化 ——
     try:
         from app.skills.engine import skill_engine
         trot = os.path.join(_skills_target_root(), pid)
         os.makedirs(trot, exist_ok=True)
+        used_native: set = set()
         for rel in _glob_kind(pdir, m.extensionPoints.skills):
             if os.path.basename(rel) != "SKILL.md":
                 summary["warnings"].append(f"skill须为SKILL.md，已跳过: {rel}")
                 continue
             skill_dir = os.path.dirname(rel) or "skill"
             sname = os.path.basename(os.path.normpath(skill_dir))
-            dest_dir = os.path.join(trot, sname)
+            native = f"{_pid_norm(pid)}__{sname}"
+            n = 2
+            while native in used_native:
+                native = f"{_pid_norm(pid)}__{sname}_{n}"
+                n += 1
+            used_native.add(native)
+            dest_dir = os.path.join(trot, native)
             os.makedirs(dest_dir, exist_ok=True)
-            shutil.copy2(os.path.join(pdir, rel), os.path.join(dest_dir, "SKILL.md"))
-            installed_files.append(os.path.join(dest_dir, "SKILL.md"))
-            skill_names.append(sname)
-            summary["skills"].append(sname)
+            dest_file = os.path.join(dest_dir, "SKILL.md")
+            try:
+                with open(os.path.join(pdir, rel), "r", encoding="utf-8") as f:
+                    raw = f.read()
+                with open(dest_file, "w", encoding="utf-8") as f:
+                    f.write(_namespace_skill_name(raw, native))
+            except Exception:
+                shutil.copy2(os.path.join(pdir, rel), dest_file)
+            installed_files.append(dest_file)
+            skill_names.append(native)
+            summary["skills"].append({"native": native, "original": sname})
         try:
             skill_engine.reload_skills()
         except Exception as e:
@@ -540,6 +682,11 @@ def enable(pid: str) -> Dict[str, Any]:
 
 
 def disable(pid: str) -> Dict[str, Any]:
+    with _LOCK:
+        return _disable_locked(pid)
+
+
+def _disable_locked(pid: str) -> Dict[str, Any]:
     idx = _load_index()
     rec = (idx.get("plugins") or {}).get(pid)
     if not rec or not rec.get("enabled"):
@@ -617,11 +764,11 @@ def disable(pid: str) -> Dict[str, Any]:
                 removed.append(ap)
         except Exception as e:
             warnings.append(f"删除失败 {fp}: {e}")
-    # 清理空技能目录
+    # 清理该插件的技能目录（含命名空间子目录）
     try:
         trot = os.path.join(_skills_target_root(), pid)
-        if os.path.isdir(trot) and not os.listdir(trot):
-            os.rmdir(trot)
+        if os.path.isdir(trot):
+            shutil.rmtree(trot, ignore_errors=True)
     except Exception:
         pass
     try:
@@ -640,15 +787,109 @@ def disable(pid: str) -> Dict[str, Any]:
 
 
 def uninstall(pid: str) -> Dict[str, Any]:
-    try:
+    with _LOCK:
+        try:
+            disable(pid)
+        except Exception:
+            pass
+        root = _plugins_root()
+        pdir = os.path.join(root, pid)
+        if os.path.isdir(pdir):
+            shutil.rmtree(pdir, ignore_errors=True)
+        idx = _load_index()
+        (idx.get("plugins") or {}).pop(pid, None)
+        _save_index(idx)
+        _WATCH_SNAPSHOT.pop(pid, None)
+    return {"id": pid, "uninstalled": True}
+
+
+def reload_plugin(pid: str) -> Dict[str, Any]:
+    """热重载单个插件：启用中则 disable→enable 重读全部贡献；未启用仅重扫。"""
+    with _LOCK:
+        idx = _load_index()
+        rec = (idx.get("plugins") or {}).get(pid) or {}
+        was_enabled = bool(rec.get("enabled"))
+    if was_enabled:
         disable(pid)
+        ret = enable(pid)
+        return {"id": pid, "reloaded": True, "enabled": True, "detail": ret}
+    return {"id": pid, "reloaded": True, "enabled": False,
+            "note": "未启用，仅重扫 manifest 与贡献"}
+
+
+def _dir_mtime(pid: str) -> float:
+    pdir = os.path.join(_plugins_root(), pid)
+    latest = 0.0
+    try:
+        for dp, _dn, fns in os.walk(pdir):
+            for fn in fns:
+                try:
+                    latest = max(latest, os.path.getmtime(os.path.join(dp, fn)))
+                except Exception:
+                    continue
     except Exception:
         pass
+    return latest
+
+
+def scan_plugin_changes() -> List[str]:
+    """对比插件目录 mtime，返回内容有变化的插件 id 列表（供文件监听热重载）。"""
+    changed: List[str] = []
     root = _plugins_root()
-    pdir = os.path.join(root, pid)
-    if os.path.isdir(pdir):
-        shutil.rmtree(pdir, ignore_errors=True)
-    idx = _load_index()
-    (idx.get("plugins") or {}).pop(pid, None)
-    _save_index(idx)
-    return {"id": pid, "uninstalled": True}
+    try:
+        entries = [e for e in os.listdir(root) if os.path.isdir(os.path.join(root, e))]
+    except Exception:
+        return changed
+    for pid in entries:
+        if pid.startswith(".staging-"):
+            continue
+        mt = _dir_mtime(pid)
+        prev = _WATCH_SNAPSHOT.get(pid)
+        _WATCH_SNAPSHOT[pid] = mt
+        if prev is not None and mt > prev:
+            changed.append(pid)
+    return changed
+
+
+def start_plugin_watcher(interval: float = 3.0, auto_reload: bool = True) -> Dict[str, Any]:
+    """启动后台文件监听线程：插件目录变化时自动热重载启用中的插件。
+
+    由环境变量 STUDIO_PLUGIN_WATCH=0 关闭。返回启动状态（幂等）。
+    """
+    global _watcher_thread
+    if os.environ.get("STUDIO_PLUGIN_WATCH", "1") in ("0", "false", "False"):
+        return {"started": False, "reason": "disabled_by_env"}
+    with _LOCK:
+        if _watcher_thread and _watcher_thread.is_alive():
+            return {"started": True, "reason": "already_running"}
+        _watcher_stop.clear()
+
+        def _loop():
+            # 首轮只建基线，不触发热重载
+            try:
+                scan_plugin_changes()
+            except Exception:
+                pass
+            while not _watcher_stop.wait(max(0.5, float(interval))):
+                try:
+                    changed = scan_plugin_changes()
+                    if not changed:
+                        continue
+                    for pid in changed:
+                        try:
+                            if auto_reload:
+                                reload_plugin(pid)
+                            else:
+                                discover()
+                        except Exception:
+                            continue
+                except Exception:
+                    continue
+
+        _watcher_thread = threading.Thread(target=_loop, name="plugin-watcher", daemon=True)
+        _watcher_thread.start()
+    return {"started": True, "interval": interval, "auto_reload": auto_reload}
+
+
+def stop_plugin_watcher() -> None:
+    _watcher_stop.set()

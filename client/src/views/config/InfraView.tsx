@@ -100,6 +100,65 @@ export const InfraView: React.FC<{
         </div>
       </div>
 
+      {/* 云端视频默认源 Key（缺 Key 即禁用，配 Key 后即用） */}
+      <div className="bg-surface rounded-2xl border border-border p-4 space-y-4">
+        <div className="flex items-center justify-between border-b border-border pb-2">
+          <span className="text-xs font-bold text-white flex items-center gap-2"><Film className="w-3.5 h-3.5 text-orange-400"/> 云端视频默认源 <span className="text-[10px] px-2 py-0.5 rounded-full bg-orange-500/10 border border-orange-500/20 text-orange-300">缺Key禁用 · 配Key即用</span></span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs font-medium text-gray-300">MINIMAX_API_KEY（MiniMax H3 复用）</label>
+            <div className="mt-1.5 relative">
+              <input type={showKeys['MINIMAX_API_KEY']?'text':'password'} value={form.MINIMAX_API_KEY||''} onChange={e=> setField('MINIMAX_API_KEY', e.target.value)} placeholder="MiniMax 按量Key（H3 必需）" className="w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 pr-9 text-xs font-mono text-white"/>
+              <button type="button" onClick={()=> toggleKey('MINIMAX_API_KEY')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white">{showKeys['MINIMAX_API_KEY']?<EyeOff className="w-3 h-3"/>:<Eye className="w-3 h-3"/>}</button>
+            </div>
+            <div className="mt-1.5 flex gap-1.5">
+              <input value={form.MINIMAX_H3_MODEL||'MiniMax-H3'} onChange={e=> setField('MINIMAX_H3_MODEL', e.target.value)} placeholder="MiniMax-H3" className="flex-1 bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs font-mono text-white"/>
+              <button onClick={()=> onTest('minimax_h3')} disabled={!!testing} className="px-2.5 py-1 rounded-full bg-surface-tertiary border border-border text-[11px] text-white flex items-center gap-1 disabled:opacity-40">{testing==='minimax_h3'?<Loader2 className="w-3 h-3 animate-spin"/>:<TestTube2 className="w-3 h-3"/>} 测试</button>
+            </div>
+            {testResult.minimax_h3 && <div className={`mt-1 text-[11px] flex items-center gap-1 ${testResult.minimax_h3.ok?'text-emerald-400':'text-red-400'}`}>{testResult.minimax_h3.ok?<CheckCircle2 className="w-3 h-3"/>:<XCircle className="w-3 h-3"/>}{testResult.minimax_h3.detail}</div>}
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-300">SEEDANCE_API_KEY（火山引擎 Ark）</label>
+            <div className="mt-1.5 relative">
+              <input type={showKeys['SEEDANCE_API_KEY']?'text':'password'} value={form.SEEDANCE_API_KEY||''} onChange={e=> setField('SEEDANCE_API_KEY', e.target.value)} placeholder="Ark API Key" className="w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 pr-9 text-xs font-mono text-white"/>
+              <button type="button" onClick={()=> toggleKey('SEEDANCE_API_KEY')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white">{showKeys['SEEDANCE_API_KEY']?<EyeOff className="w-3 h-3"/>:<Eye className="w-3 h-3"/>}</button>
+            </div>
+            <div className="mt-1.5 flex gap-1.5">
+              <input value={form.SEEDANCE_MODEL||''} onChange={e=> setField('SEEDANCE_MODEL', e.target.value)} placeholder="doubao-seedance-2-0-260128" className="flex-1 bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs font-mono text-white"/>
+              <button onClick={()=> onTest('seedance')} disabled={!!testing} className="px-2.5 py-1 rounded-full bg-surface-tertiary border border-border text-[11px] text-white flex items-center gap-1 disabled:opacity-40">{testing==='seedance'?<Loader2 className="w-3 h-3 animate-spin"/>:<TestTube2 className="w-3 h-3"/>} 测试</button>
+            </div>
+            {testResult.seedance && <div className={`mt-1 text-[11px] flex items-center gap-1 ${testResult.seedance.ok?'text-emerald-400':'text-red-400'}`}>{testResult.seedance.ok?<CheckCircle2 className="w-3 h-3"/>:<XCircle className="w-3 h-3"/>}{testResult.seedance.detail}</div>}
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-300">KLING_API_KEY（可灵/柯灵）</label>
+            <div className="mt-1.5 relative">
+              <input type={showKeys['KLING_API_KEY']?'text':'password'} value={form.KLING_API_KEY||''} onChange={e=> setField('KLING_API_KEY', e.target.value)} placeholder="Kling Bearer Key（官网/中转）" className="w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 pr-9 text-xs font-mono text-white"/>
+              <button type="button" onClick={()=> toggleKey('KLING_API_KEY')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white">{showKeys['KLING_API_KEY']?<EyeOff className="w-3 h-3"/>:<Eye className="w-3 h-3"/>}</button>
+            </div>
+            <div className="mt-1.5 flex gap-1.5">
+              <input value={form.KLING_MODEL||''} onChange={e=> setField('KLING_MODEL', e.target.value)} placeholder="kling-v3" className="flex-1 bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs font-mono text-white"/>
+              <input value={form.KLING_BASE_URL||''} onChange={e=> setField('KLING_BASE_URL', e.target.value)} placeholder="https://api-beijing.klingai.com" className="flex-1 bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs font-mono text-white"/>
+              <button onClick={()=> onTest('kling')} disabled={!!testing} className="px-2.5 py-1 rounded-full bg-surface-tertiary border border-border text-[11px] text-white flex items-center gap-1 disabled:opacity-40">{testing==='kling'?<Loader2 className="w-3 h-3 animate-spin"/>:<TestTube2 className="w-3 h-3"/>} 测试</button>
+            </div>
+            {testResult.kling && <div className={`mt-1 text-[11px] flex items-center gap-1 ${testResult.kling.ok?'text-emerald-400':'text-red-400'}`}>{testResult.kling.ok?<CheckCircle2 className="w-3 h-3"/>:<XCircle className="w-3 h-3"/>}{testResult.kling.detail}</div>}
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-300">DASHSCOPE_API_KEY（万相 Wan3.0 复用）</label>
+            <div className="mt-1.5 relative">
+              <input type={showKeys['DASHSCOPE_API_KEY']?'text':'password'} value={form.DASHSCOPE_API_KEY||''} onChange={e=> setField('DASHSCOPE_API_KEY', e.target.value)} placeholder="阿里百炼 Key" className="w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 pr-9 text-xs font-mono text-white"/>
+              <button type="button" onClick={()=> toggleKey('DASHSCOPE_API_KEY')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white">{showKeys['DASHSCOPE_API_KEY']?<EyeOff className="w-3 h-3"/>:<Eye className="w-3 h-3"/>}</button>
+            </div>
+            <div className="mt-1.5 flex gap-1.5">
+              <input value={form.WAN3_MODEL||''} onChange={e=> setField('WAN3_MODEL', e.target.value)} placeholder="wan3.0-video" className="flex-1 bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs font-mono text-white"/>
+              <button onClick={()=> onTest('wan3')} disabled={!!testing} className="px-2.5 py-1 rounded-full bg-surface-tertiary border border-border text-[11px] text-white flex items-center gap-1 disabled:opacity-40">{testing==='wan3'?<Loader2 className="w-3 h-3 animate-spin"/>:<TestTube2 className="w-3 h-3"/>} 测试</button>
+            </div>
+            {testResult.wan3 && <div className={`mt-1 text-[11px] flex items-center gap-1 ${testResult.wan3.ok?'text-emerald-400':'text-red-400'}`}>{testResult.wan3.ok?<CheckCircle2 className="w-3 h-3"/>:<XCircle className="w-3 h-3"/>}{testResult.wan3.detail}</div>}
+          </div>
+        </div>
+        <div className="text-[11px] text-gray-500">H3 需 MiniMax 按量 API；Seedance 模型如 doubao-seedance-2-0-260128/fast；Kling 官方为 AK/SK 签 JWT，中转网关可用 Bearer，BASE_URL 可覆盖；Wan3 注意 Key 与地域 endpoint 一致。保存后热重载，生成源中枢即出现对应 Provider。</div>
+      </div>
+
       {/* LLM 基础设施（遗留兼容，已收敛到生成源，仍保留以便迁移） */}
       <div className="bg-surface rounded-2xl border border-border p-4 space-y-4">
         <div className="flex items-center justify-between border-b border-border pb-2">

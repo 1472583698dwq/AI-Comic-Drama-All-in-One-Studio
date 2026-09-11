@@ -180,7 +180,13 @@ async def execute_canvas_single_node(req: CanvasNodeExecuteRequest):
             node_data.update(req.custom_data)
             node["data"] = node_data
         upstream = dict(req.upstream or {})
-        result = await execute_node(node, upstream, project_id=req.project_id)
+        from app.extensions import guard
+        _tok = guard.set_project_context(req.project_id) if req.project_id else None
+        try:
+            result = await execute_node(node, upstream, project_id=req.project_id)
+        finally:
+            if _tok is not None:
+                guard.reset_project_context(_tok)
         return {"status": "success", "node_id": node.get("id"), "result": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"节点执行失败: {e}")

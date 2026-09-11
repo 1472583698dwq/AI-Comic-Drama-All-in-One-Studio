@@ -941,7 +941,13 @@ class CanvasEngine:
             if on_progress:
                 try: await on_progress({"event":"node_start","node_id":nid,"type":node.get("type")})
                 except: pass
-            res = await execute_node(node, upstream, project_id=project_id)
+            from app.extensions import guard
+            _tok = guard.set_project_context(project_id) if project_id else None
+            try:
+                res = await execute_node(node, upstream, project_id=project_id)
+            finally:
+                if _tok is not None:
+                    guard.reset_project_context(_tok)
             results[nid]=res
             # 将结果写回 node data 便于前端展示（不持久化，由前端决定）
             if on_progress:

@@ -13,6 +13,51 @@ const CODE_TEMPLATES_FALLBACK: Record<string, string> = {
   "python:video": `import httpx, asyncio\nasync def generate(ctx, api):\n    headers={"Authorization": f"Bearer {ctx['api_key']}"}\n    payload={"prompt": ctx["prompt"], "duration": ctx.get("duration",5)}\n    url="https://api.example.com/v1/videos/generations"\n    async with httpx.AsyncClient(timeout=60) as client:\n        r=await client.post(url, headers=headers, json=payload)\n        r.raise_for_status()\n        d=r.json()\n        v=d.get("video_url") or d.get("url")\n        if v: return {"video_url": v}\n        task_id=d.get("task_id") or d.get("id")\n        poll=f"https://api.example.com/v1/videos/status/{task_id}"\n        for _ in range(30):\n            await asyncio.sleep(3)\n            pr=await client.get(poll, headers=headers)\n            pj=pr.json()\n            s=str(pj.get("status") or pj.get("data",{}).get("status","")).upper()\n            if s in ("SUCCESS","COMPLETED"):\n                return {"video_url": pj.get("video_url") or pj.get("data",{}).get("video_url")}\n            if s=="FAILED": raise RuntimeError(str(pj))\n        raise TimeoutError(task_id)\n`,
 }
 
+// 内置源 Key 配置映射：每个内置 Provider 对应 .env 中的哪些键（配 Key 后即用，缺 Key 即禁用）
+const BUILTIN_KEY_MAP: Record<string, { note: string; testTarget?: string; fields: Array<{ key: string; label: string; placeholder?: string; password?: boolean }> }> = {
+  minimax_h3: { note: 'MiniMax H3 与 MiniMax 同 Key，需按量计费 API。', testTarget: 'minimax_h3', fields: [
+    { key: 'MINIMAX_API_KEY', label: 'MINIMAX_API_KEY', placeholder: 'MiniMax 按量 Key', password: true },
+    { key: 'MINIMAX_H3_MODEL', label: '模型', placeholder: 'MiniMax-H3' },
+  ]},
+  seedance: { note: '火山引擎 Ark 的 API Key，模型如 doubao-seedance-2-0-260128。', testTarget: 'seedance', fields: [
+    { key: 'SEEDANCE_API_KEY', label: 'SEEDANCE_API_KEY', placeholder: 'Ark API Key', password: true },
+    { key: 'SEEDANCE_MODEL', label: '模型', placeholder: 'doubao-seedance-2-0-260128' },
+    { key: 'SEEDANCE_BASE_URL', label: '接口地址', placeholder: 'https://ark.cn-beijing.volces.com/api/v3' },
+  ]},
+  kling: { note: '可灵官网或中转网关的 Bearer Key，BASE_URL 可指向中转。', testTarget: 'kling', fields: [
+    { key: 'KLING_API_KEY', label: 'KLING_API_KEY', placeholder: 'Kling Bearer Key', password: true },
+    { key: 'KLING_MODEL', label: '模型', placeholder: 'kling-v3' },
+    { key: 'KLING_BASE_URL', label: '接口地址', placeholder: 'https://api-beijing.klingai.com' },
+  ]},
+  wan3: { note: '复用阿里百炼 DASHSCOPE Key，注意 Key 与地域 endpoint 一致。', testTarget: 'wan3', fields: [
+    { key: 'DASHSCOPE_API_KEY', label: 'DASHSCOPE_API_KEY', placeholder: '阿里百炼 Key', password: true },
+    { key: 'WAN3_MODEL', label: '模型', placeholder: 'wan3.0-video' },
+  ]},
+  minimax_video: { note: '旧版云端兼容通道，与 H3 共用 MiniMax Key。', testTarget: 'minimax', fields: [
+    { key: 'MINIMAX_API_KEY', label: 'MINIMAX_API_KEY', placeholder: 'MiniMax Key', password: true },
+    { key: 'KLING_API_KEY', label: 'KLING_API_KEY（备用）', placeholder: 'Kling Key（可选）', password: true },
+  ]},
+  siliconflow: { note: '硅基流动 API Key。', testTarget: 'siliconflow', fields: [
+    { key: 'SILICONFLOW_API_KEY', label: 'SILICONFLOW_API_KEY', placeholder: 'sk-...', password: true },
+    { key: 'SILICONFLOW_IMAGE_MODEL', label: '模型', placeholder: 'black-forest-labs/FLUX.1-schnell' },
+  ]},
+  dashscope: { note: '阿里百炼 API Key（生图万相 + 视频 Wan3 共用）。', testTarget: 'dashscope', fields: [
+    { key: 'DASHSCOPE_API_KEY', label: 'DASHSCOPE_API_KEY', placeholder: '阿里百炼 Key', password: true },
+    { key: 'DASHSCOPE_IMAGE_MODEL', label: '生图模型', placeholder: 'wanx2.1-t2i-turbo' },
+  ]},
+  openai_compat: { note: 'OpenAI 兼容生图通道。', fields: [
+    { key: 'OPENAI_API_KEY', label: 'OPENAI_API_KEY', placeholder: 'sk-...', password: true },
+    { key: 'OPENAI_IMAGE_MODEL', label: '模型', placeholder: 'dall-e-3' },
+    { key: 'OPENAI_IMAGE_BASE_URL', label: '接口地址', placeholder: '留空用默认' },
+  ]},
+  minimax: { note: 'MiniMax 语音通道。', testTarget: 'minimax', fields: [
+    { key: 'MINIMAX_API_KEY', label: 'MINIMAX_API_KEY', placeholder: 'MiniMax Key', password: true },
+  ]},
+  elevenlabs: { note: 'ElevenLabs 语音通道。', testTarget: 'elevenlabs', fields: [
+    { key: 'ELEVENLABS_API_KEY', label: 'ELEVENLABS_API_KEY', placeholder: 'xi-...', password: true },
+  ]},
+};
+
 export const ProvidersHubView: React.FC<{
   providers: any[];
   onRefresh: ()=>void;
@@ -29,6 +74,11 @@ export const ProvidersHubView: React.FC<{
   const [importLang, setImportLang] = useState<'python'|'javascript'>('python');
   const [importName, setImportName] = useState('');
   const [importKey, setImportKey] = useState('');
+  // 内置源 Key 配置（.env 热重载）
+  const [builtinKeys, setBuiltinKeys] = useState<Record<string,string>>({});
+  const [builtinKeysLoading, setBuiltinKeysLoading] = useState(false);
+  const [builtinKeysSaving, setBuiltinKeysSaving] = useState(false);
+  const [builtinKeysMsg, setBuiltinKeysMsg] = useState<string | null>(null);
 
   const filtered = providers.filter(p=>{
     if(filter!=='all' && p.kind!==filter) return false;
@@ -88,6 +138,36 @@ export const ProvidersHubView: React.FC<{
       setEditLang(p.language||'python');
       setEditCode(p.code||'');
     }
+    // 内置源：预加载 .env 中的 Key 供直接配置
+    if(p.builtin && BUILTIN_KEY_MAP[p.id]){
+      setBuiltinKeysLoading(true);
+      setBuiltinKeysMsg(null);
+      try{
+        const cfg = await apiService.getConfig();
+        const loaded = cfg.config || {};
+        const pick: Record<string,string> = {};
+        for(const f of BUILTIN_KEY_MAP[p.id].fields){ pick[f.key] = loaded[f.key] || ''; }
+        setBuiltinKeys(pick);
+      }catch(e:any){ setBuiltinKeysMsg(e?.message || '配置加载失败'); }
+      finally{ setBuiltinKeysLoading(false); }
+    } else {
+      setBuiltinKeys({});
+      setBuiltinKeysMsg(null);
+    }
+  };
+  const handleSaveBuiltinKeys = async ()=>{
+    if(!editing?.builtin || !BUILTIN_KEY_MAP[editing.id]) return;
+    setBuiltinKeysSaving(true);
+    setBuiltinKeysMsg(null);
+    try{
+      const payload: Record<string,string> = {};
+      for(const f of BUILTIN_KEY_MAP[editing.id].fields){ payload[f.key] = builtinKeys[f.key] || ''; }
+      await apiService.saveConfig(payload);
+      setBuiltinKeysMsg('✓ 已保存并热重载生效，可点“测试”验证');
+      toast.success('Key 已保存并热重载生效');
+      onRefresh(); window.dispatchEvent(new Event('provider-list-refresh'));
+    }catch(e:any){ setBuiltinKeysMsg(e?.message || '保存失败'); toast.error(e?.message || '保存失败'); }
+    finally{ setBuiltinKeysSaving(false); }
   };
   const handleSaveEdit = async ()=>{
     if(!editing) return;
@@ -189,8 +269,16 @@ export const ProvidersHubView: React.FC<{
                     <div className="text-[10px] font-mono text-gray-500 truncate">{p.id} · {p.kind} {p.has_code?'·有代码':''}</div>
                   </div>
                 </div>
-                <span className={`text-[10px] px-2 py-0.5 rounded-full border shrink-0 ${p.builtin?'bg-surface border-border text-gray-400':'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'}`}>{p.builtin?'内置':'自定义'}</span>
+                <div className="flex items-center gap-1 shrink-0">
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full border ${p.production_ready ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : (p.is_configured === false ? 'bg-surface border-border text-gray-500' : 'bg-amber-500/10 border-amber-500/20 text-amber-300')}`} title={p.production_ready ? '已测试联通，生产端可选' : '未验证：仅配置端可见，测试联通后才会出现在生产端'}>
+                    {p.production_ready ? '● 生产可用' : (p.is_configured === false ? '未配置' : '未验证')}
+                  </span>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full border shrink-0 ${p.builtin?'bg-surface border-border text-gray-400':'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'}`}>{p.builtin?'内置':'自定义'}</span>
+                </div>
               </div>
+              {p.builtin && p.is_configured === false && BUILTIN_KEY_MAP[p.id] && (
+                <div className="text-[11px] px-2.5 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-300 flex items-center gap-1.5"><KeyRound className="w-3 h-3 shrink-0"/> 未配 Key（已禁用）— 点下方“配 Key”填写后即用</div>
+              )}
               {p.description && <div className="text-[11px] text-gray-400 line-clamp-2">{p.description}</div>}
               <div className="text-[10px] font-mono text-gray-500 truncate flex items-center gap-1"><FileCode className="w-3 h-3"/> {p.has_code||p.code ? `代码 ${p.code_entry||'generate'} (${(p.code||'').split('\n').length} 行)` : (p.transport?.url?`URL: ${p.transport.url}`:'— 无代码')}</div>
               <div className="flex items-center gap-1.5 text-[10px] text-gray-500">
@@ -199,6 +287,9 @@ export const ProvidersHubView: React.FC<{
               </div>
               <div className="flex items-center gap-1.5 pt-1 flex-wrap">
                 <button onClick={()=> handleTest(p.id)} className="flex-1 min-w-[60px] py-1.5 rounded-xl bg-surface-secondary border border-border text-xs text-white hover:border-brand flex items-center justify-center gap-1"><Activity className="w-3 h-3"/> 测试</button>
+                {p.builtin && BUILTIN_KEY_MAP[p.id] && (
+                  <button onClick={()=> openEdit(p)} className="flex-1 min-w-[60px] py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-bold flex items-center justify-center gap-1 hover:bg-amber-500/25"><KeyRound className="w-3 h-3"/> 配 Key</button>
+                )}
                 <button onClick={()=> openEdit(p)} className="flex-1 min-w-[60px] py-1.5 rounded-xl bg-brand/10 border border-brand/20 text-brand-light text-xs flex items-center justify-center gap-1"><Edit3 className="w-3 h-3"/> {p.builtin?'查看':'编辑代码'}</button>
                 {!p.builtin && isLegacy && <button onClick={()=> handleUpgrade(p.id)} className="px-3 py-1.5 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs flex items-center gap-1"><ArrowUpCircle className="w-3 h-3"/> 升级</button>}
                 {!p.builtin && <button onClick={()=> handleDelete(p.id)} className="px-3 py-1.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs flex items-center gap-1"><Trash2 className="w-3 h-3"/> 删除</button>}
@@ -229,9 +320,46 @@ export const ProvidersHubView: React.FC<{
                   <input value={editing.code_entry||'generate'} onChange={e=> setEditing({...editing, code_entry:e.target.value})} className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-white font-mono w-32" disabled={editing.builtin}/>
                   <span className="ml-auto text-[11px] text-zinc-500">ctx/api 参考：prompt/size/api_key/reference_images/first_frame_url/duration/text/voice_id | api.httpx/api.asyncio/api.download</span>
                 </div>
+                {editing.builtin && BUILTIN_KEY_MAP[editing.id] && (
+                  <div className="m-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-2 lg:hidden">
+                    <div className="text-xs font-bold text-amber-200 flex items-center gap-1.5"><KeyRound className="w-3.5 h-3.5"/> 配置 Key（缺 Key 即禁用）</div>
+                    <div className="text-[11px] text-amber-200/70">{BUILTIN_KEY_MAP[editing.id].note}</div>
+                    {BUILTIN_KEY_MAP[editing.id].fields.map(f=>(
+                      <input key={f.key} type={f.password?'password':'text'} value={builtinKeys[f.key]||''} onChange={e=> setBuiltinKeys(prev=> ({...prev, [f.key]: e.target.value}))} placeholder={`${f.label}（${f.placeholder||f.key}）`} className="w-full bg-black/40 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white font-mono placeholder-zinc-600 focus:outline-none focus:border-amber-400"/>
+                    ))}
+                    <button onClick={handleSaveBuiltinKeys} disabled={builtinKeysSaving} className="w-full py-2 rounded-xl bg-amber-500 text-black text-xs font-bold disabled:opacity-40">{builtinKeysSaving?'保存中…':'保存 Key 并生效'}</button>
+                    {builtinKeysMsg && <div className="text-[11px] text-amber-200">{builtinKeysMsg}</div>}
+                  </div>
+                )}
                 <textarea value={editCode} onChange={e=> setEditCode(e.target.value)} spellCheck={false} disabled={editing.builtin} className="flex-1 w-full bg-[#0f0f12] p-4 font-mono text-[13px] leading-5 text-zinc-100 placeholder:text-zinc-600 focus:outline-none resize-none" placeholder={`async def generate(ctx, api):\n    # ctx: {prompt, width, height, api_key, ...}\n    # api: {httpx, asyncio, download, json, re}\n    ...\n    return {"image_url": url}`} />
               </div>
               <div className="w-[320px] border-l border-zinc-800 bg-[#18181b] p-3 space-y-3 overflow-y-auto hidden lg:flex flex-col">
+                {editing.builtin && BUILTIN_KEY_MAP[editing.id] && (
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-2">
+                    <div className="text-xs font-bold text-amber-200 flex items-center gap-1.5"><KeyRound className="w-3.5 h-3.5"/> 配置 Key（缺 Key 即禁用）</div>
+                    <div className="text-[11px] text-amber-200/70 leading-relaxed">{BUILTIN_KEY_MAP[editing.id].note}</div>
+                    {builtinKeysLoading ? (
+                      <div className="text-[11px] text-zinc-400">读取配置中…</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {BUILTIN_KEY_MAP[editing.id].fields.map(f=>(
+                          <div key={f.key}>
+                            <div className="text-[11px] text-zinc-300 font-mono mb-1">{f.label}</div>
+                            <input
+                              type={f.password ? 'password' : 'text'}
+                              value={builtinKeys[f.key] || ''}
+                              onChange={e=> setBuiltinKeys(prev=> ({...prev, [f.key]: e.target.value}))}
+                              placeholder={f.placeholder || f.key}
+                              className="w-full bg-black/40 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white font-mono placeholder-zinc-600 focus:outline-none focus:border-amber-400"
+                            />
+                          </div>
+                        ))}
+                        <button onClick={handleSaveBuiltinKeys} disabled={builtinKeysSaving} className="w-full py-2 rounded-xl bg-amber-500 text-black text-xs font-bold hover:bg-amber-400 disabled:opacity-40 flex items-center justify-center gap-1"><Save className="w-3.5 h-3.5"/> {builtinKeysSaving?'保存中…':'保存 Key 并生效'}</button>
+                        {builtinKeysMsg && <div className="text-[11px] text-amber-200">{builtinKeysMsg}</div>}
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="text-xs font-bold text-white">元信息</div>
                 <input value={editing.name||''} onChange={e=> setEditing({...editing, name:e.target.value})} placeholder="名称" className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white" disabled={editing.builtin}/>
                 <textarea value={editing.description||''} onChange={e=> setEditing({...editing, description:e.target.value})} placeholder="描述" rows={2} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-xs text-white" disabled={editing.builtin}/>

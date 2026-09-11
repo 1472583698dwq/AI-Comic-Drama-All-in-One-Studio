@@ -18,6 +18,8 @@ class PluginExtensionPoints(BaseModel):
     skills: List[str] = Field(default_factory=list)
     workflows: List[str] = Field(default_factory=list)
     custom_nodes: List[str] = Field(default_factory=list)
+    # 统一扩展注册表新增 kind（P1 起可声明，执行随各槽宿主落地）
+    storyboard_slots: List[str] = Field(default_factory=list)
     # P1预留：声明后仅展示，不执行
     mcp_tools: List[str] = Field(default_factory=list)
     canvas_nodes: List[str] = Field(default_factory=list)
@@ -34,8 +36,12 @@ class PluginManifest(BaseModel):
     version: str = Field(description="semver，如 1.0.0")
     description: str = ""
     author: str = ""
+    publisher: str = Field(default="", description="命名空间/发布者，缺省用 author，再缺省用 id")
     license: str = "MIT"
     min_app_version: Optional[str] = None
+    dependsOn: Dict[str, str] = Field(
+        default_factory=dict,
+        description="依赖的插件 → 版本约束，如 {\"base-pack\": \">=1.0.0\"}；支持 *, =, >, >=, <, <=, ^, ~")
     extensionPoints: PluginExtensionPoints = Field(default_factory=PluginExtensionPoints)
 
 
@@ -67,24 +73,28 @@ MANIFEST_TEMPLATE: Dict = {
     "version": "1.0.0",
     "description": "一句话说明这个包带来什么",
     "author": "you",
+    "publisher": "you",
     "license": "MIT",
+    "dependsOn": {},
     "extensionPoints": {
         "providers": ["providers/*.json"],
         "skills": ["skills/*/SKILL.md"],
         "workflows": ["workflows/*.json"],
         "custom_nodes": ["custom_nodes/*.json"],
+        "storyboard_slots": ["slots/*.json"],
     },
 }
 
-# P1扩展点说明（给插件作者看，不参与P0执行）
+# 扩展点说明（给插件作者看）
 EXTENSION_POINTS_DOC: Dict[str, str] = {
-    "providers": "P0可用：ProviderDefinition JSON（推荐code模式python/javascript），启用后热注册并自动转为 provider_* MCP Tool + 画布可选源",
-    "skills": "P0可用：SKILL.md目录（含name/description/tools frontmatter），通用技能零代码生效，编排技能需P1",
-    "workflows": "P1可用：ComfyUI工作流JSON经save_workflow校验入库（含Save格式自动转换）并自动sync为独立生成源",
-    "mcp_tools": "P1可用：在插件内声明新增MCP工具（python查壳函数+schema），注册为 plugin_<id>_<name>，执行强制走trusted总闸",
-    "custom_nodes": "P1可用：代码节点包（input_schema+params_schema+run代码JSON），启用后体检入库并出现在画布工具栏",
-    "canvas_nodes": "P1：声明新画布节点类型（NodeSpec+组件），需前端贡献点注册",
-    "director_packs": "P1：导演台扩展包（预设/环境/道具/GLB），复用directorPresets同源机制",
-    "exporters": "P1：新导出目标（CapCut/FFmpeg/MP4），复用ExportModal装配",
-    "themes": "P1：主题变量包",
+    "providers": "可用：ProviderDefinition JSON（推荐code模式python/javascript），启用后热注册并自动转为 provider_* MCP Tool + 画布可选源",
+    "skills": "可用：SKILL.md目录（含name/description/tools frontmatter），通用技能零代码生效，编排技能为高级分支",
+    "workflows": "可用：ComfyUI工作流JSON经save_workflow校验入库（含Save格式自动转换）并自动sync为独立生成源",
+    "mcp_tools": "可用：在插件内声明新增MCP工具（python查壳函数+schema），注册为 plugin_<id>_<name>，执行强制走trusted总闸",
+    "custom_nodes": "可用：代码节点包（input_schema+params_schema+run代码JSON），启用后体检入库并出现在画布工具栏",
+    "storyboard_slots": "可用：分镜工作台槽贡献（slot/id/label/order/when JSON），启用后挂载到对应 Slot 宿主",
+    "canvas_nodes": "未落地（占位）：声明新画布节点类型（NodeSpec+组件），需前端贡献点注册",
+    "director_packs": "未落地（占位）：导演台扩展包（预设/环境/道具/GLB），复用directorPresets同源机制",
+    "exporters": "未落地（占位）：新导出目标（CapCut/FFmpeg/MP4），复用ExportModal装配",
+    "themes": "未落地（占位）：主题变量包",
 }

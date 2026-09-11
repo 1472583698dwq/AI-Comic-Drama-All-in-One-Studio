@@ -131,6 +131,9 @@ async def run_custom_node(definition: CustomNodeDefinition, inputs: Dict[str, An
                           params: Dict[str, Any], extra_ctx: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """执行自定义节点：params 合并默认值 → shim → 沙箱。返回用户代码的dict结果。"""
     from app.providers.generic.code_provider import _execute_python_code, _execute_js_code
+    from app.extensions import guard
+    guard.ensure_enabled("custom_node", definition.id,
+                         (extra_ctx or {}).get("project_id"))
     merged = dict(definition.default_params or {})
     merged.update({k: v for k, v in (params or {}).items() if v not in (None, "")})
     try:

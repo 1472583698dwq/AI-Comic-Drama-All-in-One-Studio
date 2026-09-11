@@ -157,11 +157,27 @@ const ENV_LABELS: Record<StageEnvironment, { label: string; desc: string; icon: 
   neon_city: { label: '雨夜霓虹都市', desc: '湿漉街道+雨滴反射', icon: '🌃' },
 };
 
+/** "9:16" / "16/9" → 数值宽高比；非法回退 9:16。 */
+const ratioToNumber = (ratio?: string): number => {
+  const m = String(ratio || '').match(/(\d+(?:\.\d+)?)\s*[:/]\s*(\d+(?:\.\d+)?)/);
+  if (m) {
+    const n = parseFloat(m[1]) / parseFloat(m[2]);
+    if (isFinite(n) && n > 0) return n;
+  }
+  return 9 / 16;
+};
+
 export const Director3DStage: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const pipContainerRef = useRef<HTMLDivElement>(null);
+  const pipBoxRef = useRef<HTMLDivElement>(null);
+  const [pipFrame, setPipFrame] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
   const { project, activeShotId, setActiveShotId, updateShot } = useProjectStore();
   const { invokeTool } = useMcpStore();
+
+  // 画幅唯一真源：项目 aspect_ratio（与生成结果一致）
+  const projectAspect = project?.aspect_ratio || '9:16';
+  const projectAspectNum = ratioToNumber(projectAspect);
 
   const shots = project?.scenes.flatMap((s) => s.shots) || [];
   const activeShot = shots.find((sh) => sh.id === activeShotId) || shots[0];
@@ -219,7 +235,11 @@ export const Director3DStage: React.FC = () => {
   const [selectedTransform, setSelectedTransform] = useState<{ p: [number, number, number]; r: [number, number, number]; s: number } | null>(null);
   const gizmoModeRef = useRef<'translate' | 'rotate' | 'scale'>('translate');
   const [compositionGrid, setCompositionGrid] = useState<'rule_of_thirds' | 'golden_ratio' | 'crosshair' | 'diagonal' | 'none'>('rule_of_thirds');
-  const [aspectRatioMask, setAspectRatioMask] = useState<'9:16' | '16:9' | '1:1' | '2.35:1'>('9:16');
+  // 遮幅/比例跟随项目画幅（不再独立默认 9:16，避免与生成结果不一致）
+  const [aspectRatioMask, setAspectRatioMask] = useState<string>(project?.aspect_ratio || '9:16');
+  useEffect(() => {
+    setAspectRatioMask(project?.aspect_ratio || '9:16');
+  }, [project?.aspect_ratio]);
   const [showPip, setShowPip] = useState(true);
   const [showHelpers, setShowHelpers] = useState(true);
   const [showTrajectory, setShowTrajectory] = useState(true);
@@ -890,11 +910,37 @@ export const Director3DStage: React.FC = () => {
     pipContainerRef.current.innerHTML = '';
     pipContainerRef.current.appendChild(pipRenderer.domElement);
     pipRendererRef.current = pipRenderer;
+    // 画幅变化/容器尺寸变化时同步渲染缓冲，保证监视器画面比例 = 项目画幅
+    const ro = new ResizeObserver(() => {
+      const el = pipContainerRef.current;
+      if (!el) return;
+      const nw = el.clientWidth, nh = el.clientHeight;
+      if (nw > 0 && nh > 0) pipRenderer.setSize(nw, nh);
+    });
+    ro.observe(pipContainerRef.current);
     return () => {
+      ro.disconnect();
       if (pipContainerRef.current && pipRenderer.domElement) pipContainerRef.current.innerHTML = '';
       pipRenderer.dispose();
     };
-  }, [showPip, aspectRatioMask]);
+  }, [showPip, projectAspectNum]);
+
+  // 监视器画幅 = 项目画幅：按容器尺寸做等比内接（letterbox），避免拉伸
+  useEffect(() => {
+    const el = pipBoxRef.current;
+    if (!el) return;
+    const compute = () => {
+      const cw = el.clientWidth, ch = el.clientHeight;
+      if (!cw || !ch) return;
+      let w = cw, h = Math.round(cw / projectAspectNum);
+      if (h > ch) { h = ch; w = Math.round(ch * projectAspectNum); }
+      setPipFrame((prev) => (prev.w === w && prev.h === h ? prev : { w, h }));
+    };
+    compute();
+    const ro = new ResizeObserver(compute);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [projectAspectNum, showPip]);
 
   // ============================================================
   // 环境构建（真实场景，非网格）
@@ -1192,11 +1238,8 @@ export const Director3DStage: React.FC = () => {
     const sensorHeight = 24;
     const fovCalculated = 2 * Math.atan(sensorHeight / (2 * focalLength)) * (180 / Math.PI);
     vCam.fov = Math.max(12, Math.min(105, fovCalculated));
-    let aspect = 9 / 16;
-    if (aspectRatioMask === '16:9') aspect = 16 / 9;
-    else if (aspectRatioMask === '1:1') aspect = 1.0;
-    else if (aspectRatioMask === '2.35:1') aspect = 2.35;
-    vCam.aspect = aspect;
+    // 摄像机画幅 = 项目画幅（与生成结果一致），不再用独立遮幅
+    vCam.aspect = projectAspectNum;
     let target = new THREE.Vector3(0, 1.25, 0);
     let camPos = new THREE.Vector3(0, 1.3, 2.5);
     switch (framing) {
@@ -1216,7 +1259,7 @@ export const Director3DStage: React.FC = () => {
     if (cameraRoll !== 0) vCam.rotation.z = (cameraRoll * Math.PI) / 180;
     vCam.updateProjectionMatrix();
     if (cameraHelperRef.current) cameraHelperRef.current.update();
-  }, [framing, focalLength, cameraRoll, aspectRatioMask]);
+  }, [framing, focalLength, cameraRoll, projectAspectNum]);
 
   useEffect(() => { updateVirtualCameraOptics(); }, [updateVirtualCameraOptics]);
 
@@ -1520,19 +1563,24 @@ export const Director3DStage: React.FC = () => {
   const handleCaptureSnapshot = async () => {
     if (!activeShot) return;
     const shotId = activeShot.id;
-    // 截图源：监视器（导演机位视角）优先，关闭时用主舞台视角兜底；限宽 1024 压缩，避免 dataURL 撑爆项目保存
+    // 截图源：监视器（导演机位视角）优先，关闭时用主舞台视角兜底
     const src = (showPip && pipRendererRef.current?.domElement) || rendererRef.current?.domElement;
     if (!src) { setSnapshotMsg('无可用画面（请确认舞台已加载）'); return; }
     let dataUrl: string;
     try {
-      const scale = Math.min(1, 1024 / src.width);
-      if (scale >= 1) dataUrl = src.toDataURL('image/jpeg', 0.88);
-      else {
-        const c = document.createElement('canvas');
-        c.width = Math.round(src.width * scale); c.height = Math.round(src.height * scale);
-        c.getContext('2d')!.drawImage(src, 0, 0, c.width, c.height);
-        dataUrl = c.toDataURL('image/jpeg', 0.88);
-      }
+      // 输出画幅强制 = 项目画幅（与生成结果一致）：按目标比例做 cover 裁切，杜绝拉伸/比例错位
+      const targetRatio = ratioToNumber(project?.aspect_ratio || '9:16');
+      const outW = Math.min(1024, src.width || 1024);
+      const outH = Math.max(1, Math.round(outW / targetRatio));
+      const c = document.createElement('canvas');
+      c.width = outW; c.height = outH;
+      const ctx = c.getContext('2d')!;
+      const sRatio = (src.width || 1) / (src.height || 1);
+      let sx = 0, sy = 0, sW = src.width || outW, sH = src.height || outH;
+      if (sRatio > targetRatio) { sW = (src.height || outH) * targetRatio; sx = ((src.width || outW) - sW) / 2; }
+      else { sH = (src.width || outW) / targetRatio; sy = ((src.height || outH) - sH) / 2; }
+      ctx.drawImage(src as CanvasImageSource, sx, sy, sW, sH, 0, 0, outW, outH);
+      dataUrl = c.toDataURL('image/jpeg', 0.88);
     } catch { setSnapshotMsg('截图失败（画布不可读）'); return; }
     // 先即时挂为参考不断链；上传成功后替换为资产地址（持久化 + 复用）
     try { updateShot(shotId, { previz_url: dataUrl }); } catch {}
@@ -1743,7 +1791,7 @@ export const Director3DStage: React.FC = () => {
               <span className="flex items-center space-x-1.5"><span className="w-2 h-2 rounded-full bg-red-500 animate-ping" /><span className="text-white font-bold">CAM 1 [REC]</span></span>
               <div className="flex items-center space-x-1"><span className="text-brand-light font-bold">{aspectRatioMask}</span><span className="text-gray-500">|</span><span className="text-accent-blue font-bold">{focalLength}mm</span></div>
             </div>
-            <div className="flex-1 relative overflow-hidden bg-black flex items-center justify-center"><div ref={pipContainerRef} className="w-full h-full" />{compositionGrid === 'rule_of_thirds' && <div className="absolute inset-0 pointer-events-none grid grid-cols-3 grid-rows-3 border border-white/10 opacity-40"><div className="border-r border-b border-white/25" /><div className="border-r border-b border-white/25" /><div className="border-b border-white/25" /><div className="border-r border-b border-white/25" /><div className="border-r border-b border-white/25" /><div className="border-b border-white/25" /><div className="border-r border-b border-white/25" /><div className="border-r border-b border-white/25" /><div /></div>}{compositionGrid === 'crosshair' && <div className="absolute inset-0 pointer-events-none flex items-center justify-center"><Crosshair className="w-6 h-6 text-brand-light/70" /></div>}{compositionGrid === 'golden_ratio' && <div className="absolute inset-0 pointer-events-none border border-brand-light/30 rounded-full scale-90 opacity-40" />}</div>
+            <div ref={pipBoxRef} className="flex-1 relative overflow-hidden bg-black flex items-center justify-center"><div className="relative shadow-inner" style={{ width: pipFrame.w || '100%', height: pipFrame.h || undefined, aspectRatio: projectAspect, maxHeight: '100%' }}><div ref={pipContainerRef} className="absolute inset-0" />{compositionGrid === 'rule_of_thirds' && <div className="absolute inset-0 pointer-events-none grid grid-cols-3 grid-rows-3 border border-white/10 opacity-40"><div className="border-r border-b border-white/25" /><div className="border-r border-b border-white/25" /><div className="border-b border-white/25" /><div className="border-r border-b border-white/25" /><div className="border-r border-b border-white/25" /><div className="border-b border-white/25" /><div className="border-r border-b border-white/25" /><div className="border-r border-b border-white/25" /><div /></div>}{compositionGrid === 'crosshair' && <div className="absolute inset-0 pointer-events-none flex items-center justify-center"><Crosshair className="w-6 h-6 text-brand-light/70" /></div>}{compositionGrid === 'golden_ratio' && <div className="absolute inset-0 pointer-events-none border border-brand-light/30 rounded-full scale-90 opacity-40" />}</div></div>
             <div className="p-2 bg-surface-secondary/95 border-t border-border flex items-center justify-between text-[10px] gap-1">
               <button onClick={() => setCompositionGrid((g) => (g === 'rule_of_thirds' ? 'crosshair' : g === 'crosshair' ? 'golden_ratio' : g === 'golden_ratio' ? 'none' : 'rule_of_thirds'))} className="px-2 py-0.5 rounded bg-surface border border-border text-gray-300 hover:text-white font-mono" title="切换构图参考线">网格: {compositionGrid === 'rule_of_thirds' ? '九宫' : compositionGrid === 'crosshair' ? '十字' : compositionGrid === 'golden_ratio' ? '黄金' : '无'}</button>
               <button onClick={handleCaptureSnapshot} className="flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-brand/30 hover:bg-brand border border-brand/50 text-brand-light hover:text-white font-bold transition-all" title="截取导演视角为图片参考（存资产库 previz，挂分镜 previz_url）">{snapshotSuccess ? <Check className="w-3 h-3 text-accent-green" /> : <Camera className="w-3 h-3" />}<span>{snapshotSuccess ? '已快照' : '截屏为参考'}</span></button>
@@ -1902,8 +1950,11 @@ export const Director3DStage: React.FC = () => {
                 <div className="grid grid-cols-2 gap-2">{(Object.keys(ENV_LABELS) as StageEnvironment[]).map((env) => { const info = ENV_LABELS[env]; return <button key={env} onClick={() => { setEnvironment(env); setSceneDesc(`${info.label} · ${info.desc}`); }} className={`p-2.5 rounded-xl border text-left transition-all ${environment === env ? 'bg-accent-green/20 border-accent-green text-white shadow-md ring-1 ring-accent-green' : 'bg-surface-secondary border-border text-gray-400 hover:text-gray-200'}`}><div className="text-xs font-bold flex items-center space-x-1"><span>{info.icon}</span><span>{info.label}</span></div><div className="text-[9px] text-gray-500 mt-0.5">{info.desc}</div></button>; })}</div>
               </div>
               <div>
-                <label className="text-xs text-gray-300 font-semibold mb-2 block">📐 构图比例与遮幅</label>
-                <div className="grid grid-cols-4 gap-2">{(['9:16', '16:9', '1:1', '2.35:1'] as const).map((r) => <button key={r} onClick={() => setAspectRatioMask(r)} className={`py-2 rounded-xl text-xs font-bold border transition-all ${aspectRatioMask === r ? 'bg-brand text-white border-brand shadow-md' : 'bg-surface-secondary border-border text-gray-400 hover:text-white'}`}>{r}</button>)}</div>
+                <label className="text-xs text-gray-300 font-semibold mb-2 block">📐 画面比例（跟随项目画幅）</label>
+                <div className="flex items-center gap-2">
+                  <span className="px-3 py-2 rounded-xl text-xs font-bold bg-brand text-white border border-brand">{projectAspect}</span>
+                  <span className="text-[10px] text-gray-500 leading-4">导演台取景与截图比例已锁定为项目画幅，与生成结果一致；如需更改画幅请在项目看板设置。</span>
+                </div>
               </div>
               <div className="p-3 rounded-xl bg-surface-secondary border border-border">
                 <div className="text-[10px] text-gray-400 font-bold mb-1">当前场景描述</div>

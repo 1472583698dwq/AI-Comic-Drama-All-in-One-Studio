@@ -71,6 +71,23 @@ storage/config_store.json
 
 # ===== External Engines (sub-repos, optional) =====
 external_engines/
+deepseek-harness/
+
+# ===== Build work dirs / installer artifacts =====
+build_release/
+build_onefile/
+build_installer/
+installer/*.spec
+installer/payload.zip
+
+# ===== Runtime state (not source) =====
+storage/projects/
+storage/plugins/
+storage/extensions/
+storage/providers/
+storage/storyboard_slots/
+storage/setup.json
+storage/config_store.json
 
 # ===== Temp =====
 tmp/

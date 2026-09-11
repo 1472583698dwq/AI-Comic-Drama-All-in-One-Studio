@@ -71,6 +71,11 @@ def inspect_runtime(context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
 
 def _classify_goal(goal: str) -> str:
     g = (goal or "")
+    # 分镜工作台槽（storyboard_slot）：分镜 Tab/锚点/槽位/批注定制；
+    # 含生成源/接口/模型/插槽字样时仍归源侧，避免“补参考图槽”误分类
+    if (any(k in g for k in ["分镜", "Tab", "tab", "锚点", "storyboard", "槽位", "批注", "分镜工作台"])
+            and not any(k in g for k in ["源", "Provider", "provider", "API", "接口", "模型", "工作流", "插槽", "input_schema", "params_schema"])):
+        return "storyboard_slot"
     if any(k in g for k in ["插件", "插件包", "plugin", "package", "扩展包"]):
         return "new_plugin"
     if any(k in g for k in ["参数", "暴露", "补", "first_frame", "插槽", "input_schema", "params_schema", "H3", "h3"]):
@@ -177,6 +182,48 @@ def _generate_plugin_spec(goal: str, pid: str) -> Dict[str, Any]:
     }
 
 
+def _generate_slot_spec(goal: str, pid: str) -> Dict[str, Any]:
+    """由目标生成分镜槽声明模板（含启发式槽位推断，可在 persist 前由人工/LLM 改写）。
+
+    推断规则：含“锚点/挂载/字段”→ shot.anchors；含“按钮/批量/操作”→ shot.actions；
+    含“模式/流程”→ shot.modes；其余一律 shot.tabs（最通用、可只读展示）。
+    """
+    import re as _re
+    g = (goal or "").strip()
+    base = _re.sub(r"[^a-zA-Z0-9\u4e00-\u9fa5]+", "-", g).strip("-")
+    slug = _re.sub(r"-{2,}", "-", base.lower())[:24].strip("-") or f"slot-{pid[-6:]}"
+    # 中文 slug 转为合法 id：保留计数后缀
+    sid = _re.sub(r"[^a-z0-9\-]", "", slug)[:32].strip("-") or f"slot-{pid[-6:]}"
+    if len(sid) < 2:
+        sid = f"slot-{pid[-6:]}"
+    label = (g[:16] or "定制槽").strip()
+    if any(k in g for k in ["锚点", "挂载", "字段"]):
+        field = f"custom_{sid.replace('-', '_')}"[:40]
+        doc = {"slot": "shot.anchors", "id": sid, "label": label, "order": 40,
+               "field": field, "category": "prop",
+               "description": f"Creator 生成：{g[:80]}"}
+    elif any(k in g for k in ["按钮", "批量", "操作", "一键"]):
+        doc = {"slot": "shot.actions", "id": sid, "label": label, "order": 40,
+               "run": {"store_action": "synthesizeShotPrompt", "args": {}},
+               "description": f"Creator 生成：{g[:80]}"}
+    elif any(k in g for k in ["模式", "流程", "直出", "漫画"]):
+        doc = {"slot": "shot.modes", "id": sid, "label": label, "order": 40,
+               "caps": {"canImage": True, "canVideo": True, "canTts": True,
+                        "direct": False, "needsFirstFrame": False, "lockPreview": None},
+               "inherit_render": "image_to_video",
+               "description": f"Creator 生成：{g[:80]}"}
+    else:
+        doc = {"slot": "shot.tabs", "id": sid, "label": label, "icon": "📝",
+               "color": "text-teal-400", "order": 40,
+               "blocks": [
+                   {"kind": "info", "text": f"Creator 生成：{g[:120]}"},
+                   {"kind": "buttons", "buttons": [
+                       {"label": "⚡ 全要素合成", "run": {"store_action": "synthesizeShotPrompt"}}]},
+               ],
+               "description": f"Creator 生成：{g[:80]}"}
+    return {"doc": doc, "goal": g[:500]}
+
+
 def propose_capability(goal: str, context: Optional[Dict[str, Any]] = None, run_id: str = "") -> Dict[str, Any]:
     """生成临时提案（不生效）。返回提案卡所需全部字段：diff_preview/风险/试跑计划/可逆性声明。"""
     ctx = context or {}
@@ -184,6 +231,7 @@ def propose_capability(goal: str, context: Optional[Dict[str, Any]] = None, run_
     pid = f"prop_{int(time.time())}_{uuid.uuid4().hex[:6]}"
     runtime = inspect_runtime(ctx)
     plugin_spec = None
+    slot_spec = None
     if kind == "new_plugin":
         plugin_spec = _generate_plugin_spec(goal, pid)
         manifest = plugin_spec["manifest"]
@@ -206,6 +254,12 @@ def propose_capability(goal: str, context: Optional[Dict[str, Any]] = None, run_
         diff_preview = "batch create nodes+edges：生图→视频→配音链，位置按阶段列排，默认 scoped=downstream 执行"
         test_plan = ["画布预览（不执行）", "单节点试跑", "全量需二次确认"]
         risk, reversible = "medium", "可逆：模板删除不影响已生成节点"
+    elif kind == "storyboard_slot":
+        slot_spec = _generate_slot_spec(goal, pid)
+        title = f"新建分镜槽（{slot_spec['doc']['slot']}:{slot_spec['doc']['id']}，临时）"
+        diff_preview = f"new storyboard slot {slot_spec['doc']['slot']}:{slot_spec['doc']['id']}（{slot_spec['doc'].get('label','')}），落盘至 storage/storyboard_slots/custom/，需项目内验收"
+        test_plan = ["槽声明 schema 校验", "slot:id 全局去重检查", "分镜工作台沙盒预览"]
+        risk, reversible = "low", "可逆：删除裸件槽文件即卸载，不碰内置槽"
     else:
         title = "新建 Skill 规范（临时）"
         diff_preview = "new skill SKILL.md：触发条件 + 步骤 + 质检门，引用现有 MCP 工具，不新增外部调用"
@@ -220,6 +274,8 @@ def propose_capability(goal: str, context: Optional[Dict[str, Any]] = None, run_
     }
     if plugin_spec:
         proposal["plugin_spec"] = plugin_spec
+    if kind == "storyboard_slot" and slot_spec:
+        proposal["slot_spec"] = slot_spec
     try:
         (_proposal_dir() / f"{pid}.json").write_text(json.dumps(proposal, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
@@ -548,6 +604,24 @@ async def start_test(proposal_id: str, context: Optional[Dict[str, Any]] = None,
             else:
                 report["checks"].append({"name": "dry_run_schema", "ok": True, "detail": "补丁试算通过，未写生产配置"})
             prop["status"] = "tested"
+        elif kind == "storyboard_slot":
+            from app.storyboard import slots as _slot_store
+            doc = (prop.get("slot_spec") or {}).get("doc") or {}
+            err = _slot_store.validate_slot_doc(doc)
+            report["checks"].append({"name": "slot_schema", "ok": err is None,
+                                     "detail": "槽声明校验通过" if err is None else err})
+            if err is None:
+                dup = [e for e in (_slot_store.list_effective_slots().get("slots") or [])
+                       if e.get("slot") == doc.get("slot") and e.get("id") == doc.get("id") and e.get("valid")]
+                if dup:
+                    d0 = dup[0]
+                    report["checks"].append({"name": "slot_id_unique", "ok": False,
+                                             "detail": f"槽已存在: {doc.get('slot')}:{doc.get('id')}（来源 {d0.get('source')}）"})
+                else:
+                    report["checks"].append({"name": "slot_id_unique", "ok": True,
+                                             "detail": f"slot:id 全局唯一: {doc.get('slot')}:{doc.get('id')}"})
+            all_ok = all(c.get("ok") for c in report["checks"])
+            prop["status"] = "tested" if all_ok else "test_failed"
         else:
             report["checks"].append({"name": "dry_run_schema", "ok": True, "detail": "试算通过，未写生产配置"})
             prop["status"] = "tested"
@@ -764,6 +838,26 @@ def _rollback_canvas_template(prop: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": False, "note": str(e)[:200]}
 
 
+def _persist_storyboard_slot(prop: Dict[str, Any]) -> Dict[str, Any]:
+    """真写裸件槽：storage/storyboard_slots/custom/<slot>__<id>.json（幂等：同文件覆盖写）"""
+    from app.storyboard import slots as _slot_store
+    doc = (prop.get("slot_spec") or {}).get("doc") or {}
+    saved = _slot_store.save_custom_slot(doc)
+    prop["slot_key"] = f"{saved['slot']}:{saved['id']}"
+    return {"slot": prop["slot_key"], "path": saved["path"]}
+
+
+def _rollback_storyboard_slot(prop: Dict[str, Any]) -> Dict[str, Any]:
+    from app.storyboard import slots as _slot_store
+    doc = (prop.get("slot_spec") or {}).get("doc") or {}
+    slot, sid = str(doc.get("slot") or ""), str(doc.get("id") or "")
+    if not slot or not sid:
+        return {"ok": False, "note": "提案无槽记录，无法回滚"}
+    ok = _slot_store.delete_custom_slot(slot, sid)
+    return {"ok": ok, "slot": f"{slot}:{sid}",
+            "note": "裸件槽文件已删除" if ok else "裸件槽文件不存在（可能已手动删除）"}
+
+
 def _persist_new_plugin(prop: Dict[str, Any], run_id: str) -> Dict[str, Any]:
     import tempfile
     from app.plugins import manager as pm
@@ -848,6 +942,8 @@ async def finalize(proposal_id: str, action: str = "persist", context: Optional[
             r = _rollback_canvas_template(prop)
         elif kind == "new_plugin":
             r = _rollback_new_plugin(prop)
+        elif kind == "storyboard_slot":
+            r = _rollback_storyboard_slot(prop)
         else:
             return {"proposal_id": proposal_id, "status": prop.get("status"), "note": "该类型无备份可回滚"}
         if r.get("ok"):
@@ -891,6 +987,15 @@ async def finalize(proposal_id: str, action: str = "persist", context: Optional[
             _trace(run_id, "proposal_persisted", {"proposal_id": proposal_id, "kind": kind, "template_id": r.get("template_id")})
             return {"proposal_id": proposal_id, "status": "persisted", "template_id": r.get("template_id"), "path": r.get("path"),
                     "note": "模板已落盘 storage/canvas_templates，删除文件即卸载"}
+        if kind == "storyboard_slot":
+            if prop.get("status") != "tested":
+                raise ValueError("请先 Start 试跑通过后再持久化")
+            r = _persist_storyboard_slot(prop)
+            prop["status"] = "persisted"
+            _save(prop)
+            _trace(run_id, "proposal_persisted", {"proposal_id": proposal_id, "kind": kind, "slot": r.get("slot")})
+            return {"proposal_id": proposal_id, "status": "persisted", "slot": r.get("slot"), "path": r.get("path"),
+                    "note": "分镜槽已落盘 storage/storyboard_slots/custom，删除文件即卸载（rollback 同效）"}
         # new_provider：高风险代码生成不在此自动写，要求走 register 链路（防坏码入库）
         prop["status"] = "needs_manual"
         _save(prop)

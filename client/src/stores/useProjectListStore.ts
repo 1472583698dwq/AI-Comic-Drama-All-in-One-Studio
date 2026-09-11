@@ -64,7 +64,7 @@ export const useProjectListStore = create<ProjectListState>((set, get) => ({
   openProject: async (id) => {
     try {
       await apiService.openProject(id);
-    } catch (_) {}
+    } catch { /* ignore */ }
     get().setActiveProjectId(id);
   },
 

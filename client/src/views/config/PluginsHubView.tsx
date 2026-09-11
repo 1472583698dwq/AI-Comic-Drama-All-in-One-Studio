@@ -21,7 +21,20 @@ export const PluginsHubView: React.FC = () => {
       setLoading(false);
     }
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiService.listPlugins();
+        if (!cancelled) setPlugins(res.plugins || []);
+      } catch (e: any) {
+        if (!cancelled) setMsg(e?.message || '加载失败');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const doToggle = async (p: any) => {
     setBusy(p.id);
@@ -79,7 +92,7 @@ export const PluginsHubView: React.FC = () => {
       <div className="flex items-center justify-between">
         <div>
           <div className="text-sm font-bold text-white flex items-center gap-2"><Puzzle className="w-4 h-4 text-brand-light" />插件中心 <span className="text-[10px] px-1.5 py-0.5 rounded bg-brand/20 text-brand-light font-mono">P0</span></div>
-          <div className="text-[11px] text-gray-500 mt-1">支持 providers / skills / workflows（自动sync成源）/ mcp_tools（查壳函数，需可信模式执行）/ custom_nodes（一段代码即画布节点）；canvas_nodes / director_packs / exporters / themes 为P2预留。包格式见服务端 GET /plugins/spec。</div>
+          <div className="text-[11px] text-gray-500 mt-1">支持 providers / skills / workflows（自动sync成源）/ mcp_tools（查壳函数，需可信模式执行）/ custom_nodes（一段代码即画布节点）/ storyboard_slots（分镜槽）；canvas_nodes / director_packs / exporters / themes 为未落地占位。包格式见服务端 GET /plugins/spec，开发指南见 docs/plugin-dev.md。</div>
         </div>
         <div className="flex items-center gap-2">
           <input ref={fileRef} type="file" accept=".zip" hidden onChange={(e) => doUpload(e.target.files?.[0])} />
@@ -100,8 +113,9 @@ export const PluginsHubView: React.FC = () => {
               </div>
               {p.error ? <div className="text-[11px] text-red-400">{p.error}</div> : <div className="text-[11px] text-gray-400 leading-4">{p.description || '—'}</div>}
               <div className="text-[10px] font-mono text-gray-500">
-                源:{(p.contributions?.providers || []).length} · 技能:{(p.contributions?.skills || []).length} · 流:{(p.contributions?.workflows || []).length} · 工具:{(p.contributions?.mcp_tools || []).length} · 节点:{(p.contributions?.custom_nodes || []).length}
-                {p.deferred && Object.keys(p.deferred).length > 0 && <span className="text-amber-400"> · P1预留:{Object.keys(p.deferred).join(',')}</span>}
+                源:{(p.contributions?.providers || []).length} · 技能:{(p.contributions?.skills || []).length} · 流:{(p.contributions?.workflows || []).length} · 工具:{(p.contributions?.mcp_tools || []).length} · 节点:{(p.contributions?.custom_nodes || []).length} · 槽:{(p.contributions?.storyboard_slots || []).length}
+                {p.dependsOn && Object.keys(p.dependsOn).length > 0 && <span className="text-amber-400"> · 依赖:{Object.keys(p.dependsOn).join(',')}</span>}
+                {p.deferred && Object.keys(p.deferred).length > 0 && <span className="text-amber-400"> · 未落地:{Object.keys(p.deferred).join(',')}</span>}
               </div>
               {!p.error && (
                 <div className="flex items-center gap-2 pt-1">

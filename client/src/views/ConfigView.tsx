@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   Settings, ArrowLeft, RefreshCw, Save, Loader2,
-  Plug, Layers, Route, Cpu, Info, Sparkles,
+  Plug, Layers, Route, Cpu, Info, Sparkles, Boxes,
   CheckCircle2, XCircle,
 } from 'lucide-react';
 import { apiService } from '../services/api';
@@ -12,13 +12,15 @@ import { DefaultsView } from './config/DefaultsView';
 import { InfraView } from './config/InfraView';
 import { SystemView } from './config/SystemView';
 import { PluginsHubView } from './config/PluginsHubView';
+import { ExtensionsCenterView } from './config/ExtensionsCenterView';
 
-type TabKey = 'dashboard' | 'providers' | 'plugins' | 'defaults' | 'infra' | 'system';
+type TabKey = 'dashboard' | 'providers' | 'extensions' | 'plugins' | 'defaults' | 'infra' | 'system';
 
 const TABS: Array<{key: TabKey; label: string; sub: string; icon: any; badge?: string}> = [
   { key: 'dashboard', label: '概览', sub: '健康与统计', icon: Layers },
   { key: 'providers', label: '生成源', sub: '增删改查 · 全域', icon: Plug, badge: '核心' },
-  { key: 'plugins', label: '插件', sub: '扩展包 · P0', icon: Sparkles, badge: '新' },
+  { key: 'extensions', label: '扩展中心', sub: '全 kind 聚合 · 启停', icon: Boxes, badge: '新' },
+  { key: 'plugins', label: '插件', sub: '扩展包 · P0', icon: Sparkles },
   { key: 'defaults', label: '默认路由', sub: '全局默认通道', icon: Route },
   { key: 'infra', label: '基础设施', sub: 'ComfyUI / 工作流 / 剪映', icon: Cpu },
   { key: 'system', label: '系统诊断', sub: '端点与测试', icon: Info },
@@ -36,7 +38,7 @@ export const ConfigView: React.FC = () => {
   const [envFile, setEnvFile] = useState('');
   const [checks, setChecks] = useState<Record<string,any>>({});
   const [providers, setProviders] = useState<any[]>([]);
-  const [healthMap, setHealthMap] = useState<Record<string,any>>({});
+  const [healthMap] = useState<Record<string,any>>({});
 
   const setField = (k:string, v:string)=> {
     setFormState(prev=> ({...prev, [k]: v}));
@@ -190,6 +192,7 @@ export const ConfigView: React.FC = () => {
 
             {tab==='dashboard' && <DashboardView providers={providers} onNavigate={(k)=> setTab(k as TabKey)} healthMap={healthMap} checks={checks} envFile={envFile} />}
             {tab==='providers' && <ProvidersHubView providers={providers} onRefresh={loadProviders} />}
+            {tab==='extensions' && <ExtensionsCenterView />}
             {tab==='plugins' && <PluginsHubView />}
             {tab==='defaults' && <DefaultsView form={form} setField={setField} onSave={handleSave} saving={saving} providers={providers} />}
             {tab==='infra' && <InfraView form={form} setField={setField} onTest={handleTest} testing={testing} testResult={testResult} onPickFolder={handlePickFolder} onOpenFolder={handleOpenFolder} onSave={handleSave} saving={saving} onMsg={setMsg} />}

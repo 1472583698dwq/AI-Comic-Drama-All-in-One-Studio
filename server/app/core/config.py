@@ -57,7 +57,16 @@ MANAGED_KEYS = [
     "VIDEO_PROVIDER",
     "COMFYUI_DEFAULT_VIDEO_WORKFLOW",
     "KLING_API_KEY",
+    "KLING_BASE_URL",
+    "KLING_MODEL",
     "VIDU_API_KEY",
+    "MINIMAX_H3_MODEL",
+    "MINIMAX_H3_BASE_URL",
+    "SEEDANCE_API_KEY",
+    "SEEDANCE_BASE_URL",
+    "SEEDANCE_MODEL",
+    "WAN3_MODEL",
+    "WAN3_BASE_URL",
     # JianYing Draft & Paths
     "JIANYIN_DRAFT_PATH",
     # Trusted Mode 总闸（A档）
@@ -186,11 +195,23 @@ class Settings(BaseModel):
     ELEVENLABS_API_KEY: str = os.getenv("ELEVENLABS_API_KEY", "")
     ELEVENLABS_MODEL: str = os.getenv("ELEVENLABS_MODEL", "eleven_multilingual_v2")
 
-    # Video Generation Providers
+    # Video Generation
     VIDEO_PROVIDER: str = os.getenv("VIDEO_PROVIDER", "comfyui_video")
     COMFYUI_DEFAULT_VIDEO_WORKFLOW: str = os.getenv("COMFYUI_DEFAULT_VIDEO_WORKFLOW", os.getenv("COMFYUI_VIDEO_WORKFLOW_ID", ""))
     KLING_API_KEY: str = os.getenv("KLING_API_KEY", "")
+    KLING_BASE_URL: str = os.getenv("KLING_BASE_URL", "https://api-beijing.klingai.com")
+    KLING_MODEL: str = os.getenv("KLING_MODEL", "kling-v3")
     VIDU_API_KEY: str = os.getenv("VIDU_API_KEY", "")
+    # MiniMax H3 (V2 多模态视频, 与 MINIMAX_API_KEY 同平台, 模型固定 MiniMax-H3)
+    MINIMAX_H3_MODEL: str = os.getenv("MINIMAX_H3_MODEL", "MiniMax-H3")
+    MINIMAX_H3_BASE_URL: str = os.getenv("MINIMAX_H3_BASE_URL", "https://api.minimax.chat")
+    # Seedance (字节火山引擎 Ark, doubao-seedance 系列)
+    SEEDANCE_API_KEY: str = os.getenv("SEEDANCE_API_KEY", "")
+    SEEDANCE_BASE_URL: str = os.getenv("SEEDANCE_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3")
+    SEEDANCE_MODEL: str = os.getenv("SEEDANCE_MODEL", "doubao-seedance-2-0-260128")
+    # Wan3.0 (阿里百炼 DashScope, 复用 DASHSCOPE_API_KEY)
+    WAN3_MODEL: str = os.getenv("WAN3_MODEL", "wan3.0-video")
+    WAN3_BASE_URL: str = os.getenv("WAN3_BASE_URL", "https://dashscope.aliyuncs.com")
 
     # JianYing Draft Custom Location
     JIANYIN_DRAFT_PATH: str = os.getenv("JIANYIN_DRAFT_PATH", get_default_jianyin_draft_path())

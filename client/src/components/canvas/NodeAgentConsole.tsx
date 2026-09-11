@@ -41,7 +41,7 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
   const fetchProviders = useCallback(async () => {
     setLoadingProviders(true);
     try {
-      const res: any = await apiService.listProviders({ kind, include_builtin: true } as any).catch(() => null);
+      const res: any = await apiService.listProviders({ kind, include_builtin: true, production_only: true } as any).catch(() => null);
       setProviders(res?.providers || []);
     } finally { setLoadingProviders(false); }
   }, [kind]);
