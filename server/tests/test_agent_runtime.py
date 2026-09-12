@@ -23,8 +23,16 @@ from app.agent.runtime.session import Session  # noqa: E402
 from app.agent.runtime.store import SessionStore  # noqa: E402
 
 
+_LOOP = None
+
+
 def run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    """显式复用测试事件循环（避免跨模块 get_event_loop 状态漂移）。"""
+    global _LOOP
+    if _LOOP is None or _LOOP.is_closed():
+        _LOOP = asyncio.new_event_loop()
+        asyncio.set_event_loop(_LOOP)
+    return _LOOP.run_until_complete(coro)
 
 
 class TempStore(unittest.TestCase):

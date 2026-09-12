@@ -125,7 +125,9 @@ body {
   color: var(--color-text-main, #F3F4F6);
   font-family: 'Inter', 'PingFang SC', 'HarmonyOS Sans', sans-serif;
   overflow: hidden;
-  user-select: none;
+  /* 默认允许选中复制；仅拖拽面（画布节点/时间线/3D 舞台/头部）各自挂 select-none 豁免 */
+  user-select: text;
+  -webkit-user-select: text;
   transition: background-color 0.15s ease, color 0.15s ease;
 }
 
@@ -134,8 +136,8 @@ input, textarea, [contenteditable="true"], [contenteditable=""] {
   -webkit-user-select: text !important;
 }
 
-/* 全局文字可复制：凡挂 allow-select 的区域（含子节点）强制可选，
-   覆盖 body 的 user-select:none；画布拖拽/节点（select-none）不受影响 */
+/* 文字可复制：全局默认已允许；拖拽面用 Tailwind select-none 单独豁免。
+   allow-select 保留为显式强制可选（历史用法兼容） */
 .allow-select, .allow-select * {
   user-select: text !important;
   -webkit-user-select: text !important;

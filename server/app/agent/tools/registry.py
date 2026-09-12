@@ -22,6 +22,7 @@ PLAN_READONLY_TOOLS: Set[str] = {
     "list_custom_nodes",
     "todo_write",
     "job_list", "job_status",
+    "task_status",
 }
 
 # 每个工具的执行超时（秒）；未列出的用 default。视频类生成较慢。
@@ -63,7 +64,7 @@ _TODO_TOOL_SCHEMA: Dict[str, Any] = {
 }
 
 INTERNAL_TOOL_NAMES = {"todo_write", "job_start", "job_list", "job_status", "job_cancel",
-                       "subagent_run", "batch_run"}
+                       "subagent_run", "batch_run", "task_status", "task_wait", "task_cancel"}
 
 
 def _internal_schema(name: str, desc: str, props: Dict[str, Any], required: List[str]) -> Dict[str, Any]:
@@ -75,7 +76,7 @@ def _internal_schema(name: str, desc: str, props: Dict[str, Any], required: List
 
 _JOB_START_SCHEMA = _internal_schema(
     "job_start",
-    "把长耗时工具调用提交为后台任务，立即返回 job_id（视频/批量生成推荐）。完成后会自动通知。",
+    "把长耗时工具调用提交为后台任务，立即返回 job_id（适合并行多任务/批量）；单次视频生成默认已阻塞返回，无需后台化。完成后会自动通知。",
     {"tool": {"type": "string", "description": "要执行的工具名（如 generate_video / provider_xxx / batch_run）"},
      "arguments": {"type": "object", "description": "该工具的完整参数"}},
     ["tool"],
@@ -100,6 +101,21 @@ _BATCH_SCHEMA = _internal_schema(
      "concurrency": {"type": "integer", "description": "并发数（默认 3，最大 8）"}},
     ["tool", "items"],
 )
+_TASK_STATUS_SCHEMA = _internal_schema(
+    "task_status",
+    "查询异步生成任务（视频等）的状态与结果：排队/生成中/成功（含 video_url）/失败原因。",
+    {"task_id": {"type": "string", "description": "任务ID（provider 工具或 job 返回的 task_id）"}},
+    ["task_id"],
+)
+_TASK_WAIT_SCHEMA = _internal_schema(
+    "task_wait",
+    "等待异步生成任务完成并返回成片结果（默认最多等待 20 分钟）。仅当工具提示“仍在生成中”需要续等时使用。",
+    {"task_id": {"type": "string"},
+     "timeout_s": {"type": "integer", "description": "本次等待上限秒数，默认 1200"}},
+    ["task_id"],
+)
+_TASK_CANCEL_SCHEMA = _internal_schema("task_cancel", "取消一个还在生成中的异步任务。",
+                                       {"task_id": {"type": "string"}}, ["task_id"])
 
 
 def tool_timeout(name: str) -> int:
@@ -160,10 +176,11 @@ class ToolRegistryView:
             print(f"[RuntimeTools] schemas failed: {e}")
         internal = [_TODO_TOOL_SCHEMA]
         if plan_mode:
-            internal += [_JOB_LIST_SCHEMA, _JOB_STATUS_SCHEMA]
+            internal += [_JOB_LIST_SCHEMA, _JOB_STATUS_SCHEMA, _TASK_STATUS_SCHEMA]
         else:
             internal += [_JOB_START_SCHEMA, _JOB_LIST_SCHEMA, _JOB_STATUS_SCHEMA, _JOB_CANCEL_SCHEMA,
-                         _SUBAGENT_SCHEMA, _BATCH_SCHEMA]
+                         _SUBAGENT_SCHEMA, _BATCH_SCHEMA,
+                         _TASK_STATUS_SCHEMA, _TASK_WAIT_SCHEMA, _TASK_CANCEL_SCHEMA]
         out.extend(internal)
         self._schema_cache = out
         self._schema_key = key

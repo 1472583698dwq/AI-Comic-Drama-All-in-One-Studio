@@ -86,6 +86,9 @@ storage/plugins/
 storage/extensions/
 storage/providers/
 storage/storyboard_slots/
+storage/agent_sessions/
+storage/agent_spills/
+storage/tasks/
 storage/setup.json
 storage/config_store.json
 

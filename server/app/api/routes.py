@@ -802,7 +802,15 @@ async def check_videos_health():
 
 @router.get("/videos/status/{task_id}")
 async def get_video_task_status(task_id: str):
-    """查询异步视频生成任务状态（聚合全部内置视频源 + 自定义 AutoDL）"""
+    """查询异步视频生成任务状态（TaskCenter 统一口径 + 旧表兼容）"""
+    # TaskCenter 统一口径优先（提交即返的源都会登记在此）
+    try:
+        from app.providers.tasks import task_center
+        rec = task_center.status(task_id)
+        if rec is not None:
+            return rec.to_dict()
+    except Exception:
+        pass
     # 优先查自定义 AutoDL 任务
     try:
         from app.providers.generic.http_provider import get_custom_video_task
@@ -994,7 +1002,7 @@ AGENT_SYSTEM_PROMPT_BODY = """你是「AI漫剧导演 Agent」，运行在 MiniM
 **可信模式双工具（A档，需 STUDIO_TRUSTED_MODE=1，否则明错提示开启方式）：**
 25. fs_file —— 文件编辑。参数：action(list/read/write/append/delete), path(围栏 storage/exports/工作区根，禁.git等), content, encoding。示例：{"action":"read","path":"storage/providers/custom/prov_xxx.json"} / {"action":"write","path":"storage/tmp_task.txt","content":"task_id=..."}
 26. shell_exec —— 命令执行（Win走PowerShell）。参数：command, cwd(围栏内), timeout(5-1200s，默认1200=20分钟)。示例：{"command":"curl -s https://api.../query?task_id=xxx","timeout":15}
-**长任务异步范式（防截图式卡死）：** 单工具已放宽到20分钟，但视频/批量任务仍建议提交即返task_id再轮询：①provider代码提交后return {"task_id":...} ②用shell_exec单次GET查询（秒回）或provider查询分支拿video_url ③fs_file暂存task_id ④canvas_update_node回填video_url。20分钟内可阻塞等终态，超长任务优先异步。
+**长任务（视频等）：** 框架已统一处理"提交→轮询→落盘"：provider_* 视频工具默认阻塞到成片并直接返回 video_url（本地 /storage 路径），无需你手动轮询。若工具返回「仍在生成中」或只有 task_id，用 task_wait 继续等待、task_status 查询进度、task_cancel 取消；只有确实需要并行多任务时才用 job_start 后台化。
 
 **无限画布（Canvas DAG，可视化编排）：**
 20. canvas_query —— 查询画布摘要与节点清单，感知当前画布状态

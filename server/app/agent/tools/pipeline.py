@@ -334,6 +334,37 @@ class ToolPipeline:
                                model_content=json.dumps(brief, ensure_ascii=False) + "\n" +
                                json.dumps(result, ensure_ascii=False, default=str)[:6000])
 
+        # ③.5 异步生成任务（TaskCenter）：状态 / 续等 / 取消
+        if name in ("task_status", "task_wait", "task_cancel"):
+            from app.providers.tasks import task_center
+            tid = str(args.get("task_id") or "").strip()
+            if not tid:
+                msg = f"{name} 需要 task_id"
+                return ToolOutcome(call_id, name, "error", error=msg, model_content=json.dumps({"error": msg}, ensure_ascii=False))
+            if name == "task_status":
+                rec = task_center.status(tid)
+                if rec is None:
+                    msg = f"任务不存在: {tid}"
+                    return ToolOutcome(call_id, name, "error", error=msg, model_content=json.dumps({"error": msg}, ensure_ascii=False))
+                data = rec.to_dict()
+            elif name == "task_cancel":
+                data = await task_center.cancel(tid)
+                if isinstance(data, dict) and data.get("error"):
+                    return ToolOutcome(call_id, name, "error", error=str(data["error"]),
+                                       model_content=json.dumps(data, ensure_ascii=False))
+            else:
+                try:
+                    to = max(5, min(int(args.get("timeout_s") or 1200), 1800))
+                except Exception:
+                    to = 1200
+                rec = await task_center.wait(tid, timeout_s=to)
+                data = rec.to_dict()
+                if rec.status == "FAILED":
+                    return ToolOutcome(call_id, name, "error", error=rec.error or "任务失败", result=data,
+                                       model_content=json.dumps(data, ensure_ascii=False, default=str)[:4000])
+            return ToolOutcome(call_id, name, "success", result=data,
+                               model_content=json.dumps(data, ensure_ascii=False, default=str)[:6000])
+
         # ④ 人审：破坏性调用 / 模式策略要求的高风险调用
         need_confirm = is_destructive(name, args)
         if not need_confirm:

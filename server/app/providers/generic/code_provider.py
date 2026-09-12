@@ -586,8 +586,12 @@ def register_code_video_task(task_id: str, provider_id: str) -> Dict[str, Any]:
     return entry
 
 
-async def _poll_code_video_task(task_id: str, provider_id: str) -> None:
-    """后台轮询：复用源代码查询模式推进任务，终态落盘并更新表。常驻异常视为瞬态继续，直到终态/超时。"""
+async def query_code_task_once(provider_id: str, task_id: str) -> Dict[str, Any]:
+    """单次查询代码源任务（task_id + 空 prompt 的查询模式）；成功即落盘。
+
+    TaskCenter 的 code_query 适配器与旧后台轮询共用此实现。
+    返回 {status, video_url?, local_path?, error?, transient?}。
+    """
     tid = str(task_id)
     try:
         from app.providers.custom.manager import custom_provider_manager as _mgr
@@ -595,53 +599,66 @@ async def _poll_code_video_task(task_id: str, provider_id: str) -> None:
     except Exception:
         definition = None
     if definition is None or not getattr(definition, "code", None):
-        _CODE_VIDEO_TASKS[tid] = {"status": "FAILED", "task_id": tid, "provider": provider_id,
-                                  "error": f"Provider 定义缺失，无法轮询: {provider_id}"}
-        return
+        snap = {"status": "FAILED", "task_id": tid, "provider": provider_id,
+                "error": f"Provider 定义缺失，无法轮询: {provider_id}"}
+        _CODE_VIDEO_TASKS[tid] = snap
+        return snap
     trusted = _is_trusted_provider(definition)
     api_key = _get_api_key_for_provider(provider_id, definition)
     entry_name = getattr(definition, "code_entry", None) or "generate"
     lang = (getattr(definition, "language", None) or "python").lower()
     code = definition.code or ""
+    ctx = {"prompt": "", "task_id": tid, "api_key": api_key, "provider_id": provider_id,
+           "kind": "video", "dynamic_inputs": {"task_id": tid}}
+    try:
+        if lang in ("javascript", "js", "node"):
+            result = await asyncio.wait_for(_execute_js_code(code, entry_name, ctx, timeout=30, trusted=trusted), timeout=45)
+        else:
+            result = await asyncio.wait_for(_execute_python_code(code, entry_name, ctx, timeout=30, trusted=trusted), timeout=45)
+    except Exception as e:
+        # 瞬态错误（网络抖动/单次查询超时）：只刷新心跳，交由轮询器继续
+        ent = _CODE_VIDEO_TASKS.get(tid) or {"task_id": tid, "provider": provider_id}
+        ent.update({"status": ent.get("status") or "SUBMITTED", "last_poll": time.time(),
+                    "last_error": str(e)[:160]})
+        _CODE_VIDEO_TASKS[tid] = ent
+        return {"status": ent.get("status") or "SUBMITTED", "task_id": tid,
+                "last_error": str(e)[:160], "transient": True}
+    if not isinstance(result, dict):
+        return {"status": "RUNNING", "task_id": tid}
+    url, _t = extract_result_media("video", result)
+    if url:
+        try:
+            storage_url, local_path = await persist_media(url, "video", "vid")
+        except Exception as e:
+            snap = {"status": "FAILED", "task_id": tid, "provider": provider_id, "error": f"下载失败: {e}"}
+            _CODE_VIDEO_TASKS[tid] = snap
+            return snap
+        snap = {"status": "SUCCESS", "task_id": tid, "provider": provider_id,
+                "video_url": storage_url, "local_path": local_path}
+        _CODE_VIDEO_TASKS[tid] = snap
+        print(f"[CodeVideo] Task {tid} SUCCESS -> {storage_url}")
+        return snap
+    status = str(result.get("status") or "").upper()
+    if status in _CODE_VIDEO_TERMINAL_FAIL:
+        snap = {"status": "FAILED", "task_id": tid, "provider": provider_id,
+                "error": str(result.get("error") or result)[:300]}
+        _CODE_VIDEO_TASKS[tid] = snap
+        print(f"[CodeVideo] Task {tid} FAILED: {str(result)[:160]}")
+        return snap
+    ent = _CODE_VIDEO_TASKS.get(tid) or {"task_id": tid, "provider": provider_id}
+    ent.update({"status": status or "SUBMITTED", "last_poll": time.time()})
+    _CODE_VIDEO_TASKS[tid] = ent
+    return {"status": ent.get("status") or "SUBMITTED", "task_id": tid, "provider": provider_id}
+
+
+async def _poll_code_video_task(task_id: str, provider_id: str) -> None:
+    """旧后台轮询（外部直调 provider 的兼容路径）：复用 query_code_task_once。"""
+    tid = str(task_id)
     for _ in range(_CODE_VIDEO_MAX_ATTEMPTS):
         await asyncio.sleep(_CODE_VIDEO_POLL_INTERVAL)
-        ctx = {"prompt": "", "task_id": tid, "api_key": api_key, "provider_id": provider_id,
-               "kind": "video", "dynamic_inputs": {"task_id": tid}}
-        try:
-            if lang in ("javascript", "js", "node"):
-                result = await asyncio.wait_for(_execute_js_code(code, entry_name, ctx, timeout=30, trusted=trusted), timeout=45)
-            else:
-                result = await asyncio.wait_for(_execute_python_code(code, entry_name, ctx, timeout=30, trusted=trusted), timeout=45)
-        except Exception as e:
-            # 瞬态错误（网络抖动/单次查询超时）：只刷新心跳，继续下一轮
-            ent = _CODE_VIDEO_TASKS.get(tid) or {}
-            ent.update({"status": ent.get("status") or "SUBMITTED", "last_poll": time.time(),
-                        "last_error": str(e)[:160]})
-            _CODE_VIDEO_TASKS[tid] = ent
-            continue
-        if not isinstance(result, dict):
-            continue
-        url, _t = extract_result_media("video", result)
-        if url:
-            try:
-                storage_url, local_path = await persist_media(url, "video", "vid")
-            except Exception as e:
-                _CODE_VIDEO_TASKS[tid] = {"status": "FAILED", "task_id": tid, "provider": provider_id,
-                                          "error": f"下载失败: {e}"}
-                return
-            _CODE_VIDEO_TASKS[tid] = {"status": "SUCCESS", "task_id": tid, "provider": provider_id,
-                                      "video_url": storage_url, "local_path": local_path}
-            print(f"[CodeVideo] Task {tid} SUCCESS -> {storage_url}")
+        snap = await query_code_task_once(provider_id, tid)
+        if str(snap.get("status") or "").upper() in ("SUCCESS", "FAILED", "TIMEOUT"):
             return
-        status = str(result.get("status") or "").upper()
-        if status in _CODE_VIDEO_TERMINAL_FAIL:
-            _CODE_VIDEO_TASKS[tid] = {"status": "FAILED", "task_id": tid, "provider": provider_id,
-                                      "error": str(result.get("error") or result)[:300]}
-            print(f"[CodeVideo] Task {tid} FAILED: {str(result)[:160]}")
-            return
-        ent = _CODE_VIDEO_TASKS.get(tid) or {"task_id": tid, "provider": provider_id}
-        ent.update({"status": status or "SUBMITTED", "last_poll": time.time()})
-        _CODE_VIDEO_TASKS[tid] = ent
     ent = _CODE_VIDEO_TASKS.get(tid) or {"task_id": tid, "provider": provider_id}
     ent.update({"status": "TIMEOUT", "error": "轮询超时（~25min），可携带 task_id 重新查询"})
     _CODE_VIDEO_TASKS[tid] = ent

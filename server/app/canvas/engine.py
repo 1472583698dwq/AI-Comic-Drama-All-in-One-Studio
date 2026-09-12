@@ -763,26 +763,28 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
                     if mcp_res_v.status == "success" and mcp_res_v.result and (mcp_res_v.result.get("video_url") or mcp_res_v.result.get("url")):
                         v_url = mcp_res_v.result.get("video_url") or mcp_res_v.result.get("url")
                         return {"status":"success","video_url": v_url, "provider": prov, "elapsed_ms": mcp_res_v.execution_time_ms or int((time.time()-start)*1000), "task_id": mcp_res_v.result.get("task_id")}
+                    if mcp_res_v.status == "error":
+                        return {"status":"error","error": mcp_res_v.error or "视频生成失败"}
                     if mcp_res_v.status == "success" and mcp_res_v.result and mcp_res_v.result.get("task_id"):
-                        return {"status":"success","video_url": "", "provider": prov, "elapsed_ms": mcp_res_v.execution_time_ms or int((time.time()-start)*1000), "task_id": mcp_res_v.result.get("task_id")}
+                        # MCP 已按 AGENT_VIDEO_WAIT_S 阻塞等待；仍无 URL = 任务还在生成中
+                        return {"status":"success","video_url": "", "provider": prov, "elapsed_ms": mcp_res_v.execution_time_ms or int((time.time()-start)*1000), "task_id": mcp_res_v.result.get("task_id"), "note": "视频仍在生成中，完成后可在视频库查看"}
                 except Exception as _e2:
                     print(f"[CanvasEngine] MCP provider_{prov} video fallback: {_e2}")
             res = await video_registry.generate(req, provider_id=prov if prov else None)
-            # 处理异步排队（AutoDL）：若仅返回 task_id 则轮询至完成
+            # 统一异步任务抽象：仅返回 task_id 时经 TaskCenter 阻塞到终态（不再内联轮询）
             if not getattr(res, 'video_url', None) and getattr(res, 'task_id', None):
                 task_id = res.task_id
-                for _ in range(500):
-                    await asyncio.sleep(3)
-                    try:
-                        from app.providers.generic.http_provider import get_custom_video_task
-                        st = get_custom_video_task(task_id)
-                        if st and st.get("status") in ("SUCCESS", "COMPLETED") and st.get("video_url"):
-                            return {"status":"success","video_url": st["video_url"], "provider": res.provider, "elapsed_ms": int((time.time()-start)*1000), "task_id": task_id}
-                        if st and st.get("status") in ("FAILED", "FAIL", "ERROR"):
-                            return {"status":"error","error": st.get("error") or "视频任务失败"}
-                    except Exception:
-                        pass
-                return {"status":"error","error": f"视频排队超时 task_id={task_id}，请稍后在画布重试或查看 /storage/videos/"}
+                try:
+                    from app.providers.tasks import task_center
+                    task_center.register(str(task_id), res.provider or prov or "", "video")
+                    rec = await task_center.wait(str(task_id))
+                    if rec.status == "SUCCESS" and rec.video_url:
+                        return {"status":"success","video_url": rec.video_url, "local_path": rec.local_path, "provider": res.provider, "elapsed_ms": int((time.time()-start)*1000), "task_id": task_id}
+                    if rec.status == "FAILED":
+                        return {"status":"error","error": rec.error or "视频任务失败"}
+                    return {"status":"success","video_url":"", "provider": res.provider, "elapsed_ms": int((time.time()-start)*1000), "task_id": task_id, "note": "视频仍在生成中，完成后可在视频库查看"}
+                except Exception as e:
+                    return {"status":"error","error": f"视频任务查询失败: {e}"}
             return {"status":"success","video_url": res.video_url, "provider": res.provider, "elapsed_ms": res.elapsed_ms or int((time.time()-start)*1000), "task_id": getattr(res, 'task_id', None)}
         elif ntype in ("tts","audio","voice"):
             text = merged.get("text") or merged.get("prompt") or merged.get("image_prompt") or merged.get("dialogue") or merged.get("subtitle_text") or merged.get("brief") or upstream.get("prompt") or upstream.get("text") or ""

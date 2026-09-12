@@ -17,7 +17,7 @@ function MobileApp() {
   useEffect(() => { fetchTools().catch(() => {}); }, [])
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-[#070709] text-gray-100 overflow-hidden select-none">
+    <div className="h-screen w-screen flex flex-col bg-[#070709] text-gray-100 overflow-hidden">
       {/* Top bar — minimal for standalone */}
       <header className="h-12 px-4 flex items-center justify-between bg-surface border-b border-border shrink-0">
         <span className="text-xs font-bold text-white">🎬 AI 漫剧 · 移动端</span>

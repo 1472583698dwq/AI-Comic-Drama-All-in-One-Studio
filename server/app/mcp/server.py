@@ -1405,33 +1405,32 @@ class MCPServerRegistry:
                         pass
                     res = await reg.generate(req, provider_id=provider_id)
                     result = {"video_url": res.video_url, "local_path": res.local_path, "provider": res.provider, "engine": res.engine, "duration": res.duration, "task_id": res.task_id}
-                    # 异步排队型 provider：仅返回 task_id 时轮询至出片，保证节点Agent/DAG 拿到终态 URL
-                    # 代码源（code）除外：其提交已注册代码任务表并起后台轮询，此处直接返 task_id
-                    # （阻塞等终态最长 25 分钟；前端经 /videos/status 轮询，穿透口径已统一）
-                    _is_code_provider = False
+                    # 统一异步任务抽象（TaskCenter）：提交即返 task_id 的源默认阻塞到成片，
+                    # 全项目唯一轮询实现；wait=false 可转异步，用 task_wait/task_status 续查。
                     if not res.video_url and res.task_id:
-                        try:
-                            from app.providers.custom.manager import custom_provider_manager as _cm3
-                            _dd = _cm3.get_definition(provider_id)
-                            _is_code_provider = bool(_dd and getattr(_dd, "provider_type", "") == "code")
-                        except Exception:
-                            _is_code_provider = False
-                    if not res.video_url and res.task_id and not _is_code_provider:
-                        import asyncio as _aio
-                        for _ in range(500):
-                            await _aio.sleep(3)
-                            try:
-                                from app.providers.generic.http_provider import get_custom_video_task
-                                st = get_custom_video_task(res.task_id)
-                                if st and st.get("status") in ("SUCCESS", "COMPLETED") and st.get("video_url"):
-                                    result["video_url"] = st["video_url"]
-                                    break
-                                if st and st.get("status") in ("FAILED", "FAIL", "ERROR"):
-                                    raise RuntimeError(st.get("error") or "视频任务失败")
-                            except RuntimeError:
-                                raise
-                            except Exception:
-                                pass
+                        from app.providers.tasks import task_center
+                        _pid_ctx = str((project_context or {}).get("id") or "") if isinstance(project_context, dict) else ""
+                        task_center.register(
+                            str(res.task_id), provider_id, "video",
+                            request={"mode": arguments.get("mode") or "i2v"},
+                            project_id=_pid_ctx,
+                        )
+                        if arguments.get("wait") is False:
+                            result["status"] = "SUBMITTED"
+                            result["note"] = "任务已提交，可用 task_wait / task_status 查询进度"
+                        else:
+                            rec = await task_center.wait(str(res.task_id))
+                            result["status"] = rec.status
+                            if rec.status == "SUCCESS" and rec.video_url:
+                                result["video_url"] = rec.video_url
+                                result["local_path"] = rec.local_path or result.get("local_path")
+                            elif rec.status == "FAILED":
+                                raise RuntimeError(rec.error or "视频任务失败")
+                            else:
+                                result["note"] = (
+                                    f"视频仍在生成（{rec.status}，已等待 {int(rec.age_s)}s），"
+                                    f"可稍后用 task_wait 继续等待或 task_status 查询"
+                                )
                 elif kind == "audio":
                     from app.providers.audio.base import AudioGenerateRequest
                     reg = _lazy_audio_registry()

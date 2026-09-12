@@ -57,7 +57,7 @@ CREATE_MODE_RULES = """## 创造模式（Creator）
 
 TRUSTED_RULES = """## 可信模式（仅 STUDIO_TRUSTED_MODE=1 时生效）
 fs_file（list/read/write/append/delete）与 shell_exec 受围栏限制，写操作与命令执行会先弹窗确认。
-长任务异步范式：视频/批量任务提交后拿 task_id，用 shell_exec 单次查询或 provider 查询分支获取终态，再回填节点。"""
+长任务（视频等）已由框架统一阻塞到成片并返回 video_url；仅当工具提示「仍在生成中」时才用 task_wait 续等 / task_status 查询，不要用 shell_exec 反复轮询。"""
 
 
 def build_system_prompt(plan_mode: bool = False, extra_context: Optional[str] = None,

@@ -53,7 +53,7 @@ export function App() {
   }, [project, activeTab]);
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-background text-gray-100 overflow-hidden select-none">
+    <div className="h-screen w-screen flex flex-col bg-background text-gray-100 overflow-hidden">
       {/* 1. Universal Top Navigation Header */}
       <Header
         onOpenImport={() => setIsImportOpen(true)}
