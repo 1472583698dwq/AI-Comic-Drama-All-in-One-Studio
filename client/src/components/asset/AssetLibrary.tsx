@@ -7,6 +7,7 @@ import { apiService } from '../../services/api';
 import { AssetCategory } from '../../types';
 import { WorkflowInspectorModal } from '../workflow/WorkflowInspectorModal';
 import { confirmAsync, toast } from '../../stores/useDialogStore';
+import { useEscapeClose } from '../../hooks/useEscapeClose';
 
 const CATEGORY_TABS: { key: AssetCategory | 'all'; label: string; icon: React.ReactNode }[] = [
   { key: 'all', label: '全部', icon: <Library className="w-3.5 h-3.5" /> },
@@ -48,6 +49,9 @@ export const AssetLibrary: React.FC = () => {
   const [dynamicInputs, setDynamicInputs] = useState<Record<string, any>>({});
 
   const [showEdit, setShowEdit] = useState(false);
+  useEscapeClose(showEdit, () => setShowEdit(false));
+  useEscapeClose(showImport, () => setShowImport(false));
+  useEscapeClose(showGenerate, () => setShowGenerate(false));
   const [editForm, setEditForm] = useState({ name: '', category: 'character' as AssetCategory, description: '', visual_prompt: '', tags: '', status: 'approved' as string });
   const [editFile, setEditFile] = useState<File | null>(null);
   const [updating, setUpdating] = useState(false);
@@ -443,7 +447,7 @@ export const AssetLibrary: React.FC = () => {
         <div className="p-3 border-b border-border space-y-2">
           <div className="flex rounded-full bg-surface-secondary border border-border p-1 gap-1">
             {(['all','project','global'] as const).map(s=> (
-              <button key={s} onClick={()=>fetchAssets({ scope: s, page: 1 })} className={`flex-1 py-1 rounded-full text-[11px] font-bold transition-all ${((useAssetStore as any).getState?.().scope||'all')===s ? 'bg-white dark:bg-brand text-surface dark:text-white shadow-sm' : 'text-gray-500 hover:text-white'}`}>{s==='all'?'全部':s==='project'?'项目':'全局'}</button>
+              <button key={s} onClick={()=>fetchAssets({ scope: s, page: 1 })} className={`flex-1 py-1 rounded-full text-[11px] font-bold transition-all ${((useAssetStore as any).getState?.().scope||'all')===s ? 'bg-brand text-white shadow-sm' : 'text-gray-500 hover:text-white'}`}>{s==='all'?'全部':s==='project'?'项目':'全局'}</button>
             ))}
           </div>
           <div className="flex items-center gap-2 rounded-full bg-surface-secondary border border-border px-3 py-1.5 focus-within:border-brand/40">
@@ -491,7 +495,7 @@ export const AssetLibrary: React.FC = () => {
             <select value={(useAssetStore as any).getState?.()?.sort || 'updated_at'} onChange={e=>fetchAssets({ sort: e.target.value, page: 1 })} className="hidden sm:block bg-surface-secondary border border-border rounded-full px-3 py-1 text-xs text-white focus:outline-none">
               <option value="updated_at">最近更新</option><option value="created_at">创建时间</option><option value="name">名称</option>
             </select>
-            <button onClick={()=>importInputRef.current?.click()} className="hidden md:flex items-center gap-1.5 px-3 py-1 rounded-full bg-white dark:bg-surface-secondary border border-border text-xs font-medium text-surface dark:text-white hover:border-border-active">
+            <button onClick={()=>importInputRef.current?.click()} className="hidden md:flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface border border-border text-xs font-medium text-[color:var(--color-text-main)] hover:border-border-active">
               <Files className="w-3.5 h-3.5" /><span>批量</span>
             </button>
             <input ref={importInputRef} type="file" multiple accept="image/*,audio/*,video/*,.glb,.fbx" className="hidden" onChange={e=>{ onDropFiles(e.target.files); if(e.target) e.target.value=''; }} />
@@ -531,7 +535,7 @@ export const AssetLibrary: React.FC = () => {
                   const abs = url && url.startsWith('/') ? `http://127.0.0.1:8000${url}` : url;
                   return (
                   <div key={a.id} draggable onDragStart={e=>{ e.dataTransfer.setData('text/plain', abs||url||''); e.dataTransfer.setData('application/canvas-assetid', a.id); e.dataTransfer.setData('application/asset-category', a.category||''); e.dataTransfer.effectAllowed='copy'; }} onClick={()=>{selectAsset(a.id); setDetailAsset(a);}} title="拖拽到分镜垫图槽或画布" className={`group bg-surface border rounded-2xl overflow-hidden cursor-grab active:cursor-grabbing transition-all hover:shadow-lg ${selectedId===a.id ? 'border-brand ring-1 ring-brand/30' : 'border-border hover:border-border-active'}`}>
-                    <div className="aspect-square bg-black/60 relative overflow-hidden">
+                    <div className="aspect-square bg-surface-secondary relative overflow-hidden">
                       {a.thumb_url || a.file_url ? (
                         <img src={resolveUrl(a.thumb_url||a.file_url)} alt={a.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                       ) : (
@@ -579,7 +583,7 @@ export const AssetLibrary: React.FC = () => {
             <button onClick={()=>{selectAsset(null); setDetailAsset(null);}} className="text-gray-400 hover:text-white"><X className="w-4 h-4" /></button>
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            <div className="aspect-square rounded-xl overflow-hidden bg-black/60 border border-border">
+            <div className="aspect-square rounded-xl overflow-hidden bg-surface-secondary border border-border">
               {selected.file_url ? <img src={resolveUrl(selected.file_url)} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-gray-500">无预览</div>}
             </div>
             <div>
@@ -828,7 +832,7 @@ export const AssetLibrary: React.FC = () => {
                         {exp.type === 'image' ? (
                           <div className="flex items-center gap-3">
                             {val ? (
-                              <div className="relative w-14 h-14 rounded-lg border border-brand overflow-hidden group shrink-0 bg-black/50">
+                              <div className="relative w-14 h-14 rounded-lg border border-brand overflow-hidden group shrink-0 bg-surface-secondary">
                                 <img
                                   src={resolveUrl(val)}
                                   alt="Preview"
@@ -837,7 +841,7 @@ export const AssetLibrary: React.FC = () => {
                                 <button
                                   type="button"
                                   onClick={() => setDynamicInputs(p => ({ ...p, [key]: '' }))}
-                                  className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 text-white flex items-center justify-center text-[10px] transition"
+                                  className="absolute inset-0 bg-surface/85 opacity-0 group-hover:opacity-100 text-white flex items-center justify-center text-[10px] transition"
                                 >
                                   ✕ 移除
                                 </button>

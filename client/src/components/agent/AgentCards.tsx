@@ -34,7 +34,7 @@ export const PlanCard: React.FC<{
         {plan.steps.length === 0 && <div className="px-2.5 py-2 text-[11px] text-gray-500">纯问答，不调工具，零副作用。</div>}
       </div>
       {plan.needs_confirm && (
-        <div className="px-2.5 py-2 flex gap-1.5 border-t border-brand/10 bg-black/20">
+        <div className="px-2.5 py-2 flex gap-1.5 border-t border-brand/10 bg-surface-secondary">
           <button onClick={onConfirm} disabled={confirming} className="flex-1 py-1.5 rounded-lg bg-brand text-white text-[11px] font-bold hover:opacity-90 disabled:opacity-50">
             {confirming ? '执行中…' : '确认执行计划'}
           </button>
@@ -69,8 +69,8 @@ export const ArtifactCard: React.FC<{
         {applied && <span className="ml-1 px-1.5 py-px rounded bg-emerald-500/20 text-[10px]">已应用{shotLabel || ''}</span>}
       </div>
       <div className="px-2.5 pb-2">
-        {kind === 'image' && <img src={full} alt={label} className="w-full rounded-lg border border-white/10 max-h-56 object-contain bg-black/40" loading="lazy" />}
-        {kind === 'video' && <video src={full} controls className="w-full rounded-lg border border-white/10 max-h-56 bg-black" />}
+        {kind === 'image' && <img src={full} alt={label} className="w-full rounded-lg border border-white/10 max-h-56 object-contain bg-surface-secondary" loading="lazy" />}
+        {kind === 'video' && <video src={full} controls className="w-full rounded-lg border border-white/10 max-h-56 bg-surface-secondary" />}
         {kind === 'audio' && <audio src={full} controls className="w-full h-8" />}
         <div className="flex gap-1.5 mt-1.5">
           {onApply && !applied && (

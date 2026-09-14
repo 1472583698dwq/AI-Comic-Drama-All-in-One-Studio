@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { apiService } from '../../services/api';
+import { useEscapeClose } from '../../hooks/useEscapeClose';
 
 interface ExportModalProps {
   isOpen: boolean;
@@ -24,6 +25,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
   const [exportedDraft, setExportedDraft] = useState<any>(null);
   const [exportError, setExportError] = useState<string | null>(null);
 
+  useEscapeClose(isOpen, onClose);
   if (!isOpen || !project) return null;
 
   const API_ORIGIN = 'http://127.0.0.1:8000';
@@ -81,7 +83,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
           {/* Project Summary Card */}
           <div className="bg-surface-secondary p-4 rounded-xl border border-border flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <div className="w-12 h-12 rounded-lg overflow-hidden bg-black/60 border border-border flex-shrink-0">
+              <div className="w-12 h-12 rounded-lg overflow-hidden bg-surface-secondary border border-border flex-shrink-0">
                 {project.scenes[0]?.shots[0]?.image_url ? (
                   <img
                     src={project.scenes[0].shots[0].image_url?.startsWith('/') ? API_ORIGIN + project.scenes[0].shots[0].image_url : project.scenes[0].shots[0].image_url}

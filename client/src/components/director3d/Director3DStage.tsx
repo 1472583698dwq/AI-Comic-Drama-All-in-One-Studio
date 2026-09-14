@@ -1722,7 +1722,7 @@ export const Director3DStage: React.FC = () => {
 
   return (
     <div className="flex-1 flex flex-col md:flex-row h-full bg-background overflow-hidden select-none">
-      <div className="flex-1 relative flex flex-col bg-[#07070A] always-dark overflow-hidden">
+      <div className="flex-1 relative flex flex-col bg-background overflow-hidden">
         <div className="absolute top-4 left-4 z-20 flex items-center space-x-3 bg-surface/90 backdrop-blur-md px-4 py-2 rounded-2xl border border-border shadow-xl">
           <div className="flex items-center space-x-2">
             <span className="w-2.5 h-2.5 rounded-full bg-brand-light animate-pulse" />
@@ -1755,7 +1755,7 @@ export const Director3DStage: React.FC = () => {
           <button onClick={resetSelectedTransform} title="复位选中物体到默认摆位（小云雀式复位）" className="w-9 h-9 rounded-xl flex items-center justify-center text-gray-400 hover:text-white hover:bg-surface-secondary transition-all"><RefreshCw className="w-4 h-4" /></button>
         </div>
         {/* 底部操作提示（对标updream快捷键教学） */}
-        <div className="absolute bottom-[5.2rem] left-16 z-10 hidden md:block text-[10px] text-gray-500 leading-4 bg-black/40 px-2 py-1 rounded-lg backdrop-blur-sm pointer-events-none">
+        <div className="absolute bottom-[5.2rem] left-16 z-10 hidden md:block text-[10px] text-gray-500 leading-4 bg-surface/85 px-2 py-1 rounded-lg backdrop-blur-sm pointer-events-none">
           左键点击选中 · 拖轴移动/旋转 · 拖空白旋转视角 · 右键平移 · 滚轮缩放 · <span className="text-gray-300 font-mono">W移动 E旋转 R缩放 Ctrl+Z撤销 Esc取消</span>
         </div>
         {/* 大纲列表（对标updream图层区 + 小云雀左侧素材区）：点选比视口点选更可靠，支持锁定防误拖 */}
@@ -1791,7 +1791,7 @@ export const Director3DStage: React.FC = () => {
               <span className="flex items-center space-x-1.5"><span className="w-2 h-2 rounded-full bg-red-500 animate-ping" /><span className="text-white font-bold">CAM 1 [REC]</span></span>
               <div className="flex items-center space-x-1"><span className="text-brand-light font-bold">{aspectRatioMask}</span><span className="text-gray-500">|</span><span className="text-accent-blue font-bold">{focalLength}mm</span></div>
             </div>
-            <div ref={pipBoxRef} className="flex-1 relative overflow-hidden bg-black flex items-center justify-center"><div className="relative shadow-inner" style={{ width: pipFrame.w || '100%', height: pipFrame.h || undefined, aspectRatio: projectAspect, maxHeight: '100%' }}><div ref={pipContainerRef} className="absolute inset-0" />{compositionGrid === 'rule_of_thirds' && <div className="absolute inset-0 pointer-events-none grid grid-cols-3 grid-rows-3 border border-white/10 opacity-40"><div className="border-r border-b border-white/25" /><div className="border-r border-b border-white/25" /><div className="border-b border-white/25" /><div className="border-r border-b border-white/25" /><div className="border-r border-b border-white/25" /><div className="border-b border-white/25" /><div className="border-r border-b border-white/25" /><div className="border-r border-b border-white/25" /><div /></div>}{compositionGrid === 'crosshair' && <div className="absolute inset-0 pointer-events-none flex items-center justify-center"><Crosshair className="w-6 h-6 text-brand-light/70" /></div>}{compositionGrid === 'golden_ratio' && <div className="absolute inset-0 pointer-events-none border border-brand-light/30 rounded-full scale-90 opacity-40" />}</div></div>
+            <div ref={pipBoxRef} className="flex-1 relative overflow-hidden bg-surface-secondary flex items-center justify-center"><div className="relative shadow-inner" style={{ width: pipFrame.w || '100%', height: pipFrame.h || undefined, aspectRatio: projectAspect, maxHeight: '100%' }}><div ref={pipContainerRef} className="absolute inset-0" />{compositionGrid === 'rule_of_thirds' && <div className="absolute inset-0 pointer-events-none grid grid-cols-3 grid-rows-3 border border-white/10 opacity-40"><div className="border-r border-b border-white/25" /><div className="border-r border-b border-white/25" /><div className="border-b border-white/25" /><div className="border-r border-b border-white/25" /><div className="border-r border-b border-white/25" /><div className="border-b border-white/25" /><div className="border-r border-b border-white/25" /><div className="border-r border-b border-white/25" /><div /></div>}{compositionGrid === 'crosshair' && <div className="absolute inset-0 pointer-events-none flex items-center justify-center"><Crosshair className="w-6 h-6 text-brand-light/70" /></div>}{compositionGrid === 'golden_ratio' && <div className="absolute inset-0 pointer-events-none border border-brand-light/30 rounded-full scale-90 opacity-40" />}</div></div>
             <div className="p-2 bg-surface-secondary/95 border-t border-border flex items-center justify-between text-[10px] gap-1">
               <button onClick={() => setCompositionGrid((g) => (g === 'rule_of_thirds' ? 'crosshair' : g === 'crosshair' ? 'golden_ratio' : g === 'golden_ratio' ? 'none' : 'rule_of_thirds'))} className="px-2 py-0.5 rounded bg-surface border border-border text-gray-300 hover:text-white font-mono" title="切换构图参考线">网格: {compositionGrid === 'rule_of_thirds' ? '九宫' : compositionGrid === 'crosshair' ? '十字' : compositionGrid === 'golden_ratio' ? '黄金' : '无'}</button>
               <button onClick={handleCaptureSnapshot} className="flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-brand/30 hover:bg-brand border border-brand/50 text-brand-light hover:text-white font-bold transition-all" title="截取导演视角为图片参考（存资产库 previz，挂分镜 previz_url）">{snapshotSuccess ? <Check className="w-3 h-3 text-accent-green" /> : <Camera className="w-3 h-3" />}<span>{snapshotSuccess ? '已快照' : '截屏为参考'}</span></button>
@@ -2013,7 +2013,7 @@ export const Director3DStage: React.FC = () => {
           )}
           <div className="p-3.5 rounded-2xl bg-surface-secondary border border-border space-y-2">
             <div className="flex items-center justify-between text-[11px] font-bold text-gray-300"><span className="flex items-center space-x-1.5"><Sparkles className="w-3.5 h-3.5 text-brand-light" /><span>MiniMax 01-Director 规范语法</span></span><span className="text-[9px] bg-brand/20 text-brand-light px-1.5 py-0.5 rounded font-mono">LIVE PROMPT</span></div>
-            <div className="p-2.5 rounded-xl bg-black/60 font-mono text-[11px] text-brand-light leading-relaxed break-all border border-brand/20">{minimaxPromptPreview}</div>
+            <div className="p-2.5 rounded-xl bg-surface-secondary font-mono text-[11px] text-brand-light leading-relaxed break-all border border-brand/20">{minimaxPromptPreview}</div>
           </div>
         </div>
         <div className="p-4 border-t border-border bg-surface-secondary/40 shrink-0">

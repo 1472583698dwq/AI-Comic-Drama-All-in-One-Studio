@@ -113,7 +113,7 @@ export const CanvasManagerModal: React.FC<Props> = ({ isOpen, onClose, projectId
               <div key={c.id} className={`p-3 rounded-xl border transition-all ${isCur ? 'bg-brand/10 border-brand/40' : 'bg-surface-secondary/60 border-border'}`}>
                 <div className="flex items-center gap-2">
                   {renaming === c.id ? (
-                    <input autoFocus value={renameValue} onChange={e => setRenameValue(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleRename(c.id); if (e.key === 'Escape') setRenaming(null); }} onBlur={() => handleRename(c.id)} className="flex-1 bg-black/40 border border-brand rounded-lg px-2 py-1 text-xs text-white focus:outline-none" />
+                    <input autoFocus value={renameValue} onChange={e => setRenameValue(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleRename(c.id); if (e.key === 'Escape') setRenaming(null); }} onBlur={() => handleRename(c.id)} className="flex-1 bg-surface-secondary border border-brand rounded-lg px-2 py-1 text-xs text-white focus:outline-none" />
                   ) : (
                     <span className="flex-1 text-xs font-bold text-white truncate">{isCur ? '● ' : ''}{c.name}</span>
                   )}
@@ -123,7 +123,7 @@ export const CanvasManagerModal: React.FC<Props> = ({ isOpen, onClose, projectId
                 {affil.length > 0 && (
                   <div className="mt-1.5 flex items-center gap-1 flex-wrap text-[10px] text-gray-400">
                     <Film className="w-3 h-3 text-brand-light" />
-                    {affil.map(s => <span key={s.id} className="px-1.5 py-0.5 rounded bg-black/40 border border-border font-mono">#{s.shot_index}</span>)}
+                    {affil.map(s => <span key={s.id} className="px-1.5 py-0.5 rounded bg-surface-secondary border border-border font-mono">#{s.shot_index}</span>)}
                   </div>
                 )}
                 <div className="mt-2 flex items-center gap-1.5">

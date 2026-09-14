@@ -27,7 +27,7 @@ function parseInline(text: string): React.ReactNode[] {
     const [full, code, bold1, bold2, strike, ital1, ital2, _link, linkText, href] = m;
     if (code) {
       out.push(
-        <code key={nk('c')} className="px-1 py-px rounded bg-black/30 border border-white/10 font-mono text-[11px] text-amber-200 break-all">
+        <code key={nk('c')} className="px-1 py-px rounded bg-surface-secondary border border-white/10 font-mono text-[11px] text-amber-200 break-all">
           {code.slice(1, -1)}
         </code>
       );
@@ -75,7 +75,7 @@ const CodeBlock: React.FC<{ lang: string; code: string }> = ({ lang, code }) => 
     setTimeout(() => setCopied(false), 1500);
   };
   return (
-    <div className="my-2 rounded-lg border border-white/10 bg-black/40 overflow-hidden">
+    <div className="my-2 rounded-lg border border-white/10 bg-surface-secondary overflow-hidden">
       <div className="flex items-center justify-between px-2.5 py-1 bg-white/5 border-b border-white/10">
         <span className="text-[10px] font-mono text-white/50">{lang || 'code'}</span>
         <button

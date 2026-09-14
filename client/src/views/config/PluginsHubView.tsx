@@ -21,6 +21,13 @@ export const PluginsHubView: React.FC = () => {
       setLoading(false);
     }
   };
+  // Agent 安装/启停插件后会派发该事件，此前无人监听，插件列表不会自动刷新
+  useEffect(() => {
+    const onRefresh = () => { load(); };
+    window.addEventListener('plugin-list-refresh', onRefresh);
+    return () => window.removeEventListener('plugin-list-refresh', onRefresh);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {

@@ -66,7 +66,7 @@ export const PreviewStage: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
       {videoError && <div className="mb-2 px-3 py-1.5 rounded-xl bg-red-500/15 border border-red-500/40 text-xs text-red-300 max-w-md truncate">⚠️ {videoError}</div>}
       {ttsError && <div className="mb-2 px-3 py-1.5 rounded-xl bg-red-500/15 border border-red-500/40 text-xs text-red-300 max-w-md truncate">⚠️ {ttsError}</div>}
 
-      <div className="relative max-h-[60vh] w-full max-w-md rounded-2xl overflow-hidden shadow-2xl border border-border/80 group bg-black always-dark" style={{ aspectRatio: previewAspect }}>
+      <div className="relative max-h-[60vh] w-full max-w-md rounded-2xl overflow-hidden shadow-2xl border border-border/80 group bg-surface-secondary" style={{ aspectRatio: previewAspect }}>
         {effectivePreviewTab === 'video' ? (
           activeShot.video_url ? (
             <video
@@ -111,7 +111,7 @@ export const PreviewStage: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
           </div>
         )}
 
-        <div className="absolute top-3 left-3 flex items-center space-x-2 bg-black/70 backdrop-blur-md px-2.5 py-1 rounded-lg border border-white/10 pointer-events-none">
+        <div className="absolute top-3 left-3 flex items-center space-x-2 bg-surface/85 backdrop-blur-md px-2.5 py-1 rounded-lg border border-white/10 pointer-events-none">
           <span className="text-[11px] font-bold text-white font-mono">镜头 #{activeShot.shot_index}</span>
           <span className="text-[10px] px-1.5 rounded bg-brand/30 text-brand-light border border-brand/40">
             {activeShot.camera_framing}
@@ -122,7 +122,7 @@ export const PreviewStage: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
         </div>
 
         {activeShot.subtitle_text && (
-          <div className="absolute bottom-6 left-4 right-4 bg-black/75 backdrop-blur-md p-3 rounded-xl border border-white/15 text-center shadow-lg animate-fade-in pointer-events-none">
+          <div className="absolute bottom-6 left-4 right-4 bg-surface/85 backdrop-blur-md p-3 rounded-xl border border-white/15 text-center shadow-lg animate-fade-in pointer-events-none">
             <span className="text-xs font-bold text-white tracking-wide">
               {activeShot.subtitle_text}
             </span>
@@ -132,7 +132,7 @@ export const PreviewStage: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
         <div className="absolute top-3 right-3 flex flex-col space-y-2">
           <button
             onClick={() => setActiveTab('director3d')}
-            className="p-2 rounded-xl bg-black/70 hover:bg-accent-orange text-white backdrop-blur-md border border-white/10 transition-all shadow-md"
+            className="p-2 rounded-xl bg-surface-secondary hover:bg-accent-orange text-white backdrop-blur-md border border-white/10 transition-all shadow-md"
             title="进入 3D 导演台规划姿态与机位"
           >
             <Compass className="w-4 h-4 text-accent-orange hover:text-white" />
@@ -141,7 +141,7 @@ export const PreviewStage: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
           <button
             onClick={() => handleRegenerateImage()}
             disabled={isRegenerating}
-            className="p-2 rounded-xl bg-black/70 hover:bg-brand text-white backdrop-blur-md border border-white/10 transition-all shadow-md disabled:opacity-40"
+            className="p-2 rounded-xl bg-surface-secondary hover:bg-brand text-white backdrop-blur-md border border-white/10 transition-all shadow-md disabled:opacity-40"
             title={`重新生成画面 (按 R) ${candidateCount===4 ? '- 4抽模式' : ''}`}
           >
             <RefreshCw className={`w-4 h-4 text-brand-light ${isRegenerating ? 'animate-spin' : ''}`} />
@@ -150,7 +150,7 @@ export const PreviewStage: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
             <button
               onClick={()=> handleSaveShotToAsset('image')}
               disabled={savingAsset}
-              className="p-2 rounded-xl bg-black/70 hover:bg-emerald-600 text-white backdrop-blur-md border border-white/10 transition-all shadow-md disabled:opacity-40"
+              className="p-2 rounded-xl bg-surface-secondary hover:bg-emerald-600 text-white backdrop-blur-md border border-white/10 transition-all shadow-md disabled:opacity-40"
               title="保存首帧到素材库（项目）"
             >
               <ImageIcon className="w-4 h-4" />
@@ -160,7 +160,7 @@ export const PreviewStage: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
             <button
               onClick={()=> handleSaveShotToAsset('video')}
               disabled={savingAsset}
-              className="p-2 rounded-xl bg-black/70 hover:bg-emerald-600 text-white backdrop-blur-md border border-white/10 transition-all shadow-md disabled:opacity-40"
+              className="p-2 rounded-xl bg-surface-secondary hover:bg-emerald-600 text-white backdrop-blur-md border border-white/10 transition-all shadow-md disabled:opacity-40"
               title="保存视频到素材库（项目）"
             >
               <Film className="w-4 h-4" />
@@ -189,7 +189,7 @@ export const PreviewStage: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
                   title={`选定第 ${idx + 1} 张作为正片定版 (快捷键 ${idx + 1})`}
                 >
                   <img src={getMediaUrl(cUrl)} alt="" className="w-full h-full object-cover" />
-                  <span className={`absolute top-0.5 left-0.5 px-1 rounded text-[8px] font-mono font-bold ${isChosen ? 'bg-brand text-white' : 'bg-black/70 text-gray-300'}`}>
+                  <span className={`absolute top-0.5 left-0.5 px-1 rounded text-[8px] font-mono font-bold ${isChosen ? 'bg-brand text-white' : 'bg-surface-secondary text-gray-300'}`}>
                     {idx + 1}
                   </span>
                   {isChosen && (

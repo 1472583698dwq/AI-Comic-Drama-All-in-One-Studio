@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { useMcpStore } from '../../stores/useMcpStore';
 import { MCPToolDefinition } from '../../types';
+import { useEscapeClose } from '../../hooks/useEscapeClose';
 
 interface McpToolsModalProps {
   isOpen: boolean;
@@ -41,6 +42,7 @@ export const McpToolsModal: React.FC<McpToolsModalProps> = ({ isOpen, onClose })
     }
   }, [tools]);
 
+  useEscapeClose(isOpen, onClose);
   if (!isOpen) return null;
 
   const handleSelectTool = (tool: MCPToolDefinition) => {
@@ -150,7 +152,7 @@ export const McpToolsModal: React.FC<McpToolsModalProps> = ({ isOpen, onClose })
                     >
                       <div className="flex items-center justify-between mb-1.5">
                         <div className="flex items-center space-x-2">
-                          <div className="p-1 rounded-lg bg-black/40 border border-white/5">
+                          <div className="p-1 rounded-lg bg-surface-secondary border border-white/5">
                             {getToolIcon(tool.icon)}
                           </div>
                           <span className="text-xs font-bold text-white">{tool.name}</span>
@@ -168,7 +170,7 @@ export const McpToolsModal: React.FC<McpToolsModalProps> = ({ isOpen, onClose })
                       <p className="text-[11px] text-gray-400 line-clamp-2">{tool.description}</p>
                       <div className="mt-2 flex items-center justify-between text-[10px] text-gray-500">
                         <span>作者: {tool.author}</span>
-                        <span className="px-1.5 py-0.2 rounded bg-black/50 text-brand-light font-mono">
+                        <span className="px-1.5 py-0.2 rounded bg-surface-secondary text-brand-light font-mono">
                           {tool.category}
                         </span>
                       </div>
@@ -202,7 +204,7 @@ export const McpToolsModal: React.FC<McpToolsModalProps> = ({ isOpen, onClose })
                         value={testArgsJson}
                         onChange={(e) => setTestArgsJson(e.target.value)}
                         rows={7}
-                        className="w-full flex-1 bg-black/60 border border-border rounded-xl p-3 font-mono text-xs text-accent-green focus:outline-none focus:border-brand custom-scrollbar"
+                        className="w-full flex-1 bg-surface-secondary border border-border rounded-xl p-3 font-mono text-xs text-accent-green focus:outline-none focus:border-brand custom-scrollbar"
                       />
                     </div>
 
@@ -254,7 +256,7 @@ export const McpToolsModal: React.FC<McpToolsModalProps> = ({ isOpen, onClose })
                       </div>
                     </div>
 
-                    <div className="bg-black/50 p-2.5 rounded-lg border border-border/60 text-gray-300 text-[11px] overflow-x-auto">
+                    <div className="bg-surface-secondary p-2.5 rounded-lg border border-border/60 text-gray-300 text-[11px] overflow-x-auto">
                       <div className="text-gray-500 text-[10px] mb-1">Arguments:</div>
                       <pre>{JSON.stringify(log.arguments, null, 2)}</pre>
                       {log.result && (

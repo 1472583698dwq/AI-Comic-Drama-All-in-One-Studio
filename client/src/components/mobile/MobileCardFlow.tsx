@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   ChevronUp, 
   ChevronDown, 
@@ -43,6 +43,20 @@ export const MobileCardFlow: React.FC<MobileCardFlowProps> = ({ onOpenExport, st
   const [regenError, setRegenError] = useState<string | null>(null);
   const [ttsError, setTtsError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // 播放：按每镜 duration 自动推进卡片，到末尾自动停。
+  // 修复前这里没有任何消费方，顶栏/底部的「播放」只是切了个图标，卡片一动不动。
+  useEffect(() => {
+    if (!isPlaying) return;
+    if (shots.length === 0 || activeIndex >= shots.length - 1) {
+      setIsPlaying(false);
+      return;
+    }
+    const ms = Math.max(500, (shots[activeIndex]?.duration || 3) * 1000);
+    const timer = setTimeout(() => setActiveShotId(shots[activeIndex + 1].id), ms);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlaying, activeIndex, shots.length]);
 
   if (!currentShot) {
     return (
@@ -131,7 +145,7 @@ export const MobileCardFlow: React.FC<MobileCardFlowProps> = ({ onOpenExport, st
           className="flex items-center space-x-1 px-2.5 py-1 rounded-full bg-gradient-to-r from-brand to-brand-blue text-[10px] font-bold text-white shadow-md"
         >
           <Share2 className="w-3 h-3" />
-          <span>一键成片</span>
+          <span>导出剪映</span>
         </button>
       </div>
 
@@ -140,7 +154,7 @@ export const MobileCardFlow: React.FC<MobileCardFlowProps> = ({ onOpenExport, st
       )}
 
       {/* 2. Fullscreen Vertical Storyboard Canvas */}
-      <div className="flex-1 relative flex items-center justify-center bg-black overflow-hidden group">
+      <div className="flex-1 relative flex items-center justify-center bg-surface-secondary overflow-hidden group">
         {imgSrc ? (
           <img
             src={imgSrc}
@@ -148,8 +162,8 @@ export const MobileCardFlow: React.FC<MobileCardFlowProps> = ({ onOpenExport, st
             className="w-full h-full object-cover animate-fade-in"
           />
         ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center text-gray-500 text-xs space-y-3 p-4 text-center bg-[#0A0A12] always-dark">
-            <span>{currentShot.status === 'generating_image' ? 'ComfyUI 生成中...' : '该分镜暂无画面'}</span>
+          <div className="w-full h-full flex flex-col items-center justify-center text-gray-500 text-xs space-y-3 p-4 text-center bg-surface-secondary">
+            <span>{currentShot.status === 'generating_image' ? '生成中...' : '该分镜暂无画面'}</span>
             <button onClick={handleRegenerate} disabled={isRegenerating} className="px-3 py-1.5 rounded bg-brand text-white text-xs disabled:opacity-40">
               {isRegenerating ? '生成中...' : '点击生成画面'}
             </button>
@@ -159,7 +173,7 @@ export const MobileCardFlow: React.FC<MobileCardFlowProps> = ({ onOpenExport, st
         {/* Subtitle / Dialogue Bubble (Comic Overlay) */}
         <div className="absolute bottom-20 left-4 right-4 z-20">
           {isEditingDialogue ? (
-            <div className="bg-black/90 p-3 rounded-2xl border border-brand space-y-2 backdrop-blur-md">
+            <div className="bg-surface-secondary p-3 rounded-2xl border border-brand space-y-2 backdrop-blur-md">
               <input
                 type="text"
                 value={currentShot.dialogue || currentShot.voiceover || ''}
@@ -181,7 +195,7 @@ export const MobileCardFlow: React.FC<MobileCardFlowProps> = ({ onOpenExport, st
               </button>
             </div>
           ) : (
-            <div className="bg-black/75 backdrop-blur-md p-3.5 rounded-2xl border border-white/20 text-center shadow-2xl">
+            <div className="bg-surface-secondary backdrop-blur-md p-3.5 rounded-2xl border border-white/20 text-center shadow-2xl">
               <div className="flex items-center justify-center space-x-1.5 mb-1">
                 <span className="text-[10px] font-bold text-brand-light">
                   {currentShot.speaker_name || '旁白'}
@@ -203,7 +217,7 @@ export const MobileCardFlow: React.FC<MobileCardFlowProps> = ({ onOpenExport, st
           <button
             onClick={handlePrev}
             disabled={activeIndex === 0}
-            className="p-2.5 rounded-full bg-black/60 backdrop-blur-md text-white border border-white/10 disabled:opacity-30 active:scale-90 transition-all shadow-lg"
+            className="p-2.5 rounded-full bg-surface-secondary backdrop-blur-md text-white border border-white/10 disabled:opacity-30 active:scale-90 transition-all shadow-lg"
           >
             <ChevronUp className="w-4 h-4" />
           </button>
@@ -212,26 +226,26 @@ export const MobileCardFlow: React.FC<MobileCardFlowProps> = ({ onOpenExport, st
           <button
             onClick={handleNext}
             disabled={activeIndex === shots.length - 1}
-            className="p-2.5 rounded-full bg-black/60 backdrop-blur-md text-white border border-white/10 disabled:opacity-30 active:scale-90 transition-all shadow-lg"
+            className="p-2.5 rounded-full bg-surface-secondary backdrop-blur-md text-white border border-white/10 disabled:opacity-30 active:scale-90 transition-all shadow-lg"
           >
             <ChevronDown className="w-4 h-4" />
           </button>
 
-          {/* Play TTS Voice — 真实 MiniMax */}
+          {/* Play TTS Voice — 走当前配置的音频生成源 */}
           <button
             onClick={handleTTS}
             className="p-2.5 rounded-full bg-accent-pink/80 backdrop-blur-md text-white active:scale-90 transition-all shadow-lg"
-            title="试听 MiniMax 真实配音"
+            title="试听配音（使用当前配置的音频生成源）"
           >
             <Volume2 className={`w-4 h-4 ${isPlayingTTS ? 'animate-bounce' : ''}`} />
           </button>
 
-          {/* Quick Inpaint / Regenerate — 真实 ComfyUI */}
+          {/* Quick Inpaint / Regenerate — 走当前配置的图片生成源 */}
           <button
             onClick={handleRegenerate}
             disabled={isRegenerating}
             className="p-2.5 rounded-full bg-brand/80 backdrop-blur-md text-white active:scale-90 transition-all shadow-lg disabled:opacity-40"
-            title="ComfyUI 真实重绘"
+            title="智能重绘（使用当前配置的图片生成源）"
           >
             <RefreshCw className={`w-4 h-4 ${isRegenerating ? 'animate-spin' : ''}`} />
           </button>
@@ -239,7 +253,7 @@ export const MobileCardFlow: React.FC<MobileCardFlowProps> = ({ onOpenExport, st
           {/* Edit Dialogue */}
           <button
             onClick={() => setIsEditingDialogue(!isEditingDialogue)}
-            className="p-2.5 rounded-full bg-black/60 backdrop-blur-md text-white border border-white/10 active:scale-90 transition-all shadow-lg"
+            className="p-2.5 rounded-full bg-surface-secondary backdrop-blur-md text-white border border-white/10 active:scale-90 transition-all shadow-lg"
             title="改台词"
           >
             <Edit3 className="w-4 h-4 text-accent-orange" />
@@ -262,7 +276,7 @@ export const MobileCardFlow: React.FC<MobileCardFlowProps> = ({ onOpenExport, st
           className="flex flex-col items-center text-gray-400 hover:text-white"
         >
           <Volume2 className="w-4 h-4 text-accent-pink" />
-          <span className="text-[10px] mt-0.5">MiniMax配音</span>
+          <span className="text-[10px] mt-0.5">配音</span>
         </button>
 
         <button
@@ -288,7 +302,7 @@ export const MobileCardFlow: React.FC<MobileCardFlowProps> = ({ onOpenExport, st
   if (standalone) {
     // 移动端独立入口：全屏沉浸，不套手机拟真边框
     return (
-      <div className="flex-1 flex flex-col bg-[#070709] always-dark overflow-hidden min-h-screen">
+      <div className="flex-1 flex flex-col bg-background overflow-hidden min-h-screen">
         {Inner}
       </div>
     );
@@ -297,9 +311,9 @@ export const MobileCardFlow: React.FC<MobileCardFlowProps> = ({ onOpenExport, st
   return (
     <div className="flex-1 flex items-center justify-center bg-background p-4 overflow-hidden">
       {/* Mobile Device Mockup Frame（桌面端嵌套展示用） */}
-      <div className="w-full max-w-sm h-[90vh] bg-black always-dark rounded-[40px] border-[6px] border-[#22222E] shadow-2xl relative flex flex-col overflow-hidden ring-1 ring-white/10">
+      <div className="w-full max-w-sm h-[90vh] bg-surface-secondary rounded-[40px] border-[6px] border-[#22222E] shadow-2xl relative flex flex-col overflow-hidden ring-1 ring-white/10">
         {/* Dynamic Island / Speaker */}
-        <div className="absolute top-2.5 left-1/2 -translate-x-1/2 w-24 h-4 bg-[#181822] always-dark rounded-full z-30" />
+        <div className="absolute top-2.5 left-1/2 -translate-x-1/2 w-24 h-4 bg-surface-tertiary rounded-full z-30" />
         {Inner}
       </div>
     </div>

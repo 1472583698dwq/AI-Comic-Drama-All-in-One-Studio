@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { apiService } from '../../services/api';
 import { confirmAsync, toast } from '../../stores/useDialogStore';
+import { useEscapeClose } from '../../hooks/useEscapeClose';
 
 interface ParameterItem {
   name: string;
@@ -370,6 +371,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
     }
   };
 
+  useEscapeClose(isOpen, onClose);
   if (!isOpen) return null;
 
   const categoryNames: Record<string, string> = {
@@ -503,7 +505,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
               {validationResult.errors && validationResult.errors.length > 0 && (
                 <div className="mt-1.5 space-y-1">
                   {validationResult.errors.map((err: any, idx: number) => (
-                    <div key={idx} className="bg-black/30 p-2 rounded border border-rose-500/20">
+                    <div key={idx} className="bg-surface-secondary p-2 rounded border border-rose-500/20">
                       <div className="font-medium text-rose-200">
                         {err.node_id ? `节点 #${err.node_id} (${err.class_type}): ` : ''}{err.message}
                       </div>
@@ -723,7 +725,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                               <div
                                 key={`${p.node_id}_${p.param_name}`}
                                 onClick={(e) => e.stopPropagation()}
-                                className="p-2.5 rounded-xl bg-black/40 border border-purple-500/30 text-xs space-y-1.5"
+                                className="p-2.5 rounded-xl bg-surface-secondary border border-purple-500/30 text-xs space-y-1.5"
                               >
                                 <div className="flex items-center justify-between">
                                   <span className="font-semibold text-gray-200">{p.param_name}</span>
@@ -827,10 +829,10 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                               key={param.name}
                               className={`p-2.5 rounded-lg border text-xs transition ${
                                 param.is_linked
-                                  ? 'bg-black/20 border-white/5 opacity-75'
+                                  ? 'bg-surface-secondary border-white/5 opacity-75'
                                   : exposed
                                   ? 'bg-amber-950/20 border-amber-500/30'
-                                  : 'bg-black/40 border-white/10 hover:border-white/20'
+                                  : 'bg-surface-secondary border-white/10 hover:border-white/20'
                               }`}
                             >
                               <div className="flex items-center justify-between mb-1.5">
@@ -867,7 +869,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                                   该参数由上游节点插槽实时输出提供
                                 </div>
                               ) : param.type === 'IMAGE' || param.type === 'AUDIO' || param.type === 'VIDEO' || param.name.toLowerCase().includes('image') || param.name.toLowerCase().includes('audio') || param.name.toLowerCase().includes('video') || param.name.toLowerCase().includes('frame') ? (
-                                <label className="flex items-center gap-2 p-2 rounded-lg border border-dashed border-white/20 bg-black/20 hover:bg-black/30 cursor-pointer">
+                                <label className="flex items-center gap-2 p-2 rounded-lg border border-dashed border-white/20 bg-surface-secondary hover:bg-surface-secondary cursor-pointer">
                                   <span className="text-xs">{param.type==='AUDIO' ? '🎵' : param.type==='VIDEO' ? '🎬' : '🖼️'}</span>
                                   <span className="text-xs text-gray-300 truncate flex-1">{currentValue ? `已选择${param.type==='AUDIO'?'音频':param.type==='VIDEO'?'视频':'图片'} · 点击更换` : `点击上传${param.type==='AUDIO'?'音频':param.type==='VIDEO'?'视频':'图片'} · 弹出文件系统`}</span>
                                   <input type="file" accept={param.type==='AUDIO' ? 'audio/*' : param.type==='VIDEO' ? 'video/*' : 'image/*'} className="hidden" onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; const r=new FileReader(); r.onload=()=> handleParamChange(node.node_id, param.name, r.result as string); r.readAsDataURL(f); }} />
@@ -1135,7 +1137,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
             </div>
           ) : (
             <div className="bg-surface-secondary border border-white/10 rounded-xl p-4">
-              <pre className="text-[11px] font-mono text-gray-300 overflow-x-auto p-2 bg-black/40 rounded-lg max-h-[60vh]">
+              <pre className="text-[11px] font-mono text-gray-300 overflow-x-auto p-2 bg-surface-secondary rounded-lg max-h-[60vh]">
                 {JSON.stringify(data, null, 2)}
               </pre>
             </div>

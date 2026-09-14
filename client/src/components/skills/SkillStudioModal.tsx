@@ -22,6 +22,7 @@ import { useProjectStore } from '../../stores/useProjectStore';
 import { SkillVersionDiff } from './SkillVersionDiff';
 import { SkillDefinition } from '../../types';
 import { confirmAsync, toast } from '../../stores/useDialogStore';
+import { useEscapeClose } from '../../hooks/useEscapeClose';
 
 interface SkillStudioModalProps {
   isOpen: boolean;
@@ -47,6 +48,13 @@ export const SkillStudioModal: React.FC<SkillStudioModalProps> = ({ isOpen, onCl
       fetchSkills();
     }
   }, [isOpen]);
+
+  // Agent 通过 Creator 落地新技能后会派发该事件，此前无人监听，列表不会自动刷新
+  useEffect(() => {
+    const onRefresh = () => { if (isOpen) fetchSkills(); };
+    window.addEventListener('skill-list-refresh', onRefresh);
+    return () => window.removeEventListener('skill-list-refresh', onRefresh);
+  }, [isOpen, fetchSkills]);
 
   const handleImport = async () => {
     if (!importFile && !importContent.trim()) {
@@ -96,6 +104,7 @@ export const SkillStudioModal: React.FC<SkillStudioModalProps> = ({ isOpen, onCl
     }
   };
 
+  useEscapeClose(isOpen, onClose);
   if (!isOpen) return null;
 
   const handleExecute = async () => {
@@ -186,13 +195,13 @@ export const SkillStudioModal: React.FC<SkillStudioModalProps> = ({ isOpen, onCl
                       e.stopPropagation();
                       handleDelete(skill.name);
                     }}
-                    className="absolute top-2 right-2 p-1 rounded-lg bg-black/40 text-gray-400 hover:text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all"
+                    className="absolute top-2 right-2 p-1 rounded-lg bg-surface/85 text-gray-400 hover:text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all"
                     title="删除此 Skill"
                   >
                     <Trash2 className="w-3 h-3" />
                   </button>
                   <div className="flex items-center space-x-2 mb-1.5 pr-6">
-                    <div className="p-1.5 rounded-lg bg-black/40 border border-white/5">
+                    <div className="p-1.5 rounded-lg bg-surface-secondary border border-white/5">
                       {getSkillIcon(skill.category)}
                     </div>
                     <span className="text-xs font-bold text-white truncate">{skill.name}</span>
@@ -202,7 +211,7 @@ export const SkillStudioModal: React.FC<SkillStudioModalProps> = ({ isOpen, onCl
                   {/* Tools Badge */}
                   <div className="mt-2.5 flex flex-wrap gap-1">
                     {skill.tools?.map((t) => (
-                      <span key={t} className="text-[9px] px-1.5 py-0.2 rounded bg-black/50 text-accent-green font-mono border border-accent-green/20">
+                      <span key={t} className="text-[9px] px-1.5 py-0.2 rounded bg-surface-secondary text-accent-green font-mono border border-accent-green/20">
                         {t}
                       </span>
                     ))}
@@ -238,7 +247,7 @@ export const SkillStudioModal: React.FC<SkillStudioModalProps> = ({ isOpen, onCl
                 </div>
 
                 {/* Skill SOP Instructions Preview */}
-                <div className="bg-black/50 p-4 rounded-xl border border-border/80 flex flex-col space-y-2">
+                <div className="bg-surface-secondary p-4 rounded-xl border border-border/80 flex flex-col space-y-2">
                   <div className="flex items-center space-x-1.5 text-xs font-semibold text-brand-light">
                     <FileCode className="w-3.5 h-3.5" />
                     <span>SKILL.md 导演指导规范 (Instructions)</span>
@@ -265,7 +274,7 @@ export const SkillStudioModal: React.FC<SkillStudioModalProps> = ({ isOpen, onCl
                     {/* Tool Calls */}
                     <div className="flex flex-wrap gap-1.5 mt-1">
                       {lastResult.tool_calls.map((tc, i) => (
-                        <span key={i} className="text-[10px] px-2 py-0.5 rounded bg-black/60 text-accent-green font-mono flex items-center space-x-1 border border-accent-green/30">
+                        <span key={i} className="text-[10px] px-2 py-0.5 rounded bg-surface-secondary text-accent-green font-mono flex items-center space-x-1 border border-accent-green/30">
                           <Cpu className="w-3 h-3" />
                           <span>{tc.tool} (OK)</span>
                         </span>
@@ -297,7 +306,7 @@ export const SkillStudioModal: React.FC<SkillStudioModalProps> = ({ isOpen, onCl
 
       {/* Import Skill Modal */}
       {showImport && (
-        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowImport(false)}>
+        <div className="absolute inset-0 bg-surface/85 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowImport(false)}>
           <div className="bg-surface border border-border rounded-2xl w-full max-w-lg p-5 space-y-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -330,7 +339,7 @@ export const SkillStudioModal: React.FC<SkillStudioModalProps> = ({ isOpen, onCl
                   onChange={(e) => setImportContent(e.target.value)}
                   placeholder={`---\nname: my-awesome-skill\ndescription: 描述\nversion: 1.0.0\ncategory: general\ntools:\n  - generate_image\n---\n\n# 技能说明\n...`}
                   rows={8}
-                  className="mt-1 w-full bg-black/40 border border-border rounded-xl p-3 text-xs font-mono text-white placeholder-gray-500 focus:outline-none focus:border-brand resize-none"
+                  className="mt-1 w-full bg-surface-secondary border border-border rounded-xl p-3 text-xs font-mono text-white placeholder-gray-500 focus:outline-none focus:border-brand resize-none"
                 />
               </div>
 

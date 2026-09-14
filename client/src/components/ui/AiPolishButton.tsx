@@ -20,6 +20,7 @@ import {
   Search,
 } from 'lucide-react';
 import { apiService } from '../../services/api';
+import { useEscapeClose } from '../../hooks/useEscapeClose';
 
 export interface AiPolishButtonProps {
   value: string;
@@ -83,6 +84,7 @@ export const AiPolishButton: React.FC<AiPolishButtonProps> = ({
   label = 'AI 润色',
 }) => {
   const [modalOpen, setModalOpen] = useState(false);
+  useEscapeClose(modalOpen, () => setModalOpen(false));
   const [skills, setSkills] = useState<SkillItem[]>([]);
   const [loadingSkills, setLoadingSkills] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');

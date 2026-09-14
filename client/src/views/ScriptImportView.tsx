@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { useProjectStore } from '../stores/useProjectStore';
 import { StylePreset, AspectRatio } from '../types';
+import { useEscapeClose } from '../hooks/useEscapeClose';
 
 interface ScriptImportViewProps {
   isOpen: boolean;
@@ -64,6 +65,7 @@ export const ScriptImportView: React.FC<ScriptImportViewProps> = ({ isOpen, onCl
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('9:16');
   const [localError, setLocalError] = useState<string | null>(null);
 
+  useEscapeClose(isOpen, onClose);
   if (!isOpen) return null;
 
   const handleStartBreakdown = async () => {

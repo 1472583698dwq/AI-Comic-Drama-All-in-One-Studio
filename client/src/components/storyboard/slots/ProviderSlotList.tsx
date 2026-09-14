@@ -35,7 +35,7 @@ export const ProviderSlotList: React.FC<{
               <div className="flex flex-wrap items-center gap-2 pt-0.5">
                 {urls.map((u) => (
                   slot.type === 'audio'
-                    ? <span key={u} className="px-2 py-1 rounded bg-black/40 text-[10px] font-mono text-pink-300 max-w-[150px] truncate">🎵 {u.split(/[\\/]/).pop()}</span>
+                    ? <span key={u} className="px-2 py-1 rounded bg-surface-secondary text-[10px] font-mono text-pink-300 max-w-[150px] truncate">🎵 {u.split(/[\\/]/).pop()}</span>
                     : <img key={u} src={resolveUrl(u)} alt="" className="w-16 h-16 rounded-lg object-cover border border-border" />
                 ))}
                 <button type="button" onClick={() => onWrite(writeKeys, isMulti ? [] : '')} className="px-2 py-1 rounded bg-red-500/20 text-red-400 text-[11px] hover:bg-red-500/30">清除</button>

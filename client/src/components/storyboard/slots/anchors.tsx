@@ -69,7 +69,7 @@ export const CharacterAnchor: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => 
                   <span title="参考图强度">{(weight * 100).toFixed(0)}%</span>
                   <button
                     onClick={() => unbindCharacterFromShot(activeShot.id, char.id)}
-                    className="w-3.5 h-3.5 rounded-full hover:bg-black/30 flex items-center justify-center text-white/80"
+                    className="w-3.5 h-3.5 rounded-full hover:bg-surface-secondary flex items-center justify-center text-white/80"
                   >
                     ×
                   </button>
@@ -91,7 +91,7 @@ export const CharacterAnchor: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => 
         return (
           <div className="pt-2 border-t border-brand/15 space-y-2 text-[11px]">
             {/* 参考图片预览与视角切换 */}
-            <div className="flex items-center justify-between bg-black/40 p-2 rounded-xl border border-brand/20">
+            <div className="flex items-center justify-between bg-surface-secondary p-2 rounded-xl border border-brand/20">
               <div
                 onClick={() => {
                   setAssetPickerConfig({
@@ -107,7 +107,7 @@ export const CharacterAnchor: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => 
                 className="flex items-center gap-2 cursor-pointer group"
                 title="点击从素材库更换参考垫图"
               >
-                <div className="w-10 h-10 rounded-lg overflow-hidden bg-black/60 border border-border shrink-0 relative group-hover:border-brand transition-all">
+                <div className="w-10 h-10 rounded-lg overflow-hidden bg-surface-secondary border border-border shrink-0 relative group-hover:border-brand transition-all">
                   {currentRef ? (
                     <img src={getMediaUrl(currentRef)} alt="" className="w-full h-full object-cover" />
                   ) : (
@@ -222,9 +222,9 @@ export const SceneAnchor: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
       </div>
 
       {activeShot.scene_name ? (
-        <div className="flex items-center justify-between bg-black/40 p-2 rounded-xl border border-emerald-500/30">
+        <div className="flex items-center justify-between bg-surface-secondary p-2 rounded-xl border border-emerald-500/30">
           <div className="flex items-center gap-2 min-w-0">
-            <div className="w-10 h-10 rounded-lg overflow-hidden bg-black/60 border border-border shrink-0">
+            <div className="w-10 h-10 rounded-lg overflow-hidden bg-surface-secondary border border-border shrink-0">
               {activeShot.scene_ref_image ? (
                 <img src={getMediaUrl(activeShot.scene_ref_image)} alt="" className="w-full h-full object-cover" />
               ) : (
@@ -294,7 +294,7 @@ export const PropAnchor: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
       </div>
 
       {activeShot.prop_prompts ? (
-        <div className="p-2 rounded-xl bg-black/40 border border-amber-500/30 flex items-center justify-between text-xs">
+        <div className="p-2 rounded-xl bg-surface-secondary border border-amber-500/30 flex items-center justify-between text-xs">
           <span className="text-gray-300 truncate">{activeShot.prop_prompts}</span>
           <button
             onClick={() => updateShot(activeShot.id, { prop_asset_ids: [], prop_prompts: '' })}

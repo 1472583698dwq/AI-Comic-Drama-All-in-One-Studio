@@ -18,6 +18,7 @@ import {
 import { apiService } from '../../services/api';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { AssetCategory } from '../../types';
+import { useEscapeClose } from '../../hooks/useEscapeClose';
 
 interface AssetPickerModalProps {
   isOpen: boolean;
@@ -119,6 +120,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
     }
   };
 
+  useEscapeClose(isOpen, onClose);
   if (!isOpen) return null;
 
   return (
@@ -241,13 +243,13 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
                     }}
                     className="group rounded-2xl overflow-hidden border border-border bg-surface-secondary/70 cursor-pointer hover:border-brand hover:ring-2 hover:ring-brand/40 transition-all flex flex-col relative shadow-sm"
                   >
-                    <div className="aspect-[3/4] bg-black/60 overflow-hidden relative">
+                    <div className="aspect-[3/4] bg-surface-secondary overflow-hidden relative">
                       <img
                         src={resolveUrl(img)}
                         alt={asset.name}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                       />
-                      <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/70 text-[9px] text-gray-200 border border-white/10 font-mono">
+                      <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-surface/85 text-[9px] text-gray-200 border border-white/10 font-mono">
                         {catLabel}
                       </span>
                       {asset.scope === 'global' && (

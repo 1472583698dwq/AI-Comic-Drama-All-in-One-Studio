@@ -81,7 +81,7 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
               {compact && m.text && (
                 <button
                   onClick={(e) => copyMsg(e, m.id, m.text)}
-                  className="absolute top-1.5 right-1.5 p-1 rounded-md opacity-0 group-hover/msg:opacity-100 transition-opacity bg-black/20 hover:bg-black/40 text-white/70 hover:text-white"
+                  className="absolute top-1.5 right-1.5 p-1 rounded-md opacity-0 group-hover/msg:opacity-100 transition-opacity bg-surface/85 hover:bg-surface/85 text-white/70 hover:text-white"
                   title="复制本条消息"
                 >
                   {copiedId === m.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
@@ -105,7 +105,7 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
                     </span>
                   </button>
                   {thinkingOpen && (
-                    <div className="px-3 py-2 border-t border-brand/15 text-[11px] leading-relaxed text-gray-300 font-mono whitespace-pre-wrap max-h-60 overflow-y-auto custom-scrollbar select-text bg-black/30">
+                    <div className="px-3 py-2 border-t border-brand/15 text-[11px] leading-relaxed text-gray-300 font-mono whitespace-pre-wrap max-h-60 overflow-y-auto custom-scrollbar select-text bg-surface-secondary">
                       {m.thinking || (m.isThinkingStreaming ? '正在感知导演意图与分析分镜机位…' : '')}
                       {m.isThinkingStreaming && <span className="inline-block w-1.5 h-3.5 bg-brand ml-1 animate-pulse align-middle" />}
                     </div>

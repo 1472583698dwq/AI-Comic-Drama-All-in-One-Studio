@@ -61,7 +61,8 @@ export const useAssetStore = create<AssetState>((set, get) => ({
     }
     set({ isLoading: true, error: null });
     try {
-      const data = await apiService.listAssets({ category: cat, q, tag, page, limit: get().limit, sort, scope: scope==='all'?undefined:scope, project_id, include_shared: true });
+      // 'all' 只是 UI 上的「全部」，不是后端类目；必须归一成 undefined，否则后端按字面比对会过滤掉全部素材
+      const data = await apiService.listAssets({ category: cat==='all'?undefined:cat, q, tag, page, limit: get().limit, sort, scope: scope==='all'?undefined:scope, project_id, include_shared: true });
       set({ assets: data.assets, total: data.total, page: data.page, category: cat as any, q, tag, sort, scope, isLoading: false });
     } catch (e: any) {
       set({ error: e?.message || '加载失败', isLoading: false });

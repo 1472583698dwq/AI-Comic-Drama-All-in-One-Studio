@@ -28,6 +28,7 @@ import { WorkflowInspectorModal } from '../workflow/WorkflowInspectorModal';
 import { getNodeSpec } from './nodeRegistry';
 import { CanvasManagerModal } from './CanvasManagerModal';
 import { buildShotReferenceInputs } from '../storyboard/shotReference';
+import { useCanvasShortcuts } from './hooks/useCanvasShortcuts';
 
 const nodeTypes: any = {
   // 6 核心 Agent 节点
@@ -183,30 +184,6 @@ const InnerCanvas: React.FC = () => {
     return () => { clearTimeout(timer); window.removeEventListener('asset-refresh', onAssetRefresh as any); };
   }, [pid, canvasId]);
 
-  // 历史回退 (Ctrl+Z)
-  const histRef = useRef<{ nodes: any[]; edges: any[] }[]>([]);
-  useEffect(() => {
-    if (!pid || !loadedRef.current) return;
-    histRef.current.push({ nodes: JSON.parse(JSON.stringify(nodes)), edges: JSON.parse(JSON.stringify(edges)) });
-    if (histRef.current.length > 50) histRef.current.shift();
-  }, [nodes, edges]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
-        e.preventDefault();
-        const prev = histRef.current.pop();
-        if (prev) {
-          const cur = histRef.current[histRef.current.length - 1];
-          if (cur) { setNodes(cur.nodes); setEdges(cur.edges as any); }
-          else if (prev) { setNodes(prev.nodes); setEdges(prev.edges as any); }
-        }
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
-
   // 800ms 防抖同步（带当前画布 id）
   useEffect(() => {
     if (!pid || !loadedRef.current) return;
@@ -336,6 +313,29 @@ const InnerCanvas: React.FC = () => {
       setExecutingNodeIds(prev => { const n = new Set(prev); n.delete(nodeId); return n; });
     }
   }, [nodes]);
+
+  // ⚠️ 必须 memo：ReactFlow 把 onSelectionChange 放进 effect 依赖，
+  // 传内联箭头会每次渲染重订阅→回调→setState→再渲染，直接 Maximum update depth
+  const handleSelectionChange = useCallback(({ nodes: sel }: { nodes: Node[] }) => {
+    setSelectedNodeId(sel.length ? sel[sel.length - 1].id : null);
+  }, []);
+
+  // 节点运行时回调：撤销/粘贴还原节点后必须重新挂上，否则卡上的按钮全哑
+  const attachHandlers = useCallback(
+    (n: Node): Node => ({
+      ...n,
+      data: { ...(n.data as any), onUpdate: handleNodeUpdate, onExecute: handleNodeExecute },
+    }),
+    [handleNodeUpdate, handleNodeExecute],
+  );
+
+  // 撤销 / 重做 / 复制 / 粘贴 / 删除
+  useCanvasShortcuts({
+    enabled: !!pid && loadedRef.current,
+    nodes, edges, setNodes, setEdges,
+    attachHandlers, genId,
+    onSelect: setSelectedNodeId,
+  });
 
   const isValidConnection: any = useCallback((connection: any) => {
     const c: Connection = connection;
@@ -996,7 +996,7 @@ const InnerCanvas: React.FC = () => {
           <div>
             <div className="text-xs font-bold mb-2 [color:var(--color-text-main)] flex items-center gap-1.5">
               自定义节点
-              <button onClick={() => useProjectStore.getState().setActiveTab('config')} title="去设置 → 插件中心安装含自定义节点的插件包"
+              <button onClick={() => { try { localStorage.setItem('config_pending_tab', 'plugins'); } catch { /* ignore */ } useProjectStore.getState().setActiveTab('config'); }} title="去设置 → 插件中心安装含自定义节点的插件包"
                 className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-teal-500/10 border border-teal-500/30 text-teal-300 hover:bg-teal-500/20">插件安装</button>
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -1037,7 +1037,7 @@ const InnerCanvas: React.FC = () => {
                 const abs = url?.startsWith('/') ? `http://127.0.0.1:8000${url}` : url;
                 return (
                   <div key={a.id} draggable onDragStart={e => { e.dataTransfer.setData('application/canvas-assetid', a.id); e.dataTransfer.setData('text/plain', abs || url); }} className="group bg-surface-secondary border border-border rounded-xl overflow-hidden cursor-grab hover:border-brand/30 hover:shadow-md transition-all">
-                    <div className="aspect-square bg-black/40 flex items-center justify-center overflow-hidden">{abs ? <img src={abs} alt="" className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform" /> : <ImageIcon className="w-5 h-5 text-gray-500" />}</div>
+                    <div className="aspect-square bg-surface-secondary flex items-center justify-center overflow-hidden">{abs ? <img src={abs} alt="" className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform" /> : <ImageIcon className="w-5 h-5 text-gray-500" />}</div>
                     <div className="p-1.5"><div className="text-[11px] font-medium truncate [color:var(--color-text-main)]">{a.name}</div></div>
                   </div>
                 );
@@ -1119,6 +1119,10 @@ const InnerCanvas: React.FC = () => {
                 toast.success(`已删除画布「${cur}」`);
               } catch (e: any) { toast.error(e.message || '删除失败'); }
             }} className="w-7 h-7 rounded-full bg-surface-secondary border border-border text-[color:var(--color-text-muted)] hover:text-red-400 flex items-center justify-center transition-colors" title="删除当前画布">🗑</button>
+            <span className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-secondary border border-border text-[10px] text-[color:var(--color-text-muted)] whitespace-nowrap"
+              title="Ctrl/⌘+C 复制 · Ctrl/⌘+V 粘贴 · Ctrl/⌘+Z 撤销 · Ctrl/⌘+Y 重做 · Delete 删除；Shift+拖 框选，Ctrl/⌘+点 多选">
+              ⌨️ ⌘C/V 复制粘贴 · ⌘Z/Y 撤销重做 · Del 删除
+            </span>
             <button onClick={() => setNodes(nds => nds.map((n, i) => ({ ...n, position: { x: 120 + i * 400, y: 120 } })))} className="px-3 py-1 rounded-full bg-surface-secondary border border-border text-xs font-medium [color:var(--color-text-main)] hover:bg-surface-tertiary transition-colors">横向排布</button>
             <button onClick={async () => { 
               const ok = await confirmAsync({
@@ -1167,7 +1171,7 @@ const InnerCanvas: React.FC = () => {
             </div>
           ) : (
             <ReactFlow
-              nodes={nodes.map(n => ({ ...n, selected: n.id === selectedNodeId }))}
+              nodes={nodes}
               edges={edges}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
@@ -1176,7 +1180,8 @@ const InnerCanvas: React.FC = () => {
               nodeTypes={nodeTypes}
               onNodeClick={(_, node) => setSelectedNodeId(node.id)}
               onPaneClick={() => setSelectedNodeId(null)}
-              deleteKeyCode="Delete"
+              onSelectionChange={handleSelectionChange}
+              deleteKeyCode={null}  /* 删除交给 useCanvasShortcuts，统一处理节点+连线 */
               fitView
               colorMode={isLight ? 'light' : 'dark'}
               className={isLight ? 'light' : 'dark'}

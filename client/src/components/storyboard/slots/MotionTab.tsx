@@ -74,7 +74,7 @@ export const MotionTab: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
 
       {/* 视频源专有 Schema 参数动态表单 */}
       {videoProviderDef?.params_schema && (
-        <div className="rounded-xl bg-black/30 border border-orange-500/20 p-2.5 space-y-2">
+        <div className="rounded-xl bg-surface-secondary border border-orange-500/20 p-2.5 space-y-2">
           <div className="text-[11px] font-bold text-orange-300">
             ⚙️ {videoProviderDef.display_name || videoProviderDef.name || videoProviderDef.id} 专属参数
           </div>

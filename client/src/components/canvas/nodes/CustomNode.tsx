@@ -96,7 +96,7 @@ export const CustomNode: React.FC<NodeProps> = ({ id, data, selected }) => {
   const resultKind = d.video_url ? 'video' : d.image_url ? 'image' : d.audio_url ? 'audio' : '';
 
   return (
-    <div className={`w-[340px] bg-[#141419] rounded-3xl border-2 transition-all relative select-none shadow-xl ${selected ? 'border-teal-500 ring-4 ring-teal-500/20' : 'border-white/10 hover:border-teal-500/40'}`}>
+    <div className={`w-[340px] bg-surface rounded-3xl border-2 transition-all relative select-none shadow-xl ${selected ? 'border-teal-500 ring-4 ring-teal-500/20' : 'border-white/10 hover:border-teal-500/40'}`}>
       <div className="px-4 py-3 flex items-center gap-2.5 border-b border-white/10">
         <div className="w-6 h-6 rounded-lg bg-teal-500/15 flex items-center justify-center text-teal-300"><Boxes className="w-3.5 h-3.5" /></div>
         <span className="text-xs font-bold text-white/95 truncate">{def?.name || '自定义节点'}</span>
@@ -119,7 +119,7 @@ export const CustomNode: React.FC<NodeProps> = ({ id, data, selected }) => {
         <select
           value={d.custom_node_id || ''}
           onChange={(e) => updateNodeData(id, { custom_node_id: e.target.value, definition: undefined })}
-          className="w-full bg-black/50 border border-white/10 rounded-xl px-2.5 py-2 text-xs text-white focus:outline-none focus:border-teal-500"
+          className="w-full bg-surface-secondary border border-white/10 rounded-xl px-2.5 py-2 text-xs text-white focus:outline-none focus:border-teal-500"
         >
           <option value="">选择自定义节点…</option>
           {options.map((o: any) => <option key={o.id} value={o.id}>{o.name}（{o.kind}/{o.language}）</option>)}
@@ -133,12 +133,12 @@ export const CustomNode: React.FC<NodeProps> = ({ id, data, selected }) => {
             onKeyDown={(e) => e.stopPropagation()}
             placeholder="文本输入（连线优先）…"
             rows={2}
-            className="w-full bg-black/50 border border-white/10 rounded-xl px-2.5 py-2 text-xs text-white placeholder-white/25 focus:outline-none focus:border-teal-500 resize-none"
+            className="w-full bg-surface-secondary border border-white/10 rounded-xl px-2.5 py-2 text-xs text-white placeholder-white/25 focus:outline-none focus:border-teal-500 resize-none"
           />
         )}
 
         {paramSpecs.length > 0 && (
-          <div className="space-y-2 rounded-xl bg-black/30 border border-white/10 p-2.5">
+          <div className="space-y-2 rounded-xl bg-surface-secondary border border-white/10 p-2.5">
             <div className="text-[10px] font-bold text-white/50 flex items-center gap-1"><Cpu className="w-3 h-3" />参数</div>
             {paramSpecs.filter((s) => s.visibility !== 'hidden').map((s) => (
               <DynamicControl key={s.id} spec={s} compact
@@ -149,13 +149,13 @@ export const CustomNode: React.FC<NodeProps> = ({ id, data, selected }) => {
         )}
 
         {resultUrl ? (
-          <div className="rounded-xl overflow-hidden border border-white/10 bg-black/50">
+          <div className="rounded-xl overflow-hidden border border-white/10 bg-surface-secondary">
             {resultKind === 'video' ? <video src={resultUrl} controls className="w-full max-h-40" />
               : resultKind === 'image' ? <img src={resultUrl} alt="" className="w-full max-h-40 object-cover" />
               : <audio src={resultUrl} controls className="w-full" />}
           </div>
         ) : d.text && !d.prompt ? (
-          <div className="text-[11px] text-white/70 bg-black/40 rounded-xl p-2 whitespace-pre-wrap max-h-24 overflow-y-auto">{d.text}</div>
+          <div className="text-[11px] text-white/70 bg-surface-secondary rounded-xl p-2 whitespace-pre-wrap max-h-24 overflow-y-auto">{d.text}</div>
         ) : null}
         {st.status === 'failed' && st.error && <div className="text-[10px] text-red-400">❌ {st.error}</div>}
 

@@ -4,6 +4,7 @@ import { apiService } from '../../services/api';
 import { DynamicControl } from '../../components/canvas/controls/DynamicControl';
 import { confirmAsync, promptAsync, toast } from '../../stores/useDialogStore';
 import { CustomHeadersEditor } from '../../components/provider/CustomHeadersEditor';
+import { useEscapeClose } from '../../hooks/useEscapeClose';
 
 const kindIcon: any = { image: Globe, video: Video, audio: Mic, llm: Cpu };
 const kindColor: any = { image: 'text-violet-400', video: 'text-orange-400', audio: 'text-pink-400', llm: 'text-cyan-400' };
@@ -68,6 +69,8 @@ export const ProvidersHubView: React.FC<{
   const [editCode, setEditCode] = useState('');
   const [editLang, setEditLang] = useState<'python'|'javascript'>('python');
   const [showCreate, setShowCreate] = useState(false);
+  useEscapeClose(showCreate, () => setShowCreate(false));
+  useEscapeClose(!!editing, () => setEditing(null));
   const [importMode, setImportMode] = useState(false);
   const [importDoc, setImportDoc] = useState('');
   const [importKind, setImportKind] = useState<'image'|'video'|'audio'>('image');
@@ -228,7 +231,7 @@ export const ProvidersHubView: React.FC<{
             <input value={importName} onChange={e=> setImportName(e.target.value)} placeholder="名称（可选）" className="flex-1 min-w-[160px] bg-surface border border-border rounded-xl px-3 py-1.5 text-xs text-white placeholder-gray-500"/>
             <input value={importKey} onChange={e=> setImportKey(e.target.value)} placeholder="API Key（可选）" className="flex-1 min-w-[160px] bg-surface border border-border rounded-xl px-3 py-1.5 text-xs text-white placeholder-gray-500 font-mono"/>
           </div>
-          <textarea value={importDoc} onChange={e=> setImportDoc(e.target.value)} placeholder="粘贴 API 文档 / cURL / OpenAPI JSON… 导演将直接生成 python/js 携程源码（含轮询/签名）" rows={4} className="w-full bg-black/40 border border-border rounded-xl p-3 text-xs font-mono text-white placeholder-gray-500 focus:outline-none focus:border-brand resize-none"/>
+          <textarea value={importDoc} onChange={e=> setImportDoc(e.target.value)} placeholder="粘贴 API 文档 / cURL / OpenAPI JSON… 导演将直接生成 python/js 携程源码（含轮询/签名）" rows={4} className="w-full bg-surface-secondary border border-border rounded-xl p-3 text-xs font-mono text-white placeholder-gray-500 focus:outline-none focus:border-brand resize-none"/>
           <div className="flex justify-end gap-2">
             <button onClick={()=> setImportMode(false)} className="px-3 py-1.5 rounded-xl bg-surface border border-border text-xs text-white">取消</button>
             <button onClick={handleImport} className="px-4 py-1.5 rounded-xl bg-brand text-white text-xs font-bold flex items-center gap-1"><Code2 className="w-3.5 h-3.5"/> 让导演生成代码</button>
@@ -260,7 +263,7 @@ export const ProvidersHubView: React.FC<{
             <div key={p.id} className={`p-4 rounded-2xl border flex flex-col gap-2.5 ${p.builtin?'bg-surface-secondary/40 border-border': isLegacy?'bg-amber-500/5 border-amber-500/30':'bg-surface border-brand/20 shadow-sm'}`}>
               <div className="flex items-center justify-between min-w-0">
                 <div className="flex items-center gap-2 min-w-0">
-                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center border bg-black/20 ${p.builtin?'border-border':'border-brand/20'}`}><Icon className={`w-4 h-4 ${color}`}/></div>
+                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center border bg-surface-secondary ${p.builtin?'border-border':'border-brand/20'}`}><Icon className={`w-4 h-4 ${color}`}/></div>
                   <div className="min-w-0">
                     <div className="text-xs font-bold text-white truncate flex items-center gap-1.5">{p.display_name || p.name || p.id}
                       {!p.builtin && <span className={`text-[10px] px-1.5 py-0 rounded border flex items-center gap-1 ${p.language==='javascript'?'bg-yellow-500/15 text-yellow-300 border-yellow-500/20':'bg-blue-500/15 text-blue-300 border-blue-500/20'}`}><Languages className="w-3 h-3"/>{p.language||'python'}</span>}
@@ -282,8 +285,8 @@ export const ProvidersHubView: React.FC<{
               {p.description && <div className="text-[11px] text-gray-400 line-clamp-2">{p.description}</div>}
               <div className="text-[10px] font-mono text-gray-500 truncate flex items-center gap-1"><FileCode className="w-3 h-3"/> {p.has_code||p.code ? `代码 ${p.code_entry||'generate'} (${(p.code||'').split('\n').length} 行)` : (p.transport?.url?`URL: ${p.transport.url}`:'— 无代码')}</div>
               <div className="flex items-center gap-1.5 text-[10px] text-gray-500">
-                <span>模型</span><span className="px-1.5 py-0.5 rounded bg-black/30 text-gray-300 truncate max-w-[140px]">{p.default_model || p.models?.[0] || '—'}</span>
-                <span className="ml-auto flex items-center gap-1.5">{p.health?.ok!==undefined && <span className={`w-2 h-2 rounded-full ${p.health.ok?'bg-emerald-500':'bg-amber-500'}`}/>}{p.language && <span className="px-1 py-0 rounded bg-black/30">{p.language}</span>}</span>
+                <span>模型</span><span className="px-1.5 py-0.5 rounded bg-surface-secondary text-gray-300 truncate max-w-[140px]">{p.default_model || p.models?.[0] || '—'}</span>
+                <span className="ml-auto flex items-center gap-1.5">{p.health?.ok!==undefined && <span className={`w-2 h-2 rounded-full ${p.health.ok?'bg-emerald-500':'bg-amber-500'}`}/>}{p.language && <span className="px-1 py-0 rounded bg-surface-secondary">{p.language}</span>}</span>
               </div>
               <div className="flex items-center gap-1.5 pt-1 flex-wrap">
                 <button onClick={()=> handleTest(p.id)} className="flex-1 min-w-[60px] py-1.5 rounded-xl bg-surface-secondary border border-border text-xs text-white hover:border-brand flex items-center justify-center gap-1"><Activity className="w-3 h-3"/> 测试</button>
@@ -325,7 +328,7 @@ export const ProvidersHubView: React.FC<{
                     <div className="text-xs font-bold text-amber-200 flex items-center gap-1.5"><KeyRound className="w-3.5 h-3.5"/> 配置 Key（缺 Key 即禁用）</div>
                     <div className="text-[11px] text-amber-200/70">{BUILTIN_KEY_MAP[editing.id].note}</div>
                     {BUILTIN_KEY_MAP[editing.id].fields.map(f=>(
-                      <input key={f.key} type={f.password?'password':'text'} value={builtinKeys[f.key]||''} onChange={e=> setBuiltinKeys(prev=> ({...prev, [f.key]: e.target.value}))} placeholder={`${f.label}（${f.placeholder||f.key}）`} className="w-full bg-black/40 border border-border-active rounded-lg px-3 py-1.5 text-xs text-white font-mono placeholder-zinc-600 focus:outline-none focus:border-amber-400"/>
+                      <input key={f.key} type={f.password?'password':'text'} value={builtinKeys[f.key]||''} onChange={e=> setBuiltinKeys(prev=> ({...prev, [f.key]: e.target.value}))} placeholder={`${f.label}（${f.placeholder||f.key}）`} className="w-full bg-surface-secondary border border-border-active rounded-lg px-3 py-1.5 text-xs text-white font-mono placeholder-zinc-600 focus:outline-none focus:border-amber-400"/>
                     ))}
                     <button onClick={handleSaveBuiltinKeys} disabled={builtinKeysSaving} className="w-full py-2 rounded-xl bg-amber-500 text-black text-xs font-bold disabled:opacity-40">{builtinKeysSaving?'保存中…':'保存 Key 并生效'}</button>
                     {builtinKeysMsg && <div className="text-[11px] text-amber-200">{builtinKeysMsg}</div>}
@@ -350,7 +353,7 @@ export const ProvidersHubView: React.FC<{
                               value={builtinKeys[f.key] || ''}
                               onChange={e=> setBuiltinKeys(prev=> ({...prev, [f.key]: e.target.value}))}
                               placeholder={f.placeholder || f.key}
-                              className="w-full bg-black/40 border border-border-active rounded-lg px-3 py-1.5 text-xs text-white font-mono placeholder-zinc-600 focus:outline-none focus:border-amber-400"
+                              className="w-full bg-surface-secondary border border-border-active rounded-lg px-3 py-1.5 text-xs text-white font-mono placeholder-zinc-600 focus:outline-none focus:border-amber-400"
                             />
                           </div>
                         ))}
@@ -525,7 +528,7 @@ const SetKeyInline: React.FC<{providerId:string}> = ({ providerId })=>{
   };
   return (
     <div className="flex gap-1.5">
-      <input value={k} onChange={e=> setK(e.target.value)} placeholder="输入新 API Key" className="flex-1 bg-black/40 border border-border-active rounded-xl px-3 py-1.5 text-xs font-mono text-white placeholder-zinc-500"/>
+      <input value={k} onChange={e=> setK(e.target.value)} placeholder="输入新 API Key" className="flex-1 bg-surface-secondary border border-border-active rounded-xl px-3 py-1.5 text-xs font-mono text-white placeholder-zinc-500"/>
       <button onClick={save} className="px-3 py-1.5 rounded-xl bg-brand text-white text-xs font-bold">保存Key</button>
     </div>
   );

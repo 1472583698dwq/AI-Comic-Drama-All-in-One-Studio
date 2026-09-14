@@ -34,7 +34,7 @@ export const DefaultsView: React.FC<{
         <ProviderPicker kind={kind} value={current} onChange={(pid)=> setField(key, pid)} includeUnverified />
         {def && (
           <div className="flex items-center gap-2 text-[11px] text-gray-500">
-            <span className="px-1.5 py-0.5 rounded bg-black/30 text-gray-300 truncate max-w-[180px]">{def.display_name || def.name}</span>
+            <span className="px-1.5 py-0.5 rounded bg-surface-secondary text-gray-300 truncate max-w-[180px]">{def.display_name || def.name}</span>
             <span className="ml-auto flex items-center gap-1">{h ? (h.ok? <CheckCircle2 className="w-3 h-3 text-emerald-500"/> : <span className="text-amber-400">{h.detail?.slice(0,40)}</span>) : null}</span>
           </div>
         )}
@@ -72,7 +72,7 @@ export const DefaultsView: React.FC<{
       </div>
 
       <div className="p-4 rounded-2xl bg-amber-500/5 border border-amber-500/20 text-[11px] text-gray-300 leading-relaxed">
-        <span className="font-bold text-amber-300">说明：</span> 具体模型、采样参数、鉴权 Key 请到 <span className="text-white">生成源中枢</span> 的对应 Provider 卡片编辑；此处只决定“用哪个源”。导演 Agent 可在对话中动态指定 <code className="px-1 py-0.5 rounded bg-black/30 text-brand-light">provider</code> 参数覆盖。
+        <span className="font-bold text-amber-300">说明：</span> 具体模型、采样参数、鉴权 Key 请到 <span className="text-white">生成源中枢</span> 的对应 Provider 卡片编辑；此处只决定“用哪个源”。导演 Agent 可在对话中动态指定 <code className="px-1 py-0.5 rounded bg-surface-secondary text-brand-light">provider</code> 参数覆盖。
       </div>
 
       <div className="flex items-center justify-between">

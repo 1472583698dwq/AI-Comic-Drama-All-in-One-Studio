@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Rocket, Cpu, Image as ImageIcon, Mic, Video, Check, X, Loader2, Sparkles, ChevronRight, ShieldCheck } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { toast } from '../../stores/useDialogStore';
+import { useEscapeClose } from '../../hooks/useEscapeClose';
 
 type Step = 'welcome' | 'llm' | 'image' | 'extra' | 'done';
 
@@ -112,6 +113,7 @@ export const FirstRunWizard: React.FC = () => {
     return () => window.removeEventListener('open-first-run-wizard', h as any);
   }, []);
 
+  useEscapeClose(open, () => setOpen(false));
   if (!open) return null;
 
   const currentList = step === 'llm' ? LLM_PRESETS : step === 'image' ? IMAGE_PRESETS : step === 'extra' ? (EXTRA_PRESETS as any) : [];
@@ -171,7 +173,7 @@ export const FirstRunWizard: React.FC = () => {
         value={values[f.key] ?? f.default ?? ''}
         onChange={(e) => setVal(f.key, e.target.value)}
         placeholder={f.placeholder || ''}
-        className="mt-1 w-full bg-black/40 border border-border-active rounded-xl px-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-brand"
+        className="mt-1 w-full bg-surface-secondary border border-border-active rounded-xl px-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-brand"
       />
     </label>
   );
@@ -233,7 +235,7 @@ export const FirstRunWizard: React.FC = () => {
                 ))}
               </div>
               {preset && (
-                <div className="p-3 rounded-xl bg-black/30 border border-border space-y-2.5">
+                <div className="p-3 rounded-xl bg-surface-secondary border border-border space-y-2.5">
                   {preset.fields.map(renderField)}
                   {result && (
                     <div className={`text-[11px] px-2.5 py-1.5 rounded-lg border ${result.ok ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-red-500/10 border-red-500/30 text-red-300'}`}>

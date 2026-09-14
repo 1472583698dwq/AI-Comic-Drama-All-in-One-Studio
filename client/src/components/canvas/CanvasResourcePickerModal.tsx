@@ -22,6 +22,7 @@ import {
 import { useCanvasStore } from '../../stores/useCanvasStore';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { apiService } from '../../services/api';
+import { useEscapeClose } from '../../hooks/useEscapeClose';
 
 const API_ORIGIN = typeof window !== 'undefined' && window.location.port === '5173' ? 'http://127.0.0.1:8000' : '';
 // 相对产物 URL（/storage、/assets）在 dev 下必须回源，否则缩略图 404；存值保持原样，仅展示拼接
@@ -91,6 +92,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
   }, [isOpen, slotKey]);
   const allProjectAssets = libAssets;
 
+  useEscapeClose(isOpen, onClose);
   if (!isOpen) return null;
 
   // 过滤画布资源
@@ -256,7 +258,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
 
         {/* Tab 切换与搜索栏 */}
         <div className="px-6 py-3 border-b border-white/10 bg-white/[0.01] flex items-center justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-1 bg-black/40 p-1 rounded-xl border border-white/10">
+          <div className="flex items-center gap-1 bg-surface-secondary p-1 rounded-xl border border-white/10">
             <button
               onClick={() => setActiveTab('canvas')}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
@@ -311,10 +313,10 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
                 placeholder="搜索资源..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-44 bg-black/40 border border-white/10 rounded-xl pl-9 pr-3 py-1.5 text-xs text-white placeholder-white/40 focus:outline-none focus:border-violet-500 transition-colors"
+                className="w-44 bg-surface-secondary border border-white/10 rounded-xl pl-9 pr-3 py-1.5 text-xs text-white placeholder-white/40 focus:outline-none focus:border-violet-500 transition-colors"
               />
             </div>
-            <div className="flex items-center bg-black/40 border border-white/10 rounded-lg p-0.5">
+            <div className="flex items-center bg-surface-secondary border border-white/10 rounded-lg p-0.5">
               <button
                 onClick={() => setViewMode('grid')}
                 className={`p-1.5 rounded ${viewMode === 'grid' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white'}`}
@@ -362,13 +364,13 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
                             : 'border-white/10 hover:border-white/30 bg-white/[0.02]'
                         }`}
                       >
-                        <div className="aspect-[9/16] w-full bg-black/60 relative overflow-hidden flex items-center justify-center">
+                        <div className="aspect-[9/16] w-full bg-surface-secondary relative overflow-hidden flex items-center justify-center">
                           {asset.type === 'video' ? (
                             <video src={resolveUrl(asset.url)} className="w-full h-full object-cover" muted />
                           ) : (
                             <img src={resolveUrl(asset.url)} alt={asset.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
                           )}
-                          <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-black/60 backdrop-blur-md text-[10px] font-mono text-white/80 border border-white/10">
+                          <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-surface/85 backdrop-blur-md text-[10px] font-mono text-white/80 border border-white/10">
                             {asset.sourceNodeType}
                           </div>
                           {isSelected && (
@@ -377,7 +379,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
                             </div>
                           )}
                         </div>
-                        <div className="p-2 bg-black/40 border-t border-white/5">
+                        <div className="p-2 bg-surface-secondary border-t border-white/5">
                           <div className="text-xs font-medium text-white/90 truncate">{asset.name}</div>
                           <div className="text-[10px] text-white/40 truncate">{asset.url.split('/').pop()}</div>
                         </div>
@@ -413,7 +415,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
                             : 'border-white/10 hover:border-white/30 bg-white/[0.02]'
                         }`}
                       >
-                        <div className="aspect-square w-full rounded-xl bg-black/60 overflow-hidden relative border border-white/10 flex items-center justify-center">
+                        <div className="aspect-square w-full rounded-xl bg-surface-secondary overflow-hidden relative border border-white/10 flex items-center justify-center">
                           {avatar ? (
                             <img src={resolveUrl(avatar)} alt={char.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                           ) : (
@@ -475,7 +477,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
                             : 'border-white/10 hover:border-white/30 bg-white/[0.02]'
                         }`}
                       >
-                        <div className="aspect-[4/3] w-full bg-black/60 relative overflow-hidden flex items-center justify-center">
+                        <div className="aspect-[4/3] w-full bg-surface-secondary relative overflow-hidden flex items-center justify-center">
                           {asset.category === 'video' || asset.type === 'video' ? (
                             u ? (<video src={resolveUrl(u)} className="w-full h-full object-cover" muted />) : (<Video className="w-8 h-8 text-orange-400" />)
                           ) : asset.category === 'audio' || asset.type === 'audio' ? (
@@ -491,7 +493,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
                             </div>
                           )}
                         </div>
-                        <div className="p-2 bg-black/40 border-t border-white/5">
+                        <div className="p-2 bg-surface-secondary border-t border-white/5">
                           <div className="text-xs font-medium text-white/90 truncate">{asset.name || '未命名资产'}</div>
                           <div className="text-[10px] text-white/40 truncate">{asset.category || asset.type || 'asset'}</div>
                         </div>

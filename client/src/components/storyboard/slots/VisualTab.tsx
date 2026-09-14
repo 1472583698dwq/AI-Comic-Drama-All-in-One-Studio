@@ -77,7 +77,7 @@ export const VisualTab: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
 
           {/* 生图源专有 Schema 参数动态表单 */}
           {imageProviderDef?.params_schema && (
-            <div className="rounded-xl bg-black/30 border border-violet-500/20 p-2.5 space-y-2">
+            <div className="rounded-xl bg-surface-secondary border border-violet-500/20 p-2.5 space-y-2">
               <div className="text-[11px] font-bold text-violet-300 flex items-center justify-between">
                 <span>⚙️ {imageProviderDef.display_name || imageProviderDef.name || imageProviderDef.id} 专属参数</span>
               </div>

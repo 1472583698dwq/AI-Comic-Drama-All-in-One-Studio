@@ -92,7 +92,7 @@ export const ProviderPicker: React.FC<ProviderPickerProps> = ({ kind, value, onC
         <div className="flex items-center gap-1.5 text-[10px] text-gray-500 flex-wrap">
           <span className={`px-1.5 py-0.5 rounded border ${selected.builtin ? 'bg-brand/10 border-brand/20 text-brand-light' : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'}`}>{selected.builtin?'内置':'自定义'}</span>
           {(Array.isArray(selected.capabilities) && selected.capabilities.length ? selected.capabilities : []).map((c: string)=> (
-            <span key={c} className="px-1.5 py-0.5 rounded border bg-black/30 border-border text-gray-300">{capabilityLabel(kind, c)}</span>
+            <span key={c} className="px-1.5 py-0.5 rounded border bg-surface-secondary border-border text-gray-300">{capabilityLabel(kind, c)}</span>
           ))}
           <span className="truncate" title={selected.transport?.url || ''}>{selected.transport?.url ? `URL: ${selected.transport.url.slice(0,32)}…` : ''}</span>
           {selected.health?.ok !== undefined && <span className={`w-2 h-2 rounded-full ${selected.health.ok ? 'bg-emerald-500' : 'bg-amber-500'}`} />}

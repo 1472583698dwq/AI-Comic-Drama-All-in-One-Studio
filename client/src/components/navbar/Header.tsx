@@ -30,6 +30,13 @@ export const Header: React.FC<HeaderProps> = ({ onOpenImport, onOpenExport, onOp
   const shotsCount = (project?.scenes || []).reduce(
     (n: number, s: any) => n + (s?.shots?.length || 0), 0);
 
+  // 播放靠底部多轨时间线（桌面端）或移动端卡片流驱动；其余页签不渲染任何播放消费方，
+  // 此前在这些页签上点播放只会切图标，什么都不会发生。
+  const canPlay = !!project && (
+    platformMode === 'mobile' ||
+    activeTab === 'studio' || activeTab === 'timeline' || activeTab === 'director3d'
+  );
+
   return (
     <header className="h-[54px] bg-surface/95 backdrop-blur-xl border-b border-border px-3 lg:px-4 flex items-center justify-between gap-2 select-none z-30 relative shrink-0">
       {/* ── 左侧：品牌 + 当前项目 + 工作区切换 ── */}
@@ -100,10 +107,13 @@ export const Header: React.FC<HeaderProps> = ({ onOpenImport, onOpenExport, onOp
             onClick={() => {
               if (!project) { toast.info('请先创建或打开项目以进入漫剧工坊'); return; }
               setWorkspace('production');
-              if (activeTab === 'canvas') setActiveTab('studio');
+              // 从画布 / AI 导演等非制作页签点进来时要真的切过去，否则按钮亮了人还停在原地
+              if (!['studio', 'characters', 'director3d', 'timeline', 'assets'].includes(activeTab)) {
+                setActiveTab('studio');
+              }
             }}
             className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
-              workspace === 'production' && activeTab !== 'canvas'
+              workspace === 'production' && ['studio', 'characters', 'director3d', 'timeline', 'assets'].includes(activeTab)
                 ? 'bg-brand text-white shadow-sm shadow-brand/25'
                 : 'text-gray-400 hover:text-white'
             }`}
@@ -136,16 +146,17 @@ export const Header: React.FC<HeaderProps> = ({ onOpenImport, onOpenExport, onOp
         <button
           onClick={() => {
             if (!project) { toast.info('请先创建或打开项目以预览播放'); return; }
+            if (!canPlay) { toast.info('请切到分镜工作台 / 多轨剪辑 / 3D 片场再播放'); return; }
             setIsPlaying(!isPlaying);
           }}
           className={`w-8 h-8 rounded-xl flex items-center justify-center border transition-all shrink-0 ${
-            !project
+            !canPlay
               ? 'opacity-35 cursor-not-allowed bg-surface-secondary border-border text-gray-500'
               : isPlaying
               ? 'bg-accent-orange border-accent-orange text-white shadow-sm shadow-accent-orange/30'
               : 'bg-surface-secondary border-border text-gray-300 hover:text-white hover:border-brand/40'
           }`}
-          title={!project ? '请先创建或打开项目' : isPlaying ? '暂停全剧播放 (空格)' : '全剧预览播放 (空格)'}
+          title={!project ? '请先创建或打开项目' : !canPlay ? '该页签无播放视图，请切到分镜工作台 / 多轨剪辑 / 3D 片场' : isPlaying ? '暂停播放 (空格)' : '预览播放：按分镜时长推进播放头 (空格)'}
         >
           {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 fill-current ml-0.5" />}
         </button>
@@ -192,7 +203,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenImport, onOpenExport, onOp
               ? 'opacity-35 cursor-not-allowed bg-surface-secondary border border-border text-gray-500 shadow-none'
               : 'bg-gradient-to-r from-brand via-brand-light to-brand-blue text-white shadow-brand/25 hover:shadow-brand/40 hover:scale-[1.02] active:scale-[0.98]'
           }`}
-          title={!project ? '请先创建或打开项目以导出剪映工程' : '导出剪映/CapCut 草稿工程或音画分轨包'}
+          title={!project ? '请先创建或打开项目以导出剪映工程' : '导出剪映 / CapCut 草稿工程'}
         >
           {!project ? <Lock className="w-3.5 h-3.5 text-gray-500" /> : <Film className="w-3.5 h-3.5" />}
           <span className="hidden sm:inline">导出剪映</span>

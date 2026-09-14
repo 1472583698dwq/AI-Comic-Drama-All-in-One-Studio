@@ -208,7 +208,7 @@ export const CustomHeadersEditor: React.FC<CustomHeadersEditorProps> = ({
       {!isJsonMode ? (
         <div className="space-y-2">
           {pairs.length === 0 ? (
-            <div className="p-4 rounded-xl border border-dashed border-border-active text-center space-y-2 bg-black/20">
+            <div className="p-4 rounded-xl border border-dashed border-border-active text-center space-y-2 bg-surface-secondary">
               <div className="text-xs text-gray-300 font-medium">当前未配置自定义请求头（可选）</div>
               <div className="text-[11px] text-gray-500">
                 如果您的模型网关要求携带鉴权令牌或 Session（如 OpenCode.ai、OpenRouter），请点击上方快捷标签或下方按钮添加。
@@ -229,7 +229,7 @@ export const CustomHeadersEditor: React.FC<CustomHeadersEditorProps> = ({
               {pairs.map((p, idx) => (
                 <div
                   key={p.id}
-                  className="p-2 rounded-xl bg-black/40 border border-border/80 flex items-center gap-2 hover:border-brand/50 transition-colors"
+                  className="p-2 rounded-xl bg-surface-secondary border border-border/80 flex items-center gap-2 hover:border-brand/50 transition-colors"
                 >
                   <span className="text-[10px] font-mono text-gray-500 w-4 text-center">#{idx + 1}</span>
                   <div className="flex-1 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
@@ -287,7 +287,7 @@ export const CustomHeadersEditor: React.FC<CustomHeadersEditorProps> = ({
             onChange={e => handleJsonChange(e.target.value)}
             rows={5}
             placeholder='{\n  "x-opencode-session": "session_xxxx",\n  "HTTP-Referer": "https://..."\n}'
-            className="w-full rounded-xl border border-border bg-black/60 p-3 font-mono text-xs text-white placeholder-gray-500 focus:border-brand focus:outline-none leading-relaxed"
+            className="w-full rounded-xl border border-border bg-surface-secondary p-3 font-mono text-xs text-white placeholder-gray-500 focus:border-brand focus:outline-none leading-relaxed"
           />
           {jsonError && <div className="text-[11px] text-red-400 font-medium">⚠️ {jsonError}</div>}
         </div>

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, Plus, RefreshCw, Save, Trash2, Wand2, X } from 'lucide-react';
 import { apiService } from '../../../services/api';
+import { useEscapeClose } from '../../../hooks/useEscapeClose';
 
 const CONTAINER_LABEL: Record<string, string> = {
   'shot.modes': '制作模式',
@@ -18,6 +19,7 @@ export const SlotManagerModal: React.FC<{
   onClose: () => void;
   onChanged: () => void;
 }> = ({ projectId, onClose, onChanged }) => {
+  useEscapeClose(true, onClose);
   const [slots, setSlots] = useState<any[]>([]);
   const [overrides, setOverrides] = useState<{ disabled: string[]; order: Record<string, number> }>({ disabled: [], order: {} });
   const [loading, setLoading] = useState(false);
@@ -219,17 +221,17 @@ export const SlotManagerModal: React.FC<{
                 onChange={(e) => setGoal(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') handlePropose(); }}
                 placeholder="如：分镜加个批注Tab / 加个灯光锚点 / 加个一键合成按钮"
-                className="flex-1 bg-black/40 border border-border-active rounded-xl px-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-brand"
+                className="flex-1 bg-surface-secondary border border-border-active rounded-xl px-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-brand"
               />
               <button onClick={handlePropose} disabled={creating || !goal.trim()} className="px-4 py-2 rounded-xl bg-brand text-white text-xs font-bold disabled:opacity-40">提案</button>
             </div>
             {proposal && (
-              <div className="p-2.5 rounded-xl bg-black/40 border border-border text-xs space-y-1.5">
+              <div className="p-2.5 rounded-xl bg-surface-secondary border border-border text-xs space-y-1.5">
                 <div className="text-white font-bold">{proposal.title} <span className="font-mono font-normal text-zinc-500">· {proposal.kind} · {proposal.status}</span></div>
                 <div className="text-zinc-400">{proposal.diff_preview}</div>
                 {(proposal.test_plan || []).length > 0 && <div className="text-zinc-500">试跑：{(proposal.test_plan || []).join(' → ')}</div>}
                 {proposal.slot_spec?.doc && (
-                  <pre className="text-[10px] font-mono text-zinc-500 bg-black/40 rounded-lg p-2 overflow-x-auto max-h-28 overflow-y-auto">{JSON.stringify(proposal.slot_spec.doc, null, 1)}</pre>
+                  <pre className="text-[10px] font-mono text-zinc-500 bg-surface-secondary rounded-lg p-2 overflow-x-auto max-h-28 overflow-y-auto">{JSON.stringify(proposal.slot_spec.doc, null, 1)}</pre>
                 )}
                 {report && (
                   <div className="space-y-0.5">
