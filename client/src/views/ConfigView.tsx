@@ -181,7 +181,7 @@ export const ConfigView: React.FC = () => {
         </div>
 
         {/* Right Content */}
-        <div className="flex-1 flex flex-col overflow-hidden bg-[#07070A]">
+        <div className="flex-1 flex flex-col overflow-hidden bg-background">
           <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar max-w-5xl">
             {msg && (
               <div className={`px-4 py-3 rounded-2xl border text-xs flex items-center justify-between ${msg.type==='success'?'bg-emerald-500/10 border-emerald-500/30 text-emerald-300':'bg-red-500/10 border-red-500/30 text-red-300'}`}>

@@ -66,7 +66,7 @@ export const PreviewStage: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
       {videoError && <div className="mb-2 px-3 py-1.5 rounded-xl bg-red-500/15 border border-red-500/40 text-xs text-red-300 max-w-md truncate">⚠️ {videoError}</div>}
       {ttsError && <div className="mb-2 px-3 py-1.5 rounded-xl bg-red-500/15 border border-red-500/40 text-xs text-red-300 max-w-md truncate">⚠️ {ttsError}</div>}
 
-      <div className="relative max-h-[60vh] w-full max-w-md rounded-2xl overflow-hidden shadow-2xl border border-border/80 group bg-black" style={{ aspectRatio: previewAspect }}>
+      <div className="relative max-h-[60vh] w-full max-w-md rounded-2xl overflow-hidden shadow-2xl border border-border/80 group bg-black always-dark" style={{ aspectRatio: previewAspect }}>
         {effectivePreviewTab === 'video' ? (
           activeShot.video_url ? (
             <video

@@ -1722,7 +1722,7 @@ export const Director3DStage: React.FC = () => {
 
   return (
     <div className="flex-1 flex flex-col md:flex-row h-full bg-background overflow-hidden select-none">
-      <div className="flex-1 relative flex flex-col bg-[#07070A] overflow-hidden">
+      <div className="flex-1 relative flex flex-col bg-[#07070A] always-dark overflow-hidden">
         <div className="absolute top-4 left-4 z-20 flex items-center space-x-3 bg-surface/90 backdrop-blur-md px-4 py-2 rounded-2xl border border-border shadow-xl">
           <div className="flex items-center space-x-2">
             <span className="w-2.5 h-2.5 rounded-full bg-brand-light animate-pulse" />

@@ -303,21 +303,21 @@ export const ProvidersHubView: React.FC<{
       {/* Edit drawer - Code Editor */}
       {editing && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-5xl h-[85vh] bg-[#0f0f12] rounded-2xl border border-zinc-800 flex flex-col overflow-hidden">
-            <div className="h-12 px-4 border-b border-zinc-800 flex items-center justify-between shrink-0 bg-[#18181b]">
+          <div className="w-full max-w-5xl h-[85vh] bg-surface rounded-2xl border border-border flex flex-col overflow-hidden">
+            <div className="h-12 px-4 border-b border-border flex items-center justify-between shrink-0 bg-surface-secondary">
               <span className="text-sm font-bold text-white flex items-center gap-2"><Code2 className="w-4 h-4 text-violet-400"/>{editing.builtin?'查看':'编辑'} {editing.id} <span className="text-xs font-normal text-zinc-500">· {editing.kind} · {editLang}</span></span>
               <div className="flex items-center gap-2">
-                <select value={editLang} onChange={e=> setEditLang(e.target.value as any)} className="bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1 text-xs text-white" disabled={editing.builtin}>
+                <select value={editLang} onChange={e=> setEditLang(e.target.value as any)} className="bg-surface-secondary border border-border-active rounded-lg px-2 py-1 text-xs text-white" disabled={editing.builtin}>
                   <option value="python">Python</option><option value="javascript">JavaScript</option>
                 </select>
-                <button onClick={()=> setEditing(null)} className="p-1 rounded hover:bg-zinc-800"><X className="w-4 h-4 text-zinc-400"/></button>
+                <button onClick={()=> setEditing(null)} className="p-1 rounded hover:bg-surface-secondary"><X className="w-4 h-4 text-zinc-400"/></button>
               </div>
             </div>
             <div className="flex-1 flex overflow-hidden">
               <div className="flex-1 flex flex-col min-w-0">
-                <div className="px-3 py-2 border-b border-zinc-800 flex items-center gap-2 bg-[#18181b]">
+                <div className="px-3 py-2 border-b border-border flex items-center gap-2 bg-surface-secondary">
                   <span className="text-xs text-zinc-400">入口: </span>
-                  <input value={editing.code_entry||'generate'} onChange={e=> setEditing({...editing, code_entry:e.target.value})} className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-white font-mono w-32" disabled={editing.builtin}/>
+                  <input value={editing.code_entry||'generate'} onChange={e=> setEditing({...editing, code_entry:e.target.value})} className="bg-surface border border-border-active rounded px-2 py-1 text-xs text-white font-mono w-32" disabled={editing.builtin}/>
                   <span className="ml-auto text-[11px] text-zinc-500">ctx/api 参考：prompt/size/api_key/reference_images/first_frame_url/duration/text/voice_id | api.httpx/api.asyncio/api.download</span>
                 </div>
                 {editing.builtin && BUILTIN_KEY_MAP[editing.id] && (
@@ -325,15 +325,15 @@ export const ProvidersHubView: React.FC<{
                     <div className="text-xs font-bold text-amber-200 flex items-center gap-1.5"><KeyRound className="w-3.5 h-3.5"/> 配置 Key（缺 Key 即禁用）</div>
                     <div className="text-[11px] text-amber-200/70">{BUILTIN_KEY_MAP[editing.id].note}</div>
                     {BUILTIN_KEY_MAP[editing.id].fields.map(f=>(
-                      <input key={f.key} type={f.password?'password':'text'} value={builtinKeys[f.key]||''} onChange={e=> setBuiltinKeys(prev=> ({...prev, [f.key]: e.target.value}))} placeholder={`${f.label}（${f.placeholder||f.key}）`} className="w-full bg-black/40 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white font-mono placeholder-zinc-600 focus:outline-none focus:border-amber-400"/>
+                      <input key={f.key} type={f.password?'password':'text'} value={builtinKeys[f.key]||''} onChange={e=> setBuiltinKeys(prev=> ({...prev, [f.key]: e.target.value}))} placeholder={`${f.label}（${f.placeholder||f.key}）`} className="w-full bg-black/40 border border-border-active rounded-lg px-3 py-1.5 text-xs text-white font-mono placeholder-zinc-600 focus:outline-none focus:border-amber-400"/>
                     ))}
                     <button onClick={handleSaveBuiltinKeys} disabled={builtinKeysSaving} className="w-full py-2 rounded-xl bg-amber-500 text-black text-xs font-bold disabled:opacity-40">{builtinKeysSaving?'保存中…':'保存 Key 并生效'}</button>
                     {builtinKeysMsg && <div className="text-[11px] text-amber-200">{builtinKeysMsg}</div>}
                   </div>
                 )}
-                <textarea value={editCode} onChange={e=> setEditCode(e.target.value)} spellCheck={false} disabled={editing.builtin} className="flex-1 w-full bg-[#0f0f12] p-4 font-mono text-[13px] leading-5 text-zinc-100 placeholder:text-zinc-600 focus:outline-none resize-none" placeholder={`async def generate(ctx, api):\n    # ctx: {prompt, width, height, api_key, ...}\n    # api: {httpx, asyncio, download, json, re}\n    ...\n    return {"image_url": url}`} />
+                <textarea value={editCode} onChange={e=> setEditCode(e.target.value)} spellCheck={false} disabled={editing.builtin} className="flex-1 w-full bg-surface p-4 font-mono text-[13px] leading-5 text-zinc-100 placeholder:text-zinc-600 focus:outline-none resize-none" placeholder={`async def generate(ctx, api):\n    # ctx: {prompt, width, height, api_key, ...}\n    # api: {httpx, asyncio, download, json, re}\n    ...\n    return {"image_url": url}`} />
               </div>
-              <div className="w-[320px] border-l border-zinc-800 bg-[#18181b] p-3 space-y-3 overflow-y-auto hidden lg:flex flex-col">
+              <div className="w-[320px] border-l border-border bg-surface-secondary p-3 space-y-3 overflow-y-auto hidden lg:flex flex-col">
                 {editing.builtin && BUILTIN_KEY_MAP[editing.id] && (
                   <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-2">
                     <div className="text-xs font-bold text-amber-200 flex items-center gap-1.5"><KeyRound className="w-3.5 h-3.5"/> 配置 Key（缺 Key 即禁用）</div>
@@ -350,7 +350,7 @@ export const ProvidersHubView: React.FC<{
                               value={builtinKeys[f.key] || ''}
                               onChange={e=> setBuiltinKeys(prev=> ({...prev, [f.key]: e.target.value}))}
                               placeholder={f.placeholder || f.key}
-                              className="w-full bg-black/40 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white font-mono placeholder-zinc-600 focus:outline-none focus:border-amber-400"
+                              className="w-full bg-black/40 border border-border-active rounded-lg px-3 py-1.5 text-xs text-white font-mono placeholder-zinc-600 focus:outline-none focus:border-amber-400"
                             />
                           </div>
                         ))}
@@ -361,11 +361,11 @@ export const ProvidersHubView: React.FC<{
                   </div>
                 )}
                 <div className="text-xs font-bold text-white">元信息</div>
-                <input value={editing.name||''} onChange={e=> setEditing({...editing, name:e.target.value})} placeholder="名称" className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white" disabled={editing.builtin}/>
-                <textarea value={editing.description||''} onChange={e=> setEditing({...editing, description:e.target.value})} placeholder="描述" rows={2} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-xs text-white" disabled={editing.builtin}/>
+                <input value={editing.name||''} onChange={e=> setEditing({...editing, name:e.target.value})} placeholder="名称" className="w-full bg-surface border border-border-active rounded-lg px-3 py-1.5 text-xs text-white" disabled={editing.builtin}/>
+                <textarea value={editing.description||''} onChange={e=> setEditing({...editing, description:e.target.value})} placeholder="描述" rows={2} className="w-full bg-surface border border-border-active rounded-lg p-2 text-xs text-white" disabled={editing.builtin}/>
                 <div className="text-xs font-bold text-white mt-2">模型</div>
-                <input value={Array.isArray(editing.models)?editing.models.join(','):editing.models||''} onChange={e=> setEditing({...editing, models:e.target.value.split(',').map((s:string)=>s.trim()).filter(Boolean)})} placeholder="models 逗号分隔" className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white font-mono" disabled={editing.builtin}/>
-                <input value={editing.default_model||''} onChange={e=> setEditing({...editing, default_model:e.target.value})} placeholder="default_model" className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white font-mono" disabled={editing.builtin}/>
+                <input value={Array.isArray(editing.models)?editing.models.join(','):editing.models||''} onChange={e=> setEditing({...editing, models:e.target.value.split(',').map((s:string)=>s.trim()).filter(Boolean)})} placeholder="models 逗号分隔" className="w-full bg-surface border border-border-active rounded-lg px-3 py-1.5 text-xs text-white font-mono" disabled={editing.builtin}/>
+                <input value={editing.default_model||''} onChange={e=> setEditing({...editing, default_model:e.target.value})} placeholder="default_model" className="w-full bg-surface border border-border-active rounded-lg px-3 py-1.5 text-xs text-white font-mono" disabled={editing.builtin}/>
                 <div className="space-y-1">
                   <div className="text-xs font-bold text-white">自定义请求头 (OpenCode)</div>
                   <CustomHeadersEditor
@@ -467,10 +467,10 @@ export const ProvidersHubView: React.FC<{
                         editing.kind==='video' ? {aspect_ratio:{type:'string',title:'画面比例',enum:["9:16","16:9","1:1"],default:"9:16"}, resolution:{type:'string',title:'分辨率',enum:["480p","720p","1080p"],default:"720p"}, duration:{type:'integer',title:'时长',default:5,minimum:3,maximum:15}, fps:{type:'integer',title:'帧率',enum:[16,24,30],default:24}} :
                         {speed:{type:'number',title:'语速',default:1,minimum:0.5,maximum:2,step:0.1}};
                       setEditing({...editing, params_schema:{type:'object', properties: preset}, default_params:{}});
-                    }} className="w-full py-1.5 rounded-xl bg-zinc-900 text-white text-xs">一键填充 {editing.kind} 预设</button>
+                    }} className="w-full py-1.5 rounded-xl bg-surface text-white text-xs">一键填充 {editing.kind} 预设</button>
                   )}
                 </div>
-                <div className="p-2.5 rounded-xl bg-zinc-900 border border-zinc-700 text-[11px] leading-relaxed text-zinc-400">
+                <div className="p-2.5 rounded-xl bg-surface border border-border-active text-[11px] leading-relaxed text-zinc-400">
                   <div className="font-semibold text-zinc-200 mb-1">代码约定</div>
                   Python: <code className="text-violet-300">async def generate(ctx, api)</code> 返回 <code className="text-emerald-300">{"{"+`"image_url": url`+"}"}</code><br/>
                   JS: <code className="text-violet-300">async function generate(ctx, api)</code> 返回同<br/>
@@ -479,7 +479,7 @@ export const ProvidersHubView: React.FC<{
                   支持任意轮询、签名、重试逻辑
                 </div>
                 {!editing.builtin && (
-                  <div className="p-3 rounded-xl bg-zinc-900 border border-zinc-700 space-y-2">
+                  <div className="p-3 rounded-xl bg-surface border border-border-active space-y-2">
                     <span className="text-[11px] font-semibold text-white flex items-center gap-1"><KeyRound className="w-3 h-3"/> 改 API Key</span>
                     <SetKeyInline providerId={editing.id} />
                   </div>
@@ -496,11 +496,11 @@ export const ProvidersHubView: React.FC<{
                     setEditCode(tmpl);
                     toast.info('已填充代码模板');
                   }
-                }} className="w-full py-2 rounded-xl bg-zinc-800 border border-zinc-700 text-xs text-white hover:bg-zinc-700 flex items-center justify-center gap-1" disabled={editing.builtin}><Copy className="w-3 h-3"/> 填充模板</button>
+                }} className="w-full py-2 rounded-xl bg-surface-secondary border border-border-active text-xs text-white hover:bg-surface-tertiary flex items-center justify-center gap-1" disabled={editing.builtin}><Copy className="w-3 h-3"/> 填充模板</button>
               </div>
             </div>
-            <div className="p-3 border-t border-zinc-800 flex justify-end gap-2 shrink-0 bg-[#18181b]">
-              <button onClick={()=> setEditing(null)} className="px-4 py-1.5 rounded-xl bg-zinc-800 border border-zinc-700 text-xs text-white">取消</button>
+            <div className="p-3 border-t border-border flex justify-end gap-2 shrink-0 bg-surface-secondary">
+              <button onClick={()=> setEditing(null)} className="px-4 py-1.5 rounded-xl bg-surface-secondary border border-border-active text-xs text-white">取消</button>
               {!editing.builtin && <button onClick={handleSaveEdit} className="px-4 py-1.5 rounded-xl bg-violet-600 text-white text-xs font-bold flex items-center gap-1 hover:bg-violet-700"><Save className="w-3.5 h-3.5"/> 保存代码</button>}
             </div>
           </div>
@@ -525,7 +525,7 @@ const SetKeyInline: React.FC<{providerId:string}> = ({ providerId })=>{
   };
   return (
     <div className="flex gap-1.5">
-      <input value={k} onChange={e=> setK(e.target.value)} placeholder="输入新 API Key" className="flex-1 bg-black/40 border border-zinc-700 rounded-xl px-3 py-1.5 text-xs font-mono text-white placeholder-zinc-500"/>
+      <input value={k} onChange={e=> setK(e.target.value)} placeholder="输入新 API Key" className="flex-1 bg-black/40 border border-border-active rounded-xl px-3 py-1.5 text-xs font-mono text-white placeholder-zinc-500"/>
       <button onClick={save} className="px-3 py-1.5 rounded-xl bg-brand text-white text-xs font-bold">保存Key</button>
     </div>
   );
@@ -568,39 +568,39 @@ const CreateCodeForm: React.FC<{onClose:()=>void, onCreated:()=>void}> = ({ onCl
     }catch(e:any){ alert(e.message); }
   };
   return (
-    <div className="w-full max-w-5xl h-[85vh] bg-[#0f0f12] rounded-2xl border border-zinc-800 flex flex-col overflow-hidden">
-      <div className="h-12 px-4 border-b border-zinc-800 flex items-center justify-between shrink-0 bg-[#18181b]">
+    <div className="w-full max-w-5xl h-[85vh] bg-surface rounded-2xl border border-border flex flex-col overflow-hidden">
+      <div className="h-12 px-4 border-b border-border flex items-center justify-between shrink-0 bg-surface-secondary">
         <span className="text-sm font-bold text-white flex items-center gap-2"><FileCode className="w-4 h-4 text-violet-400"/> 新建代码生成源</span>
         <button onClick={onClose}><X className="w-4 h-4 text-zinc-400"/></button>
       </div>
       <div className="flex-1 flex overflow-hidden">
         <div className="flex-1 flex flex-col min-w-0">
-          <div className="p-3 border-b border-zinc-800 flex items-center gap-2 bg-[#18181b]">
-            <select value={form.language} onChange={e=> setForm({...form, language:e.target.value})} className="bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white">
+          <div className="p-3 border-b border-border flex items-center gap-2 bg-surface-secondary">
+            <select value={form.language} onChange={e=> setForm({...form, language:e.target.value})} className="bg-surface border border-border-active rounded-lg px-2 py-1.5 text-xs text-white">
               <option value="python">Python</option><option value="javascript">JavaScript</option>
             </select>
-            <input value={form.code_entry} onChange={e=> setForm({...form, code_entry:e.target.value})} placeholder="入口" className="bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs font-mono text-white w-28"/>
-            <button onClick={loadTemplate} disabled={loadingTmpl} className="px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-xs text-white hover:bg-zinc-700">{loadingTmpl?'加载中…':'填充模板'}</button>
+            <input value={form.code_entry} onChange={e=> setForm({...form, code_entry:e.target.value})} placeholder="入口" className="bg-surface border border-border-active rounded-lg px-2 py-1.5 text-xs font-mono text-white w-28"/>
+            <button onClick={loadTemplate} disabled={loadingTmpl} className="px-3 py-1.5 rounded-lg bg-surface-secondary border border-border-active text-xs text-white hover:bg-surface-tertiary">{loadingTmpl?'加载中…':'填充模板'}</button>
           </div>
-          <textarea value={form.code} onChange={e=> setForm({...form, code:e.target.value})} spellCheck={false} className="flex-1 w-full bg-[#0f0f12] p-4 font-mono text-[13px] leading-5 text-zinc-100 focus:outline-none resize-none" placeholder={`async def generate(ctx, api):\n    ...\n    return {"image_url": url}`}/>
+          <textarea value={form.code} onChange={e=> setForm({...form, code:e.target.value})} spellCheck={false} className="flex-1 w-full bg-surface p-4 font-mono text-[13px] leading-5 text-zinc-100 focus:outline-none resize-none" placeholder={`async def generate(ctx, api):\n    ...\n    return {"image_url": url}`}/>
         </div>
-        <div className="w-[320px] border-l border-zinc-800 bg-[#18181b] p-3 space-y-3 overflow-y-auto">
-          <input value={form.name} onChange={e=> setForm({...form, name:e.target.value})} placeholder="名称，如 我的Flux" className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-500"/>
-          <select value={form.kind} onChange={e=> setForm({...form, kind:e.target.value})} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white">
+        <div className="w-[320px] border-l border-border bg-surface-secondary p-3 space-y-3 overflow-y-auto">
+          <input value={form.name} onChange={e=> setForm({...form, name:e.target.value})} placeholder="名称，如 我的Flux" className="w-full bg-surface border border-border-active rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-500"/>
+          <select value={form.kind} onChange={e=> setForm({...form, kind:e.target.value})} className="w-full bg-surface border border-border-active rounded-lg px-3 py-2 text-xs text-white">
             <option value="image">生图 image</option><option value="video">视频 video</option><option value="audio">语音 audio</option><option value="llm">LLM</option>
           </select>
-          <textarea value={form.description} onChange={e=> setForm({...form, description:e.target.value})} placeholder="描述" rows={2} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-xs text-white placeholder-zinc-500"/>
-          <input value={form.models} onChange={e=> setForm({...form, models:e.target.value})} placeholder="models 逗号分隔，可空" className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-500"/>
-          <input value={form.default_model} onChange={e=> setForm({...form, default_model:e.target.value})} placeholder="default_model，可空" className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-500"/>
-          <input value={apiKey} onChange={e=> setApiKey(e.target.value)} placeholder="API Key（可选）" className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white font-mono placeholder-zinc-500"/>
+          <textarea value={form.description} onChange={e=> setForm({...form, description:e.target.value})} placeholder="描述" rows={2} className="w-full bg-surface border border-border-active rounded-lg p-2 text-xs text-white placeholder-zinc-500"/>
+          <input value={form.models} onChange={e=> setForm({...form, models:e.target.value})} placeholder="models 逗号分隔，可空" className="w-full bg-surface border border-border-active rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-500"/>
+          <input value={form.default_model} onChange={e=> setForm({...form, default_model:e.target.value})} placeholder="default_model，可空" className="w-full bg-surface border border-border-active rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-500"/>
+          <input value={apiKey} onChange={e=> setApiKey(e.target.value)} placeholder="API Key（可选）" className="w-full bg-surface border border-border-active rounded-lg px-3 py-2 text-xs text-white font-mono placeholder-zinc-500"/>
           <div className="space-y-1">
             <div className="text-xs font-bold text-white">自定义请求头 (OpenCode)</div>
             <CustomHeadersEditor headers={headers} onChange={setHeaders} />
           </div>
         </div>
       </div>
-      <div className="p-3 border-t border-zinc-800 flex justify-end gap-2 shrink-0 bg-[#18181b]">
-        <button onClick={onClose} className="px-3 py-1.5 rounded-xl bg-zinc-800 border border-zinc-700 text-xs text-white">取消</button>
+      <div className="p-3 border-t border-border flex justify-end gap-2 shrink-0 bg-surface-secondary">
+        <button onClick={onClose} className="px-3 py-1.5 rounded-xl bg-surface-secondary border border-border-active text-xs text-white">取消</button>
         <button onClick={handleSubmit} className="px-4 py-1.5 rounded-xl bg-violet-600 text-white text-xs font-bold">创建</button>
       </div>
     </div>

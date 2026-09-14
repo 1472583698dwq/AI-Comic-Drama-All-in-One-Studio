@@ -229,7 +229,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={onClose}>
-      <div className="w-full max-w-4xl max-h-[85vh] bg-[#1a1b1e] border border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden text-white" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-4xl max-h-[85vh] bg-surface border border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden text-white" onClick={(e) => e.stopPropagation()}>
         {/* 顶部标题栏 */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-white/[0.02]">
           <div className="flex items-center gap-3">
@@ -527,7 +527,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
         </div>
 
         {/* 底部确认栏 - 始终显示，修复无法确定/退出 */}
-        <div className="px-6 py-3 border-t border-white/10 bg-[#1a1b1e] flex items-center justify-between shrink-0">
+        <div className="px-6 py-3 border-t border-white/10 bg-surface flex items-center justify-between shrink-0">
           <span className="text-xs text-white/60">
             {selectedUrls.length === 0 ? (
               <span>未选择 {multiSelect ? '· 可多选' : ''}</span>

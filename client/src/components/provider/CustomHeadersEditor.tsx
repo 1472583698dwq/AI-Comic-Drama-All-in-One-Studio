@@ -135,7 +135,7 @@ export const CustomHeadersEditor: React.FC<CustomHeadersEditorProps> = ({
   const hasOpenCodeSession = pairs.some(p => p.key.toLowerCase() === 'x-opencode-session' && p.value.trim());
 
   return (
-    <div className={`space-y-3 rounded-2xl border-2 border-brand/30 bg-[#0d0d14]/90 p-3.5 text-xs shadow-lg shadow-brand/5 ${className}`}>
+    <div className={`space-y-3 rounded-2xl border-2 border-brand/30 bg-surface-secondary p-3.5 text-xs shadow-lg shadow-brand/5 ${className}`}>
       {/* 标题栏与模式切换 */}
       <div className="flex items-center justify-between pb-2 border-b border-border/60">
         <div className="flex items-center gap-2">
@@ -190,7 +190,7 @@ export const CustomHeadersEditor: React.FC<CustomHeadersEditorProps> = ({
                   title={preset.hint}
                   className={`rounded-xl px-2.5 py-1 text-[11px] font-bold border transition-all flex items-center gap-1 ${
                     hasKey
-                      ? 'border-zinc-800 bg-zinc-900/40 text-zinc-600 cursor-not-allowed opacity-50'
+                      ? 'border-border bg-surface-secondary text-zinc-600 cursor-not-allowed opacity-50'
                       : preset.isPrimary
                       ? 'border-amber-400/60 bg-amber-500/20 text-amber-200 hover:bg-amber-500/30 hover:border-amber-300 shadow-sm shadow-amber-500/20 ring-1 ring-amber-400/30'
                       : 'border-brand/40 bg-brand/10 text-brand-light hover:bg-brand/20 hover:border-brand'
@@ -208,7 +208,7 @@ export const CustomHeadersEditor: React.FC<CustomHeadersEditorProps> = ({
       {!isJsonMode ? (
         <div className="space-y-2">
           {pairs.length === 0 ? (
-            <div className="p-4 rounded-xl border border-dashed border-zinc-700/80 text-center space-y-2 bg-black/20">
+            <div className="p-4 rounded-xl border border-dashed border-border-active text-center space-y-2 bg-black/20">
               <div className="text-xs text-gray-300 font-medium">当前未配置自定义请求头（可选）</div>
               <div className="text-[11px] text-gray-500">
                 如果您的模型网关要求携带鉴权令牌或 Session（如 OpenCode.ai、OpenRouter），请点击上方快捷标签或下方按钮添加。

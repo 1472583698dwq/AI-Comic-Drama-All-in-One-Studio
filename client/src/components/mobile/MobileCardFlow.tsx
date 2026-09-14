@@ -148,7 +148,7 @@ export const MobileCardFlow: React.FC<MobileCardFlowProps> = ({ onOpenExport, st
             className="w-full h-full object-cover animate-fade-in"
           />
         ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center text-gray-500 text-xs space-y-3 p-4 text-center bg-[#0A0A12]">
+          <div className="w-full h-full flex flex-col items-center justify-center text-gray-500 text-xs space-y-3 p-4 text-center bg-[#0A0A12] always-dark">
             <span>{currentShot.status === 'generating_image' ? 'ComfyUI 生成中...' : '该分镜暂无画面'}</span>
             <button onClick={handleRegenerate} disabled={isRegenerating} className="px-3 py-1.5 rounded bg-brand text-white text-xs disabled:opacity-40">
               {isRegenerating ? '生成中...' : '点击生成画面'}
@@ -288,18 +288,18 @@ export const MobileCardFlow: React.FC<MobileCardFlowProps> = ({ onOpenExport, st
   if (standalone) {
     // 移动端独立入口：全屏沉浸，不套手机拟真边框
     return (
-      <div className="flex-1 flex flex-col bg-[#070709] overflow-hidden min-h-screen">
+      <div className="flex-1 flex flex-col bg-[#070709] always-dark overflow-hidden min-h-screen">
         {Inner}
       </div>
     );
   }
 
   return (
-    <div className="flex-1 flex items-center justify-center bg-[#070709] p-4 overflow-hidden">
+    <div className="flex-1 flex items-center justify-center bg-background p-4 overflow-hidden">
       {/* Mobile Device Mockup Frame（桌面端嵌套展示用） */}
-      <div className="w-full max-w-sm h-[90vh] bg-black rounded-[40px] border-[6px] border-[#22222E] shadow-2xl relative flex flex-col overflow-hidden ring-1 ring-white/10">
+      <div className="w-full max-w-sm h-[90vh] bg-black always-dark rounded-[40px] border-[6px] border-[#22222E] shadow-2xl relative flex flex-col overflow-hidden ring-1 ring-white/10">
         {/* Dynamic Island / Speaker */}
-        <div className="absolute top-2.5 left-1/2 -translate-x-1/2 w-24 h-4 bg-[#181822] rounded-full z-30" />
+        <div className="absolute top-2.5 left-1/2 -translate-x-1/2 w-24 h-4 bg-[#181822] always-dark rounded-full z-30" />
         {Inner}
       </div>
     </div>
