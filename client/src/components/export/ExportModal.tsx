@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   X, 
   Share2, 
@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { apiService } from '../../services/api';
+import { syncExporterSpecs, listExporterSpecs, type ExporterInfo } from '../../services/exporterSpecs';
 
 interface ExportModalProps {
   isOpen: boolean;
@@ -23,10 +24,45 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
   const [isExporting, setIsExporting] = useState(false);
   const [exportedDraft, setExportedDraft] = useState<any>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [pluginExporters, setPluginExporters] = useState<ExporterInfo[]>([]);
+  const [exporterBusyId, setExporterBusyId] = useState('');
+  const [exporterResults, setExporterResults] = useState<Record<string, any>>({});
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    syncExporterSpecs(project?.id)
+      .then(() => { if (!cancelled) setPluginExporters(listExporterSpecs()); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [isOpen, project?.id]);
 
   if (!isOpen || !project) return null;
 
   const API_ORIGIN = 'http://127.0.0.1:8000';
+
+  const handleRunExporter = async (spec: ExporterInfo) => {
+    setExporterBusyId(spec.id);
+    setExporterResults((prev) => ({ ...prev, [spec.id]: undefined }));
+    try {
+      const shots = project.scenes.flatMap((s) => s.shots);
+      const res = await apiService.runExporter({
+        exporter_id: spec.id,
+        project_id: project.id,
+        payload: {
+          project,
+          shots,
+          characters: project.characters || [],
+          meta: { title: project.title, aspect_ratio: project.aspect_ratio, style_preset: project.style_preset },
+        },
+      });
+      setExporterResults((prev) => ({ ...prev, [spec.id]: res }));
+    } catch (e: any) {
+      setExporterResults((prev) => ({ ...prev, [spec.id]: { error: e?.message || String(e) } }));
+    } finally {
+      setExporterBusyId('');
+    }
+  };
 
   const handleExportJianYing = async () => {
     setIsExporting(true);
@@ -196,6 +232,55 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
               </div>
             </div>
           </div>
+
+          {/* 插件导出器（exporters 扩展点） */}
+          {pluginExporters.length > 0 && (
+            <div className="space-y-2">
+              <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5 text-accent-green" />插件导出器
+                <span className="text-[10px] font-normal text-gray-500">来自插件包 exporters：SRT/第三方草稿/FFmpeg 命令等可扩展目标</span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {pluginExporters.map((ex) => {
+                  const r: any = exporterResults[ex.id];
+                  return (
+                    <div key={ex.id} className="bg-surface-secondary/70 p-4 rounded-2xl border border-border space-y-2">
+                      <div className="flex items-center gap-2">
+                        <FileText className="w-4 h-4 text-accent-green" />
+                        <div className="text-xs font-bold text-white truncate">{ex.name}</div>
+                        <span className="text-[9px] font-mono text-gray-500 ml-auto truncate max-w-[140px]" title={ex.run?.extension}>{ex.run?.extension}</span>
+                      </div>
+                      {ex.description && <div className="text-[11px] text-gray-400 leading-4">{ex.description}</div>}
+                      <button
+                        onClick={() => handleRunExporter(ex)}
+                        disabled={exporterBusyId === ex.id}
+                        className="w-full py-2 rounded-xl bg-accent-green/20 border border-accent-green/40 text-accent-green text-xs font-bold hover:bg-accent-green/30 disabled:opacity-40"
+                      >
+                        {exporterBusyId === ex.id ? '执行中…' : '运行导出'}
+                      </button>
+                      {r?.error && <div className="text-[11px] text-red-300">⚠️ {r.error}</div>}
+                      {r && !r.error && (
+                        <div className="text-[11px] text-gray-300 space-y-1">
+                          {r.file_url && (
+                            <a className="text-accent-green underline break-all block" href={API_ORIGIN + r.file_url} target="_blank" rel="noreferrer">下载 / 预览 {r.file_url}</a>
+                          )}
+                          {r.url && !r.file_url && (
+                            <a className="text-accent-green underline break-all block" href={r.url} target="_blank" rel="noreferrer">{r.url}</a>
+                          )}
+                          {r.export_dir && (
+                            <button className="text-accent-green underline block" onClick={() => apiService.openFolder(r.export_dir)}>打开目录 {r.export_dir}</button>
+                          )}
+                          {!r.file_url && !r.url && !r.export_dir && (
+                            <pre className="text-[10px] font-mono text-gray-400 whitespace-pre-wrap break-all max-h-24 overflow-y-auto">{JSON.stringify(r).slice(0, 500)}</pre>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

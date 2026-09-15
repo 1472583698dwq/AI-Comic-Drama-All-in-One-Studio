@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { ShotSlotContext } from './types';
 import { apiService } from '../../../services/api';
+import { useProjectStore } from '../../../stores/useProjectStore';
 
 /**
  * 插件槽运行辅助（非组件，SlotOutlet/通用渲染器消费）。
@@ -27,9 +28,32 @@ export function substituteTpl(tpl: any, shot: any, projectId?: string): any {
   return tpl;
 }
 
-const STORE_ACTIONS: Record<string, { label: string; run: (ctx: ShotSlotContext) => void }> = {
+const STORE_ACTIONS: Record<string, { label: string; run: (ctx: ShotSlotContext, args: Record<string, any>) => void }> = {
   synthesizeShotPrompt: { label: '全要素合成', run: (ctx) => ctx.synthesizeShotPrompt(ctx.activeShot.id) },
-  autoFitShotDuration: { label: '智能吸附时长', run: (ctx) => ctx.autoFitShotDuration(ctx.activeShot.id) },
+  autoFitShotDuration: {
+    label: '智能吸附时长',
+    run: (ctx, args) => {
+      const p = Number(args?.padding);
+      ctx.autoFitShotDuration(ctx.activeShot.id, Number.isFinite(p) ? p : undefined);
+    },
+  },
+  autoFitAllDurations: {
+    label: '全局吸附时长',
+    run: (_ctx, args) => {
+      const p = Number(args?.padding);
+      useProjectStore.getState().autoFitAllDurations(Number.isFinite(p) ? p : undefined);
+    },
+  },
+  selectCandidate: {
+    label: '选定候选',
+    run: (ctx, args) => {
+      const idx = Number(args?.candidate_index);
+      if (!Number.isFinite(idx) || idx < 0) {
+        throw new Error('selectCandidate 需 args.candidate_index（候选序号，从 0 起）');
+      }
+      ctx.selectCandidate(ctx.activeShot.id, idx);
+    },
+  },
 };
 
 export function useRunSlotAction(ctx: ShotSlotContext) {
@@ -40,7 +64,10 @@ export function useRunSlotAction(ctx: ShotSlotContext) {
     if (runSpec.store_action) {
       const fn = STORE_ACTIONS[runSpec.store_action];
       if (!fn) { setResult(`未知 store_action: ${runSpec.store_action}`); return; }
-      try { fn.run(ctx); setResult('✓ 已执行'); } catch (e: any) { setResult(`✗ ${e?.message || e}`); }
+      try {
+        fn.run(ctx, substituteTpl(runSpec.args || {}, ctx.activeShot, ctx.project?.id));
+        setResult('✓ 已执行');
+      } catch (e: any) { setResult(`✗ ${e?.message || e}`); }
       return null;
     }
     if (runSpec.extension) {
@@ -48,7 +75,8 @@ export function useRunSlotAction(ctx: ShotSlotContext) {
       setResult(null);
       try {
         const args = substituteTpl(runSpec.args || {}, ctx.activeShot, ctx.project?.id);
-        const res: any = await apiService.executeExtension(runSpec.extension, args);
+        // 携带项目作用域：项目级停用/审计在统一执行口与引擎级 guard 一并生效
+        const res: any = await apiService.executeExtension(runSpec.extension, args, undefined, ctx.project?.id);
         setResult(null);
         return res;
       } catch (e: any) {

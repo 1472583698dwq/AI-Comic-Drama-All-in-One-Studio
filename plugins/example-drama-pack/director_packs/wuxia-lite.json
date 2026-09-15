@@ -1,0 +1,26 @@
+{
+  "id": "wuxia-lite",
+  "name": "武侠轻量导演包",
+  "description": "示例导演包：英雄机位预设 + 竹林背景底图 + 灵果 GLB 道具",
+  "icon": "Clapperboard",
+  "presets": {
+    "framing": [
+      {"id": "hero_low", "label": "英雄仰拍", "fl": 28, "desc": "低机位仰拍主角"}
+    ],
+    "motion": [
+      {"id": "sword_dash", "label": "御剑突进", "category": "combo", "desc": "低机位 + 前推", "minimaxCode": "Low Angle + Forward Tracking"}
+    ],
+    "pose": [
+      {"id": "sword_pose", "label": "持剑式", "icon": "🗡️"}
+    ],
+    "cast": [
+      {"id": "trio", "label": "三人成阵", "desc": "三角站位纵深"}
+    ]
+  },
+  "environments": [
+    {"id": "bamboo", "label": "竹林", "desc": "青翠竹海远景", "icon": "🎋", "background_url": "/storage/assets/ast_24895c5a/original.png"}
+  ],
+  "props": [
+    {"id": "spirit_fruit", "label": "灵果", "icon": "🥑", "glb_url": "/models/Avocado.glb", "scale": 1.0}
+  ]
+}

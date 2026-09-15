@@ -62,6 +62,7 @@ import {
   StoryboardShot,
 } from '../../types';
 import { FRAMING_PRESETS, MOTION_PRESETS, POSE_PRESETS, CAST_LAYOUTS } from './directorPresets';
+import { syncDirectorPacks, listDirectorPackProps, listDirectorPackEnvironments, getDirectorPackEnv } from './directorPackSpecs';
 
 // ============================================================
 // MiniMax Design 3D Director - 重构版
@@ -210,6 +211,22 @@ export const Director3DStage: React.FC = () => {
   const [recordMsg, setRecordMsg] = useState<string | null>(null);
   const [environment, setEnvironment] = useState<StageEnvironment>('cyber_studio');
   const [propsConfig, setPropsConfig] = useState<StagePropType[]>(['sword', 'magic_circle']);
+  // 插件导演包（director_packs 扩展点）：预设注入 + 扩展环境背景底图/GLB 道具
+  const [packEnvId, setPackEnvId] = useState('');
+  const [packRev, setPackRev] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    const sync = () => {
+      syncDirectorPacks(project?.id)
+        .then(() => { if (!cancelled) setPackRev((v) => v + 1); })
+        .catch(() => {});
+    };
+    sync();
+    const h = () => sync();
+    window.addEventListener('directorpacks-list-refresh', h as any);
+    return () => { cancelled = true; window.removeEventListener('directorpacks-list-refresh', h as any); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project?.id]);
 
   // 2. Agent 场景生成
   const [scenePrompt, setScenePrompt] = useState('');
@@ -351,7 +368,7 @@ export const Director3DStage: React.FC = () => {
     const scene = sceneRef.current;
     if (!scene) return;
     if (backdropRef.current) { scene.remove(backdropRef.current); (backdropRef.current.material as THREE.Material)?.dispose?.(); (backdropRef.current.geometry as THREE.BufferGeometry)?.dispose?.(); backdropRef.current = null; }
-    const url = activeShot?.scene_ref_image;
+    const url = activeShot?.scene_ref_image || getDirectorPackEnv(packEnvId)?.background_url;
     if (!url) return;
     let cancelled = false;
     new THREE.TextureLoader().load(url, (tex) => {
@@ -369,7 +386,7 @@ export const Director3DStage: React.FC = () => {
     }, undefined, () => {});
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeShotId, (activeShot as any)?.scene_ref_image]);
+  }, [activeShotId, (activeShot as any)?.scene_ref_image, packEnvId, packRev]);
 
   // Three refs
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -454,6 +471,28 @@ export const Director3DStage: React.FC = () => {
     if (castLayout !== 'solo') parts.push(`Cast Staging: ${castLayout.toUpperCase()}`);
     return `[Camera: ${parts.join(', ')}]`;
   }, [framing, motion, focalLength, cameraRoll, motionSpeed, castLayout]);
+
+  // 道具面板条目：内置 + 插件导演包（packRev 触发重算）
+  const propOptions = useMemo(() => {
+    const builtin = [
+      { id: 'sword' as StagePropType, label: '浮空飞剑', icon: '🗡️', sub: '程序化' },
+      { id: 'shield' as StagePropType, label: '聚能护盾', icon: '🛡️', sub: '程序化' },
+      { id: 'magic_circle' as StagePropType, label: '地面符文阵', icon: '🌀', sub: '程序化' },
+      { id: 'chair' as StagePropType, label: '休闲椅', icon: '🪑', sub: 'SheenChair.glb' },
+      { id: 'helmet' as StagePropType, label: '破损头盔', icon: '⛑️', sub: 'DamagedHelmet.glb' },
+      { id: 'camera' as StagePropType, label: '复古相机', icon: '📷', sub: 'AntiqueCamera.glb' },
+      { id: 'avocado' as StagePropType, label: '牛油果', icon: '🥑', sub: 'Avocado.glb' },
+      { id: 'boombox' as StagePropType, label: '音响', icon: '🔊', sub: 'BoomBox.glb' },
+    ];
+    const packProps = listDirectorPackProps().map((p) => ({
+      id: p.id as any,
+      label: p.label,
+      icon: p.icon || '🧩',
+      sub: p.glb_url.split('/').pop() || '插件 GLB',
+    }));
+    return [...builtin, ...packProps];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [packRev]);
 
   const handleResetView = useCallback(() => {
     orbitStateRef.current.target.set(0, 1.2, 0);
@@ -1196,6 +1235,24 @@ export const Director3DStage: React.FC = () => {
       if (propsConfig.includes('boombox' as StagePropType)) {
         await addPropGLBOrFallback('boombox' as StagePropType, () => createRealisticShield(), new THREE.Vector3(-1.0, 0.5, 0.9), 'boombox', 1.1);
       }
+      // 插件导演包道具（director_packs.props：GLB URL 直接加载，可选中/拖拽/持久化）
+      const packPropMap = new Map(listDirectorPackProps().map((p) => [p.id, p]));
+      let packPropIdx = 0;
+      for (const ptype of propsConfig) {
+        const pp = packPropMap.get(String(ptype));
+        if (!pp) continue;
+        const glb = await loadGLBModel(pp.glb_url, pp.scale || 1);
+        if (glb && !cancelled) {
+          glb.name = `prop_${pp.id}`;
+          if (!applySaved(glb)) glb.position.set(1.4 + packPropIdx * 0.6, 0.35, -0.8);
+          const light = new THREE.PointLight(0x22d3ee, 0.5, 2.2);
+          light.position.copy(glb.position).add(new THREE.Vector3(0, 0.2, 0));
+          stage.add(light);
+          stage.add(glb);
+          markBaseY(glb);
+        }
+        packPropIdx++;
+      }
       if (cancelled) return;
       // 场景专属道具（根据环境自动补充真实物品，具名可选中）
       if (environment === 'xianxia_cloud' && !propsConfig.includes('magic_circle')) {
@@ -1230,7 +1287,7 @@ export const Director3DStage: React.FC = () => {
 
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pose, castLayout, propsConfig, environment]);
+  }, [pose, castLayout, propsConfig, environment, packRev]);
 
   const updateVirtualCameraOptics = useCallback(() => {
     if (!virtualCameraRef.current) return;
@@ -1895,16 +1952,7 @@ export const Director3DStage: React.FC = () => {
               <div>
                 <label className="text-xs text-gray-300 font-semibold mb-2 flex items-center justify-between"><span>⚔️ 场景道具与结界 (Props & FX)</span><span className="text-[10px] text-gray-500">真实 GLB 已接入</span></label>
                 <div className="grid grid-cols-2 gap-2">
-                  {[
-                    { id: 'sword' as StagePropType, label: '浮空飞剑', icon: '🗡️', sub: '程序化' },
-                    { id: 'shield' as StagePropType, label: '聚能护盾', icon: '🛡️', sub: '程序化' },
-                    { id: 'magic_circle' as StagePropType, label: '地面符文阵', icon: '🌀', sub: '程序化' },
-                    { id: 'chair' as StagePropType, label: '休闲椅', icon: '🪑', sub: 'SheenChair.glb' },
-                    { id: 'helmet' as StagePropType, label: '破损头盔', icon: '⛑️', sub: 'DamagedHelmet.glb' },
-                    { id: 'camera' as StagePropType, label: '复古相机', icon: '📷', sub: 'AntiqueCamera.glb' },
-                    { id: 'avocado' as StagePropType, label: '牛油果', icon: '🥑', sub: 'Avocado.glb' },
-                    { id: 'boombox' as StagePropType, label: '音响', icon: '🔊', sub: 'BoomBox.glb' },
-                  ].map((pr) => {
+                  {propOptions.map((pr: any) => {
                     const active = propsConfig.includes(pr.id);
                     return (
                       <button
@@ -1947,8 +1995,28 @@ export const Director3DStage: React.FC = () => {
             <>
               <div>
                 <label className="text-xs text-gray-300 font-semibold mb-2 block">🌆 3D 影棚氛围预设</label>
-                <div className="grid grid-cols-2 gap-2">{(Object.keys(ENV_LABELS) as StageEnvironment[]).map((env) => { const info = ENV_LABELS[env]; return <button key={env} onClick={() => { setEnvironment(env); setSceneDesc(`${info.label} · ${info.desc}`); }} className={`p-2.5 rounded-xl border text-left transition-all ${environment === env ? 'bg-accent-green/20 border-accent-green text-white shadow-md ring-1 ring-accent-green' : 'bg-surface-secondary border-border text-gray-400 hover:text-gray-200'}`}><div className="text-xs font-bold flex items-center space-x-1"><span>{info.icon}</span><span>{info.label}</span></div><div className="text-[9px] text-gray-500 mt-0.5">{info.desc}</div></button>; })}</div>
+                <div className="grid grid-cols-2 gap-2">{(Object.keys(ENV_LABELS) as StageEnvironment[]).map((env) => { const info = ENV_LABELS[env]; return <button key={env} onClick={() => { setEnvironment(env); setPackEnvId(''); setSceneDesc(`${info.label} · ${info.desc}`); }} className={`p-2.5 rounded-xl border text-left transition-all ${environment === env ? 'bg-accent-green/20 border-accent-green text-white shadow-md ring-1 ring-accent-green' : 'bg-surface-secondary border-border text-gray-400 hover:text-gray-200'}`}><div className="text-xs font-bold flex items-center space-x-1"><span>{info.icon}</span><span>{info.label}</span></div><div className="text-[9px] text-gray-500 mt-0.5">{info.desc}</div></button>; })}</div>
               </div>
+              {listDirectorPackEnvironments().length > 0 && (
+                <div>
+                  <label className="text-xs text-gray-300 font-semibold mb-2 block">🧩 扩展环境（插件导演包 · 背景底图）</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {listDirectorPackEnvironments().map((env) => (
+                      <button
+                        key={env.id}
+                        onClick={() => {
+                          setPackEnvId(env.id);
+                          setSceneDesc(`${env.label} · ${env.desc || '插件背景底图'}`);
+                        }}
+                        className={`p-2.5 rounded-xl border text-left transition-all ${packEnvId === env.id ? 'bg-accent-green/20 border-accent-green text-white shadow-md ring-1 ring-accent-green' : 'bg-surface-secondary border-border text-gray-400 hover:text-gray-200'}`}
+                      >
+                        <div className="text-xs font-bold flex items-center space-x-1"><span>{env.icon || '🧩'}</span><span>{env.label}</span></div>
+                        <div className="text-[9px] text-gray-500 mt-0.5">{env.desc || env.id}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div>
                 <label className="text-xs text-gray-300 font-semibold mb-2 block">📐 画面比例（跟随项目画幅）</label>
                 <div className="flex items-center gap-2">

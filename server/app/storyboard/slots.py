@@ -19,7 +19,7 @@
 }
 
 有效列表 = 内置目录 → 插件包内（enabled 插件）→ 裸件 custom/，
-再叠加项目覆盖（disabled 过滤 + order 改写）。同 id 包内优先。
+再叠加项目覆盖（disabled 过滤 + order 改写）与扩展中心停用项（默认过滤，管理面可保留）。同 id 包内优先。
 """
 import glob
 import json
@@ -275,8 +275,21 @@ def set_project_overrides(project_id: str, disabled: List[str], order: Dict[str,
     return projs[project_id]
 
 
-def list_effective_slots(project_id: str = "") -> Dict[str, Any]:
-    """合并内置 + 插件 + 裸件，叠加项目覆盖。key 为 slot:id，全局唯一。"""
+def _is_ext_disabled(key: str, disabled_ids: set) -> bool:
+    """扩展中心停用集匹配：兼容 `storyboard_slot:<key>` 与 `storyboard_slot:<publisher>/<key>`。"""
+    if not disabled_ids:
+        return False
+    if f"storyboard_slot:{key}" in disabled_ids:
+        return True
+    return any(i.startswith("storyboard_slot:") and i.endswith(f"/{key}")
+               for i in disabled_ids)
+
+
+def list_effective_slots(project_id: str = "", include_disabled: bool = False) -> Dict[str, Any]:
+    """合并内置 + 插件 + 裸件，叠加项目覆盖与扩展中心停用。key 为 slot:id，全局唯一。
+
+    include_disabled=True 保留被停用项（管理面枚举用，如扩展中心需展示以支持重新启用）。
+    """
     merged: Dict[str, Dict[str, Any]] = {}
     for b in BUILTIN_SLOT_CATALOG:
         merged[f"{b['slot']}:{b['id']}"] = {**b, "valid": True, "error": None,
@@ -296,9 +309,18 @@ def list_effective_slots(project_id: str = "") -> Dict[str, Any]:
     ov = get_project_overrides(project_id) if project_id else {"disabled": [], "order": {}}
     disabled = set(ov.get("disabled") or [])
     order_ov = ov.get("order") or {}
+    ext_disabled: set = set()
+    if not include_disabled:
+        try:
+            from app.extensions import state as ext_state
+            ext_disabled = ext_state.effective_disabled(project_id or "")
+        except Exception:
+            ext_disabled = set()
     items = []
     for key, d in merged.items():
         if key in disabled:
+            continue
+        if _is_ext_disabled(key, ext_disabled):
             continue
         if key in order_ov:
             d = {**d, "order": order_ov[key]}
@@ -313,8 +335,8 @@ def save_custom_slot(doc: Dict[str, Any]) -> Dict[str, Any]:
     if err:
         raise ValueError(err)
     sid = str(doc["id"])
-    # 去重：内置 / 插件 / 裸件同 slot:id 不可重复
-    existing = list_effective_slots().get("slots") or []
+    # 去重：内置 / 插件 / 裸件同 slot:id 不可重复（含已停用项，防止覆盖后无法再启用）
+    existing = list_effective_slots(include_disabled=True).get("slots") or []
     for e in existing:
         if e.get("slot") == doc["slot"] and e.get("id") == sid and e.get("valid"):
             raise ValueError(f"槽已存在: {doc['slot']}:{sid}（来源 {e.get('source')}/{e.get('source_detail') or '内置'}）")

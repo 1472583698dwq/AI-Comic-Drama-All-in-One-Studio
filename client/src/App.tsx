@@ -42,7 +42,14 @@ export function App() {
     useProjectStore.getState().loadActiveProject();
     const h = () => setIsProviderOpen(true);
     window.addEventListener('open-provider-manager', h as any);
-    return () => window.removeEventListener('open-provider-manager', h as any);
+    // 插件主题包（themes 扩展点）：启动同步 + 插件启停后热刷新
+    const syncThemes = () => { import('./services/themeSpecs').then((m) => m.syncPluginThemes().catch(() => {})).catch(() => {}); };
+    syncThemes();
+    window.addEventListener('theme-list-refresh', syncThemes as any);
+    return () => {
+      window.removeEventListener('open-provider-manager', h as any);
+      window.removeEventListener('theme-list-refresh', syncThemes as any);
+    };
   }, []);
 
   // 严格 UI 准入拦截：未选择或创建项目时，禁止停留在任何项目内部功能页，自动重定向至项目看板

@@ -10,6 +10,12 @@ export const PluginsHubView: React.FC = () => {
   const [busy, setBusy] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const refreshHosts = () => {
+    for (const ev of ['theme-list-refresh', 'canvasnode-list-refresh', 'exporter-list-refresh', 'directorpacks-list-refresh']) {
+      try { window.dispatchEvent(new CustomEvent(ev)); } catch { /* ignore */ }
+    }
+  };
+
   const load = async () => {
     setLoading(true);
     try {
@@ -42,6 +48,7 @@ export const PluginsHubView: React.FC = () => {
     try {
       const r = await apiService.setPluginEnabled(p.id, !p.enabled);
       setMsg(r?.note || ((r?.warnings || []).join('；') || (p.enabled ? '已禁用' : '已启用')));
+      refreshHosts();
       await load();
     } catch (e: any) {
       setMsg(e?.message || '操作失败');
@@ -92,7 +99,7 @@ export const PluginsHubView: React.FC = () => {
       <div className="flex items-center justify-between">
         <div>
           <div className="text-sm font-bold text-white flex items-center gap-2"><Puzzle className="w-4 h-4 text-brand-light" />插件中心 <span className="text-[10px] px-1.5 py-0.5 rounded bg-brand/20 text-brand-light font-mono">P0</span></div>
-          <div className="text-[11px] text-gray-500 mt-1">支持 providers / skills / workflows（自动sync成源）/ mcp_tools（查壳函数，需可信模式执行）/ custom_nodes（一段代码即画布节点）/ storyboard_slots（分镜槽）；canvas_nodes / director_packs / exporters / themes 为未落地占位。包格式见服务端 GET /plugins/spec，开发指南见 docs/plugin-dev.md。</div>
+          <div className="text-[11px] text-gray-500 mt-1">支持 providers / skills / workflows（自动sync成源）/ mcp_tools（查壳函数，需可信模式执行）/ custom_nodes（一段代码即画布节点）/ canvas_nodes（声明式画布节点）/ themes（CSS 变量主题）/ exporters（导出器）/ director_packs（导演台预设/环境/道具）/ storyboard_slots（分镜槽）。包格式见服务端 GET /plugins/spec，开发指南见 docs/plugin-dev.md。</div>
         </div>
         <div className="flex items-center gap-2">
           <input ref={fileRef} type="file" accept=".zip" hidden onChange={(e) => doUpload(e.target.files?.[0])} />

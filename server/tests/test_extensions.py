@@ -151,6 +151,21 @@ class TestStoryboardOverrides(_TempStorage):
         self.assertNotIn("shot.tabs:note-x", ov["disabled"])
         self.assertNotIn("shot.tabs:note-x", ov["order"])
 
+    def test_extension_state_disable_filters_slots(self):
+        self._write_custom({"slot": "shot.tabs", "id": "note-y", "label": "批注",
+                            "blocks": [{"kind": "info", "text": "hi"}]})
+        key = "shot.tabs:note-y"
+        # 扩展中心停用（命名空间形式）→ 有效列表过滤，管理面（include_disabled）保留
+        state.set_disabled(f"storyboard_slot:acme/{key}", True)
+        try:
+            self.assertIn(key, {s["key"] for s in slot_store.list_effective_slots(include_disabled=True)["slots"]})
+            self.assertNotIn(key, {s["key"] for s in slot_store.list_effective_slots()["slots"]})
+            # 项目级继承全局
+            self.assertNotIn(key, {s["key"] for s in slot_store.list_effective_slots("proj-slot")["slots"]})
+        finally:
+            state.set_disabled(f"storyboard_slot:acme/{key}", False)
+        self.assertIn(key, {s["key"] for s in slot_store.list_effective_slots()["slots"]})
+
 
 class TestProjectScopeNative(_TempStorage):
     def test_native_provider_project_scope_soft_disable(self):
@@ -243,6 +258,32 @@ class TestEngineGuard(_TempStorage):
             self.assertIn("停用", str(ctx.exception))
         finally:
             state.set_disabled(f"provider:{pid}", False)
+
+
+class TestExtensionExecuteTrustedGate(_TempStorage):
+    def test_mcp_tool_execute_requires_trusted(self):
+        import asyncio
+        from app.core import config as cfg
+        from app.plugins.manager import _PLUGIN_TOOL_HANDLERS
+
+        tool = "plugin_gate_demo_tool"
+        _PLUGIN_TOOL_HANDLERS[tool] = {"pid": "", "file": "", "entry": "demo",
+                                       "input_schema": {"type": "object", "properties": {}}}
+        old_setting = cfg.settings.STUDIO_TRUSTED_MODE
+        old_env = os.environ.get("STUDIO_TRUSTED_MODE")
+        try:
+            cfg.settings.STUDIO_TRUSTED_MODE = "0"
+            os.environ["STUDIO_TRUSTED_MODE"] = "0"
+            with self.assertRaises(ValueError) as ctx:
+                asyncio.run(extension_registry.execute(f"mcp_tool:{tool}", args={}))
+            self.assertIn("可信模式", str(ctx.exception))
+        finally:
+            cfg.settings.STUDIO_TRUSTED_MODE = old_setting
+            if old_env is None:
+                os.environ.pop("STUDIO_TRUSTED_MODE", None)
+            else:
+                os.environ["STUDIO_TRUSTED_MODE"] = old_env
+            _PLUGIN_TOOL_HANDLERS.pop(tool, None)
 
 
 class TestTelemetry(_TempStorage):

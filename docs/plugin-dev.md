@@ -5,7 +5,7 @@
 统一收敛到「扩展注册表」对外呈现与执行。
 
 - 后端入口：`server/app/plugins/`（包管理）、`server/app/extensions/`（统一门面）
-- 存储：`storage/plugins/<id>/`、`storage/storage/plugins/index.json`、`storage/extensions/state.json`
+- 存储：`storage/plugins/<id>/`、`storage/plugins/index.json`、`storage/extensions/state.json`
 - 相关 API 前缀：`/api/v1/plugins`、`/api/v1/extensions`
 
 > ⚠️ 安全模型：插件代码在**服务进程内**执行，无沙箱。`mcp_tools` / provider `code` 模式的执行
@@ -23,6 +23,10 @@ my-pack/
   skills/<name>/SKILL.md     # 技能（frontmatter: name/description）
   workflows/*.json           # ComfyUI 工作流
   custom_nodes/*.json        # 代码节点（input_schema + params_schema + run）
+  canvas_nodes/*.json        # 声明式画布节点（inputs/outputs/params_schema + run.extension）
+  themes/*.json              # 主题变量包（CSS vars，扩展中心应用/取消）
+  exporters/*.json           # 声明式导出器（导出中心消费）
+  director_packs/*.json      # 导演台扩展包（预设/环境底图/GLB 道具）
   slots/*.json               # 分镜工作台槽（声明式 UI）
   tools/*.py                 # mcp_tools 查壳函数
 ```
@@ -47,6 +51,10 @@ my-pack/
     "skills": ["skills/*/SKILL.md"],
     "workflows": ["workflows/*.json"],
     "custom_nodes": ["custom_nodes/*.json"],
+    "canvas_nodes": ["canvas_nodes/*.json"],
+    "themes": ["themes/*.json"],
+    "exporters": ["exporters/*.json"],
+    "director_packs": ["director_packs/*.json"],
     "storyboard_slots": ["slots/*.json"],
     "mcp_tools": ["tools/*.py"]
   }
@@ -100,8 +108,10 @@ discover → validate → install → enable ⇄ disable → uninstall
   - 生图/生视频/配音：`image/video/audio_registry.generate`
   - 技能：`skill_engine.execute_skill`
   - 代码节点：`run_custom_node`
-  - 插件 MCP 工具：`run_plugin_tool`
+  - 插件 MCP 工具：`run_plugin_tool`（统一执行口 `/extensions/execute` 亦强制 trusted 闸）
   - 工作流：连带其同步出的 provider（`comfyui_*`）一起校验
+  - 分镜槽：`storyboard.slots.list_effective_slots`（扩展中心停用 → 有效槽聚合过滤，
+    管理面用 `include_disabled=True` 保留以便重新启用）
   入口显式传 `project_id` 或用 contextvar 传播（HTTP 中间件读 `?project_id=`/`X-Project-Id`，
   canvas 执行注入项目上下文）；命中停用直接短路拒绝。
 - **热重载**：服务启动后后台线程监听插件目录 mtime（`STUDIO_PLUGIN_WATCH=0` 可关），
@@ -115,9 +125,12 @@ discover → validate → install → enable ⇄ disable → uninstall
 | `skills` | `SKILL.md`（frontmatter: name/description/tools） | 通用技能零代码生效 |
 | `workflows` | ComfyUI 工作流 JSON | `save_workflow` 校验入库并 sync 为独立源 |
 | `custom_nodes` | `{input_schema, params_schema, run}` JSON | 画布代码节点 + MCP Tool |
+| `canvas_nodes` | 声明式节点 JSON（inputs/outputs/params_schema + `run.extension`） | 画布工具栏动态节点（通用渲染，无需前端代码） |
+| `themes` | `{id,name,mode,vars:{"--x":"值"}}` JSON | CSS 变量注入 `:root`（扩展中心应用/取消） |
+| `exporters` | `{id,name,accepts,run}` JSON | 导出中心按钮，载荷（project/shots/…）装配后走统一执行口 |
+| `director_packs` | `{presets,environments,props}` JSON | 3D 导演台：预设合并 + 背景底图 + GLB 道具 |
 | `storyboard_slots` | 分镜槽声明 JSON | 分镜工作台槽宿主 |
 | `mcp_tools` | `.py`：`PLUGIN_TOOLS` 列表 + 入口函数 | `plugin_<id>_<name>`，trusted 闸 + 20分钟超时 |
-| `canvas_nodes` / `director_packs` / `exporters` / `themes` | — | **未落地（占位）**，声明会被记录但不执行 |
 
 ### 4.1 mcp_tools 查壳函数
 
@@ -165,6 +178,67 @@ def text_stats(args: dict, ctx: dict) -> dict:
 白名单 `store_action`：`synthesizeShotPrompt`、`autoFitShotDuration`、
 `autoFitAllDurations`、`selectCandidate`。
 模板变量：`{{shot.<字段>}}`、`{{project.id}}`。
+
+### 4.3 canvas_nodes 声明式画布节点
+
+```json
+{
+  "id": "upscale_ext",
+  "name": "智能超分",
+  "kind": "video",
+  "inputs": [{"id": "video", "label": "输入视频", "type": "video", "required": true}],
+  "outputs": [{"id": "video", "label": "视频", "type": "video", "from": "video_url"}],
+  "params_schema": {"type": "object", "properties": {"scale": {"type": "integer", "default": 2}}},
+  "run": {"extension": "custom_node:upscale_demo", "map": {"video": "$in.video", "scale": "$param.scale"}}
+}
+```
+
+- 端口 `type` ∈ `image|video|audio|text|any`；输入 ≤12、输出 ≤8；`from` 指定结果字段（缺省同 id）。
+- `run.extension` 只能是可执行扩展：`provider:*` / `skill:*` / `custom_node:*` / `mcp_tool:*`；
+  `entry` 对 provider 可传 `image|video|audio` 显式指定类型。
+- 参数装配：静态 `run.args` → 同名输入/参数默认透传 → `run.map` 显式覆盖
+  （`$in.<端口>` / `$param.<参数键>` / 字面量）。
+- 执行链：画布「运行节点/DAG」→ 引擎 `ext-node` 分支 → 统一执行口（含停用审计、沙箱、trusted 闸）；
+  `task_id` 视频任务经 TaskCenter 阻塞到终态，输出端口自动映射（`image_url/video_url/audio_url/text`）。
+- 停用走扩展中心覆盖层（项目/全局），节点卡片仍在画布中但执行被拒绝。
+
+### 4.4 themes 主题变量包
+
+```json
+{ "id": "ink-drama", "name": "水墨漫剧", "mode": "all",
+  "vars": {"--color-brand": "#0f766e", "--color-brand-light": "#14b8a6"} }
+```
+
+- `vars` 键须为 `--xxx`（CSS 自定义属性，覆盖 `client/src/index.css @theme` 的同名令牌）；`mode=dark|light` 时仅对应明暗模式生效。
+- 应用/取消入口：设置 → 扩展中心 → 主题包条目「应用主题/取消应用」，选择持久化在 localStorage。
+
+### 4.5 exporters 声明式导出器
+
+```json
+{ "id": "srt_exporter", "name": "SRT 字幕导出", "accepts": ["project", "shots"],
+  "run": {"extension": "mcp_tool:plugin_acme_srt_export",
+          "map": {"project": "$project", "shots": "$shots"}} }
+```
+
+- `accepts` ∈ `project|shots|characters|assets|meta`；`run.map` 目标键 → `$project` 等载荷变量或字面量（缺省按 accepts 同名注入）。
+- 前端导出中心（ExportModal）渲染条目并把项目载荷交给 `POST /exporters/run`，结果支持 `file_url`/`url`/`export_dir` 展示与打开。
+
+### 4.6 director_packs 导演台扩展包
+
+```json
+{ "id": "wuxia-lite", "name": "武侠轻量导演包",
+  "presets": {
+    "framing": [{"id": "hero_low", "label": "英雄仰拍", "fl": 28, "desc": "低机位仰拍"}],
+    "motion":  [{"id": "sword_dash", "label": "御剑突进", "category": "combo", "minimaxCode": "Low Angle + Forward Tracking"}],
+    "pose":    [{"id": "sword_pose", "label": "持剑式", "icon": "🗡️"}],
+    "cast":    [{"id": "trio", "label": "三人成阵", "desc": "三角站位"}]
+  },
+  "environments": [{"id": "bamboo", "label": "竹林", "icon": "🎋", "background_url": "/storage/scenes/bamboo.jpg"}],
+  "props": [{"id": "spirit_fruit", "label": "灵果", "icon": "🥑", "glb_url": "/models/Avocado.glb", "scale": 1.0}] }
+```
+
+- 预设合并进 `directorPresets.ts` 同源数组，3D 舞台与画布 director3d 节点同步生效；自定义 id 为本地语义，送给 MCP 精控建议沿用内置 id。
+- `environments` 以背景板形式挂载远景图（分镜 `scene_ref_image` 优先）；`props` 直接按 GLB URL 加载并可选中/拖拽/持久化。
 
 ## 5. 扩展注册表 API
 

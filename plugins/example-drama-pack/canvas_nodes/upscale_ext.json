@@ -1,0 +1,30 @@
+{
+  "id": "upscale_ext",
+  "name": "超分扩展节点",
+  "description": "示例：声明式画布节点包装同包代码节点（无需前端代码，自动出现在画布工具栏）",
+  "icon": "Wand2",
+  "color": "text-cyan-400",
+  "kind": "video",
+  "inputs": [
+    {"id": "video", "label": "输入视频", "type": "video", "required": true},
+    {"id": "prompt", "label": "提示词", "type": "text"}
+  ],
+  "outputs": [
+    {"id": "video", "label": "视频", "type": "video", "from": "video_url"}
+  ],
+  "params_schema": {
+    "type": "object",
+    "properties": {
+      "scale": {"type": "integer", "default": 2, "description": "放大倍数"}
+    }
+  },
+  "run": {
+    "extension": "custom_node:upscale_demo",
+    "entry": "generate",
+    "map": {
+      "video": "$in.video",
+      "prompt": "$in.prompt",
+      "scale": "$param.scale"
+    }
+  }
+}

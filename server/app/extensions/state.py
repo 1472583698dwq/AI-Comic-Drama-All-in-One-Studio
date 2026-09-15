@@ -89,24 +89,28 @@ def is_disabled(ext_id: str, scope: str = "") -> bool:
     return ext_id in effective_disabled(scope)
 
 
+def match_in(kind: str, local_id: str, disabled_ids: Set[str]) -> Optional[str]:
+    """在给定停用集合中按 (kind, local_id) 匹配（避免逐项重复读盘）。"""
+    if not disabled_ids:
+        return None
+    direct = f"{kind}:{local_id}"
+    if direct in disabled_ids:
+        return direct
+    prefix = f"{kind}:"
+    suffix = f"/{local_id}"
+    for i in disabled_ids:
+        if i.startswith(prefix) and i.endswith(suffix):
+            return i
+    return None
+
+
 def match_disabled(kind: str, local_id: str, scope: str = "") -> Optional[str]:
     """按 (kind, local_id) 匹配生效停用集，命中返回停用 id，否则 None。
 
     同时兼容无命名空间 `kind:local_id` 与带命名空间 `kind:publisher/local_id`，
     这样引擎层无需解析 publisher 即可强制停用。
     """
-    ids = effective_disabled(scope)
-    if not ids:
-        return None
-    direct = f"{kind}:{local_id}"
-    if direct in ids:
-        return direct
-    prefix = f"{kind}:"
-    suffix = f"/{local_id}"
-    for i in ids:
-        if i.startswith(prefix) and i.endswith(suffix):
-            return i
-    return None
+    return match_in(kind, local_id, effective_disabled(scope))
 
 
 def set_disabled(ext_id: str, disabled: bool, scope: str = "") -> Dict[str, Any]:

@@ -61,13 +61,15 @@ EXECUTABLE_KINDS = ("provider", "skill", "custom_node", "mcp_tool")
 # 有原生生命周期的 kind：启停/卸载委托各管家（plugin.package / 自定义 provider）
 LIFECYCLE_KINDS = ("plugin", "provider")
 
-# 无原生生命周期、经扩展层覆盖层启停的 kind（skill/workflow/custom_node/mcp_tool/slot）
+# 无原生生命周期、经扩展层覆盖层启停的 kind
+# （skill/workflow/custom_node/mcp_tool/slot/canvas_node/theme/exporter/director_pack）
 OVERLAY_LIFECYCLE_KINDS = (
-    "skill", "workflow", "custom_node", "mcp_tool", "storyboard_slot",
+    "skill", "workflow", "custom_node", "mcp_tool", "storyboard_slot", "canvas_node",
+    "theme", "exporter", "director_pack",
 )
 
-# 已声明但执行尚未落地的 kind（只读占位，UI 需明确标注）
-PLACEHOLDER_KINDS = ("canvas_node", "director_pack", "exporter", "theme")
+# 已声明但执行尚未落地的 kind（只读占位，UI 需明确标注；当前为空）
+PLACEHOLDER_KINDS = ()
 
 
 _NON_NAMESPACE_PUBLISHERS = ("", "builtin", "local", "standalone", "system")

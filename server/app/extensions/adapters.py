@@ -293,7 +293,7 @@ def list_storyboard_slot_extensions() -> List[ExtensionInfo]:
     out: List[ExtensionInfo] = []
     try:
         from app.storyboard import slots as slot_store
-        data = slot_store.list_effective_slots("")
+        data = slot_store.list_effective_slots("", include_disabled=True)
         for s in (data.get("slots") or []):
             if not isinstance(s, dict):
                 continue
@@ -328,6 +328,124 @@ def list_storyboard_slot_extensions() -> List[ExtensionInfo]:
     return out
 
 
+def list_canvas_node_extensions() -> List[ExtensionInfo]:
+    out: List[ExtensionInfo] = []
+    try:
+        from app.canvas_nodes.manager import canvas_node_manager
+        for n in canvas_node_manager.list_nodes():
+            nid = getattr(n, "id", "") or ""
+            if not nid:
+                continue
+            source, pid = _plugin_owner("canvas_nodes", nid)
+            publisher = pid if source == ExtensionSource.PLUGIN else "local"
+            out.append(ExtensionInfo(
+                id=make_ext_id(ExtensionKind.CANVAS_NODE, nid, publisher),
+                kind=ExtensionKind.CANVAS_NODE,
+                local_id=nid,
+                publisher=publisher,
+                name=getattr(n, "name", nid) or nid,
+                description=getattr(n, "description", "") or "",
+                icon=getattr(n, "icon", "") or "Boxes",
+                source=source,
+                source_detail=pid,
+                status=ExtensionStatus.ENABLED,
+                sub_kind=getattr(n, "kind", "") or "",
+                detail_hint="canvas/nodes",
+            ))
+    except Exception:
+        pass
+    return out
+
+
+def list_theme_extensions() -> List[ExtensionInfo]:
+    out: List[ExtensionInfo] = []
+    try:
+        from app.themes.manager import theme_manager
+        for t in theme_manager.list_themes():
+            tid = getattr(t, "id", "") or ""
+            if not tid:
+                continue
+            source, pid = _plugin_owner("theme_ids", tid)
+            publisher = pid if source == ExtensionSource.PLUGIN else "local"
+            out.append(ExtensionInfo(
+                id=make_ext_id(ExtensionKind.THEME, tid, publisher),
+                kind=ExtensionKind.THEME,
+                local_id=tid,
+                publisher=publisher,
+                name=getattr(t, "name", tid) or tid,
+                description=getattr(t, "description", "") or "",
+                icon=getattr(t, "icon", "") or "Palette",
+                source=source,
+                source_detail=pid,
+                status=ExtensionStatus.ENABLED,
+                sub_kind=getattr(t, "mode", "") or "",
+                detail_hint="themes/hub",
+            ))
+    except Exception:
+        pass
+    return out
+
+
+def list_exporter_extensions() -> List[ExtensionInfo]:
+    out: List[ExtensionInfo] = []
+    try:
+        from app.exporters.manager import exporter_manager
+        for e in exporter_manager.list_exporters():
+            eid = getattr(e, "id", "") or ""
+            if not eid:
+                continue
+            source, pid = _plugin_owner("exporter_ids", eid)
+            publisher = pid if source == ExtensionSource.PLUGIN else "local"
+            out.append(ExtensionInfo(
+                id=make_ext_id(ExtensionKind.EXPORTER, eid, publisher),
+                kind=ExtensionKind.EXPORTER,
+                local_id=eid,
+                publisher=publisher,
+                name=getattr(e, "name", eid) or eid,
+                description=getattr(e, "description", "") or "",
+                icon=getattr(e, "icon", "") or "FileOutput",
+                source=source,
+                source_detail=pid,
+                status=ExtensionStatus.ENABLED,
+                sub_kind=",".join(getattr(e, "accepts", []) or []),
+                detail_hint="export/hub",
+            ))
+    except Exception:
+        pass
+    return out
+
+
+def list_director_pack_extensions() -> List[ExtensionInfo]:
+    out: List[ExtensionInfo] = []
+    try:
+        from app.director_packs.manager import director_pack_manager
+        for p in director_pack_manager.list_packs():
+            pid = getattr(p, "id", "") or ""
+            if not pid:
+                continue
+            source, owner = _plugin_owner("director_pack_ids", pid)
+            publisher = owner if source == ExtensionSource.PLUGIN else "local"
+            preset_count = sum(len(v or []) for v in (getattr(p, "presets", {}) or {}).values())
+            out.append(ExtensionInfo(
+                id=make_ext_id(ExtensionKind.DIRECTOR_PACK, pid, publisher),
+                kind=ExtensionKind.DIRECTOR_PACK,
+                local_id=pid,
+                publisher=publisher,
+                name=getattr(p, "name", pid) or pid,
+                description=getattr(p, "description", "") or "",
+                icon=getattr(p, "icon", "") or "Clapperboard",
+                source=source,
+                source_detail=owner,
+                status=ExtensionStatus.ENABLED,
+                sub_kind=f"{preset_count} 预设/{(getattr(p, 'props', []) or []) and len(p.props)} 道具"
+                         if preset_count or getattr(p, "props", None) else "",
+                detail_hint="director/packs",
+            ))
+    except Exception:
+        pass
+    return out
+
+
 ADAPTERS = {
     ExtensionKind.PROVIDER: list_provider_extensions,
     ExtensionKind.SKILL: list_skill_extensions,
@@ -336,4 +454,8 @@ ADAPTERS = {
     ExtensionKind.PLUGIN: list_plugin_extensions,
     ExtensionKind.MCP_TOOL: list_mcp_tool_extensions,
     ExtensionKind.STORYBOARD_SLOT: list_storyboard_slot_extensions,
+    ExtensionKind.CANVAS_NODE: list_canvas_node_extensions,
+    ExtensionKind.THEME: list_theme_extensions,
+    ExtensionKind.EXPORTER: list_exporter_extensions,
+    ExtensionKind.DIRECTOR_PACK: list_director_pack_extensions,
 }

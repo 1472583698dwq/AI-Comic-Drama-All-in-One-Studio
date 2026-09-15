@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Boxes, Power, RefreshCw, Trash2, Activity, Search, Puzzle, AlertTriangle } from 'lucide-react';
+import { Boxes, Power, RefreshCw, Trash2, Activity, Search, Puzzle, AlertTriangle, Palette } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { useProjectStore } from '../../stores/useProjectStore';
+import { useThemeStore } from '../../stores/useThemeStore';
 import { confirmAsync, toast } from '../../stores/useDialogStore';
 
 const KIND_LABEL_FALLBACK: Record<string, string> = {
@@ -22,6 +23,8 @@ const STATUS_STYLE: Record<string, string> = {
  */
 export const ExtensionsCenterView: React.FC = () => {
   const projectId = useProjectStore((s) => s.project?.id) || undefined;
+  const activePluginThemeId = useThemeStore((s) => s.activePluginThemeId);
+  const applyPluginTheme = useThemeStore((s) => s.applyPluginTheme);
   const [items, setItems] = useState<any[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [kindsMeta, setKindsMeta] = useState<any>({ labels: KIND_LABEL_FALLBACK, placeholder: [], native_lifecycle: [], overlay_lifecycle: [] });
@@ -87,6 +90,10 @@ export const ExtensionsCenterView: React.FC = () => {
       const r = await apiService.setExtensionEnabled(e.id, e.status !== 'enabled', scope);
       setMsg(`${e.status === 'enabled' ? '已停用' : '已启用'} ${e.id}（${r?.mode || 'native'}${scope ? ' · 项目级' : ''}）`);
       await load();
+      // 前端各宿主热刷新（主题/画布节点/导出器/导演包）
+      for (const ev of ['theme-list-refresh', 'canvasnode-list-refresh', 'exporter-list-refresh', 'directorpacks-list-refresh']) {
+        try { window.dispatchEvent(new CustomEvent(ev)); } catch { /* ignore */ }
+      }
     } catch (err: any) {
       setMsg(err?.message || '操作失败');
     } finally {
@@ -213,6 +220,15 @@ export const ExtensionsCenterView: React.FC = () => {
                     {canToggle(e) && (
                       <button onClick={() => doToggle(e)} disabled={busy === e.id} className="flex-1 py-1 rounded-lg bg-surface border border-border text-[11px] text-gray-200 hover:border-brand disabled:opacity-40 flex items-center justify-center gap-1">
                         <Power className="w-3 h-3" />{e.status === 'enabled' ? '停用' : '启用'}
+                      </button>
+                    )}
+                    {e.kind === 'theme' && (
+                      <button
+                        onClick={() => applyPluginTheme(activePluginThemeId === e.local_id ? '' : e.local_id)}
+                        className={`flex-1 py-1 rounded-lg border text-[11px] flex items-center justify-center gap-1 ${activePluginThemeId === e.local_id ? 'bg-brand/20 border-brand/50 text-brand-light' : 'bg-surface border-border text-gray-200 hover:border-brand'}`}
+                        title={activePluginThemeId === e.local_id ? '取消应用（恢复默认变量）' : '应用该主题包（注入 CSS 变量）'}
+                      >
+                        <Palette className="w-3 h-3" />{activePluginThemeId === e.local_id ? '取消应用' : '应用主题'}
                       </button>
                     )}
                     {e.kind === 'plugin' && (

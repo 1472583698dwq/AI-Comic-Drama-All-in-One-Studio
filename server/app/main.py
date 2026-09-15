@@ -123,6 +123,26 @@ try:
     print("[Main] CustomNode routes mounted at /api/v1/custom-nodes")
 except Exception as e:
     print(f"[Main] CustomNode routes mount failed: {e}")
+# 声明式画布节点路由（canvas_nodes 声明 CRUD/单次执行）
+try:
+    from app.api.canvas_node_routes import router as canvas_node_router
+    app.include_router(canvas_node_router, prefix=settings.API_V1_STR)
+    print("[Main] CanvasNode routes mounted at /api/v1/canvas-nodes")
+except Exception as e:
+    print(f"[Main] CanvasNode routes mount failed: {e}")
+# 前端扩展点路由：主题包 / 导出器 / 导演包
+for _mod, _name, _path in (
+    ("app.api.theme_routes", "theme_router", "/api/v1/themes"),
+    ("app.api.exporter_routes", "exporter_router", "/api/v1/exporters"),
+    ("app.api.director_pack_routes", "director_pack_router", "/api/v1/director-packs"),
+):
+    try:
+        import importlib as _il
+        _r = getattr(_il.import_module(_mod), _name)
+        app.include_router(_r, prefix=settings.API_V1_STR)
+        print(f"[Main] FrontendExt routes mounted at {_path}")
+    except Exception as e:
+        print(f"[Main] FrontendExt routes mount failed ({_mod}): {e}")
 # 首次启动引导路由（安装向导状态）
 try:
     from app.api.setup_routes import router as setup_router

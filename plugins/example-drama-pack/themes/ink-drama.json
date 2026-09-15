@@ -1,0 +1,12 @@
+{
+  "id": "ink-drama",
+  "name": "水墨漫剧",
+  "description": "示例主题包：墨绿主色 + 青蓝点缀（扩展中心可应用/取消）",
+  "icon": "Palette",
+  "mode": "all",
+  "vars": {
+    "--color-brand": "#0f766e",
+    "--color-brand-light": "#14b8a6",
+    "--color-brand-glow": "#2dd4bf"
+  }
+}

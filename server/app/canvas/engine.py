@@ -875,6 +875,38 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
             if r.status=="success":
                 return {"status":"success","minimax_camera_prompt": r.result.get("minimax_camera_prompt"), "result": r.result, "elapsed_ms": r.execution_time_ms}
             return {"status":"error","error": r.error}
+        elif ntype in ("ext-node", "ext_node"):
+            # 声明式画布节点（canvas_nodes）：按声明收集输入/参数 → 统一执行口 → 输出端口映射
+            cnid = data.get("canvas_node_id") or data.get("canvasNodeId") or ""
+            if not cnid:
+                return {"status":"error","error":"未绑定扩展节点（canvas_node_id 为空）"}
+            try:
+                from app.canvas_nodes.manager import canvas_node_manager, run_canvas_node
+                spec = canvas_node_manager.get(cnid)
+                if not spec:
+                    return {"status":"error","error":f"扩展节点不存在: {cnid}"}
+                if not spec.enabled:
+                    return {"status":"error","error":f"扩展节点已禁用: {cnid}"}
+                inputs: Dict[str, Any] = {}
+                for port in spec.inputs:
+                    v = upstream.get(port.id, merged.get(port.id, None))
+                    if v not in (None, "", []):
+                        inputs[port.id] = v
+                declared_params = list((spec.params_schema or {}).get("properties") or {})
+                params: Dict[str, Any] = {}
+                for k in declared_params:
+                    v = merged.get(k, None)
+                    if v not in (None, "", []):
+                        params[k] = v
+                if isinstance(merged.get("params"), dict):
+                    for k, v in merged["params"].items():
+                        if v not in (None, "") and k not in params:
+                            params[k] = v
+                result = await run_canvas_node(spec, inputs, params, project_id=project_id)
+                result.setdefault("elapsed_ms", int((time.time()-start)*1000))
+                return result
+            except Exception as e:
+                return {"status":"error","error":f"扩展节点执行失败: {e}"}
         elif ntype == "asset":
             # 透传资产本身
             return {"status":"success","image_url": data.get("file_url") or data.get("thumb_url"), "visual_prompt": data.get("visual_prompt"), "asset": data}

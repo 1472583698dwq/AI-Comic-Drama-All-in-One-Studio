@@ -23,6 +23,8 @@ import { ProviderNode, ProviderImageNode, ProviderVideoNode, ProviderAudioNode }
 import { LoadImageNode, LoadImageBatchNode, LoadVideoNode, LoadAudioNode, TextPromptNode } from './nodes/LoaderNodes';
 import { PromptNode, ImageNode, VideoGenNode, AudioNode, Director3DMinimalNode, ExportNode } from './nodes/MinimalNodes';
 import { CustomNode } from './nodes/CustomNode';
+import { ExtNode } from './nodes/ExtNode';
+import { syncCanvasNodeSpecs, listCanvasNodeSpecs, getCanvasNodeSpec } from './canvasNodeSpecs';
 import { FloatingAgentPromptBar } from './FloatingAgentPromptBar';
 import { WorkflowInspectorModal } from '../workflow/WorkflowInspectorModal';
 import { getNodeSpec } from './nodeRegistry';
@@ -57,6 +59,7 @@ const nodeTypes: any = {
   'load-audio': LoadAudioNode,
   'text-prompt': TextPromptNode,
   'custom': CustomNode,
+  'ext-node': ExtNode,
 };
 
 let idSeq = 0;
@@ -104,6 +107,21 @@ const InnerCanvas: React.FC = () => {
     return () => window.removeEventListener('customnode-list-refresh', h as any);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // 声明式扩展节点（canvas_nodes）：插件前端扩展点，spec 驱动通用渲染
+  const [extNodes, setExtNodes] = useState<any[]>([]);
+  const refreshExtNodes = async () => {
+    try {
+      await syncCanvasNodeSpecs(pid || undefined);
+      setExtNodes(listCanvasNodeSpecs());
+    } catch {}
+  };
+  useEffect(() => {
+    refreshExtNodes();
+    const h = () => refreshExtNodes();
+    window.addEventListener('canvasnode-list-refresh', h as any);
+    return () => window.removeEventListener('canvasnode-list-refresh', h as any);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pid]);
   const [inspectWfId, setInspectWfId] = useState('');
   const [saving, setSaving] = useState(false);
   const [executingNodeIds, setExecutingNodeIds] = useState<Set<string>>(new Set());
@@ -314,10 +332,12 @@ const InnerCanvas: React.FC = () => {
         const r = (res as any)?.result || res;
         handleNodeUpdate(nodeId, { minimax_camera_prompt: r.minimax_camera_prompt || JSON.stringify(r).slice(0, 200), ...r });
       } else {
-        // 兼容旧节点：经由 Canvas DAG 引擎执行（复用 Provider 系统）
+        // 兼容旧节点 + 声明式扩展节点（ext-node）：经由 Canvas DAG 引擎执行（复用 Provider 系统）
         const d: any = { ...node.data, ...(customData || {}) };
+        if (node.type === 'ext-node') delete d.definition; // 大字段不上行，引擎按 canvas_node_id 重读声明
+        const projectId = (window as any).__activePid || useProjectStore.getState().project?.id || undefined;
         const API_ORIGIN = (window as any).location?.port === '5173' ? 'http://127.0.0.1:8000' : '';
-        const resp = await fetch(`${API_ORIGIN}/api/v1/canvas/node/execute`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ node: { id: nodeId, type: node.type, data: d }, project_id: (window as any).__activePid || undefined }) }).then(r=>r.json());
+        const resp = await fetch(`${API_ORIGIN}/api/v1/canvas/node/execute`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ node: { id: nodeId, type: node.type, data: d }, project_id: projectId }) }).then(r=>r.json());
         if (resp?.result?.status === 'success') {
           const rr = resp.result;
           const patch: any = {};
@@ -325,6 +345,8 @@ const InnerCanvas: React.FC = () => {
           if (rr.video_url) patch.video_url = rr.video_url;
           if (rr.audio_url) patch.audio_url = rr.audio_url;
           if (rr.prompt) patch.prompt = rr.prompt;
+          if (typeof rr.text === 'string' && rr.text) patch.text = rr.text;
+          if (rr.outputs && typeof rr.outputs === 'object') patch.outputs = rr.outputs;
           handleNodeUpdate(nodeId, patch);
         } else if (resp?.result?.error || resp?.detail) {
           throw new Error(resp.result?.error || resp.detail);
@@ -833,6 +855,7 @@ const InnerCanvas: React.FC = () => {
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     const type = e.dataTransfer.getData('application/canvas-nodetype');
+    const droppedNodeId = e.dataTransfer.getData('application/canvas-nodeid');
     const assetId = e.dataTransfer.getData('application/canvas-assetid');
     const assetUrl = e.dataTransfer.getData('text/plain');
     if (!type && !assetId && !assetUrl) return;
@@ -849,7 +872,10 @@ const InnerCanvas: React.FC = () => {
       return;
     }
     if (type) {
-      const node = createNode(type, position);
+      const extra = type === 'ext-node' && droppedNodeId
+        ? { canvas_node_id: droppedNodeId, definition: getCanvasNodeSpec(droppedNodeId) }
+        : undefined;
+      const node = createNode(type, position, extra);
       setNodes(nds => [...nds, node]);
       setSelectedNodeId(node.id);
     }
@@ -1023,6 +1049,44 @@ const InnerCanvas: React.FC = () => {
               {customNodes.length === 0 && (
                 <div className="col-span-2 p-3 rounded-2xl border border-dashed border-border text-[11px] [color:var(--color-text-muted)]">
                   暂无自定义节点，去设置 → 插件中心安装含节点的插件包
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* 声明式扩展节点（来自插件包 canvas_nodes，无需前端代码） */}
+          <div>
+            <div className="text-xs font-bold mb-2 [color:var(--color-text-main)] flex items-center gap-1.5">
+              扩展节点
+              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 font-mono">canvas_nodes</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {extNodes.map((s: any) => (
+                <div
+                  key={s.id}
+                  draggable
+                  onDragStart={e => {
+                    e.dataTransfer.setData('application/canvas-nodetype', 'ext-node');
+                    e.dataTransfer.setData('application/canvas-nodeid', s.id);
+                  }}
+                  onClick={() => {
+                    const pos = { x: 120 + nodes.length * 40, y: 120 + nodes.length * 40 };
+                    const node = createNode('ext-node', pos, { canvas_node_id: s.id, definition: s });
+                    setNodes(nds => [...nds, node]);
+                    setSelectedNodeId(node.id);
+                  }}
+                  className="flex flex-col gap-1.5 p-3 rounded-2xl bg-surface-secondary border border-border hover:border-cyan-500/40 hover:bg-surface-tertiary hover:shadow-md cursor-grab active:cursor-grabbing transition-all"
+                >
+                  <Wand2 className="w-5 h-5 text-cyan-400" />
+                  <div>
+                    <div className="text-xs font-bold [color:var(--color-text-main)] leading-none truncate">{s.name}</div>
+                    <div className="text-[10px] [color:var(--color-text-muted)] mt-1 truncate">{(s.inputs || []).length} 入 / {(s.outputs || []).length} 出 · {s.kind || 'utility'}</div>
+                  </div>
+                </div>
+              ))}
+              {extNodes.length === 0 && (
+                <div className="col-span-2 p-3 rounded-2xl border border-dashed border-border text-[11px] [color:var(--color-text-muted)]">
+                  暂无扩展节点：插件包声明 canvas_nodes 后在此出现
                 </div>
               )}
             </div>

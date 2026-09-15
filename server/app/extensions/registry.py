@@ -91,6 +91,11 @@ class ExtensionRegistry:
         args = dict(args or {})
         # 项目作用域：args.project_id 优先，其次显式 scope
         _scope = scope or str(args.get("project_id") or "")
+        # 作用域下沉：写 contextvar，使引擎级 guard（provider/skill/节点/工具）按项目强制停用
+        _scope_token = None
+        if _scope:
+            from . import guard as _guard
+            _scope_token = _guard.set_project_context(_scope)
         kind = ""
         try:
             ext = self.get(ext_id)
@@ -125,6 +130,10 @@ class ExtensionRegistry:
             telemetry.record(ext_id, False, ms, kind=kind, error=e,
                              timeout=isinstance(e, (TimeoutError,)))
             raise
+        finally:
+            if _scope_token is not None:
+                from . import guard as _guard
+                _guard.reset_project_context(_scope_token)
 
     async def _exec_skill(self, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         from app.skills.engine import skill_engine
@@ -151,6 +160,9 @@ class ExtensionRegistry:
         h = (_PLUGIN_TOOL_HANDLERS or {}).get(tool_name)
         if not h:
             raise ValueError(f"MCP 工具未注册（或所属插件已停用）: {tool_name}")
+        # 与正常 MCP 路径一致：查壳工具必须过可信总闸（与 fs_file/shell_exec 同闸）
+        from app.mcp.server import _trusted_gate_or_raise
+        _trusted_gate_or_raise()
         entry = h.get("entry") or tool_name
         pid = h.get("pid") or ""
         path = h.get("file") or ""

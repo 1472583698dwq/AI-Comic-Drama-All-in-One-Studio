@@ -56,6 +56,11 @@ class PluginRecord(BaseModel):
     skill_names: List[str] = Field(default_factory=list)
     workflow_ids: List[str] = Field(default_factory=list)
     mcp_tools: List[str] = Field(default_factory=list)
+    custom_nodes: List[str] = Field(default_factory=list)
+    canvas_nodes: List[str] = Field(default_factory=list)
+    theme_ids: List[str] = Field(default_factory=list)
+    exporter_ids: List[str] = Field(default_factory=list)
+    director_pack_ids: List[str] = Field(default_factory=list)
 
 
 # mcp_tools 查壳文件契约（P1）：每个 .py 须定义 PLUGIN_TOOLS 列表 + 同模块入口函数
@@ -93,8 +98,8 @@ EXTENSION_POINTS_DOC: Dict[str, str] = {
     "mcp_tools": "可用：在插件内声明新增MCP工具（python查壳函数+schema），注册为 plugin_<id>_<name>，执行强制走trusted总闸",
     "custom_nodes": "可用：代码节点包（input_schema+params_schema+run代码JSON），启用后体检入库并出现在画布工具栏",
     "storyboard_slots": "可用：分镜工作台槽贡献（slot/id/label/order/when JSON），启用后挂载到对应 Slot 宿主",
-    "canvas_nodes": "未落地（占位）：声明新画布节点类型（NodeSpec+组件），需前端贡献点注册",
-    "director_packs": "未落地（占位）：导演台扩展包（预设/环境/道具/GLB），复用directorPresets同源机制",
-    "exporters": "未落地（占位）：新导出目标（CapCut/FFmpeg/MP4），复用ExportModal装配",
-    "themes": "未落地（占位）：主题变量包",
+    "canvas_nodes": "可用：声明式画布节点（inputs/outputs/params_schema + run.extension 指向 provider|skill|custom_node|mcp_tool），启用后出现在画布工具栏，无需前端代码",
+    "themes": "可用：CSS 变量主题包（vars: --xxx → 值，mode: all|dark|light），启用后在扩展中心可应用/取消",
+    "exporters": "可用：声明式导出器（accepts 载荷 + run.extension），启用后出现在导出中心",
+    "director_packs": "可用：导演台扩展包（presets 景别/运镜/姿态/站位 + environments 背景底图 + props GLB），启用后注入 3D 导演台",
 }

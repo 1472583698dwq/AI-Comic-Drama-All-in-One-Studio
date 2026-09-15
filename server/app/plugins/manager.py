@@ -294,7 +294,7 @@ def install_from_dir(src_dir: str) -> PluginManifest:
         idx.setdefault("plugins", {})[m.id] = {
             "version": m.version, "enabled": False, "installed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "installed_files": [], "provider_ids": [], "skill_names": [], "workflow_ids": [], "mcp_tools": [],
-            "custom_nodes": [],
+            "custom_nodes": [], "canvas_nodes": [], "theme_ids": [], "exporter_ids": [], "director_pack_ids": [],
         }
         _save_index(idx)
     return m
@@ -521,10 +521,10 @@ def _enable_locked(pid: str) -> Dict[str, Any]:
     if deps["disabled"]:
         raise ValueError(f"依赖插件尚未启用: {', '.join(deps['disabled'])}")
     idx = _load_index()
-    rec = idx.setdefault("plugins", {}).setdefault(pid, {"version": m.version, "enabled": False, "installed_at": "", "installed_files": [], "provider_ids": [], "skill_names": [], "workflow_ids": [], "mcp_tools": [], "custom_nodes": []})
+    rec = idx.setdefault("plugins", {}).setdefault(pid, {"version": m.version, "enabled": False, "installed_at": "", "installed_files": [], "provider_ids": [], "skill_names": [], "workflow_ids": [], "mcp_tools": [], "custom_nodes": [], "canvas_nodes": [], "theme_ids": [], "exporter_ids": [], "director_pack_ids": []})
     if rec.get("enabled"):
         return {"id": pid, "enabled": True, "note": "已启用，无需重复操作"}
-    summary: Dict[str, Any] = {"providers": [], "skills": [], "workflows": [], "mcp_tools": [], "custom_nodes": [], "warnings": []}
+    summary: Dict[str, Any] = {"providers": [], "skills": [], "workflows": [], "mcp_tools": [], "custom_nodes": [], "canvas_nodes": [], "themes": [], "exporters": [], "director_packs": [], "warnings": []}
     installed_files: List[str] = []
     provider_ids: List[str] = []
     skill_names: List[str] = []
@@ -665,6 +665,102 @@ def _enable_locked(pid: str) -> Dict[str, Any]:
     except Exception as e:
         summary["warnings"].append(f"custom_nodes子系统不可用: {e}")
 
+    # —— canvas_nodes：声明式画布节点（JSON），体检入库 + 画布工具栏动态挂载 ——
+    canvas_ids: List[str] = []
+    try:
+        from app.canvas_nodes.manager import canvas_node_manager
+        from app.canvas_nodes.models import CanvasNodeSpec as _CNS
+        for rel in _glob_kind(pdir, m.extensionPoints.canvas_nodes):
+            if not rel.lower().endswith(".json"):
+                summary["warnings"].append(f"跳过非JSON: {rel}")
+                continue
+            try:
+                with open(os.path.join(pdir, rel), "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+                definition = _CNS.model_validate(payload)
+                if canvas_node_manager.get(definition.id):
+                    summary["warnings"].append(f"已存在同名节点已跳过: {definition.id}")
+                    continue
+                saved = canvas_node_manager.save(definition)
+                canvas_ids.append(saved.id)
+                summary["canvas_nodes"].append({"id": saved.id, "kind": saved.kind})
+            except Exception as e:
+                summary["warnings"].append(f"画布节点失败 {rel}: {e}")
+    except Exception as e:
+        summary["warnings"].append(f"canvas_nodes子系统不可用: {e}")
+
+    # —— themes：主题变量包（JSON），入库 + 前端主题选择器可见 ——
+    theme_ids: List[str] = []
+    try:
+        from app.themes.manager import theme_manager
+        from app.themes.models import ThemeSpec as _TS
+        for rel in _glob_kind(pdir, m.extensionPoints.themes):
+            if not rel.lower().endswith(".json"):
+                summary["warnings"].append(f"跳过非JSON: {rel}")
+                continue
+            try:
+                with open(os.path.join(pdir, rel), "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+                spec = _TS.model_validate(payload)
+                if theme_manager.get(spec.id):
+                    summary["warnings"].append(f"已存在同名主题已跳过: {spec.id}")
+                    continue
+                saved = theme_manager.save(spec)
+                theme_ids.append(saved.id)
+                summary["themes"].append({"id": saved.id, "mode": saved.mode})
+            except Exception as e:
+                summary["warnings"].append(f"主题失败 {rel}: {e}")
+    except Exception as e:
+        summary["warnings"].append(f"themes子系统不可用: {e}")
+
+    # —— exporters：声明式导出器（JSON），入库 + 导出中心可见 ——
+    exporter_ids: List[str] = []
+    try:
+        from app.exporters.manager import exporter_manager
+        from app.exporters.models import ExporterSpec as _ES
+        for rel in _glob_kind(pdir, m.extensionPoints.exporters):
+            if not rel.lower().endswith(".json"):
+                summary["warnings"].append(f"跳过非JSON: {rel}")
+                continue
+            try:
+                with open(os.path.join(pdir, rel), "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+                spec = _ES.model_validate(payload)
+                if exporter_manager.get(spec.id):
+                    summary["warnings"].append(f"已存在同名导出器已跳过: {spec.id}")
+                    continue
+                saved = exporter_manager.save(spec)
+                exporter_ids.append(saved.id)
+                summary["exporters"].append({"id": saved.id, "extension": saved.run.extension})
+            except Exception as e:
+                summary["warnings"].append(f"导出器失败 {rel}: {e}")
+    except Exception as e:
+        summary["warnings"].append(f"exporters子系统不可用: {e}")
+
+    # —— director_packs：导演台扩展包（JSON），入库 + 导演台预设/道具/环境可见 ——
+    pack_ids: List[str] = []
+    try:
+        from app.director_packs.manager import director_pack_manager
+        from app.director_packs.models import DirectorPackSpec as _DS
+        for rel in _glob_kind(pdir, m.extensionPoints.director_packs):
+            if not rel.lower().endswith(".json"):
+                summary["warnings"].append(f"跳过非JSON: {rel}")
+                continue
+            try:
+                with open(os.path.join(pdir, rel), "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+                spec = _DS.model_validate(payload)
+                if director_pack_manager.get(spec.id):
+                    summary["warnings"].append(f"已存在同名导演包已跳过: {spec.id}")
+                    continue
+                saved = director_pack_manager.save(spec)
+                pack_ids.append(saved.id)
+                summary["director_packs"].append({"id": saved.id})
+            except Exception as e:
+                summary["warnings"].append(f"导演包失败 {rel}: {e}")
+    except Exception as e:
+        summary["warnings"].append(f"director_packs子系统不可用: {e}")
+
     try:
         from app.mcp.server import mcp_registry
         mcp_registry.refresh_provider_tools()
@@ -675,7 +771,8 @@ def _enable_locked(pid: str) -> Dict[str, Any]:
                 "installed_at": rec.get("installed_at") or time.strftime("%Y-%m-%d %H:%M:%S"),
                 "installed_files": installed_files, "provider_ids": provider_ids,
                 "skill_names": skill_names, "workflow_ids": workflow_ids, "mcp_tools": registered_tools,
-                "custom_nodes": custom_ids})
+                "custom_nodes": custom_ids, "canvas_nodes": canvas_ids,
+                "theme_ids": theme_ids, "exporter_ids": exporter_ids, "director_pack_ids": pack_ids})
     _save_index(idx)
     summary.update({"id": pid, "enabled": True})
     return summary
@@ -755,6 +852,48 @@ def _disable_locked(pid: str) -> Dict[str, Any]:
             pass
     except Exception as e:
         warnings.append(f"custom_nodes子系统不可用: {e}")
+    # 声明式画布节点：删定义（仅追踪到的id）
+    try:
+        from app.canvas_nodes.manager import canvas_node_manager
+        for cnid in rec.get("canvas_nodes", []):
+            try:
+                canvas_node_manager.delete(cnid)
+            except Exception as e:
+                warnings.append(f"画布节点删除失败 {cnid}: {e}")
+            removed.append(f"canvas_node:{cnid}")
+    except Exception as e:
+        warnings.append(f"canvas_nodes子系统不可用: {e}")
+    # 主题包 / 导出器 / 导演包：删定义（仅追踪到的id）
+    try:
+        from app.themes.manager import theme_manager
+        for tid in rec.get("theme_ids", []):
+            try:
+                theme_manager.delete(tid)
+            except Exception as e:
+                warnings.append(f"主题删除失败 {tid}: {e}")
+            removed.append(f"theme:{tid}")
+    except Exception as e:
+        warnings.append(f"themes子系统不可用: {e}")
+    try:
+        from app.exporters.manager import exporter_manager
+        for eid in rec.get("exporter_ids", []):
+            try:
+                exporter_manager.delete(eid)
+            except Exception as e:
+                warnings.append(f"导出器删除失败 {eid}: {e}")
+            removed.append(f"exporter:{eid}")
+    except Exception as e:
+        warnings.append(f"exporters子系统不可用: {e}")
+    try:
+        from app.director_packs.manager import director_pack_manager
+        for dpid in rec.get("director_pack_ids", []):
+            try:
+                director_pack_manager.delete(dpid)
+            except Exception as e:
+                warnings.append(f"导演包删除失败 {dpid}: {e}")
+            removed.append(f"director_pack:{dpid}")
+    except Exception as e:
+        warnings.append(f"director_packs子系统不可用: {e}")
     # 落盘文件：仅删追踪到的
     for fp in rec.get("installed_files", []):
         try:
@@ -781,7 +920,7 @@ def _disable_locked(pid: str) -> Dict[str, Any]:
         mcp_registry.refresh_provider_tools()
     except Exception:
         pass
-    rec.update({"enabled": False, "installed_files": [], "provider_ids": [], "skill_names": [], "workflow_ids": [], "mcp_tools": [], "custom_nodes": []})
+    rec.update({"enabled": False, "installed_files": [], "provider_ids": [], "skill_names": [], "workflow_ids": [], "mcp_tools": [], "custom_nodes": [], "canvas_nodes": [], "theme_ids": [], "exporter_ids": [], "director_pack_ids": []})
     _save_index(idx)
     return {"id": pid, "enabled": False, "removed": removed, "warnings": warnings}
 

@@ -945,10 +945,10 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
-  async executeExtension(extId: string, args?: Record<string, any>, entry?: string): Promise<any> {
+  async executeExtension(extId: string, args?: Record<string, any>, entry?: string, projectId?: string): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/extensions/execute`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: extId, args: args || {}, entry }),
+      body: JSON.stringify({ id: extId, args: args || {}, entry, project_id: projectId || undefined }),
     });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
@@ -1043,6 +1043,89 @@ export const apiService = {
   },
   async customNodeTemplates(): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/custom-nodes/templates`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  // 声明式画布节点（canvas_nodes 插件前端扩展点）
+  async listCanvasNodes(projectId?: string): Promise<{ nodes: any[]; total: number }> {
+    const qs = projectId ? `?project_id=${encodeURIComponent(projectId)}` : '';
+    const res = await fetch(`${API_BASE_URL}/canvas-nodes${qs}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async getCanvasNode(id: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/canvas-nodes/${encodeURIComponent(id)}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async saveCanvasNode(spec: Record<string, any>): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/canvas-nodes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(spec) });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async deleteCanvasNode(id: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/canvas-nodes/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async runCanvasNode(payload: { canvas_node_id: string; inputs?: Record<string, any>; params?: Record<string, any>; project_id?: string }): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/canvas-nodes/run`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  // 主题包（themes）
+  async listThemes(projectId?: string): Promise<{ themes: any[]; total: number }> {
+    const qs = projectId ? `?project_id=${encodeURIComponent(projectId)}` : '';
+    const res = await fetch(`${API_BASE_URL}/themes${qs}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async saveTheme(spec: Record<string, any>): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/themes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(spec) });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async deleteTheme(id: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/themes/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  // 导出器（exporters）
+  async listExporters(projectId?: string): Promise<{ exporters: any[]; total: number }> {
+    const qs = projectId ? `?project_id=${encodeURIComponent(projectId)}` : '';
+    const res = await fetch(`${API_BASE_URL}/exporters${qs}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async saveExporter(spec: Record<string, any>): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/exporters`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(spec) });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async deleteExporter(id: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/exporters/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async runExporter(payload: { exporter_id: string; payload?: Record<string, any>; project_id?: string }): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/exporters/run`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  // 导演包（director_packs）
+  async listDirectorPacks(projectId?: string): Promise<{ packs: any[]; total: number }> {
+    const qs = projectId ? `?project_id=${encodeURIComponent(projectId)}` : '';
+    const res = await fetch(`${API_BASE_URL}/director-packs${qs}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async saveDirectorPack(spec: Record<string, any>): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/director-packs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(spec) });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async deleteDirectorPack(id: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/director-packs/${encodeURIComponent(id)}`, { method: 'DELETE' });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
