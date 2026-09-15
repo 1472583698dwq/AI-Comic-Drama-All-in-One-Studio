@@ -31,6 +31,9 @@ class CustomNodeDefinition(BaseModel):
     enabled: bool = True
     language: str = "python"  # python | javascript
     code: str = ""
+    # 插件包写法：代码放真实文件（相对 plugin.json 的包内路径），启用时由插件管理器读入 code。
+    # 与 code 同时存在时 inline code 优先；裸件/UI 创建仍用 code。
+    code_file: str = ""
     code_entry: str = "run"
     code_timeout: int = 1200
     trusted: bool = False

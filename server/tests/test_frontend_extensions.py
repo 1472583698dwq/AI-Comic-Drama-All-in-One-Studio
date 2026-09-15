@@ -191,5 +191,124 @@ class TestPluginContribution(_TempStorage):
             shutil.rmtree(src, ignore_errors=True)
 
 
+class TestCodeFileResolution(_TempStorage):
+    """插件包真实代码文件（code_file）解析。"""
+
+    def _make_pack(self, code_file="code/node.py", write_file=True, content=None,
+                   extra_doc=None, providers=False):
+        src = tempfile.mkdtemp(prefix="cf_plugin_")
+        ext = {"providers": ["providers/*.json"]} if providers else {"custom_nodes": ["custom_nodes/*.json"]}
+        with open(os.path.join(src, "plugin.json"), "w", encoding="utf-8") as f:
+            json.dump({"id": "cf-pack", "name": "代码文件包", "version": "1.0.0",
+                       "extensionPoints": ext}, f)
+        sub = "providers" if providers else "custom_nodes"
+        os.makedirs(os.path.join(src, sub), exist_ok=True)
+        if providers:
+            doc = {"id": "prov_cf", "name": "文件源", "kind": "image", "language": "python",
+                   "code_file": code_file, "code_entry": "generate",
+                   "input_schema": {"type": "object", "properties": {"prompt": {"type": "string", "x-handle": "text"}}}}
+        else:
+            doc = {"id": "cf_node", "name": "文件节点", "kind": "utility", "language": "python",
+                   "code_file": code_file, "code_entry": "run",
+                   "input_schema": {"type": "object", "properties": {}}}
+        if extra_doc:
+            doc.update(extra_doc)
+        with open(os.path.join(src, sub, "item.json"), "w", encoding="utf-8") as f:
+            json.dump(doc, f)
+        if write_file:
+            fpath = os.path.join(src, code_file.replace("/", os.sep))
+            os.makedirs(os.path.dirname(fpath) or src, exist_ok=True)
+            with open(fpath, "w", encoding="utf-8") as f:
+                f.write(content if content is not None else
+                        "async def run(inputs, params, ctx):\n    return {'text': 'from-file'}\n")
+        return src
+
+    def test_custom_node_code_file_loaded_and_reloaded(self):
+        from app.plugins import manager as pm
+        from app.custom_nodes.manager import custom_node_manager
+        src = self._make_pack()
+        try:
+            pm.install_from_dir(src)
+            summary = pm.enable("cf-pack")
+            node = custom_node_manager.get("cf_node")
+            self.assertIsNotNone(node)
+            self.assertIn("from-file", node.code)
+            self.assertFalse(any("code_file" in w for w in summary.get("warnings", [])))
+            # 修改"已安装"副本 → reload 后重读文件
+            installed = os.path.join(settings.STORAGE_DIR, "plugins", "cf-pack", "code", "node.py")
+            with open(installed, "w", encoding="utf-8") as f:
+                f.write("async def run(inputs, params, ctx):\n    return {'text': 'v2'}\n")
+            pm.reload_plugin("cf-pack")
+            self.assertIn("v2", custom_node_manager.get("cf_node").code)
+        finally:
+            pm.uninstall("cf-pack")
+            shutil.rmtree(src, ignore_errors=True)
+
+    def test_provider_code_file_loaded(self):
+        from app.plugins import manager as pm
+        from app.providers.custom.manager import custom_provider_manager
+        src = self._make_pack(code_file="code/prov.py", providers=True,
+                              content="async def generate(ctx, api):\n    return {'image_url': 'https://x/y.png'}\n")
+        try:
+            pm.install_from_dir(src)
+            summary = pm.enable("cf-pack")
+            self.assertFalse(any("prov_cf" in w and "失败" in w for w in summary.get("warnings", [])))
+            d = custom_provider_manager.get_definition("prov_cf")
+            self.assertIsNotNone(d)
+            self.assertIn("generate(ctx, api)", d.code or "")
+        finally:
+            pm.uninstall("cf-pack")
+            shutil.rmtree(src, ignore_errors=True)
+
+    def test_missing_and_escape_warn(self):
+        from app.plugins import manager as pm
+        from app.custom_nodes.manager import custom_node_manager
+        for code_file, write, keyword in (("code/missing.py", False, "不存在"),
+                                          ("../evil.py", False, "越界"),
+                                          ("code/node.js", True, "不匹配")):
+            src = self._make_pack(code_file=code_file, write_file=write,
+                                  content="x = 1\n" if code_file.endswith(".js") else None)
+            try:
+                pm.install_from_dir(src)
+                summary = pm.enable("cf-pack")
+                self.assertTrue(any(keyword in w for w in summary.get("warnings", [])),
+                                f"{code_file} 应触发 warning（{keyword}），实际 {summary.get('warnings')}")
+                self.assertIsNone(custom_node_manager.get("cf_node"))
+            finally:
+                pm.uninstall("cf-pack")
+                shutil.rmtree(src, ignore_errors=True)
+
+    def test_inline_code_wins_with_warning(self):
+        from app.plugins import manager as pm
+        from app.custom_nodes.manager import custom_node_manager
+        src = self._make_pack(extra_doc={"code": "async def run(inputs, params, ctx):\n    return {'text': 'inline'}\n"})
+        try:
+            pm.install_from_dir(src)
+            summary = pm.enable("cf-pack")
+            self.assertTrue(any("已内联" in w for w in summary.get("warnings", [])))
+            self.assertIn("inline", custom_node_manager.get("cf_node").code)
+        finally:
+            pm.uninstall("cf-pack")
+            shutil.rmtree(src, ignore_errors=True)
+
+    def test_example_pack_uses_real_code_file(self):
+        from app.plugins.manager import _resolve_code_ref
+        from app.custom_nodes.models import CustomNodeDefinition
+        from app.custom_nodes.manager import custom_node_manager, run_custom_node
+        pack = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..",
+                                            "plugins", "example-drama-pack"))
+        with open(os.path.join(pack, "custom_nodes", "upscale_demo.json"), "r", encoding="utf-8") as f:
+            doc = CustomNodeDefinition.model_validate(json.load(f))
+        self.assertTrue(doc.code_file)
+        self.assertFalse((doc.code or "").strip())
+        _resolve_code_ref(pack, "custom_nodes/upscale_demo.json", doc)
+        self.assertIn("async def run", doc.code)
+        # 解析后的真实代码可入库并通过沙箱执行
+        saved = custom_node_manager.save(doc)
+        res = asyncio.run(run_custom_node(saved, {"video": "/storage/videos/x.mp4"}, {"scale": 3}))
+        self.assertEqual(res.get("text"), "upscaled x3")
+        self.assertEqual(res.get("video_url"), "/storage/videos/x.mp4")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

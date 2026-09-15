@@ -101,6 +101,9 @@ class ProviderDefinition(BaseModel):
     # === 代码生成源（唯一执行方式，JSON 模板已废弃） ===
     language: CodeLanguage = "python"
     code: Optional[str] = None  # 完整源码
+    # 插件包写法：代码放真实文件（相对 plugin.json 的包内路径），启用时由插件管理器读入 code。
+    # 与 code 同时存在时 inline code 优先；裸件/UI 创建仍用 code。
+    code_file: Optional[str] = None
     code_entry: str = "generate"
     code_timeout: int = 1200
     # === 可信模式（A档最小闭环）：trusted=True 时跳出受限沙箱，可执行任意代码 ===

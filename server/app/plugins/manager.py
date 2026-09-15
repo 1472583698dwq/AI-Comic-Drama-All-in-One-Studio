@@ -188,6 +188,43 @@ def _glob_kind(root: str, patterns: List[str]) -> List[str]:
     return uniq[:_MAX_PER_KIND]
 
 
+_CODE_FILE_EXT = {"python": (".py",), "javascript": (".js", ".mjs")}
+
+
+def _resolve_code_ref(pdir: str, rel: str, obj: Any,
+                      warning_sink: Optional[List[str]] = None) -> None:
+    """插件包 code_file 解析：把包内真实代码文件读入对象的 code 字段。
+
+    - code_file 为相对 plugin.json 的包内路径，统一过路径围栏（禁 .. / 绝对路径 / 盘符）；
+    - code 已内联时优先（code_file 忽略并告警）；扩展名须与 language 匹配；文件 ≤1MB。
+    """
+    cf = str(getattr(obj, "code_file", "") or "").strip()
+    if not cf:
+        return
+    inline = str(getattr(obj, "code", "") or "").strip()
+    if inline:
+        if warning_sink is not None:
+            warning_sink.append(f"{rel}: 已内联 code，忽略 code_file={cf}")
+        return
+    safe = _safe_rel(pdir, cf)
+    fpath = os.path.join(pdir, safe)
+    if not os.path.isfile(fpath):
+        raise ValueError(f"code_file 不存在: {cf}")
+    if os.path.getsize(fpath) > _MAX_FILE:
+        raise ValueError(f"code_file 超限1MB: {cf}")
+    try:
+        with open(fpath, "r", encoding="utf-8") as f:
+            code = f.read()
+    except Exception as e:
+        raise ValueError(f"code_file 读取失败: {cf}: {e}")
+    lang = str(getattr(obj, "language", "") or "python").lower()
+    ext = os.path.splitext(fpath)[1].lower()
+    allowed = _CODE_FILE_EXT.get(lang, ())
+    if allowed and ext not in allowed:
+        raise ValueError(f"code_file 扩展名与 language 不匹配: {cf}（{lang} 需 {list(allowed)}）")
+    setattr(obj, "code", code)
+
+
 def validate_manifest_dict(data: Dict[str, Any]) -> PluginManifest:
     m = PluginManifest.model_validate(data)
     if not _ID_RE.match(m.id):
@@ -546,6 +583,7 @@ def _enable_locked(pid: str) -> Dict[str, Any]:
             with open(os.path.join(pdir, rel), "r", encoding="utf-8") as f:
                 payload = json.load(f)
             definition = ProviderDefinition.model_validate(payload)
+            _resolve_code_ref(pdir, rel, definition, summary["warnings"])
             if custom_provider_manager.get_definition(definition.id):
                 summary["warnings"].append(f"已存在同名源已跳过: {definition.id}")
                 continue
@@ -648,6 +686,7 @@ def _enable_locked(pid: str) -> Dict[str, Any]:
                 with open(os.path.join(pdir, rel), "r", encoding="utf-8") as f:
                     payload = json.load(f)
                 definition = _CND.model_validate(payload)
+                _resolve_code_ref(pdir, rel, definition, summary["warnings"])
                 if custom_node_manager.get(definition.id):
                     summary["warnings"].append(f"已存在同名节点已跳过: {definition.id}")
                     continue
