@@ -102,7 +102,7 @@ Compress-Archive -Path hello-pack\* -DestinationPath hello-pack.zip
 | `providers` | `providers/*.json` | ✅ Python/JS | 生成源管理、画布节点、分镜参数面板 | 受限沙箱（`trusted` 可越） |
 | `skills` | `skills/*/SKILL.md` | ❌（提示词） | 技能工坊/Agent | LLM 分支 / 工具编排 |
 | `workflows` | `workflows/*.json` | ❌（图） | ComfyUI 工作流库 + 自动生成 `comfyui_wf_*` 源 | ComfyUI 进程 |
-| `custom_nodes` | `custom_nodes/*.json` | ✅ Python/JS 内嵌 | 画布「自定义节点」 | 受限沙箱（`trusted` 可越） |
+| `custom_nodes` | `custom_nodes/*.json` | ✅ Python/JS（内联或 `code_file`） | 画布「自定义节点」 | 受限沙箱（`trusted` 可越） |
 | `canvas_nodes` | `canvas_nodes/*.json` | ❌ 声明式 | 画布「扩展节点」 | 调可执行扩展 |
 | `storyboard_slots` | `slots/*.json` | ❌ 声明式 | 分镜检查器 Tab/锚点/动作/模式 | 本地动作或调扩展 |
 | `themes` | `themes/*.json` | ❌ | 扩展中心「应用主题」 | CSS 变量注入 |
@@ -418,13 +418,26 @@ tools: []
 
 ### 4.4 custom_nodes — 代码节点（画布）
 
+**与 4.5 `canvas_nodes` 的关系**（一句话：前者是"代码"，后者是"声明"）：
+
+| | `custom_nodes` | `canvas_nodes` |
+|---|---|---|
+| 本质 | 一段可执行代码（Python/JS） | 一份 JSON 声明，**无代码** |
+| 能力来源 | 自己的 `run(inputs, params, ctx)` | `run.extension` 指向可执行扩展（`custom_node:` / `provider:` / `skill:` / `mcp_tool:`） |
+| 画布落点 | 工具栏「自定义节点」区 | 工具栏「扩展节点」区 |
+| 典型用途 | 写一个真实算子（超分、特定模型调用） | 换皮/编排/预设（包装算子、拼参数映射） |
+| 复用 | 一个 custom_node 可被多个 canvas_node 包装 | canvas_node 之间互不复用，只编排 |
+
+示例包正是这套配合：`canvas_nodes/upscale_ext.json` 包装 `custom_nodes/upscale_demo.json`。
+
 JSON 字段：
 
 | 字段 | 说明 |
 |---|---|
 | `id` / `name` / `kind` | kind ∈ `image/video/audio/utility` |
 | `language` | `python` / `javascript` |
-| `code` | 内嵌源码，入口 `async def run(inputs, params, ctx)` / `async function run(inputs, params, ctx)` |
+| `code` | 内联源码，入口 `async def run(inputs, params, ctx)` / `async function run(inputs, params, ctx)` |
+| `code_file` | 插件包推荐：包内真实代码文件路径（相对 `plugin.json`），启用时读入 `code`；与内联同时存在时**内联优先** |
 | `code_entry` / `code_timeout` / `trusted` | 同 provider |
 | `input_schema` | 输入槽（`x-handle` 决定句柄类型） |
 | `params_schema` / `default_params` | 参数表单（同 provider 的 `x-*` 规范） |
