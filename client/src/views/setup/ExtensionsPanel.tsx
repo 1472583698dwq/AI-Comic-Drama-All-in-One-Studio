@@ -2,12 +2,13 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Package, Power, RefreshCw, Trash2, Search, Upload, Loader2,
   Plug, Workflow, Puzzle, Boxes, Sparkles, Cpu, Palette, Eye, EyeOff,
-  Edit3, Plug2, FileCode2, Copy, Check,
+  Edit3, Plug2, FileCode2, Copy, Check, FileSearch,
 } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { toast, confirmAsync } from '../../stores/useDialogStore';
 import { useThemeStore } from '../../stores/useThemeStore';
 import { WorkflowInspectorModal } from '../../components/workflow/WorkflowInspectorModal';
+import { ExtensionDetailDrawer } from './ExtensionDetailDrawer';
 
 /** 11 类扩展的中文名与一句话解释（与后端 ExtensionKind 对齐） */
 const KIND_META: Record<string, { label: string; desc: string }> = {
@@ -30,8 +31,10 @@ const SOURCE_META: Record<string, { label: string; cls: string }> = {
   plugin:     { label: '来自插件', cls: 'text-violet-300 border-violet-500/40 bg-violet-500/10' },
 };
 
-/** 哪些 kind 真有编辑入口（其余要么只能整包替换，要么完全不可改） */
-const EDITABLE_KINDS = new Set(['provider', 'workflow']);
+/** 哪些 kind 有编辑入口 */
+const EDITABLE_KINDS = new Set(['provider', 'workflow', 'skill']);
+/** 没有写接口、只能看的 kind */
+const PREVIEW_KINDS = new Set(['mcp_tool']);
 /** 哪些 kind 能单独跑连通测试 */
 const TESTABLE_KINDS = new Set(['provider']);
 /** 哪些 kind 有删除接口 */
@@ -50,6 +53,7 @@ export const ExtensionsPanel: React.FC = () => {
   const [showBuiltin, setShowBuiltin] = useState(false);
   const [tests, setTests] = useState<Record<string, { running?: boolean; ok?: boolean; detail?: string }>>({});
   const [inspectWfId, setInspectWfId] = useState('');
+  const [detailExt, setDetailExt] = useState<any>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const activePluginThemeId = useThemeStore((st) => st.activePluginThemeId);
   const applyPluginTheme = useThemeStore((st) => st.applyPluginTheme);
@@ -155,6 +159,7 @@ export const ExtensionsPanel: React.FC = () => {
   /** 编辑：先取完整定义再开弹窗，避免弹窗先出空壳再填充 */
   const editExt = async (e: any) => {
     if (e.kind === 'workflow') { setInspectWfId(e.local_id); return; }
+    if (e.kind === 'skill' || PREVIEW_KINDS.has(e.kind)) { setDetailExt(e); return; }
     if (e.kind !== 'provider') return;
     setBusy(e.id);
     try {
@@ -339,6 +344,9 @@ export const ExtensionsPanel: React.FC = () => {
                         <Act onClick={() => editExt(e)} disabled={busy === e.id}
                           icon={busy === e.id ? Loader2 : Edit3} spin={busy === e.id} label="编辑" />
                       )}
+                      {PREVIEW_KINDS.has(e.kind) && (
+                        <Act onClick={() => setDetailExt(e)} icon={FileSearch} label="预览" />
+                      )}
                       {TESTABLE_KINDS.has(e.kind) && (
                         <Act onClick={() => testExt(e)} disabled={t.running}
                           icon={t.running ? Loader2 : Plug2} spin={t.running} label={t.running ? '测试中' : '测试'} />
@@ -371,6 +379,14 @@ export const ExtensionsPanel: React.FC = () => {
           )}
         </div>
       </section>
+
+      {detailExt && (
+        <ExtensionDetailDrawer
+          ext={detailExt}
+          onClose={() => setDetailExt(null)}
+          onSaved={load}
+        />
+      )}
 
       {inspectWfId && (
         <WorkflowInspectorModal

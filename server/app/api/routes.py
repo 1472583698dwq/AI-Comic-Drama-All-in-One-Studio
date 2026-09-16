@@ -104,6 +104,23 @@ async def execute_skill(req: SkillExecuteRequest):
         if _tok is not None:
             guard.reset_project_context(_tok)
 
+@router.get("/skills/{skill_name}/raw")
+async def get_skill_raw(skill_name: str):
+    """读取技能的原始 SKILL.md 全文，供编辑器无损往返（改完用 /skills/import 覆盖保存）。"""
+    sk = skill_engine.get_skill(skill_name)
+    if not sk or not getattr(sk, "file_path", ""):
+        raise HTTPException(status_code=404, detail=f"未找到技能: {skill_name}")
+    fp = sk.file_path
+    if not os.path.exists(fp):
+        raise HTTPException(status_code=404, detail=f"技能文件不存在: {fp}")
+    try:
+        with open(fp, "r", encoding="utf-8") as f:
+            content = f.read()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取失败: {e}")
+    return {"name": skill_name, "file_path": fp, "content": content}
+
+
 @router.post("/skills/import")
 async def import_skill(
     file: UploadFile = File(None),

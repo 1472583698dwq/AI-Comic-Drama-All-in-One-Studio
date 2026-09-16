@@ -375,6 +375,11 @@ export const apiService = {
     return await res.json();
   },
 
+  async getSkillRaw(name: string): Promise<{ name: string; file_path: string; content: string }> {
+    const res = await fetch(`${API_BASE_URL}/skills/${encodeURIComponent(name)}/raw`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
   async importSkill(file?: File, content?: string, nameOverwrite?: string): Promise<any> {
     const fd = new FormData();
     if (file) fd.append('file', file);

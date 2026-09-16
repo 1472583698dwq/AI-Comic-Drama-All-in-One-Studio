@@ -263,10 +263,35 @@ def list_plugin_extensions() -> List[ExtensionInfo]:
 
 def list_mcp_tool_extensions() -> List[ExtensionInfo]:
     out: List[ExtensionInfo] = []
+    seen: set = set()
+    # 注册表里的全部工具（内置 + Provider 动态 Tool + 自定义节点 Tool）。
+    # 此前这里只枚举插件查壳工具，导致 37 个内置工具在扩展中心完全不可见。
+    try:
+        from app.mcp.server import mcp_registry
+        for t in mcp_registry.get_all_tools():
+            name = str(getattr(t, "name", "") or "")
+            if not name:
+                continue
+            seen.add(name)
+            out.append(ExtensionInfo(
+                id=make_ext_id(ExtensionKind.MCP_TOOL, name),
+                kind=ExtensionKind.MCP_TOOL,
+                local_id=name,
+                publisher="builtin",
+                name=name,
+                description=str(getattr(t, "description", "") or ""),
+                icon=str(getattr(t, "icon", "") or "Cpu"),
+                source=ExtensionSource.BUILTIN,
+                status=ExtensionStatus.ENABLED,
+                sub_kind=str(getattr(t, "category", "") or ""),
+                detail_hint="mcp/tools",
+            ))
+    except Exception:
+        pass
     try:
         from app.plugins.manager import _PLUGIN_TOOL_HANDLERS
         for tool_name, h in list((_PLUGIN_TOOL_HANDLERS or {}).items()):
-            if not tool_name:
+            if not tool_name or tool_name in seen:
                 continue
             pid = ""
             if isinstance(h, dict):

@@ -1270,6 +1270,17 @@ class MCPServerRegistry:
         start_time = time.time()
         if tool_name not in self.tools:
             return MCPToolCallResponse(tool_name=tool_name, status="error", result=None, error=f"MCP Tool '{tool_name}' not found", execution_time_ms=0)
+        # 扩展中心的停用对全部工具生效（此前只有插件查壳工具过闸，内置工具停了也照跑）
+        try:
+            from app.extensions import guard as _ext_guard
+            if not _ext_guard.is_enabled("mcp_tool", tool_name):
+                return MCPToolCallResponse(
+                    tool_name=tool_name, status="error", result=None,
+                    error=f"工具已被停用：{tool_name}（可在设置·扩展中重新启用）",
+                    execution_time_ms=0,
+                )
+        except Exception:
+            pass
         try:
             result = None
             # Agent检索：关键词取工具子集，防provider全量爆context（Anthropic Code Mode同思路）
