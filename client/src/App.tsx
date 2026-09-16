@@ -12,7 +12,7 @@ import { ScriptImportView } from './views/ScriptImportView';
 import { ExportModal } from './components/export/ExportModal';
 import { McpToolsModal } from './components/mcp/McpToolsModal';
 import { SkillStudioModal } from './components/skills/SkillStudioModal';
-import { ConfigView } from './views/ConfigView';
+import { SetupView } from './views/setup/SetupView';
 import { ProjectDashboard } from './views/ProjectDashboard';
 import { AgentModeView } from './views/AgentModeView';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
@@ -108,8 +108,8 @@ export function App() {
         )}
         <main className="flex-1 flex flex-col overflow-hidden relative min-w-0">
           {activeTab === 'config' ? (
-            <ErrorBoundary name="系统配置中心">
-              <ConfigView />
+            <ErrorBoundary name="设置中心">
+              <SetupView />
             </ErrorBoundary>
           ) : (!project || activeTab === 'projects') ? (
             <ProjectDashboard />
