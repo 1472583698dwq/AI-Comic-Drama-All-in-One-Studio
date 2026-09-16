@@ -1,12 +1,84 @@
 {
   "version": 2,
-  "active_canvas_id": "default",
+  "active_canvas_id": "cv_mtzyrq4i",
   "canvases": {
     "default": {
       "name": "默认画布",
-      "nodes": [],
-      "edges": [],
-      "updated_at": "2026-09-11 14:17:40"
+      "nodes": [
+        {
+          "id": "prompt_1789312807070_1",
+          "type": "prompt",
+          "position": {
+            "x": -54.41134751773046,
+            "y": 40.51063829787236
+          },
+          "data": {
+            "prompt": ""
+          },
+          "measured": {
+            "width": 360,
+            "height": 252
+          },
+          "selected": true,
+          "dragging": false
+        },
+        {
+          "id": "image_1789312807070_2",
+          "type": "image",
+          "position": {
+            "x": 506.8368794326241,
+            "y": 62.72340425531917
+          },
+          "data": {
+            "prompt": ""
+          },
+          "measured": {
+            "width": 360,
+            "height": 404
+          },
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "video_1789312807070_3",
+          "type": "video",
+          "position": {
+            "x": 1010.722729654234,
+            "y": 74.32982939661039
+          },
+          "data": {
+            "prompt": "",
+            "duration": 5
+          },
+          "measured": {
+            "width": 360,
+            "height": 404
+          },
+          "selected": true,
+          "dragging": false
+        }
+      ],
+      "edges": [
+        {
+          "id": "e_prompt_1789312807070_1_image_1789312807070_2",
+          "source": "prompt_1789312807070_1",
+          "target": "image_1789312807070_2",
+          "sourceHandle": "prompt",
+          "targetHandle": "prompt",
+          "type": "smoothstep",
+          "animated": true
+        },
+        {
+          "id": "e_image_1789312807070_2_video_1789312807070_3",
+          "source": "image_1789312807070_2",
+          "target": "video_1789312807070_3",
+          "sourceHandle": "image",
+          "targetHandle": "first_frame",
+          "type": "smoothstep",
+          "animated": true
+        }
+      ],
+      "updated_at": "2026-09-13 23:21:41"
     },
     "cv_mtpeb9n6": {
       "name": "画布2",
@@ -145,6 +217,41 @@
         }
       ],
       "updated_at": "2026-09-06 14:21:36"
+    },
+    "cv_mtzyrp2k": {
+      "name": "画布4",
+      "nodes": [],
+      "edges": [],
+      "updated_at": "2026-09-13 23:23:33"
+    },
+    "cv_mtzyrpqi": {
+      "name": "画布4",
+      "nodes": [],
+      "edges": [],
+      "updated_at": "2026-09-13 23:23:34"
+    },
+    "cv_mtzyrq4i": {
+      "name": "画布5",
+      "nodes": [
+        {
+          "id": "image_1789313022829_7",
+          "type": "image",
+          "position": {
+            "x": 840.0557440698991,
+            "y": 406
+          },
+          "data": {
+            "prompt": ""
+          },
+          "measured": {
+            "width": 360,
+            "height": 404
+          },
+          "dragging": false
+        }
+      ],
+      "edges": [],
+      "updated_at": "2026-09-13 23:24:08"
     }
   }
 }
