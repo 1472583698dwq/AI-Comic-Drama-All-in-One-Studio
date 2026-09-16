@@ -314,6 +314,26 @@ def list_mcp_tool_extensions() -> List[ExtensionInfo]:
     return out
 
 
+_SLOT_CONTAINER_LABEL = {
+    "shot.tabs": "检查器页签",
+    "shot.anchors": "参考锚点",
+    "shot.actions": "动作按钮",
+    "shot.modes": "制作模式",
+}
+
+
+def _slot_desc(s: dict) -> str:
+    """分镜槽没有自带描述，用「插在哪儿 · 排序」当人话说明。"""
+    container = str(s.get("slot") or "")
+    label = _SLOT_CONTAINER_LABEL.get(container, container)
+    parts = [f"插在分镜工作台的{label}", f"排序 {s.get('order', 50)}"]
+    when = s.get("when") or {}
+    modes = when.get("mode") if isinstance(when, dict) else None
+    if modes:
+        parts.append("仅 " + " / ".join(str(m) for m in modes) + " 模式可见")
+    return " · ".join(parts)
+
+
 def list_storyboard_slot_extensions() -> List[ExtensionInfo]:
     out: List[ExtensionInfo] = []
     try:
@@ -339,7 +359,7 @@ def list_storyboard_slot_extensions() -> List[ExtensionInfo]:
                 local_id=key,
                 publisher=publisher,
                 name=str(s.get("label") or s.get("id") or key),
-                description=f"{s.get('slot')} · order {s.get('order', 50)}",
+                description=_slot_desc(s),
                 icon=str(s.get("icon") or "LayoutTemplate"),
                 source=source,
                 source_detail=detail,

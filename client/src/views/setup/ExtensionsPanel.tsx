@@ -363,8 +363,9 @@ export const ExtensionsPanel: React.FC = () => {
                       <span className="text-[9.5px] px-1.5 py-0.5 rounded border border-border bg-surface-tertiary text-gray-400">
                         {KIND_META[e.kind]?.label || e.kind}
                       </span>
-                      <span className={`text-[9.5px] px-1.5 py-0.5 rounded border ${src.cls}`}>
-                        {src.label}{e.source === 'plugin' && e.source_detail ? ` · ${e.source_detail}` : ''}
+                      <span className={`text-[9.5px] px-1.5 py-0.5 rounded border ${src.cls}`}
+                        title={e.source === 'plugin' && e.source_detail ? `来自插件 ${e.source_detail}` : undefined}>
+                        {src.label}
                       </span>
                       {e.status === 'disabled' && (
                         <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/40 text-amber-300">已停用</span>
@@ -373,7 +374,11 @@ export const ExtensionsPanel: React.FC = () => {
                         <span className={`text-[10.5px] ${t.ok ? 'text-emerald-400' : 'text-red-300'}`}>{t.detail}</span>
                       )}
                     </div>
-                    <div className="text-[10px] font-mono text-gray-600 mt-0.5 truncate">{e.id}</div>
+                    {e.description && (
+                      <div className="text-[11px] text-gray-500 mt-0.5 truncate" title={e.description}>
+                        {e.description}
+                      </div>
+                    )}
 
                     <div className="mt-2 flex items-center gap-1.5 flex-wrap" onClick={(ev) => ev.stopPropagation()}>
                       {EDITABLE_KINDS.has(e.kind) && !isBuiltin && (
