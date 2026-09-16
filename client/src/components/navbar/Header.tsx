@@ -29,12 +29,11 @@ export const Header: React.FC<HeaderProps> = ({ onOpenImport, onOpenExport }) =>
   const shotsCount = (project?.scenes || []).reduce(
     (n: number, s: any) => n + (s?.shots?.length || 0), 0);
 
-  // 播放靠底部多轨时间线（桌面端）或移动端卡片流驱动；其余页签不渲染任何播放消费方，
-  // 此前在这些页签上点播放只会切图标，什么都不会发生。
-  const canPlay = !!project && (
-    platformMode === 'mobile' ||
-    activeTab === 'studio' || activeTab === 'timeline' || activeTab === 'director3d'
-  );
+  // 播放头与桌面/移动视口只对「分镜工作台 / 多轨剪辑 / 3D 片场」这三个页签生效：
+  // 其余页签既不渲染多轨时间线，也不渲染移动端卡片流，两个控件在那里点了没有任何效果。
+  // 与其摆在那里置灰，不如直接不显示。
+  const stageTabs = ['studio', 'timeline', 'director3d'];
+  const onStage = !!project && stageTabs.includes(activeTab);
 
   return (
     <header className="h-[54px] bg-surface/95 backdrop-blur-xl border-b border-border px-3 lg:px-4 flex items-center justify-between gap-2 select-none z-30 relative shrink-0">
@@ -104,44 +103,40 @@ export const Header: React.FC<HeaderProps> = ({ onOpenImport, onOpenExport }) =>
 
       {/* ── 右侧：播放 + 视口 + 导入导出 + 设置 ── */}
       <div className="flex items-center gap-1.5 lg:gap-2 shrink-0">
-        <button
-          onClick={() => {
-            if (!project) { toast.info('请先创建或打开项目以预览播放'); return; }
-            if (!canPlay) { toast.info('请切到分镜工作台 / 多轨剪辑 / 3D 片场再播放'); return; }
-            setIsPlaying(!isPlaying);
-          }}
-          className={`w-8 h-8 rounded-xl flex items-center justify-center border transition-all shrink-0 ${
-            !canPlay
-              ? 'opacity-35 cursor-not-allowed bg-surface-secondary border-border text-gray-500'
-              : isPlaying
-              ? 'bg-accent-orange border-accent-orange text-white shadow-sm shadow-accent-orange/30'
-              : 'bg-surface-secondary border-border text-gray-300 hover:text-white hover:border-brand/40'
-          }`}
-          title={!project ? '请先创建或打开项目' : !canPlay ? '该页签无播放视图，请切到分镜工作台 / 多轨剪辑 / 3D 片场' : isPlaying ? '暂停播放 (空格)' : '预览播放：按分镜时长推进播放头 (空格)'}
-        >
-          {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 fill-current ml-0.5" />}
-        </button>
+        {onStage && (
+          <>
+            <button
+              onClick={() => setIsPlaying(!isPlaying)}
+              className={`w-8 h-8 rounded-xl flex items-center justify-center border transition-all shrink-0 ${
+                isPlaying
+                  ? 'bg-accent-orange border-accent-orange text-white shadow-sm shadow-accent-orange/30'
+                  : 'bg-surface-secondary border-border text-gray-300 hover:text-white hover:border-brand/40'
+              }`}
+              title={isPlaying ? '暂停播放 (空格)' : '预览播放：按分镜时长推进播放头 (空格)'}
+            >
+              {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 fill-current ml-0.5" />}
+            </button>
 
-        <div className={`hidden xl:flex items-center rounded-xl bg-surface-secondary border border-border p-0.5 shrink-0 ${!project ? 'opacity-35 pointer-events-none' : ''}`}>
-          <button
-            disabled={!project}
-            onClick={() => setPlatformMode('desktop')}
-            className={`p-1.5 rounded-lg transition-all ${platformMode === 'desktop' ? 'bg-surface text-brand shadow-sm font-bold' : 'text-gray-400 hover:text-white'}`}
-            title="专业桌面工作台"
-          >
-            <Monitor className="w-3.5 h-3.5" />
-          </button>
-          <button
-            disabled={!project}
-            onClick={() => setPlatformMode('mobile')}
-            className={`p-1.5 rounded-lg transition-all ${platformMode === 'mobile' ? 'bg-surface text-brand shadow-sm font-bold' : 'text-gray-400 hover:text-white'}`}
-            title="9:16 移动端卡片流"
-          >
-            <Smartphone className="w-3.5 h-3.5" />
-          </button>
-        </div>
+            <div className="hidden xl:flex items-center rounded-xl bg-surface-secondary border border-border p-0.5 shrink-0">
+              <button
+                onClick={() => setPlatformMode('desktop')}
+                className={`p-1.5 rounded-lg transition-all ${platformMode === 'desktop' ? 'bg-surface text-brand shadow-sm font-bold' : 'text-gray-400 hover:text-white'}`}
+                title="专业桌面工作台"
+              >
+                <Monitor className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => setPlatformMode('mobile')}
+                className={`p-1.5 rounded-lg transition-all ${platformMode === 'mobile' ? 'bg-surface text-brand shadow-sm font-bold' : 'text-gray-400 hover:text-white'}`}
+                title="9:16 移动端卡片流"
+              >
+                <Smartphone className="w-3.5 h-3.5" />
+              </button>
+            </div>
 
-        <div className="h-4 w-px bg-border hidden sm:block shrink-0" />
+            <div className="h-4 w-px bg-border hidden sm:block shrink-0" />
+          </>
+        )}
 
         <button
           onClick={onOpenImport}
