@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Plug, KeyRound, ArrowUpCircle, Edit3, Plug2, Loader2, RefreshCw,
+  Plug, ArrowUpCircle, Edit3, Plug2, Loader2, RefreshCw,
   FileCode2, Copy, Check, Trash2,
 } from 'lucide-react';
 import { apiService } from '../../services/api';
-import { toast, confirmAsync, promptAsync } from '../../stores/useDialogStore';
+import { toast, confirmAsync } from '../../stores/useDialogStore';
 
 const KIND_LABEL: Record<string, string> = { image: '生图', video: '视频', audio: '语音', llm: '文本' };
 
@@ -46,23 +46,6 @@ export const ProviderToolsSection: React.FC = () => {
     () => providers.filter((p) => !p.builtin && p.source !== 'builtin'),
     [providers],
   );
-
-  const setKey = async (p: any) => {
-    const v = await promptAsync({
-      title: `设置 ${p.display_name || p.name || p.id} 的 API Key`,
-      message: '只改密钥，不动代码与参数。留空可清除。',
-      placeholder: 'sk-...',
-      confirmText: '保存',
-    });
-    if (v === null) return;
-    setBusy(p.id);
-    try {
-      await apiService.setProviderApiKey(p.id, v);
-      toast.success('已更新 API Key');
-      await load();
-      window.dispatchEvent(new Event('provider-list-refresh'));
-    } catch (e: any) { toast.error(e?.message || '保存失败'); } finally { setBusy(null); }
-  };
 
   const upgrade = async (p: any) => {
     const ok = await confirmAsync({
@@ -214,8 +197,6 @@ export const ProviderToolsSection: React.FC = () => {
                   <div className="text-[10px] font-mono text-gray-600 mt-0.5 truncate">{p.id}</div>
 
                   <div className="mt-2 flex items-center gap-1.5 flex-wrap">
-                    <Act onClick={() => setKey(p)} disabled={busy === p.id}
-                      icon={KeyRound} label="改 Key" accent={needKey ? 'amber' : undefined} />
                     {isLegacy && (
                       <Act onClick={() => upgrade(p)} disabled={busy === p.id}
                         icon={ArrowUpCircle} label="升级为代码模式" accent="amber" />

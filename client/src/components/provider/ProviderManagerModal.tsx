@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { X, Plus, Plug, Globe, Video, Mic, Cpu, Trash2, Edit3, Activity, Save, Upload, FileText, Link2, TestTube } from 'lucide-react';
+import { X, Plus, Plug, Globe, Video, Mic, Cpu, Trash2, Edit3, Activity, Save, Upload, FileText, Link2, TestTube, Loader2 } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { CAPABILITIES_BY_KIND, getCapabilities } from './providerCapabilities';
 import { confirmAsync, toast } from '../../stores/useDialogStore';
@@ -22,6 +22,7 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
   const [q, setQ] = useState('');
   const [capFilter, setCapFilter] = useState<string>('all');
   const [editing, setEditing] = useState<any>(null);
+  const [editApiKey, setEditApiKey] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [importMode, setImportMode] = useState(false);
   const [importDoc, setImportDoc] = useState('');
@@ -39,8 +40,10 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
   const openEdit = async (p:any)=>{
     try {
       const r = await apiService.getProvider(p.id);
+      setEditApiKey('');
       setEditing({ ...(r.provider || p), code: (r.provider?.code ?? r.raw?.code ?? p.code ?? '') });
     } catch {
+      setEditApiKey('');
       setEditing(p);
     }
   };
@@ -55,6 +58,7 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
       try {
         const r = await apiService.getProvider(editProviderId);
         if (!cancelled && r?.provider) {
+          setEditApiKey('');
           setEditing({ ...r.provider, code: (r.provider.code ?? r.raw?.code ?? '') });
         }
       } catch { /* 拉不到就停在列表 */ }
@@ -117,8 +121,9 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
         if (payload[k]==='' || payload[k]==='null') delete payload[k];
       }
       if (editing.headers) payload.headers = editing.headers;
+      if (editApiKey) payload.api_key = editApiKey;
       await apiService.updateProvider(editing.id, payload);
-      setEditing(null);
+      if (editProviderId) { onClose(); } else { setEditing(null); }
       await fetchAll();
       window.dispatchEvent(new Event('provider-list-refresh'));
     } catch(e:any){ alert(e.message); }
@@ -206,9 +211,19 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
   useEscapeClose(isOpen, onClose);
   if (!isOpen) return null;
 
+  /** 从设置页点某个源的「编辑」进来：只给编辑表单，不摆一层管理列表 */
+  const directEdit = !!editProviderId;
+  const closeEdit = ()=> { if (directEdit) { onClose(); } else { setEditing(null); } };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fade-in">
-      <div className="w-full max-w-6xl h-[85vh] bg-surface rounded-2xl border border-border flex flex-col overflow-hidden shadow-2xl">
+      {directEdit && !editing && (
+        <div className="text-xs text-gray-400 flex items-center gap-2">
+          <Loader2 className="w-4 h-4 animate-spin" />读取生成源定义…
+        </div>
+      )}
+      <div className={directEdit ? 'contents' : 'w-full max-w-6xl h-[85vh] bg-surface rounded-2xl border border-border flex flex-col overflow-hidden shadow-2xl'}>
+        {!directEdit && (<>
         {/* Header */}
         <div className="h-14 px-6 border-b border-border flex items-center justify-between bg-surface-secondary/50 shrink-0">
           <div className="flex items-center gap-3">
@@ -299,13 +314,15 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
           {filtered.length===0 && <div className="text-center py-12 text-sm text-gray-500">暂无匹配的生成源</div>}
         </div>
 
+        </>)}
+
         {/* Edit Drawer */}
         {editing && (
           <div className="absolute inset-0 bg-surface/85 backdrop-blur-sm flex items-center justify-center p-4">
             <div className="w-full max-w-2xl max-h-[85vh] bg-surface rounded-2xl border border-border flex flex-col overflow-hidden">
               <div className="h-12 px-4 border-b border-border flex items-center justify-between shrink-0">
                 <span className="text-sm font-bold text-white">{editing.builtin?'查看':'编辑'} {editing.id}</span>
-                <button onClick={()=> setEditing(null)} className="p-1 rounded hover:bg-surface-tertiary"><X className="w-4 h-4 text-gray-400"/></button>
+                <button onClick={closeEdit} className="p-1 rounded hover:bg-surface-tertiary"><X className="w-4 h-4 text-gray-400"/></button>
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar text-xs">
                 {/* 代码型一键修正 */}
@@ -316,6 +333,33 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
                       <div className="text-violet-200/70">点击一键修正为真实 API：4 分辨率（竖/横）· 去除多余 aspect_ratio/fps · 补 seed/reference_audios</div>
                     </div>
                     <button onClick={handleAutoFixVideoCode} className="px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-bold shrink-0">一键修正</button>
+                  </div>
+                )}
+                {!editing.builtin && editing.provider_type !== 'comfyui' && (
+                  <div className="space-y-1">
+                    <label className="text-[11px] text-gray-400 block">API Key</label>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="password" value={editApiKey} autoComplete="off"
+                        onChange={e=> setEditApiKey(e.target.value)}
+                        placeholder="留空则不改动已保存的 Key"
+                        className="flex-1 bg-surface-secondary border border-border rounded-lg px-3 py-2 text-xs text-white placeholder-gray-500 font-mono"
+                      />
+                      <button
+                        onClick={async ()=>{
+                          const ok = await confirmAsync({ title:'清除 API Key', isDanger:true, confirmText:'确认清除', cancelText:'取消',
+                            message:`清除「${editing.name || editing.id}」已保存的 Key？清除后这个源会变成未配置。` });
+                          if (!ok) return;
+                          try {
+                            await apiService.setProviderApiKey(editing.id, '');
+                            toast.success('已清除');
+                            window.dispatchEvent(new Event('provider-list-refresh'));
+                          } catch(e:any){ toast.error(e?.message || '清除失败'); }
+                        }}
+                        className="px-2.5 py-2 rounded-lg bg-surface border border-border text-[11px] text-gray-400 hover:text-white shrink-0"
+                      >清除</button>
+                    </div>
+                    <div className="text-[10.5px] text-gray-500">代码里用 <code className="font-mono">api.get("api_key")</code> 取，不用写死在代码中</div>
                   </div>
                 )}
                 {[
@@ -381,7 +425,7 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
                 <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-200">内置源只读；自定义源可直接改 JSON 后保存。kind 决定全局分类（设置/画布/分镜），由导演通过 MCP kind 参数自动填。</div>
               </div>
               <div className="p-3 border-t border-border flex justify-end gap-2 shrink-0">
-                <button onClick={()=> setEditing(null)} className="px-4 py-1.5 rounded-lg bg-surface-secondary border border-border text-xs text-white">取消</button>
+                <button onClick={closeEdit} className="px-4 py-1.5 rounded-lg bg-surface-secondary border border-border text-xs text-white">取消</button>
                 {!editing.builtin && <button onClick={handleSaveEdit} className="px-4 py-1.5 rounded-lg bg-brand text-white text-xs font-bold flex items-center gap-1"><Save className="w-3.5 h-3.5"/> 保存</button>}
               </div>
             </div>
