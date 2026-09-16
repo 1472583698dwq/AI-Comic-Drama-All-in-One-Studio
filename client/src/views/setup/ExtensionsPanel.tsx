@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Package, Power, RefreshCw, Trash2, Search, Upload, Loader2,
-  Plug, Workflow, Puzzle, Info, Boxes,
+  Plug, Workflow, Puzzle, Boxes,
 } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { toast, confirmAsync } from '../../stores/useDialogStore';
+import { ProviderToolsSection } from './ProviderToolsSection';
 
 /** 11 类扩展的中文名与一句话解释（与后端 ExtensionKind 对齐） */
 const KIND_META: Record<string, { label: string; desc: string }> = {
@@ -136,22 +137,11 @@ export const ExtensionsPanel: React.FC = () => {
 
   return (
     <div className="space-y-5">
-      {/* ── 概念说明：这一页为什么把两件事放一起 ── */}
-      <div className="rounded-2xl border border-border bg-surface p-5">
-        <div className="flex items-start gap-2.5">
-          <Info className="w-4 h-4 text-brand-light shrink-0 mt-0.5" />
-          <div className="text-[12px] text-gray-400 leading-relaxed">
-            <b className="text-[color:var(--color-text-main)]">插件是包，扩展是颗粒。</b>
-            装一个插件 = 一次性往下面的扩展表里塞进去一批；卸载它 = 把这批精确撤回。
-            所以「安装」和「管理」本来就是一件事的两头，这一页合在一起。
-          </div>
-        </div>
-        <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-px bg-border rounded-xl overflow-hidden border border-border">
-          <Stat label="扩展总数" value={counts.total ?? exts.length} />
-          <Stat label="生成源" value={counts.provider ?? 0} />
-          <Stat label="技能" value={counts.skill ?? 0} />
-          <Stat label="已装插件" value={plugins.length} />
-        </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-border rounded-2xl overflow-hidden border border-border">
+        <Stat label="扩展总数" value={counts.total ?? exts.length} />
+        <Stat label="生成源" value={counts.provider ?? 0} />
+        <Stat label="技能" value={counts.skill ?? 0} />
+        <Stat label="已装插件" value={plugins.length} />
       </div>
 
       {/* ── 安装插件 ── */}
@@ -159,8 +149,7 @@ export const ExtensionsPanel: React.FC = () => {
         <div className="px-5 pt-4 pb-3 border-b border-border/70 flex items-center gap-2">
           <Package className="w-4 h-4 text-violet-400" />
           <h3 className="text-sm font-bold text-[color:var(--color-text-main)]">插件包</h3>
-          <span className="text-[11px] text-gray-500">一个 zip 能同时带进 10 类扩展</span>
-          <button
+                    <button
             onClick={() => fileRef.current?.click()}
             disabled={busy === 'install'}
             className="ml-auto px-3 py-1.5 rounded-xl bg-brand text-white text-[11.5px] font-bold hover:bg-brand-light disabled:opacity-40 flex items-center gap-1.5"
@@ -178,10 +167,7 @@ export const ExtensionsPanel: React.FC = () => {
           {plugins.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border px-4 py-6 text-center">
               <div className="text-[12px] text-gray-400">还没有装任何插件</div>
-              <div className="text-[11px] text-gray-500 mt-1">
-                仓库里有个示例包 <code className="font-mono text-[10.5px]">plugins/example-drama-pack</code>，
-                打成 zip 传上来就能看到整条链路
-              </div>
+              <div className="text-[11px] text-gray-500 mt-1">选一个 zip 包安装</div>
             </div>
           ) : (
             <div className="space-y-2">
@@ -225,9 +211,6 @@ export const ExtensionsPanel: React.FC = () => {
           <Puzzle className="w-4 h-4 text-brand-light" />
           <h3 className="text-sm font-bold text-[color:var(--color-text-main)]">自己造一个</h3>
         </div>
-        <p className="text-[11.5px] text-gray-400 leading-relaxed mb-3">
-          不装包也能加能力。下面两条是最常用的入口——加出来的东西会以「自建」身份出现在扩展表里。
-        </p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
           <button
             onClick={() => window.dispatchEvent(new CustomEvent('open-provider-manager'))}
@@ -254,14 +237,15 @@ export const ExtensionsPanel: React.FC = () => {
         </div>
       </section>
 
+      <ProviderToolsSection />
+
       {/* ── 全部扩展 ── */}
       <section className="rounded-2xl border border-border bg-surface overflow-hidden">
         <div className="px-5 pt-4 pb-3 border-b border-border/70">
           <div className="flex items-center gap-2 flex-wrap">
             <Boxes className="w-4 h-4 text-brand-light" />
             <h3 className="text-sm font-bold text-[color:var(--color-text-main)]">全部扩展</h3>
-            <span className="text-[11px] text-gray-500">内置 · 自建 · 来自插件，全都在这里逐个启停</span>
-            <button onClick={load} className="ml-auto px-2.5 py-1 rounded-lg bg-surface-secondary border border-border text-[11px] text-gray-300 hover:text-white flex items-center gap-1">
+                        <button onClick={load} className="ml-auto px-2.5 py-1 rounded-lg bg-surface-secondary border border-border text-[11px] text-gray-300 hover:text-white flex items-center gap-1">
               <RefreshCw className="w-3 h-3" />刷新
             </button>
           </div>
