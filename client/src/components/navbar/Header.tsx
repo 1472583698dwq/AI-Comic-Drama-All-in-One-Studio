@@ -1,6 +1,6 @@
 import React from 'react';
 import {
-  Sparkles, Monitor, Smartphone, PlusCircle, Play, Pause, Settings,
+  Sparkles, Monitor, Smartphone, PlusCircle, Play, Pause,
   FolderKanban, Film, ChevronDown, Lock, LogOut,
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
@@ -9,7 +9,6 @@ import { toast } from '../../stores/useDialogStore';
 interface HeaderProps {
   onOpenImport: () => void;
   onOpenExport: () => void;
-  onOpenConfig: () => void;
   // 兼容旧调用（工具入口已迁至左侧栏底部工具区）
   onOpenMcp?: () => void;
   onOpenSkills?: () => void;
@@ -20,7 +19,7 @@ interface HeaderProps {
  * 顶栏只承担「全局上下文」：品牌 / 当前项目 / 工作区切换 / 播放 / 视口 / 导入导出 / 设置。
  * 主频道导航与扩展工具已在左侧栏，避免顶栏拥挤（设置也更易被发现）。
  */
-export const Header: React.FC<HeaderProps> = ({ onOpenImport, onOpenExport, onOpenConfig }) => {
+export const Header: React.FC<HeaderProps> = ({ onOpenImport, onOpenExport }) => {
   const {
     project, closeProject, platformMode, setPlatformMode,
     activeTab, setActiveTab, workspace, setWorkspace,
@@ -210,27 +209,6 @@ export const Header: React.FC<HeaderProps> = ({ onOpenImport, onOpenExport, onOp
           <span className="sm:hidden">导出</span>
         </button>
 
-        <div className="h-4 w-px bg-border shrink-0" />
-
-        {/* 设置：右上角常驻且始终带文字，保证可发现 */}
-        <button
-          onClick={() => {
-            if (activeTab === 'config') {
-              setActiveTab(project ? 'studio' : 'projects');
-            } else {
-              onOpenConfig();
-            }
-          }}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all shrink-0 ${
-            activeTab === 'config'
-              ? 'bg-brand border-brand text-white shadow-sm shadow-brand/25'
-              : 'bg-surface-secondary border-border text-gray-200 hover:text-white hover:border-brand/50'
-          }`}
-          title={activeTab === 'config' ? '关闭设置并返回' : '系统设置 (API Keys / 模型配置 / 扩展中心 / 服务状态)'}
-        >
-          <Settings className={`w-4 h-4 ${activeTab === 'config' ? 'text-white' : 'text-brand-light'}`} />
-          <span>设置</span>
-        </button>
       </div>
     </header>
   );

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
-  ShieldAlert, HardDrive, Activity, Copy, Check, Loader2, FolderOpen,
+  ShieldAlert, Activity, Copy, Check, Loader2, FolderOpen,
   Terminal, Lock, RefreshCw,
 } from 'lucide-react';
 import { apiService } from '../../services/api';
@@ -28,6 +28,24 @@ const ENV_ONLY: Array<{ key: string; def: string; desc: string }> = [
   { key: 'STUDIO_TASK_TIMEOUT',      def: '1500',  desc: '异步任务总超时（秒）' },
 ];
 
+/** 与后端 /config/test 支持的 target 对齐 */
+const TEST_TARGETS: Array<{ k: string; label: string }> = [
+  { k: 'openai', label: '文本大模型' },
+  { k: 'responses_api', label: 'Responses API' },
+  { k: 'minimax', label: 'MiniMax' },
+  { k: 'comfyui', label: 'ComfyUI' },
+  { k: 'siliconflow', label: '硅基流动' },
+  { k: 'dashscope', label: '通义万相' },
+  { k: 'kling', label: '可灵 Kling' },
+  { k: 'minimax_h3', label: 'MiniMax H3' },
+  { k: 'seedance', label: 'Seedance' },
+  { k: 'wan3', label: '万相 Wan3.0' },
+  { k: 'elevenlabs', label: 'ElevenLabs' },
+  { k: 'cosyvoice', label: 'CosyVoice' },
+  { k: 'gpt_sovits', label: 'GPT-SoVITS' },
+  { k: 'jianyin', label: '剪映目录' },
+];
+
 interface Props {
   cfg: Record<string, string>;
   draft: Record<string, string>;
@@ -43,6 +61,31 @@ export const SystemPanel: React.FC<Props> = ({ cfg, draft, setDraft, envFile, js
   const [health, setHealth] = useState<any>(null);
   const [loadingHealth, setLoadingHealth] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copiedHealth, setCopiedHealth] = useState(false);
+  const [allTests, setAllTests] = useState<Record<string, { running?: boolean; ok?: boolean; detail?: string }>>({});
+  const [testingAll, setTestingAll] = useState(false);
+
+  const merged = { ...cfg, ...draft };
+
+  /** 逐个跑一遍所有通道的连通测试，一眼看出哪条通、哪条没通 */
+  const runAllTests = async () => {
+    setTestingAll(true);
+    setAllTests(Object.fromEntries(TEST_TARGETS.map((t) => [t.k, { running: true }])));
+    for (const t of TEST_TARGETS) {
+      try {
+        const r = await apiService.testConfig(t.k as any, merged);
+        setAllTests((s0) => ({ ...s0, [t.k]: { ok: !!r?.ok, detail: r?.detail || '' } }));
+      } catch (e: any) {
+        setAllTests((s0) => ({ ...s0, [t.k]: { ok: false, detail: e?.message || '失败' } }));
+      }
+    }
+    setTestingAll(false);
+  };
+
+  const copyText = async (text: string, mark: (v: boolean) => void) => {
+    try { await navigator.clipboard.writeText(text); mark(true); setTimeout(() => mark(false), 1800); }
+    catch { toast.error('复制失败，请手动选中'); }
+  };
 
   const trusted = ['1', 'true', 'yes', 'on'].includes(String(val(draft, cfg, 'STUDIO_TRUSTED_MODE')).toLowerCase());
 
@@ -67,35 +110,6 @@ export const SystemPanel: React.FC<Props> = ({ cfg, draft, setDraft, envFile, js
 
   return (
     <div className="space-y-5">
-      {/* ── 本机路径 ── */}
-      <section className="rounded-2xl border border-border bg-surface overflow-hidden">
-        <div className="px-5 pt-4 pb-3 border-b border-border/70 flex items-center gap-2">
-          <HardDrive className="w-4 h-4 text-emerald-400" />
-          <h3 className="text-sm font-bold text-[color:var(--color-text-main)]">本机路径</h3>
-          <span className="text-[11px] text-gray-500">跟具体厂商无关的几项</span>
-        </div>
-        <div className="p-5 pt-4 space-y-3">
-          <PathRow
-            label="ComfyUI 工作流目录" k="COMFYUI_WORKFLOWS_DIR"
-            hint="填了之后可以直读本机 ComfyUI 的工作流，不用一个个上传"
-            value={val(draft, cfg, 'COMFYUI_WORKFLOWS_DIR')}
-            onChange={(v) => setDraft((d) => ({ ...d, COMFYUI_WORKFLOWS_DIR: v }))}
-          />
-          <PathRow
-            label="默认生图工作流 ID" k="COMFYUI_DEFAULT_IMAGE_WORKFLOW" mono
-            hint="不指定时用哪个工作流出图"
-            value={val(draft, cfg, 'COMFYUI_DEFAULT_IMAGE_WORKFLOW')}
-            onChange={(v) => setDraft((d) => ({ ...d, COMFYUI_DEFAULT_IMAGE_WORKFLOW: v }))}
-          />
-          <PathRow
-            label="ComfyUI 超时（秒）" k="COMFYUI_TIMEOUT_SECONDS" mono
-            hint="本机跑大模型慢的话调大，默认 240"
-            value={val(draft, cfg, 'COMFYUI_TIMEOUT_SECONDS')}
-            onChange={(v) => setDraft((d) => ({ ...d, COMFYUI_TIMEOUT_SECONDS: v }))}
-          />
-        </div>
-      </section>
-
       {/* ── 安全总闸 ── */}
       <section className={`rounded-2xl border overflow-hidden ${trusted ? 'border-red-500/50 bg-red-500/[0.04]' : 'border-border bg-surface'}`}>
         <div className="px-5 pt-4 pb-3 border-b border-border/70 flex items-center gap-2">
@@ -181,7 +195,38 @@ export const SystemPanel: React.FC<Props> = ({ cfg, draft, setDraft, envFile, js
           <KV label="ComfyUI" value={health?.comfyui_online ? '在线' : '未连接（用云端源时可忽略）'} ok={!!health?.comfyui_online} neutral={!health?.comfyui_online} />
           <KV label="已注册生成源"
             value={`图 ${health?.providers?.image_count ?? '—'} · 音 ${health?.providers?.audio_count ?? '—'}`} neutral />
-          <div className="pt-2 flex flex-wrap gap-2">
+          <div className="pt-1.5">
+            <div className="flex items-center gap-2 flex-wrap mb-2">
+              <button onClick={runAllTests} disabled={testingAll}
+                className="px-3 py-1.5 rounded-xl bg-brand text-white text-[11px] font-bold hover:bg-brand-light disabled:opacity-40 flex items-center gap-1.5">
+                {testingAll ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Activity className="w-3.5 h-3.5" />}
+                {testingAll ? '逐个测试中…' : '一键测试全部通道'}
+              </button>
+              <button onClick={() => copyText(JSON.stringify(health, null, 2), setCopiedHealth)}
+                className="px-2.5 py-1 rounded-lg bg-surface-secondary border border-border text-[11px] text-gray-300 hover:text-white flex items-center gap-1">
+                {copiedHealth ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                {copiedHealth ? '已复制' : '复制健康 JSON'}
+              </button>
+            </div>
+            {Object.keys(allTests).length > 0 && (
+              <div className="rounded-xl border border-border overflow-hidden mb-2">
+                {TEST_TARGETS.map((t) => {
+                  const r = allTests[t.k];
+                  if (!r) return null;
+                  return (
+                    <div key={t.k} className="px-3 py-1.5 flex items-baseline gap-2 border-b border-border/50 last:border-b-0">
+                      <span className="text-[11px] text-gray-300 w-24 shrink-0">{t.label}</span>
+                      <span className={`text-[11px] shrink-0 ${r.running ? 'text-gray-500' : r.ok ? 'text-emerald-400' : 'text-amber-300'}`}>
+                        {r.running ? '测试中' : r.ok ? '通' : '未通'}
+                      </span>
+                      <span className="text-[10.5px] text-gray-500 flex-1 min-w-0 truncate">{r.detail || ''}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <div className="pt-1 flex flex-wrap gap-2">
             <a href={`${API_ORIGIN}/docs`} target="_blank" rel="noreferrer"
               className="px-2.5 py-1 rounded-lg bg-surface-secondary border border-border text-[11px] text-gray-300 hover:text-white">
               打开接口文档 /docs
@@ -219,23 +264,6 @@ export const SystemPanel: React.FC<Props> = ({ cfg, draft, setDraft, envFile, js
     </div>
   );
 };
-
-const PathRow: React.FC<{
-  label: string; k: string; value: string; hint?: string; mono?: boolean;
-  onChange: (v: string) => void;
-}> = ({ label, k, value, hint, onChange }) => (
-  <div className="grid grid-cols-1 md:grid-cols-[180px_1fr] md:items-center gap-1.5 md:gap-3">
-    <label className="text-[11.5px] text-gray-400">{label}</label>
-    <div className="space-y-1">
-      <input
-        value={value} onChange={(e) => onChange(e.target.value)} spellCheck={false}
-        className="w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-[12px] font-mono text-[color:var(--color-text-main)] placeholder-gray-600 focus:outline-none focus:border-brand/60"
-      />
-      {hint && <div className="text-[10.5px] text-gray-500">{hint}</div>}
-      <div className="text-[9.5px] font-mono text-gray-600">{k}</div>
-    </div>
-  </div>
-);
 
 const KV: React.FC<{ label: string; value: string; ok?: boolean; neutral?: boolean }> = ({ label, value, ok, neutral }) => (
   <div className="flex items-center gap-3 text-[11.5px]">

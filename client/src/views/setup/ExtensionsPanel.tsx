@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Package, Power, RefreshCw, Trash2, Search, Upload, Loader2,
-  Plug, Workflow, Puzzle, Boxes,
+  Plug, Workflow, Puzzle, Boxes, Sparkles, Cpu, Palette, Eye, EyeOff,
 } from 'lucide-react';
+import { useThemeStore } from '../../stores/useThemeStore';
 import { apiService } from '../../services/api';
 import { toast, confirmAsync } from '../../stores/useDialogStore';
 import { ProviderToolsSection } from './ProviderToolsSection';
@@ -36,6 +37,9 @@ export const ExtensionsPanel: React.FC = () => {
   const [busy, setBusy] = useState<string | null>(null);
   const [kind, setKind] = useState('');
   const [q, setQ] = useState('');
+  const [showBuiltin, setShowBuiltin] = useState(false);
+  const activePluginThemeId = useThemeStore((st) => st.activePluginThemeId);
+  const applyPluginTheme = useThemeStore((st) => st.applyPluginTheme);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
@@ -67,11 +71,12 @@ export const ExtensionsPanel: React.FC = () => {
   const shown = useMemo(() => {
     const ql = q.trim().toLowerCase();
     return exts.filter((e) => {
+      if (!showBuiltin && (e.source === 'builtin' || e.status === 'builtin')) return false;
       if (kind && e.kind !== kind) return false;
       if (!ql) return true;
       return [e.id, e.name, e.local_id, e.description].some((s) => (s || '').toLowerCase().includes(ql));
     });
-  }, [exts, kind, q]);
+  }, [exts, kind, q, showBuiltin]);
 
   const kindsPresent = useMemo(() => {
     const set = new Set(exts.map((e) => e.kind));
@@ -224,6 +229,28 @@ export const ExtensionsPanel: React.FC = () => {
             </div>
           </button>
           <button
+            onClick={() => window.dispatchEvent(new CustomEvent('open-skill-studio'))}
+            className="text-left rounded-xl border border-border bg-surface-secondary hover:border-brand/50 transition-colors px-4 py-3"
+          >
+            <div className="flex items-center gap-1.5 text-[12.5px] font-bold text-[color:var(--color-text-main)]">
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />技能工坊
+            </div>
+            <div className="text-[11px] text-gray-500 mt-1 leading-relaxed">
+              导入 / 删除 / 试跑技能，看版本 diff
+            </div>
+          </button>
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent('open-mcp-tools'))}
+            className="text-left rounded-xl border border-border bg-surface-secondary hover:border-brand/50 transition-colors px-4 py-3"
+          >
+            <div className="flex items-center gap-1.5 text-[12.5px] font-bold text-[color:var(--color-text-main)]">
+              <Cpu className="w-3.5 h-3.5 text-emerald-400" />MCP 工具
+            </div>
+            <div className="text-[11px] text-gray-500 mt-1 leading-relaxed">
+              查看工具清单、单独调用、看调用日志
+            </div>
+          </button>
+          <button
             onClick={() => window.dispatchEvent(new CustomEvent('open-workflow-inspector'))}
             className="text-left rounded-xl border border-border bg-surface-secondary hover:border-brand/50 transition-colors px-4 py-3"
           >
@@ -261,14 +288,25 @@ export const ExtensionsPanel: React.FC = () => {
           </div>
 
           <div className="mt-2 flex flex-wrap gap-1.5">
-            <Chip active={!kind} onClick={() => setKind('')} label={`全部 ${exts.length}`} />
+            <Chip active={!kind} onClick={() => setKind('')} label={`全部 ${shown.length}`} />
             {kindsPresent.map((k) => (
               <Chip key={k} active={kind === k} onClick={() => setKind(k)}
                 label={`${KIND_META[k].label} ${counts[k] ?? 0}`} title={KIND_META[k].desc} />
             ))}
+            <button onClick={() => setShowBuiltin((v) => !v)}
+              className={`px-2.5 py-1 rounded-lg text-[11px] border transition-colors flex items-center gap-1 ${
+                showBuiltin ? 'bg-brand/15 border-brand/50 text-[color:var(--color-text-main)]' : 'bg-surface-secondary border-border text-gray-400 hover:text-[color:var(--color-text-main)]'
+              }`}>
+              {showBuiltin ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}内置
+            </button>
           </div>
           {kind && (
             <div className="mt-2 text-[11px] text-gray-500 leading-relaxed">{KIND_META[kind].desc}</div>
+          )}
+          {!showBuiltin && (
+            <div className="mt-2 text-[11px] text-gray-500 leading-relaxed">
+              已隐藏程序自带的内置项（它们删不掉，唯一要配的 Key 在「能力配置」页填）。
+            </div>
           )}
         </div>
 
@@ -306,6 +344,22 @@ export const ExtensionsPanel: React.FC = () => {
                         <button onClick={() => toggleExt(e)} disabled={busy === e.id}
                           className="px-2.5 py-1 rounded-lg bg-surface border border-border text-[11px] text-gray-200 hover:border-brand disabled:opacity-40 flex items-center gap-1">
                           <Power className="w-3 h-3" />{e.status === 'enabled' ? '停用' : '启用'}
+                        </button>
+                      )}
+                      {e.kind === 'theme' && (
+                        <button onClick={() => applyPluginTheme(activePluginThemeId === e.local_id ? '' : e.local_id)}
+                          className={`px-2.5 py-1 rounded-lg border text-[11px] flex items-center gap-1 ${
+                            activePluginThemeId === e.local_id
+                              ? 'bg-brand/20 border-brand/50 text-brand-light'
+                              : 'bg-surface border-border text-gray-200 hover:border-brand'}`}>
+                          <Palette className="w-3 h-3" />{activePluginThemeId === e.local_id ? '取消应用' : '应用主题'}
+                        </button>
+                      )}
+                      {e.kind === 'plugin' && (
+                        <button onClick={async () => { setBusy(e.id); try { await apiService.reloadPlugin(e.local_id); toast.success('已热重载'); await load(); } catch (err: any) { toast.error(err?.message || '重载失败'); } finally { setBusy(null); } }}
+                          disabled={busy === e.id} title="热重载"
+                          className="px-2 py-1 rounded-lg bg-surface border border-border text-gray-300 hover:text-white disabled:opacity-40">
+                          <RefreshCw className="w-3 h-3" />
                         </button>
                       )}
                       {e.source !== 'builtin' && (

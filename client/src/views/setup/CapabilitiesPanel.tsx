@@ -1,9 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import {
   Check, AlertTriangle, Loader2, Eye, EyeOff, Cloud, HardDrive,
-  CircleDot, Plug, ChevronRight,
+  CircleDot, Plug, ChevronRight, FolderOpen, FolderSearch,
 } from 'lucide-react';
 import { apiService } from '../../services/api';
+import { toast } from '../../stores/useDialogStore';
+import { ComfyWorkflowList } from './ComfyWorkflowList';
 import {
   CAPABILITIES, channelFilled, currentChannelId,
   type Capability, type Channel, type CapField,
@@ -201,6 +203,15 @@ export const CapabilitiesPanel: React.FC<Props> = ({ cfg, draft, setDraft, loadi
                     ))}
                   </div>
 
+                  {/* ComfyUI 通道：工作流列表就近管理，不用再去别的页 */}
+                  {ch.id === 'comfyui' && (
+                    <ComfyWorkflowList
+                      defaultImage={val(draft, cfg, 'COMFYUI_DEFAULT_IMAGE_WORKFLOW')}
+                      defaultVideo={val(draft, cfg, 'COMFYUI_DEFAULT_VIDEO_WORKFLOW')}
+                      onSetDefault={(k, v) => setDraft((d) => ({ ...d, [k]: v }))}
+                    />
+                  )}
+
                   {/* 操作 */}
                   <div className="mt-3.5 flex items-center gap-2 flex-wrap">
                     {ch.test ? (
@@ -250,6 +261,19 @@ const FieldRow: React.FC<{
   onChange: (v: string) => void;
 }> = ({ field, value, revealed, onReveal, onChange }) => {
   const secret = field.kind === 'secret';
+
+  const pickDir = async () => {
+    try {
+      const r = await apiService.browseFolder({ initialDir: value || undefined, title: `选择${field.label}` });
+      if (r?.selected_path) onChange(r.selected_path);
+    } catch (e: any) {
+      toast.error(e?.message || '打不开系统目录选择器，请手动填路径');
+    }
+  };
+  const openDir = async () => {
+    try { await apiService.openFolder(value); }
+    catch (e: any) { toast.error(e?.message || '打开目录失败'); }
+  };
   return (
     <div className="grid grid-cols-1 md:grid-cols-[160px_1fr] md:items-center gap-1.5 md:gap-3">
       <label className="text-[11.5px] text-gray-400 flex items-center gap-1.5">
@@ -276,6 +300,26 @@ const FieldRow: React.FC<{
               {revealed ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
             </button>
           )}
+        </div>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {field.pick && (
+            <>
+              <button type="button" onClick={pickDir}
+                className="px-2 py-0.5 rounded-lg bg-brand/15 border border-brand/35 text-[10.5px] text-brand-light hover:bg-brand/25 flex items-center gap-1">
+                <FolderSearch className="w-3 h-3" />选择目录
+              </button>
+              <button type="button" onClick={openDir} disabled={!value}
+                className="px-2 py-0.5 rounded-lg bg-surface-secondary border border-border text-[10.5px] text-gray-400 hover:text-white disabled:opacity-40 flex items-center gap-1">
+                <FolderOpen className="w-3 h-3" />打开
+              </button>
+            </>
+          )}
+          {(field.quickFill || []).map((q) => (
+            <button key={q.value} type="button" onClick={() => onChange(q.value)}
+              className="px-2 py-0.5 rounded-lg bg-surface-secondary border border-border text-[10.5px] text-gray-400 hover:text-white">
+              {q.label}
+            </button>
+          ))}
         </div>
         {field.hint && <div className="text-[10.5px] text-gray-500 leading-relaxed">{field.hint}</div>}
         <div className="text-[9.5px] font-mono text-gray-600">{field.key}</div>

@@ -25,6 +25,10 @@ export interface CapField {
   /** 为空时该通道视为「未配置」 */
   required?: boolean;
   hint?: string;
+  /** 走后端原生目录选择器（/system/browse-folder），并给出"打开目录"入口 */
+  pick?: boolean;
+  /** 一键填入的常用值 */
+  quickFill?: Array<{ label: string; value: string }>;
 }
 
 export interface Channel {
@@ -129,8 +133,17 @@ export const CAPABILITIES: Capability[] = [
         summary: '本机或自建的 ComfyUI。不花钱、可控性最强，导入的每个工作流还会各自变成一个独立生成源。',
         test: 'comfyui',
         fields: [
-          KEY('COMFYUI_SERVER_URL', '服务地址', { kind: 'url', placeholder: 'http://127.0.0.1:8188' }),
+          KEY('COMFYUI_SERVER_URL', '服务地址', {
+            kind: 'url', placeholder: 'http://127.0.0.1:8188',
+            quickFill: [{ label: '本机', value: 'http://127.0.0.1:8188' }],
+          }),
           KEY('COMFYUI_CHECKPOINT', '首选底模', { kind: 'text', required: false, hint: '留空用工作流里自带的' }),
+          KEY('COMFYUI_TIMEOUT_SECONDS', '超时（秒）', { kind: 'number', required: false, placeholder: '240', hint: '本机跑大模型慢就调大' }),
+          KEY('COMFYUI_WORKFLOWS_DIR', '工作流目录', {
+            kind: 'path', required: false, pick: true,
+            hint: '填了可直读本机 ComfyUI 的工作流，不用一个个上传',
+          }),
+          KEY('COMFYUI_DEFAULT_IMAGE_WORKFLOW', '默认生图工作流', { kind: 'text', required: false, hint: '不指定时用哪个工作流出图；可在下方工作流列表里点「设默认生图」' }),
         ],
       },
       {
@@ -312,7 +325,7 @@ export const CAPABILITIES: Capability[] = [
         test: 'jianyin',
         fields: [
           KEY('JIANYIN_DRAFT_PATH', '剪映草稿目录', {
-            kind: 'path', required: false,
+            kind: 'path', required: false, pick: true,
             placeholder: 'C:/Users/xxx/AppData/Local/JianyingPro/User Data/Projects/com.lveditor.draft',
             hint: 'Windows 会自动探测；macOS 需要手动填，留空则只导到 exports/ 目录',
           }),

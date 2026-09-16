@@ -43,6 +43,9 @@ export function App() {
     const h = () => setIsProviderOpen(true);
     // 画布底部栏 / 导出节点派发的全局意图事件，此前无人监听导致按钮点了没反应
     const onOpenExport = () => setIsExportOpen(true);
+    // 设置→扩展页里的入口：技能工坊 / MCP 工具（原先在侧边栏）
+    const onOpenSkillStudio = () => setIsSkillsOpen(true);
+    const onOpenMcpTools = () => setIsMcpOpen(true);
     const onOpenAssetLibrary = () => {
       const st = useProjectStore.getState();
       if (!st.project) { toast.info('请先在项目看板创建或打开项目'); return; }
@@ -56,11 +59,15 @@ export function App() {
     window.addEventListener('open-export-modal', onOpenExport as any);
     window.addEventListener('open-asset-library', onOpenAssetLibrary as any);
     window.addEventListener('theme-list-refresh', syncThemes as any);
+    window.addEventListener('open-skill-studio', onOpenSkillStudio as any);
+    window.addEventListener('open-mcp-tools', onOpenMcpTools as any);
     return () => {
       window.removeEventListener('open-provider-manager', h as any);
       window.removeEventListener('open-export-modal', onOpenExport as any);
       window.removeEventListener('open-asset-library', onOpenAssetLibrary as any);
       window.removeEventListener('theme-list-refresh', syncThemes as any);
+      window.removeEventListener('open-skill-studio', onOpenSkillStudio as any);
+      window.removeEventListener('open-mcp-tools', onOpenMcpTools as any);
     };
   }, []);
 
@@ -79,7 +86,6 @@ export function App() {
         onOpenExport={() => setIsExportOpen(true)}
         onOpenMcp={() => setIsMcpOpen(true)}
         onOpenSkills={() => setIsSkillsOpen(true)}
-        onOpenConfig={() => useProjectStore.getState().setActiveTab('config')}
         onOpenProvider={() => setIsProviderOpen(true)}
       />
 
@@ -99,13 +105,11 @@ export function App() {
 
       {/* 2. 左侧主导航 + 内容区（设置页为全屏，自带子导航） */}
       <div className="flex-1 flex overflow-hidden">
-        {activeTab !== 'config' && (
-          <Sidebar
-            onOpenMcp={() => setIsMcpOpen(true)}
-            onOpenSkills={() => setIsSkillsOpen(true)}
-            onOpenProvider={() => setIsProviderOpen(true)}
-          />
-        )}
+        <Sidebar
+          onOpenMcp={() => setIsMcpOpen(true)}
+          onOpenSkills={() => setIsSkillsOpen(true)}
+          onOpenProvider={() => setIsProviderOpen(true)}
+        />
         <main className="flex-1 flex flex-col overflow-hidden relative min-w-0">
           {activeTab === 'config' ? (
             <ErrorBoundary name="设置中心">

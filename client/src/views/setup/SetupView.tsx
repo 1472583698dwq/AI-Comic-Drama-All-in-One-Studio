@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  ArrowLeft, Sliders, Boxes, Cog, Loader2, Save, RotateCcw, Check, AlertTriangle,
+  Sliders, Boxes, Cog, Loader2, Save, RotateCcw, Check, AlertTriangle,
 } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { useProjectStore } from '../../stores/useProjectStore';
@@ -15,7 +15,7 @@ type TabKey = 'capabilities' | 'extensions' | 'system';
 const TABS: Array<{ key: TabKey; label: string; sub: string; icon: any }> = [
   { key: 'capabilities', label: '能力配置', sub: '要做什么 · 谁来做 · 填什么', icon: Sliders },
   { key: 'extensions',   label: '扩展',     sub: '装插件 · 管全部扩展',        icon: Boxes },
-  { key: 'system',       label: '系统',     sub: '本机路径 · 安全 · 诊断',     icon: Cog },
+  { key: 'system',       label: '系统',     sub: '安全 · 内核参数 · 诊断',     icon: Cog },
 ];
 
 /**
@@ -96,14 +96,7 @@ export const SetupView: React.FC = () => {
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-background">
       {/* ── 顶栏 ── */}
       <div className="h-12 shrink-0 bg-surface border-b border-border px-5 flex items-center gap-3">
-        <button
-          onClick={() => setActiveTab(project ? 'studio' : 'projects')}
-          className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-surface-secondary hover:bg-surface-tertiary text-[11.5px] text-gray-300 hover:text-white border border-border"
-        >
-          <ArrowLeft className="w-3.5 h-3.5" />
-          <span>{project ? '返回工作台' : '返回项目看板'}</span>
-        </button>
-        <span className="text-gray-600">/</span>
+        {/* 左侧主导航常驻，这里不再放重复的返回入口 */}
         <span className="text-[12.5px] font-bold text-[color:var(--color-text-main)]">设置</span>
 
         <div className="ml-auto flex items-center gap-2">

@@ -1,17 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import {
   Sparkles, Layers, Users, Compass, Video, Library, FolderKanban, Bot,
-  Settings, Sun, Moon, Plug, Cpu, PanelLeftClose, PanelLeft, Lock,
+  Settings, Sun, Moon, PanelLeftClose, PanelLeft, Lock,
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
-import { useMcpStore } from '../../stores/useMcpStore';
 import { useThemeStore } from '../../stores/useThemeStore';
 import { toast } from '../../stores/useDialogStore';
 
 interface SidebarProps {
-  onOpenMcp: () => void;
-  onOpenSkills: () => void;
-  onOpenProvider: () => void;
+  /** 设置页内仍会用到这三个弹窗，App 统一持有开关 */
+  onOpenMcp?: () => void;
+  onOpenSkills?: () => void;
+  onOpenProvider?: () => void;
 }
 
 interface NavItem {
@@ -28,11 +28,9 @@ interface NavItem {
  * - 顶栏只保留全局上下文；本项目主频道全部收敛到这里，支持折叠成图标栏。
  * - 底部工具区固定放「生成源 / 技能 / MCP / 主题 / 系统设置」，设置永远可见。
  */
-export const Sidebar: React.FC<SidebarProps> = ({ onOpenMcp, onOpenSkills, onOpenProvider }) => {
+export const Sidebar: React.FC<SidebarProps> = () => {
   const { project, activeTab, setActiveTab, setWorkspace } = useProjectStore();
   const { effectiveTheme, toggleTheme } = useThemeStore();
-  const { tools } = useMcpStore();
-  const activeToolsCount = tools.filter((t) => t.is_enabled).length;
 
   const shotsCount = (project?.scenes || []).reduce(
     (n: number, s: any) => n + (s?.shots?.length || 0), 0);
@@ -154,9 +152,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenMcp, onOpenSkills, onOpe
 
       {/* 底部工具区：设置永远可见 */}
       <div className="p-2 border-t border-border space-y-0.5 bg-surface/95">
-        <UtilButton icon={Plug} label="生成源" collapsed={collapsed} onClick={onOpenProvider} />
-        <UtilButton icon={Sparkles} label="技能工坊" collapsed={collapsed} onClick={onOpenSkills} iconCls="text-amber-400" />
-        <UtilButton icon={Cpu} label="MCP 工具" collapsed={collapsed} onClick={onOpenMcp} iconCls="text-emerald-400" badge={activeToolsCount} />
         <UtilButton
           icon={effectiveTheme === 'dark' ? Sun : Moon}
           label="切换主题"
@@ -167,7 +162,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenMcp, onOpenSkills, onOpe
 
         <button
           onClick={() => setActiveTab('config')}
-          title="系统设置 (API Keys / 模型配置 / 扩展中心 / 服务状态)"
+          title="设置：能力配置 / 扩展与插件 / 系统"
           className={`w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-xs font-bold transition-all ${
             collapsed ? 'justify-center px-0' : ''
           } ${
@@ -177,7 +172,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenMcp, onOpenSkills, onOpe
           }`}
         >
           <Settings className={`w-4 h-4 shrink-0 ${activeTab === 'config' ? 'text-white' : 'text-brand-light'}`} />
-          {!collapsed && <span className="truncate">系统设置</span>}
+          {!collapsed && <span className="truncate">设置</span>}
         </button>
 
         <button
