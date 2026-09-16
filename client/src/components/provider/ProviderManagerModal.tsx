@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { X, Plus, Plug, Globe, Video, Mic, Cpu, Trash2, Edit3, Activity, Save, Upload, FileText, Link2, TestTube, Loader2 } from 'lucide-react';
+import { X, Plus, Plug, Globe, Video, Mic, Cpu, Trash2, Edit3, Activity, Save, Upload, FileText, Link2, TestTube } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { CAPABILITIES_BY_KIND, getCapabilities } from './providerCapabilities';
 import { confirmAsync, toast } from '../../stores/useDialogStore';
@@ -9,20 +9,21 @@ import { useEscapeClose } from '../../hooks/useEscapeClose';
 interface Props {
   isOpen: boolean;
   onClose: ()=>void;
-  /** 打开即直接进入该生成源的编辑态（设置→扩展里点「编辑」用） */
-  editProviderId?: string;
+  /** 打开即直接进入该生成源的编辑态（设置→扩展里点「编辑」用，调用方已取好完整定义） */
+  editProvider?: any;
 }
 
 const kindIcon: any = { image: Globe, video: Video, audio: Mic, llm: Cpu };
 const kindColor: any = { image: 'text-violet-400', video: 'text-orange-400', audio: 'text-pink-400', llm: 'text-cyan-400' };
 
-export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editProviderId }) => {
+export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editProvider }) => {
   const [providers, setProviders] = useState<any[]>([]);
   const [filter, setFilter] = useState<'all'|'image'|'video'|'audio'>('all');
   const [q, setQ] = useState('');
   const [capFilter, setCapFilter] = useState<string>('all');
   const [editing, setEditing] = useState<any>(null);
   const [editApiKey, setEditApiKey] = useState('');
+  const [editSrc, setEditSrc] = useState<any>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [importMode, setImportMode] = useState(false);
   const [importDoc, setImportDoc] = useState('');
@@ -50,21 +51,6 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
 
   useEffect(()=> { if (isOpen) fetchAll(); }, [isOpen]);
 
-  // 外部指定了要编辑谁：直接进编辑态，不停在列表
-  useEffect(()=> {
-    if (!isOpen || !editProviderId) return;
-    let cancelled = false;
-    (async ()=>{
-      try {
-        const r = await apiService.getProvider(editProviderId);
-        if (!cancelled && r?.provider) {
-          setEditApiKey('');
-          setEditing({ ...r.provider, code: (r.provider.code ?? r.raw?.code ?? '') });
-        }
-      } catch { /* 拉不到就停在列表 */ }
-    })();
-    return ()=> { cancelled = true; };
-  }, [isOpen, editProviderId]);
   useEffect(()=>{
     const h = ()=> fetchAll();
     window.addEventListener('provider-list-refresh', h as any);
@@ -123,7 +109,7 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
       if (editing.headers) payload.headers = editing.headers;
       if (editApiKey) payload.api_key = editApiKey;
       await apiService.updateProvider(editing.id, payload);
-      if (editProviderId) { onClose(); } else { setEditing(null); }
+      if (editProvider) { onClose(); } else { setEditing(null); }
       await fetchAll();
       window.dispatchEvent(new Event('provider-list-refresh'));
     } catch(e:any){ alert(e.message); }
@@ -212,16 +198,19 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
   if (!isOpen) return null;
 
   /** 从设置页点某个源的「编辑」进来：只给编辑表单，不摆一层管理列表 */
-  const directEdit = !!editProviderId;
+  const directEdit = !!editProvider;
+  // 渲染期同步对齐 props：React 会在这一帧内重渲染，不会先把空态画出来。
+  // 按对象引用比对（每次打开都是新拉的定义），保证同一个源再次打开也是干净的。
+  if (directEdit && editSrc !== editProvider) {
+    setEditSrc(editProvider);
+    setEditing(editProvider);
+    setEditApiKey('');
+    return null;
+  }
   const closeEdit = ()=> { if (directEdit) { onClose(); } else { setEditing(null); } };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fade-in">
-      {directEdit && !editing && (
-        <div className="text-xs text-gray-400 flex items-center gap-2">
-          <Loader2 className="w-4 h-4 animate-spin" />读取生成源定义…
-        </div>
-      )}
       <div className={directEdit ? 'contents' : 'w-full max-w-6xl h-[85vh] bg-surface rounded-2xl border border-border flex flex-col overflow-hidden shadow-2xl'}>
         {!directEdit && (<>
         {/* Header */}
