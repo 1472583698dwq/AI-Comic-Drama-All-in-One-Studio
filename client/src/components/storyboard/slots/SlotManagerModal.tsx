@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, Plus, RefreshCw, Save, Trash2, Wand2, X } from 'lucide-react';
 import { apiService } from '../../../services/api';
+import { useEscapeClose } from '../../../hooks/useEscapeClose';
 
 const CONTAINER_LABEL: Record<string, string> = {
   'shot.modes': '制作模式',
@@ -18,6 +19,7 @@ export const SlotManagerModal: React.FC<{
   onClose: () => void;
   onChanged: () => void;
 }> = ({ projectId, onClose, onChanged }) => {
+  useEscapeClose(true, onClose);
   const [slots, setSlots] = useState<any[]>([]);
   const [overrides, setOverrides] = useState<{ disabled: string[]; order: Record<string, number> }>({ disabled: [], order: {} });
   const [loading, setLoading] = useState(false);
@@ -170,11 +172,11 @@ export const SlotManagerModal: React.FC<{
 
   return (
     <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
-      <div className="w-full max-w-3xl max-h-[85vh] bg-[#0f0f12] rounded-2xl border border-zinc-800 flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
-        <div className="h-12 px-4 border-b border-zinc-800 flex items-center justify-between shrink-0 bg-[#18181b]">
+      <div className="w-full max-w-3xl max-h-[85vh] bg-surface rounded-2xl border border-border flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="h-12 px-4 border-b border-border flex items-center justify-between shrink-0 bg-surface-secondary">
           <span className="text-sm font-bold text-white">🧩 分镜槽管理 <span className="text-xs font-normal text-zinc-500">· {slots.length} 槽生效中</span></span>
           <div className="flex items-center gap-2">
-            <button onClick={load} disabled={loading} className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-400"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /></button>
+            <button onClick={load} disabled={loading} className="p-1.5 rounded-lg hover:bg-surface-secondary text-zinc-400"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /></button>
             <button onClick={onClose}><X className="w-4 h-4 text-zinc-400" /></button>
           </div>
         </div>
@@ -189,7 +191,7 @@ export const SlotManagerModal: React.FC<{
                 {(grouped[container] || []).map((s: any) => {
                   const off = disabled.includes(s.key);
                   return (
-                    <div key={s.key} className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs ${off ? 'opacity-40 bg-zinc-900 border-zinc-800' : 'bg-zinc-900/60 border-zinc-800'} ${s.valid === false ? 'border-red-500/40' : ''}`}>
+                    <div key={s.key} className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs ${off ? 'opacity-40 bg-surface border-border' : 'bg-surface-secondary border-border'} ${s.valid === false ? 'border-red-500/40' : ''}`}>
                       <input type="checkbox" checked={!off} onChange={() => toggleDisabled(s.key)} title={off ? '已禁用（保存后生效）' : '启用中'} className="w-3.5 h-3.5 accent-brand shrink-0" />
                       <div className="min-w-0 flex-1">
                         <div className="text-white font-semibold truncate">{s.label || s.id} <span className="font-mono font-normal text-zinc-500">{s.slot}:{s.id}</span></div>
@@ -197,8 +199,8 @@ export const SlotManagerModal: React.FC<{
                         {s.source !== 'builtin' && <div className="text-[10px] text-zinc-500">来源：{s.source}{s.source_detail ? `/${s.source_detail}` : ''}</div>}
                       </div>
                       <span className="text-[10px] font-mono text-zinc-500 shrink-0">{order[s.key] ?? s.order ?? 50}</span>
-                      <button onClick={() => moveOrder(s.key, -1)} className="p-1 rounded hover:bg-zinc-800 text-zinc-400" title="前移"><ArrowUp className="w-3 h-3" /></button>
-                      <button onClick={() => moveOrder(s.key, 1)} className="p-1 rounded hover:bg-zinc-800 text-zinc-400" title="后移"><ArrowDown className="w-3 h-3" /></button>
+                      <button onClick={() => moveOrder(s.key, -1)} className="p-1 rounded hover:bg-surface-secondary text-zinc-400" title="前移"><ArrowUp className="w-3 h-3" /></button>
+                      <button onClick={() => moveOrder(s.key, 1)} className="p-1 rounded hover:bg-surface-secondary text-zinc-400" title="后移"><ArrowDown className="w-3 h-3" /></button>
                       {s.source === 'standalone' && (
                         <button onClick={() => handleDeleteCustom(s.slot, s.id)} className="p-1 rounded hover:bg-red-500/20 text-red-400" title="删除裸件槽"><Trash2 className="w-3 h-3" /></button>
                       )}
@@ -219,17 +221,17 @@ export const SlotManagerModal: React.FC<{
                 onChange={(e) => setGoal(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') handlePropose(); }}
                 placeholder="如：分镜加个批注Tab / 加个灯光锚点 / 加个一键合成按钮"
-                className="flex-1 bg-black/40 border border-zinc-700 rounded-xl px-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-brand"
+                className="flex-1 bg-surface-secondary border border-border-active rounded-xl px-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-brand"
               />
               <button onClick={handlePropose} disabled={creating || !goal.trim()} className="px-4 py-2 rounded-xl bg-brand text-white text-xs font-bold disabled:opacity-40">提案</button>
             </div>
             {proposal && (
-              <div className="p-2.5 rounded-xl bg-black/40 border border-zinc-800 text-xs space-y-1.5">
+              <div className="p-2.5 rounded-xl bg-surface-secondary border border-border text-xs space-y-1.5">
                 <div className="text-white font-bold">{proposal.title} <span className="font-mono font-normal text-zinc-500">· {proposal.kind} · {proposal.status}</span></div>
                 <div className="text-zinc-400">{proposal.diff_preview}</div>
                 {(proposal.test_plan || []).length > 0 && <div className="text-zinc-500">试跑：{(proposal.test_plan || []).join(' → ')}</div>}
                 {proposal.slot_spec?.doc && (
-                  <pre className="text-[10px] font-mono text-zinc-500 bg-black/40 rounded-lg p-2 overflow-x-auto max-h-28 overflow-y-auto">{JSON.stringify(proposal.slot_spec.doc, null, 1)}</pre>
+                  <pre className="text-[10px] font-mono text-zinc-500 bg-surface-secondary rounded-lg p-2 overflow-x-auto max-h-28 overflow-y-auto">{JSON.stringify(proposal.slot_spec.doc, null, 1)}</pre>
                 )}
                 {report && (
                   <div className="space-y-0.5">
@@ -242,17 +244,17 @@ export const SlotManagerModal: React.FC<{
                   {proposal.status === 'proposed' && <button onClick={handleStart} disabled={creating} className="px-3 py-1.5 rounded-lg bg-brand/20 border border-brand/30 text-brand-light text-[11px] font-bold disabled:opacity-40">Start 试跑</button>}
                   {proposal.status === 'tested' && <button onClick={() => handleFinalize('persist')} disabled={creating} className="px-3 py-1.5 rounded-lg bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-[11px] font-bold disabled:opacity-40">持久化</button>}
                   {proposal.status === 'persisted' && <button onClick={() => handleFinalize('rollback')} disabled={creating} className="px-3 py-1.5 rounded-lg bg-amber-500/20 border border-amber-500/30 text-amber-300 text-[11px] font-bold disabled:opacity-40">回滚</button>}
-                  {['proposed', 'tested', 'test_failed'].includes(proposal.status) && <button onClick={() => handleFinalize('discard')} disabled={creating} className="px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 text-[11px] disabled:opacity-40">丢弃</button>}
+                  {['proposed', 'tested', 'test_failed'].includes(proposal.status) && <button onClick={() => handleFinalize('discard')} disabled={creating} className="px-3 py-1.5 rounded-lg bg-surface-secondary border border-border-active text-zinc-300 text-[11px] disabled:opacity-40">丢弃</button>}
                 </div>
               </div>
             )}
           </div>
         </div>
 
-        <div className="p-3 border-t border-zinc-800 flex items-center justify-between shrink-0 bg-[#18181b]">
+        <div className="p-3 border-t border-border flex items-center justify-between shrink-0 bg-surface-secondary">
           <span className="text-[11px] text-zinc-500">{projectId ? `项目级覆盖 · ${projectId.slice(0, 8)}` : '未打开项目（覆盖需 project_id）'}{dirty ? ' · 有未保存更改' : ''}</span>
           <div className="flex gap-2">
-            <button onClick={() => { setGoal(''); setProposal(null); setReport(null); onClose(); }} className="px-4 py-1.5 rounded-xl bg-zinc-800 border border-zinc-700 text-xs text-white">关闭</button>
+            <button onClick={() => { setGoal(''); setProposal(null); setReport(null); onClose(); }} className="px-4 py-1.5 rounded-xl bg-surface-secondary border border-border-active text-xs text-white">关闭</button>
             <button onClick={handleSave} disabled={saving || !dirty} className="px-4 py-1.5 rounded-xl bg-brand text-white text-xs font-bold flex items-center gap-1 disabled:opacity-40"><Save className="w-3.5 h-3.5" />{saving ? '保存中…' : '保存覆盖'}</button>
           </div>
         </div>

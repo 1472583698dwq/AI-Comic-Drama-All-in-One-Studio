@@ -165,7 +165,7 @@ export const AgentModeView: React.FC = () => {
           <div className="rounded-2xl border border-amber-500/40 bg-amber-500/5 p-3 space-y-2">
             <div className="text-xs font-bold text-amber-300 flex items-center gap-1.5"><ShieldAlert className="w-3.5 h-3.5" />待确认 {pendingList.length}</div>
             {pendingList.map(([aid, v]) => (
-              <div key={aid} className="rounded-xl bg-black/30 border border-amber-500/20 p-2">
+              <div key={aid} className="rounded-xl bg-surface-secondary border border-amber-500/20 p-2">
                 <div className="text-[11px] font-mono text-white truncate">{v.tool_name}</div>
                 <div className="text-[10px] font-mono text-gray-500 break-all max-h-20 overflow-y-auto custom-scrollbar">{JSON.stringify(v.args).slice(0, 400)}</div>
                 <div className="flex gap-1.5 mt-1.5">

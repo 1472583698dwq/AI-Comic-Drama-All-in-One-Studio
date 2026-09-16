@@ -83,7 +83,7 @@ export const DialogueTab: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
 
         {/* 语音源专有 Schema 参数动态表单 */}
         {audioProviderDef?.params_schema && (
-          <div className="rounded-xl bg-black/30 border border-pink-500/20 p-2.5 space-y-2">
+          <div className="rounded-xl bg-surface-secondary border border-pink-500/20 p-2.5 space-y-2">
             <div className="text-[11px] font-bold text-pink-300">
               ⚙️ {audioProviderDef.display_name || audioProviderDef.name || audioProviderDef.id} 专属参数
             </div>

@@ -4,6 +4,7 @@ import { apiService } from '../../services/api';
 import { CAPABILITIES_BY_KIND, getCapabilities } from './providerCapabilities';
 import { confirmAsync, toast } from '../../stores/useDialogStore';
 import { CustomHeadersEditor } from './CustomHeadersEditor';
+import { useEscapeClose } from '../../hooks/useEscapeClose';
 
 interface Props { isOpen: boolean; onClose: ()=>void; }
 
@@ -172,6 +173,7 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose }) => {
     } catch(e:any){ alert(e.message); }
   };
 
+  useEscapeClose(isOpen, onClose);
   if (!isOpen) return null;
 
   return (
@@ -203,7 +205,7 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose }) => {
               <input value={importName} onChange={e=> setImportName(e.target.value)} placeholder="名称（可选，如 我的FLUX）" className="flex-1 bg-surface border border-border rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-500"/>
               <input value={importKey} onChange={e=> setImportKey(e.target.value)} placeholder="API Key（可选）" className="flex-1 bg-surface border border-border rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-500 font-mono"/>
             </div>
-            <textarea value={importDoc} onChange={e=> setImportDoc(e.target.value)} placeholder="粘贴 API 文档 / cURL / OpenAPI JSON… 导演将自动解析 transport/auth/input_schema/output_schema" rows={4} className="w-full bg-black/40 border border-border rounded-xl p-3 text-xs font-mono text-white placeholder-gray-500 focus:outline-none focus:border-brand resize-none"/>
+            <textarea value={importDoc} onChange={e=> setImportDoc(e.target.value)} placeholder="粘贴 API 文档 / cURL / OpenAPI JSON… 导演将自动解析 transport/auth/input_schema/output_schema" rows={4} className="w-full bg-surface-secondary border border-border rounded-xl p-3 text-xs font-mono text-white placeholder-gray-500 focus:outline-none focus:border-brand resize-none"/>
             <div className="flex justify-end gap-2">
               <button onClick={()=> setImportMode(false)} className="px-3 py-1.5 rounded-lg bg-surface border border-border text-xs text-white">取消</button>
               <button onClick={handleImport} className="px-4 py-1.5 rounded-lg bg-brand text-white text-xs font-bold">让导演解析并创建</button>
@@ -215,7 +217,7 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose }) => {
         <div className="px-6 py-3 border-b border-border flex items-center gap-2 shrink-0">
           <div className="flex items-center gap-1 p-1 rounded-full bg-surface-secondary border border-border">
             {(['all','image','video','audio'] as const).map(k=> (
-              <button key={k} onClick={()=> { setFilter(k); setCapFilter('all'); }} className={`px-3 py-1 rounded-full text-xs font-medium ${filter===k?'bg-white dark:bg-brand text-surface dark:text-white shadow-sm':'text-gray-400 hover:text-white'}`}>{k==='all'?'全部':k==='image'?'生图':k==='video'?'视频':'语音'}</button>
+              <button key={k} onClick={()=> { setFilter(k); setCapFilter('all'); }} className={`px-3 py-1 rounded-full text-xs font-medium ${filter===k?'bg-brand text-white shadow-sm':'text-gray-400 hover:text-white'}`}>{k==='all'?'全部':k==='image'?'生图':k==='video'?'视频':'语音'}</button>
             ))}
           </div>
           <input value={q} onChange={e=> setQ(e.target.value)} placeholder="搜索 名称/ID…" className="flex-1 max-w-xs bg-surface-secondary border border-border rounded-full px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand"/>
@@ -236,7 +238,7 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose }) => {
                 <div key={p.id} className={`p-4 rounded-xl border flex flex-col gap-2 ${p.builtin?'bg-surface-secondary/40 border-border':'bg-surface border-brand/20 shadow-sm'}`}>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 min-w-0">
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center border bg-black/20 ${p.builtin?'border-border':'border-brand/20'}`}><Icon className={`w-4 h-4 ${color}`} /></div>
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center border bg-surface-secondary ${p.builtin?'border-border':'border-brand/20'}`}><Icon className={`w-4 h-4 ${color}`} /></div>
                       <div className="min-w-0">
                         <div className="text-xs font-bold text-white truncate">{p.display_name || p.name || p.id}</div>
                         <div className="text-[10px] font-mono text-gray-500 truncate">{p.id} · {p.kind} {p.provider_type?`·${p.provider_type}`:''}</div>
@@ -247,13 +249,13 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose }) => {
                   {p.description && <div className="text-[11px] text-gray-400 line-clamp-2">{p.description}</div>}
                   <div className="flex flex-wrap items-center gap-1">
                     {getCapabilities(p).map(c=> (
-                      <span key={c} title={c} className={`text-[10px] px-1.5 py-0.5 rounded border ${Array.isArray(p.capabilities) && p.capabilities.length ? 'bg-brand/10 border-brand/30 text-brand-light' : 'bg-black/30 border-border text-gray-500'}`}>{(CAPABILITIES_BY_KIND[p.kind] || []).find(o=>o.id===c)?.label || c}</span>
+                      <span key={c} title={c} className={`text-[10px] px-1.5 py-0.5 rounded border ${Array.isArray(p.capabilities) && p.capabilities.length ? 'bg-brand/10 border-brand/30 text-brand-light' : 'bg-surface-secondary border-border text-gray-500'}`}>{(CAPABILITIES_BY_KIND[p.kind] || []).find(o=>o.id===c)?.label || c}</span>
                     ))}
                   </div>
                   <div className="text-[10px] font-mono text-gray-500 truncate" title={p.transport?.url}>URL: {p.transport?.url || '—'}</div>
                   <div className="flex items-center gap-1.5 text-[10px] text-gray-500">
-                    <span>模型:</span><span className="px-1.5 py-0.5 rounded bg-black/30 text-gray-300 truncate max-w-[140px]">{p.default_model || p.models?.[0] || '—'}</span>
-                    <span className="ml-auto flex items-center gap-1">{p.health?.ok ? <span className="w-2 h-2 rounded-full bg-emerald-500"/> : p.health?.ok===false ? <span className="w-2 h-2 rounded-full bg-amber-500"/> : null}{p.builtin?'':<span className="px-1 py-0.5 rounded bg-black/30">{p.params_schema ? Object.keys(p.params_schema.properties||{}).length+' 参数' : '无参'}</span>}</span>
+                    <span>模型:</span><span className="px-1.5 py-0.5 rounded bg-surface-secondary text-gray-300 truncate max-w-[140px]">{p.default_model || p.models?.[0] || '—'}</span>
+                    <span className="ml-auto flex items-center gap-1">{p.health?.ok ? <span className="w-2 h-2 rounded-full bg-emerald-500"/> : p.health?.ok===false ? <span className="w-2 h-2 rounded-full bg-amber-500"/> : null}{p.builtin?'':<span className="px-1 py-0.5 rounded bg-surface-secondary">{p.params_schema ? Object.keys(p.params_schema.properties||{}).length+' 参数' : '无参'}</span>}</span>
                   </div>
                   <div className="flex items-center gap-1.5 pt-1">
                     <button onClick={()=> handleTest(p.id)} className="flex-1 py-1.5 rounded-lg bg-surface-secondary border border-border text-xs text-white hover:border-brand flex items-center justify-center gap-1"><Activity className="w-3 h-3"/> 测试</button>
@@ -269,7 +271,7 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
         {/* Edit Drawer */}
         {editing && (
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-surface/85 backdrop-blur-sm flex items-center justify-center p-4">
             <div className="w-full max-w-2xl max-h-[85vh] bg-surface rounded-2xl border border-border flex flex-col overflow-hidden">
               <div className="h-12 px-4 border-b border-border flex items-center justify-between shrink-0">
                 <span className="text-sm font-bold text-white">{editing.builtin?'查看':'编辑'} {editing.id}</span>
@@ -309,9 +311,9 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose }) => {
                     <div key={f.k} className="space-y-1">
                       <span className="text-[11px] font-semibold text-gray-300">{f.label} <span className="text-[10px] text-gray-500">{f.k}</span></span>
                       {f.type==='textarea' ? (
-                        <textarea value={display} onChange={e=> setEditing({...editing, [f.k]: e.target.value})} rows={2} className="w-full bg-black/40 border border-border rounded-lg p-2 font-mono text-xs text-white focus:outline-none focus:border-brand" disabled={editing.builtin}/>
+                        <textarea value={display} onChange={e=> setEditing({...editing, [f.k]: e.target.value})} rows={2} className="w-full bg-surface-secondary border border-border rounded-lg p-2 font-mono text-xs text-white focus:outline-none focus:border-brand" disabled={editing.builtin}/>
                       ) : f.type==='code' ? (
-                        <textarea value={display} onChange={e=> setEditing({...editing, [f.k]: e.target.value})} rows={10} className="w-full bg-black/40 border border-border rounded-lg p-2 font-mono text-[11px] text-white focus:outline-none focus:border-brand" disabled={editing.builtin} placeholder="async def generate(ctx, api): ... # 末尾可追加 # PARAMS_SCHEMA: {...}"/>
+                        <textarea value={display} onChange={e=> setEditing({...editing, [f.k]: e.target.value})} rows={10} className="w-full bg-surface-secondary border border-border rounded-lg p-2 font-mono text-[11px] text-white focus:outline-none focus:border-brand" disabled={editing.builtin} placeholder="async def generate(ctx, api): ... # 末尾可追加 # PARAMS_SCHEMA: {...}"/>
                       ) : f.type==='custom_headers' ? (
                         <CustomHeadersEditor
                           headers={editing.headers || editing.custom_headers || {}}
@@ -319,14 +321,14 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose }) => {
                           disabled={editing.builtin}
                         />
                       ) : f.type==='json' ? (
-                        <textarea value={display} onChange={e=> setEditing({...editing, [f.k]: e.target.value})} rows={4} className="w-full bg-black/40 border border-border rounded-lg p-2 font-mono text-[11px] text-white focus:outline-none focus:border-brand" disabled={editing.builtin}/>
+                        <textarea value={display} onChange={e=> setEditing({...editing, [f.k]: e.target.value})} rows={4} className="w-full bg-surface-secondary border border-border rounded-lg p-2 font-mono text-[11px] text-white focus:outline-none focus:border-brand" disabled={editing.builtin}/>
                       ) : f.type==='select' ? (
                         <select value={val||''} onChange={e=> setEditing({...editing, [f.k]: e.target.value})} className="w-full bg-surface-secondary border border-border rounded-lg px-2 py-1.5 text-xs text-white" disabled={editing.builtin}>
                           {f.opts?.map((o:string)=> <option key={o} value={o}>{o}</option>
                           )}
                         </select>
                       ) : f.type==='caps' ? (
-                        <div className="flex flex-wrap gap-1.5 p-2 rounded-lg bg-black/40 border border-border">
+                        <div className="flex flex-wrap gap-1.5 p-2 rounded-lg bg-surface-secondary border border-border">
                           {!(CAPABILITIES_BY_KIND[editing.kind] || []).length && <span className="text-[11px] text-gray-500">该类型暂无能力选项</span>}
                           {(CAPABILITIES_BY_KIND[editing.kind] || []).map(o=> {
                             const cur: string[] = Array.isArray(editing.capabilities) ? editing.capabilities : [];
@@ -358,7 +360,7 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
         {/* Create Modal */}
         {showCreate && (
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-surface/85 backdrop-blur-sm flex items-center justify-center p-4">
             <CreateForm onClose={()=> setShowCreate(false)} onCreated={()=> { setShowCreate(false); fetchAll(); window.dispatchEvent(new Event('provider-list-refresh')); }} />
           </div>
         )}
@@ -413,8 +415,8 @@ const CreateForm: React.FC<{onClose:()=>void, onCreated:()=>void}> = ({ onClose,
         <label className="text-[11px] font-semibold text-gray-300">自定义请求头 (Custom Headers / OpenCode 规范)</label>
         <CustomHeadersEditor headers={headers} onChange={setHeaders} />
       </div>
-      <textarea value={typeof form.transport==='string'?form.transport:JSON.stringify(form.transport, null, 2)} onChange={e=> setForm({...form, transport:e.target.value})} rows={4} placeholder='transport JSON，如 {"method":"POST","url":"https://...","headers":{"Content-Type":"application/json"}}' className="w-full bg-black/40 border border-border rounded-lg p-2 font-mono text-[11px] text-white"/>
-      <textarea value={typeof form.auth==='string'?form.auth:JSON.stringify(form.auth, null, 2)} onChange={e=> setForm({...form, auth:e.target.value})} rows={2} placeholder='auth JSON，如 {"type":"bearer"}' className="w-full bg-black/40 border border-border rounded-lg p-2 font-mono text-[11px] text-white"/>
+      <textarea value={typeof form.transport==='string'?form.transport:JSON.stringify(form.transport, null, 2)} onChange={e=> setForm({...form, transport:e.target.value})} rows={4} placeholder='transport JSON，如 {"method":"POST","url":"https://...","headers":{"Content-Type":"application/json"}}' className="w-full bg-surface-secondary border border-border rounded-lg p-2 font-mono text-[11px] text-white"/>
+      <textarea value={typeof form.auth==='string'?form.auth:JSON.stringify(form.auth, null, 2)} onChange={e=> setForm({...form, auth:e.target.value})} rows={2} placeholder='auth JSON，如 {"type":"bearer"}' className="w-full bg-surface-secondary border border-border rounded-lg p-2 font-mono text-[11px] text-white"/>
       <input value={Array.isArray(form.models)?form.models.join(','):form.models} onChange={e=> setForm({...form, models:e.target.value})} placeholder="models 逗号分隔，可空" className="w-full bg-surface-secondary border border-border rounded-lg px-3 py-2 text-xs text-white"/>
       <input value={form.default_model} onChange={e=> setForm({...form, default_model:e.target.value})} placeholder="default_model，可空" className="w-full bg-surface-secondary border border-border rounded-lg px-3 py-2 text-xs text-white"/>
       <input value={apiKey} onChange={e=> setApiKey(e.target.value)} placeholder="API Key（可选）" className="w-full bg-surface-secondary border border-border rounded-lg px-3 py-2 text-xs text-white font-mono"/>

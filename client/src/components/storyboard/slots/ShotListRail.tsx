@@ -71,10 +71,10 @@ export const ShotListRail: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
                   });
                 }}
                 onClick={e=> e.stopPropagation()}
-                className="absolute top-2 left-2 w-3.5 h-3.5 rounded border border-white/30 bg-black/60 accent-brand z-10"
+                className="absolute top-2 left-2 w-3.5 h-3.5 rounded border border-white/30 bg-surface/85 accent-brand z-10"
               />
 
-              <div className="relative aspect-video rounded-lg overflow-hidden bg-black/60 mb-1.5 ml-5">
+              <div className="relative aspect-video rounded-lg overflow-hidden bg-surface-secondary mb-1.5 ml-5">
                 {shot.image_url ? (
                   <img
                     src={getMediaUrl(shot.image_url)}
@@ -87,7 +87,7 @@ export const ShotListRail: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
                   </div>
                 )}
 
-                <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-black/70 text-[9px] font-mono text-brand-light font-bold">
+                <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-surface/85 text-[9px] font-mono text-brand-light font-bold">
                   #{shot.shot_index}
                 </span>
 
@@ -111,7 +111,7 @@ export const ShotListRail: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
                   </span>
                 )}
 
-                <span className="absolute bottom-1 right-1 px-1 rounded bg-black/70 text-[9px] text-gray-300 font-mono">
+                <span className="absolute bottom-1 right-1 px-1 rounded bg-surface/85 text-[9px] text-gray-300 font-mono">
                   {shot.duration}s
                 </span>
 

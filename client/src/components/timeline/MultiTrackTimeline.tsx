@@ -37,10 +37,10 @@ export const MultiTrackTimeline: React.FC = () => {
   const [zoom, setZoom] = useState<number>(60); // pixels per second
   const timelineRef = useRef<HTMLDivElement>(null);
 
+  // 进「多轨剪辑」自动展开、离开自动收起。
+  // 修复前只展不收：去过一次多轨剪辑后，「分镜工作台」和「多轨剪辑」两个入口画面完全一样。
   useEffect(() => {
-    if (activeTab === 'timeline') {
-      setIsCollapsed(false);
-    }
+    setIsCollapsed(activeTab !== 'timeline');
   }, [activeTab]);
 
   const shots: StoryboardShot[] = project?.scenes.flatMap((s) => s.shots) || [];

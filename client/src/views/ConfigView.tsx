@@ -27,8 +27,18 @@ const TABS: Array<{key: TabKey; label: string; sub: string; icon: any; badge?: s
 ];
 
 export const ConfigView: React.FC = () => {
-  const { setActiveTab } = useProjectStore();
-  const [tab, setTab] = useState<TabKey>('dashboard');
+  const { setActiveTab, project } = useProjectStore();
+  // 支持从别处深链到某个子页（如画布的「插件安装」直达插件中心），沿用画布素材交接的 localStorage 约定
+  const [tab, setTab] = useState<TabKey>(() => {
+    try {
+      const pending = localStorage.getItem('config_pending_tab');
+      if (pending) {
+        localStorage.removeItem('config_pending_tab');
+        if (TABS.some(t => t.key === pending)) return pending as TabKey;
+      }
+    } catch { /* ignore */ }
+    return 'dashboard';
+  });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [form, setFormState] = useState<Record<string,string>>({});
@@ -132,8 +142,8 @@ export const ConfigView: React.FC = () => {
       {/* Top Header */}
       <div className="h-12 bg-surface border-b border-border px-6 flex items-center justify-between shrink-0">
         <div className="flex items-center space-x-3">
-          <button onClick={()=> setActiveTab('studio')} className="flex items-center space-x-1.5 px-3 py-1 rounded-lg bg-surface-secondary hover:bg-surface-tertiary text-xs text-gray-300 hover:text-white border border-border">
-            <ArrowLeft className="w-3.5 h-3.5"/><span>返回漫剧工作台</span>
+          <button onClick={()=> setActiveTab(project ? 'studio' : 'projects')} className="flex items-center space-x-1.5 px-3 py-1 rounded-lg bg-surface-secondary hover:bg-surface-tertiary text-xs text-gray-300 hover:text-white border border-border">
+            <ArrowLeft className="w-3.5 h-3.5"/><span>{project ? '返回漫剧工作台' : '返回项目看板'}</span>
           </button>
           <span className="text-gray-600">/</span>
           <div className="flex items-center space-x-2">
@@ -181,7 +191,7 @@ export const ConfigView: React.FC = () => {
         </div>
 
         {/* Right Content */}
-        <div className="flex-1 flex flex-col overflow-hidden bg-[#07070A]">
+        <div className="flex-1 flex flex-col overflow-hidden bg-background">
           <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar max-w-5xl">
             {msg && (
               <div className={`px-4 py-3 rounded-2xl border text-xs flex items-center justify-between ${msg.type==='success'?'bg-emerald-500/10 border-emerald-500/30 text-emerald-300':'bg-red-500/10 border-red-500/30 text-red-300'}`}>

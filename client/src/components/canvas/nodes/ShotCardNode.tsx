@@ -100,7 +100,7 @@ export const ShotCardNode: React.FC<NodeProps> = ({ data, id }) => {
 
       <div className="aspect-[9/16] max-h-[220px] bg-surface-secondary relative overflow-hidden flex items-center justify-center border-b border-border">
         {imgUrl ? <img src={imgUrl} alt="" className="w-full h-full object-cover"/> : <div className="text-xs [color:var(--color-text-muted)] flex flex-col items-center gap-1"><ImageIcon className="w-6 h-6 opacity-50"/><span>{generating ? '生成中…' : '暂无画面'}</span></div>}
-        {localData.subtitle_text && <div className="absolute bottom-2 left-2 right-2 bg-black/70 backdrop-blur px-2 py-1 rounded text-[11px] text-white text-center border border-white/10">{localData.subtitle_text}</div>}
+        {localData.subtitle_text && <div className="absolute bottom-2 left-2 right-2 bg-surface/85 backdrop-blur px-2 py-1 rounded text-[11px] text-white text-center border border-white/10">{localData.subtitle_text}</div>}
       </div>
 
       <div className="p-2.5 space-y-2 bg-surface">

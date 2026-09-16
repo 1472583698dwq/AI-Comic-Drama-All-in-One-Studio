@@ -106,7 +106,7 @@ export const LoadVideoNode: React.FC<NodeProps> = ({ data, id })=>{
       </div>
       <Handle type="source" position={Position.Right} id="video" className="!bg-orange-500 !w-3 !h-3 !border-2 !border-surface"/>
       <div className="p-3 space-y-2">
-        {url ? <video src={getUrl(url)} controls className="w-full h-28 rounded-xl bg-black object-cover border border-border"/> : <div className="h-20 flex items-center justify-center text-xs [color:var(--color-text-muted)] border border-dashed border-border rounded-xl">暂无视频</div>}
+        {url ? <video src={getUrl(url)} controls className="w-full h-28 rounded-xl bg-surface-secondary object-cover border border-border"/> : <div className="h-20 flex items-center justify-center text-xs [color:var(--color-text-muted)] border border-dashed border-border rounded-xl">暂无视频</div>}
         <input value={url} onChange={e=> sync(e.target.value)} placeholder="/storage/... 或 http" className="w-full bg-surface-secondary border border-border rounded-lg px-2.5 py-1.5 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] font-mono focus:outline-none focus:border-brand"/>
       </div>
     </div>

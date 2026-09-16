@@ -20,7 +20,7 @@ import { ProviderManagerModal } from './components/provider/ProviderManagerModal
 import { GlobalAiPolish } from './components/ui/GlobalAiPolish';
 import { GlobalDialogContainer } from './components/ui/GlobalDialogContainer';
 import { FirstRunWizard } from './components/onboarding/FirstRunWizard';
-import { installGlobalDialogPatch } from './stores/useDialogStore';
+import { installGlobalDialogPatch, toast } from './stores/useDialogStore';
 const CreativeCanvas = React.lazy(()=> import('./components/canvas/CreativeCanvas').then(m=> ({default: m.CreativeCanvas})));
 import { useProjectStore } from './stores/useProjectStore';
 import { useMcpStore } from './stores/useMcpStore';
@@ -41,13 +41,25 @@ export function App() {
     fetchTools().catch((e: any) => setMcpError(e?.message || 'MCP 服务连接失败'));
     useProjectStore.getState().loadActiveProject();
     const h = () => setIsProviderOpen(true);
-    window.addEventListener('open-provider-manager', h as any);
+    // 画布底部栏 / 导出节点派发的全局意图事件，此前无人监听导致按钮点了没反应
+    const onOpenExport = () => setIsExportOpen(true);
+    const onOpenAssetLibrary = () => {
+      const st = useProjectStore.getState();
+      if (!st.project) { toast.info('请先在项目看板创建或打开项目'); return; }
+      st.setWorkspace('production');
+      st.setActiveTab('assets');
+    };
     // 插件主题包（themes 扩展点）：启动同步 + 插件启停后热刷新
     const syncThemes = () => { import('./services/themeSpecs').then((m) => m.syncPluginThemes().catch(() => {})).catch(() => {}); };
     syncThemes();
+    window.addEventListener('open-provider-manager', h as any);
+    window.addEventListener('open-export-modal', onOpenExport as any);
+    window.addEventListener('open-asset-library', onOpenAssetLibrary as any);
     window.addEventListener('theme-list-refresh', syncThemes as any);
     return () => {
       window.removeEventListener('open-provider-manager', h as any);
+      window.removeEventListener('open-export-modal', onOpenExport as any);
+      window.removeEventListener('open-asset-library', onOpenAssetLibrary as any);
       window.removeEventListener('theme-list-refresh', syncThemes as any);
     };
   }, []);

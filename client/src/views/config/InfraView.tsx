@@ -196,7 +196,7 @@ export const InfraView: React.FC<{
                       </span>
                     </div>
                     <div className="text-[11px] text-zinc-300 mt-0.5">
-                      💡 OpenCode.ai 用户请点击下方快捷标签 <code className="text-amber-300 bg-black/40 px-1.5 py-0.5 rounded font-mono font-bold">+ OpenCode Session (必需)</code> 即可一键生成会话标识，防止 400 拦截
+                      💡 OpenCode.ai 用户请点击下方快捷标签 <code className="text-amber-300 bg-surface-secondary px-1.5 py-0.5 rounded font-mono font-bold">+ OpenCode Session (必需)</code> 即可一键生成会话标识，防止 400 拦截
                     </div>
                   </div>
                 </div>
@@ -237,7 +237,7 @@ export const InfraView: React.FC<{
           <button onClick={()=> onPickFolder('COMFYUI_WORKFLOWS_DIR','请选择 ComfyUI 工作流文件夹')} className="px-3 py-2 rounded-xl bg-brand/20 border border-brand/30 text-xs text-brand-light flex items-center gap-1"><FolderSearch className="w-3.5 h-3.5"/> 选择</button>
           {form.COMFYUI_WORKFLOWS_DIR && <button onClick={()=> onOpenFolder('COMFYUI_WORKFLOWS_DIR')} className="px-2.5 py-2 rounded-xl bg-surface-tertiary border border-border text-xs text-white"><FolderOpen className="w-3.5 h-3.5"/></button>}
         </div>
-        <div className="text-[11px] text-gray-500">仅 API Format 可执行，Save Format 需 Export API Format。外部 id 以 <code className="px-1 py-0.5 rounded bg-black/30 text-brand-light">ext_</code> 开头可直接用。</div>
+        <div className="text-[11px] text-gray-500">仅 API Format 可执行，Save Format 需 Export API Format。外部 id 以 <code className="px-1 py-0.5 rounded bg-surface-secondary text-brand-light">ext_</code> 开头可直接用。</div>
       </div>
 
       {/* 工作流列表 */}

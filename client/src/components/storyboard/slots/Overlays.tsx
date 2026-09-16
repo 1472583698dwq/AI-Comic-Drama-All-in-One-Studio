@@ -4,6 +4,7 @@ import type { ShotSlotContext } from './types';
 import { WorkflowInspectorModal } from '../../workflow/WorkflowInspectorModal';
 import { CanvasResourcePickerModal } from '../../canvas/CanvasResourcePickerModal';
 import { AssetPickerModal } from '../../asset/AssetPickerModal';
+import { useEscapeClose } from '../../../hooks/useEscapeClose';
 
 /**
  * 浮层 Slot（shot.overlays）：快捷键指南 + 工作流检查窗 + 插槽素材选择窗
@@ -19,6 +20,7 @@ export const ShotOverlays: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
     assetPickerConfig, setAssetPickerConfig,
     ctxMenu, setCtxMenu, shots, ctxCanvases, ctxLoadingCanvas, sendShotToCanvas,
   } = ctx;
+  useEscapeClose(!!ctxMenu, () => setCtxMenu(null));
   return (
     <>
       {/* ⌨️ 底部悬浮专业快捷键指南 */}

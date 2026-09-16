@@ -62,7 +62,7 @@ const AgentShell: React.FC<{
   return (
     <div
       onClick={() => setSelectedNodeId(id)}
-      className={`w-[360px] bg-[#141419] rounded-3xl border-2 transition-all duration-200 relative group select-none shadow-xl ${
+      className={`w-[360px] bg-surface rounded-3xl border-2 transition-all duration-200 relative group select-none shadow-xl ${
         selected
           ? 'border-violet-500 ring-4 ring-violet-500/20 shadow-2xl shadow-violet-500/20'
           : 'border-white/10 hover:border-violet-500/40 shadow-black/40'
@@ -70,7 +70,7 @@ const AgentShell: React.FC<{
     >
       {/* 顶部悬浮动作条 */}
       {selected && (
-        <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-[#1c1d24] border border-white/15 rounded-full px-3 py-1 flex items-center gap-2 shadow-lg z-30 animate-in fade-in zoom-in-95 duration-150 backdrop-blur-md">
+        <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-surface-secondary border border-white/15 rounded-full px-3 py-1 flex items-center gap-2 shadow-lg z-30 animate-in fade-in zoom-in-95 duration-150 backdrop-blur-md">
           {topActions || (
             <>
               <span className="text-[11px] font-semibold text-violet-400 flex items-center gap-1">
@@ -122,7 +122,7 @@ const AgentShell: React.FC<{
           e.stopPropagation();
           setShowAddMenu((v) => !v);
         }}
-        className="absolute -right-3.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-[#1c1d24] border border-white/20 shadow-lg flex items-center justify-center text-white/60 hover:text-white hover:border-violet-500 hover:scale-110 transition-all z-20"
+        className="absolute -right-3.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-surface-secondary border border-white/20 shadow-lg flex items-center justify-center text-white/60 hover:text-white hover:border-violet-500 hover:scale-110 transition-all z-20"
         title="向右衍生新节点"
       >
         <Plus className="w-4 h-4" />
@@ -132,7 +132,7 @@ const AgentShell: React.FC<{
       {showAddMenu && (
         <div
           ref={menuRef}
-          className="absolute left-[370px] top-1/2 -translate-y-1/2 w-48 bg-[#1c1d24] border border-white/15 rounded-2xl p-1.5 shadow-2xl z-40 flex flex-col gap-1 animate-in fade-in slide-in-from-left-2 duration-150"
+          className="absolute left-[370px] top-1/2 -translate-y-1/2 w-48 bg-surface-secondary border border-white/15 rounded-2xl p-1.5 shadow-2xl z-40 flex flex-col gap-1 animate-in fade-in slide-in-from-left-2 duration-150"
         >
           <div className="px-2.5 py-1 text-[10px] font-bold text-white/40 uppercase tracking-wider">衍生连接下游</div>
           <button
@@ -233,11 +233,11 @@ export const PromptNode: React.FC<NodeProps> = ({ id, data, selected }) => {
             onCut={(e) => e.stopPropagation()}
             placeholder="输入故事创意 / 小说段落 / 分镜描述，点击下方技能触发拆解、扩写…"
             rows={content ? 6 : 3}
-            className="w-full max-h-48 bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white/90 placeholder-white/40 focus:outline-none focus:border-cyan-500 resize-y leading-relaxed select-text nodrag"
+            className="w-full max-h-48 bg-surface-secondary border border-white/10 rounded-xl px-3 py-2 text-xs text-white/90 placeholder-white/40 focus:outline-none focus:border-cyan-500 resize-y leading-relaxed select-text nodrag"
             autoFocus
           />
         ) : content ? (
-          <div className="w-full max-h-48 overflow-y-auto p-3.5 rounded-2xl bg-black/40 border border-white/10 text-xs text-white/90 whitespace-pre-wrap leading-relaxed select-text font-sans">
+          <div className="w-full max-h-48 overflow-y-auto p-3.5 rounded-2xl bg-surface-secondary border border-white/10 text-xs text-white/90 whitespace-pre-wrap leading-relaxed select-text font-sans">
             {content}
           </div>
         ) : (
@@ -318,14 +318,14 @@ export const ImageNode: React.FC<NodeProps> = ({ id, data, selected }) => {
       }
     >
       {imgUrl ? (
-        <div className="w-full max-h-[420px] rounded-2xl overflow-hidden bg-black/60 border border-white/10 relative group" style={aspectStyle}>
+        <div className="w-full max-h-[420px] rounded-2xl overflow-hidden bg-surface-secondary border border-white/10 relative group" style={aspectStyle}>
           <img src={resolveMediaUrl(imgUrl)} alt="生成的画面" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-          <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-black/60 text-[9px] font-mono text-violet-300 border border-violet-500/30 flex items-center gap-1">
+          <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-surface/85 text-[9px] font-mono text-violet-300 border border-violet-500/30 flex items-center gap-1">
             <span>{d.skill_id || 'text_to_image'} · {d.provider || 'auto'}</span>
             {allRefs.length > 0 && <span className="text-violet-400">({allRefs.length}垫图)</span>}
           </div>
           {st?.status === 'running' && (
-            <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-2">
+            <div className="absolute inset-0 bg-surface/85 flex flex-col items-center justify-center gap-2">
               <div className="w-7 h-7 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
               <span className="text-[11px] text-violet-200">Agent 生成中…</span>
             </div>
@@ -335,7 +335,7 @@ export const ImageNode: React.FC<NodeProps> = ({ id, data, selected }) => {
           </div>
         </div>
       ) : (
-        <div className="w-full max-h-[320px] rounded-2xl border-2 border-dashed border-white/15 bg-black/20 flex flex-col items-center justify-center p-4 text-center" style={aspectStyle}>
+        <div className="w-full max-h-[320px] rounded-2xl border-2 border-dashed border-white/15 bg-surface-secondary flex flex-col items-center justify-center p-4 text-center" style={aspectStyle}>
           <ImageIcon className="w-8 h-8 text-violet-400/50 mb-2" />
           <span className="text-xs font-bold text-white/80">待生成画面</span>
           <span className="text-[10px] text-white/30 mt-1 font-mono">{String(d.aspect_ratio || d.params?.aspect_ratio || '9:16').split(' ')[0]}</span>
@@ -346,7 +346,7 @@ export const ImageNode: React.FC<NodeProps> = ({ id, data, selected }) => {
               </span>
               <div className="flex -space-x-1.5 overflow-hidden py-0.5">
                 {allRefs.slice(0, 3).map((r, i) => (
-                  <img key={i} src={resolveMediaUrl(r)} alt="" className="inline-block w-5 h-5 rounded-full ring-1 ring-violet-400/40 object-cover bg-black" />
+                  <img key={i} src={resolveMediaUrl(r)} alt="" className="inline-block w-5 h-5 rounded-full ring-1 ring-violet-400/40 object-cover bg-surface-secondary" />
                 ))}
               </div>
             </div>
@@ -391,21 +391,21 @@ export const VideoGenNode: React.FC<NodeProps> = ({ id, data, selected }) => {
       }
     >
       {vidUrl ? (
-        <div className="w-full max-h-[420px] rounded-2xl overflow-hidden bg-black/80 border border-white/10 relative group flex items-center justify-center" style={aspectStyle}>
+        <div className="w-full max-h-[420px] rounded-2xl overflow-hidden bg-surface-secondary border border-white/10 relative group flex items-center justify-center" style={aspectStyle}>
           <video ref={videoRef} src={resolveMediaUrl(vidUrl)} loop playsInline preload="metadata" onEnded={() => setIsPlaying(false)} className="w-full h-full object-cover" />
-          <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-black/60 text-[9px] font-mono text-orange-300 border border-orange-500/30">{d.skill_id || 'video'} · {d.provider || 'auto'}</div>
+          <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-surface/85 text-[9px] font-mono text-orange-300 border border-orange-500/30">{d.skill_id || 'video'} · {d.provider || 'auto'}</div>
           {st?.status === 'running' && (
-            <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-2">
+            <div className="absolute inset-0 bg-surface/85 flex flex-col items-center justify-center gap-2">
               <div className="w-7 h-7 border-2 border-orange-400 border-t-transparent rounded-full animate-spin" />
               <span className="text-[11px] text-orange-200">Agent 生成中（异步排队）…</span>
             </div>
           )}
-          <button onClick={togglePlay} className="absolute w-12 h-12 rounded-full bg-black/60 backdrop-blur-md border border-white/20 text-white flex items-center justify-center group-hover:scale-110 transition-transform shadow-xl">
+          <button onClick={togglePlay} className="absolute w-12 h-12 rounded-full bg-surface/85 backdrop-blur-md border border-white/20 text-white flex items-center justify-center group-hover:scale-110 transition-transform shadow-xl">
             {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-0.5" />}
           </button>
         </div>
       ) : (
-        <div className="w-full max-h-[320px] rounded-2xl border-2 border-dashed border-white/15 bg-black/20 flex flex-col items-center justify-center p-4 text-center" style={aspectStyle}>
+        <div className="w-full max-h-[320px] rounded-2xl border-2 border-dashed border-white/15 bg-surface-secondary flex flex-col items-center justify-center p-4 text-center" style={aspectStyle}>
           <Film className="w-8 h-8 text-orange-400/50 mb-2" />
           <span className="text-xs font-bold text-white/80">待生成镜头视频</span>
           <span className="text-[10px] text-white/30 mt-1 font-mono">{String(d.aspect_ratio || d.params?.aspect_ratio || '9:16').split(' ')[0]}</span>
@@ -451,7 +451,7 @@ export const AudioNode: React.FC<NodeProps> = ({ id, data, selected }) => {
     >
       <div className="w-full flex flex-col items-center justify-center p-3 gap-3">
         {d.text && (
-          <div className="w-full p-2.5 rounded-xl bg-black/40 border border-white/10 text-xs text-white/90 line-clamp-3">
+          <div className="w-full p-2.5 rounded-xl bg-surface-secondary border border-white/10 text-xs text-white/90 line-clamp-3">
             “{d.text}”
           </div>
         )}
@@ -508,26 +508,26 @@ export const Director3DMinimalNode: React.FC<NodeProps> = ({ id, data, selected 
         <div className="grid grid-cols-2 gap-2 text-[11px]">
           {selected ? (
             <>
-              <label className="flex flex-col gap-1 p-2 rounded-xl bg-black/40 border border-white/10">
+              <label className="flex flex-col gap-1 p-2 rounded-xl bg-surface-secondary border border-white/10">
                 <span className="text-white/40 text-[9px]">景别</span>
-                <select value={d.framing || 'medium'} onChange={(e) => updateNodeData(id, { framing: e.target.value })} className="bg-black/50 border border-white/10 rounded-lg px-1.5 py-1 text-[11px] text-cyan-300 focus:outline-none focus:border-cyan-500">
+                <select value={d.framing || 'medium'} onChange={(e) => updateNodeData(id, { framing: e.target.value })} className="bg-surface-secondary border border-white/10 rounded-lg px-1.5 py-1 text-[11px] text-cyan-300 focus:outline-none focus:border-cyan-500">
                   {FRAMING_PRESETS.map((f)=>(<option key={f.id} value={f.id}>{f.label}</option>))}
                 </select>
               </label>
-              <label className="flex flex-col gap-1 p-2 rounded-xl bg-black/40 border border-white/10">
+              <label className="flex flex-col gap-1 p-2 rounded-xl bg-surface-secondary border border-white/10">
                 <span className="text-white/40 text-[9px]">运镜</span>
-                <select value={d.motion || 'push_in'} onChange={(e) => updateNodeData(id, { motion: e.target.value })} className="bg-black/50 border border-white/10 rounded-lg px-1.5 py-1 text-[11px] text-orange-300 focus:outline-none focus:border-orange-500">
+                <select value={d.motion || 'push_in'} onChange={(e) => updateNodeData(id, { motion: e.target.value })} className="bg-surface-secondary border border-white/10 rounded-lg px-1.5 py-1 text-[11px] text-orange-300 focus:outline-none focus:border-orange-500">
                   {MOTION_PRESETS.map((m)=>(<option key={m.id} value={m.id}>{m.label}{m.category === 'combo' ? ' ★' : ''}</option>))}
                 </select>
               </label>
             </>
           ) : (
             <>
-              <div className="p-2 rounded-xl bg-black/40 border border-white/10 flex flex-col">
+              <div className="p-2 rounded-xl bg-surface-secondary border border-white/10 flex flex-col">
                 <span className="text-white/40 text-[9px]">景别</span>
                 <span className="font-bold text-cyan-300">{framingShortLabel(d.framing)}</span>
               </div>
-              <div className="p-2 rounded-xl bg-black/40 border border-white/10 flex flex-col">
+              <div className="p-2 rounded-xl bg-surface-secondary border border-white/10 flex flex-col">
                 <span className="text-white/40 text-[9px]">运镜</span>
                 <span className="font-bold text-orange-300">{motionShortLabel(d.motion)}</span>
               </div>
@@ -547,7 +547,7 @@ export const Director3DMinimalNode: React.FC<NodeProps> = ({ id, data, selected 
             onCut={(e) => e.stopPropagation()}
             placeholder="粘贴/输入自然语言机位指令，如“希区柯克变焦突显惊恐”或“贴地仰角双人对峙推镜”"
             rows={2}
-            className="w-full bg-black/40 border border-white/10 rounded-xl px-2.5 py-2 text-[11px] text-white placeholder-white/40 focus:outline-none focus:border-blue-500 resize-none nodrag select-text"
+            className="w-full bg-surface-secondary border border-white/10 rounded-xl px-2.5 py-2 text-[11px] text-white placeholder-white/40 focus:outline-none focus:border-blue-500 resize-none nodrag select-text"
             autoFocus
           />
         )}

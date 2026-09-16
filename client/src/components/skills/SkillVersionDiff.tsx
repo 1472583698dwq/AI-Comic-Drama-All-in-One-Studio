@@ -104,7 +104,7 @@ export const SkillVersionDiff: React.FC<{ skillName: string }> = ({ skillName })
   const snapshots = vers.filter(v => v.vid !== 'current');
 
   return (
-    <div className="bg-black/50 rounded-xl border border-border/80 overflow-hidden">
+    <div className="bg-surface-secondary rounded-xl border border-border/80 overflow-hidden">
       <button
         onClick={() => { if (!open && vers.length === 0) load(); setOpen(!open); }}
         className="w-full px-4 py-2.5 flex items-center gap-1.5 text-xs font-semibold text-violet-300 hover:bg-white/5"
@@ -135,7 +135,7 @@ export const SkillVersionDiff: React.FC<{ skillName: string }> = ({ skillName })
                 快照 → 现行：<span className="text-emerald-400 font-mono">+{stat.add}</span>
                 <span className="text-red-400 font-mono">-{stat.del}</span>
               </div>
-              <pre className="text-[11px] font-mono leading-relaxed max-h-64 overflow-y-auto custom-scrollbar rounded-lg border border-white/10 bg-black/40 p-2 whitespace-pre-wrap break-words">
+              <pre className="text-[11px] font-mono leading-relaxed max-h-64 overflow-y-auto custom-scrollbar rounded-lg border border-white/10 bg-surface-secondary p-2 whitespace-pre-wrap break-words">
                 {ops.filter(o => o.t !== 'eq').length === 0
                   ? <span className="text-gray-500">与现行完全一致。</span>
                   : ops.filter(o => o.t !== 'eq').slice(0, 400).map((o, i) => (

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Rocket, Cpu, Image as ImageIcon, Mic, Video, Check, X, Loader2, Sparkles, ChevronRight, ShieldCheck } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { toast } from '../../stores/useDialogStore';
+import { useEscapeClose } from '../../hooks/useEscapeClose';
 
 type Step = 'welcome' | 'llm' | 'image' | 'extra' | 'done';
 
@@ -112,6 +113,7 @@ export const FirstRunWizard: React.FC = () => {
     return () => window.removeEventListener('open-first-run-wizard', h as any);
   }, []);
 
+  useEscapeClose(open, () => setOpen(false));
   if (!open) return null;
 
   const currentList = step === 'llm' ? LLM_PRESETS : step === 'image' ? IMAGE_PRESETS : step === 'extra' ? (EXTRA_PRESETS as any) : [];
@@ -171,7 +173,7 @@ export const FirstRunWizard: React.FC = () => {
         value={values[f.key] ?? f.default ?? ''}
         onChange={(e) => setVal(f.key, e.target.value)}
         placeholder={f.placeholder || ''}
-        className="mt-1 w-full bg-black/40 border border-zinc-700 rounded-xl px-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-brand"
+        className="mt-1 w-full bg-surface-secondary border border-border-active rounded-xl px-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-brand"
       />
     </label>
   );
@@ -184,15 +186,15 @@ export const FirstRunWizard: React.FC = () => {
 
   return (
     <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setOpen(false)}>
-      <div className="w-full max-w-2xl max-h-[88vh] bg-[#0f0f12] rounded-2xl border border-zinc-800 flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-2xl max-h-[88vh] bg-surface rounded-2xl border border-border flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
-        <div className="h-12 px-4 border-b border-zinc-800 flex items-center justify-between shrink-0 bg-[#18181b]">
+        <div className="h-12 px-4 border-b border-border flex items-center justify-between shrink-0 bg-surface-secondary">
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-brand to-brand-blue flex items-center justify-center"><Rocket className="w-4 h-4 text-white" /></div>
             <span className="text-sm font-bold text-white">安装向导</span>
             {status && <span className="text-[10px] text-gray-500">· {status.llm?.ready ? '文本✓' : '文本○'} {status.image?.ready ? '图像✓' : '图像○'} {status.video?.ready ? '视频✓' : '视频○'} {status.audio?.ready ? '配音✓' : '配音○'}</span>}
           </div>
-          <button onClick={() => setOpen(false)} title="稍后再说" className="p-1 rounded hover:bg-zinc-800"><X className="w-4 h-4 text-zinc-400" /></button>
+          <button onClick={() => setOpen(false)} title="稍后再说" className="p-1 rounded hover:bg-surface-secondary"><X className="w-4 h-4 text-zinc-400" /></button>
         </div>
 
         {/* Body */}
@@ -233,7 +235,7 @@ export const FirstRunWizard: React.FC = () => {
                 ))}
               </div>
               {preset && (
-                <div className="p-3 rounded-xl bg-black/30 border border-zinc-800 space-y-2.5">
+                <div className="p-3 rounded-xl bg-surface-secondary border border-border space-y-2.5">
                   {preset.fields.map(renderField)}
                   {result && (
                     <div className={`text-[11px] px-2.5 py-1.5 rounded-lg border ${result.ok ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-red-500/10 border-red-500/30 text-red-300'}`}>
@@ -271,7 +273,7 @@ export const FirstRunWizard: React.FC = () => {
         </div>
 
         {/* Footer */}
-        <div className="p-3 border-t border-zinc-800 flex items-center justify-between shrink-0 bg-[#18181b]">
+        <div className="p-3 border-t border-border flex items-center justify-between shrink-0 bg-surface-secondary">
           <button onClick={() => setOpen(false)} className="px-3 py-1.5 rounded-xl text-xs text-gray-400 hover:text-white">稍后再说</button>
           <div className="flex items-center gap-2">
             {step !== 'welcome' && step !== 'done' && (

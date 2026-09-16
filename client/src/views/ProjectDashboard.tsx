@@ -5,6 +5,7 @@ import { useProjectStore } from '../stores/useProjectStore';
 import { apiService } from '../services/api';
 import { OneKeyRunModal } from '../components/workflow/OneKeyRunModal';
 import { confirmAsync, toast } from '../stores/useDialogStore';
+import { useEscapeClose } from '../hooks/useEscapeClose';
 
 export const ProjectDashboard: React.FC = () => {
   const { projects, fetchProjects, createBlank, importProjectFile, openProject, deleteProject, duplicateProject, isLoading } = useProjectListStore();
@@ -13,6 +14,7 @@ export const ProjectDashboard: React.FC = () => {
   const [status, setStatus] = useState('all');
   const [sort, setSort] = useState('updated_at');
   const [showCreate, setShowCreate] = useState(false);
+  useEscapeClose(showCreate, () => setShowCreate(false));
   const [showOneKey, setShowOneKey] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newStyle, setNewStyle] = useState('donghua_xianxia');
@@ -121,7 +123,7 @@ export const ProjectDashboard: React.FC = () => {
           </select>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <label className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white dark:bg-surface-secondary border border-border text-xs font-medium text-surface dark:text-white hover:border-border-active cursor-pointer">
+          <label className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface border border-border text-xs font-medium text-[color:var(--color-text-main)] hover:border-border-active cursor-pointer">
             <Upload className="w-3.5 h-3.5"/> 导入 <input type="file" accept=".json,.zip" className="hidden" onChange={handleImport} />
           </label>
           <button onClick={()=>setShowOneKey(true)} className="px-4 py-1.5 rounded-full bg-gradient-to-r from-amber-500 to-brand text-white text-xs font-bold shadow-md flex items-center gap-1.5"><Zap className="w-3.5 h-3.5"/> 一键成片</button>
@@ -151,8 +153,8 @@ export const ProjectDashboard: React.FC = () => {
                 <div className="h-[118px] bg-surface-secondary relative flex items-center justify-center overflow-hidden">
                   {p.cover_url ? <img src={p.cover_url} alt="" className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-300"/> : <span className="text-2xl opacity-40">🎬</span>}
                   <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent pointer-events-none" />
-                  <span className="absolute top-2.5 left-2.5 text-[10px] px-2 py-1 rounded-full bg-black/60 text-white backdrop-blur border border-white/10">{p.style_preset}</span>
-                  <span className="absolute top-2.5 right-2.5 text-[10px] px-2 py-1 rounded-full bg-white text-surface text-[10px] font-bold">{p.aspect_ratio}</span>
+                  <span className="absolute top-2.5 left-2.5 text-[10px] px-2 py-1 rounded-full bg-surface/85 text-white backdrop-blur border border-white/10">{p.style_preset}</span>
+                  <span className="absolute top-2.5 right-2.5 text-[10px] px-2 py-1 rounded-full bg-surface/90 text-[color:var(--color-text-main)] text-[10px] font-bold">{p.aspect_ratio}</span>
                   <span className={`absolute bottom-2.5 left-2.5 text-[10px] px-2 py-1 rounded-full border font-medium ${p.status==='done' ? 'bg-accent-green text-white border-accent-green' : p.status==='producing' ? 'bg-accent-orange text-white border-accent-orange' : 'bg-surface text-gray-300 border-border'}`}>{p.status==='draft'?'草稿':p.status==='producing'?'制作中':p.status==='done'?'已完成':'已归档'}</span>
                 </div>
                 <div className="p-3.5 flex-1 flex flex-col gap-2.5">

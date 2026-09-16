@@ -166,7 +166,7 @@ export const CharacterStudio: React.FC = () => {
                     : 'bg-surface-secondary/70 border-border hover:border-border-active'
                 }`}
               >
-                <div className="w-12 h-12 rounded-xl overflow-hidden bg-black/60 flex-shrink-0 border border-border">
+                <div className="w-12 h-12 rounded-xl overflow-hidden bg-surface-secondary flex-shrink-0 border border-border">
                   {avatar ? (
                     <img src={resolveUrl(avatar)} alt="" className="w-full h-full object-cover" />
                   ) : (
@@ -205,7 +205,7 @@ export const CharacterStudio: React.FC = () => {
             <div className="flex items-center space-x-4">
               <div 
                 onClick={() => setAssetPickerViewKey('avatar')}
-                className="relative w-16 h-16 rounded-2xl overflow-hidden border border-border shadow-md bg-black/40 group cursor-pointer"
+                className="relative w-16 h-16 rounded-2xl overflow-hidden border border-border shadow-md bg-surface-secondary group cursor-pointer"
                 title="点击从素材库更换角色头像"
               >
                 {selectedChar.avatar_url || selectedChar.three_views?.front ? (
@@ -213,7 +213,7 @@ export const CharacterStudio: React.FC = () => {
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-xl font-bold text-white/60">{selectedChar.name[0]}</div>
                 )}
-                <div className="absolute inset-0 bg-black/60 text-white text-[10px] flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="absolute inset-0 bg-surface/85 text-white text-[10px] flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                   <FolderOpen className="w-3.5 h-3.5 mb-0.5 text-brand-light" />
                   <span>素材库选图</span>
                 </div>
@@ -254,7 +254,7 @@ export const CharacterStudio: React.FC = () => {
                 className="flex items-center space-x-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-accent-pink to-brand text-white text-xs font-bold shadow-md hover:opacity-90 transition-all disabled:opacity-40"
               >
                 <Sparkles className={`w-4 h-4 ${isGeneratingSheet ? 'animate-spin' : ''}`} />
-                <span>{isGeneratingSheet ? 'ComfyUI 生成中...' : 'ComfyUI 智能生三视图'}</span>
+                <span>{isGeneratingSheet ? '生成中...' : '智能生成三视图'}</span>
               </button>
               <button
                 onClick={handleDeleteCurrentChar}
@@ -290,7 +290,7 @@ export const CharacterStudio: React.FC = () => {
 
                 <div 
                   onClick={() => setAssetPickerViewKey('front')}
-                  className="aspect-[3/4] rounded-xl overflow-hidden bg-black/60 mb-3 border border-border flex items-center justify-center relative cursor-pointer hover:border-brand transition-all group"
+                  className="aspect-[3/4] rounded-xl overflow-hidden bg-surface-secondary mb-3 border border-border flex items-center justify-center relative cursor-pointer hover:border-brand transition-all group"
                   title="点击从素材库选择或上传正面参考图"
                 >
                   {selectedChar.three_views?.front ? (
@@ -340,7 +340,7 @@ export const CharacterStudio: React.FC = () => {
 
                 <div 
                   onClick={() => setAssetPickerViewKey('side')}
-                  className="aspect-[3/4] rounded-xl overflow-hidden bg-black/60 mb-3 border border-border flex items-center justify-center relative cursor-pointer hover:border-accent-orange transition-all group"
+                  className="aspect-[3/4] rounded-xl overflow-hidden bg-surface-secondary mb-3 border border-border flex items-center justify-center relative cursor-pointer hover:border-accent-orange transition-all group"
                   title="点击从素材库选择或上传侧面参考图"
                 >
                   {selectedChar.three_views?.side ? (
@@ -390,7 +390,7 @@ export const CharacterStudio: React.FC = () => {
 
                 <div 
                   onClick={() => setAssetPickerViewKey('three_quarter')}
-                  className="aspect-[3/4] rounded-xl overflow-hidden bg-black/60 mb-3 border border-border flex items-center justify-center relative cursor-pointer hover:border-accent-pink transition-all group"
+                  className="aspect-[3/4] rounded-xl overflow-hidden bg-surface-secondary mb-3 border border-border flex items-center justify-center relative cursor-pointer hover:border-accent-pink transition-all group"
                   title="点击从素材库选择或上传 3/4 视角参考图"
                 >
                   {selectedChar.three_views?.three_quarter ? (

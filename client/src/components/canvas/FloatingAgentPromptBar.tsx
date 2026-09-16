@@ -67,7 +67,7 @@ export const FloatingAgentPromptBar: React.FC<Props> = ({ onAddNode, onOpenAsset
     const kind = selectedNode!.type as 'image' | 'video' | 'audio';
     return (
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-40 w-[92vw] max-w-3xl flex flex-col items-center gap-2 pointer-events-auto">
-        <div className="w-full bg-[#18191c]/95 backdrop-blur-2xl border border-white/15 rounded-2xl shadow-2xl overflow-hidden">
+        <div className="w-full bg-surface/95 backdrop-blur-2xl border border-white/15 rounded-2xl shadow-2xl overflow-hidden">
           <div className="px-4 py-2 bg-white/[0.03] border-b border-white/10 flex items-center gap-2 text-xs">
             <span className="text-[11px] font-bold text-violet-300">节点 Agent 控制台</span>
             <span className="text-[11px] text-white/40">· 点画布空白返回全局</span>
@@ -76,7 +76,7 @@ export const FloatingAgentPromptBar: React.FC<Props> = ({ onAddNode, onOpenAsset
           <div className="p-3">
             <NodeAgentConsole nodeId={selectedNode!.id} kind={kind} />
           </div>
-          <div className="px-4 py-2 bg-black/40 border-t border-white/10 flex items-center gap-2 text-xs overflow-x-auto">
+          <div className="px-4 py-2 bg-surface-secondary border-t border-white/10 flex items-center gap-2 text-xs overflow-x-auto">
             <span className="text-white/40 text-[11px] whitespace-nowrap">快速添加:</span>
             <button onClick={() => onAddNode('prompt')} className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-white/80 flex items-center gap-1.5 border border-white/10 whitespace-nowrap"><Clapperboard className="w-3.5 h-3.5 text-cyan-400" /><span>剧本</span></button>
             <button onClick={() => onAddNode('image')} className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-white/80 flex items-center gap-1.5 border border-white/10 whitespace-nowrap"><Globe className="w-3.5 h-3.5 text-violet-400" /><span>生图 Agent</span></button>
@@ -93,10 +93,10 @@ export const FloatingAgentPromptBar: React.FC<Props> = ({ onAddNode, onOpenAsset
 
   return (
     <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-40 w-[92vw] max-w-3xl flex flex-col items-center gap-2 pointer-events-auto">
-      <div className="w-full bg-[#18191c]/95 backdrop-blur-2xl border border-white/15 rounded-2xl shadow-2xl overflow-hidden">
+      <div className="w-full bg-surface/95 backdrop-blur-2xl border border-white/15 rounded-2xl shadow-2xl overflow-hidden">
         {/* 头部：全局编排定位 */}
         <div className="px-4 py-2 bg-white/[0.03] border-b border-white/10 flex items-center gap-2 text-xs">
-          <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-black/40 border border-white/10 text-white/90">
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-surface-secondary border border-white/10 text-white/90">
             <Sparkles className="w-3.5 h-3.5 text-violet-400" />
             <span className="font-bold">全局导演 Agent</span>
           </div>
@@ -115,7 +115,7 @@ export const FloatingAgentPromptBar: React.FC<Props> = ({ onAddNode, onOpenAsset
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleGlobalGo(); } }}
               placeholder="例：根据李逍遥角色卡，生成他在客栈门口拔剑的三格分镜首帧，并合成一段 5 秒冲刺视频 + 怒吼配音…"
               rows={2}
-              className="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-white/40 focus:outline-none focus:border-violet-500 transition-all resize-none pr-24"
+              className="w-full bg-surface-secondary border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-white/40 focus:outline-none focus:border-violet-500 transition-all resize-none pr-24"
             />
             <button
               onClick={handleGlobalGo}
@@ -137,7 +137,7 @@ export const FloatingAgentPromptBar: React.FC<Props> = ({ onAddNode, onOpenAsset
         </div>
 
         {/* 快速建节点 + 素材 + 导出 */}
-        <div className="px-4 py-2.5 bg-black/40 border-t border-white/10 flex items-center gap-2 text-xs overflow-x-auto">
+        <div className="px-4 py-2.5 bg-surface-secondary border-t border-white/10 flex items-center gap-2 text-xs overflow-x-auto">
           <span className="text-white/40 text-[11px] whitespace-nowrap">快速添加:</span>
           <button onClick={() => onAddNode('prompt')} className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-white/80 hover:text-white flex items-center gap-1.5 transition-all border border-white/10 whitespace-nowrap">
             <Clapperboard className="w-3.5 h-3.5 text-cyan-400" />

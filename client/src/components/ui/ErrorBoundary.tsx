@@ -30,7 +30,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
         <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-3 overflow-y-auto">
           <div className="w-12 h-12 rounded-2xl bg-red-500/15 border border-red-500/40 flex items-center justify-center text-xl">⚠️</div>
           <h2 className="text-sm font-bold text-white">{this.props.name}加载失败</h2>
-          <pre className="max-w-2xl w-full text-left text-[11px] font-mono text-red-300 bg-black/40 border border-red-500/30 rounded-xl p-3 whitespace-pre-wrap break-all max-h-56 overflow-y-auto custom-scrollbar">
+          <pre className="max-w-2xl w-full text-left text-[11px] font-mono text-red-300 bg-surface-secondary border border-red-500/30 rounded-xl p-3 whitespace-pre-wrap break-all max-h-56 overflow-y-auto custom-scrollbar">
             {String(err?.message || err)}
             {err?.stack ? `\n\n${String(err.stack).split('\n').slice(0, 8).join('\n')}` : ''}
           </pre>

@@ -10,6 +10,7 @@ import { apiService } from '../../services/api';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { autoBindShotCharacters } from '../storyboard/shotReference';
 import { ProviderPicker } from '../ui/ProviderPicker';
+import { useEscapeClose } from '../../hooks/useEscapeClose';
 
 interface Props { isOpen: boolean; onClose: () => void; }
 
@@ -66,6 +67,7 @@ export const OneKeyRunModal: React.FC<Props> = ({ isOpen, onClose }) => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
   }, [logs.length]);
 
+  useEscapeClose(isOpen, onClose);
   if (!isOpen) return null;
   const running = status === 'queued' || status === 'running';
   const done = status === 'success' || status === 'partial';
@@ -135,7 +137,7 @@ export const OneKeyRunModal: React.FC<Props> = ({ isOpen, onClose }) => {
           {!taskId && (
             <>
               <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="成片标题（可选）" className="w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand" />
-              <textarea value={text} onChange={e=>setText(e.target.value)} rows={8} placeholder="粘贴小说章节 / 故事梗概（≥20字）。Agent 将自动拆解角色分镜、定妆、生图、转视频、配音并导出剪映草稿…" className="w-full bg-black/40 border border-border rounded-xl p-3 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand resize-y" />
+              <textarea value={text} onChange={e=>setText(e.target.value)} rows={8} placeholder="粘贴小说章节 / 故事梗概（≥20字）。Agent 将自动拆解角色分镜、定妆、生图、转视频、配音并导出剪映草稿…" className="w-full bg-surface-secondary border border-border rounded-xl p-3 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand resize-y" />
               <div className="grid grid-cols-3 gap-2">
                 <div>
                   <div className="text-[11px] text-gray-400 mb-1">生图源</div>
@@ -175,9 +177,9 @@ export const OneKeyRunModal: React.FC<Props> = ({ isOpen, onClose }) => {
                   </span>
                   <span className="font-mono text-brand-light">{progress}%</span>
                 </div>
-                <div className="h-2 rounded-full bg-black/50 overflow-hidden"><div className="h-full bg-gradient-to-r from-brand to-amber-400 transition-all" style={{ width: `${progress}%` }} /></div>
+                <div className="h-2 rounded-full bg-surface-secondary overflow-hidden"><div className="h-full bg-gradient-to-r from-brand to-amber-400 transition-all" style={{ width: `${progress}%` }} /></div>
               </div>
-              <div ref={logRef} className="h-48 overflow-y-auto rounded-xl bg-black/50 border border-border p-3 space-y-1 custom-scrollbar">
+              <div ref={logRef} className="h-48 overflow-y-auto rounded-xl bg-surface-secondary border border-border p-3 space-y-1 custom-scrollbar">
                 {logs.length === 0 && <div className="text-[11px] text-gray-500">等待 Agent 上报进度…</div>}
                 {logs.map((l: any, i: number) => (
                   <div key={i} className="text-[11px] leading-relaxed"><span className="text-brand-light font-bold">[{l.stage}]</span> <span className="text-gray-300">{l.message}</span></div>

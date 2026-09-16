@@ -111,7 +111,7 @@ export const DashboardView: React.FC<Props> = ({ providers, onNavigate, healthMa
 
       {/* 遗留提示 */}
       <div className="p-3 rounded-xl bg-surface-secondary border border-border text-[11px] text-gray-400 leading-relaxed">
-        <span className="font-semibold text-white">提示：</span> 旧版 <code className="px-1 py-0.5 rounded bg-black/30 text-brand-light">image/voice/video</code> 引擎配置已收敛到“生成源 + 默认路由”，具体模型/参数请在生成源卡片编辑，Key 请在生成源编辑页填写。
+        <span className="font-semibold text-white">提示：</span> 旧版 <code className="px-1 py-0.5 rounded bg-surface-secondary text-brand-light">image/voice/video</code> 引擎配置已收敛到“生成源 + 默认路由”，具体模型/参数请在生成源卡片编辑，Key 请在生成源编辑页填写。
       </div>
     </div>
   );

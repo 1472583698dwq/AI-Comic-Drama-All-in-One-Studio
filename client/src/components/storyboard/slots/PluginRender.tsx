@@ -67,7 +67,7 @@ export const PluginTab: React.FC<{ ctx: ShotSlotContext; doc: any }> = ({ ctx, d
                   placeholder={`${b.label || b.field}（写入分镜字段 ${b.field}）`}
                 />
               ) : (
-                <pre className="text-[10px] font-mono text-gray-400 bg-black/30 rounded-lg p-2 whitespace-pre-wrap break-all">{JSON.stringify(v)}</pre>
+                <pre className="text-[10px] font-mono text-gray-400 bg-surface-secondary rounded-lg p-2 whitespace-pre-wrap break-all">{JSON.stringify(v)}</pre>
               )}
             </div>
           );
@@ -113,7 +113,7 @@ export const PluginAnchor: React.FC<{ ctx: ShotSlotContext; doc: any }> = ({ ctx
         ) : null}
       </div>
       {v ? (
-        <div className="flex items-center gap-2 bg-black/40 p-2 rounded-xl border border-teal-500/30">
+        <div className="flex items-center gap-2 bg-surface-secondary p-2 rounded-xl border border-teal-500/30">
           {isUrl && !v.startsWith('data:audio') ? (
             <img src={getMediaUrl(v)} alt="" className="w-10 h-10 rounded-lg object-cover border border-border shrink-0" />
           ) : null}
