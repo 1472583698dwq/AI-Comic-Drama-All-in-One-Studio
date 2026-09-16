@@ -131,10 +131,12 @@ try:
 except Exception as e:
     print(f"[Main] CanvasNode routes mount failed: {e}")
 # 前端扩展点路由：主题包 / 导出器 / 导演包
+# 三个模块导出的都是 `router`（与其余路由模块一致），此前按 theme_router/exporter_router/
+# director_pack_router 取会 AttributeError，被 except 吞掉 → 三个扩展点静默未挂载
 for _mod, _name, _path in (
-    ("app.api.theme_routes", "theme_router", "/api/v1/themes"),
-    ("app.api.exporter_routes", "exporter_router", "/api/v1/exporters"),
-    ("app.api.director_pack_routes", "director_pack_router", "/api/v1/director-packs"),
+    ("app.api.theme_routes", "router", "/api/v1/themes"),
+    ("app.api.exporter_routes", "router", "/api/v1/exporters"),
+    ("app.api.director_pack_routes", "router", "/api/v1/director-packs"),
 ):
     try:
         import importlib as _il
