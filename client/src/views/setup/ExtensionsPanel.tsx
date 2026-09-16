@@ -84,15 +84,32 @@ export const ExtensionsPanel: React.FC = () => {
     };
   }, []);
 
-  const shown = useMemo(() => {
+  /** 已应用「内置显隐 + 搜索」但不含 kind 过滤：各 kind 的计数以此为基准，互不影响 */
+  const base = useMemo(() => {
     const ql = q.trim().toLowerCase();
     return exts.filter((e) => {
       if (!showBuiltin && (e.source === 'builtin' || e.status === 'builtin')) return false;
-      if (kind && e.kind !== kind) return false;
       if (!ql) return true;
       return [e.id, e.name, e.local_id, e.description].some((s) => (s || '').toLowerCase().includes(ql));
     });
-  }, [exts, kind, q, showBuiltin]);
+  }, [exts, q, showBuiltin]);
+
+  const shown = useMemo(
+    () => (kind ? base.filter((e) => e.kind === kind) : base),
+    [base, kind],
+  );
+
+  /** 筛选条上的数字 = 点进去真能看到几条，和「全部 N」同一口径 */
+  const viewCounts = useMemo(() => {
+    const m: Record<string, number> = {};
+    base.forEach((e) => { m[e.kind] = (m[e.kind] || 0) + 1; });
+    return m;
+  }, [base]);
+
+  const hiddenBuiltin = useMemo(
+    () => (showBuiltin ? 0 : exts.filter((e) => e.source === 'builtin' || e.status === 'builtin').length),
+    [exts, showBuiltin],
+  );
 
   const kindsPresent = useMemo(() => {
     const set = new Set(exts.map((e) => e.kind));
@@ -171,6 +188,15 @@ export const ExtensionsPanel: React.FC = () => {
     } finally { setBusy(null); }
   };
 
+  /** 整卡点击：有编辑入口的进编辑，其余一律进预览，不做成死点 */
+  const openPrimary = (e: any) => {
+    if (EDITABLE_KINDS.has(e.kind) && !(e.source === 'builtin' || e.status === 'builtin')) {
+      editExt(e);
+      return;
+    }
+    setDetailExt(e);
+  };
+
   const testExt = async (e: any) => {
     setTests((t) => ({ ...t, [e.id]: { running: true } }));
     try {
@@ -185,11 +211,14 @@ export const ExtensionsPanel: React.FC = () => {
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-border rounded-2xl overflow-hidden border border-border">
-        <Stat label="扩展总数" value={counts.total ?? exts.length} />
-        <Stat label="生成源" value={counts.provider ?? 0} />
-        <Stat label="技能" value={counts.skill ?? 0} />
-        <Stat label="已装插件" value={plugins.length} />
+      <div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-border rounded-2xl overflow-hidden border border-border">
+          <Stat label="扩展总数" value={counts.total ?? exts.length} />
+          <Stat label="生成源" value={counts.provider ?? 0} />
+          <Stat label="MCP 工具" value={counts.mcp_tool ?? 0} />
+          <Stat label="技能" value={counts.skill ?? 0} />
+        </div>
+        <div className="mt-1.5 text-[10.5px] text-gray-500">系统全量（含内置）；下面列表按筛选条件展示</div>
       </div>
 
       {/* ── 插件包 ── */}
@@ -292,7 +321,7 @@ export const ExtensionsPanel: React.FC = () => {
             <Chip active={!kind} onClick={() => setKind('')} label={`全部 ${shown.length}`} />
             {kindsPresent.map((k) => (
               <Chip key={k} active={kind === k} onClick={() => setKind(k)}
-                label={`${KIND_META[k].label} ${counts[k] ?? 0}`} title={KIND_META[k].desc} />
+                label={`${KIND_META[k].label} ${viewCounts[k] ?? 0}`} title={KIND_META[k].desc} />
             ))}
             <button onClick={() => setShowBuiltin((v) => !v)}
               className={`px-2.5 py-1 rounded-lg text-[11px] border transition-colors flex items-center gap-1 ${
@@ -302,9 +331,9 @@ export const ExtensionsPanel: React.FC = () => {
             </button>
           </div>
           {kind && <div className="mt-2 text-[11px] text-gray-500 leading-relaxed">{KIND_META[kind].desc}</div>}
-          {!showBuiltin && (
+          {!showBuiltin && hiddenBuiltin > 0 && (
             <div className="mt-2 text-[11px] text-gray-500 leading-relaxed">
-              已隐藏程序自带的内置项（它们删不掉，唯一要配的 Key 在「能力配置」页填）。
+              已隐藏 {hiddenBuiltin} 个程序自带的内置项（删不掉，唯一要配的 Key 在「能力配置」页填）。点「内置」可展开。
             </div>
           )}
         </div>
@@ -321,7 +350,14 @@ export const ExtensionsPanel: React.FC = () => {
                 const isBuiltin = e.source === 'builtin' || e.status === 'builtin';
                 const t = tests[e.id] || {};
                 return (
-                  <div key={e.id} className="rounded-xl border border-border bg-surface-secondary px-3.5 py-2.5">
+                  <div
+                    key={e.id}
+                    role="button" tabIndex={0}
+                    onClick={() => openPrimary(e)}
+                    onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); openPrimary(e); } }}
+                    title={EDITABLE_KINDS.has(e.kind) && !isBuiltin ? '点击编辑' : '点击预览'}
+                    className="rounded-xl border border-border bg-surface-secondary px-3.5 py-2.5 cursor-pointer hover:border-brand/45 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-brand"
+                  >
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-[12px] font-bold text-[color:var(--color-text-main)] truncate">{e.name || e.local_id}</span>
                       <span className="text-[9.5px] px-1.5 py-0.5 rounded border border-border bg-surface-tertiary text-gray-400">
@@ -339,7 +375,7 @@ export const ExtensionsPanel: React.FC = () => {
                     </div>
                     <div className="text-[10px] font-mono text-gray-600 mt-0.5 truncate">{e.id}</div>
 
-                    <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                    <div className="mt-2 flex items-center gap-1.5 flex-wrap" onClick={(ev) => ev.stopPropagation()}>
                       {EDITABLE_KINDS.has(e.kind) && !isBuiltin && (
                         <Act onClick={() => editExt(e)} disabled={busy === e.id}
                           icon={busy === e.id ? Loader2 : Edit3} spin={busy === e.id} label="编辑" />

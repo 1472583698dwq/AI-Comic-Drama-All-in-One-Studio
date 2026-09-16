@@ -20,6 +20,7 @@ interface Props {
  */
 export const ExtensionDetailDrawer: React.FC<Props> = ({ ext, onClose, onSaved }) => {
   const isSkill = ext?.kind === 'skill';
+  const isTool = ext?.kind === 'mcp_tool';
   const [content, setContent] = useState('');
   const [origin, setOrigin] = useState('');
   const [filePath, setFilePath] = useState('');
@@ -41,7 +42,7 @@ export const ExtensionDetailDrawer: React.FC<Props> = ({ ext, onClose, onSaved }
           setContent(r?.content || '');
           setOrigin(r?.content || '');
           setFilePath(r?.file_path || '');
-        } else {
+        } else if (isTool) {
           const tools = await apiService.listMcpTools();
           if (cancelled) return;
           setTool((tools as any[]).find((t) => t.name === ext.local_id) || null);
@@ -83,7 +84,7 @@ export const ExtensionDetailDrawer: React.FC<Props> = ({ ext, onClose, onSaved }
         <div className="h-12 px-4 border-b border-border flex items-center gap-2 shrink-0">
           {isSkill ? <FileText className="w-4 h-4 text-amber-400" /> : <Cpu className="w-4 h-4 text-emerald-400" />}
           <span className="text-sm font-bold text-[color:var(--color-text-main)]">
-            {isSkill ? '编辑技能' : '工具预览'} {ext.local_id}
+            {isSkill ? '编辑技能' : isTool ? '工具预览' : '扩展详情'} {ext.local_id}
           </span>
           {!isSkill && (
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-tertiary border border-border text-gray-400">只读</span>
@@ -110,6 +111,8 @@ export const ExtensionDetailDrawer: React.FC<Props> = ({ ext, onClose, onSaved }
                 （name / description / tools 等），下面是给模型看的执行规范。保存即覆盖原文件并重载。
               </div>
             </>
+          ) : !isTool ? (
+            <GenericPreview ext={ext} />
           ) : tool ? (
             <>
               <div>
@@ -159,6 +162,41 @@ export const ExtensionDetailDrawer: React.FC<Props> = ({ ext, onClose, onSaved }
         )}
       </div>
     </div>
+  );
+};
+
+/** 没有专属编辑/预览界面的 kind：至少把它的身份与来源摊开，别做成死点 */
+const GenericPreview: React.FC<{ ext: any }> = ({ ext }) => {
+  const rows: Array<[string, any]> = [
+    ['全局 id', ext.id],
+    ['本地 id', ext.local_id],
+    ['类别', ext.kind],
+    ['子类', ext.sub_kind || '—'],
+    ['来源', ext.source === 'plugin' ? `插件 ${ext.source_detail || ''}` : ext.source === 'builtin' ? '内置' : '自建'],
+    ['发布者', ext.publisher || '—'],
+    ['版本', ext.version || '—'],
+    ['状态', ext.status],
+    ['派生自', ext.derived_from || '—'],
+    ['依赖', (ext.depends_on || []).join(', ') || '—'],
+  ];
+  return (
+    <>
+      {ext.description && (
+        <div className="text-[12px] text-[color:var(--color-text-main)] leading-relaxed">{ext.description}</div>
+      )}
+      <div className="rounded-xl border border-border overflow-hidden">
+        {rows.map(([k, v], i) => (
+          <div key={k} className={`px-3 py-1.5 flex items-baseline gap-3 ${i % 2 ? 'bg-surface-secondary/50' : 'bg-surface-secondary/20'}`}>
+            <span className="text-[11px] text-gray-500 w-20 shrink-0">{k}</span>
+            <span className="text-[11px] font-mono text-gray-300 break-all">{String(v)}</span>
+          </div>
+        ))}
+      </div>
+      <div className="text-[10.5px] text-gray-500 leading-relaxed">
+        这类扩展没有单项编辑接口（整包 POST 替换或由代码提供），只能看。
+        要改内容请重新导入对应的包或声明文件。
+      </div>
+    </>
   );
 };
 
