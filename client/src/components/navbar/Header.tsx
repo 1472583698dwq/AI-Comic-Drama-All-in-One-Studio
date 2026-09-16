@@ -22,7 +22,7 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({ onOpenImport, onOpenExport }) => {
   const {
     project, closeProject, platformMode, setPlatformMode,
-    activeTab, setActiveTab, workspace, setWorkspace,
+    activeTab, setActiveTab,
     isPlaying, setIsPlaying, totalDuration,
   } = useProjectStore();
 
@@ -100,44 +100,6 @@ export const Header: React.FC<HeaderProps> = ({ onOpenImport, onOpenExport }) =>
           </button>
         )}
 
-        {/* 工作区双模切换 */}
-        <div className={`hidden lg:flex items-center p-0.5 rounded-xl bg-surface-secondary/80 border border-border shrink-0 ${!project ? 'opacity-35 cursor-not-allowed' : ''}`}>
-          <button
-            onClick={() => {
-              if (!project) { toast.info('请先创建或打开项目以进入漫剧工坊'); return; }
-              setWorkspace('production');
-              // 从画布 / AI 导演等非制作页签点进来时要真的切过去，否则按钮亮了人还停在原地
-              if (!['studio', 'characters', 'director3d', 'timeline', 'assets'].includes(activeTab)) {
-                setActiveTab('studio');
-              }
-            }}
-            className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
-              workspace === 'production' && ['studio', 'characters', 'director3d', 'timeline', 'assets'].includes(activeTab)
-                ? 'bg-brand text-white shadow-sm shadow-brand/25'
-                : 'text-gray-400 hover:text-white'
-            }`}
-            title={project ? '漫剧制作流水线：分镜、角色、3D、剪辑、素材库' : '请先创建或打开项目'}
-          >
-            <Film className="w-3.5 h-3.5" />
-            <span>漫剧工坊</span>
-          </button>
-          <button
-            onClick={() => {
-              if (!project) { toast.info('请先创建或打开项目以进入创意画布'); return; }
-              setWorkspace('creative');
-              setActiveTab('canvas');
-            }}
-            className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
-              workspace === 'creative' || activeTab === 'canvas'
-                ? 'bg-gradient-to-r from-accent-pink to-brand text-white shadow-sm shadow-brand/25'
-                : 'text-gray-400 hover:text-white'
-            }`}
-            title={project ? '智能体无限画布：DAG多模态节点流转' : '请先创建或打开项目'}
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>创意画布</span>
-          </button>
-        </div>
       </div>
 
       {/* ── 右侧：播放 + 视口 + 导入导出 + 设置 ── */}
