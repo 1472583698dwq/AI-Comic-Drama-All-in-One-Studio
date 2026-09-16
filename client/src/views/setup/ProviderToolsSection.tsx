@@ -220,8 +220,8 @@ export const ProviderToolsSection: React.FC = () => {
                       <Act onClick={() => upgrade(p)} disabled={busy === p.id}
                         icon={ArrowUpCircle} label="升级为代码模式" accent="amber" />
                     )}
-                    <Act onClick={() => window.dispatchEvent(new CustomEvent('open-provider-manager'))}
-                      icon={Edit3} label="编辑代码" />
+                    <Act onClick={() => window.dispatchEvent(new CustomEvent('open-provider-manager', { detail: { providerId: p.id } }))}
+                      icon={Edit3} label="编辑" />
                     <Act onClick={() => test(p)} disabled={t.running}
                       icon={t.running ? Loader2 : Plug2} label={t.running ? '测试中' : '测试'} spin={t.running} />
                     <Act onClick={() => remove(p)} disabled={busy === p.id}

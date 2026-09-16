@@ -34,13 +34,14 @@ export function App() {
   const [isMcpOpen, setIsMcpOpen] = useState(false);
   const [isSkillsOpen, setIsSkillsOpen] = useState(false);
   const [isProviderOpen, setIsProviderOpen] = useState(false);
+  const [providerEditId, setProviderEditId] = useState('');
   const [mcpError, setMcpError] = useState<string | null>(null);
 
   useEffect(() => {
     installGlobalDialogPatch();
     fetchTools().catch((e: any) => setMcpError(e?.message || 'MCP 服务连接失败'));
     useProjectStore.getState().loadActiveProject();
-    const h = () => setIsProviderOpen(true);
+    const h = (e: any) => { setProviderEditId(e?.detail?.providerId || ''); setIsProviderOpen(true); };
     // 画布底部栏 / 导出节点派发的全局意图事件，此前无人监听导致按钮点了没反应
     const onOpenExport = () => setIsExportOpen(true);
     // 设置→扩展页里的入口：技能工坊 / MCP 工具（原先在侧边栏）
@@ -172,7 +173,8 @@ export function App() {
 
       <ProviderManagerModal
         isOpen={isProviderOpen}
-        onClose={() => setIsProviderOpen(false)}
+        editProviderId={providerEditId}
+        onClose={() => { setIsProviderOpen(false); setProviderEditId(''); }}
       />
 
       {/* Modern Global Toast / Confirm / Prompt Dialogs */}

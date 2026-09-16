@@ -6,12 +6,17 @@ import { confirmAsync, toast } from '../../stores/useDialogStore';
 import { CustomHeadersEditor } from './CustomHeadersEditor';
 import { useEscapeClose } from '../../hooks/useEscapeClose';
 
-interface Props { isOpen: boolean; onClose: ()=>void; }
+interface Props {
+  isOpen: boolean;
+  onClose: ()=>void;
+  /** 打开即直接进入该生成源的编辑态（设置→扩展里点「编辑」用） */
+  editProviderId?: string;
+}
 
 const kindIcon: any = { image: Globe, video: Video, audio: Mic, llm: Cpu };
 const kindColor: any = { image: 'text-violet-400', video: 'text-orange-400', audio: 'text-pink-400', llm: 'text-cyan-400' };
 
-export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose }) => {
+export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editProviderId }) => {
   const [providers, setProviders] = useState<any[]>([]);
   const [filter, setFilter] = useState<'all'|'image'|'video'|'audio'>('all');
   const [q, setQ] = useState('');
@@ -30,7 +35,32 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose }) => {
       setProviders(res.providers || []);
     } catch {}
   };
+  /** 列表项不含 code/params_schema，进编辑前先拉完整定义，避免代码框空白 */
+  const openEdit = async (p:any)=>{
+    try {
+      const r = await apiService.getProvider(p.id);
+      setEditing({ ...(r.provider || p), code: (r.provider?.code ?? r.raw?.code ?? p.code ?? '') });
+    } catch {
+      setEditing(p);
+    }
+  };
+
   useEffect(()=> { if (isOpen) fetchAll(); }, [isOpen]);
+
+  // 外部指定了要编辑谁：直接进编辑态，不停在列表
+  useEffect(()=> {
+    if (!isOpen || !editProviderId) return;
+    let cancelled = false;
+    (async ()=>{
+      try {
+        const r = await apiService.getProvider(editProviderId);
+        if (!cancelled && r?.provider) {
+          setEditing({ ...r.provider, code: (r.provider.code ?? r.raw?.code ?? '') });
+        }
+      } catch { /* 拉不到就停在列表 */ }
+    })();
+    return ()=> { cancelled = true; };
+  }, [isOpen, editProviderId]);
   useEffect(()=>{
     const h = ()=> fetchAll();
     window.addEventListener('provider-list-refresh', h as any);
@@ -259,7 +289,7 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose }) => {
                   </div>
                   <div className="flex items-center gap-1.5 pt-1">
                     <button onClick={()=> handleTest(p.id)} className="flex-1 py-1.5 rounded-lg bg-surface-secondary border border-border text-xs text-white hover:border-brand flex items-center justify-center gap-1"><Activity className="w-3 h-3"/> 测试</button>
-                    <button onClick={()=> setEditing(p)} className="flex-1 py-1.5 rounded-lg bg-brand/10 border border-brand/20 text-brand-light text-xs flex items-center justify-center gap-1"><Edit3 className="w-3 h-3"/> {p.builtin?'查看':'编辑'}</button>
+                    <button onClick={()=> openEdit(p)} className="flex-1 py-1.5 rounded-lg bg-brand/10 border border-brand/20 text-brand-light text-xs flex items-center justify-center gap-1"><Edit3 className="w-3 h-3"/> {p.builtin?'查看':'编辑'}</button>
                     {!p.builtin && <button onClick={()=> handleDelete(p.id)} className="px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs flex items-center gap-1"><Trash2 className="w-3 h-3"/> 删除</button>}
                   </div>
                 </div>
