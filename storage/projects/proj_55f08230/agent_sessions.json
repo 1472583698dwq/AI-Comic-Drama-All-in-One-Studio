@@ -1,1 +1,25 @@
-[]
+[
+  {
+    "id": "sess_mtzzjntk_flhex",
+    "title": "新会话",
+    "created_at": "2026-09-13T15:45:17.912Z",
+    "updated_at": "2026-09-13T15:45:17.912Z",
+    "messages": [
+      {
+        "id": "welcome_mtzzjntk_3pk3x",
+        "sender": "agent",
+        "mode": "execute",
+        "text": "这里是 **执行模式**。我会按 ReAct 循环直接调生图/配音/视频/画布/剪映等工具；敏感操作（删源/写文件/跑命令）会弹窗确认。",
+        "suggested": [
+          "为当前镜头规划3D特写推镜",
+          "生成主角怒吼配音并对齐时长",
+          "把画布现有节点全量执行一遍",
+          "导出剪映工程草稿"
+        ],
+        "time": "就绪"
+      }
+    ],
+    "mode": "execute",
+    "run_mode": "approve"
+  }
+]

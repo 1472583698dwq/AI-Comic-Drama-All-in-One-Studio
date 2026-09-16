@@ -13,7 +13,33 @@
       "location": "",
       "time_of_day": "day",
       "atmosphere": "epic",
-      "shots": []
+      "shots": [
+        {
+          "id": "shot-1789033375844",
+          "shot_index": 1,
+          "scene_index": 1,
+          "camera_framing": "medium",
+          "camera_motion": "push_in",
+          "action_desc": "新分镜描述...",
+          "speaker_id": null,
+          "speaker_name": null,
+          "dialogue": "",
+          "voiceover": "",
+          "emotion": "neutral",
+          "image_prompt": "Cinematic anime shot, high quality lighting, masterpiece",
+          "video_prompt": "",
+          "image_url": null,
+          "video_url": null,
+          "audio_url": null,
+          "duration": 3.5,
+          "subtitle_text": "新台词",
+          "pose_preset": null,
+          "focal_length_mm": 35.0,
+          "camera_roll_deg": 0.0,
+          "cast_layout": "solo",
+          "props_config": []
+        }
+      ]
     }
   ],
   "bgm_name": "Epic_Battle_Orchestra.mp3",

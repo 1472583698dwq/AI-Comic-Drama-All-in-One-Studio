@@ -1464,8 +1464,9 @@ def auto_detect_exposed_inputs(clean_wf: Dict[str, Any], mapping: Optional[Dict[
 def resolve_exposed_inputs(clean_wf: Dict[str, Any], meta: Optional[Dict[str, Any]] = None) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
     """
     解析某工作流的最终暴露清单与映射，全系统唯一口径。
-    先取清单（新鲜探测为基准 + 已存白名单保留用户编辑），再叠加官方 App Mode 契约
-    （meta.app_contract，来自工作流的 extra.linearData）：被契约声明的项拿到作者显示名与顺序并标记 declared，
+    白名单默认全关（空），只有用户在参数面板显式保存过的 exposed_inputs（exposed_source=user）才生效；
+    随后叠加官方 App Mode 契约（meta.app_contract，来自工作流的 extra.linearData）：
+    被契约声明的项拿到作者显示名与顺序并标记 declared，
     未被声明的项由 schema 生成侧收进隐藏层，从而不再把整张图摊平成参数表。
     """
     exposed, mapping = _resolve_exposed_raw(clean_wf, meta)
@@ -1478,23 +1479,22 @@ def resolve_exposed_inputs(clean_wf: Dict[str, Any], meta: Optional[Dict[str, An
 
 def _resolve_exposed_raw(clean_wf: Dict[str, Any], meta: Optional[Dict[str, Any]] = None) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
     """
-    用户已保存的 exposed_inputs 为权威白名单（保存在 meta.json 中）。
-    仅当 meta 中尚未配置 exposed_inputs 时，以 auto_detect 的新鲜清单作为默认值。
-    对于白名单内的条目，与 fresh_exposed 对齐更新真实控件类型、步长/范围与枚举项，
-    同时保留用户自定义的 label/别名/描述/默认值/分组/排序；绝不倒灌未勾选的参数！
+    暴露白名单默认全关：仅当用户在参数面板显式保存过清单（meta.exposed_source == "user"）时，
+    已存的 exposed_inputs 才是权威白名单；auto_detect 的新鲜探测只用于刷新白名单条目的
+    真实控件类型、步长/范围与枚举项，绝不再作为默认暴露来源，也绝不倒灌未勾选的参数！
     """
     meta = meta or {}
     try:
         current_mapping = meta.get("mapping") or auto_generate_mapping(analyze_workflow(clean_wf))
     except Exception:
         current_mapping = {}
-    try:
-        fresh_exposed = auto_detect_exposed_inputs(clean_wf, current_mapping)
-    except Exception:
-        fresh_exposed = []
+
+    # 默认不暴露任何输入：未由用户显式配置过白名单的工作流一律返回空清单
+    if meta.get("exposed_source") != "user":
+        return [], current_mapping
     saved_exposed = meta.get("exposed_inputs")
-    if saved_exposed is None or len(saved_exposed) == 0:
-        return fresh_exposed, current_mapping
+    if not saved_exposed:
+        return [], current_mapping
 
     # 过滤掉 undefined 脏项
     valid_saved = [
@@ -1502,7 +1502,12 @@ def _resolve_exposed_raw(clean_wf: Dict[str, Any], meta: Optional[Dict[str, Any]
         if isinstance(e, dict) and e.get('param_name') and e.get('param_name') != 'undefined' and not str(e.get('id', '')).endswith('_undefined')
     ]
     if not valid_saved:
-        return fresh_exposed, current_mapping
+        return [], current_mapping
+
+    try:
+        fresh_exposed = auto_detect_exposed_inputs(clean_wf, current_mapping)
+    except Exception:
+        fresh_exposed = []
 
     # 用户已保存的 exposed_inputs 即为唯一的权威白名单！
     type_fix_map = {f"{e['node_id']}_{e['param_name']}": e for e in fresh_exposed if isinstance(e, dict)}
@@ -1949,6 +1954,8 @@ class ComfyWorkflowManager:
                         found_ext["node_overrides"] = saved_meta["node_overrides"]
                     if "exposed_inputs" in saved_meta:
                         found_ext["exposed_inputs"] = saved_meta["exposed_inputs"]
+                    if "exposed_source" in saved_meta:
+                        found_ext["exposed_source"] = saved_meta["exposed_source"]
                 return found_ext
             return saved_meta
 
@@ -2083,11 +2090,25 @@ class ComfyWorkflowManager:
             raise FileNotFoundError(f"工作流不存在: {workflow_id}")
         contract = self._contract_from_file(meta.get("source_file"))
         meta["app_contract"] = contract
+        # 白名单默认全关；用户点击"读取 App 契约"即视为显式选择：把作者声明的输入播种进白名单
+        if contract and contract.get("inputs") and meta.get("exposed_source") != "user":
+            try:
+                wf = self.get_workflow(workflow_id)
+                if wf:
+                    clean_wf = self.sanitize_workflow(copy.deepcopy(wf))
+                    fresh = auto_detect_exposed_inputs(clean_wf, meta.get("mapping") or {})
+                    declared = {(str(i.get("node_id")), str(i.get("param_name"))) for i in contract["inputs"]}
+                    picked = [e for e in fresh if (str(e.get("node_id")), str(e.get("param_name"))) in declared]
+                    if picked:
+                        meta["exposed_inputs"] = picked
+                        meta["exposed_source"] = "user"
+            except Exception:
+                pass
         meta["updated_at"] = time.time()
         with open(_meta_path(workflow_id), "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)
         try:
-            sync_workflow_provider(workflow_id)
+            sync_workflow_provider(workflow_id, force=True)
         except Exception:
             pass
         return {"workflow_id": workflow_id, "app_contract": contract}
@@ -3161,6 +3182,8 @@ class ComfyWorkflowManager:
             meta["node_overrides"] = node_overrides
         if exposed_inputs is not None:
             meta["exposed_inputs"] = exposed_inputs
+            # 显式标记：这是用户亲手选择的白名单，才允许在解析时生效（默认全关）
+            meta["exposed_source"] = "user"
         meta["updated_at"] = time.time()
 
         os.makedirs(WORKFLOWS_DIR, exist_ok=True)
@@ -3170,9 +3193,9 @@ class ComfyWorkflowManager:
         # 清除列表缓存，确保下次 list_workflows 能看到更新
         self._list_cache = None
         self._list_cache_ts = 0
-        # 同步 Provider 输入/参数 Schema（exposed 变更）
+        # 同步 Provider 输入/参数 Schema（exposed 变更；force 跳过快路径，保证白名单立即生效）
         try:
-            sync_workflow_provider(workflow_id)
+            sync_workflow_provider(workflow_id, force=True)
         except Exception:
             pass
         return meta
@@ -3668,42 +3691,14 @@ def _build_provider_schemas_from_workflow(workflow: Dict[str, Any], meta: Option
     return kind, input_schema, params_schema, output_schema, exposed
 
 
-def _persist_exposed_baseline(workflow_id: str, meta: Optional[Dict[str, Any]], exposed: List[Dict[str, Any]]) -> Optional[tuple]:
-    """
-    把工作流暴露清单写入 meta 作为基线（供 ComfyUI 离线启动时复用），并用新 meta 重算 schema。
-    返回重算后的 (kind, input_schema, params_schema, output_schema, exposed)；
-    若 meta 已包含已保存的白名单（哪怕仅 1 项），禁止覆盖并返回 None。
-    """
-    if not exposed:
-        return None
-    if (meta or {}).get("exposed_inputs") is not None:
-        return None
-    try:
-        mpath = _meta_path(workflow_id)
-        if not os.path.exists(mpath):
-            return None
-        with open(mpath, "r", encoding="utf-8") as f:
-            m = json.load(f)
-        if m.get("exposed_inputs") is not None:
-            return None
-        m["exposed_inputs"] = exposed
-        with open(mpath, "w", encoding="utf-8") as f:
-            json.dump(m, f, ensure_ascii=False, indent=2)
-        wf = workflow_manager.get_workflow(workflow_id)
-        if not wf:
-            return None
-        return _build_provider_schemas_from_workflow(wf, m)
-    except Exception:
-        return None
-
-
 # 工作流→生成源的 Schema 生成规则版本：resolve/auto_detect/_build_* 等规则变更时 +1，
 # 存量源在下次启动时自动重建一次。启动 fast path 靠它判断，未变更时全程零网络。
-WORKFLOW_SCHEMA_VERSION = 2
+WORKFLOW_SCHEMA_VERSION = 3
 
 
-def sync_workflow_provider(workflow_id: str):
-    """将单条工作流同步为独立 Provider（comfyui_<id>），仅内部已导出工作流可成为生成源"""
+def sync_workflow_provider(workflow_id: str, force: bool = False):
+    """将单条工作流同步为独立 Provider（comfyui_<id>），仅内部已导出工作流可成为生成源。
+    force=True 时跳过快路径强制重建（用户保存白名单 / 读取 App 契约后必须立即生效）。"""
     try:
         # 仅内部工作流可成为独立生成源，外部直读需先“导出为内部”才能在画布作为生成源
         if workflow_id.startswith("ext_"):
@@ -3713,29 +3708,23 @@ def sync_workflow_provider(workflow_id: str):
             return None
         if not meta or meta.get("source") != "internal":
             return None
-        # Fast path（无 ComfyUI 也能秒级启动的关键）：工作流内容未变、规则版本一致、
-        # 且存量定义带有暴露清单时，直接复用存量定义。init_all_providers 启动时已从
-        # storage 把它注册进 Registry，这里跳过 _build_provider_schemas_from_workflow
-        # 中的 ComfyUI object_info 在线探测，零网络开销。ComfyUI 上线后的精准枚举
-        # 在“工作流内容变更 / 规则升级 / 首次同步”时才会触发重建。
+        # Fast path（无 ComfyUI 也能秒级启动的关键）：工作流内容未变、规则版本一致时直接复用存量定义。
+        # 白名单默认全关后 exposed 合法为空，不再以"清单非空"作为复用条件；白名单变更走 force 重建。
         content_hash = hashlib.md5(json.dumps(wf, sort_keys=True).encode("utf-8")).hexdigest()[:8]
         pid = _workflow_provider_id(workflow_id)
         from app.providers.custom.manager import custom_provider_manager
         existing = custom_provider_manager.get_definition(pid)
-        if (existing is not None
+        if (not force
+                and existing is not None
                 and getattr(existing, "workflow_hash", None) == content_hash
                 and getattr(existing, "workflow_id", None) == workflow_id
-                and (getattr(existing, "schema_version", None) or 0) == WORKFLOW_SCHEMA_VERSION
-                and list(getattr(existing, "workflow_exposed", None) or [])):
+                and (getattr(existing, "schema_version", None) or 0) == WORKFLOW_SCHEMA_VERSION):
             return existing
-        # 内容变更 / 首次同步 / 规则升级：走完整构建（含 ComfyUI 在线探测；
-        # 离线时自动降级并受已存清单基线保护，见下）
+        # 内容变更 / 首次同步 / 规则升级 / 用户显式保存白名单：走完整构建（含 ComfyUI 在线探测；
+        # 离线时自动降级：白名单内条目保留已存类型与枚举）
         kind, input_schema, params_schema, output_schema, exposed = _build_provider_schemas_from_workflow(wf, meta)
         # 构造 ProviderDefinition
         from app.models.provider_definition import ProviderDefinition
-        # 仅当 meta 从未配置过 exposed_inputs 时，才尝试固化基线供离线使用
-        if (meta or {}).get("exposed_inputs") is None and exposed:
-            _persist_exposed_baseline(workflow_id, meta, exposed)
         # 已存在且 hash、暴露清单、输入与参数 schema、规则版本全部未变才跳过
         # （schema 规则升级后需自动重建存量源；版本不一致时落到下方重新保存以盖戳）
         if existing and getattr(existing, "workflow_hash", None) == content_hash and existing.workflow_id == workflow_id:

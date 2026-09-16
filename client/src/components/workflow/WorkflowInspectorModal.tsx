@@ -313,14 +313,17 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
     }
 
     // Merge without duplicates
-    setExposedInputs(prev => {
-      const existingKeys = new Set(prev.map(x => `${x.node_id}_${x.param_name}`));
-      const filteredNew = detected.filter(x => !existingKeys.has(`${x.node_id}_${x.param_name}`));
-      return [...prev, ...filteredNew];
-    });
+    const existingKeys = new Set(exposedInputs.map(x => `${x.node_id}_${x.param_name}`));
+    const filteredNew = detected.filter(x => !existingKeys.has(`${x.node_id}_${x.param_name}`));
+    if (filteredNew.length === 0) {
+      setActiveTab('exposed');
+      alert('检测到的可暴露项均已在当前列表中，无需重复添加');
+      return;
+    }
+    setExposedInputs(prev => [...prev, ...filteredNew]);
 
     setActiveTab('exposed');
-    alert(`⚡ 成功自动识别并添加了 ${detected.length} 个外部表单输入插槽！`);
+    alert(`⚡ 成功自动识别并添加了 ${filteredNew.length} 个外部表单输入插槽！`);
   };
 
   const handleSave = async () => {
@@ -599,6 +602,16 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
               >
                 <span>⚡ 自动探测图片与文本节点</span>
               </button>
+              {exposedInputs.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setExposedInputs([])}
+                  className="px-3 py-1 rounded-lg text-xs font-medium bg-red-500/15 hover:bg-red-500/25 text-red-300 border border-red-500/30 transition flex items-center gap-1"
+                  title="清空所有暴露项；保存后生成表单不再显示任何自定义输入"
+                >
+                  <span>🗑 清空全部暴露</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={handleRefreshContract}
@@ -952,18 +965,19 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
               <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-200 leading-relaxed flex items-start gap-2.5">
                 <span className="text-lg">⭐️</span>
                 <div>
-                  <div className="font-bold text-amber-300 mb-0.5">外部生成表单动态输入配置说明</div>
-                  在生图或生成视频时，不同工作流需要的输入差异很大（例如需要上传特定垫图、角色参考图、局部触发词等）。<br/>
-                  在此暴露的节点参数，会在您生成画面或素材时，<b>自适应渲染为图片上传卡片或提示词输入框</b>，并将上传内容实时注入到工作流的对应节点中。
+                  <div className="font-bold text-amber-300 mb-0.5">外部生成表单动态输入配置说明（默认全部不暴露）</div>
+                  为保持生成表单干净，工作流导入后<b>默认不暴露任何输入</b>，需要您在此显式勾选。<br/>
+                  被暴露的节点参数，会在您生成画面或素材时，<b>自适应渲染为图片上传卡片或提示词输入框</b>，并将上传内容实时注入到工作流的对应节点中。
                 </div>
               </div>
 
               {exposedInputs.length === 0 ? (
                 <div className="py-16 text-center text-gray-500 space-y-3 bg-surface-secondary border border-white/10 rounded-xl p-6">
                   <div className="text-2xl">🧩</div>
-                  <div className="text-sm font-semibold text-gray-300">当前尚未暴露任何自定义表单输入项</div>
+                  <div className="text-sm font-semibold text-gray-300">当前未暴露任何输入项（默认状态）</div>
                   <p className="text-xs text-gray-500 max-w-md mx-auto">
-                    您可以点击下方按钮一键自动识别工作流中的垫图（LoadImage）与文本节点，或在「节点参数与模型选择」中按需勾选。
+                    如需在生成时填写提示词、上传垫图或调节参数，请到「节点参数与模型选择」中点击参数行的 ➕ 暴露为表单项，
+                    或点击下方按钮一键识别常见可暴露项，确认后保存即可。
                   </p>
                   <button
                     type="button"
