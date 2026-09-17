@@ -218,6 +218,7 @@ def init_all_providers():
     from .audio.elevenlabs import ElevenLabsProvider
     from .audio.cosyvoice import CosyVoiceProvider
     from .audio.gptsovits import GPTSoVITSProvider
+    from .audio.indextts import IndexTTSProvider
     from .video.comfyui_video import ComfyUIVideoProvider
     from .video.minimax_video import CloudVideoProvider
     from .video.minimax_h3 import MiniMaxH3VideoProvider
@@ -251,6 +252,7 @@ def init_all_providers():
     audio_registry.register(ElevenLabsProvider())
     audio_registry.register(CosyVoiceProvider())
     audio_registry.register(GPTSoVITSProvider())
+    audio_registry.register(IndexTTSProvider())
 
     # 注册视频 (ComfyUI 本地 + 4 默认云端: H3/Seedance/Kling/Wan3 + 旧兼容通道 + 自定义 OpenAI 兼容)
     # 缺 Key 的源 is_configured()=False, 注册表自动跳过, 配 Key 后即用
