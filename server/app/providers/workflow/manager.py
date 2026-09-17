@@ -3541,7 +3541,6 @@ def _build_provider_schemas_from_workflow(workflow: Dict[str, Any], meta: Option
         input_props: Dict[str, Any] = {
             "prompt": {"type": "string", "description": "运动/提示词", "x-handle": "text", "x-role": "prompt"},
             "first_frame": {"type": "string", "format": "uri", "description": "首帧", "x-handle": "image", "x-slot": "first_frame"},
-            "last_frame": {"type": "string", "format": "uri", "description": "尾帧", "x-handle": "image", "x-slot": "last_frame"},
             "reference_images": {"type": "array", "items": {"type": "string", "format": "uri"}, "description": "参考图组", "x-handle": "image", "x-slot": "reference_images"},
             "reference_videos": {"type": "array", "items": {"type": "string", "format": "uri"}, "description": "参考视频组", "x-handle": "video", "x-slot": "reference_videos"},
             "reference_audios": {"type": "array", "items": {"type": "string", "format": "uri"}, "description": "参考音频组", "x-handle": "audio", "x-slot": "reference_audios"},

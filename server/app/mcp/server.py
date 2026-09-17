@@ -1752,34 +1752,10 @@ class MCPServerRegistry:
                 pid = arguments.get("provider_id") or ""
                 if not pid:
                     raise ValueError("provider_id 不能为空")
-                from app.providers.custom.manager import custom_provider_manager as _mgr
-                pd = _mgr.get_definition(pid)
-                if not pd:
-                    raise ValueError(f"Provider 不存在: {pid}")
-                # 优先代码 provider
-                prov = None
-                if pd.code and not pd.legacy_json_mode:
-                    from app.providers.generic.code_provider import GenericCodeImageProvider, GenericCodeAudioProvider, GenericCodeVideoProvider
-                    if pd.kind == "image":
-                        prov = GenericCodeImageProvider(pd)
-                    elif pd.kind == "audio":
-                        prov = GenericCodeAudioProvider(pd)
-                    elif pd.kind == "video":
-                        prov = GenericCodeVideoProvider(pd)
-                    else:
-                        prov = GenericCodeImageProvider(pd)
-                else:
-                    from app.providers.generic.http_provider import GenericHttpImageProvider, GenericHttpAudioProvider, GenericHttpVideoProvider
-                    if pd.kind == "image":
-                        prov = GenericHttpImageProvider(pd)
-                    elif pd.kind == "audio":
-                        prov = GenericHttpAudioProvider(pd)
-                    elif pd.kind == "video":
-                        prov = GenericHttpVideoProvider(pd)
-                    else:
-                        prov = GenericHttpImageProvider(pd)
-                ok = await prov.check_health()
-                result = {"provider_id": pid, "ok": ok, "is_configured": prov.is_configured(), "detail": "连通正常" if ok else "未通过（检查 Key/地址/代码）"}
+                # 与 HTTP /providers/{id}/test 共用同一实现：测试联通即写“生产可用”验证标记，
+                # 保证 Agent 侧测试过的源会出现在画布/分镜的生产端选择器（原先 MCP 不落验证 → 画布选不到源）
+                from app.api.provider_routes import run_provider_test
+                result = await run_provider_test(pid)
 
             elif tool_name == "delete_custom_provider":
                 pid = arguments.get("provider_id") or ""
@@ -1863,6 +1839,8 @@ class MCPServerRegistry:
                 from app.providers.init_providers import unregister_single_custom_provider, register_single_custom_provider
                 unregister_single_custom_provider(pid, kind=pd.kind)
                 register_single_custom_provider(saved)
+                from app.providers import verification as _verification
+                _verification.clear(pid)  # 定义变更 → 需重新测试才可回到生产端（与 HTTP 更新同口径）
                 result = {"status": "updated", "provider": saved.to_provider_info()}
 
             elif tool_name == "get_provider_code":

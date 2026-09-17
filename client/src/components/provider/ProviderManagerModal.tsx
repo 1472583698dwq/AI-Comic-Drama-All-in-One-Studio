@@ -162,10 +162,9 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
     const fixedParams = { type: "object", properties: newProps };
     // 2) input: 补齐 9 张 / 3 条 上限，按真实 max 映射
     const newIProps: any = { ...iprops };
-    // 确保基础 5 字段存在
+    // 确保基础字段存在（尾帧不再默认补：未声明支持尾帧的源挂上会误导）
     if (!newIProps.prompt) newIProps.prompt = { type: "string", description: "运动描述", "x-handle": "text" };
     if (!newIProps.first_frame) newIProps.first_frame = { type: "string", format: "uri", description: "首帧（定格开头画面）", "x-handle": "image" };
-    if (!newIProps.last_frame) newIProps.last_frame = { type: "string", format: "uri", description: "尾帧图（定格结尾画面）", "x-handle": "image" };
     if (!newIProps.reference_images) newIProps.reference_images = { type: "array", items: { type: "string", format: "uri" }, description: "参考集，最多9张", "x-handle": "image", maxItems: 9, minItems: 0 };
     else { newIProps.reference_images.maxItems = 9; newIProps.reference_images.minItems = 0; newIProps.reference_images.description = "参考集，最多9张"; newIProps.reference_images["x-handle"] = "image"; }
     if (!newIProps.reference_audios) newIProps.reference_audios = { type: "array", items: { type: "string", format: "uri" }, description: "参考音频，最多3条", "x-handle": "audio", maxItems: 3, minItems: 0 };

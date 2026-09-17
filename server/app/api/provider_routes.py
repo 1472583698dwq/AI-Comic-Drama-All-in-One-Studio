@@ -392,8 +392,13 @@ def code_gen_system_prompt(kind: str, language: str, tmpl: str = "") -> str:
 - ctx 含 prompt/width/height/size/seed/model/style_preset/api_key/reference_images/first_frame_url/duration/resolution/aspect_ratio/fps/text/voice_id/emotion 等，api 含 httpx/asyncio/json/re/time/uuid/download(api.download(url,prefix)->(storage_url,local_path))；python 沙箱可 import 第三方库（aiohttp/requests/httpx）与 raise 异常
 - 防御式解析（必须）：响应一律用 .get() 链取值；业务码非成功、data 缺失或为 null 时，必须 raise RuntimeError 并把服务端 code/msg/原始响应前300字符带出来，严禁对可能为 None 的值做 [] 下标取值
 - 列表结果元素可能是对象（取其中的 url 字段）也可能是字符串，两种都兼容
-- 必须包含完整请求、鉴权、payload、轮询（视频类用 while/for+sleep 并设最大轮询次数）、错误处理
-- 成功返回 {{"image_url": url}} / {{"video_url": url}} / {{"audio_url": url}}，轮询场景可先返回 task_id 再由框架接管；视频长任务（H3约100s）推荐提交后即返 task_id，由框架/调用方轮询，勿在代码内阻塞超600s
+- 必须包含完整请求、鉴权、payload、超时与错误处理；同步返回直接给 {{"image_url": url}} / {{"video_url": url}} / {{"audio_url": url}}
+- **异步任务制 API（提交返 task_id/job_id，另有独立结果查询接口）必须实现"提交/查询"双分支**：框架 TaskCenter 会用「空 prompt + task_id」反复调用你的代码推进任务，缺查询分支任务必然超时：
+  1) 提交分支（ctx 无 task_id）：POST 提交后**立即返回**，禁止在代码内 while/sleep 长轮询：{{"video_url": None, "task_id": <id>, "status": "SUBMITTED"}}（image 用 "image_url": None、audio 用 "audio_url": None）
+  2) 查询分支（ctx 有 task_id 且 prompt 为空）：GET 结果接口查询；完成返回 {{"video_url": url}}（image→image_url、audio→audio_url）；未完成返回 {{"video_url": None, "task_id": <同一个id>, "status": "RUNNING"}}；失败 raise RuntimeError 或返回 status "FAILED"
+  3) task_id 必须双路取：task_id = (ctx.get("task_id") or (ctx.get("dynamic_inputs") or {{}}).get("task_id") or "").strip()
+  4) 查询分支必须返回**与传入相同**的 task_id；返回新 task_id 会被框架判定为"缺少查询分支"并直接失败
+- 视频类即便同步 API 也不得在代码内阻塞超过 600s；长任务一律走上述双分支
 - 可信源（trusted=True且全局STUDIO_TRUSTED_MODE=1）可用任意库与系统调用（os/subprocess/curl/ffmpeg/文件读写），普通沙箱仅可用httpx/aiohttp且禁os系导入
 - 若该 API 有自己的参数枚举（分辨率档位/比例/时长档等），必须在代码最后一行追加单行注释（一行合法 JSON），并按标准标注分组与人机分工：
   # PARAMS_SCHEMA: {{"type":"object","properties":{{"resolution":{{"type":"string","title":"分辨率","enum":["...真实枚举..."],"default":"...","description":"...","x-category":"layout","x-visibility":"basic","x-agent":"auto","x-priority":20}}}}}}
@@ -555,7 +560,6 @@ def _default_input_schema(kind: str) -> Dict[str, Any]:
         return {"type":"object","properties":{
             "prompt":{"type":"string","description":"运动描述","x-handle":"text","x-role":"prompt"},
             "first_frame":{"type":"string","format":"uri","description":"首帧（定格开头画面）","x-handle":"image","x-slot":"first_frame"},
-            "last_frame":{"type":"string","format":"uri","description":"尾帧图（定格结尾画面）","x-handle":"image","x-slot":"last_frame"},
             "reference_images":{"type":"array","items":{"type":"string","format":"uri"},"description":"参考集，最多9张","x-handle":"image","x-slot":"reference_images","maxItems":9,"minItems":0},
             "reference_audios":{"type":"array","items":{"type":"string","format":"uri"},"description":"参考音频，最多3条","x-handle":"audio","x-slot":"ref_audio","maxItems":3,"minItems":0},
         },"required":["prompt"]}
@@ -995,8 +999,15 @@ async def delete_provider(provider_id: str):
     return {"status": "deleted", "provider_id": provider_id}
 
 
-@router.post("/providers/{provider_id}/test")
-async def test_provider(provider_id: str, body: Optional[Dict[str, Any]] = Body(None)):
+class ProviderNotFound(ValueError):
+    """测试/查询时生成源不存在（HTTP 404，MCP 直接透出错误）。"""
+
+
+async def run_provider_test(provider_id: str) -> Dict[str, Any]:
+    """统一「连通测试 + 生产可用验证标记」的唯一实现（HTTP 路由与 MCP test_custom_provider 共用）。
+
+    测试联通即授予生产端（画布/分镜选择器）可见资格；失败/改代码/改 Key 后撤销。
+    """
     pd = custom_provider_manager.get_definition(provider_id)
     prov = None
     kind = None
@@ -1014,7 +1025,7 @@ async def test_provider(provider_id: str, body: Optional[Dict[str, Any]] = Body(
             else:
                 prov = GenericCodeImageProvider(pd)
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"创建 Provider 实例失败: {e}")
+            raise ValueError(f"创建 Provider 实例失败: {e}")
         # 免费深度体检先行：沙箱编译+入口定位（零配额），坏代码快速失败并给出确切原因
         if pd.code:
             from app.providers.generic.code_provider import compile_check_code
@@ -1049,7 +1060,7 @@ async def test_provider(provider_id: str, body: Optional[Dict[str, Any]] = Body(
         except Exception:
             pass
         if not prov:
-            raise HTTPException(status_code=404, detail=f"Provider 不存在: {provider_id}")
+            raise ProviderNotFound(f"Provider 不存在: {provider_id}")
     try:
         ok = await prov.check_health()
         is_configured = prov.is_configured() if hasattr(prov, "is_configured") else True
@@ -1068,6 +1079,17 @@ async def test_provider(provider_id: str, body: Optional[Dict[str, Any]] = Body(
     except Exception as e:
         verification.mark(provider_id, False, f"检测异常: {e}", kind or "")
         return {"provider_id": provider_id, "ok": False, "verified": False, "detail": f"检测异常: {e}"}
+
+
+@router.post("/providers/{provider_id}/test")
+async def test_provider(provider_id: str, body: Optional[Dict[str, Any]] = Body(None)):
+    """HTTP 连通测试（与 MCP test_custom_provider 共用同一实现，保证验证语义一致）。"""
+    try:
+        return await run_provider_test(provider_id)
+    except ProviderNotFound as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 class ProviderImportRequest(BaseModel):

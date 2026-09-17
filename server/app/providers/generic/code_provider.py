@@ -626,6 +626,16 @@ async def query_code_task_once(provider_id: str, task_id: str) -> Dict[str, Any]
     if not isinstance(result, dict):
         return {"status": "RUNNING", "task_id": tid}
     url, _t = extract_result_media("video", result)
+    new_tid = str(result.get("task_id") or result.get("id") or "").strip()
+    if not url and new_tid and new_tid != tid:
+        # 查询调用却返回新 task_id：该源缺查询分支（把查询当再次提交），任务永远不会终态
+        snap = {"status": "FAILED", "task_id": tid, "provider": provider_id,
+                "error": ("该 Provider 缺少异步查询分支：以「空 prompt + task_id」调用时返回了新的 task_id，"
+                          "疑似把查询当成了再次提交。请实现『ctx 有 task_id 且 prompt 为空 → 调查询接口』分支，"
+                          "并返回与传入相同的 task_id（参考 provider-factory 技能·异步视频源铁律）。")}
+        _CODE_VIDEO_TASKS[tid] = snap
+        print(f"[CodeVideo] Task {tid} FAILED: missing query branch (got new task_id {new_tid})")
+        return snap
     if url:
         try:
             storage_url, local_path = await persist_media(url, "video", "vid")
