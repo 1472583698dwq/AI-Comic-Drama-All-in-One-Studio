@@ -44,6 +44,7 @@ const TEST_TARGETS: Array<{ k: string; label: string }> = [
   { k: 'elevenlabs', label: 'ElevenLabs' },
   { k: 'cosyvoice', label: 'CosyVoice' },
   { k: 'gpt_sovits', label: 'GPT-SoVITS' },
+  { k: 'indextts', label: 'IndexTTS' },
   { k: 'jianyin', label: '剪映目录' },
 ];
 

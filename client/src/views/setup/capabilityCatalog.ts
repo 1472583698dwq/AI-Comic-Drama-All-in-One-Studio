@@ -15,7 +15,7 @@ export type FieldKind = 'text' | 'secret' | 'url' | 'number' | 'path';
 export type TestTarget =
   | 'openai' | 'responses_api' | 'minimax' | 'minimax_h3' | 'seedance'
   | 'kling' | 'wan3' | 'comfyui' | 'siliconflow' | 'dashscope' | 'openai_image'
-  | 'elevenlabs' | 'cosyvoice' | 'gpt_sovits' | 'jianyin';
+  | 'elevenlabs' | 'cosyvoice' | 'gpt_sovits' | 'indextts' | 'jianyin';
 
 /** 通道对应的后端生成源注册表（用于拉取真实配置状态；LLM 无注册表） */
 export type ProviderKind = 'image' | 'video' | 'audio';
@@ -454,6 +454,25 @@ export const CAPABILITIES: Capability[] = [
             kind: 'url', placeholder: 'http://127.0.0.1:9880',
             quickFill: [{ label: '本机', value: 'http://127.0.0.1:9880' }],
           }),
+        ],
+      },
+      {
+        id: 'indextts',
+        name: 'IndexTTS',
+        where: 'local',
+        summary: '本机 IndexTTS-2.5。零样本克隆——音色不是从列表里挑，而是由你给的一段参考音频决定。',
+        test: 'indextts',
+        fields: [
+          KEY('INDEXTTS_URL', '服务地址', {
+            kind: 'url', placeholder: 'http://127.0.0.1:7860',
+            quickFill: [{ label: '本机', value: 'http://127.0.0.1:7860' }],
+          }),
+          KEY('INDEXTTS_REF_AUDIO', '默认参考音频', {
+            kind: 'path', required: false, pick: true,
+            placeholder: '/Users/you/project/tts/refs/ref.wav',
+            hint: '一段 wav，决定默认音色；也可以给单个角色绑别的 wav 路径当它的音色',
+          }),
+          KEY('INDEXTTS_LANG', '默认语言', { kind: 'text', required: false, placeholder: 'ZH', hint: 'ZH / EN / JA / KO' }),
         ],
       },
     ],

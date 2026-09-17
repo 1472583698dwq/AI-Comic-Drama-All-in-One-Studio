@@ -53,6 +53,9 @@ MANAGED_KEYS = [
     "TTS_PROVIDER",
     "COSYVOICE_URL",
     "GPTSOVITS_URL",
+    "INDEXTTS_URL",
+    "INDEXTTS_REF_AUDIO",
+    "INDEXTTS_LANG",
     "ELEVENLABS_API_KEY",
     "ELEVENLABS_MODEL",
     # Video Generation
@@ -197,6 +200,13 @@ class Settings(BaseModel):
     TTS_PROVIDER: str = os.getenv("TTS_PROVIDER", "minimax")
     COSYVOICE_URL: str = os.getenv("COSYVOICE_URL", "http://127.0.0.1:9233")
     GPTSOVITS_URL: str = os.getenv("GPTSOVITS_URL", "http://127.0.0.1:9880")
+    # IndexTTS-2.5（本机 Gradio）：音色靠参考音频零样本克隆
+    INDEXTTS_URL: str = os.getenv("INDEXTTS_URL", "")
+    INDEXTTS_REF_AUDIO: str = os.getenv("INDEXTTS_REF_AUDIO", "")
+    INDEXTTS_LANG: str = os.getenv("INDEXTTS_LANG", "ZH")
+    INDEXTTS_NUM_BEAMS: int = int(os.getenv("INDEXTTS_NUM_BEAMS", "3"))
+    INDEXTTS_SEG_TOKENS: int = int(os.getenv("INDEXTTS_SEG_TOKENS", "120"))
+    INDEXTTS_TIMEOUT: int = int(os.getenv("INDEXTTS_TIMEOUT", "1800"))
     ELEVENLABS_API_KEY: str = os.getenv("ELEVENLABS_API_KEY", "")
     ELEVENLABS_MODEL: str = os.getenv("ELEVENLABS_MODEL", "eleven_multilingual_v2")
 

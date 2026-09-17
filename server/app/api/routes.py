@@ -1888,6 +1888,26 @@ async def test_config_connection(req: ConfigTestRequest):
         except Exception as e:
             return {"target": "cosyvoice", "ok": False, "url": url, "detail": f"无法连接 CosyVoice: {e}"}
 
+    if target in ["indextts", "index_tts"]:
+        url = (cfg.get("INDEXTTS_URL") or settings.INDEXTTS_URL or "").rstrip("/")
+        if not url:
+            return {"target": "indextts", "ok": False, "detail": "INDEXTTS_URL 未配置"}
+        ref = cfg.get("INDEXTTS_REF_AUDIO") or settings.INDEXTTS_REF_AUDIO or ""
+        try:
+            async with httpx.AsyncClient(timeout=6.0) as client:
+                r = await client.get(url + "/")
+            if r.status_code >= 500:
+                return {"target": "indextts", "ok": False, "url": url, "detail": f"IndexTTS 响应 HTTP {r.status_code}"}
+            if not ref:
+                return {"target": "indextts", "ok": True, "url": url,
+                        "detail": "服务在线；还没填参考音频，合成时会报错"}
+            if not os.path.exists(ref):
+                return {"target": "indextts", "ok": False, "url": url,
+                        "detail": f"服务在线，但参考音频不存在: {ref}"}
+            return {"target": "indextts", "ok": True, "url": url, "detail": f"服务在线，参考音频就绪（{os.path.basename(ref)}）"}
+        except Exception as e:
+            return {"target": "indextts", "ok": False, "url": url, "detail": f"无法连接 IndexTTS: {e}"}
+
     if target in ["gptsovits", "gpt_sovits"]:
         url = (cfg.get("GPTSOVITS_URL") or settings.GPTSOVITS_URL).rstrip("/")
         try:
@@ -1937,7 +1957,7 @@ async def test_config_connection(req: ConfigTestRequest):
             return {"target": "wan3", "ok": False, "detail": "DASHSCOPE_API_KEY 未配置 (Wan3.0 复用此Key)"}
         return {"target": "wan3", "ok": True, "detail": "Wan3.0 Key 已配置 (wan3.0-video, 真实生成时校验)"}
 
-    raise HTTPException(status_code=400, detail="target 不支持，支持: openai | responses_api | deepseek | qwen | minimax | minimax_h3 | seedance | kling | wan3 | comfyui | siliconflow | dashscope | elevenlabs | cosyvoice | gpt_sovits | jianyin")
+    raise HTTPException(status_code=400, detail="target 不支持，支持: openai | responses_api | deepseek | qwen | minimax | minimax_h3 | seedance | kling | wan3 | comfyui | siliconflow | dashscope | elevenlabs | cosyvoice | gpt_sovits | indextts | jianyin")
 
 @router.post("/agent/chat")
 async def http_agent_chat(req: AgentChatRequest):
