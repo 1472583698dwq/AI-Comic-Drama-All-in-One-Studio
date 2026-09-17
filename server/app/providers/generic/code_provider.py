@@ -539,7 +539,7 @@ def resolve_code_timeout(definition) -> int:
 
 
 # ==================== 代码视频源异步任务表（H3 等提交即返 task_id 型） ====================
-# 背景：code 源返回 {"task_id"} 后，旧链路轮询的是 http_provider 的 _CUSTOM_VIDEO_TASKS（code 源从不写），
+# 背景：code 源返回 {"task_id"} 后，任务表由此模块统一维护（非代码模式已删除）；
 # 导致 task_id 永远查不到。本表由 GenericCodeVideoProvider 提交时注册，后台协程复用源自身代码的
 # 查询模式（task_id + 空 prompt，单次秒回）推进，前端 /videos/status 经 get_custom_video_task 穿透可见。
 _CODE_VIDEO_TASKS: Dict[str, Dict[str, Any]] = {}
@@ -569,7 +569,7 @@ def _spawn_code_video_poll(task_id: str, provider_id: str) -> None:
 
 
 def get_code_video_task(task_id: str) -> Optional[Dict[str, Any]]:
-    """查询代码视频源异步任务（供 http_provider.get_custom_video_task 穿透）。"""
+    """查询代码视频源异步任务（/videos/status 与 TaskCenter 共用口径）。"""
     if not task_id:
         return None
     return _CODE_VIDEO_TASKS.get(str(task_id))

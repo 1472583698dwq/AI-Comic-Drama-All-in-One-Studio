@@ -896,7 +896,7 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
-  async createProvider(payload: { name: string; kind: string; language?: string; code?: string; code_entry?: string; transport?: any; auth?: any; mapping?: any; models?: string[]; default_model?: string; api_key?: string; description?: string; provider_type?: string; headers?: Record<string, string>; custom_headers?: Record<string, string>; params_schema?: any; input_schema?: any; output_schema?: any; capabilities?: string[] }): Promise<any> {
+  async createProvider(payload: { name: string; kind: string; language?: string; code: string; code_entry?: string; models?: string[]; default_model?: string; api_key?: string; description?: string; headers?: Record<string, string>; custom_headers?: Record<string, string>; params_schema?: any; input_schema?: any; output_schema?: any; capabilities?: string[] }): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/providers`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();

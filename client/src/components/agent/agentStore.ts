@@ -521,10 +521,11 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
           );
         } else {
           const r: any = await apiService.creatorFinalize(proposalId, kind);
-          const refreshes: Array<{ type: 'template_refresh' | 'skill_refresh' | 'plugin_refresh'; on: boolean }> = [
+          const refreshes: Array<{ type: 'template_refresh' | 'skill_refresh' | 'plugin_refresh' | 'provider_refresh'; on: boolean }> = [
             { type: 'template_refresh', on: !!r?.template_id },
             { type: 'skill_refresh', on: !!r?.skill },
             { type: 'plugin_refresh', on: !!r?.plugin_id },
+            { type: 'provider_refresh', on: !!r?.provider_id },
           ];
           const effects = refreshes.filter((x) => x.on).map((x) => ({ type: x.type } as any));
           if (r?.plugin_id) effects.push({ type: 'skill_refresh' } as any);
@@ -543,7 +544,8 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
           });
         }
       } catch (e: any) {
-        patchMsg(msgId, (m) => ({ ...m, text: `${m.text}\n\n提案操作失败：${e?.message || '未知'}` }));
+        // 不再往消息正文追加失败行（重复点击会刷屏）；改为一次性提示
+        toast.error(e?.message || '提案操作失败');
       }
     },
 

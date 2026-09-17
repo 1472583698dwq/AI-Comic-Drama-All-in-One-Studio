@@ -28,7 +28,7 @@ export interface DynamicProviderInfo {
   name: string;
   display_name?: string;
   kind: 'image' | 'video' | 'audio' | 'llm';
-  provider_type?: 'http' | 'comfyui' | 'code' | 'local';
+  provider_type?: 'comfyui' | 'code';
   description?: string;
   icon?: string;
   models: string[];

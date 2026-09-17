@@ -74,8 +74,12 @@ def _trusted_repo_root() -> str:
     return _os.path.abspath(_os.getcwd())
 
 
-def _resolve_trusted_path(path: str) -> str:
-    """将用户传入 path 解析为绝对路径并校验围栏；越界/敏感文件直接拒绝。"""
+def _resolve_trusted_path(path: str, allow_build_outputs: bool = False) -> str:
+    """将用户传入 path 解析为绝对路径并校验围栏；越界/敏感文件直接拒绝。
+
+    allow_build_outputs=True（只读查看 fs_read 用）：允许读 dist/build 构建产物目录；
+    写操作（fs_file/shell）仍拦截，避免把改动落进构建产物。
+    """
     import os as _os
     if not path or not str(path).strip():
         raise ValueError("path 不能为空")
@@ -88,9 +92,12 @@ def _resolve_trusted_path(path: str) -> str:
     # 围栏校验
     if roots and not any(ap == r or ap.startswith(r + _os.sep) for r in roots):
         raise ValueError(f"路径越界已拦截：{ap}（仅允许 {roots} 内）")
-    # 敏感文件保护（最小集）：.git/__pycache__ 不同情，.env 只读不写由调用方控制
+    # 敏感目录保护（最小集）
+    deny = ["/.git/", "/__pycache__/", "/node_modules/", "/.venv/"]
+    if not allow_build_outputs:
+        deny += ["/dist/", "/build/"]
     low = ap.replace("\\", "/").lower()
-    for seg in ("/.git/", "/__pycache__/", "/node_modules/", "/.venv/", "/dist/", "/build/"):
+    for seg in deny:
         if seg in low:
             raise ValueError(f"敏感目录已拦截：{seg.strip('/')}")
     return ap
@@ -132,6 +139,55 @@ def _run_trusted_shell(command: str, cwd: str = "", timeout: int = 1200) -> dict
     out = (proc.stdout or "")[-12000:]
     err = (proc.stderr or "")[-4000:]
     return {"returncode": proc.returncode, "stdout": out, "stderr": err, "cwd": workdir, "truncated": bool(proc.stdout and len(proc.stdout) > 12000)}
+
+
+def _fs_read_action(path: str, offset: int = 0, limit: int = 500, encoding: str = "utf-8") -> dict:
+    """只读文件查看（无需可信模式）：围栏内 + 行分页（offset/limit），用于通读完整源码/JSON。
+
+    - offset：起始行号（0 基）；limit：返回行数（默认 500，上限 2000）
+    - 明文密钥类文件（.env / config_store.json）拒绝直读，防止泄进模型上下文
+    - dist/build 构建产物允许只读查看（写操作仍由 fs_file 拦截）
+    """
+    import os as _os
+    ap = _resolve_trusted_path(path, allow_build_outputs=True)
+    base_low = _os.path.basename(ap).lower()
+    if base_low in (".env", "config_store.json"):
+        raise ValueError(f"敏感文件不允许直读（含明文密钥）：{ap}")
+    if not _os.path.isfile(ap):
+        raise ValueError(f"文件不存在：{ap}")
+    size = _os.path.getsize(ap)
+    if size > 5 * 1024 * 1024:
+        raise ValueError(f"文件过大（>{5}MB）已拒绝：{ap}")
+    try:
+        off = max(0, int(offset or 0))
+    except Exception:
+        off = 0
+    try:
+        lim = int(limit or 500)
+    except Exception:
+        lim = 500
+    lim = max(1, min(lim, 2000))
+    enc = (encoding or "utf-8").strip() or "utf-8"
+    lines: List[str] = []
+    total = 0
+    with open(ap, "r", encoding=enc, errors="ignore") as f:
+        for i, line in enumerate(f):
+            total = i + 1
+            if off <= i < off + lim:
+                lines.append(line)
+    content = "".join(lines)
+    end = off + len(lines)
+    return {
+        "path": ap.replace("\\", "/"),
+        "offset": off,
+        "limit": lim,
+        "returned_lines": len(lines),
+        "total_lines": total,
+        "has_more": end < total,
+        "next_offset": end if end < total else None,
+        "content": content,
+        "size": size,
+    }
 
 
 def _fs_file_action(action: str, path: str, content: str = "", encoding: str = "utf-8") -> dict:
@@ -408,9 +464,9 @@ class MCPServerRegistry:
             return asset.model_dump()
 
         @mcp_app.tool
-        async def register_custom_provider(kind: str = "image", name: str = "", language: str = "python", code: str = "", doc_text: str = "", doc_url: str = "", curl: str = "", openapi_url: str = "", api_key: str = "", definition: dict = None) -> dict:
+        async def register_custom_provider(kind: str = "image", name: str = "", language: str = "python", code: str = "", doc_text: str = "", doc_url: str = "", curl: str = "", openapi_url: str = "", api_key: str = "") -> dict:
             """[生成源扩展-代码模式] 支持 python/javascript 携程源码直接注册，或据文档自动生成代码"""
-            payload = {"kind": kind, "name": name, "language": language, "doc_text": doc_text, "doc_url": doc_url, "curl": curl, "openapi_url": openapi_url, "api_key": api_key, "definition": definition}
+            payload = {"kind": kind, "name": name, "language": language, "doc_text": doc_text, "doc_url": doc_url, "curl": curl, "openapi_url": openapi_url, "api_key": api_key}
             if code: payload["code"] = code
             res = await mcp_registry.execute_tool("register_custom_provider", payload)
             if res.status == "success":
@@ -452,8 +508,24 @@ class MCPServerRegistry:
             raise RuntimeError(res.error)
 
         @mcp_app.tool
-        async def get_provider_code(provider_id: str) -> dict:
-            res = await mcp_registry.execute_tool("get_provider_code", {"provider_id": provider_id})
+        async def get_provider_code(provider_id: str, offset: int = 0, limit: int = 4000) -> dict:
+            res = await mcp_registry.execute_tool("get_provider_code", {"provider_id": provider_id, "offset": offset, "limit": limit})
+            if res.status == "success":
+                return res.result
+            raise RuntimeError(res.error)
+
+        @mcp_app.tool
+        async def fs_read(path: str, offset: int = 0, limit: int = 500, encoding: str = "utf-8") -> dict:
+            """[文件查看-只读] 围栏内文件行分页读取（无需可信模式）"""
+            res = await mcp_registry.execute_tool("fs_read", {"path": path, "offset": offset, "limit": limit, "encoding": encoding})
+            if res.status == "success":
+                return res.result
+            raise RuntimeError(res.error)
+
+        @mcp_app.tool
+        async def read_skill(name: str = "") -> dict:
+            """[技能] 列出/读取系统技能（SKILL.md）规范"""
+            res = await mcp_registry.execute_tool("read_skill", {"name": name} if name else {})
             if res.status == "success":
                 return res.result
             raise RuntimeError(res.error)
@@ -792,7 +864,7 @@ class MCPServerRegistry:
         # 12. 自定义生成源扩展（导演自扩展核心）
         self.register_tool(MCPToolDefinition(
             name="register_custom_provider",
-            description="[生成源扩展-代码模式] 根据 API 文档/cURL/OpenAPI/示例或直接提供的 python/javascript 携程源码，注册新的生成源 Provider（image/video/audio）。支持 python/javascript 双语言，导演自动生成可轮询、可签名等任意逻辑的携程代码。创建后可在无限画布作为独立节点使用。",
+            description="[生成源扩展-代码模式] 代码模式为唯一方式：根据 API 文档/cURL/OpenAPI/示例生成、或直接提供 python/javascript 携程源码，注册新的生成源 Provider（image/video/audio）。不支持非代码（JSON/transport）模式。创建后可在无限画布作为独立节点使用。",
             category="ai_generation",
             icon="Plug",
             author="Provider Extension",
@@ -811,7 +883,10 @@ class MCPServerRegistry:
                     "openapi_url": {"type": "string", "description": "OpenAPI JSON URL（可选）"},
                     "api_key": {"type": "string", "description": "API Key（可选）"},
                     "trusted": {"type": "boolean", "description": "可信模式：True则该源跳出沙箱可执行任意代码（需全局 STUDIO_TRUSTED_MODE=1，否则创建后执行会明错）"},
-                    "definition": {"type": "object", "description": "若已自行构造完整 ProviderDefinition JSON，可直接传入"}
+                    "input_schema": {"type": "object", "description": "文件插槽声明（prompt/首帧/参考图/参考音频），可选，缺省由框架补全"},
+                    "params_schema": {"type": "object", "description": "非文件参数 schema（必须带 x-category/x-visibility/x-agent/x-priority），可选"},
+                    "models": {"type": "array", "items": {"type": "string"}, "description": "模型列表（可选）"},
+                    "default_model": {"type": "string", "description": "默认模型（可选）"}
                 },
                 "required": ["kind"]
             }
@@ -888,7 +963,7 @@ class MCPServerRegistry:
         ))
         self.register_tool(MCPToolDefinition(
             name="get_provider_code",
-            description="[查询] 获取单个 Provider 的完整代码与参数结构，支持按 id/name/q 精准或模糊选择，供导演诊断“参数未暴露”并升级",
+            description="[查询] 获取单个 Provider 的完整代码与参数结构，支持按 id/name/q 精准或模糊选择。代码支持 offset/limit 分页通读（默认窗口 4000 字符），配合 code_total_len/code_next_offset 逐页读完整源码，不再只看 800 字预览。",
             category="utility",
             icon="FileCode",
             author="Provider Extension",
@@ -899,7 +974,9 @@ class MCPServerRegistry:
                     "provider_id": {"type": "string", "description": "Provider ID，如 prov_xxx；与 name/q 二选一，优先级最高"},
                     "name": {"type": "string", "description": "按名称精确或模糊匹配，如 'MiniMax H3 音视频' 或 'H3'"},
                     "q": {"type": "string", "description": "模糊搜索关键词（名称/ID/描述/类型），如 'h3' 或 'video'"},
-                    "kind": {"type": "string", "enum": ["image", "video", "audio", "llm"], "description": "可选：限定类型，避免同名跨类型歧义"}
+                    "kind": {"type": "string", "enum": ["image", "video", "audio", "llm"], "description": "可选：限定类型，避免同名跨类型歧义"},
+                    "offset": {"type": "integer", "default": 0, "description": "代码字符偏移（从 0 开始），用于分页通读完整代码"},
+                    "limit": {"type": "integer", "default": 4000, "description": "本次返回的代码字符数 200-6000（默认 4000）"}
                 },
                 "required": []
             }
@@ -1008,6 +1085,39 @@ class MCPServerRegistry:
         ))
 
         # --- A档可信模式双工具：文件编辑 + 命令执行（总闸 STUDIO_TRUSTED_MODE=1，未开则明错） ---
+        self.register_tool(MCPToolDefinition(
+            name="fs_read",
+            description="[文件查看-只读] 读取围栏内文件（storage/exports/工作区根），支持 offset/limit 行分页，无需可信模式。用于通读生成源代码文件、插件包、技能规范与 JSON 配置等完整文件；明文密钥文件（.env/config_store.json）拒绝直读。",
+            category="utility",
+            icon="FileText",
+            author="Runtime",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "相对工作区根或绝对路径（围栏内），如 storage/providers/custom/prov_xxx.json 或 server/skills/provider-factory/SKILL.md"},
+                    "offset": {"type": "integer", "default": 0, "description": "起始行号（0 基），用于分页"},
+                    "limit": {"type": "integer", "default": 500, "description": "返回行数 1-2000（默认 500）"},
+                    "encoding": {"type": "string", "default": "utf-8", "description": "文件编码"},
+                },
+                "required": ["path"]
+            }
+        ))
+        self.register_tool(MCPToolDefinition(
+            name="read_skill",
+            description="[技能] 列出/读取系统技能（SKILL.md）规范：不传 name 列出全部技能（名称+描述+分类）；传 name 返回该技能完整执行 SOP。接生成源/插件/技能类需求前先读取对应 SOP 再动手。",
+            category="utility",
+            icon="Sparkles",
+            author="Skill Engine",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "技能名（精确或包含匹配），如 provider-factory；留空则列出全部技能"},
+                },
+                "required": []
+            }
+        ))
         self.register_tool(MCPToolDefinition(
             name="fs_file",
             description="[可信文件] list/read/write/append/delete 工作区文件（围栏 storage/exports/工作区根，禁.git等，读≤200KB写≤1MB）。需 STUDIO_TRUSTED_MODE=1。H3长任务可用它读写 task_id/回填分镜。",
@@ -1629,8 +1739,11 @@ class MCPServerRegistry:
                 curl = arguments.get("curl") or ""
                 openapi_url = arguments.get("openapi_url") or ""
                 api_key = arguments.get("api_key") or ""
-                definition = arguments.get("definition")
                 headers = arguments.get("headers") or arguments.get("custom_headers")
+                _input_schema = arguments.get("input_schema") if isinstance(arguments.get("input_schema"), dict) else None
+                _params_schema = arguments.get("params_schema") if isinstance(arguments.get("params_schema"), dict) else None
+                _models = arguments.get("models") if isinstance(arguments.get("models"), list) else None
+                _default_model = (arguments.get("default_model") or "").strip() or None
                 # 分支1：直接提供 code（导演编辑后回写或用户粘贴）—— 统一创建入口
                 _trusted_arg = arguments.get("trusted")
                 _trusted_bool = bool(_trusted_arg) if not isinstance(_trusted_arg, str) else _trusted_arg.strip().lower() in ("1", "true", "yes", "on")
@@ -1645,42 +1758,14 @@ class MCPServerRegistry:
                         doc_text=doc_text, doc_url=doc_url,
                         trusted=_trusted_bool,
                         headers=headers,
+                        input_schema=_input_schema,
+                        params_schema=_params_schema,
+                        models=_models,
+                        default_model=_default_model,
                     )
                     result = {"status": "success" if _created["compile_check"].get("ok") else "compile_failed",
                               "provider": _created["provider"], "mode": "direct_code",
                               "language": _created["provider"].get("language"),
-                              "compile_check": _created["compile_check"],
-                              **({"hint": "代码未通过沙箱编译体检，请根据 compile_check.error 修正后重新提交"} if not _created["compile_check"].get("ok") else {})}
-                elif definition and isinstance(definition, dict):
-                    # 分支2：直接提供完整 definition —— 统一创建入口（schema 规整/超时/保存/注册/Key/体检）
-                    definition["kind"] = kind
-                    if not definition.get("name"):
-                        definition["name"] = name
-                    from app.api.provider_routes import create_code_source as _ccs
-                    _def_trusted = definition.get("trusted", _trusted_bool)
-                    if isinstance(_def_trusted, str):
-                        _def_trusted = _def_trusted.strip().lower() in ("1", "true", "yes", "on")
-                    _created = _ccs(
-                        name=definition.get("name") or name,
-                        kind=kind,
-                        code=definition.get("code") or "",
-                        language=definition.get("language") or language or "python",
-                        code_entry=definition.get("code_entry"),
-                        description=definition.get("description") or "由导演提供完整定义",
-                        api_key=api_key or None,
-                        doc_text=definition.get("doc_text") or doc_text or "",
-                        doc_url=definition.get("doc_url") or doc_url or "",
-                        params_schema=definition.get("params_schema"),
-                        input_schema=definition.get("input_schema"),
-                        output_schema=definition.get("output_schema"),
-                        models=definition.get("models"),
-                        default_model=definition.get("default_model"),
-                        provider_id=definition.get("id"),
-                        trusted=bool(_def_trusted),
-                        headers=definition.get("headers") or definition.get("custom_headers") or headers,
-                    )
-                    result = {"status": "success" if _created["compile_check"].get("ok") else "compile_failed",
-                              "provider": _created["provider"], "mode": "direct_definition",
                               "compile_check": _created["compile_check"],
                               **({"hint": "代码未通过沙箱编译体检，请根据 compile_check.error 修正后重新提交"} if not _created["compile_check"].get("ok") else {})}
                 else:
@@ -1707,7 +1792,7 @@ class MCPServerRegistry:
                         except Exception:
                             pass
                     if not full_doc or len(full_doc.strip()) < 10:
-                        raise ValueError("请提供 doc_text / doc_url / curl / openapi_url 或 code/definition")
+                        raise ValueError("请提供 code，或 doc_text / doc_url / curl / openapi_url 以便生成代码")
                     from app.pipelines.llm_service import llm_service as _llm
                     from app.api.provider_routes import code_gen_system_prompt as _cgsp, create_code_source as _ccs
                     system_prompt = _cgsp(kind, language)
@@ -1728,6 +1813,10 @@ class MCPServerRegistry:
                         api_key=api_key or None, doc_text=full_doc, doc_url=doc_url or "",
                         trusted=_trusted_bool,
                         headers=headers,
+                        input_schema=_input_schema,
+                        params_schema=_params_schema,
+                        models=_models,
+                        default_model=_default_model,
                     )
                     result = {"status": "success" if _created["compile_check"].get("ok") else "compile_failed",
                               "provider": _created["provider"], "mode": "llm_code", "code": _created["code"],
@@ -1893,8 +1982,20 @@ class MCPServerRegistry:
                     all_defs = _mgr.list_definitions(kind=raw_kind)
                     brief = [{"id": d.id, "name": d.name, "kind": d.kind, "description": (d.description or "")[:60]} for d in all_defs[:12]]
                     raise ValueError(f"未找到匹配的 Provider (provider_id='{raw_pid}' name='{raw_name}' q='{raw_q}' kind='{raw_kind}')，可选: {brief}")
-                # 返回完整信息：含参数结构与代码，便于诊断“未暴露”
+                # 返回完整信息：含参数结构与代码；代码窗口可分页通读（offset/limit），便于诊断与改码
                 info = pd.to_provider_info(include_code=False)
+                full_code = pd.code or ""
+                try:
+                    _c_off = max(0, int(arguments.get("offset") or 0))
+                except Exception:
+                    _c_off = 0
+                try:
+                    _c_lim = int(arguments.get("limit") or 4000)
+                except Exception:
+                    _c_lim = 4000
+                _c_lim = max(200, min(_c_lim, 6000))
+                _chunk = full_code[_c_off:_c_off + _c_lim]
+                _next_off = _c_off + len(_chunk)
                 result = {
                     "provider_id": pd.id,
                     "id": pd.id,
@@ -1902,9 +2003,13 @@ class MCPServerRegistry:
                     "kind": pd.kind,
                     "language": pd.language,
                     "code_entry": pd.code_entry,
-                    "code": pd.code or "",
-                    "code_preview": (pd.code[:800] + f"…(共{len(pd.code)}字符)") if pd.code and len(pd.code) > 800 else (pd.code or ""),
-                    "code_length": len(pd.code or ""),
+                    "code": _chunk,
+                    "code_offset": _c_off,
+                    "code_total_len": len(full_code),
+                    "code_has_more": _next_off < len(full_code),
+                    "code_next_offset": _next_off if _next_off < len(full_code) else None,
+                    "code_preview": (full_code[:800] + f"…(共{len(full_code)}字符)") if len(full_code) > 800 else full_code,
+                    "code_length": len(full_code),
                     "description": pd.description,
                     "params_schema": pd.params_schema,
                     "input_schema": pd.input_schema,
@@ -1922,10 +2027,10 @@ class MCPServerRegistry:
                 pd = _mgr.get_definition(pid)
                 if not pd:
                     raise ValueError(f"Provider 不存在: {pid}")
-                if pd.code and not pd.legacy_json_mode:
+                if pd.code:
                     result = {"status": "already_code", "provider": pd.to_provider_info()}
                 else:
-                    # 根据旧 transport 生成模板代码
+                    # 根据旧 transport 生成模板代码（存量非代码源的一次性升级迁移）
                     url = pd.transport.url or "https://api.example.com/v1/generate"
                     from app.api.provider_routes import CODE_TEMPLATES
                     tmpl = CODE_TEMPLATES.get((lang, pd.kind)) or CODE_TEMPLATES.get(("python", pd.kind)) or ""
@@ -1933,13 +2038,55 @@ class MCPServerRegistry:
                     pd.language = lang
                     pd.code = code
                     pd.code_entry = "generate"
-                    pd.legacy_json_mode = False
                     pd.provider_type = "code"
                     saved = _mgr.save_definition(pd)
                     from app.providers.init_providers import unregister_single_custom_provider, register_single_custom_provider
                     unregister_single_custom_provider(pid, kind=pd.kind)
                     register_single_custom_provider(saved)
                     result = {"status": "upgraded", "provider": saved.to_provider_info()}
+
+            elif tool_name == "fs_read":
+                result = _fs_read_action(
+                    arguments.get("path") or "",
+                    arguments.get("offset") or 0,
+                    arguments.get("limit") or 500,
+                    arguments.get("encoding") or "utf-8",
+                )
+
+            elif tool_name == "read_skill":
+                from app.skills.engine import skill_engine as _se
+                _name = (arguments.get("name") or "").strip()
+                if not _name:
+                    result = {
+                        "skills": [
+                            {"name": s.name, "description": (s.description or "")[:160],
+                             "category": s.category or "", "version": s.version or ""}
+                            for s in _se.list_skills()
+                        ],
+                        "total": len(_se.list_skills()),
+                        "hint": "传 name 读取对应技能的完整执行 SOP（SKILL.md）",
+                    }
+                else:
+                    _skill = _se.get_skill(_name)
+                    if _skill is None:
+                        _sl = _name.lower()
+                        for _s in _se.list_skills():
+                            if _sl in (_s.name or "").lower() or _sl in (_s.description or "").lower():
+                                _skill = _s
+                                break
+                    if _skill is None:
+                        _names = [s.name for s in _se.list_skills()][:30]
+                        raise ValueError(f"未找到技能: {_name}，可选: {_names}")
+                    result = {
+                        "name": _skill.name,
+                        "description": _skill.description,
+                        "category": _skill.category,
+                        "version": _skill.version,
+                        "tools": list(_skill.tools or []),
+                        "file_path": _skill.file_path,
+                        "instructions": (_skill.instructions or "")[:12000],
+                        "truncated": len(_skill.instructions or "") > 12000,
+                    }
 
             elif tool_name == "fs_file":
                 result = _fs_file_action(

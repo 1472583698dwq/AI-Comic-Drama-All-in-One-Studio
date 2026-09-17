@@ -35,7 +35,8 @@ def normalize_headers(headers: Optional[Dict[str, Any]]) -> Dict[str, str]:
 
 
 ProviderKind = Literal['image', 'video', 'audio', 'llm']
-ProviderType = Literal['comfyui', 'http', 'local', 'code']
+# 非代码（JSON 模板 http/local）模式已删除：生成源只允许代码模式与 ComfyUI 工作流模式
+ProviderType = Literal['comfyui', 'code']
 ProviderScope = Literal['global', 'project']
 AuthType = Literal['none', 'bearer', 'apikey_header', 'apikey_query', 'basic']
 
@@ -90,7 +91,7 @@ class ProviderDefinition(BaseModel):
     name: str = ""  # 展示名，如 硅基流动 FLUX
     display_name: Optional[str] = None
     kind: ProviderKind = "image"  # image/video/audio/llm
-    provider_type: ProviderType = "http"  # comfyui/http/code
+    provider_type: ProviderType = "code"  # code（唯一执行方式）/ comfyui（工作流绑定）
     description: str = ""
     icon: str = "Zap"
     scope: ProviderScope = "global"
@@ -110,16 +111,28 @@ class ProviderDefinition(BaseModel):
     # 需同时满足全局开关 STUDIO_TRUSTED_MODE=1，否则回落沙箱并报错提示。
     trusted: bool = False
 
-    # 兼容：旧 JSON 模板（已废弃，仅用于存量迁移，创建新源时忽略）
+    # 兼容：旧 JSON 模板（已删除，仅保留字段以兼容存量数据读取；创建/执行一律走 code）
     transport: ProviderTransport = Field(default_factory=ProviderTransport)
     auth: ProviderAuthConfig = Field(default_factory=ProviderAuthConfig)
     mapping: ProviderMapping = Field(default_factory=ProviderMapping)
     health_check: ProviderHealthCheck = Field(default_factory=ProviderHealthCheck)
-    # 废弃标记
-    legacy_json_mode: bool = False
 
     # 自定义请求头 (Custom Headers) - 对齐 OpenCode 规范，用于 AI Gateway、反代、认证等
     headers: Dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_legacy_provider_type(cls, data: Any) -> Any:
+        """存量非代码（http/local）定义容忍读取：类型归一为 code。
+
+        无 code 的定义不可执行/注册，但保留可读，便于列表展示、升级迁移或删除。
+        """
+        if isinstance(data, dict):
+            pt = str(data.get("provider_type") or "").strip().lower()
+            if pt in ("http", "local"):
+                data["provider_type"] = "code"
+            data.pop("legacy_json_mode", None)
+        return data
 
     @model_validator(mode="before")
     @classmethod
@@ -216,7 +229,6 @@ class ProviderDefinition(BaseModel):
             "code_entry": self.code_entry,
             "code_timeout": self.code_timeout,
             "trusted": bool(getattr(self, "trusted", False)),
-            "legacy_json_mode": self.legacy_json_mode,
             "has_code": bool(self.code),
         }
         if include_code:

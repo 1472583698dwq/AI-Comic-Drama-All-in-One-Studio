@@ -101,7 +101,7 @@ pyinstaller_cmd = [
     "--collect-all", "starlette",
     "--collect-all", "uvicorn",
     "--collect-all", "pywebview",
-    "--collect-all", "pyjianyingdraft",
+    "--collect-all", "pyJianYingDraft",
     "--collect-all", "fastmcp",
     "--collect-all", "pydantic",
     "--collect-all", "httpx",

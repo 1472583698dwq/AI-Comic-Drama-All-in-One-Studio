@@ -37,6 +37,8 @@ class ToolCall:
     name: str
     arguments: str  # 原始 JSON 字符串（模型输出，不保证合法）
     parsed: Dict[str, Any] = field(default_factory=dict)
+    # 参数是否为合法 JSON（超长被 max_tokens 截断时会是 False，绝不能原样回传上游）
+    arguments_valid: bool = True
 
     def to_openai(self) -> Dict[str, Any]:
         return {"id": self.id, "type": "function", "function": {"name": self.name, "arguments": self.arguments}}
@@ -65,6 +67,23 @@ class AssistantReply:
     @property
     def has_tool_calls(self) -> bool:
         return bool(self.tool_calls)
+
+
+def _arguments_valid(raw: str) -> bool:
+    """工具参数是否为合法 JSON。空参视为合法；截断/非法一律 False（禁止回传上游）。"""
+    s = (raw or "").strip()
+    if not s:
+        return True
+    try:
+        json.loads(s)
+        return True
+    except Exception:
+        try:
+            import re
+            json.loads(re.sub(r",\s*([}\]])", r"\1", s))
+            return True
+        except Exception:
+            return False
 
 
 def _parse_tool_arguments(raw: str) -> Dict[str, Any]:
@@ -273,6 +292,7 @@ class OpenAICompatAdapter:
                 name=e["name"],
                 arguments=e["arguments"],
                 parsed=_parse_tool_arguments(e["arguments"]),
+                arguments_valid=_arguments_valid(e["arguments"]),
             ))
         return reply
 

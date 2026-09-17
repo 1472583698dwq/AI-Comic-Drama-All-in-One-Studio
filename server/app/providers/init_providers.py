@@ -22,10 +22,9 @@ def _inject_workflow_prompt(dyn: dict, req, exposed: list) -> dict:
 
 
 def _make_provider(definition):
-    """根据 definition.language/code 选择代码执行器，兼容存量 JSON 迁移"""
+    """代码执行器唯一入口；非代码（JSON 模板/http）模式已删除，无代码定义一律拒绝注册"""
     kind = getattr(definition, "kind", "image")
     has_code = bool(getattr(definition, "code", None) and definition.code.strip())
-    legacy = getattr(definition, "legacy_json_mode", False)
     # 优先代码
     if has_code:
         from app.providers.generic.code_provider import GenericCodeImageProvider, GenericCodeVideoProvider, GenericCodeAudioProvider
@@ -202,19 +201,9 @@ def _make_provider(definition):
                 return await _orig(req)
             base.generate = _gen2  # type: ignore
             return base
-    # 兼容存量 JSON（自动提示升级）
-    if legacy or definition.transport.url:
-        from app.providers.generic.http_provider import GenericHttpImageProvider, GenericHttpAudioProvider, GenericHttpVideoProvider
-        print(f"[Providers] Legacy JSON provider {definition.id} detected, consider upgrading to code mode via director tool")
-        if kind == "image":
-            return GenericHttpImageProvider(definition)
-        elif kind == "audio":
-            return GenericHttpAudioProvider(definition)
-        elif kind == "video":
-            return GenericHttpVideoProvider(definition)
-        else:
-            return GenericHttpImageProvider(definition)
-    raise RuntimeError(f"Provider {definition.id} 未配置代码且非兼容 JSON，已跳过")
+    # 非代码模式已删除：无代码、非工作流的定义一律拒绝注册（存量请用升级接口升级为代码）
+    print(f"[Providers] 非代码源 {definition.id} 已废弃（JSON 模板模式已移除），请升级为代码模式")
+    raise RuntimeError(f"Provider {definition.id} 未配置代码（非代码模式已删除），已拒绝注册")
 
 
 def init_all_providers():

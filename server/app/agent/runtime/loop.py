@@ -275,6 +275,7 @@ class AgentLoop:
                 self.session.append(E.USER_MESSAGE, {"text": context_block, "source": "system", "form": "context"})
             tools = self._tool_schemas()
             step_index = 0
+            bad_args_streak = 0
             while True:
                 if step_index >= safety_cap:
                     reason = "max-steps"
@@ -312,10 +313,32 @@ class AgentLoop:
                     })
                     if truncated:
                         reason = "max-tokens"
+                        if reply.tool_calls:
+                            await self._emit({"event": "error", "message": "模型输出达到长度上限，工具调用被截断已丢弃；请精简参数或拆分任务后重试。"})
                         break
                     if tool_calls:
-                        await self._execute_tools(tool_calls)
+                        # 参数被截断/非法（多为输出超长）：绝不执行，也绝不把非法 JSON 回传上游，
+                        # 以结构化错误让模型自行精简重试（历史投影层还会二次清洗，防毒化会话）。
+                        bad = [tc for tc in tool_calls if not getattr(tc, "arguments_valid", True)]
+                        good = [tc for tc in tool_calls if getattr(tc, "arguments_valid", True)]
+                        for tc in bad:
+                            _err = ("工具参数 JSON 不完整或非法（多为输出超长被截断），已跳过执行。"
+                                    "请精简参数后重试：长文档分段传入、批量任务拆分，或直接提供精简版 code。")
+                            self.session.append(E.TOOL_CALL, {"call_id": tc.id, "name": tc.name, "arguments": {}})
+                            await self._emit({"event": "tool_calling", "tool_name": tc.name,
+                                              "arguments": {}, "status": "error"})
+                            self.session.append(E.TOOL_RESULT, {"call_id": tc.id, "name": tc.name,
+                                                                "status": "error", "result": None, "error": _err})
+                            await self._emit({"event": "tool_result", "tool_name": tc.name,
+                                              "status": "error", "result": None, "error": _err})
+                        bad_args_streak = bad_args_streak + 1 if bad else 0
+                        if good:
+                            await self._execute_tools(good)
                         self._claim_steers()
+                        if bad_args_streak >= 3:
+                            reason = "error"
+                            await self._emit({"event": "error", "message": "连续多轮工具参数被截断/非法，已停止本回合；请精简指令或缩短文档后重试。"})
+                            break
                         continue
                     final_text = reply.content or ""
                     steers = self._claim_steers()

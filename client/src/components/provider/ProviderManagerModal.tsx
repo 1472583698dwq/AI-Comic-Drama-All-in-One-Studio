@@ -100,7 +100,7 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
       // 清理只读字段
       delete payload.health;
       // 处理 JSON 字符串字段
-      for (const k of ['params_schema','input_schema','output_schema','default_params','transport','auth','mapping','headers']) {
+      for (const k of ['params_schema','input_schema','output_schema','default_params','headers']) {
         if (typeof payload[k] === 'string' && payload[k].trim()) {
           try { payload[k] = JSON.parse(payload[k]); } catch { alert(`${k} JSON 格式错误`); return; }
         }
@@ -360,9 +360,6 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
                   {k:'input_schema', label:'input_schema JSON (文件插槽: prompt/首帧/参考图/参考音频)', type:'json'},
                   {k:'params_schema', label:'params_schema JSON (非文件参数, 需带 x-* 分组)', type:'json'},
                   {k:'output_schema', label:'output_schema JSON', type:'json'},
-                  {k:'transport', label:'transport JSON (code 型可空)', type:'json'},
-                  {k:'auth', label:'auth JSON', type:'json'},
-                  {k:'mapping', label:'mapping JSON', type:'json'},
                   {k:'models', label:'models (逗号分隔)', type:'text'},
                   {k:'default_model', label:'default_model', type:'text'},
                   {k:'default_params', label:'default_params JSON', type:'json'},
@@ -432,24 +429,31 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
 };
 
 const CreateForm: React.FC<{onClose:()=>void, onCreated:()=>void}> = ({ onClose, onCreated })=>{
-  const [form, setForm] = useState<any>({ name:'', kind:'image', description:'', transport: { method:'POST', url:'', headers:{'Content-Type':'application/json'}, timeout:60 }, auth:{type:'bearer'}, models:[], default_model:'', params_schema:'', default_params:'', capabilities: [] });
+  const [form, setForm] = useState<any>({ name:'', kind:'image', language:'python', code:'', description:'', models:'', default_model:'', capabilities: [] });
   const [apiKey, setApiKey] = useState('');
   const [headers, setHeaders] = useState<Record<string, string>>({});
+  const [tplBusy, setTplBusy] = useState(false);
   const toggleCap = (id: string)=>{
     const cur: string[] = Array.isArray(form.capabilities) ? form.capabilities : [];
     setForm({ ...form, capabilities: cur.includes(id) ? cur.filter(c=>c!==id) : [...cur, id] });
   };
+  const loadTemplate = async ()=>{
+    try {
+      setTplBusy(true);
+      const r = await apiService.getCodeTemplate(form.language, form.kind);
+      setForm((f:any)=> ({ ...f, code: r.template || '' }));
+    } catch(e:any){ alert(e?.message || '模板加载失败'); } finally { setTplBusy(false); }
+  };
   const handleSubmit = async ()=>{
     try {
-      const payload: any = { ...form };
-      if (typeof payload.models === 'string') payload.models = payload.models.split(',').map((s:string)=>s.trim()).filter(Boolean);
-      if (!Array.isArray(payload.capabilities)) payload.capabilities = [];
-      ['transport','auth','params_schema','default_params'].forEach(k=>{
-        if (typeof payload[k]==='string' && payload[k].trim()) {
-          try { payload[k]=JSON.parse(payload[k]); } catch { /* keep string for backend validation */ }
-        }
-        if (payload[k]==='') delete payload[k];
-      });
+      if (!form.code || String(form.code).trim().length < 20) { alert('代码模式为唯一方式：请提供 python/javascript 携程源码（可点「加载模板」起步）'); return; }
+      const payload: any = {
+        name: form.name, kind: form.kind, language: form.language,
+        code: form.code, description: form.description,
+        capabilities: Array.isArray(form.capabilities) ? form.capabilities : [],
+      };
+      if (form.models) payload.models = String(form.models).split(',').map((s:string)=>s.trim()).filter(Boolean);
+      if (form.default_model) payload.default_model = form.default_model;
       if (apiKey) payload.api_key = apiKey;
       if (Object.keys(headers).length > 0) payload.headers = headers;
       await apiService.createProvider(payload);
@@ -458,7 +462,7 @@ const CreateForm: React.FC<{onClose:()=>void, onCreated:()=>void}> = ({ onClose,
   };
   return (
     <div className="w-full max-w-xl bg-surface rounded-2xl border border-border p-4 space-y-3 max-h-[85vh] overflow-y-auto">
-      <div className="flex items-center justify-between"><span className="text-sm font-bold text-white">新建自定义源</span><button onClick={onClose}><X className="w-4 h-4 text-gray-400"/></button></div>
+      <div className="flex items-center justify-between"><span className="text-sm font-bold text-white">新建自定义源 · 代码模式</span><button onClick={onClose}><X className="w-4 h-4 text-gray-400"/></button></div>
       <input value={form.name} onChange={e=> setForm({...form, name:e.target.value})} placeholder="名称，如 我的FLUX" className="w-full bg-surface-secondary border border-border rounded-lg px-3 py-2 text-xs text-white placeholder-gray-500"/>
       <select value={form.kind} onChange={e=> setForm({...form, kind:e.target.value, capabilities: []})} className="w-full bg-surface-secondary border border-border rounded-lg px-3 py-2 text-xs text-white">
         <option value="image">生图 image</option><option value="video">视频 video</option><option value="audio">语音 audio</option>
@@ -477,9 +481,17 @@ const CreateForm: React.FC<{onClose:()=>void, onCreated:()=>void}> = ({ onClose,
         <label className="text-[11px] font-semibold text-gray-300">自定义请求头 (Custom Headers / OpenCode 规范)</label>
         <CustomHeadersEditor headers={headers} onChange={setHeaders} />
       </div>
-      <textarea value={typeof form.transport==='string'?form.transport:JSON.stringify(form.transport, null, 2)} onChange={e=> setForm({...form, transport:e.target.value})} rows={4} placeholder='transport JSON，如 {"method":"POST","url":"https://...","headers":{"Content-Type":"application/json"}}' className="w-full bg-surface-secondary border border-border rounded-lg p-2 font-mono text-[11px] text-white"/>
-      <textarea value={typeof form.auth==='string'?form.auth:JSON.stringify(form.auth, null, 2)} onChange={e=> setForm({...form, auth:e.target.value})} rows={2} placeholder='auth JSON，如 {"type":"bearer"}' className="w-full bg-surface-secondary border border-border rounded-lg p-2 font-mono text-[11px] text-white"/>
-      <input value={Array.isArray(form.models)?form.models.join(','):form.models} onChange={e=> setForm({...form, models:e.target.value})} placeholder="models 逗号分隔，可空" className="w-full bg-surface-secondary border border-border rounded-lg px-3 py-2 text-xs text-white"/>
+      <div className="space-y-1">
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-semibold text-gray-300">代码（异步携程 async def generate(ctx, api)）</span>
+          <select value={form.language} onChange={e=> setForm({...form, language:e.target.value})} className="ml-auto bg-surface-secondary border border-border rounded-lg px-2 py-1 text-[11px] text-white">
+            <option value="python">python</option><option value="javascript">javascript</option>
+          </select>
+          <button type="button" onClick={loadTemplate} disabled={tplBusy} className="px-2.5 py-1 rounded-lg bg-surface-secondary border border-border text-[11px] text-gray-300 hover:text-white disabled:opacity-40">{tplBusy ? '加载中…' : '加载模板'}</button>
+        </div>
+        <textarea value={form.code} onChange={e=> setForm({...form, code:e.target.value})} rows={10} placeholder="async def generate(ctx, api): ...  # 末尾可追加 # PARAMS_SCHEMA: {...}" className="w-full bg-surface-secondary border border-border rounded-lg p-2 font-mono text-[11px] text-white placeholder-gray-500 focus:outline-none focus:border-brand"/>
+      </div>
+      <input value={form.models} onChange={e=> setForm({...form, models:e.target.value})} placeholder="models 逗号分隔，可空" className="w-full bg-surface-secondary border border-border rounded-lg px-3 py-2 text-xs text-white"/>
       <input value={form.default_model} onChange={e=> setForm({...form, default_model:e.target.value})} placeholder="default_model，可空" className="w-full bg-surface-secondary border border-border rounded-lg px-3 py-2 text-xs text-white"/>
       <input value={apiKey} onChange={e=> setApiKey(e.target.value)} placeholder="API Key（可选）" className="w-full bg-surface-secondary border border-border rounded-lg px-3 py-2 text-xs text-white font-mono"/>
       <div className="flex justify-end gap-2 pt-2">

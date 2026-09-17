@@ -288,7 +288,8 @@ async def list_tts_providers(production_only: bool = False):
     for p in providers:
         p["health"] = health.get(p["id"], {})
         p["verified"] = verification.is_verified(p["id"])
-        p["production_ready"] = bool(p.get("is_configured", True)) and p["verified"]
+        # 生产可用口径：已配置即上架（代码源=有代码；内置=已填 Key），不再强制测试
+        p["production_ready"] = bool(p.get("is_configured", True))
     if production_only:
         providers = [p for p in providers if p.get("production_ready")]
     return {"providers": providers}
@@ -372,7 +373,8 @@ async def list_image_providers(production_only: bool = False):
     for p in providers:
         p["health"] = health.get(p["id"], {})
         p["verified"] = verification.is_verified(p["id"])
-        p["production_ready"] = bool(p.get("is_configured", True)) and p["verified"]
+        # 生产可用口径：已配置即上架（代码源=有代码；内置=已填 Key），不再强制测试
+        p["production_ready"] = bool(p.get("is_configured", True))
     if production_only:
         providers = [p for p in providers if p.get("production_ready")]
     return {"providers": providers}
@@ -806,7 +808,8 @@ async def list_video_providers(production_only: bool = False):
     from app.providers import verification
     for p in providers:
         p["verified"] = verification.is_verified(p.get("id"))
-        p["production_ready"] = bool(p.get("is_configured", True)) and p["verified"]
+        # 生产可用口径：已配置即上架（代码源=有代码；内置=已填 Key），不再强制测试
+        p["production_ready"] = bool(p.get("is_configured", True))
     if production_only:
         providers = [p for p in providers if p.get("production_ready")]
     return providers
@@ -828,10 +831,10 @@ async def get_video_task_status(task_id: str):
             return rec.to_dict()
     except Exception:
         pass
-    # 优先查自定义 AutoDL 任务
+    # 代码视频源任务表兜底（非代码模式已删除，仅代码源会登记任务）
     try:
-        from app.providers.generic.http_provider import get_custom_video_task
-        custom = get_custom_video_task(task_id)
+        from app.providers.generic.code_provider import get_code_video_task
+        custom = get_code_video_task(task_id)
         if custom is not None:
             return custom
     except Exception:
@@ -1008,7 +1011,7 @@ AGENT_SYSTEM_PROMPT_BODY = """你是「AI漫剧导演 Agent」，运行在 MiniM
 14. export_jianyin_draft —— 剪映草稿导出。参数：project(完整Project JSON)
 
 **生成源扩展 v2（解耦独立节点 + x-* 分组与人机分工，与画布/分镜完全同源）：**
-15. register_custom_provider —— [核心] 用户提供 API 文档/cURL/OpenAPI 时自动注册新生成源（v2 标准）。参数：kind(image/video/audio/llm), name, doc_text, doc_url, curl, openapi_url, api_key, language(python/javascript), trusted(可信开关，需全局总闸), input_schema(文件插槽,含prompt首帧参考图), params_schema(非文件参数,*必须带 x-category/x-visibility/x-agent/x-priority*), code(可选完整 async def generate(ctx,api)), definition(可选完整JSON)。v2 示例：{"kind":"image","name":"我的FLUX","doc_text":"POST https://api.xxx.com/v1/images/generations ...","language":"python","input_schema":{"prompt":{"type":"string","x-handle":"text"},"reference_images":{"type":"array","items":{"format":"uri"},"x-handle":"image","maxItems":2}},"params_schema":{"aspect_ratio":{"type":"string","enum":["9:16","16:9"],"default":"9:16","x-category":"layout","x-visibility":"basic","x-agent":"auto","x-priority":10},"steps":{"type":"integer","default":20,"x-category":"quality","x-visibility":"advanced","x-agent":"suggest","x-priority":40}},"api_key":"sk-..."}。必须把文件插槽放 input_schema，可量化参数放 params_schema 并标注 x-*，导演应自动解析并注册，成功后提示可在画布看到新 Provider 节点（基础参数常显，高级需点⚙）。需任意代码（os/subprocess/curl/ffmpeg）时传 trusted:true 并确认全局 STUDIO_TRUSTED_MODE=1。
+15. register_custom_provider —— [核心] 用户提供 API 文档/cURL/OpenAPI 时自动注册新生成源（v2 标准）。参数：kind(image/video/audio/llm), name, doc_text, doc_url, curl, openapi_url, api_key, language(python/javascript), trusted(可信开关，需全局总闸), input_schema(文件插槽,含prompt首帧参考图), params_schema(非文件参数,*必须带 x-category/x-visibility/x-agent/x-priority*), code(可选完整 async def generate(ctx,api))。非代码（JSON/transport）模式已删除，必须产出代码，否则直接报错。v2 示例：{"kind":"image","name":"我的FLUX","doc_text":"POST https://api.xxx.com/v1/images/generations ...","language":"python","input_schema":{"prompt":{"type":"string","x-handle":"text"},"reference_images":{"type":"array","items":{"format":"uri"},"x-handle":"image","maxItems":2}},"params_schema":{"aspect_ratio":{"type":"string","enum":["9:16","16:9"],"default":"9:16","x-category":"layout","x-visibility":"basic","x-agent":"auto","x-priority":10},"steps":{"type":"integer","default":20,"x-category":"quality","x-visibility":"advanced","x-agent":"suggest","x-priority":40}},"api_key":"sk-..."}。必须把文件插槽放 input_schema，可量化参数放 params_schema 并标注 x-*，导演应自动解析并注册，成功后提示可在画布看到新 Provider 节点（基础参数常显，高级需点⚙）。需任意代码（os/subprocess/curl/ffmpeg）时传 trusted:true 并确认全局 STUDIO_TRUSTED_MODE=1。
 16. list_custom_providers —— 列出所有自定义 Provider。参数：kind,q。可先查询已有。
 17. test_custom_provider —— 测试 Provider 连通性。参数：provider_id
 18. delete_custom_provider —— 删除自定义 Provider。参数：provider_id

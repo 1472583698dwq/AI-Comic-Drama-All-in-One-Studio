@@ -7,7 +7,7 @@
 - 任务记录持久化 storage/tasks/{id}.json，后端重启可续跑 bootstrap。
 - 适配器统一解析三类源：
   1. code_query ：代码源（AutoDL/H3 等），task_id + 空 prompt 调用户代码查询分支
-  2. legacy      ：旧内存表（http_provider / code_provider 的后台轮询结果）
+  2. legacy      ：代码源内存任务表（code_provider 的后台轮询结果）
   3. builtin     ：内置视频源 provider.get_task_status(task_id)
 """
 from __future__ import annotations
@@ -309,15 +309,7 @@ class TaskCenter:
                 return await cp.query_code_task_once(rec.provider_id, rec.task_id)
         except Exception:
             pass
-        # 2) 旧内存表（http_provider 透传 code 表）
-        try:
-            from app.providers.generic.http_provider import get_custom_video_task
-            st = get_custom_video_task(rec.task_id)
-            if st:
-                return st
-        except Exception:
-            pass
-        # 3) 内置源 get_task_status
+        # 2) 内置源 get_task_status
         try:
             from app.providers.video.registry import video_registry
             prov = video_registry.get(rec.provider_id) if rec.provider_id else None
@@ -363,7 +355,7 @@ class TaskCenter:
         if not low.startswith("http"):
             return url
         try:
-            from app.providers.generic.http_provider import _download_to_storage
+            from app.providers.generic.code_provider import _download_to_storage
             storage_url, local_path = await _download_to_storage(url, prefix="vid")
             rec.local_path = local_path or ""
             return storage_url or url

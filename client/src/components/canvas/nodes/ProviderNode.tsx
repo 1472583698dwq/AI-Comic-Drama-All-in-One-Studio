@@ -330,28 +330,31 @@ export const ProviderNode: React.FC<NodeProps> = ({ data, id, type }) => {
           {showCreate && (
             <div className="space-y-2 pt-2 border-t border-brand/20">
               <input id={`prov-name-${id}`} placeholder="名称，如 我的FLUX" className="w-full bg-surface border border-border rounded-lg px-2 py-1.5 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand"/>
-              <input id={`prov-url-${id}`} placeholder="API URL https://api.xxx.com/v1/images/generations" className="w-full bg-surface border border-border rounded-lg px-2 py-1.5 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] font-mono focus:outline-none focus:border-brand"/>
-              <select id={`prov-auth-${id}`} className="w-full bg-surface border border-border rounded-lg px-2 py-1.5 text-xs [color:var(--color-text-main)] focus:outline-none focus:border-brand">
-                <option value="bearer">Bearer (Authorization: Bearer)</option>
-                <option value="apikey_header">Header (X-API-Key)</option>
-                <option value="apikey_query">Query (api_key)</option>
-                <option value="none">无鉴权</option>
-              </select>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] [color:var(--color-text-muted)]">代码模式（唯一）</span>
+                <select id={`prov-lang-${id}`} className="ml-auto bg-surface border border-border rounded-lg px-2 py-1 text-[11px] [color:var(--color-text-main)] focus:outline-none focus:border-brand">
+                  <option value="python">python</option>
+                  <option value="javascript">javascript</option>
+                </select>
+                <button type="button" onClick={async()=>{
+                  const lang = (document.getElementById(`prov-lang-${id}`) as HTMLSelectElement)?.value || 'python';
+                  try {
+                    const r = await fetch(`${API_ORIGIN || ''}/api/v1/providers/code/templates?language=${lang}&kind=${nodeKind}`).then(x=>x.json());
+                    if (r?.template) (document.getElementById(`prov-code-${id}`) as HTMLTextAreaElement).value = r.template;
+                    else toast.error('模板不存在');
+                  } catch { toast.error('模板加载失败'); }
+                }} className="px-2 py-1 rounded-lg bg-surface border border-border text-[11px] [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)]">加载模板</button>
+              </div>
+              <textarea id={`prov-code-${id}`} rows={8} placeholder="async def generate(ctx, api): ...  # 末尾可追加 # PARAMS_SCHEMA: {...}" className="w-full bg-surface border border-border rounded-lg px-2 py-1.5 font-mono text-[11px] [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand"/>
               <input id={`prov-key-${id}`} placeholder="API Key (可选)" className="w-full bg-surface border border-border rounded-lg px-2 py-1.5 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] font-mono focus:outline-none focus:border-brand"/>
               <button onClick={async()=>{
                 const name = (document.getElementById(`prov-name-${id}`) as HTMLInputElement)?.value?.trim() || `自定义${nodeKind}源`;
-                const url = (document.getElementById(`prov-url-${id}`) as HTMLInputElement)?.value?.trim();
-                const authType = (document.getElementById(`prov-auth-${id}`) as HTMLSelectElement)?.value || 'bearer';
+                const lang = (document.getElementById(`prov-lang-${id}`) as HTMLSelectElement)?.value || 'python';
+                const code = (document.getElementById(`prov-code-${id}`) as HTMLTextAreaElement)?.value?.trim();
                 const key = (document.getElementById(`prov-key-${id}`) as HTMLInputElement)?.value?.trim();
-                if(!url){ alert('请填写 API URL'); return; }
+                if(!code || code.length < 20){ alert('代码模式为唯一方式：请粘贴或加载完整携程源码（async def generate(ctx, api)）'); return; }
                 try{
-                  const body:any = {
-                    name, kind: nodeKind, provider_type: 'http',
-                    transport: { method: 'POST', url, headers: {'Content-Type':'application/json'}, timeout: 60 },
-                    auth: { type: authType, header_name: authType==='apikey_header' ? 'X-API-Key' : 'Authorization', query_name: 'api_key', prefix: 'Bearer ' },
-                    mapping: { request_template: { model: '{model}', prompt: '{prompt}', size: '{size}', seed: '{seed}' }, response_mappings: { image_url: 'data[0].url' } },
-                    models: [], description: '手动创建'
-                  };
+                  const body:any = { name, kind: nodeKind, language: lang, code, description: '画布内快速创建（手动代码）' };
                   const res = await fetch(`${API_ORIGIN || ''}/api/v1/providers`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...body, api_key: key || undefined})}).then(r=>r.json());
                   if(res.status==='success' || res.provider){
                     alert(`✓ 已创建 ${res.provider?.id || ''}`);

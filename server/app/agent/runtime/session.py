@@ -57,6 +57,24 @@ def _sanitize_tool_pairing(msgs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
+def _safe_tool_arguments(args: Any) -> str:
+    """历史回放给上游的 tool 参数必须是合法 JSON：截断/非法一律回落 {}。
+
+    模型输出超长被 max_tokens 截断时 arguments 是不完整 JSON，若原样回传，
+    上游会 400 并把整段会话历史毒化（此后每次请求都失败）。
+    """
+    if not isinstance(args, str):
+        return json.dumps(args or {}, ensure_ascii=False)
+    s = args.strip()
+    if not s:
+        return "{}"
+    try:
+        json.loads(s)
+        return s
+    except Exception:
+        return "{}"
+
+
 class Session:
     def __init__(self, session_id: str, events: Optional[List[Dict[str, Any]]] = None,
                  store: Optional[SessionStore] = None):
@@ -185,13 +203,10 @@ class Session:
                 if tcs:
                     m["tool_calls"] = []
                     for tc in tcs:
-                        args = tc.get("arguments")
-                        if not isinstance(args, str):
-                            args = json.dumps(args or {}, ensure_ascii=False)
                         m["tool_calls"].append({
                             "id": tc.get("id") or tc.get("call_id") or "",
                             "type": "function",
-                            "function": {"name": tc.get("name") or "", "arguments": args},
+                            "function": {"name": tc.get("name") or "", "arguments": _safe_tool_arguments(tc.get("arguments"))},
                         })
                 msgs.append(m)
             elif t == E.TOOL_RESULT:

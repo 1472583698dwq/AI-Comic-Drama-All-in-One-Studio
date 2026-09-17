@@ -21,13 +21,16 @@ OPERATING_RULES = """## 工作准则
 5. 自定义能力可直接调用：自定义代码节点为 customnode_<id>，插件工具为 plugin_<id>_<name>，不存在调用盲区。
 6. 画布编排：canvas_query 感知现状 → canvas_create_node/canvas_connect 编排 → canvas_execute 执行；参考图场景必须创建 load-image 节点并连到目标插槽。
 7. 目标未完成时禁止输出最终总结；每轮自检「目标清单→已完成→下一步」。
-8. 思考推演：在决策前用 <think> ... </think> 展示导演推演（意图分析、镜头/参数依据），系统会渲染到思考卡片。"""
+8. 思考推演：在决策前用 <think> ... </think> 展示导演推演（意图分析、镜头/参数依据），系统会渲染到思考卡片。
+9. 读完整文件：通读生成源代码用 get_provider_code（offset/limit 分页，按 code_next_offset 逐页读到底）；读任意围栏内文件用 fs_read（行分页，只读，无需可信模式）。改码前必须先通读目标源码，禁止只凭 800 字 code_preview 动手。"""
 
 TOOL_STRATEGY = """## 典型指令路由
 - 生成/换图/重绘 → generate_image（可先 list_assets 找风格锚点）
 - 配音/换声线 → generate_voice（按角色/情绪选 provider 与 voice_id）
 - 视频/运镜 → generate_video（i2v 需要 first_frame_url）
 - 接入新源/贴 API 文档 cURL OpenAPI → register_custom_provider 自动解析注册
+- 直写生成源/插件/技能 → 先 read_skill（无 name 列技能，传 name 读 SOP，如 provider-author）加载规范再动手
+- 读源码/长文件 → get_provider_code(offset/limit) / fs_read(offset/limit)，可通读完整文件
 - 查健康/排障 → list_* / get_provider_code 先只读排查再修复
 - 一键成片/整集批量 → 先拆解剧本，再按角色定妆→生图→视频→配音→导出推进
 - 不确定可用哪种源/音色/工作流/素材时，先调用对应 list_* 查询再决策

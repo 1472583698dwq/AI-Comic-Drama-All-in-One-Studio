@@ -15,7 +15,7 @@ interface ProviderPickerProps {
   compact?: boolean;
   /** 能力过滤（如 video 选 'i2v' 则只列出图生视频源；不传则不过滤） */
   capability?: string;
-  /** 配置端显示全部（含未验证）；生产端默认只显示已验证源 */
+  /** 配置端显示全部（含未配置）；生产端显示「已配置/已接入」的源（未配置 Key 的内置源隐藏） */
   includeUnverified?: boolean;
 }
 
@@ -49,7 +49,7 @@ export const ProviderPicker: React.FC<ProviderPickerProps> = ({ kind, value, onC
   }, [kind]);
 
   const selected = providers.find(p=> p.id===value);
-  // 生产端只显示「已配置 + 测试联通」的源；配置端(includeUnverified)显示全部。
+  // 生产端显示「已配置/已接入」的源（内置=已填 Key，自定义=接入即显示）；配置端(includeUnverified)显示全部。
   const pool = includeUnverified ? providers : providers.filter(p=> p.production_ready === true);
   const pendingCount = includeUnverified ? 0 : providers.filter(p=> p.production_ready !== true).length;
   const visibleProviders = pool.filter(p=> p.id===value
@@ -100,8 +100,8 @@ export const ProviderPicker: React.FC<ProviderPickerProps> = ({ kind, value, onC
       )}
       {visibleProviders.length===0 && !loading && (
         <div className="text-[10px] text-amber-400/90 bg-amber-500/10 border border-amber-500/20 rounded-lg px-2 py-1.5 leading-4">
-          暂无已验证的{meta.label}源。请到 <span className="font-bold">设置 → 生成源</span> 配置并点击「测试」联通后，才会在生产端出现。
-          {pendingCount > 0 && <span className="text-gray-500">（当前有 {pendingCount} 个源待验证）</span>}
+          暂无已配置的{meta.label}源。请到 <span className="font-bold">设置 → 生成源</span> 填写内置源 Key，或接入自定义源（接入即显示）。
+          {pendingCount > 0 && <span className="text-gray-500">（当前有 {pendingCount} 个源未配置）</span>}
         </div>
       )}
     </div>

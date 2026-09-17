@@ -108,24 +108,6 @@ class TestTaskCenter(TempStorage):
         out = run(scenario())
         self.assertEqual(out["status"], "CANCELLED")
 
-    def test_legacy_table_bridge(self):
-        from app.providers.generic import http_provider as hp
-
-        async def scenario():
-            tid = self.unique("legacy")
-            hp._CUSTOM_VIDEO_TASKS[tid] = {"status": "SUCCESS", "task_id": tid,
-                                           "video_url": "/storage/videos/legacy.mp4",
-                                           "provider": "legacy_prov"}
-            try:
-                task_center.register(tid, "legacy_prov", "video", timeout_s=30)
-                return await task_center.wait(tid, timeout_s=5)
-            finally:
-                hp._CUSTOM_VIDEO_TASKS.pop(tid, None)
-
-        rec = run(scenario())
-        self.assertEqual(rec.status, "SUCCESS")
-        self.assertIn("legacy.mp4", rec.video_url)
-
     def test_bootstrap_reloads_fresh_instance(self):
         async def scenario():
             tid = self.unique("boot")

@@ -78,6 +78,11 @@ def _classify_goal(goal: str) -> str:
         return "storyboard_slot"
     if any(k in g for k in ["插件", "插件包", "plugin", "package", "扩展包"]):
         return "new_plugin"
+    # 明确的“新建/接入”意图优先于补丁：长文档里常带 H3/补/插槽 等字样，
+    # 不能因此把“新建视频生成源：接入 XXX”误判成给存量源打补丁（会误改到错误目标）。
+    if (any(k in g for k in ["新建", "新增", "接入", "注册", "创建", "添加", "做一个", "做个", "制作"])
+            and any(k in g for k in ["源", "Provider", "provider", "API", "接口", "工作流", "模型", "服务"])):
+        return "new_provider"
     if any(k in g for k in ["参数", "暴露", "补", "first_frame", "插槽", "input_schema", "params_schema", "H3", "h3"]):
         return "patch_provider"
     if any(k in g for k in ["模板", "画布", "节点编排", "工作流模板"]):
@@ -246,9 +251,9 @@ def propose_capability(goal: str, context: Optional[Dict[str, Any]] = None, run_
         risk, reversible = "medium", "可逆：patch 前自动备份原 definition，discard 一键回滚"
     elif kind == "new_provider":
         title = "接入新生成源（临时包）"
-        diff_preview = "new provider_xxx (code 沙盒，trusted 关)：input_schema 文件槽 + params_schema 分组，默认禁用，花钱动作需二次确认"
-        test_plan = ["register_custom_provider(dry-run)", "小参试生成 1 张", "人工验收后再 persist"]
-        risk, reversible = "high", "部分可逆：已发生的生成计费不可逆，注册本身可删"
+        diff_preview = "new provider_xxx (code 沙盒，trusted 关)：Start 试跑 = 按文档草拟代码 + 沙箱编译体检（不落库）；持久化 = 创建入库+注册+连通试跑，失败自动删除"
+        test_plan = ["校验目标文档/接口信息", "草拟代码 + 沙箱编译体检（零配额）", "持久化后连通试跑，失败自动删除"]
+        risk, reversible = "high", "可逆：本提案创建的源可在卡片上一键回滚（删除）；已发生的生成计费不可逆"
     elif kind == "canvas_template":
         title = "新建画布编排模板（临时）"
         diff_preview = "batch create nodes+edges：生图→视频→配音链，位置按阶段列排，默认 scoped=downstream 执行"
@@ -266,7 +271,7 @@ def propose_capability(goal: str, context: Optional[Dict[str, Any]] = None, run_
         test_plan = ["单镜试跑 Skill", "人工验收", "persist 到 skills/"]
         risk, reversible = "low", "可逆：删除 skill 目录即卸载"
     proposal = {
-        "proposal_id": pid, "kind": kind, "title": title, "goal": (goal or "")[:500],
+        "proposal_id": pid, "kind": kind, "title": title, "goal": (goal or "")[:6000],
         "diff_preview": diff_preview, "test_plan": test_plan,
         "risk": risk, "reversible": reversible, "status": "proposed",
         "runtime_snapshot": {k: (str(v)[:400]) for k, v in runtime.items()},
@@ -436,6 +441,16 @@ def _resolve_target_provider(goal: str) -> Dict[str, Any]:
     from app.providers.custom.manager import custom_provider_manager as _mgr
     defs = _mgr.list_definitions(kind=None)
     g = (goal or "").lower()
+    # 目标类型提示：避免“给H3视频源补插槽”这类目标被同名的音频/图片源抢走
+    want = None
+    if any(k in g for k in ("视频", "video", "生视频", "图生视频", "文生视频")):
+        want = "video"
+    elif any(k in g for k in ("生图", "图片", "图像", "文生图", "image")):
+        want = "image"
+    elif any(k in g for k in ("配音", "语音", "音频", "声音", "tts", "audio")):
+        want = "audio"
+    if want:
+        defs = [d for d in defs if d.kind == want]
     scored = []
     for d in defs:
         hay = f"{d.id} {d.name} {d.display_name or ''} {d.description or ''}".lower()
@@ -527,8 +542,114 @@ def list_proposals(limit: int = 20) -> List[Dict[str, Any]]:
         return []
 
 
+async def _draft_code_for_goal(goal: str, kind_hint: str = "") -> Dict[str, Any]:
+    """按目标文档草拟生成源代码（不落库）：LLM 生成 → 沙箱编译体检。返回 {ok, kind, code, error}。"""
+    goal = (goal or "").strip()
+    if len(goal) < 20:
+        return {"ok": False, "error": "goal 太短，无法草拟代码"}
+    from app.api.provider_routes import code_gen_system_prompt, CODE_TEMPLATES, _infer_kind_from_doc
+    from app.providers.generic.code_provider import compile_check_code
+    kind = kind_hint or _infer_kind_from_doc(goal, "") or "image"
+    lang = "python"
+    tmpl = CODE_TEMPLATES.get((lang, kind)) or CODE_TEMPLATES.get(("python", kind)) or ""
+    system_prompt = code_gen_system_prompt(kind, lang, tmpl)
+    user_prompt = f"kind: {kind}\nlanguage: {lang}\n\nAPI 文档:\n{goal[:6000]}"
+    from app.pipelines.llm_service import llm_service
+    try:
+        code_text = await llm_service.chat_completion(
+            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+            temperature=0.2,
+        )
+    except Exception:
+        code_text = await llm_service.chat_json(system_prompt=system_prompt, user_prompt=user_prompt, temperature=0.2)
+        if isinstance(code_text, dict):
+            code_text = code_text.get("code") or str(code_text)
+    code_text = str(code_text or "").strip()
+    if len(code_text) < 50:
+        return {"ok": False, "kind": kind, "error": "LLM 生成代码过短"}
+    cc = compile_check_code(lang, code_text, "generate")
+    return {"ok": bool(cc.get("ok")), "kind": kind, "code": code_text, "error": cc.get("error")}
+
+
+def _delete_created_provider(pid: str) -> None:
+    """删除本提案创建的生成源（失败回滚用）：定义 + 配置 Key + 反注册 + MCP 刷新。"""
+    if not pid:
+        return
+    try:
+        from app.providers.custom.manager import custom_provider_manager as _mgr
+        from app.providers.init_providers import unregister_single_custom_provider
+        pd = _mgr.get_definition(pid)
+        if pd:
+            _mgr.delete_definition(pid)
+            unregister_single_custom_provider(pid, kind=pd.kind)
+        from app.mcp.server import mcp_registry
+        mcp_registry.refresh_provider_tools()
+    except Exception:
+        pass
+    try:
+        import json as _json
+        import os as _os
+        from app.core.config import settings as _settings
+        cfg_path = _os.path.join(_settings.STORAGE_DIR, "config_store.json")
+        if _os.path.exists(cfg_path):
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                data = _json.load(f)
+            if isinstance(data.get("custom_providers"), dict):
+                data["custom_providers"].pop(pid, None)
+            data.pop(f"CUSTOM_PROVIDER_{pid}", None)
+            with open(cfg_path, "w", encoding="utf-8") as f:
+                _json.dump(data, f, ensure_ascii=False, indent=2)
+            _os.environ.pop(f"CUSTOM_PROVIDER_{pid}", None)
+    except Exception:
+        pass
+
+
+async def _persist_new_provider(prop: Dict[str, Any], run_id: str) -> Dict[str, Any]:
+    """新源持久化：草稿代码（Start 试跑已生成）或现生成 → 统一创建入口（注册+落 Key+体检）→ 连通试跑；失败自动删除回滚。"""
+    import re as _re
+    goal = (prop.get("goal") or "").strip()
+    code_text = str(prop.get("draft_code") or "").strip()
+    kind = str(prop.get("draft_kind") or "")
+    if not code_text:
+        draft = await _draft_code_for_goal(goal, prop.get("target_kind") or "")
+        if not draft.get("ok"):
+            raise RuntimeError(f"代码草稿未通过体检，无法持久化：{draft.get('error')}")
+        code_text = draft["code"]
+        kind = draft["kind"]
+    kind = kind or "image"
+    name = ""
+    m = _re.search(r"[「【《\"']([^」】》\"']{2,40})[」】》\"']", goal)
+    if m:
+        name = m.group(1).strip()
+    if not name:
+        first = (goal.splitlines() or [""])[0]
+        name = (first[:24].strip() or f"自定义{kind}源")
+    api_key = ""
+    mk = _re.search(r"(?:api[_ \-]?key|密钥)\s*[=:：]\s*([A-Za-z0-9_\-]{16,})", goal, _re.IGNORECASE)
+    if mk:
+        api_key = mk.group(1)
+    from app.api.provider_routes import create_code_source
+    created = create_code_source(
+        name=name, kind=kind, code=code_text, language="python",
+        description=f"由 Creator 提案持久化（{prop.get('proposal_id')}）",
+        api_key=api_key or None, doc_text=goal,
+    )
+    pid = created["id"]
+    if not created["compile_check"].get("ok"):
+        _delete_created_provider(pid)
+        raise RuntimeError(f"代码未通过沙箱体检，已删除：{created['compile_check'].get('error')}")
+    from app.mcp.server import mcp_registry as _reg
+    tres = await _reg.execute_tool("test_custom_provider", {"provider_id": pid})
+    if getattr(tres, "status", "error") != "success":
+        _delete_created_provider(pid)
+        raise RuntimeError(f"连通试跑失败，已删除：{getattr(tres, 'error', '')}")
+    prop["provider_id"] = pid
+    return {"provider_id": pid,
+            "note": f"新生成源已创建并连通：{pid}（已出现在生成源/画布/分镜选择器）"}
+
+
 async def start_test(proposal_id: str, context: Optional[Dict[str, Any]] = None, run_id: str = "") -> Dict[str, Any]:
-    """人来 Start：只做只读/小参试跑，不写生产。patch_provider 会算出真实补丁存提案，供 persist 使用。"""
+    """人来 Start：只做只读/小参试跑，不写生产。patch 算真实补丁；new_provider 草拟代码+沙箱编译体检。"""
     prop = _load(proposal_id)
     if not prop:
         raise ValueError(f"提案不存在: {proposal_id}")
@@ -543,7 +664,23 @@ async def start_test(proposal_id: str, context: Optional[Dict[str, Any]] = None,
                 report["checks"].append({"name": "provider_tools_visible", "ok": True, "detail": f"可见 provider_* 工具（前5: {tools}）"})
             except Exception as e:
                 report["checks"].append({"name": "provider_tools_visible", "ok": False, "detail": str(e)[:200]})
-        if kind == "new_plugin":
+        if kind == "new_provider":
+            # 真实试跑（不落库）：按目标文档草拟代码并做沙箱编译体检，草稿存提案供持久化复用
+            try:
+                draft = await _draft_code_for_goal(prop.get("goal", ""), prop.get("target_kind") or "")
+                if draft.get("ok"):
+                    prop["draft_code"] = draft["code"]
+                    prop["draft_kind"] = draft["kind"]
+                    report["checks"].append({"name": "code_draft_compile", "ok": True,
+                                             "detail": f"代码草稿编译体检通过（{len(draft['code'])} 字符，{draft['kind']}，未入库）"})
+                else:
+                    report["checks"].append({"name": "code_draft_compile", "ok": False,
+                                             "detail": f"代码草稿体检失败: {draft.get('error')}"})
+            except Exception as e:
+                report["checks"].append({"name": "code_draft_compile", "ok": False, "detail": f"草拟异常: {str(e)[:200]}"})
+            all_ok = all(c.get("ok") for c in report["checks"])
+            prop["status"] = "tested" if all_ok else "test_failed"
+        elif kind == "new_plugin":
             spec = prop.get("plugin_spec") or {}
             manifest = spec.get("manifest") or {}
             files = spec.get("files") or {}
@@ -642,7 +779,7 @@ def _slug(text: str, fallback: str) -> str:
     return (s[:40] or fallback)
 
 
-def _persist_patch_provider(prop: Dict[str, Any], run_id: str) -> Dict[str, Any]:
+async def _persist_patch_provider(prop: Dict[str, Any], run_id: str) -> Dict[str, Any]:
     """真写生产：备份原 definition → 合并补丁（只增不改存量值）→ 保存 → 热重载 → MCP 刷新 → 连通试跑；试跑失败自动回滚。"""
     from app.providers.custom.manager import custom_provider_manager as _mgr
     pid = prop.get("target_provider_id") or ""
@@ -697,22 +834,10 @@ def _persist_patch_provider(prop: Dict[str, Any], run_id: str) -> Dict[str, Any]
     except Exception as e:
         _rollback_patch_provider(prop, run_id, reason=f"热重载失败自动回滚: {e}")
         raise RuntimeError(f"热重载失败已回滚: {e}")
-    # 4) 连通试跑；失败自动回滚
+    # 4) 连通试跑（真实执行 test_custom_provider：编译体检+连通，零配额）；失败自动回滚
     try:
         from app.mcp.server import mcp_registry as _reg
-        import asyncio as _aio
-        async def _t():
-            return await _reg.execute_tool("test_custom_provider", {"provider_id": pid})
-        try:
-            _loop = _aio.get_running_loop()
-        except RuntimeError:
-            _loop = None
-        if _loop and _loop.is_running():
-            # 已在事件循环中（MCP/HTTP 上下文）：跳过阻塞试跑，标记待用户手动点测试
-            return {"provider_id": pid, "backup": str(backup_path),
-                    "note": "已写入并热重载；循环内跳过连通试跑，请手动测试该源"}
-        else:
-            tres = _aio.run(_t())
+        tres = await _reg.execute_tool("test_custom_provider", {"provider_id": pid})
         if getattr(tres, "status", "error") != "success":
             _rollback_patch_provider(prop, run_id, reason=f"试跑失败自动回滚: {getattr(tres, 'error', '')}")
             raise RuntimeError(f"连通试跑失败已回滚: {getattr(tres, 'error', '')}")
@@ -722,7 +847,8 @@ def _persist_patch_provider(prop: Dict[str, Any], run_id: str) -> Dict[str, Any]
         _rollback_patch_provider(prop, run_id, reason=f"试跑异常自动回滚: {e}")
         raise RuntimeError(f"试跑异常已回滚: {e}")
     prop["backup_path"] = str(backup_path)
-    return {"provider_id": pid, "backup": str(backup_path), "patch_summary": patch.get("summary", "")}
+    return {"provider_id": pid, "backup": str(backup_path), "patch_summary": patch.get("summary", ""),
+            "note": f"已写入并热重载，连通试跑通过（备份见 {backup_path}），失败可一键回滚"}
 
 
 def _rollback_patch_provider(prop: Dict[str, Any], run_id: str, reason: str = "") -> Dict[str, Any]:
@@ -944,6 +1070,14 @@ async def finalize(proposal_id: str, action: str = "persist", context: Optional[
             r = _rollback_new_plugin(prop)
         elif kind == "storyboard_slot":
             r = _rollback_storyboard_slot(prop)
+        elif kind == "new_provider":
+            pid = prop.get("provider_id") or ""
+            if not pid:
+                return {"proposal_id": proposal_id, "status": prop.get("status"), "note": "该提案未创建生成源，无需回滚"}
+            _delete_created_provider(pid)
+            prop["status"] = "rolled_back"
+            _save(prop)
+            return {"proposal_id": proposal_id, "status": "rolled_back", "note": f"已删除本提案创建的生成源 {pid}"}
         else:
             return {"proposal_id": proposal_id, "status": prop.get("status"), "note": "该类型无备份可回滚"}
         if r.get("ok"):
@@ -955,6 +1089,9 @@ async def finalize(proposal_id: str, action: str = "persist", context: Optional[
     kind = prop.get("kind", "")
     try:
         if kind == "new_plugin":
+            if prop.get("status") == "persisted":
+                return {"proposal_id": proposal_id, "status": "persisted", "plugin_id": prop.get("plugin_id"),
+                        "note": "该提案已持久化，无需重复操作；如需调整请重新提案"}
             if prop.get("status") != "tested":
                 raise ValueError("请先 Start 试跑通过后再持久化")
             r = _persist_new_plugin(prop, run_id)
@@ -964,9 +1101,12 @@ async def finalize(proposal_id: str, action: str = "persist", context: Optional[
             return {"proposal_id": proposal_id, "status": "persisted", "plugin_id": r.get("plugin_id"),
                     "path": r.get("path"), "note": r.get("note")}
         if kind == "patch_provider":
+            if prop.get("status") == "persisted" and prop.get("patch"):
+                return {"proposal_id": proposal_id, "status": "persisted", "provider_id": prop.get("target_provider_id"),
+                        "note": "该提案已持久化，无需重复操作；如需再改可重新提案或让导演直接 update_custom_provider"}
             if prop.get("status") != "tested" or not prop.get("patch"):
                 raise ValueError("请先 Start 试跑通过后再持久化")
-            r = _persist_patch_provider(prop, run_id)
+            r = await _persist_patch_provider(prop, run_id)
             prop["status"] = "persisted"
             _save(prop)
             _trace(run_id, "proposal_persisted", {"proposal_id": proposal_id, "kind": kind, "provider_id": r.get("provider_id")})
@@ -996,11 +1136,23 @@ async def finalize(proposal_id: str, action: str = "persist", context: Optional[
             _trace(run_id, "proposal_persisted", {"proposal_id": proposal_id, "kind": kind, "slot": r.get("slot")})
             return {"proposal_id": proposal_id, "status": "persisted", "slot": r.get("slot"), "path": r.get("path"),
                     "note": "分镜槽已落盘 storage/storyboard_slots/custom，删除文件即卸载（rollback 同效）"}
-        # new_provider：高风险代码生成不在此自动写，要求走 register 链路（防坏码入库）
+        if kind == "new_provider":
+            if prop.get("status") == "persisted":
+                return {"proposal_id": proposal_id, "status": "persisted", "provider_id": prop.get("provider_id"),
+                        "note": "该提案已持久化（生成源已创建），无需重复操作"}
+            if prop.get("status") != "tested":
+                raise ValueError("请先 Start 试跑通过后再持久化")
+            r = await _persist_new_provider(prop, run_id)
+            prop["status"] = "persisted"
+            _save(prop)
+            _trace(run_id, "proposal_persisted", {"proposal_id": proposal_id, "kind": kind, "provider_id": r.get("provider_id")})
+            return {"proposal_id": proposal_id, "status": "persisted", "provider_id": r.get("provider_id"),
+                    "note": r.get("note")}
+        # 未知类型：保留原上下文，交由人工/导演走专用链路
         prop["status"] = "needs_manual"
         _save(prop)
         return {"proposal_id": proposal_id, "status": "needs_manual",
-                "note": "新源接入需文档/Key/沙箱体检，请走 register_custom_provider（本提案保留上下文，可直接引用 goal）"}
+                "note": "未知提案类型，请人工处理（本提案保留上下文）"}
     except (ValueError, RuntimeError) as e:
         raise
     except Exception as e:

@@ -636,9 +636,10 @@ async def list_providers(kind: Optional[str] = None, scope: Optional[str] = None
                     info["builtin"] = True
                     info["provider_type"] = "builtin"
                     info["enabled"] = True
-                    # 生产可用 = 已配置 且 已验证（测试联通）。未验证的源只在配置端可见。
+                    # 生产可用口径：内置源 = 已配置（填了 Key）即上架，不再强制测试；
+                    # 未配置 Key 的内置源不显示（配置端始终可见）。
                     info["verified"] = verification.is_verified(pid)
-                    info["production_ready"] = bool(info.get("is_configured", True)) and info["verified"]
+                    info["production_ready"] = bool(info.get("is_configured", True))
                     # 内置源也补 x-*，保证画布/分镜分组与人机徽标一致
                     try:
                         raw_ps = info.get("params_schema")
@@ -663,7 +664,8 @@ async def list_providers(kind: Optional[str] = None, scope: Optional[str] = None
                 continue
             info = _sanitize_for_frontend(pd)
             info["verified"] = verification.is_verified(pd.id)
-            info["production_ready"] = bool(getattr(pd, "enabled", True)) and info["verified"]
+            # 自定义源：启用即上架（不再以“测试联通”作为显示门槛）
+            info["production_ready"] = bool(getattr(pd, "enabled", True))
             result.append(info)
     except Exception as e:
         print(f"[ProviderRoutes] custom list failed: {e}")
@@ -772,12 +774,7 @@ async def create_provider(req: ProviderCreateRequest):
     if req.language not in ("python", "javascript", "js"):
         raise HTTPException(status_code=400, detail="language 必须为 python/javascript")
     if not req.code or len(req.code.strip()) < 20:
-        # 若未提供代码，自动用模板补齐
-        tmpl = CODE_TEMPLATES.get((req.language, req.kind)) or CODE_TEMPLATES.get(("python", req.kind)) or ""
-        if tmpl:
-            req.code = tmpl
-        else:
-            raise HTTPException(status_code=400, detail="code 不能为空，请提供 python/javascript 携程源码（含 async def generate(ctx, api)）")
+        raise HTTPException(status_code=400, detail="代码模式为唯一方式：请提供 python/javascript 携程源码（含 async def generate(ctx, api)）；可先取 /providers/code/templates 模板")
     # 语法预检 python
     if req.language == "python":
         try:
@@ -791,7 +788,6 @@ async def create_provider(req: ProviderCreateRequest):
         data["headers"] = hdrs
     data["language"] = "javascript" if req.language == "js" else req.language
     data["provider_type"] = "code"
-    data["legacy_json_mode"] = False
     if not data.get("id"):
         import uuid
         data["id"] = f"prov_{uuid.uuid4().hex[:8]}"
@@ -892,6 +888,11 @@ async def update_provider(provider_id: str, body: Dict[str, Any] = Body(...)):
         else:
             _save_api_key(provider_id, api_key)
             body.setdefault("auth", {})["key_env"] = f"CUSTOM_PROVIDER_{provider_id}"
+    # 非代码模式已删除：legacy 字段不再接受更新，provider_type 不允许改写
+    for _legacy_key in ("transport", "auth", "mapping", "health_check", "provider_type"):
+        body.pop(_legacy_key, None)
+    if "code" in body and not str(body.get("code") or "").strip():
+        raise HTTPException(status_code=400, detail="非代码模式已删除：code 不能为空，请提供完整携程源码")
     # 语法预检
     if "code" in body and body["code"] and (body.get("language") or pd.language) == "python":
         try:
@@ -911,9 +912,9 @@ async def update_provider(provider_id: str, body: Dict[str, Any] = Body(...)):
         if not _cc_rest.get("ok"):
             raise HTTPException(status_code=400, detail=f"代码未通过沙箱体检，已拒绝保存: {_cc_rest.get('error')}")
     current = pd.model_dump()
-    # 深度合并
+    # 深度合并（default_params 深合并，其余直接覆盖）
     for k, v in body.items():
-        if k in ("transport", "auth", "mapping", "health_check", "default_params") and isinstance(v, dict):
+        if k == "default_params" and isinstance(v, dict):
             current[k] = {**(current.get(k) or {}), **v}
         else:
             current[k] = v
@@ -935,9 +936,8 @@ async def update_provider(provider_id: str, body: Dict[str, Any] = Body(...)):
             pass
     # 若更新了 code 且未显式传 input_schema，且新 input 缺 reference_audios，尝试保留旧 input 的扩展字段
     # （由前端升级接口手动传 input_schema 覆盖，此处不自动清理）
-    # 若更新了 code，强制标记非 legacy
+    # 若更新了 code，强制标记代码型
     if "code" in body:
-        current["legacy_json_mode"] = False
         current["provider_type"] = "code"
     # 统一 enrich，保证 x-* 完整（尤其手动修正后的 schema）
     if current.get("params_schema") and isinstance(current["params_schema"], dict) and current["params_schema"].get("properties"):
@@ -1012,7 +1012,10 @@ async def run_provider_test(provider_id: str) -> Dict[str, Any]:
     prov = None
     kind = None
     compile_check = None
-    if pd:
+    if pd and not pd.code and getattr(pd, "provider_type", "") != "comfyui":
+        # 非代码（JSON 模板）模式已删除：无代码的定义不可测试，需先升级为代码
+        raise ValueError("该源为非代码（JSON 模板）模式，已废弃；请先升级为代码模式")
+    if pd and pd.code:
         kind = pd.kind
         try:
             from app.providers.generic.code_provider import GenericCodeImageProvider, GenericCodeAudioProvider, GenericCodeVideoProvider
@@ -1027,26 +1030,13 @@ async def run_provider_test(provider_id: str) -> Dict[str, Any]:
         except Exception as e:
             raise ValueError(f"创建 Provider 实例失败: {e}")
         # 免费深度体检先行：沙箱编译+入口定位（零配额），坏代码快速失败并给出确切原因
-        if pd.code:
-            from app.providers.generic.code_provider import compile_check_code
-            cc = compile_check_code(pd.language or "python", pd.code, pd.code_entry or "generate")
-            compile_check = cc
-            if not cc.get("ok"):
-                verification.mark(provider_id, False, f"代码体检未通过: {cc.get('error')}", kind or "")
-                return {"provider_id": provider_id, "ok": False, "is_configured": True, "kind": kind,
-                        "detail": f"代码体检未通过: {cc.get('error')}", "compile_check": cc, "verified": False}
-        # 兼容：若仍是 legacy JSON 且无 code，尝试用 http_provider
-        if not pd.code and pd.legacy_json_mode:
-            try:
-                from app.providers.generic.http_provider import GenericHttpImageProvider, GenericHttpAudioProvider, GenericHttpVideoProvider
-                if kind == "image":
-                    prov = GenericHttpImageProvider(pd)
-                elif kind == "audio":
-                    prov = GenericHttpAudioProvider(pd)
-                elif kind == "video":
-                    prov = GenericHttpVideoProvider(pd)
-            except Exception:
-                pass
+        from app.providers.generic.code_provider import compile_check_code
+        cc = compile_check_code(pd.language or "python", pd.code, pd.code_entry or "generate")
+        compile_check = cc
+        if not cc.get("ok"):
+            verification.mark(provider_id, False, f"代码体检未通过: {cc.get('error')}", kind or "")
+            return {"provider_id": provider_id, "ok": False, "is_configured": True, "kind": kind,
+                    "detail": f"代码体检未通过: {cc.get('error')}", "compile_check": cc, "verified": False}
     else:
         try:
             from app.providers.image.registry import image_registry
@@ -1117,12 +1107,11 @@ async def import_provider_from_doc(req: ProviderImportRequest):
             data["kind"] = req.kind or data.get("kind", "image")
             if req.name:
                 data["name"] = req.name
-            # 若 definition 含 transport 但无 code，尝试迁移为代码（兼容旧 JSON）
-            if not data.get("code") and data.get("transport", {}).get("url"):
-                # 生成极简代码包裹旧模板（过渡）
-                url = data["transport"]["url"]
-                data["language"] = req.language or "python"
-                data["code"] = CODE_TEMPLATES.get((data["language"], data["kind"]), PY_IMAGE_TEMPLATE).replace("https://api.example.com/v1/images/generations", url)
+            # 非代码模式已删除：definition 必须内联完整 code（旧 transport 自动迁移路径已移除）
+            code_in = str(data.get("code") or "").strip()
+            if len(code_in) < 20:
+                raise HTTPException(status_code=400, detail="非代码模式已删除：definition 必须包含完整 code（async def generate(ctx, api)）")
+            data["provider_type"] = "code"
             pd = ProviderDefinition.model_validate(data)
             if not pd.params_schema or not pd.params_schema.get("properties"):
                 pd.params_schema = _default_params_schema(pd.kind)
@@ -1255,7 +1244,7 @@ async def upgrade_legacy_to_code(provider_id: str, body: Optional[Dict[str, Any]
     pd = custom_provider_manager.get_definition(provider_id)
     if not pd:
         raise HTTPException(status_code=404, detail=f"Provider 不存在: {provider_id}")
-    if pd.code and not pd.legacy_json_mode:
+    if pd.code:
         return {"status": "already_code", "provider": _sanitize_for_frontend(pd)}
     # 根据旧 transport/mapping 生成代码
     lang = (body or {}).get("language") or "python"
@@ -1266,7 +1255,6 @@ async def upgrade_legacy_to_code(provider_id: str, body: Optional[Dict[str, Any]
     pd.language = lang
     pd.code = migrated_code
     pd.code_entry = "generate"
-    pd.legacy_json_mode = False
     pd.provider_type = "code"
     saved = custom_provider_manager.save_definition(pd)
     from app.providers.init_providers import unregister_single_custom_provider, register_single_custom_provider

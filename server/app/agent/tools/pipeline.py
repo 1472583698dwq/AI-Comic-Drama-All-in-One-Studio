@@ -187,9 +187,12 @@ def _summarize_result(name: str, result: Any, max_chars: int = 4000) -> str:
         except Exception:
             pass
 
-    # get_provider_code：code 截断
+    # get_provider_code：分页窗口请求保留完整窗口（limit≤6000）；未分页则压成预览
     if name == "get_provider_code" and isinstance(result, dict) and "code" in result:
         try:
+            if "code_total_len" in result:
+                s = json.dumps(result, ensure_ascii=False, default=str)
+                return s[:7600] + ("…(truncated)" if len(s) > 7600 else "")
             code = result.get("code") or ""
             summarized = {k: v for k, v in result.items() if k != "code"}
             summarized["code_preview"] = code[:800] + (f"…(共{len(code)}字符)" if len(code) > 800 else "")

@@ -123,33 +123,9 @@ async def canvas_agent_generate(req: CanvasAgentGenerateRequest):
     res = await mcp_registry.execute_tool(f"provider_{pid}", args)
     if res.status != "success":
         return {"status": "error", "plan": {**plan, "final_args": args}, "error": res.error or "生成失败"}
-    # 视频异步 task 兜底轮询（provider_ 分支内部已有轮询，这里处理仍返回 task_id 的旧源）
-    # 代码源除外：后台轮询已接管，直接返 task_id（阻塞必超前端/Agent 等待，前端经 /videos/status 轮询）
+    # 视频异步 task 兜底：非代码（JSON 模板）模式已删除，代码源由后台 TaskCenter 轮询接管，
+    # 前端统一经 /videos/status 轮询，这里不再阻塞等待。
     result = res.result or {}
-    _is_code_pid = False
-    if node_type == "video" and not result.get("video_url") and result.get("task_id"):
-        try:
-            from app.providers.custom.manager import custom_provider_manager as _cmCanvas
-            _ddc = _cmCanvas.get_definition(pid or "")
-            _is_code_pid = bool(_ddc and getattr(_ddc, "provider_type", "") == "code")
-        except Exception:
-            _is_code_pid = False
-    if node_type == "video" and not result.get("video_url") and result.get("task_id") and not _is_code_pid:
-        import asyncio
-        from app.providers.generic.http_provider import get_custom_video_task
-        for _ in range(500):
-            await asyncio.sleep(3)
-            try:
-                st = get_custom_video_task(result["task_id"])
-                if st and st.get("status") in ("SUCCESS", "COMPLETED") and st.get("video_url"):
-                    result["video_url"] = st["video_url"]
-                    break
-                if st and st.get("status") in ("FAILED", "FAIL", "ERROR"):
-                    return {"status": "error", "plan": {**plan, "final_args": args}, "error": st.get("error") or "视频任务失败"}
-            except RuntimeError:
-                raise
-            except Exception:
-                pass
     return {"status": "success", "plan": {**plan, "final_args": args}, "result": result, "elapsed_ms": res.execution_time_ms}
 
 

@@ -60,18 +60,29 @@ export const ErrorCard: React.FC<{ what: string; why: string; next: string; onRe
   </div>
 );
 
+/** Creator 能力提案状态中文口径（卡头展示） */
+const PROPOSAL_STATUS_LABEL: Record<string, string> = {
+  proposed: '待试跑', testing: '试跑中…', tested: '试跑通过', test_failed: '试跑未通过',
+  persisted: '已持久化', discarded: '已丢弃', rolled_back: '已回滚', needs_manual: '需人工接入',
+};
+
 /** Creator 能力提案卡：临时提案，需人 Start 试跑，试跑后 persist 真写生产（备份+回滚）/discard/rollback */
 export const CapabilityProposalCard: React.FC<{
   proposal: CreatorProposal;
   busy?: string | null;
   onStart: () => void;
   onFinalize: (action: 'persist' | 'discard' | 'rollback') => void;
-}> = ({ proposal, busy, onStart, onFinalize }) => (
+}> = ({ proposal, busy, onStart, onFinalize }) => {
+  const status = proposal.status || 'proposed';
+  const isPersisted = status === 'persisted';
+  const canStart = !busy && !isPersisted && status !== 'discarded';
+  const canPersist = !busy && status === 'tested';
+  return (
   <div className="mt-2 rounded-xl border border-violet-500/30 bg-violet-500/5 overflow-hidden">
     <div className="px-2.5 py-1.5 flex items-center gap-1.5 text-[11px] font-bold text-violet-300">
       <Lightbulb className="w-3.5 h-3.5" />能力提案 · {proposal.title}
       <span className="ml-1 px-1.5 py-px rounded bg-violet-500/20 text-[10px] font-mono">{proposal.kind}</span>
-      <span className="ml-auto text-[10px] font-normal text-gray-500">{proposal.status}</span>
+      <span className={`ml-auto text-[10px] font-normal ${isPersisted ? 'text-emerald-400' : 'text-gray-500'}`}>{PROPOSAL_STATUS_LABEL[status] || status}</span>
     </div>
     <div className="px-2.5 pb-2 text-[11px] leading-5 text-gray-300">
       <div className="font-mono text-[10px] text-gray-500 break-all">{proposal.proposal_id}</div>
@@ -79,13 +90,23 @@ export const CapabilityProposalCard: React.FC<{
       <div className="mt-1 text-[10px] text-gray-500">试跑计划：{(proposal.test_plan || []).join(' → ')}</div>
       <div className="mt-0.5 text-[10px] text-gray-500">可逆性：{proposal.reversible}</div>
       <div className="flex gap-1.5 mt-2">
-        <button onClick={onStart} disabled={!!busy} className="flex-1 py-1.5 rounded-lg bg-violet-500 text-white text-[11px] font-bold disabled:opacity-50 flex items-center justify-center gap-1">
+        <button
+          onClick={onStart}
+          disabled={!canStart}
+          title={isPersisted ? '已持久化，如需调整请重新提案' : '只读/小参试跑，不写生产'}
+          className="flex-1 py-1.5 rounded-lg bg-violet-500 text-white text-[11px] font-bold disabled:opacity-50 flex items-center justify-center gap-1"
+        >
           <FlaskConical className="w-3 h-3" />{busy === 'start' ? '试跑中…' : 'Start 试跑（只读/小参）'}
         </button>
-        <button onClick={() => onFinalize('persist')} disabled={!!busy} className="px-2.5 py-1.5 rounded-lg border border-violet-500/40 text-violet-200 text-[11px] font-bold disabled:opacity-50 flex items-center gap-1">
+        <button
+          onClick={() => onFinalize('persist')}
+          disabled={!canPersist}
+          title={canPersist ? '真写生产：备份→写入→热重载→试跑（失败自回滚）' : '需先点 Start 试跑通过后才能持久化'}
+          className="px-2.5 py-1.5 rounded-lg border border-violet-500/40 text-violet-200 text-[11px] font-bold disabled:opacity-50 flex items-center gap-1"
+        >
           <PackageCheck className="w-3 h-3" />{busy === 'persist' ? '…' : '持久化'}
         </button>
-        {proposal.status === 'persisted' ? (
+        {isPersisted ? (
           <button onClick={() => onFinalize('rollback')} disabled={!!busy} className="px-2.5 py-1.5 rounded-lg border border-amber-500/40 text-amber-200 text-[11px] font-bold disabled:opacity-50 flex items-center gap-1">
             {busy === 'rollback' ? '…' : '回滚'}
           </button>
@@ -98,4 +119,5 @@ export const CapabilityProposalCard: React.FC<{
       <div className="mt-1 text-[10px] text-gray-600">持久化=备份→写入→热重载→试跑（失败自回滚）；丢弃即卸载，已发生的外部计费不可逆。</div>
     </div>
   </div>
-);
+  );
+};

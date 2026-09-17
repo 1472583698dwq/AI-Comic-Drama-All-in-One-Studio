@@ -87,7 +87,7 @@ tools:
    - 文件侧：按口语确定 `kind` + `多文件数量` → 组 `input_schema`（含 `maxItems`，`first_frame` 是否 `required`）。
    - 参数侧：按口语/项目画幅推断版式参数（`aspect_ratio/resolution` 必为 `layout/basic/auto`），按 API 文档确定枚举；画质类（`steps/cfg`）一律 `quality/advanced/suggest`；时长运动类一律 `motion/basic/auto`；音色 `audio/basic/auto`。缺省时用 `_default_params_schema` 的 v2 模板。
    - **video 异步 API**：`params_schema` 必须按该 API 真实枚举手写（如 H3 的 `480p竖/768p竖`），**禁止**套通用 `480p/720p` 模板（出网前护栏会直接拦截，见坑位 6）。
-3. **生成**：若用户已给 `code`/`definition` 则 `register_custom_provider {kind,name,language,code,input_schema,params_schema}` 直建；否则 `register_custom_provider {kind,name,doc_text/curl,language,input_schema,params_schema}` 让 LLM 按本文模板生成。**禁止**把文件插槽塞进 `params_schema`。video 异步源的 `code` 必须套用下文异步模板（含查询分支），不可用同步模板。
+3. **生成**：若用户已给 `code` 则 `register_custom_provider {kind,name,language,code,input_schema,params_schema}` 直建；否则 `register_custom_provider {kind,name,doc_text/curl,language,input_schema,params_schema}` 让 LLM 按本文模板生成（非代码 JSON/transport 模式已删除，注册结果必须是代码）。**禁止**把文件插槽塞进 `params_schema`。video 异步源的 `code` 必须套用下文异步模板（含查询分支），不可用同步模板。
 4. **校验**：`get_provider_code {name/q}` 检视 `input_schema/params_schema` 是否含预期 `maxItems` 与 `x-*`；`test_custom_provider` 试连（仅语法+配置检查，零配额）。video 异步源加一步：**用一个历史真实 `task_id` 调查询分支验链路**（`shell_exec` 单次 GET 结果接口，或 provider 工具传 `task_id`+空 prompt），链路通后再花配额提交新任务。
 5. **修复**：参数未暴露或分组错误则 `update_custom_provider {provider_id, params_schema/input_schema}` 增量补丁；`x-visibility:hidden` 的内部参数不会在两端显示但仍会透传。收不到结果类问题先查下文坑位表再改码。
 6. **告知**：回复中明确“已生成 `id`，`input: 首帧必选 1张 / 参考图 0-3张`，`params: 基础 2项常显(比例/分辨率·Agent可填) 高级 2项需展开(步数/CFG·建议)`，已可在节点 Agent 下拉中选中”。video 异步源须加一句“提交后返 `task_id`，后台轮询约 N 分钟，经分镜/画布状态轮询取片”。

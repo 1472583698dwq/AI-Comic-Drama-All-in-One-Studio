@@ -110,7 +110,7 @@ export const CapabilitiesPanel: React.FC<Props> = ({ cfg, draft, setDraft, loadi
             <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
             <div className="text-[11.5px] text-emerald-200 leading-relaxed">
               必需项都填了。接下来两步：右上角<b>保存</b> → 每张卡点一次<b>测试连通</b>。
-              没测通的生成源不会出现在画布和分镜台的下拉里，这是故意的。
+              未配置 Key 的内置源不会出现在画布和分镜台的下拉里；自定义源接入即显示。
             </div>
           </div>
         )}
