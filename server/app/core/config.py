@@ -70,6 +70,7 @@ MANAGED_KEYS = [
     "SEEDANCE_API_KEY",
     "SEEDANCE_BASE_URL",
     "SEEDANCE_MODEL",
+    "WAN_API_KEY",
     "WAN3_MODEL",
     "WAN3_BASE_URL",
     # JianYing Draft & Paths
@@ -224,7 +225,9 @@ class Settings(BaseModel):
     SEEDANCE_API_KEY: str = os.getenv("SEEDANCE_API_KEY", "")
     SEEDANCE_BASE_URL: str = os.getenv("SEEDANCE_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3")
     SEEDANCE_MODEL: str = os.getenv("SEEDANCE_MODEL", "doubao-seedance-2-0-260128")
-    # Wan3.0 (阿里百炼 DashScope, 复用 DASHSCOPE_API_KEY)
+    # 万相 Wan3.0：独立 Key + 账号专属 MaaS 实例地址（与通用 DashScope 不是一套）；
+    # 留空时回退 DASHSCOPE_API_KEY 以兼容存量配置
+    WAN_API_KEY: str = os.getenv("WAN_API_KEY", "")
     WAN3_MODEL: str = os.getenv("WAN3_MODEL", "wan3.0-video")
     WAN3_BASE_URL: str = os.getenv("WAN3_BASE_URL", "https://dashscope.aliyuncs.com")
 

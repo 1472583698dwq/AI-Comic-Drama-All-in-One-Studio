@@ -7,7 +7,10 @@
   - 查询: GET  {BASE}/api/v1/tasks/{task_id}
           -> {"output": {"task_status": "PENDING|RUNNING|SUCCEEDED|FAILED|CANCELED", "video_url": ...}}
 模型: wan3.0-video (标准) / wan3.0-video-prime (高速), All-in-One: 文生/首尾帧/全模态参考/编辑/延长, 最长30s/30fps/原生有声
-鉴权: Bearer DASHSCOPE_API_KEY (复用生图同一Key), 地域 endpoint 注意与 Key 一致 (默认北京)
+鉴权: Bearer WAN_API_KEY；缺省回退 DASHSCOPE_API_KEY(存量兼容)。
+      ⚠️ 实践中万相多是「账号专属 MaaS 实例」，host 形如
+      https://ws-xxxxxxxx.us-east-1.maas.aliyuncs.com，与通用 dashscope.aliyuncs.com
+      不是一套，key 也不通用 —— 必须把 WAN3_BASE_URL 填成你自己实例的地址。
 约束: first_frame/last_frame 族与 reference_*/file/link 族互斥, 不可混用。
 缺 Key 时 is_configured()=False, 注册表自动跳过。
 """
@@ -56,8 +59,12 @@ class Wan3VideoProvider(VideoProvider):
     description = "阿里万相3.0 All-in-One: 文生/首尾帧/多模态参考/编辑, 2-30s原生有声, 复用 DASHSCOPE_API_KEY"
     icon = "Wand2"
 
+    @staticmethod
+    def _api_key() -> str:
+        return (getattr(settings, "WAN_API_KEY", "") or getattr(settings, "DASHSCOPE_API_KEY", "") or "").strip()
+
     def is_configured(self) -> bool:
-        return bool(getattr(settings, "DASHSCOPE_API_KEY", ""))
+        return bool(self._api_key())
 
     async def check_health(self) -> bool:
         return self.is_configured()
@@ -101,16 +108,15 @@ class Wan3VideoProvider(VideoProvider):
                     "audio": {"type": "boolean", "title": "原生有声", "default": True, "description": "台词/BGM/音效, 开关同价", "x-category": "audio", "x-visibility": "basic", "x-agent": "auto", "x-priority": 11},
                     "prompt_extend": {"type": "boolean", "title": "提示词改写", "default": True, "description": "短prompt效果提升但更慢", "x-category": "quality", "x-visibility": "advanced", "x-agent": "suggest", "x-priority": 42},
                     "seed": {"type": "integer", "title": "随机种子", "description": "复现结果, 留空随机", "x-category": "quality", "x-visibility": "advanced", "x-agent": "manual", "x-priority": 99},
-                    "watermark": {"type": "boolean", "title": "水印", "default": False, "description": "是否添加水印", "x-category": "quality", "x-visibility": "advanced", "x-agent": "suggest", "x-priority": 60},
                 },
             },
         })
         return cap
 
     async def generate(self, req: VideoGenerateRequest) -> VideoGenerateResult:
-        api_key = getattr(settings, "DASHSCOPE_API_KEY", "")
+        api_key = self._api_key()
         if not api_key:
-            raise RuntimeError("万相 Wan3.0 未配置: 请在「设置中心→基础设施→云端视频」填入 DASHSCOPE_API_KEY(阿里百炼) 后再使用")
+            raise RuntimeError("万相 Wan3.0 未配置: 请在「设置 → 能力配置 → 生视频 → 万相」填入 WAN_API_KEY 与专属实例地址")
         prompt = (req.prompt or "").strip()
         started = time.time()
         base = (getattr(settings, "WAN3_BASE_URL", "") or "https://dashscope.aliyuncs.com").rstrip("/")
@@ -144,10 +150,12 @@ class Wan3VideoProvider(VideoProvider):
             if last:
                 media.append({"type": "last_frame", "url": _abs_url(last)})
         else:
-            for u in ref_imgs:
-                media.append({"type": "reference_image", "url": _abs_url(u)})
+            # 顺序与已验证的 sd25pe 一致：视频在前、图在后。
+            # 组内序号就是 prompt 里的「视频1/视频2…」「图1/图2…」，顺序错了指代就错。
             for u in ref_vids:
                 media.append({"type": "reference_video", "url": _abs_url(u)})
+            for u in ref_imgs:
+                media.append({"type": "reference_image", "url": _abs_url(u)})
             for u in ref_auds:
                 media.append({"type": "reference_audio", "url": _abs_url(u)})
             if dyn.get("file_url"):
@@ -158,7 +166,12 @@ class Wan3VideoProvider(VideoProvider):
             raise ValueError("提示词与媒体素材至少提供其一")
 
         resolution = _map_resolution(req.resolution or dyn.get("resolution") or extra.get("resolution"))
-        ratio = _map_ratio(dyn.get("ratio") or extra.get("ratio") or req.aspect_ratio)
+        ratio_explicit = dyn.get("ratio") or extra.get("ratio")
+        ratio = _map_ratio(ratio_explicit or req.aspect_ratio)
+        if media and not ratio_explicit:
+            # 有素材就让画幅跟着素材走（同方舟「有参考就不发 --ratio」），
+            # 项目级的 9:16 不该硬套在首尾帧/参考视频上。显式在参数面板选过的除外。
+            ratio = "adaptive"
         try:
             duration = int(req.duration if req.duration is not None else dyn.get("duration", 5))
         except Exception:
@@ -171,17 +184,19 @@ class Wan3VideoProvider(VideoProvider):
         prompt_extend = dyn.get("prompt_extend", extra.get("prompt_extend", True))
         if isinstance(prompt_extend, str):
             prompt_extend = prompt_extend.strip().lower() in ("1", "true", "yes", "on")
-        watermark = bool(dyn.get("watermark", extra.get("watermark", False)))
         seed = req.seed if req.seed is not None else dyn.get("seed")
         try:
             seed = int(seed) if seed is not None and str(seed).strip() != "" else None
         except Exception:
             seed = None
 
+        if ref_vids:
+            # 带参考视频＝编辑类任务，时长跟随原片
+            duration = -1
+        # parameters 只发已验证可用的字段；watermark 等未确认字段不发，避免整单被拒
         body: Dict[str, Any] = {"model": model, "input": {"prompt": prompt or "cinematic shot"},
                                 "parameters": {"resolution": resolution, "ratio": ratio, "duration": duration,
-                                               "audio": bool(audio), "prompt_extend": bool(prompt_extend),
-                                               "watermark": bool(watermark)}}
+                                               "audio": bool(audio), "prompt_extend": bool(prompt_extend)}}
         if media:
             body["input"]["media"] = media
         if seed is not None:
@@ -233,9 +248,13 @@ class Wan3VideoProvider(VideoProvider):
                                                         "local_path": out_path}
                                 print(f"[Wan3] 任务 {task_id} 完成 -> {out_path}")
                                 return
-                    elif status in ("FAILED", "CANCELED", "CANCELLED"):
-                        _TASK_STORE[task_id] = {"status": "failed", "task_id": task_id,
-                                                "error": str(output.get("message") or output.get("code") or status)}
+                    elif status in ("FAILED", "CANCELED", "CANCELLED", "UNKNOWN"):
+                        # UNKNOWN 多半是 task_id 过期（万相 task_id 24 小时有效），且不带 message，
+                        # 之前会被当成 running 一路轮到 25 分钟超时才报错
+                        err = str(output.get("message") or output.get("code") or "")
+                        if not err and status == "UNKNOWN":
+                            err = "任务不存在或已过期（万相 task_id 24 小时有效）"
+                        _TASK_STORE[task_id] = {"status": "failed", "task_id": task_id, "error": err or status}
                         return
             except Exception as e:
                 print(f"[Wan3] 轮询 {task_id} 异常: {e}")
