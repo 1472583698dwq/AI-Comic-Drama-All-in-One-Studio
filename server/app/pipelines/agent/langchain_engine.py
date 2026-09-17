@@ -516,7 +516,7 @@ async def run_agent_with_langchain(
     tools = _mcp_to_langchain_tools(None)
     _plan_allowed: set = set()
     if _plan_mode:
-        from app.agent.planner import PLAN_READONLY_TOOLS
+        from app.agent.mode_policy import PLAN_READONLY_TOOLS
         _plan_allowed = set(PLAN_READONLY_TOOLS)
         tools = [t for t in tools if getattr(t, "name", "") in _plan_allowed]
     try:

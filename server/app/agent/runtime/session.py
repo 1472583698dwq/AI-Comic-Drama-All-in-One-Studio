@@ -14,6 +14,48 @@ from typing import Any, Dict, List, Optional
 from app.agent.runtime import events as E
 from app.agent.runtime.store import store as default_store, SessionStore
 
+# 配对修复用合成结果：缺失的 tool 响应（中断/剪裁）以错误态占位，禁止模型臆测结果
+_ORPHAN_FILL = json.dumps(
+    {"error": "工具结果不可用（会话中断或上下文已剪裁）；禁止假设其结果，如需请重新调用。"},
+    ensure_ascii=False,
+)
+
+
+def _sanitize_tool_pairing(msgs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """把投影结果修成对 LLM 合法的 tool 配对（防 400）：
+
+    - 孤儿 tool 消息（无父级 assistant.tool_calls）：丢弃；
+      典型来源：早先 prune 的替换预览 + 后续 summary 把父级 assistant 一并遮蔽（遮蔽集重叠）。
+    - assistant.tool_calls 缺少响应：补合成错误结果，保证每个 tool_call 紧跟响应；
+      典型来源：中断/异常时后续工具未执行、剪裁遮蔽了原响应。
+    """
+    out: List[Dict[str, Any]] = []
+    pending: List[str] = []
+
+    def flush_pending() -> None:
+        nonlocal pending
+        for cid in pending:
+            out.append({"role": "tool", "tool_call_id": cid, "content": _ORPHAN_FILL})
+        pending = []
+
+    for m in msgs:
+        role = m.get("role")
+        if role == "assistant":
+            flush_pending()
+            pending = [str((tc or {}).get("id") or "") for tc in (m.get("tool_calls") or [])]
+            out.append(m)
+        elif role == "tool":
+            cid = str(m.get("tool_call_id") or "")
+            if cid in pending:
+                pending.remove(cid)
+                out.append(m)
+            # 无匹配父级的孤儿：直接丢弃
+        else:
+            flush_pending()
+            out.append(m)
+    flush_pending()
+    return out
+
 
 class Session:
     def __init__(self, session_id: str, events: Optional[List[Dict[str, Any]]] = None,
@@ -175,6 +217,7 @@ class Session:
         system = system_text if system_text is not None else logged_system
         if system:
             msgs.insert(0, {"role": "system", "content": system})
+        msgs = _sanitize_tool_pairing(msgs)
         self._messages_cache = msgs
         self._messages_cache_key = cache_key
         return [dict(m) for m in msgs]

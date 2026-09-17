@@ -23,7 +23,7 @@ export const AgentModeView: React.FC = () => {
     messages, isRunning, wsStatus, approvals,
     mode, runMode,
     bindProject, setMode, setRunMode, createSession, selectSession, deleteSession,
-    send, confirmPlan, cancelPlan, executePlan, abort, approve, clearAll, proposalAction, applyArtifact,
+    send, executePlan, abort, approve, clearAll, proposalAction, applyArtifact,
   } = useAgentStore();
 
   // 项目切换：绑定/加载该项目的会话（幂等，抽屉同时调用无副作用）
@@ -122,8 +122,6 @@ export const AgentModeView: React.FC = () => {
             isRunning={isRunning}
             activeShotIndex={activeShot?.shot_index}
             onSendSuggestion={(t) => void send(t)}
-            onConfirmPlan={confirmPlan}
-            onCancelPlan={cancelPlan}
             onExecutePlan={(id) => void executePlan(id)}
             onProposalAction={handleProposalAction}
             proposalBusy={proposalBusy}

@@ -1,19 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-Agent业务意图路由 — 结合AI漫剧主链路的确定性Planner（无LLM，可单测）
+Agent 业务意图关键词表（仅保留给旧版 langchain 引擎的 trace 标注，不做任何执行决策）
 
-主链：小说 -> Project{scenes/shots/characters} -> 角色定妆(three_views/voice)
-     -> 单镜制作(机位/生图/视频/配音/对齐) -> 批量/一键成片 -> 画布编排 -> 剪映导出 -> 素材沉淀
+注意：计划（Plan）不由本模块产出——计划模式由 runtime 的代码硬门控实现
+（mode_policy.PLAN_READONLY_TOOLS → 绑定层 + 执行口双重白名单），模型在只读工具集内自主侦察并产出计划。
+本模块的关键词判定仅用于旧版引擎的 trace 标注，不得用于生成步骤或兜底计划。
 
 意图6+2：
-  script(编剧拆解) / character(角色定妆) / shot_single(单镜制作,默认) /
+  script(编剧拆解) / character(角色定妆) / shot_single(单镜制作) /
   batch_onekey(批量整集) / canvas(画布编排) / export(导出) / asset(素材复用) / debug(排障)
   + chat(纯问答兜底)
-
-前端可先用同构规则做即时Plan预览，后端 /agent/plan/preview 做权威确认。
 """
 from typing import Any, Dict, List, Optional
-import re
 
 INTENTS: Dict[str, Dict[str, Any]] = {
     "script": {
@@ -86,7 +84,7 @@ def _hit(prompt: str, keywords: List[str]) -> int:
 
 
 def detect_intent(prompt: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """规则路由：关键词打分 + 上下文修正。返回 {intent,label,confidence,risk,targets,reason}"""
+    """规则路由（仅供 trace 标注）：关键词打分 + 上下文修正。返回 {intent,label,confidence,risk,targets,reason}"""
     ctx = context or {}
     p = (prompt or "").strip()
     scores: Dict[str, int] = {k: _hit(p, v["keywords"]) for k, v in INTENTS.items()}
@@ -107,8 +105,6 @@ def detect_intent(prompt: str, context: Optional[Dict[str, Any]] = None) -> Dict
     # 有激活镜 + 无明确批量词 -> 单镜加权
     if has_active_shot and scores.get("batch_onekey", 0) == 0 and scores.get("canvas", 0) == 0:
         scores["shot_single"] = scores.get("shot_single", 0) + 2
-    # 明确批量词优先
-    # (batch_onekey 已靠关键词命中，此处不额外加)
 
     best = max(scores.items(), key=lambda x: (x[1], x[0]))
     intent, score = best
@@ -142,75 +138,4 @@ def _targets(context: Dict[str, Any]) -> Dict[str, Any]:
         "active_shot_index": a.get("shot_index"),
         "aspect_ratio": proj.get("aspect_ratio") or "9:16",
         "style_preset": proj.get("style_preset") or "donghua_xianxia",
-    }
-
-
-def build_plan(prompt: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """由意图生成可编辑步骤。步骤结构供前端PlanCard直接渲染。"""
-    det = detect_intent(prompt, context or {})
-    intent = det["intent"]
-    t = det["targets"]
-    shot_label = f"#{t.get('active_shot_index')}" if t.get("active_shot_index") is not None else "当前镜"
-    steps: List[Dict[str, Any]] = []
-
-    if intent == "script":
-        steps = [
-            {"id": "s1", "title": "小说拆解为场/镜+角色表", "tool": "split_novel_script", "args_preview": {"text": prompt[:60] + ("…" if len(prompt) > 60 else ""), "aspect_ratio": t.get("aspect_ratio")}, "risk": "medium", "est_s": 20, "target": "新项目"},
-            {"id": "s2", "title": "载入为当前项目并自动绑角色", "tool": "local:load_project", "args_preview": {}, "risk": "low", "est_s": 1, "target": "分镜台"},
-        ]
-    elif intent == "character":
-        steps = [
-            {"id": "s1", "title": "三视图定妆(正/侧/3/4)", "tool": "generate_image", "args_preview": {"count": 3, "aspect_ratio": "1:1"}, "risk": "medium", "est_s": 60, "target": "角色库"},
-            {"id": "s2", "title": "专属音色试音一句", "tool": "generate_voice", "args_preview": {"text": "试音台词"}, "risk": "low", "est_s": 10, "target": "角色库"},
-            {"id": "s3", "title": "沉淀到素材库(角色分类)", "tool": "local:save_asset", "args_preview": {}, "risk": "low", "est_s": 1, "target": "素材库"},
-        ]
-    elif intent == "batch_onekey":
-        steps = [
-            {"id": "s1", "title": "角色定妆(三视图)", "tool": "generate_image", "args_preview": {"scope": "全角色"}, "risk": "medium", "est_s": 120, "target": "角色库"},
-            {"id": "s2", "title": "批量生图(角色参考+相机意图)", "tool": "generate_image", "args_preview": {"scope": "全部分镜"}, "risk": "high", "est_s": 300, "target": "分镜台"},
-            {"id": "s3", "title": "批量视频(首帧i2v+运镜)", "tool": "generate_video", "args_preview": {"mode": "i2v"}, "risk": "high", "est_s": 600, "target": "分镜台"},
-            {"id": "s4", "title": "批量配音+对齐时长", "tool": "generate_voice", "args_preview": {}, "risk": "medium", "est_s": 180, "target": "时间线"},
-            {"id": "s5", "title": "导出剪映草稿", "tool": "export_jianyin_draft", "args_preview": {}, "risk": "medium", "est_s": 10, "target": "剪映"},
-        ]
-    elif intent == "canvas":
-        steps = [
-            {"id": "s1", "title": "感知画布现状", "tool": "canvas_query", "args_preview": {}, "risk": "low", "est_s": 2, "target": "画布"},
-            {"id": "s2", "title": "批量建生图/视频节点并连线", "tool": "canvas_create_node", "args_preview": {"batch": True}, "risk": "medium", "est_s": 5, "target": "画布"},
-            {"id": "s3", "title": "按范围执行(单节点/下游/全量)", "tool": "canvas_execute", "args_preview": {"scope": "downstream"}, "risk": "medium", "est_s": 300, "target": "画布"},
-        ]
-    elif intent == "export":
-        steps = [
-            {"id": "s1", "title": "聚合时间线并导出剪映草稿", "tool": "export_jianyin_draft", "args_preview": {}, "risk": "medium", "est_s": 10, "target": "剪映"},
-        ]
-    elif intent == "asset":
-        steps = [
-            {"id": "s1", "title": "检索素材库(场景/道具/角色)", "tool": "list_assets", "args_preview": {"q": prompt[:30]}, "risk": "low", "est_s": 3, "target": "素材库"},
-            {"id": "s2", "title": "绑定到分镜/画布插槽", "tool": "local:bind_asset", "args_preview": {"shot": shot_label}, "risk": "low", "est_s": 1, "target": shot_label},
-        ]
-    elif intent == "debug":
-        steps = [
-            {"id": "s1", "title": "查生成源健康与工作流槽位", "tool": "list_image_providers", "args_preview": {}, "risk": "low", "est_s": 5, "target": "生成源"},
-            {"id": "s2", "title": "定位未暴露参数并给修复", "tool": "get_provider_code", "args_preview": {}, "risk": "low", "est_s": 3, "target": "生成源"},
-        ]
-    elif intent == "shot_single":
-        steps = [
-            {"id": "s1", "title": f"3D机位规划({shot_label})", "tool": "director_3d_stage_plan", "args_preview": {"shot": shot_label}, "risk": "low", "est_s": 3, "target": shot_label},
-            {"id": "s2", "title": f"生图首帧({shot_label})", "tool": "generate_image", "args_preview": {"shot": shot_label, "aspect_ratio": t.get("aspect_ratio")}, "risk": "medium", "est_s": 25, "target": shot_label},
-            {"id": "s3", "title": f"图生视频i2v({shot_label})", "tool": "generate_video", "args_preview": {"mode": "i2v", "shot": shot_label}, "risk": "medium", "est_s": 90, "target": shot_label},
-            {"id": "s4", "title": f"配音并对齐时长({shot_label})", "tool": "generate_voice", "args_preview": {"shot": shot_label}, "risk": "medium", "est_s": 12, "target": shot_label},
-        ]
-    else:  # chat
-        steps = []
-
-    needs_confirm = det["risk"] in ("high", "medium") and len(steps) > 1
-    # 单步低风险可直接跑
-    if det["risk"] == "low":
-        needs_confirm = False
-    est_total = sum(s.get("est_s", 0) for s in steps)
-    return {
-        "intent": intent, "label": det["label"], "confidence": det["confidence"],
-        "risk": det["risk"], "reason": det.get("reason", ""),
-        "targets": t, "steps": steps,
-        "needs_confirm": needs_confirm, "est_total_s": est_total,
-        "autonomy_hint": "建议" if det["risk"] == "high" else ("草稿" if needs_confirm else "自动"),
     }

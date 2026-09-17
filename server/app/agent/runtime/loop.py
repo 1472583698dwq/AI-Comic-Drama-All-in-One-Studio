@@ -368,8 +368,16 @@ class AgentLoop:
             self._open_step = False
 
     # ── 工具执行 ─────────────────────────────────────────
-    async def _execute_tools(self, tool_calls: List[Any]) -> None:
+    def _fill_tool_results(self, tool_calls: List[Any], error: str) -> None:
+        """中断/异常时为未结算的工具调用补错误结果，保证历史 tool_calls 全部有响应。"""
         for tc in tool_calls:
+            self.session.append(E.TOOL_RESULT, {
+                "call_id": tc.id, "name": tc.name, "status": "error", "result": None,
+                "error": str(error)[:300],
+            })
+
+    async def _execute_tools(self, tool_calls: List[Any]) -> None:
+        for idx, tc in enumerate(tool_calls):
             self.session.append(E.TOOL_CALL, {
                 "call_id": tc.id, "name": tc.name, "arguments": tc.parsed or {},
             })
@@ -384,10 +392,11 @@ class AgentLoop:
                     run_mode=self.run_mode,
                 )
             except asyncio.CancelledError:
-                self.session.append(E.TOOL_RESULT, {
-                    "call_id": tc.id, "name": tc.name, "status": "error", "result": None,
-                    "error": "用户中止，工具结果未知（恢复后请先检查外部状态再重试）。",
-                })
+                self._fill_tool_results(tool_calls[idx:],
+                                        "用户中止，工具结果未知（恢复后请先检查外部状态再重试）。")
+                raise
+            except Exception as e:
+                self._fill_tool_results(tool_calls[idx:], f"工具执行异常: {e}")
                 raise
             self.session.append(E.TOOL_RESULT, {
                 "call_id": tc.id, "name": tc.name, "status": outcome.status,

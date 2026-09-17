@@ -20,7 +20,7 @@ export const AgentChatDrawer: React.FC = () => {
   const {
     messages, isRunning, wsStatus, approvals, mode, runMode,
     bindProject, send, abort, clearAll, approve,
-    confirmPlan, cancelPlan, executePlan, proposalAction, applyArtifact,
+    executePlan, proposalAction, applyArtifact,
   } = useAgentStore();
 
   // 浮动按钮位置（可拖拽持久化）
@@ -296,8 +296,6 @@ export const AgentChatDrawer: React.FC = () => {
               isRunning={isRunning}
               activeShotIndex={activeShot?.shot_index}
               onSendSuggestion={(t) => void send(t)}
-              onConfirmPlan={confirmPlan}
-              onCancelPlan={cancelPlan}
               onExecutePlan={(id) => void executePlan(id)}
               onProposalAction={handleProposalAction}
               proposalBusy={proposalBusy}

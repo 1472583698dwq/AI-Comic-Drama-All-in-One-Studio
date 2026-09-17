@@ -2,28 +2,13 @@
 """工具注册视图 — MCP 注册表 → 模型 tool schema 的唯一转换点。
 
 - schema 数组按注册表内容哈希缓存，避免每次 run 重建（旧实现每次都造 pydantic 模型）。
-- PLAN_READONLY_TOOLS 白名单硬门控（与 planner 同源）。
+- plan 模式的只读白名单来自 app.agent.mode_policy（单一来源，代码硬门控）。
 """
 import hashlib
 import json
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 
-# 计划模式只读白名单（硬门控；与 app.agent.planner.PLAN_READONLY_TOOLS 同源）
-PLAN_READONLY_TOOLS: Set[str] = {
-    "search_tools",
-    "canvas_query", "canvas_query_assets",
-    "list_assets", "get_asset",
-    "list_image_providers", "list_video_providers", "list_voice_providers",
-    "list_voices", "list_comfyui_workflows", "list_custom_providers",
-    "get_provider_code",
-    "director_3d_stage_plan",
-    "split_novel_script",
-    "creator_inspect_runtime",
-    "list_custom_nodes",
-    "todo_write",
-    "job_list", "job_status",
-    "task_status",
-}
+from app.agent.mode_policy import PLAN_READONLY_TOOLS  # noqa: F401  (对外保持同名导出)
 
 # 每个工具的执行超时（秒）；未列出的用 default。视频类生成较慢。
 _DEFAULT_TIMEOUT_S = 900

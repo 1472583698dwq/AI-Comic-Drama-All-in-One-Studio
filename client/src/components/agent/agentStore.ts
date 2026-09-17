@@ -11,7 +11,7 @@ import { toast } from '../../stores/useDialogStore';
 import { agentSocket } from './agentSocket';
 import { collectFromExecutedTools, dispatchSideEffects, reduceAgentEvent } from './agentEventReducer';
 import type {
-  AgentEvent, AgentMode, AgentSession, ApprovalInfo, ChatMsg, PendingPlan, RunMode, WsStatus,
+  AgentEvent, AgentMode, AgentSession, ApprovalInfo, ChatMsg, RunMode, WsStatus,
 } from './agentTypes';
 
 export const QUICK_ASK = ['这个项目怎么做分镜？', '首尾帧和参考图有什么区别？', '剪映导出需要什么前置条件？'];
@@ -95,36 +95,6 @@ function buildContext(): Record<string, any> {
   };
 }
 
-function planSummaryText(plan: any, runMode: RunMode): string {
-  const localLabel = plan?.label || '执行计划';
-  const secs = Number(plan?.est_total_s || 0);
-  const est = secs >= 60 ? `约${Math.round(secs / 60)}分钟` : `约${secs}s`;
-  const hasProposal = !!plan?.creator_proposal;
-  const tail = hasProposal
-    ? '创造模式附带能力提案，先 Start 试跑再执行主计划。'
-    : plan?.needs_confirm
-      ? '确认后开始执行。'
-      : '风险较低，直接开始执行。';
-  return `**${localLabel}** · ${plan?.reason || ''}，预估${est}（${plan?.run_mode || runMode}）。${tail}`;
-}
-
-/** 把结构化计划转成可注入执行的文本（approve 后随上下文发给 Agent 照做） */
-function planToText(plan: any): string {
-  if (!plan || typeof plan !== 'object') return '';
-  const steps = Array.isArray(plan.steps) ? plan.steps : [];
-  if (!steps.length && !plan.creator_proposal) return '';
-  const lines = [`# ${plan.label || '执行计划'}`];
-  if (plan.reason) lines.push(`依据：${plan.reason}`);
-  if (plan.creator_proposal?.proposal_id) {
-    lines.push(`已生成能力提案 ${plan.creator_proposal.proposal_id}（等待用户在提案卡上 Start 试跑 / 持久化），不要重复提案。`);
-  }
-  steps.forEach((s: any, i: number) => {
-    const args = s?.args_preview && Object.keys(s.args_preview).length ? ` — ${JSON.stringify(s.args_preview)}` : '';
-    lines.push(`${i + 1}. [${s?.tool || '动作'}] ${s?.title || ''}${args}`);
-  });
-  return lines.join('\n');
-}
-
 interface AgentStoreState {
   projectId: string | null;
   sessions: AgentSession[];
@@ -135,7 +105,6 @@ interface AgentStoreState {
   wsStatus: WsStatus;
   streamingMsgId: string | null;
   approvals: Record<string, ApprovalInfo>;
-  pendingPlans: Record<string, PendingPlan>;
   mode: AgentMode;
   runMode: RunMode;
 
@@ -146,8 +115,6 @@ interface AgentStoreState {
   selectSession(id: string): void;
   deleteSession(id: string): Promise<void>;
   send(raw: string): Promise<void>;
-  confirmPlan(msgId: string): void;
-  cancelPlan(msgId: string): void;
   /** Plan Mode 产出计划后：批准并进入执行（注入 approved_plan） */
   executePlan(msgId: string): Promise<void>;
   abort(): void;
@@ -292,13 +259,12 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
     wsStatus: agentSocket.status,
     streamingMsgId: null,
     approvals: {},
-    pendingPlans: {},
     mode: prefs.mode,
     runMode: prefs.runMode,
 
     bindProject(projectId) {
       if (!projectId) {
-        set({ projectId: null, sessions: [], activeSessionId: '', messages: [], isRunning: false, streamingMsgId: null, approvals: {}, pendingPlans: {} });
+        set({ projectId: null, sessions: [], activeSessionId: '', messages: [], isRunning: false, streamingMsgId: null, approvals: {} });
         return;
       }
       if (get().projectId === projectId && get().sessions.length > 0) return;
@@ -312,8 +278,7 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
         isRunning: false,
         streamingMsgId: null,
         approvals: {},
-        pendingPlans: {},
-      });
+          });
       const { mode, runMode } = get();
       apiService
         .getProjectAgentSessions(projectId)
@@ -370,8 +335,7 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
         activeSessionId: sess.id,
         messages: sess.messages,
         approvals: {},
-        pendingPlans: {},
-        streamingMsgId: null,
+            streamingMsgId: null,
         isRunning: false,
       });
       persistNow();
@@ -388,8 +352,7 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
         mode: target.mode || get().mode,
         runMode: target.run_mode || get().runMode,
         approvals: {},
-        pendingPlans: {},
-        streamingMsgId: null,
+            streamingMsgId: null,
         isRunning: false,
       });
     },
@@ -407,7 +370,7 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
       if (remaining.length === 0) {
         const { mode, runMode } = get();
         const sess = makeSession('新会话', mode, runMode);
-        set({ sessions: [sess], activeSessionId: sess.id, messages: sess.messages, approvals: {}, pendingPlans: {} });
+        set({ sessions: [sess], activeSessionId: sess.id, messages: sess.messages, approvals: {} });
       } else if (activeSessionId === id) {
         const first = remaining[0];
         set({
@@ -417,8 +380,7 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
           mode: first.mode || get().mode,
           runMode: first.run_mode || get().runMode,
           approvals: {},
-          pendingPlans: {},
-          streamingMsgId: null,
+                streamingMsgId: null,
           isRunning: false,
         });
       } else {
@@ -448,40 +410,10 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
       commitMessages((prev) => [...prev, userMsg, agentMsg]);
       set({ isRunning: true, streamingMsgId: agentMsg.id, approvals: {} });
 
-      // 计划模式：运行本身就是只读规划，不再做预览闸
-      if (st.mode === 'execute' && !isPlanMode) {
-        try {
-          const plan = await apiService.agentPlanPreview(text, ctx, st.runMode);
-          if (plan && ((plan.steps && plan.steps.length > 0) || (plan as any).creator_proposal)) {
-            patchMsg(agentMsg.id, (m) => ({ ...m, plan, text: planSummaryText(plan, st.runMode) }));
-            if (plan.needs_confirm || (plan as any).creator_proposal) {
-              patchMsg(agentMsg.id, (m) => ({ ...m, isThinkingStreaming: false }));
-              set({
-                pendingPlans: { ...get().pendingPlans, [agentMsg.id]: { text, ctx, mode: st.mode, runMode: st.runMode, plan } },
-                isRunning: false,
-                streamingMsgId: null,
-              });
-              return;
-            }
-          }
-        } catch {
-          // 预览失败不阻塞，直接执行
-        }
-      }
+      // 模式即约束（代码门控，非提示词）：
+      // - plan：runtime 只绑定只读工具（绑定层）且执行口二次拒绝写工具，产出计划后由用户批准执行；
+      // - 其余模式：直接进入 ReAct 循环，工具级审批/风险分级由 pipeline 按 run_mode 裁定。
       await dispatchRun(agentMsg.id, text, ctx, st.mode, st.runMode);
-    },
-
-    confirmPlan(msgId) {
-      const p = get().pendingPlans[msgId];
-      if (!p) return;
-      const next = { ...get().pendingPlans };
-      delete next[msgId];
-      const approvedCtx: Record<string, any> = { ...p.ctx, run_mode: p.runMode };
-      const planText = planToText(p.plan);
-      if (planText) approvedCtx.approved_plan = planText;
-      set({ pendingPlans: next, isRunning: true, streamingMsgId: msgId });
-      patchMsg(msgId, (m) => ({ ...m, planConfirmed: true, isThinkingStreaming: true }));
-      void dispatchRun(msgId, p.text, approvedCtx, p.mode, p.runMode);
     },
 
     async executePlan(msgId) {
@@ -502,13 +434,6 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
       ]);
       set({ isRunning: true, streamingMsgId: agentMsg.id, approvals: {} });
       await dispatchRun(agentMsg.id, text, ctx, 'execute', 'approve');
-    },
-
-    cancelPlan(msgId) {
-      const next = { ...get().pendingPlans };
-      delete next[msgId];
-      set({ pendingPlans: next });
-      patchMsg(msgId, (m) => ({ ...m, plan: null, planConfirmed: false, isThinkingStreaming: false, text: `${m.text || ''}\n\n已取消该计划，可调整说法后重试。` }));
     },
 
     abort() {
@@ -540,7 +465,7 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
       agentSocket.send({ action: 'clear_history', session_id: key });
       const reset: ChatMsg[] = [{ id: uid('welcome_'), sender: 'agent', mode: st.mode, text: '记忆已清空，从头开始吧。', time: '就绪' }];
       commitMessages(() => reset);
-      set({ approvals: {}, pendingPlans: {}, streamingMsgId: null, isRunning: false });
+      set({ approvals: {}, streamingMsgId: null, isRunning: false });
       toast.info('已清空当前会话记忆');
     },
 

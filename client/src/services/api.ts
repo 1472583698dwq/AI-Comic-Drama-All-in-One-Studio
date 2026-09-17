@@ -540,14 +540,6 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
-  async agentPlanPreview(prompt: string, context?: any, runMode?: string): Promise<any> {
-    const res = await fetch(`${API_BASE_URL}/agent/plan/preview`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, context: context || {}, run_mode: runMode || 'approve' }),
-    });
-    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
-    return await res.json();
-  },
   async creatorPropose(goal: string, context?: any): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/agent/creator/propose`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },

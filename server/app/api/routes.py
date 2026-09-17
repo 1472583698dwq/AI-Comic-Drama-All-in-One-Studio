@@ -2278,32 +2278,6 @@ async def clear_agent_history(body: Dict[str, Any] = {}):
     return {"status": "ok", "session_id": session_id, "has_langchain": False}
 
 
-class AgentPlanPreviewRequest(BaseModel):
-    prompt: str = ""
-    context: Dict[str, Any] = Field(default_factory=dict)
-    run_mode: str = "approve"
-
-
-@router.post("/agent/plan/preview")
-async def agent_plan_preview(req: AgentPlanPreviewRequest):
-    """LLM Planner 生成结构化执行计划（失败自动回退关键词规则）：意图 + 可编辑步骤 + 是否需确认 + 预估耗时（含模式闸）"""
-    from app.agent.planner import llm_plan
-    from app.agent.mode_policy import normalize_run_mode, apply_to_plan
-    plan = await llm_plan(req.prompt or "", req.context or {})
-    # 创造模式：若命中补源/新能力意图，附带一份临时提案（不生效，需人Start）
-    mode = normalize_run_mode(req.run_mode)
-    try:
-        if mode == "create":
-            from app.agent import creator as _creator
-            goal = (req.prompt or "")[:500]
-            if any(k in goal for k in ["插件", "插件包", "plugin", "package", "扩展包", "补", "暴露", "参数", "模板", "Skill", "skill", "接入", "源", "H3", "h3", "first_frame"]):
-                prop = _creator.propose_capability(goal, req.context or {})
-                plan["creator_proposal"] = prop
-    except Exception as e:
-        plan["creator_note"] = f"提案生成失败: {e}"[:200]
-    return apply_to_plan(plan, mode)
-
-
 class CreatorProposeRequest(BaseModel):
     goal: str = ""
     context: Dict[str, Any] = Field(default_factory=dict)

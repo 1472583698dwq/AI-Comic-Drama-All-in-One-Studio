@@ -13,6 +13,24 @@ from typing import Any, Dict, Optional
 
 RUN_MODES = ("approve", "auto", "create", "plan")
 
+# 计划模式只读白名单（单一来源：绑定层 app.agent.tools.registry 与执行口 pipeline 都从这里取，
+# 模型即使想变更也无工具可调、调了也会被拒——模式约束靠代码，不靠提示词）。
+PLAN_READONLY_TOOLS = frozenset({
+    "search_tools",
+    "canvas_query", "canvas_query_assets",
+    "list_assets", "get_asset",
+    "list_image_providers", "list_video_providers", "list_voice_providers",
+    "list_voices", "list_comfyui_workflows", "list_custom_providers",
+    "get_provider_code",
+    "director_3d_stage_plan",
+    "split_novel_script",
+    "creator_inspect_runtime",
+    "list_custom_nodes",
+    "todo_write",
+    "job_list", "job_status",
+    "task_status",
+})
+
 # 工具风险分级：low 查询/规划 / medium 单镜生成 / high 批量·覆盖·花钱 / catastrophic 删源·越界写·危险命令
 TOOL_RISK: Dict[str, str] = {
     # 查询规划
@@ -99,30 +117,3 @@ def requires_confirm(tool_name: str, run_mode: str, has_interactive_channel: boo
         return risk in ("medium", "high", "catastrophic")
     return True
 
-
-def apply_to_plan(plan: Dict[str, Any], run_mode: str) -> Dict[str, Any]:
-    """按模式重算 Plan 的 needs_confirm（不改步骤本身）。"""
-    mode = normalize_run_mode(run_mode)
-    steps = plan.get("steps") or []
-    if not steps:
-        plan["needs_confirm"] = False
-        plan["run_mode"] = mode
-        return plan
-    if mode == "auto":
-        # 自动：仅当含 high/灾难步骤才拦一下（给 3s 反悔），否则直跑
-        has_high = any(tool_risk(s.get("tool", "")) in ("high", "catastrophic") for s in steps)
-        plan["needs_confirm"] = bool(has_high)
-        plan["autonomy_hint"] = "自动" if not has_high else "自动·高风险步需确认"
-    elif mode == "plan":
-        # 计划模式：运行本身就是规划（只读），无需再确认
-        plan["needs_confirm"] = False
-        plan["autonomy_hint"] = "规划（只读）"
-    elif mode == "create":
-        plan["needs_confirm"] = True
-        plan["autonomy_hint"] = "创造·提案需Start"
-    else:
-        plan["needs_confirm"] = len(steps) > 1 or plan.get("risk") in ("medium", "high")
-        plan["autonomy_hint"] = plan.get("autonomy_hint") or "审批"
-    plan["run_mode"] = mode
-    plan["budget"] = MODE_BUDGETS.get(mode, {})
-    return plan

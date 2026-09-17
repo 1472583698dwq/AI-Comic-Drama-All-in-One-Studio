@@ -1,35 +1,5 @@
-// 业务意图即时预判（前端镜像，后端 /agent/plan/preview 为权威）
-// 主链：小说->分镜->角色定妆->单镜(机位/生图/视频/配音)->批量一键->画布->剪映导出->素材
-
-export type BusinessIntent =
-  | 'script' | 'character' | 'shot_single' | 'batch_onekey'
-  | 'canvas' | 'export' | 'asset' | 'debug' | 'chat';
-
-const RULES: Array<{ intent: BusinessIntent; label: string; kws: string[]; risk: 'low'|'medium'|'high' }> = [
-  { intent: 'batch_onekey', label: '批量/一键成片', kws: ['一键','整集','全片','批量','全自动','成片','多集','全部镜头'], risk: 'high' },
-  { intent: 'script', label: '编剧拆解', kws: ['小说','拆解','分镜','剧本','章节','导入小说','解析','大纲'], risk: 'medium' },
-  { intent: 'character', label: '角色定妆', kws: ['角色','定妆','三视图','立绘','人设','声线','音色','试音'], risk: 'medium' },
-  { intent: 'canvas', label: '画布编排', kws: ['画布','节点','连线','编排','工作流','dag'], risk: 'medium' },
-  { intent: 'export', label: '导出交付', kws: ['导出','剪映','capcut','草稿','jianyin'], risk: 'medium' },
-  { intent: 'asset', label: '素材复用', kws: ['素材','找图','场景','道具','底图','预演','白模'], risk: 'low' },
-  { intent: 'debug', label: '排障诊断', kws: ['状态','健康','连通','报错','失败','超时','工作流','provider','查错'], risk: 'low' },
-  { intent: 'shot_single', label: '单镜制作', kws: ['生图','重绘','换图','视频','运镜','推镜','拉镜','环绕','配音','台词','机位','特写','当前镜','本镜','镜头','3d','导演'], risk: 'medium' },
-];
-
-export function detectLocalIntent(prompt: string, hasActiveShot: boolean): { intent: BusinessIntent; label: string; risk: string } {
-  const p = (prompt || '').toLowerCase();
-  if (!p.trim()) return { intent: 'chat', label: '问答讲解', risk: 'low' };
-  if (p.length > 200 && !hasActiveShot) {
-    // 长文本大概率是小说正文
-    const hasKw = RULES.some(r => r.kws.some(k => p.includes(k.toLowerCase())));
-    if (!hasKw) return { intent: 'script', label: '编剧拆解', risk: 'medium' };
-  }
-  for (const r of RULES) {
-    if (r.kws.some(k => p.includes(k.toLowerCase()))) return { intent: r.intent, label: r.label, risk: r.risk };
-  }
-  if (hasActiveShot) return { intent: 'shot_single', label: '单镜制作', risk: 'medium' };
-  return { intent: 'chat', label: '问答讲解', risk: 'low' };
-}
+// 业务意图即时预判（前端关键词镜像）已移除：模式约束与计划均由后端 runtime 代码门控完成，
+// 前端不再做关键词路由，避免出现与用户意图无关的假计划。
 
 export interface ArtifactInfo { kind: 'image'|'video'|'audio'; url: string; tool: string; label: string }
 

@@ -1,12 +1,12 @@
 /**
- * Agent 消息列表 — 页面与抽屉共用（含思考推演/计划卡/产物卡/错误卡/工具步骤/建议）
+ * Agent 消息列表 — 页面与抽屉共用（含思考推演/计划模式执行按钮/产物卡/错误卡/工具步骤/建议）
  */
 import React, { useState } from 'react';
 import {
   Bot, User, Sparkles, Wrench, CheckCircle2, XCircle, RefreshCw, ChevronDown, Check, Copy,
 } from 'lucide-react';
 import { MarkdownText } from './MarkdownText';
-import { ArtifactCard, CapabilityProposalCard, ErrorCard, PlanCard } from './AgentCards';
+import { ArtifactCard, CapabilityProposalCard, ErrorCard } from './AgentCards';
 import type { ChatMsg } from './agentTypes';
 
 export interface AgentMessageListProps {
@@ -15,8 +15,6 @@ export interface AgentMessageListProps {
   isRunning?: boolean;
   activeShotIndex?: number;
   onSendSuggestion: (text: string) => void;
-  onConfirmPlan: (msgId: string) => void;
-  onCancelPlan: (msgId: string) => void;
   onExecutePlan: (msgId: string) => void;
   onProposalAction: (msgId: string, proposalId: string, kind: 'start' | 'persist' | 'discard' | 'rollback') => void;
   proposalBusy: Record<string, string>;
@@ -29,8 +27,6 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
   isRunning,
   activeShotIndex,
   onSendSuggestion,
-  onConfirmPlan,
-  onCancelPlan,
   onExecutePlan,
   onProposalAction,
   proposalBusy,
@@ -119,9 +115,6 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
                 <div className="whitespace-pre-wrap">{m.text}</div>
               )}
 
-              {isAgent && m.plan && m.plan.steps.length > 0 && !m.planConfirmed && (
-                <PlanCard plan={m.plan} onConfirm={() => onConfirmPlan(m.id)} onCancel={() => onCancelPlan(m.id)} confirming={!!isRunning} />
-              )}
               {isAgent && (m.plan as any)?.creator_proposal && (
                 <CapabilityProposalCard
                   proposal={(m.plan as any).creator_proposal}
@@ -129,9 +122,6 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
                   onStart={() => onProposalAction(m.id, (m.plan as any).creator_proposal.proposal_id, 'start')}
                   onFinalize={(a) => onProposalAction(m.id, (m.plan as any).creator_proposal.proposal_id, a)}
                 />
-              )}
-              {isAgent && m.plan && m.planConfirmed && (
-                <div className="mt-1.5 text-[10px] text-emerald-300">✓ 计划已确认，正在执行…</div>
               )}
               {isAgent && m.planMode && m.text && !m.isThinkingStreaming && (
                 m.planExecuted ? (

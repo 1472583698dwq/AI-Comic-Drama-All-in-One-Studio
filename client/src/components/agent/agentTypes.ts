@@ -85,14 +85,6 @@ export interface AgentEvent {
   [k: string]: any;
 }
 
-export interface PendingPlan {
-  text: string;
-  ctx: Record<string, any>;
-  mode: AgentMode;
-  runMode: RunMode;
-  plan?: PlanPreview | null;
-}
-
 export interface ApprovalInfo {
   tool_name: string;
   args: Record<string, any>;
