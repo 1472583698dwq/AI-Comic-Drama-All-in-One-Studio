@@ -286,11 +286,19 @@ export const CAPABILITIES: Capability[] = [
         docUrl: 'https://www.volcengine.com/docs/82379',
         fields: [
           KEY('SEEDANCE_API_KEY', 'API Key'),
-          KEY('SEEDANCE_BASE_URL', '接口地址', { kind: 'url', placeholder: 'https://ark.cn-beijing.volces.com/api/v3', required: false }),
-          KEY('SEEDANCE_MODEL', '模型名', {
+          KEY('SEEDANCE_BASE_URL', '接口地址', {
+            kind: 'url', placeholder: 'https://ark.cn-beijing.volces.com', required: false,
+            hint: '带不带 /api/v3 都行，后端会补齐',
+          }),
+          KEY('SEEDANCE_MODEL', '模型名 / 接入点 id', {
             kind: 'text', required: false, placeholder: 'doubao-seedance-2-0-260128',
-            options: ['doubao-seedance-2-0-260128'],
-            hint: 'Ark 上的接入点 ID 也可填这里',
+            options: [
+              'doubao-seedance-2-5-260628',
+              'doubao-seedance-2-0-260128',
+              'doubao-seedance-2-0-fast-260128',
+              'doubao-seedance-2-0-mini-260615',
+            ],
+            hint: 'fast / mini 最高 720p；2.5（260628）支持 1080P 与 30 秒叙事；也可以填推理接入点 id（ep-xxxxxxxxxxxxxx-xxxxx）',
           }),
         ],
       },
@@ -298,18 +306,19 @@ export const CAPABILITIES: Capability[] = [
         id: 'wan3',
         name: '万相 Wan3.0',
         where: 'cloud',
-        summary: '阿里百炼，复用生图那栏的 DASHSCOPE_API_KEY。',
+        summary: '阿里万相。注意它通常是账号专属 MaaS 实例，和通用 DashScope 不是一套 —— Key 和地址都要单独填。',
         test: 'wan3',
         docUrl: 'https://help.aliyun.com/zh/model-studio/',
         fields: [
-          KEY('DASHSCOPE_API_KEY', 'API Key', { hint: '与「阿里通义万相」生图是同一把' }),
+          KEY('WAN_API_KEY', 'API Key', { hint: '留空会回退用生图那栏的 DASHSCOPE_API_KEY，但专属实例通常不通用' }),
+          KEY('WAN3_BASE_URL', '接口地址', {
+            kind: 'url', required: false,
+            placeholder: 'https://ws-xxxxxxxx.us-east-1.maas.aliyuncs.com',
+            hint: '专属实例地址，在百炼控制台看；填错会一直提交失败',
+          }),
           KEY('WAN3_MODEL', '模型名', {
             kind: 'text', required: false, placeholder: 'wan3.0-video',
             options: ['wan3.0-video', 'wan3.0-video-prime'],
-          }),
-          KEY('WAN3_BASE_URL', '接口地址', {
-            kind: 'url', placeholder: 'https://dashscope.aliyuncs.com', required: false,
-            hint: '私有部署 / 专属推理端点时换成自己的网关地址',
           }),
         ],
       },

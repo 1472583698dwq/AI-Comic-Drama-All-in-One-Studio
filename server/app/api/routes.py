@@ -1920,12 +1920,27 @@ async def test_config_connection(req: ConfigTestRequest):
         return {"target": "kling", "ok": True, "detail": "可灵 Kling Key 已配置 (真实生成时校验)"}
 
     if target in ["wan3", "wan"]:
-        api_key = cfg.get("DASHSCOPE_API_KEY") or settings.DASHSCOPE_API_KEY
+        api_key = cfg.get("WAN_API_KEY") or settings.WAN_API_KEY
         if _is_masked_placeholder(api_key):
-            api_key = settings.DASHSCOPE_API_KEY
+            api_key = settings.WAN_API_KEY
+        fallback = False
         if not api_key:
-            return {"target": "wan3", "ok": False, "detail": "DASHSCOPE_API_KEY 未配置 (Wan3.0 复用此Key)"}
-        return {"target": "wan3", "ok": True, "detail": "Wan3.0 Key 已配置 (wan3.0-video, 真实生成时校验)"}
+            api_key = cfg.get("DASHSCOPE_API_KEY") or settings.DASHSCOPE_API_KEY
+            if _is_masked_placeholder(api_key):
+                api_key = settings.DASHSCOPE_API_KEY
+            fallback = bool(api_key)
+        if not api_key:
+            return {"target": "wan3", "ok": False, "detail": "WAN_API_KEY 未配置（万相多为账号专属实例，与通用 DashScope Key 不通用）"}
+        base = (cfg.get("WAN3_BASE_URL") or settings.WAN3_BASE_URL or "").rstrip("/")
+        notes = []
+        if fallback:
+            notes.append("当前用的是 DASHSCOPE_API_KEY 回退；若万相是专属实例，需单独填 WAN_API_KEY")
+        if "maas.aliyuncs.com" not in base:
+            notes.append(f"接口地址是 {base or '(空)'}；专属实例通常形如 https://ws-xxxx.us-east-1.maas.aliyuncs.com")
+        detail = "Wan3.0 Key 已配置（真实生成时校验）"
+        if notes:
+            detail += " —— " + "；".join(notes)
+        return {"target": "wan3", "ok": True, "detail": detail}
 
     # 生图：自定义（OpenAI 兼容）通道。Key 独立，留空才回退文本大模型的 Key，
     # 与 providers/image/openai_compat.py 的回退链保持一致，否则「设置里测通、生成时却报未配置」。

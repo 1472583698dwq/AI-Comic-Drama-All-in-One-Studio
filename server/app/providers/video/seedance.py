@@ -4,7 +4,11 @@ Seedance 默认视频生成源 (内置, 字节火山引擎 Ark)
 官方文档: https://www.volcengine.com/product/ark (Seedance 2.x 视频生成 API)
   - 创建: POST {BASE}/contents/generations/tasks -> {"id": ...}
   - 查询: GET  {BASE}/contents/generations/tasks/{id} -> {"id","status":"queued|running|succeeded|failed|expired","content":{"video_url":...}}
-模型: doubao-seedance-2-0-260128 (标准) / -fast-260128 (极速) / doubao-seedance-2-5-260628 (2.5, 30s)
+模型: 填模型名 (doubao-seedance-2-0-260128 / -fast-260128 / doubao-seedance-2-5-260628)
+      或推理接入点 id (ep-xxxxxxxxxxxxxx-xxxxx)，两者都接受
+参数分层 (照已验证的 sd25pe 口径): generate_audio/return_last_frame/draft 走 JSON 顶层，
+      resolution/ratio/duration/watermark 必须拼成 --xxx 追加在 prompt 尾部；
+      有参考素材时不传 ratio；有参考视频时 duration 强制 -1 且带 omni_reference_task_type=edit
 鉴权: Bearer SEEDANCE_API_KEY (火山 Ark API Key)
 缺 Key 时 is_configured()=False, 注册表自动跳过。
 注意: 输入含真人脸会被上游审核拒绝, 请用模型生成/非写实素材。
@@ -36,6 +40,21 @@ def _abs_url(url: str) -> str:
     if url.startswith("/"):
         return f"http://127.0.0.1:8000{url}"
     return url
+
+
+# 方舟只有这三个参数走 JSON 顶层，其余一律拼进 prompt 尾部当 --xxx。
+# 口径来自已验证可用的 sd25pe（server/providers.js 的 ark()），不是猜的。
+_ARK_JSON_KEYS = ("generate_audio", "return_last_frame", "draft")
+
+
+def _norm_base(base: str) -> str:
+    """填 https://ark.cn-beijing.volces.com 或带 /api/v3 都能用。"""
+    b = (base or "").strip().rstrip("/")
+    if not b:
+        b = "https://ark.cn-beijing.volces.com"
+    if b.endswith("/api/v3"):
+        return b
+    return b + "/api/v3"
 
 
 def _map_resolution(res: Optional[str]) -> str:
@@ -117,7 +136,7 @@ class SeedanceVideoProvider(VideoProvider):
         if not (req.prompt or "").strip():
             raise ValueError("提示词不能为空")
         started = time.time()
-        base = (getattr(settings, "SEEDANCE_BASE_URL", "") or "https://ark.cn-beijing.volces.com/api/v3").rstrip("/")
+        base = _norm_base(getattr(settings, "SEEDANCE_BASE_URL", ""))
         dyn = req.dynamic_inputs if isinstance(req.dynamic_inputs, dict) else {}
         extra = req.extra if isinstance(req.extra, dict) else {}
         model = (dyn.get("model") or extra.get("model") or getattr(settings, "SEEDANCE_MODEL", "") or "doubao-seedance-2-0-260128").strip()
@@ -143,10 +162,10 @@ class SeedanceVideoProvider(VideoProvider):
             content.append({"type": "image_url", "image_url": {"url": _abs_url(last)}, "role": "last_frame"})
         for u in (ref_imgs or [])[:9]:
             if u:
-                content.append({"type": "image_url", "image_url": {"url": _abs_url(u)}})
+                content.append({"type": "image_url", "role": "reference_image", "image_url": {"url": _abs_url(u)}})
         for u in (ref_vids or [])[:3]:
             if u:
-                content.append({"type": "video_url", "video_url": {"url": _abs_url(u)}})
+                content.append({"type": "video_url", "role": "reference_video", "video_url": {"url": _abs_url(u)}})
         for u in (ref_auds or [])[:3]:
             if u:
                 content.append({"type": "audio_url", "audio_url": {"url": _abs_url(u)}})
@@ -167,9 +186,22 @@ class SeedanceVideoProvider(VideoProvider):
             gen_audio = gen_audio.strip().lower() in ("1", "true", "yes", "on")
         watermark = bool(dyn.get("watermark", extra.get("watermark", False)))
 
-        payload = {"model": model, "content": content, "resolution": resolution,
-                   "ratio": ratio, "duration": duration,
-                   "generate_audio": bool(gen_audio), "watermark": bool(watermark)}
+        # 方舟的参数分两层：generate_audio 这类走 JSON 顶层，resolution/ratio/duration/watermark
+        # 这类必须拼成 --xxx 追加到 prompt 文本尾部。放错层不会报错，但参数会被静默忽略。
+        has_ref = bool(first or last or ref_imgs or ref_vids)
+        flags = [f"--resolution {resolution}", f"--watermark {'true' if watermark else 'false'}"]
+        if not has_ref:
+            # 有参考素材时画幅由素材决定，传了反而冲突
+            flags.insert(0, f"--ratio {ratio}")
+        top: Dict[str, Any] = {"generate_audio": bool(gen_audio)}
+        if ref_vids:
+            # 带参考视频＝编辑类任务：时长跟随原片，覆盖调用方传进来的值
+            flags.append("--duration -1")
+            top["omni_reference_task_type"] = "edit"
+        else:
+            flags.append(f"--duration {duration}")
+        content[0]["text"] = f"{content[0]['text']} {' '.join(flags)}".strip()
+        payload = {"model": model, **top, "content": content}
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         url = f"{base}/contents/generations/tasks"
         async with httpx.AsyncClient(timeout=1200.0) as client:
