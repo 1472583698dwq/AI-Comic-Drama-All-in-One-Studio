@@ -183,23 +183,26 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
       if (kind === 'video' && !result.video_url && result.task_id) {
         updateNodeData(nodeId, { _taskId: result.task_id, _polling: true });
         let url = '';
-        let lastErr = '';
         for (let i = 0; i < 500; i++) {
           await new Promise((r) => setTimeout(r, 3000));
+          let st: any;
           try {
-            const st: any = await apiService.getVideoTaskStatus(result.task_id);
-            const s = (st.status || st.state || '').toString().toUpperCase();
-            if (s === 'SUCCESS' || s === 'COMPLETED') {
-              url = st.video_url || st.videoUrl || st.results?.[0] || st.url || '';
-              if (url) break;
-            }
-            if (s === 'FAILED' || s === 'FAIL' || s === 'ERROR') throw new Error(st.error || st.msg || '视频任务失败');
-          } catch (e: any) {
-            const msg = e?.message || '';
-            if (msg.includes('任务失败') || msg.includes('FAILED')) { lastErr = msg; break; }
+            st = await apiService.getVideoTaskStatus(result.task_id);
+          } catch {
+            continue; // 状态接口网络抖动：继续轮询，不误杀任务
+          }
+          const s = (st.status || st.state || '').toString().toUpperCase();
+          if (s === 'SUCCESS' || s === 'COMPLETED') {
+            url = st.video_url || st.videoUrl || st.results?.[0] || st.url || '';
+            if (url) break;
+            continue;
+          }
+          // 终态失败：把后端真实错误上抛（含 last_error 兜底），不再静默轮询
+          if (s === 'FAILED' || s === 'FAIL' || s === 'ERROR' || s === 'TIMEOUT' || s === 'CANCELLED' || s === 'CANCELED') {
+            throw new Error(st.error || st.msg || st.last_error || '视频任务失败');
           }
         }
-        if (!url) throw new Error(lastErr || `视频排队超时 task_id=${result.task_id}，task_id 已保留在节点，可恢复查询`);
+        if (!url) throw new Error(`视频排队超时 task_id=${result.task_id}，task_id 已保留在节点，可恢复查询`);
         result.video_url = url;
         updateNodeData(nodeId, { _polling: false });
       }

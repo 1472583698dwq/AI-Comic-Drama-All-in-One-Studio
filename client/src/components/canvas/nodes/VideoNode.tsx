@@ -47,17 +47,20 @@ export const VideoNode: React.FC<NodeProps> = ({ data, id }) => {
         (d.onUpdate as any)?.(id, { video_url: "", _taskId: taskId, _polling: true });
         for (let i = 0; i < 500; i++) {
           await new Promise(r => setTimeout(r, 3000));
+          let st: any;
           try {
-            const st: any = await apiService.getVideoTaskStatus(taskId);
-            const status = (st.status || st.state || "").toString().toUpperCase();
-            if (status === "SUCCESS" || status === "COMPLETED") {
-              url = st.video_url || st.videoUrl || (st.results && st.results[0]) || "";
-              if (url) break;
-            } else if (status === "FAILED" || status === "FAIL" || status === "ERROR") {
-              throw new Error(st.error || st.msg || "视频任务失败");
-            }
-          } catch (e: any) {
-            if (e?.message && e.message.includes("not_found")) continue;
+            st = await apiService.getVideoTaskStatus(taskId);
+          } catch {
+            continue; // 状态接口网络抖动：继续轮询，不误杀任务
+          }
+          const status = (st.status || st.state || "").toString().toUpperCase();
+          if (status === "SUCCESS" || status === "COMPLETED") {
+            url = st.video_url || st.videoUrl || (st.results && st.results[0]) || "";
+            if (url) break;
+            continue;
+          }
+          if (status === "FAILED" || status === "FAIL" || status === "ERROR" || status === "TIMEOUT" || status === "CANCELLED" || status === "CANCELED") {
+            throw new Error(st.error || st.msg || st.last_error || "视频任务失败");
           }
         }
         if (!url) throw new Error("视频生成排队超时，请稍后在画布执行结果中查看或重试");

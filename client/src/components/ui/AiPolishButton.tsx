@@ -18,6 +18,7 @@ import {
   Film,
   Camera,
   Search,
+  FileCode,
 } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { useEscapeClose } from '../../hooks/useEscapeClose';

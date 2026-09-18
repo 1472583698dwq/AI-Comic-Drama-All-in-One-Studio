@@ -329,6 +329,8 @@ class TaskCenter:
         local = str(snap.get("local_path") or "")
         status = normalize_status(snap.get("status"))
         rec.remote_status = status
+        if snap.get("last_error"):
+            rec.meta["last_error"] = str(snap.get("last_error"))[:200]
         rec.updated_at = time.time()
         if url:
             rec.video_url = await self._localize(rec, url, local)

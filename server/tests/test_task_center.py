@@ -185,6 +185,58 @@ class TestTaskTools(TempStorage):
         self.assertIn("任务不存在", out.error)
 
 
+class TestCodeSourceQueryFailure(TempStorage):
+    """代码源查询分支按契约 raise 终态失败 → 必须判 FAILED 并暴露真实错误（不得静默空转到超时）。"""
+
+    def _save_video_provider(self, pid: str, code: str):
+        from app.models.provider_definition import ProviderDefinition
+        from app.providers.custom.manager import custom_provider_manager
+        pd = ProviderDefinition(id=pid, name=pid, kind="video", provider_type="code",
+                                code=code, language="python", code_entry="generate")
+        custom_provider_manager.save_definition(pd)
+
+    def test_raised_failure_settles_failed(self):
+        pid = self.unique("prov_fail")
+        self._save_video_provider(pid, '''
+async def generate(ctx, api):
+    dyn = ctx.get("dynamic_inputs") or {}
+    tid = str(ctx.get("task_id") or dyn.get("task_id") or "").strip()
+    if tid and not str(ctx.get("prompt") or "").strip():
+        raise RuntimeError("任务失败(FAILED): 内容审核未通过")
+    return {"video_url": None, "task_id": "t_submit", "status": "SUBMITTED"}
+''')
+        tid = self.unique("code_fail")
+
+        async def scenario():
+            task_center.register(tid, pid, "video", timeout_s=30)
+            return await task_center.wait(tid, timeout_s=5)
+
+        rec = run(scenario())
+        self.assertEqual(rec.status, "FAILED")
+        self.assertIn("任务失败", rec.error or "")
+
+    def test_network_error_not_terminal(self):
+        pid = self.unique("prov_net")
+        self._save_video_provider(pid, '''
+async def generate(ctx, api):
+    dyn = ctx.get("dynamic_inputs") or {}
+    tid = str(ctx.get("task_id") or dyn.get("task_id") or "").strip()
+    if tid and not str(ctx.get("prompt") or "").strip():
+        raise RuntimeError("Connection refused by remote host")
+    return {"video_url": None, "task_id": "t_submit", "status": "SUBMITTED"}
+''')
+        tid = self.unique("code_net")
+
+        async def scenario():
+            task_center.register(tid, pid, "video", timeout_s=30)
+            return await task_center.wait(tid, timeout_s=1)
+
+        rec = run(scenario())
+        # 网络类异常不误杀：仍非终态，但错误已记录可见
+        self.assertFalse(rec.terminal)
+        self.assertIn("Connection refused", rec.meta.get("last_error") or "")
+
+
 class TestMCPTaskIntegration(TempStorage):
     """provider_xxx MCP 工具全链路：提交即返 task_id → TaskCenter 阻塞 → 返回 video_url。"""
 

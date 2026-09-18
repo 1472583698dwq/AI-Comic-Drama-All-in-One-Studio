@@ -409,6 +409,54 @@ def code_gen_system_prompt(kind: str, language: str, tmpl: str = "") -> str:
 """
 
 
+def _strip_code_fences(text: str) -> str:
+    """去掉 markdown 代码围栏，返回纯代码。"""
+    t = (text or "").strip()
+    t = re.sub(r"^```[a-zA-Z]*\s*\n", "", t)
+    t = re.sub(r"\n```\s*$", "", t.strip())
+    return t.strip()
+
+
+async def llm_generate_code(kind: str, language: str, doc_text: str, name_hint: str = "") -> str:
+    """LLM 生成生成源代码的单点入口（MCP register 文档分支 / /providers/import / Creator 草稿共用）。
+
+    优先走 Agent 适配器（流式 + 重试，兼容推理模型）：推理模型会把 max_tokens 烧在思考上，
+    因此逐级放大预算（16384→32768）；输出为空且因长度截断时自动重试。失败再回落 llm_service。
+    """
+    lang = "javascript" if language in ("javascript", "js", "node") else "python"
+    tmpl = CODE_TEMPLATES.get((lang, kind)) or CODE_TEMPLATES.get(("python", kind)) or ""
+    system_prompt = code_gen_system_prompt(kind, lang, tmpl)
+    user_prompt = f"kind: {kind}\nlanguage: {lang}\n" + (f"name_hint: {name_hint}\n" if name_hint else "") + f"\nAPI 文档:\n{(doc_text or '')[:6000]}"
+    messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
+    last_err: Optional[Exception] = None
+    # 1) Agent 适配器（与导演 Agent 同一运输层）
+    try:
+        from app.agent.llm.adapter import adapter
+        for mt in (16384, 32768):
+            try:
+                reply = await adapter.complete(messages, temperature=0.2, max_tokens=mt, timeout=600)
+            except Exception as e:
+                last_err = e
+                break
+            text = _strip_code_fences(reply.content or "")
+            if len(text) >= 20:
+                return text
+            last_err = RuntimeError(f"模型输出为空（finish={reply.finish_reason}，思考可能占满 max_tokens={mt}）")
+            if reply.finish_reason != "length":
+                break
+    except Exception as e:
+        last_err = e
+    # 2) llm_service 回落（老网关）
+    try:
+        from app.pipelines.llm_service import llm_service
+        text = _strip_code_fences(str(await llm_service.chat_completion(messages=messages, temperature=0.2) or ""))
+        if len(text) >= 20:
+            return text
+    except Exception as e:
+        last_err = e
+    raise RuntimeError(f"LLM 代码生成失败: {str(last_err)[:300]}")
+
+
 def create_code_source(
     *,
     name: str,
@@ -1155,18 +1203,11 @@ async def import_provider_from_doc(req: ProviderImportRequest):
             doc_content += f"\nOpenAPI fetch failed: {e}"
     if not doc_content or len(doc_content.strip()) < 10:
         raise HTTPException(status_code=400, detail="请提供 doc_text / doc_url / curl / openapi_url 或 definition")
-    # LLM 生成代码
+    # LLM 生成代码（单点：优先 Agent 适配器，抗推理模型烧光 max_tokens）
     try:
-        from app.pipelines.llm_service import llm_service
         lang = (req.language or "python").lower()
         if lang == "js": lang = "javascript"
-        tmpl = CODE_TEMPLATES.get((lang, req.kind)) or CODE_TEMPLATES.get(("python", req.kind)) or ""
-        system_prompt = code_gen_system_prompt(req.kind, lang, tmpl)
-        user_prompt = f"kind: {req.kind}\nlanguage: {lang}\nname_hint: {req.name or ''}\n\nAPI 文档:\n{doc_content[:6000]}"
-        code_text = await llm_service.chat_completion(
-            messages=[{"role":"system","content":system_prompt},{"role":"user","content":user_prompt}],
-            temperature=0.2
-        )
+        code_text = await llm_generate_code(req.kind, lang, doc_content, req.name or "")
         if len((code_text or "").strip()) < 50:
             raise ValueError("LLM 生成代码过短")
         inferred = _infer_kind_from_doc(doc_content, "")

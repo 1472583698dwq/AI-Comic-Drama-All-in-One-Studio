@@ -1793,19 +1793,8 @@ class MCPServerRegistry:
                             pass
                     if not full_doc or len(full_doc.strip()) < 10:
                         raise ValueError("请提供 code，或 doc_text / doc_url / curl / openapi_url 以便生成代码")
-                    from app.pipelines.llm_service import llm_service as _llm
-                    from app.api.provider_routes import code_gen_system_prompt as _cgsp, create_code_source as _ccs
-                    system_prompt = _cgsp(kind, language)
-                    user_prompt = "kind: " + kind + "\nlanguage: " + language + "\nname_hint: " + (name or "") + "\n\nAPI 文档:\n" + full_doc[:5000]
-                    try:
-                        code_text = await _llm.chat_completion(
-                            messages=[{"role":"system","content":system_prompt},{"role":"user","content":user_prompt}],
-                            temperature=0.2
-                        )
-                    except Exception:
-                        code_text = await _llm.chat_json(system_prompt=system_prompt, user_prompt=user_prompt, temperature=0.2)
-                        if isinstance(code_text, dict):
-                            code_text = code_text.get("code") or str(code_text)
+                    from app.api.provider_routes import llm_generate_code as _lgc, create_code_source as _ccs
+                    code_text = await _lgc(kind, language, full_doc, name or "")
                     # 统一创建入口：代码清洗/schema 规整/超时/保存注册/Key/沙箱体检 一条龙
                     _created = _ccs(
                         name=name or f"自定义{kind}源", kind=kind, code=code_text, language=language,
@@ -1902,9 +1891,19 @@ class MCPServerRegistry:
                     if not isinstance(_models, list):
                         raise ValueError("models 需为字符串数组")
                     pd.models = [str(m) for m in _models]
-                for field in ["name","description","code","code_entry","default_model","doc_text"]:
+                for field in ["name","description","code","code_entry","default_model","doc_text",
+                              "input_schema","params_schema","output_schema","default_params"]:
                     if field in arguments and arguments[field] is not None:
                         setattr(pd, field, arguments[field])
+                # schema 规整：补全 x-*（与创建/读取同一单点口径）
+                try:
+                    from app.api.provider_routes import _enrich_input_schema, _enrich_params_schema
+                    if isinstance(pd.input_schema, dict) and pd.input_schema.get("properties"):
+                        pd.input_schema = _enrich_input_schema(pd.input_schema, pd.kind)
+                    if isinstance(pd.params_schema, dict) and pd.params_schema.get("properties"):
+                        pd.params_schema = _enrich_params_schema(pd.params_schema, pd.kind)
+                except Exception:
+                    pass
                 if "trusted" in arguments and arguments["trusted"] is not None:
                     v = arguments["trusted"]
                     pd.trusted = bool(v) if not isinstance(v, str) else v.strip().lower() in ("1", "true", "yes", "on")

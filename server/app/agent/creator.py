@@ -459,12 +459,16 @@ def _resolve_target_provider(goal: str) -> Dict[str, Any]:
             score += 5
         if (d.name or "").lower() and (d.name or "").lower() in g:
             score += 3
-        for tok in ("h3", "first_frame", "首帧", "autodl", "kling", "flux"):
+        for tok in ("h3", "first_frame", "首帧", "autodl", "kling", "flux", "runninghub", "双采", "minimax", "参考生视频"):
             if tok in g and tok in hay:
                 score += 2
         if score > 0:
             scored.append((score, d))
     scored.sort(key=lambda x: -x[0])
+    # 并列第一 = 无法唯一确定目标：宁可让人选，也不静默改错源（误改比不改更糟）
+    if len(scored) >= 2 and scored[0][0] == scored[1][0]:
+        return {"provider": None, "ambiguous": True,
+                "candidates": [{"id": d.id, "name": d.name, "kind": d.kind} for _, d in scored[:5]]}
     if scored:
         best = scored[0][1]
         cands = [{"id": d.id, "name": d.name, "kind": d.kind} for _, d in scored[:5]]
@@ -547,27 +551,17 @@ async def _draft_code_for_goal(goal: str, kind_hint: str = "") -> Dict[str, Any]
     goal = (goal or "").strip()
     if len(goal) < 20:
         return {"ok": False, "error": "goal 太短，无法草拟代码"}
-    from app.api.provider_routes import code_gen_system_prompt, CODE_TEMPLATES, _infer_kind_from_doc
+    from app.api.provider_routes import llm_generate_code, _infer_kind_from_doc
     from app.providers.generic.code_provider import compile_check_code
     kind = kind_hint or _infer_kind_from_doc(goal, "") or "image"
-    lang = "python"
-    tmpl = CODE_TEMPLATES.get((lang, kind)) or CODE_TEMPLATES.get(("python", kind)) or ""
-    system_prompt = code_gen_system_prompt(kind, lang, tmpl)
-    user_prompt = f"kind: {kind}\nlanguage: {lang}\n\nAPI 文档:\n{goal[:6000]}"
-    from app.pipelines.llm_service import llm_service
     try:
-        code_text = await llm_service.chat_completion(
-            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
-            temperature=0.2,
-        )
-    except Exception:
-        code_text = await llm_service.chat_json(system_prompt=system_prompt, user_prompt=user_prompt, temperature=0.2)
-        if isinstance(code_text, dict):
-            code_text = code_text.get("code") or str(code_text)
+        code_text = await llm_generate_code(kind, "python", goal)
+    except Exception as e:
+        return {"ok": False, "kind": kind, "error": f"草拟异常: {str(e)[:200]}"}
     code_text = str(code_text or "").strip()
     if len(code_text) < 50:
         return {"ok": False, "kind": kind, "error": "LLM 生成代码过短"}
-    cc = compile_check_code(lang, code_text, "generate")
+    cc = compile_check_code("python", code_text, "generate")
     return {"ok": bool(cc.get("ok")), "kind": kind, "code": code_text, "error": cc.get("error")}
 
 

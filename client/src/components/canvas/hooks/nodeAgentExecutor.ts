@@ -80,23 +80,26 @@ export function buildAgentArgs(d: any, prompt: string, extraKeys: string[] = [])
 }
 
 async function pollVideoTask(taskId: string): Promise<string> {
-  let lastErr = '';
   for (let i = 0; i < 500; i++) {
     await new Promise((r) => setTimeout(r, 3000));
+    let st: any;
     try {
-      const st: any = await apiService.getVideoTaskStatus(taskId);
-      const s = (st.status || st.state || '').toString().toUpperCase();
-      if (s === 'SUCCESS' || s === 'COMPLETED') {
-        const url = st.video_url || st.videoUrl || st.results?.[0] || st.url || '';
-        if (url) return url;
-      }
-      if (s === 'FAILED' || s === 'FAIL' || s === 'ERROR') throw new Error(st.error || st.msg || '视频任务失败');
-    } catch (e: any) {
-      const msg = e?.message || '';
-      if (msg.includes('任务失败') || msg.includes('FAILED')) { lastErr = msg; break; }
+      st = await apiService.getVideoTaskStatus(taskId);
+    } catch {
+      continue; // 状态接口网络抖动：继续轮询，不误杀任务
+    }
+    const s = (st.status || st.state || '').toString().toUpperCase();
+    if (s === 'SUCCESS' || s === 'COMPLETED') {
+      const url = st.video_url || st.videoUrl || st.results?.[0] || st.url || '';
+      if (url) return url;
+      continue;
+    }
+    // 终态失败：把后端真实错误上抛（含 last_error 兜底），不再静默轮询
+    if (s === 'FAILED' || s === 'FAIL' || s === 'ERROR' || s === 'TIMEOUT' || s === 'CANCELLED' || s === 'CANCELED') {
+      throw new Error(st.error || st.msg || st.last_error || '视频任务失败');
     }
   }
-  throw new Error(lastErr || `视频排队超时 task_id=${taskId}，请稍后重试或查看 /storage/videos/`);
+  throw new Error(`视频排队超时 task_id=${taskId}，请稍后重试或查看 /storage/videos/`);
 }
 
 const _customDefCache = new Map<string, any>();

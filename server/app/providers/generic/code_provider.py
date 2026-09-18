@@ -56,14 +56,41 @@ def _get_generated_dir():
 
 
 async def _download_to_storage(url: str, prefix: str = "gen") -> tuple[str, str]:
+    """把远端 URL / data: URI / 本地 storage 引用统一落到 storage，返回 (storage_url, local_path)。
+    代码源拿到的参考图多为框架内联的 data: URI 或既有 /storage 路径，旧实现只认 http(s) → 必炸。"""
+    import base64 as _b64
+    from urllib.parse import unquote as _unquote
     from app.core.config import settings
     gen_dir = _get_generated_dir()
-    async with httpx.AsyncClient(timeout=40.0) as client:
-        resp = await client.get(url, timeout=40.0)
-        resp.raise_for_status()
-        content = resp.content
-        ct = resp.headers.get("content-type", "")
-        ext = ".png"
+    src = str(url or "").strip()
+    if not src:
+        raise RuntimeError("download: 空 URL")
+    if src.startswith("/storage/"):
+        local_path = os.path.join(settings.STORAGE_DIR, src[len("/storage/"):].replace("/", os.sep))
+        if os.path.isfile(local_path):
+            return src, local_path
+        raise RuntimeError(f"download: 本地文件不存在 {src}")
+    ext = ".png"
+    if src.startswith("data:"):
+        head, _, payload = src.partition(",")
+        if not payload:
+            raise RuntimeError("download: 非法 data URI")
+        mime = head[5:].split(";")[0].strip().lower()
+        ext = {
+            "image/jpeg": ".jpg", "image/jpg": ".jpg", "image/webp": ".webp", "image/gif": ".gif",
+            "audio/mpeg": ".mp3", "audio/mp3": ".mp3", "audio/wav": ".wav", "audio/x-wav": ".wav",
+            "video/mp4": ".mp4", "video/webm": ".webm",
+        }.get(mime, ".png")
+        try:
+            content = _b64.b64decode(payload) if ";base64" in head.lower() else _unquote(payload).encode("utf-8")
+        except Exception as e:
+            raise RuntimeError(f"download: data URI 解码失败: {e}")
+    else:
+        async with httpx.AsyncClient(timeout=40.0) as client:
+            resp = await client.get(src, timeout=40.0)
+            resp.raise_for_status()
+            content = resp.content
+            ct = resp.headers.get("content-type", "")
         if "jpeg" in ct or "jpg" in ct:
             ext = ".jpg"
         elif "webp" in ct:
@@ -74,24 +101,24 @@ async def _download_to_storage(url: str, prefix: str = "gen") -> tuple[str, str]
             ext = ".mp4"
         elif "wav" in ct:
             ext = ".wav"
-        elif url.endswith(".mp3"):
+        elif src.endswith(".mp3"):
             ext = ".mp3"
-        elif url.endswith(".mp4"):
+        elif src.endswith(".mp4"):
             ext = ".mp4"
-        filename = f"{prefix}_{int(time.time())}_{uuidlib.uuid4().hex[:8]}{ext}"
-        if ext in (".mp4", ".mov", ".webm"):
-            videos_dir = os.path.join(settings.STORAGE_DIR, "videos")
-            os.makedirs(videos_dir, exist_ok=True)
-            local_path = os.path.join(videos_dir, filename)
-            storage_url = f"/storage/videos/{filename}"
-        else:
-            local_path = os.path.join(gen_dir if ext in (".png",".jpg",".webp") else settings.STORAGE_DIR, filename)
-            storage_url = f"/storage/generated/{filename}" if ext in (".png",".jpg",".webp") else f"/storage/{filename}"
-            if ext in (".mp3",".wav"):
-                storage_url = f"/storage/{filename}"
-        with open(local_path, "wb") as f:
-            f.write(content)
-        return storage_url, local_path
+    filename = f"{prefix}_{int(time.time())}_{uuidlib.uuid4().hex[:8]}{ext}"
+    if ext in (".mp4", ".mov", ".webm"):
+        videos_dir = os.path.join(settings.STORAGE_DIR, "videos")
+        os.makedirs(videos_dir, exist_ok=True)
+        local_path = os.path.join(videos_dir, filename)
+        storage_url = f"/storage/videos/{filename}"
+    else:
+        local_path = os.path.join(gen_dir if ext in (".png",".jpg",".webp",".gif") else settings.STORAGE_DIR, filename)
+        storage_url = f"/storage/generated/{filename}" if ext in (".png",".jpg",".webp",".gif") else f"/storage/{filename}"
+        if ext in (".mp3",".wav"):
+            storage_url = f"/storage/{filename}"
+    with open(local_path, "wb") as f:
+        f.write(content)
+    return storage_url, local_path
 
 
 def _is_trusted_provider(definition=None, trusted_override=None) -> bool:
@@ -298,12 +325,20 @@ def _run_guarded_sync(fn, timeout: int, timeout_msg: str):
     raise payload
 
 
+def _exec_module_sync(code: str, g: Dict[str, Any], l: Dict[str, Any]) -> None:
+    """执行模块级代码；随后把 l 并回 g。
+    关键：分开的 g/l 会让 fn.__globals__ 只剩 g，模块级辅助函数（def _upload_ref）互相不可见
+    → 运行时必 NameError（'name X is not defined'）。并回后函数体内查全局名就能命中。"""
+    exec(code, g, l)
+    g.update(l)
+
+
 async def _exec_module_guarded(code: str, g: Dict[str, Any], l: Dict[str, Any], timeout: int = 20) -> None:
     """模块级 exec 隔离执行：顶层死循环/sleep 不再卡死事件循环致服务假死重启。"""
     try:
         await asyncio.to_thread(
             _run_guarded_sync,
-            lambda: exec(code, g, l),
+            lambda: _exec_module_sync(code, g, l),
             timeout,
             f"code module-level timeout ({timeout}s)：顶层代码疑似死循环/阻塞，已中断",
         )
@@ -326,6 +361,9 @@ async def _execute_python_code(code: str, entry: str, ctx: Dict[str, Any], timeo
             raise RuntimeError(f"entry '{entry}' not found")
     if not callable(fn):
         raise RuntimeError(f"entry '{entry}' not callable")
+    missing = _audit_missing_globals(fn)
+    if missing:
+        raise RuntimeError(f"entry '{entry}' 引用了未定义的全局名: {', '.join(missing)}")
     try:
         coro = fn(ctx, api)
         if asyncio.iscoroutine(coro):
@@ -342,6 +380,39 @@ async def _execute_python_code(code: str, entry: str, ctx: Dict[str, Any], timeo
     except BaseException as e:
         # SystemExit/KeyboardInterrupt 等必须就地转为普通错误，否则穿透 FastAPI 杀死 worker 致服务崩溃重启
         raise RuntimeError(f"code execution failed: {e}") from e
+
+
+def _audit_missing_globals(fn) -> list:
+    """静态审计入口函数（含嵌套）引用的全局名：不在沙箱全局/内置字典中 → 调用时必 NameError。
+    只看 LOAD_GLOBAL/LOAD_NAME（属性访问走 LOAD_ATTR/LOAD_METHOD，不会误报）。"""
+    try:
+        import dis as _dis
+        import types as _types
+    except Exception:
+        return []
+    g = getattr(fn, "__globals__", None) or {}
+    allowed = set(g.keys())
+    b = g.get("__builtins__")
+    if isinstance(b, dict):
+        allowed |= set(b.keys())
+    elif b is not None:
+        allowed |= set(dir(b))
+    missing, seen = [], set()
+
+    def walk(c):
+        if not isinstance(c, _types.CodeType):
+            return
+        for ins in _dis.get_instructions(c):
+            if ins.opname in ("LOAD_GLOBAL", "LOAD_NAME"):
+                name = str(ins.argval)
+                if name not in allowed and name not in seen:
+                    seen.add(name)
+                    missing.append(name)
+        for const in c.co_consts:
+            walk(const)
+
+    walk(getattr(fn, "__code__", None))
+    return missing
 
 
 def compile_check_code(language: str, code: str, entry: str = "generate", trusted: bool = False) -> Dict[str, Any]:
@@ -382,7 +453,7 @@ def compile_check_code(language: str, code: str, entry: str = "generate", truste
         return {"ok": False, "error": str(e)}
     g, l, _api = _python_sandbox({}, trusted=trusted)
     try:
-        _run_guarded_sync(lambda: exec(code, g, l), 20,
+        _run_guarded_sync(lambda: _exec_module_sync(code, g, l), 20,
                           "沙箱编译超时(20s)：顶层代码疑似死循环/阻塞")
     except BaseException as e:
         return {"ok": False, "error": f"沙箱编译失败: {e}"}
@@ -393,6 +464,9 @@ def compile_check_code(language: str, code: str, entry: str = "generate", truste
             fn = candidates[0]
     if not fn or not callable(fn):
         return {"ok": False, "error": f"未找到入口函数 '{entry}'（需定义 async def {entry}(ctx, api)）"}
+    missing = _audit_missing_globals(fn)
+    if missing:
+        return {"ok": False, "error": f"入口函数引用了未定义的全局名: {', '.join(missing)}（模块级辅助函数须在顶层定义，且不能引用沙箱禁用模块）"}
     return {"ok": True}
 
 
@@ -547,6 +621,38 @@ _CODE_VIDEO_POLLING: set = set()  # 已在后台轮询中的 task_id（去重：
 _CODE_VIDEO_POLL_INTERVAL = 5.0
 _CODE_VIDEO_MAX_ATTEMPTS = 300  # ~25 分钟，覆盖排队+生成
 _CODE_VIDEO_TERMINAL_FAIL = ("FAILED", "FAIL", "ERROR", "CANCELLED")
+# 连续查询异常达到该次数 → 判 FAILED（把静默卡死变成可见错误；单次网络抖不动任务）
+_CODE_VIDEO_FAIL_STREAK_LIMIT = 10
+# 源按契约用 raise 报终态失败时的特征词（网络类异常不含这些词，仍按瞬态重试）；
+# 匹配前须剥掉框架包装前缀（"code execution failed: " 自身含 failed 会误判）
+_CODE_VIDEO_FAIL_MARKERS = (
+    "任务失败", "生成失败", "提交失败", "查询失败", "失败：", "失败:",
+    "task failed", "not found", "不存在", "已过期",
+    "expired", "审核", "不通过", "取消", "任务超时", "invalid task",
+)
+
+
+def _code_poll_interval() -> float:
+    """后台轮询间隔（秒）：STUDIO_TASK_POLL_INTERVAL 可覆盖（与 TaskCenter 同一开关）。"""
+    try:
+        v = float(os.environ.get("STUDIO_TASK_POLL_INTERVAL") or _CODE_VIDEO_POLL_INTERVAL)
+        return max(1.0, v)
+    except Exception:
+        return _CODE_VIDEO_POLL_INTERVAL
+
+
+def _unwrap_exec_error(msg: str) -> str:
+    """剥掉 _execute_python_code/_exec_module_guarded 的包装前缀，拿源自身错误文本。"""
+    m = str(msg or "")
+    for prefix in ("code execution failed: ", "code compile failed: "):
+        if m.startswith(prefix):
+            return m[len(prefix):]
+    return m
+
+
+def _looks_terminal_error(msg: str) -> bool:
+    low = str(msg or "").lower()
+    return any(m in low for m in _CODE_VIDEO_FAIL_MARKERS)
 
 
 def _spawn_code_video_poll(task_id: str, provider_id: str) -> None:
@@ -616,13 +722,28 @@ async def query_code_task_once(provider_id: str, task_id: str) -> Dict[str, Any]
         else:
             result = await asyncio.wait_for(_execute_python_code(code, entry_name, ctx, timeout=30, trusted=trusted), timeout=45)
     except Exception as e:
-        # 瞬态错误（网络抖动/单次查询超时）：只刷新心跳，交由轮询器继续
+        msg = str(e)[:160]
         ent = _CODE_VIDEO_TASKS.get(tid) or {"task_id": tid, "provider": provider_id}
+        # 源按契约用 raise 报终态失败（如「任务失败(FAILED): ...」）→ 直接判 FAILED，
+        # 不能当瞬态吞掉，否则前端永远收不到结果也看不到原因，空转到超时。
+        if _looks_terminal_error(_unwrap_exec_error(msg)):
+            snap = {"status": "FAILED", "task_id": tid, "provider": provider_id, "error": msg}
+            _CODE_VIDEO_TASKS[tid] = snap
+            print(f"[CodeVideo] Task {tid} FAILED (source): {msg}")
+            return snap
+        streak = int(ent.get("fail_streak") or 0) + 1
+        # 连续异常达到阈值（单次网络抖动不误杀）→ 判 FAILED 并把真实错误暴露给前端
+        if streak >= _CODE_VIDEO_FAIL_STREAK_LIMIT:
+            snap = {"status": "FAILED", "task_id": tid, "provider": provider_id,
+                    "error": f"连续 {streak} 次查询异常，任务判定失败: {msg}"}
+            _CODE_VIDEO_TASKS[tid] = snap
+            print(f"[CodeVideo] Task {tid} FAILED (streak={streak}): {msg}")
+            return snap
         ent.update({"status": ent.get("status") or "SUBMITTED", "last_poll": time.time(),
-                    "last_error": str(e)[:160]})
+                    "last_error": msg, "fail_streak": streak})
         _CODE_VIDEO_TASKS[tid] = ent
         return {"status": ent.get("status") or "SUBMITTED", "task_id": tid,
-                "last_error": str(e)[:160], "transient": True}
+                "last_error": msg, "fail_streak": streak, "transient": True}
     if not isinstance(result, dict):
         return {"status": "RUNNING", "task_id": tid}
     url, _t = extract_result_media("video", result)
@@ -656,7 +777,8 @@ async def query_code_task_once(provider_id: str, task_id: str) -> Dict[str, Any]
         print(f"[CodeVideo] Task {tid} FAILED: {str(result)[:160]}")
         return snap
     ent = _CODE_VIDEO_TASKS.get(tid) or {"task_id": tid, "provider": provider_id}
-    ent.update({"status": status or "SUBMITTED", "last_poll": time.time()})
+    ent.update({"status": status or "SUBMITTED", "last_poll": time.time(), "fail_streak": 0})
+    ent.pop("last_error", None)
     _CODE_VIDEO_TASKS[tid] = ent
     return {"status": ent.get("status") or "SUBMITTED", "task_id": tid, "provider": provider_id}
 
@@ -664,8 +786,9 @@ async def query_code_task_once(provider_id: str, task_id: str) -> Dict[str, Any]
 async def _poll_code_video_task(task_id: str, provider_id: str) -> None:
     """旧后台轮询（外部直调 provider 的兼容路径）：复用 query_code_task_once。"""
     tid = str(task_id)
+    interval = _code_poll_interval()
     for _ in range(_CODE_VIDEO_MAX_ATTEMPTS):
-        await asyncio.sleep(_CODE_VIDEO_POLL_INTERVAL)
+        await asyncio.sleep(interval)
         snap = await query_code_task_once(provider_id, tid)
         if str(snap.get("status") or "").upper() in ("SUCCESS", "FAILED", "TIMEOUT"):
             return
