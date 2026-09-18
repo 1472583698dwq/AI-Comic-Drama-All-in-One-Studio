@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { StoryboardShot } from '../../types';
 import { apiService } from '../../services/api';
@@ -18,6 +18,27 @@ const API_ORIGIN = 'http://127.0.0.1:8000';
 
 // 内置 Slot 注册（P0）：P1 时替换为插件 slots/*.json 加载，宿主不动
 registerBuiltinSlots();
+
+// 批量生成的并发上限（镜头间并行，防止一次性打爆外部源的并发配额）
+const BATCH_CONCURRENCY = 3;
+
+// 受限并发执行：所有镜头并行推进，最多同时 BATCH_CONCURRENCY 个
+async function runLimited<T>(items: T[], limit: number, worker: (item: T) => Promise<void>): Promise<void> {
+  let cursor = 0;
+  const width = Math.max(1, Math.min(limit, items.length));
+  await Promise.all(Array.from({ length: width }, async () => {
+    while (cursor < items.length) {
+      const item = items[cursor++];
+      await worker(item);
+    }
+  }));
+}
+
+// Set<shotId> 增删：生成态按镜头隔离
+const addShotId = (setter: React.Dispatch<React.SetStateAction<Set<string>>>, id: string) =>
+  setter((prev) => { const next = new Set(prev); next.add(id); return next; });
+const removeShotId = (setter: React.Dispatch<React.SetStateAction<Set<string>>>, id: string) =>
+  setter((prev) => { const next = new Set(prev); next.delete(id); return next; });
 
 /**
  * 分镜工作台宿主（ShotInspector）。
@@ -59,9 +80,11 @@ export const ShotInspector: React.FC = () => {
   const effectivePreviewTab = getMode(productionMode).caps.lockPreview ?? previewTab;
   // 预览框跟随项目画幅（9:16 / 16:9 / 1:1），不再写死竖屏
   const previewAspect = (project?.aspect_ratio || '9:16').replace(':', '/');
-  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
-  const [isRegenerating, setIsRegenerating] = useState(false);
-  const [isGeneratingVid, setIsGeneratingVid] = useState(false);
+  // 生成/播放态按镜头隔离：A 镜头生成中不锁死 B 镜头（多镜可并行提交与轮询）
+  const [imageGenIds, setImageGenIds] = useState<Set<string>>(new Set());
+  const [videoGenIds, setVideoGenIds] = useState<Set<string>>(new Set());
+  const [audioPlayingIds, setAudioPlayingIds] = useState<Set<string>>(new Set());
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [candidateCount, setCandidateCount] = useState<1 | 4>(
     (Number(localStorage.getItem('storyboard_candidate_count')) as 1 | 4) || 4
   );
@@ -95,7 +118,6 @@ export const ShotInspector: React.FC = () => {
   const [videoError, setVideoError] = useState<string | null>(null);
   const [videoSuccess, setVideoSuccess] = useState(false);
   const [autoFitNotification, setAutoFitNotification] = useState<string | null>(null);
-  const [audioEl, setAudioEl] = useState<HTMLAudioElement | null>(null);
   const [showHotkeysHint, setShowHotkeysHint] = useState(true);
   const [savingAsset, setSavingAsset] = useState(false);
   // P1 插件槽：弹窗开关 + 注册表版本号（同步后 bump 触发重渲染）
@@ -134,6 +156,11 @@ export const ShotInspector: React.FC = () => {
 
   const shots: StoryboardShot[] = project?.scenes.flatMap((s) => s.shots) || [];
   const activeShot = shots.find((s) => s.id === activeShotId) || shots[0];
+
+  // 按镜头派生：只有"当前镜头"在生成/播放时才禁用其按钮，其他镜头可并行操作
+  const isRegenerating = activeShot ? imageGenIds.has(activeShot.id) : false;
+  const isGeneratingVid = activeShot ? videoGenIds.has(activeShot.id) : false;
+  const isPlayingAudio = activeShot ? audioPlayingIds.has(activeShot.id) : false;
 
   useEffect(() => {
     if (activeShot?.production_mode) {
@@ -320,26 +347,30 @@ export const ShotInspector: React.FC = () => {
   }
 
   const handlePlayTTS = async () => {
+    const shot = activeShot;
+    if (!shot) return;
     // 漫画模式仅编辑对白文字：拦截试听配音
     if (getMode(productionMode).caps.canTts === false) { setTtsError('漫画模式仅编辑对白，切到视频模式再试听配音'); return; }
-    const textToSpeak = activeShot.dialogue || activeShot.voiceover || '';
+    const textToSpeak = shot.dialogue || shot.voiceover || '';
     if (!textToSpeak.trim()) { setTtsError('当前分镜无台词/旁白，无法配音'); return; }
-    if (audioEl) { audioEl.pause(); setAudioEl(null); setIsPlayingAudio(false); }
+    // 播放器单例（起新的先停旧的），生成/播放态按镜头隔离：不同镜头可并行合成
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+    setAudioPlayingIds(new Set());
     setTtsError(null);
-    setIsPlayingAudio(true);
-    updateShot(activeShot.id, { status: 'generating_audio', render_status: 'rendering' });
+    addShotId(setAudioPlayingIds, shot.id);
+    updateShot(shot.id, { status: 'generating_audio', render_status: 'rendering' });
     try {
-      const char = project?.characters.find((c) => c.name === activeShot.speaker_name);
+      const char = project?.characters.find((c) => c.name === shot.speaker_name);
       const voiceId = char?.voice_id;
       const extraParams: any = { ...audioProviderParams };
-      const res = await apiService.generateTTS(textToSpeak, voiceId, activeShot.emotion, { provider: audioProvider || undefined, ...extraParams });
+      const res = await apiService.generateTTS(textToSpeak, voiceId, shot.emotion, { provider: audioProvider || undefined, ...extraParams });
       const url = res.audio_url?.startsWith('/') ? API_ORIGIN + res.audio_url : res.audio_url;
       if (!res.audio_url) throw new Error('TTS 未返回音频地址');
 
       const audioSec = res.duration || (res.audio_duration ? res.audio_duration : 3.5);
       const fittedSec = Math.max(1.5, Math.round((audioSec + 0.4) * 10) / 10);
 
-      updateShot(activeShot.id, {
+      updateShot(shot.id, {
         audio_url: res.audio_url,
         audio_duration: audioSec,
         duration: fittedSec,
@@ -351,14 +382,14 @@ export const ShotInspector: React.FC = () => {
       setTimeout(() => setAutoFitNotification(null), 4000);
 
       const a = new Audio(url);
-      setAudioEl(a);
-      a.onended = () => { setIsPlayingAudio(false); setAudioEl(null); };
-      a.onerror = () => { setTtsError('音频播放失败，请检查后端存储'); setIsPlayingAudio(false); };
+      audioRef.current = a;
+      a.onended = () => { if (audioRef.current === a) audioRef.current = null; removeShotId(setAudioPlayingIds, shot.id); };
+      a.onerror = () => { setTtsError('音频播放失败，请检查后端存储'); if (audioRef.current === a) audioRef.current = null; removeShotId(setAudioPlayingIds, shot.id); };
       await a.play();
     } catch (e: any) {
       setTtsError(e?.message || '配音生成失败');
-      updateShot(activeShot.id, { status: 'error', render_status: 'error' });
-      setIsPlayingAudio(false);
+      updateShot(shot.id, { status: 'error', render_status: 'error' });
+      removeShotId(setAudioPlayingIds, shot.id);
     }
   };
 
@@ -491,7 +522,7 @@ export const ShotInspector: React.FC = () => {
     if (getMode(productionMode).caps.canImage === false) { setRegenError('直出模式无需生图，直接点「直出动态视频」'); return; }
     if (!activeShot.image_prompt?.trim()) { setRegenError('生图提示词为空'); return; }
     setRegenError(null);
-    setIsRegenerating(true);
+    addShotId(setImageGenIds, activeShot.id);
     updateShot(activeShot.id, { status: 'generating_image', render_status: 'rendering' });
 
     // 角色标签 + 相机意图统一装配（shotReference 唯一口径）：全量绑定角色进 prompt，
@@ -582,7 +613,7 @@ export const ShotInspector: React.FC = () => {
       setRegenError(msg);
       updateShot(activeShot.id, { status: 'error', render_status: 'error', render_error: msg });
     } finally {
-      setIsRegenerating(false);
+      removeShotId(setImageGenIds, activeShot.id);
     }
   };
 
@@ -614,7 +645,7 @@ export const ShotInspector: React.FC = () => {
     }
 
     setVideoError(null);
-    setIsGeneratingVid(true);
+    addShotId(setVideoGenIds, activeShot.id);
     updateShot(activeShot.id, { status: 'generating_video', render_status: 'rendering' });
     try {
       // 工作流来自所选视频源本身；仅在未选源时回退旧分镜遗留的 workflow_id
@@ -657,7 +688,7 @@ export const ShotInspector: React.FC = () => {
       setVideoError(msg);
       updateShot(activeShot.id, { status: 'error', render_status: 'error' });
     } finally {
-      setIsGeneratingVid(false);
+      removeShotId(setVideoGenIds, activeShot.id);
     }
   };
 
@@ -667,7 +698,7 @@ export const ShotInspector: React.FC = () => {
     const ids = targetShots.map(s => s.id);
     const jobs = ids.map(id => ({ id, type: 'image' as const, status: 'queued' as const }));
     setQueue(q => [...q, ...jobs]);
-    for (const sh of targetShots) {
+    await runLimited(targetShots, BATCH_CONCURRENCY, async (sh) => {
       setQueue(q => q.map(j => j.id === sh.id ? { ...j, status: 'running' } : j));
       updateShot(sh.id, { status: 'generating_image', render_status: 'rendering' });
       try {
@@ -694,7 +725,7 @@ export const ShotInspector: React.FC = () => {
         setQueue(q => q.map(j => j.id === sh.id ? { ...j, status: 'error' } : j));
         updateShot(sh.id, { status: 'error', render_status: 'error' });
       }
-    }
+    });
     setTimeout(() => setQueue(q => q.filter(j => !ids.includes(j.id))), 4000);
   };
 
@@ -704,7 +735,7 @@ export const ShotInspector: React.FC = () => {
     const ids = targetShots.map(s => s.id);
     const jobs = ids.map(id => ({ id, type: 'audio' as const, status: 'queued' as const }));
     setQueue(q => [...q, ...jobs]);
-    for (const sh of targetShots) {
+    await runLimited(targetShots, BATCH_CONCURRENCY, async (sh) => {
       setQueue(q => q.map(j => j.id === sh.id ? { ...j, status: 'running' } : j));
       updateShot(sh.id, { status: 'generating_audio', render_status: 'rendering' });
       try {
@@ -726,7 +757,7 @@ export const ShotInspector: React.FC = () => {
         setQueue(q => q.map(j => j.id === sh.id ? { ...j, status: 'error' } : j));
         updateShot(sh.id, { status: 'error', render_status: 'error' });
       }
-    }
+    });
     setTimeout(() => setQueue(q => q.filter(j => !ids.includes(j.id))), 4000);
   };
 
@@ -776,7 +807,7 @@ export const ShotInspector: React.FC = () => {
     const ids = targetShots.map(s => s.id);
     const jobs = ids.map(id => ({ id, type: 'video' as const, status: 'queued' as const }));
     setQueue(q => [...q, ...jobs]);
-    for (const sh of targetShots) {
+    await runLimited(targetShots, BATCH_CONCURRENCY, async (sh) => {
       setQueue(q => q.map(j => j.id === sh.id ? { ...j, status: 'running' } : j));
       try {
         const prov = (sh as any).video_provider || videoProvider;
@@ -811,7 +842,7 @@ export const ShotInspector: React.FC = () => {
       } catch {
         setQueue(q => q.map(j => j.id === sh.id ? { ...j, status: 'error' } : j));
       }
-    }
+    });
     setTimeout(() => setQueue(q => q.filter(j => !ids.includes(j.id))), 4000);
   };
 
