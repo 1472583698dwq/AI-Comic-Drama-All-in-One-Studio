@@ -81,6 +81,8 @@ export interface Character {
   voice_id: string;
   voice_name: string;
   emotion_preset: EmotionType;
+  ref_audio_url?: string;
+  ref_audio_name?: string;
   avatar_url?: string;
   three_views?: {
     front?: string;

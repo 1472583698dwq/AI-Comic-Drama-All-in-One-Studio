@@ -278,15 +278,20 @@ class UnifiedDramaPipeline:
             await self._log("Stage 5 · TTS 配音", f"为含台词分镜生成配音（Provider={aud_prov_id}）...", progress_cb)
             t3 = time.time()
             char_voice = {c.name: c.voice_id for c in project.characters}
+            # 角色绑定的参考音频：优先作为音色克隆参考（支持克隆的源生效，其余源忽略该参数）
+            char_ref = {c.name: (getattr(c, "ref_audio_url", "") or "") for c in project.characters}
             narrator_voice = next((c.voice_id for c in project.characters if c.role == "narrator"), "male-pangbai")
+            narrator_ref = next((getattr(c, "ref_audio_url", "") or "" for c in project.characters if c.role == "narrator"), "")
             for shot in all_shots:
                 line = shot.dialogue or shot.voiceover
                 if not line:
                     continue
                 voice_id = char_voice.get(shot.speaker_name or "", narrator_voice)
+                ref_audio = char_ref.get(shot.speaker_name or "", narrator_ref)
                 try:
                     from app.providers.audio.base import AudioGenerateRequest
-                    areq = AudioGenerateRequest(text=line, voice_id=voice_id, emotion=shot.emotion)
+                    areq = AudioGenerateRequest(text=line, voice_id=voice_id, emotion=shot.emotion,
+                                                ref_audio_path=(ref_audio or None))
                     reg = _get_audio_registry()
                     res = await reg.generate(areq, provider_id=aud_prov_id)
                     shot.audio_url = res.audio_url

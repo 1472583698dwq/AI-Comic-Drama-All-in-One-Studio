@@ -2,20 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { 
   Users, 
   Sparkles, 
-  ShieldCheck, 
   Image as ImageIcon,
   Plus,
   Trash2,
   FolderOpen,
-  Check,
-  Wand2,
-  Layers,
-  Upload
+  Music,
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { Character } from '../../types';
 import { apiService } from '../../services/api';
-import { AiPolishButton } from '../ui/AiPolishButton';
 import { AssetPickerModal } from '../asset/AssetPickerModal';
 import { confirmAsync, toast } from '../../stores/useDialogStore';
 
@@ -26,14 +21,8 @@ export const CharacterStudio: React.FC = () => {
   const [selectedCharId, setSelectedCharId] = useState<string>(characters[0]?.id || '');
   const [isGeneratingSheet, setIsGeneratingSheet] = useState(false);
   const [regenError, setRegenError] = useState<string | null>(null);
-  const [assetPickerViewKey, setAssetPickerViewKey] = useState<'front' | 'side' | 'three_quarter' | 'avatar' | null>(null);
-  // 音色列表 = 语音源接口（/tts/voices），不写死 minimax 预设
-  const [voiceOptions, setVoiceOptions] = useState<Array<{id: string; name: string}>>([]);
-  useEffect(() => {
-    apiService.listTtsVoices().then((r: any) => {
-      setVoiceOptions((r?.voices || []).map((v: any) => ({ id: v.id || v.voice_id, name: v.name || v.voice_name || v.id })));
-    }).catch(() => {});
-  }, []);
+  // ref_audio 走音频素材选择器（mediaType=audio），三视图走图片选择器
+  const [assetPickerViewKey, setAssetPickerViewKey] = useState<'front' | 'side' | 'three_quarter' | 'ref_audio' | null>(null);
 
   // Auto select first char if active becomes invalid
   useEffect(() => {
@@ -62,7 +51,8 @@ export const CharacterStudio: React.FC = () => {
       voice_id: '',
       voice_name: '',
       description: '角色性格与外貌特征描述...',
-      visual_prompt: 'masterpiece, best quality, 1boy, handsome anime character...',
+      // 形象以三视图为准：不再预填通用视觉提示词，生图/生三视图统一用 人设描述 兜底
+      visual_prompt: '',
       three_views: {},
     };
     addCharacter(newChar);
@@ -90,8 +80,8 @@ export const CharacterStudio: React.FC = () => {
 
   const handleSelectAssetForView = (asset: { url: string; visual_prompt?: string; name: string }) => {
     if (!selectedChar || !assetPickerViewKey) return;
-    if (assetPickerViewKey === 'avatar') {
-      updateCharacter(selectedChar.id, { avatar_url: asset.url });
+    if (assetPickerViewKey === 'ref_audio') {
+      updateCharacter(selectedChar.id, { ref_audio_url: asset.url, ref_audio_name: asset.name });
     } else {
       updateCharacter(selectedChar.id, {
         three_views: {
@@ -99,20 +89,20 @@ export const CharacterStudio: React.FC = () => {
           [assetPickerViewKey]: asset.url
         },
         avatar_url: selectedChar.avatar_url || asset.url,
-        ...(asset.visual_prompt && !selectedChar.visual_prompt ? { visual_prompt: asset.visual_prompt } : {})
       });
     }
     setAssetPickerViewKey(null);
   };
 
   const handleGenerate3Views = async () => {
-    if (!selectedChar.visual_prompt?.trim()) { setRegenError('视觉提示词为空'); return; }
+    // 视觉提示词已收敛：三视图是唯一形象来源；生成时用 人设描述/角色名 兜底
+    const visualPrompt = selectedChar.visual_prompt?.trim() || selectedChar.description?.trim() || selectedChar.name;
     setRegenError(null);
     setIsGeneratingSheet(true);
     try {
       const res = await apiService.generateCharacter3Views({
         name: selectedChar.name,
-        visual_prompt: selectedChar.visual_prompt,
+        visual_prompt: visualPrompt,
         description: selectedChar.description,
         style_preset: project?.style_preset || 'donghua_xianxia',
       });
@@ -182,7 +172,9 @@ export const CharacterStudio: React.FC = () => {
                       {char.role === 'protagonist' ? '主角' : char.role === 'supporting' ? '配角' : '旁白'}
                     </span>
                   </div>
-                  <p className="text-[10px] text-gray-400 truncate mt-0.5">{char.voice_name || '默认音色'}</p>
+                  <p className="text-[10px] text-gray-400 truncate mt-0.5">
+                    {char.ref_audio_url ? '🎙 参考音频已绑定' : (char.voice_name || '默认音色')}
+                  </p>
                 </div>
               </div>
             );
@@ -204,19 +196,14 @@ export const CharacterStudio: React.FC = () => {
           <div className="flex items-center justify-between bg-surface p-5 rounded-2xl border border-border shadow-sm">
             <div className="flex items-center space-x-4">
               <div 
-                onClick={() => setAssetPickerViewKey('avatar')}
-                className="relative w-16 h-16 rounded-2xl overflow-hidden border border-border shadow-md bg-surface-secondary group cursor-pointer"
-                title="点击从素材库更换角色头像"
+                className="relative w-16 h-16 rounded-2xl overflow-hidden border border-border shadow-md bg-surface-secondary"
+                title="头像取自正面视图"
               >
-                {selectedChar.avatar_url || selectedChar.three_views?.front ? (
-                  <img src={resolveUrl(selectedChar.avatar_url || selectedChar.three_views?.front)} alt="" className="w-full h-full object-cover" />
+                {selectedChar.three_views?.front || selectedChar.avatar_url ? (
+                  <img src={resolveUrl(selectedChar.three_views?.front || selectedChar.avatar_url)} alt="" className="w-full h-full object-cover" />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-xl font-bold text-white/60">{selectedChar.name[0]}</div>
                 )}
-                <div className="absolute inset-0 bg-surface/85 text-white text-[10px] flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                  <FolderOpen className="w-3.5 h-3.5 mb-0.5 text-brand-light" />
-                  <span>素材库选图</span>
-                </div>
               </div>
               <div className="space-y-1">
                 <div className="flex items-center space-x-2">
@@ -273,7 +260,7 @@ export const CharacterStudio: React.FC = () => {
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-white flex items-center space-x-2">
                 <ImageIcon className="w-4 h-4 text-brand-light" />
-                <span>角色标准三视图与参考图绑定 (Three-View Consistency Matrix)</span>
+                <span>角色标准三视图 (Three-View Consistency Matrix)</span>
               </h3>
               <span className="text-xs text-brand-light font-medium">✨ 从统一素材库一键选用 / 归档</span>
             </div>
@@ -431,45 +418,56 @@ export const CharacterStudio: React.FC = () => {
             </div>
           </div>
 
-          {/* Character Prompts & Voice Configuration */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="bg-surface p-4 rounded-2xl border border-border space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-white flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-brand" /> 视觉特征提示词 (Visual Prompt)
-                </label>
-                <AiPolishButton value={selectedChar.visual_prompt} onPolish={(v: any) => updateCharacter(selectedChar.id, { visual_prompt: v })} contextType="prompt" size="xs" />
-              </div>
-              <textarea
-                value={selectedChar.visual_prompt}
-                onChange={(e) => updateCharacter(selectedChar.id, { visual_prompt: e.target.value })}
-                rows={3}
-                placeholder="角色外貌特征描述词，如：银发蓝眸，冷峻少年，身着青云宗道袍..."
-                className="w-full bg-surface-secondary border border-border rounded-xl p-2.5 text-xs font-mono text-gray-200 focus:outline-none focus:border-brand leading-relaxed"
-              />
+          {/* 参考音频绑定（音色克隆）：角色配音的唯一声音来源 */}
+          <div className="bg-surface p-4 rounded-2xl border border-border space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-white flex items-center gap-1.5">
+                <Music className="w-3.5 h-3.5 text-accent-pink" /> 参考音频绑定（音色克隆）
+              </label>
+              <span className={`text-[10px] font-bold ${selectedChar.ref_audio_url ? 'text-emerald-400' : 'text-gray-500'}`}>
+                {selectedChar.ref_audio_url ? '已绑定' : '未绑定 · 可选'}
+              </span>
             </div>
 
-            <div className="bg-surface p-4 rounded-2xl border border-border space-y-2">
-              <label className="text-xs font-bold text-white flex items-center justify-between">
-                <span>🎙️ 专属角色音色</span>
-                <span className="text-[10px] text-accent-pink font-mono">{voiceOptions.length} 个可选音色 · 来自语音源接口</span>
-              </label>
-              <select
-                value={selectedChar.voice_id}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  const hit = voiceOptions.find(v => v.id === val);
-                  updateCharacter(selectedChar.id, { voice_id: val, voice_name: hit?.name || val });
-                }}
-                className="w-full bg-surface-secondary border border-border rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-brand"
+            {selectedChar.ref_audio_url ? (
+              <div className="flex items-center gap-2">
+                <audio
+                  controls
+                  src={resolveUrl(selectedChar.ref_audio_url)}
+                  className="flex-1 min-w-0 h-9"
+                />
+                <button
+                  onClick={() => setAssetPickerViewKey('ref_audio')}
+                  className="shrink-0 px-3 py-2 rounded-xl bg-brand/15 hover:bg-brand/25 border border-brand/30 text-brand-light text-xs font-bold flex items-center gap-1.5 transition-all"
+                >
+                  <FolderOpen className="w-3.5 h-3.5 text-brand" />
+                  <span>更换</span>
+                </button>
+                <button
+                  onClick={() => updateCharacter(selectedChar.id, { ref_audio_url: '', ref_audio_name: '' })}
+                  className="shrink-0 p-2 rounded-xl bg-surface-secondary hover:bg-red-500/20 text-gray-400 hover:text-red-400 border border-border"
+                  title="解绑参考音频"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setAssetPickerViewKey('ref_audio')}
+                className="w-full py-3.5 rounded-xl border border-dashed border-border hover:border-brand hover:bg-brand/5 text-gray-300 hover:text-white text-xs font-medium flex flex-col items-center justify-center gap-1.5 transition-all"
               >
-                <option value="">源默认音色</option>
-                {voiceOptions.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-                {selectedChar.voice_id && !voiceOptions.some(v => v.id === selectedChar.voice_id) && (
-                  <option value={selectedChar.voice_id}>{selectedChar.voice_name || selectedChar.voice_id} (连线)</option>
-                )}
-              </select>
-            </div>
+                <FolderOpen className="w-5 h-5 text-brand-light/70" />
+                <span>从素材库选择 / 上传参考音频</span>
+              </button>
+            )}
+
+            {selectedChar.ref_audio_name && (
+              <p className="text-[10px] text-gray-400 truncate">当前：{selectedChar.ref_audio_name}</p>
+            )}
+            <p className="text-[10px] text-gray-500 leading-relaxed">
+              绑定后，该角色的单镜试听与批量配音会自动把此音频作为 ref_audio 传给所配语音源；
+              支持音色克隆的源（GPT-SoVITS / CosyVoice / 自定义克隆源）将按该音色合成。
+            </p>
           </div>
         </div>
       ) : (
@@ -478,9 +476,10 @@ export const CharacterStudio: React.FC = () => {
         </div>
       )}
 
-      {/* Universal Asset Picker Modal */}
+      {/* Universal Asset Picker Modal：三视图=图片，参考音频=音频 */}
       <AssetPickerModal
         isOpen={!!assetPickerViewKey}
+        mediaType={assetPickerViewKey === 'ref_audio' ? 'audio' : 'image'}
         title={
           assetPickerViewKey === 'front' 
             ? `从素材库选择【${selectedChar?.name || '角色'}】正面视图` 
@@ -488,9 +487,9 @@ export const CharacterStudio: React.FC = () => {
             ? `从素材库选择【${selectedChar?.name || '角色'}】侧面轮廓` 
             : assetPickerViewKey === 'three_quarter'
             ? `从素材库选择【${selectedChar?.name || '角色'}】3/4 动态视角`
-            : `从素材库选择【${selectedChar?.name || '角色'}】头像`
+            : `从素材库选择【${selectedChar?.name || '角色'}】参考音频`
         }
-        defaultCategory="character"
+        defaultCategory={assetPickerViewKey === 'ref_audio' ? 'other' : 'character'}
         onSelect={handleSelectAssetForView}
         onClose={() => setAssetPickerViewKey(null)}
       />

@@ -5,10 +5,13 @@
  * 点任何 生图/视频/配音 节点时，底部全局导演栏自动切换为此控制台。
  */
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Sparkles, RefreshCw, Plus, X, Loader2, AlertTriangle, Image as ImageIcon, Film, Mic, Settings2 } from 'lucide-react';
+import { Sparkles, RefreshCw, Plus, X, Loader2, AlertTriangle, Image as ImageIcon, Film, Mic, Settings2, Link2 } from 'lucide-react';
 import { useCanvasStore } from '../../stores/useCanvasStore';
+import { useProjectStore } from '../../stores/useProjectStore';
+import { toast } from '../../stores/useDialogStore';
 import { apiService } from '../../services/api';
 import { DynamicProviderInfo, extractSlotsFromProvider, AssetSlotDef, getSkillsForKind, describeProviderSlots, paramsSchemaToSpecs } from './providerSkills';
+import { collectResources, planBinding } from '../storyboard/referenceBinder';
 import { CanvasResourcePickerModal } from './CanvasResourcePickerModal';
 import { DynamicControl, groupSpecs, CATEGORY_LABEL } from './controls/DynamicControl';
 
@@ -85,6 +88,43 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
   const handleParamChange = (key: string, val: any) => {
     const next = { ...customParams, [key]: val };
     updateNodeData(nodeId, { params: next, provider_params: next, [key]: val });
+  };
+
+  // 一键绑定：项目角色/素材 → 该源声明插槽（仅填空槽；画布无镜头级绑定，缺省用全项目角色）
+  const handleOneClickBind = async () => {
+    if (!currentProvider || !slots.length) { toast.info('该源未声明参考插槽，无需绑定'); return; }
+    const project: any = useProjectStore.getState().project;
+    let projectAssets: any[] = [];
+    try {
+      const r: any = await apiService.listAssets({ project_id: project?.id, page: 1, limit: 100 });
+      projectAssets = r?.assets || [];
+    } catch { /* 素材可缺省 */ }
+    const charIds: string[] = Array.isArray(d.character_ids) && d.character_ids.length
+      ? d.character_ids
+      : (project?.characters || []).map((c: any) => c.id);
+    const pseudoShot: any = {
+      id: nodeId,
+      character_ids: charIds,
+      character_weights: d.character_weights,
+      scene_ref_image: d.scene_ref_image,
+      scene_name: d.scene_name,
+      prop_asset_ids: d.prop_asset_ids,
+      previz_url: d.previz_url,
+      previz_video_url: d.previz_video_url,
+      image_url: d.first_frame || d.first_frame_url || d.image_url || d._upstream?.image_url,
+      speaker_name: d.speaker_name,
+    };
+    const current: Record<string, any> = {};
+    for (const s of slots) for (const k of [s.key, s.originalKey]) if (k && d[k] !== undefined) current[k] = d[k];
+    const resources = collectResources({ shot: pseudoShot, project, projectAssets, kind, includeFirstFrame: kind === 'video' });
+    const plan = planBinding(resources, slots, current, { overwrite: false });
+    if (!Object.keys(plan.patch).length) {
+      toast.info(plan.gaps.length ? '没有可绑定资源，必填槽仍有缺口（先在项目里创建角色/素材）' : '没有可绑定资源：先在项目里创建角色/素材');
+      return;
+    }
+    updateNodeData(nodeId, plan.patch);
+    const n = plan.filled.filter((f) => !f.kept).length;
+    toast.success(`已绑定 ${n} 项参考${plan.gaps.length ? `，${plan.gaps.length} 个必填缺口` : ''}`);
   };
   const selectSkill = (skillId: string) => {
     updateNodeData(nodeId, { skill_id: skillId });
@@ -279,7 +319,19 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
 
       {/* 插槽 */}
       {slots.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-white/40">参考插槽（按该源声明）</span>
+            <button
+              onClick={handleOneClickBind}
+              className="px-2 py-0.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-[10px] font-bold flex items-center gap-1 transition-all"
+              title="把项目角色（三视图/立绘 + 参考音频）、素材与上游产物按该源声明的插槽一键填入（仅补空缺）"
+            >
+              <Link2 className="w-2.5 h-2.5" />
+              <span>一键绑定</span>
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
           {slots.map((slot) => {
             const raw = d[slot.key] ?? (slot.originalKey ? d[slot.originalKey] : undefined);
             const populated = Array.isArray(raw) ? raw.length > 0 : !!raw;
@@ -295,6 +347,7 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
               </div>
             );
           })}
+          </div>
         </div>
       )}
 

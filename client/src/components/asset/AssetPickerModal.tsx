@@ -13,7 +13,8 @@ import {
   Layers, 
   X, 
   Plus,
-  Filter
+  Filter,
+  Music
 } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { useProjectStore } from '../../stores/useProjectStore';
@@ -24,6 +25,7 @@ interface AssetPickerModalProps {
   isOpen: boolean;
   title?: string;
   defaultCategory?: AssetCategory | 'all';
+  mediaType?: 'image' | 'audio';
   onSelect: (asset: { id: string; name: string; url: string; category: string; visual_prompt?: string }) => void;
   onClose: () => void;
 }
@@ -44,13 +46,18 @@ const resolveUrl = (u?: string) => {
   return u.startsWith('/') ? API_ORIGIN + u : u;
 };
 
+const AUDIO_EXT_RE = /\.(mp3|wav|m4a|aac|flac|ogg|opus|wma)(\?|#|$)/i;
+const isAudioUrl = (u?: string) => !!u && AUDIO_EXT_RE.test(u);
+
 export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
   isOpen,
   title = '从素材库选择素材',
   defaultCategory = 'all',
+  mediaType = 'image',
   onSelect,
   onClose,
 }) => {
+  const isAudio = mediaType === 'audio';
   const { project } = useProjectStore();
   const [selectedCat, setSelectedCat] = useState<AssetCategory | 'all'>(defaultCategory);
   const [searchQuery, setSearchQuery] = useState('');
@@ -64,7 +71,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
     if (isOpen) {
       loadAssets();
     }
-  }, [isOpen, selectedCat, scope, searchQuery]);
+  }, [isOpen, selectedCat, scope, searchQuery, mediaType]);
 
   const loadAssets = async () => {
     setIsLoading(true);
@@ -78,7 +85,8 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
         page: 1,
         limit: 80,
       });
-      setAssets(res?.assets || []);
+      const raw = res?.assets || [];
+      setAssets(isAudio ? raw.filter((a: any) => isAudioUrl(a.file_url || a.thumb_url || a.image_url)) : raw);
     } catch (e) {
       console.error('Failed to load assets', e);
     } finally {
@@ -90,7 +98,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
     setIsUploading(true);
     try {
       const pid = project?.id || (useProjectStore.getState() as any).activeProjectId || undefined;
-      const cat = selectedCat === 'all' ? 'character' : selectedCat;
+      const cat = selectedCat === 'all' ? (isAudio ? 'other' : 'character') : selectedCat;
       const fd = new FormData();
       const baseName = file.name.replace(/\.[^.]+$/, '') || '新素材';
       fd.append('name', baseName);
@@ -151,7 +159,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
+              accept={isAudio ? 'audio/*' : 'image/*'}
               className="hidden"
               onChange={e => e.target.files?.[0] && handleQuickUploadToLibrary(e.target.files[0])}
             />
@@ -244,11 +252,18 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
                     className="group rounded-2xl overflow-hidden border border-border bg-surface-secondary/70 cursor-pointer hover:border-brand hover:ring-2 hover:ring-brand/40 transition-all flex flex-col relative shadow-sm"
                   >
                     <div className="aspect-[3/4] bg-surface-secondary overflow-hidden relative">
-                      <img
-                        src={resolveUrl(img)}
-                        alt={asset.name}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                      />
+                      {isAudioUrl(img) ? (
+                        <div className="w-full h-full flex flex-col items-center justify-center gap-2 bg-gradient-to-br from-surface-secondary to-surface-tertiary">
+                          <Music className="w-10 h-10 text-brand-light/70" />
+                          <span className="text-[10px] text-gray-400 font-mono px-2 truncate max-w-full">{String(img).split('/').pop()}</span>
+                        </div>
+                      ) : (
+                        <img
+                          src={resolveUrl(img)}
+                          alt={asset.name}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        />
+                      )}
                       <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-surface/85 text-[9px] text-gray-200 border border-white/10 font-mono">
                         {catLabel}
                       </span>
@@ -267,7 +282,15 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
 
                     <div className="p-2">
                       <p className="text-xs font-bold text-white truncate">{asset.name}</p>
-                      {asset.visual_prompt ? (
+                      {isAudioUrl(img) ? (
+                        <audio
+                          controls
+                          preload="none"
+                          src={resolveUrl(img)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="w-full h-7 mt-1"
+                        />
+                      ) : asset.visual_prompt ? (
                         <p className="text-[10px] text-gray-400 truncate mt-0.5">{asset.visual_prompt}</p>
                       ) : (
                         <p className="text-[10px] text-gray-500 truncate mt-0.5">已收录于素材库</p>
@@ -282,7 +305,9 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
               <FolderOpen className="w-12 h-12 text-gray-600 stroke-[1.2]" />
               <span className="text-sm font-semibold text-gray-400">素材库中暂无匹配的素材</span>
               <p className="text-[11px] text-gray-500 max-w-sm text-center">
-                您可以直接点击右上角【+ 上传素材入库】将本地图片归档到素材库，或前往「素材」频道生成新资产。
+                {isAudio
+                  ? '您可以点击右上角【+ 上传素材入库】把本地音频（mp3/wav/m4a…）归档到素材库，或前往「素材」频道生成新资产。'
+                  : '您可以直接点击右上角【+ 上传素材入库】将本地图片归档到素材库，或前往「素材」频道生成新资产。'}
               </p>
               <button
                 onClick={() => fileInputRef.current?.click()}

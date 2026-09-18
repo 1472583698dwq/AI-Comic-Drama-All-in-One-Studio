@@ -4,6 +4,8 @@ import { StoryboardShot } from '../../types';
 import { apiService } from '../../services/api';
 import { extractSlotsFromProvider } from '../canvas/providerSkills';
 import { buildShotReferenceInputs, promptWithCharacterTags, withCameraIntent } from './shotReference';
+import { collectResources, planBinding } from './referenceBinder';
+import { BindPreviewModal } from './slots/BindPreviewModal';
 import { getMode } from './slots/registry';
 import { registerBuiltinSlots } from './slots/builtin';
 import { syncStoryboardSlots } from './slots/loader';
@@ -12,6 +14,7 @@ import { PreviewStage } from './slots/PreviewStage';
 import { InspectorPanel } from './slots/InspectorPanel';
 import { ShotOverlays } from './slots/Overlays';
 import { SlotManagerModal } from './slots/SlotManagerModal';
+import { toast } from '../../stores/useDialogStore';
 import type { ProductionMode, ShotSlotContext } from './slots/types';
 
 const API_ORIGIN = 'http://127.0.0.1:8000';
@@ -134,6 +137,10 @@ export const ShotInspector: React.FC = () => {
   const [uploadingInputKey, setUploadingInputKey] = useState<string | null>(null);
   // 生成源插槽的素材选择（复用画布的四源选择器，支持多选累积）
   const [slotPicker, setSlotPicker] = useState<{ slot: any; writeKeys: string[]; multi: boolean } | null>(null);
+  // 一键绑定：预览状态 + 撤销栈（资源×源插槽声明，见 referenceBinder.ts）
+  const [bindPreview, setBindPreview] = useState<{ kind: 'image' | 'video'; shotId: string; def: any; overwrite: boolean } | null>(null);
+  const [bindUndo, setBindUndo] = useState<Array<{ shotId: string; prev: Record<string, any> }> | null>(null);
+  const bindDefCache = useRef<Map<string, any>>(new Map());
 
   // 语音源若自行声明了情绪参数（x-role: emotion），情绪就由源参数表单唯一负责
   // NOTE：必须在 early return 之前调用（hooks 顺序），仅依赖 audioProviderDef
@@ -161,6 +168,20 @@ export const ShotInspector: React.FC = () => {
   const isRegenerating = activeShot ? imageGenIds.has(activeShot.id) : false;
   const isGeneratingVid = activeShot ? videoGenIds.has(activeShot.id) : false;
   const isPlayingAudio = activeShot ? audioPlayingIds.has(activeShot.id) : false;
+
+  // 一键绑定预览编排（资源×源插槽声明；hook 必须在 early return 之前）
+  const bindPlan = useMemo(() => {
+    if (!bindPreview) return null;
+    const shot = shots.find((s) => s.id === bindPreview.shotId);
+    if (!shot) return null;
+    const caps = getMode(((shot as any).production_mode || productionMode) as ProductionMode).caps;
+    const includeFirstFrame = bindPreview.kind === 'video' && !caps.direct && (videoMode === 'i2v' || !!caps.needsFirstFrame);
+    const slots = extractSlotsFromProvider(bindPreview.def, bindPreview.kind) as any[];
+    const resources = collectResources({
+      shot, project, projectAssets: _projectAssets, kind: bindPreview.kind, includeFirstFrame,
+    });
+    return planBinding(resources, slots, (shot as any).dynamic_inputs || {}, { overwrite: bindPreview.overwrite });
+  }, [bindPreview, shots, project, _projectAssets, productionMode, videoMode]);
 
   useEffect(() => {
     if (activeShot?.production_mode) {
@@ -363,7 +384,14 @@ export const ShotInspector: React.FC = () => {
       const char = project?.characters.find((c) => c.name === shot.speaker_name);
       const voiceId = char?.voice_id;
       const extraParams: any = { ...audioProviderParams };
-      const res = await apiService.generateTTS(textToSpeak, voiceId, shot.emotion, { provider: audioProvider || undefined, ...extraParams });
+      // 角色绑定的参考音频 → 自动作为音色克隆参考（用户在本源参数里显式填了 ref 则不覆盖）
+      const hasRefParam = ['ref_audio_path', 'ref_audio', 'reference_audio', 'reference_audios'].some((k) => extraParams[k]);
+      const refAudioPath = (!hasRefParam && char?.ref_audio_url) ? char.ref_audio_url : undefined;
+      const res = await apiService.generateTTS(textToSpeak, voiceId, shot.emotion, {
+        provider: audioProvider || undefined,
+        ...extraParams,
+        ...(refAudioPath ? { ref_audio_path: refAudioPath } : {}),
+      });
       const url = res.audio_url?.startsWith('/') ? API_ORIGIN + res.audio_url : res.audio_url;
       if (!res.audio_url) throw new Error('TTS 未返回音频地址');
 
@@ -515,6 +543,102 @@ export const ShotInspector: React.FC = () => {
       if (v !== '' && v !== null && v !== undefined) merged[k] = v;
     });
     return Object.keys(merged).length ? merged : undefined;
+  };
+
+  // ── 一键绑定：资源池（人物/场景/道具/白模/参考音频）× 源插槽声明 ──
+  const handleOneClickBind = (kind: 'image' | 'video') => {
+    if (!activeShot) return;
+    const def: any = kind === 'image' ? imageProviderDef : videoProviderDef;
+    const pid = kind === 'image' ? imageProvider : videoProvider;
+    if (!def) { toast.warning(pid ? '生成源定义加载中，请稍候重试' : '请先选择生成源再一键绑定'); return; }
+    if (!extractSlotsFromProvider(def, kind).length) {
+      toast.info(`${def.display_name || def.name || pid || '该源'} 未在 input_schema 声明参考插槽，无需绑定`);
+      return;
+    }
+    setBindPreview({ kind, shotId: activeShot.id, def, overwrite: false });
+  };
+
+  const applyBind = () => {
+    if (!bindPreview || !bindPlan) return;
+    const shot = shots.find((s) => s.id === bindPreview.shotId);
+    if (!shot) return;
+    const prev = { ...((shot as any).dynamic_inputs || {}) };
+    const merged = { ...prev, ...bindPlan.patch };
+    updateShot(bindPreview.shotId, { dynamic_inputs: merged } as any);
+    if (activeShot?.id === bindPreview.shotId) setShotDynamicInputs(merged);
+    setBindUndo([{ shotId: bindPreview.shotId, prev }]);
+    const realCount = bindPlan.filled.filter((f) => !f.kept).length;
+    toast.success(`已绑定 ${realCount} 项参考${bindPlan.gaps.length ? `，${bindPlan.gaps.length} 个必填缺口待补` : ''}`);
+    setBindPreview(null);
+  };
+
+  const undoLastBind = () => {
+    if (!bindUndo?.length) return;
+    for (const it of bindUndo) {
+      updateShot(it.shotId, { dynamic_inputs: it.prev } as any);
+      if (activeShot?.id === it.shotId) setShotDynamicInputs(it.prev);
+    }
+    toast.success(`已撤销 ${bindUndo.length} 个镜头的绑定`);
+    setBindUndo(null);
+  };
+
+  const resolveBindDef = async (pid: string): Promise<any> => {
+    if (!pid) return null;
+    if (pid === imageProvider && imageProviderDef) return imageProviderDef;
+    if (pid === videoProvider && videoProviderDef) return videoProviderDef;
+    if (bindDefCache.current.has(pid)) return bindDefCache.current.get(pid);
+    try {
+      const res: any = await apiService.getProvider(pid);
+      const def = res?.provider || res;
+      bindDefCache.current.set(pid, def);
+      return def;
+    } catch { return null; }
+  };
+
+  // 单镜双源编排（图片源 + 视频源各自的声明槽位），批量绑定复用
+  const planBindForShot = async (shot: any, overwrite: boolean) => {
+    const caps = getMode(((shot as any).production_mode || productionMode) as ProductionMode).caps;
+    const out: { patch: Record<string, any>; filledCount: number; gapCount: number } = { patch: {}, filledCount: 0, gapCount: 0 };
+    const runs: Array<{ pid: string; kind: 'image' | 'video' }> = [
+      { pid: (shot as any).image_provider || imageProvider || '', kind: 'image' },
+      { pid: (shot as any).video_provider || videoProvider || '', kind: 'video' },
+    ];
+    for (const { pid, kind } of runs) {
+      if (!pid) continue;
+      const def = await resolveBindDef(pid);
+      if (!def) continue;
+      const slots = extractSlotsFromProvider(def, kind) as any[];
+      if (!slots.length) continue;
+      const includeFirstFrame = kind === 'video' && !caps.direct && (videoMode === 'i2v' || !!caps.needsFirstFrame);
+      const resources = collectResources({ shot, project, projectAssets: _projectAssets, kind, includeFirstFrame });
+      const plan = planBinding(resources, slots, { ...((shot as any).dynamic_inputs || {}), ...out.patch }, { overwrite });
+      Object.assign(out.patch, plan.patch);
+      out.filledCount += plan.filled.filter((f) => !f.kept).length;
+      out.gapCount += plan.gaps.length;
+    }
+    return out;
+  };
+
+  const handleBatchBind = async () => {
+    const targets = batchSelected.size > 0 ? shots.filter((s) => batchSelected.has(s.id)) : shots;
+    if (!targets.length) return;
+    const undos: Array<{ shotId: string; prev: Record<string, any> }> = [];
+    let bound = 0, totalFilled = 0, totalGaps = 0, skipped = 0;
+    let activeMerged: Record<string, any> | null = null;
+    for (const sh of targets) {
+      const prev = { ...((sh as any).dynamic_inputs || {}) };
+      const { patch, filledCount, gapCount } = await planBindForShot(sh, false);
+      if (!Object.keys(patch).length) { skipped++; continue; }
+      const merged = { ...prev, ...patch };
+      updateShot(sh.id, { dynamic_inputs: merged } as any);
+      undos.push({ shotId: sh.id, prev });
+      if (activeShot?.id === sh.id) activeMerged = merged;
+      bound++; totalFilled += filledCount; totalGaps += gapCount;
+    }
+    if (activeMerged) setShotDynamicInputs(activeMerged);
+    if (!bound) { toast.info('没有可绑定的镜头：请先为镜头选择生成源，并绑定人物/场景/素材'); return; }
+    setBindUndo(undos);
+    toast.success(`已批量绑定 ${bound} 个镜头（${totalFilled} 项参考${totalGaps ? `，${totalGaps} 个必填缺口` : ''}${skipped ? `，${skipped} 镜无可用源跳过` : ''}）`);
   };
 
   const handleRegenerateImage = async (customCount?: number) => {
@@ -742,7 +866,10 @@ export const ShotInspector: React.FC = () => {
         const text = sh.dialogue || sh.voiceover || '';
         const char = project?.characters.find(c => c.name === sh.speaker_name);
         const voiceId = char?.voice_id;
-        const res = await apiService.generateTTS(text, voiceId, sh.emotion, { provider: (sh as any).audio_provider || audioProvider || undefined });
+        const res = await apiService.generateTTS(text, voiceId, sh.emotion, {
+          provider: (sh as any).audio_provider || audioProvider || undefined,
+          ...(char?.ref_audio_url ? { ref_audio_path: char.ref_audio_url } : {}),
+        });
         const audioSec = res.duration || 3.5;
         const fittedSec = Math.max(1.5, Math.round((audioSec + 0.4) * 10) / 10);
         updateShot(sh.id, {
@@ -904,6 +1031,7 @@ export const ShotInspector: React.FC = () => {
     ctxMenu, setCtxMenu, ctxCanvases, ctxLoadingCanvas,
     handlePlayTTS, handleRegenerateImage, handleGenerateVideo,
     handleBatchAllImages, handleBatchAllTTS, handleBatchAllVideos,
+    handleOneClickBind, handleBatchBind, hasBindUndo: !!bindUndo?.length, undoLastBind,
     handleSaveShotToAsset, sendShotToCanvas, openShotCtxMenu,
     setSlotValue, handleSlotUploadFile, injectCharacterToSlot, pickAssetForSlot,
     handleSlotPicked, resolveRenderSlots, keepDeclaredOnly, shotBatchInputs,
@@ -928,6 +1056,20 @@ export const ShotInspector: React.FC = () => {
           }}
         />
       )}
+
+      {/* 一键绑定预览抽屉（资源 → 源声明插槽） */}
+      <BindPreviewModal
+        open={!!bindPreview}
+        kind={bindPreview?.kind || 'image'}
+        providerName={bindPreview?.def?.display_name || bindPreview?.def?.name || bindPreview?.def?.id}
+        shotLabel={activeShot?.shot_index ? `#${activeShot.shot_index}` : ''}
+        plan={bindPlan}
+        overwrite={!!bindPreview?.overwrite}
+        onToggleOverwrite={(v) => setBindPreview((p) => (p ? { ...p, overwrite: v } : p))}
+        onApply={applyBind}
+        onClose={() => setBindPreview(null)}
+        resolveUrl={getMediaUrl}
+      />
     </div>
   );
 };

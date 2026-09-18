@@ -12,6 +12,8 @@ class Character(BaseModel):
     visual_prompt: str = ""
     voice_id: str = "male-qn-qingse" # MiniMax voice timbre
     voice_name: str = "青涩青年音"
+    ref_audio_url: Optional[str] = None # 参考音频绑定（音色克隆用，配音时作为 ref_audio 传给语音源）
+    ref_audio_name: str = ""
     emotion_preset: str = "neutral" # neutral, angry, sad, happy, whisper, dramatic
     avatar_url: Optional[str] = None
     three_views: Dict[str, str] = Field(default_factory=dict) # {"front": url, "side": url, "three_quarter": url}

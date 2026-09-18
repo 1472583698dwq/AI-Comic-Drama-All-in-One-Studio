@@ -71,10 +71,29 @@ class AudioProviderRegistry:
     async def generate(self, req: AudioGenerateRequest, provider_id: Optional[str] = None) -> AudioGenerateResult:
         extra_provider = (req.extra.get("provider") if req.extra and isinstance(req.extra, dict) else None)
         prov = self.get_active_provider(provider_id or extra_provider)
+        # 参考音频归一：/storage 引用 → 本机绝对路径（本地克隆引擎要文件路径；代码源侧仍会再内联为 data URI）
+        req = self._normalize_ref_audio(req)
         from app.extensions import guard
         _pid = (req.extra.get("project_id") if req.extra and isinstance(req.extra, dict) else None)
         guard.ensure_provider_enabled(getattr(prov, "id", provider_id or ""), _pid)
         return await prov.generate(req)
+
+    @staticmethod
+    def _normalize_ref_audio(req: AudioGenerateRequest) -> AudioGenerateRequest:
+        ref = getattr(req, "ref_audio_path", None)
+        if not isinstance(ref, str) or not ref.strip():
+            return req
+        if not ref.startswith(("/storage/", "storage/")):
+            return req
+        try:
+            import os as _os
+            from app.providers.media_refs import local_path_for_ref
+            local = local_path_for_ref(ref)
+            if local and _os.path.isfile(local):
+                req.ref_audio_path = local
+        except Exception:
+            pass
+        return req
 
     async def check_health_all(self) -> Dict[str, Any]:
         results = {}

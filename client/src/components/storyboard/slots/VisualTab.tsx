@@ -1,5 +1,5 @@
 import React from 'react';
-import { Image as ImageIcon, Paintbrush, Sliders, Sparkles } from 'lucide-react';
+import { Image as ImageIcon, Paintbrush, Sliders, Sparkles, Link2 } from 'lucide-react';
 import type { ShotSlotContext } from './types';
 import { getVisibleAnchors } from './registry';
 import { ProviderSlotList } from './ProviderSlotList';
@@ -21,6 +21,7 @@ export const VisualTab: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
     setSlotValue, handleSlotUploadFile, pickAssetForSlot, injectCharacterToSlot,
     uploadingInputKey, getMediaUrl, handleRegenerateImage, isRegenerating,
     setInspectingWorkflowId, probeProvider, regenError,
+    handleOneClickBind, hasBindUndo, undoLastBind,
   } = ctx;
   return (
     <div className="space-y-3.5">
@@ -58,6 +59,19 @@ export const VisualTab: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
                 <Sparkles className="w-3 h-3" />
                 <span>⚡ 全要素合成</span>
               </button>
+              <button
+                onClick={() => handleOneClickBind('image')}
+                className="px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-[11px] font-bold flex items-center gap-1 transition-all"
+                title="按该生图源声明的参考插槽，自动填入绑定的人物 / 场景 / 道具 / 白模等参考图"
+              >
+                <Link2 className="w-3 h-3" />
+                <span>一键绑定参考</span>
+              </button>
+              {hasBindUndo && (
+                <button onClick={undoLastBind} className="px-2 py-1 rounded-lg border border-border text-gray-400 hover:text-white text-[11px] transition-all" title="撤销上一次一键绑定">
+                  ↩ 撤销
+                </button>
+              )}
               <AiPolishButton value={activeShot.image_prompt} onPolish={(v: any) => updateShot(activeShot.id, { image_prompt: v })} contextType="prompt" size="xs" />
             </div>
           </div>

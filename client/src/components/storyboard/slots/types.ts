@@ -173,6 +173,12 @@ export interface ShotSlotContext {
   handleBatchAllImages: () => void;
   handleBatchAllTTS: () => void;
   handleBatchAllVideos: () => void;
+  /** 一键绑定：按所选源声明的插槽，把人物/场景/道具/参考音频填入参考列表 */
+  handleOneClickBind: (kind: 'image' | 'video') => void;
+  /** 批量一键绑定（选中镜头/全部；图片源 + 视频源各按自身声明） */
+  handleBatchBind: () => void;
+  hasBindUndo: boolean;
+  undoLastBind: () => void;
   handleSaveShotToAsset: (kind: 'image' | 'video') => void;
   sendShotToCanvas: (shot: any, opts: { mode: 'new' | 'existing'; canvas_id?: string }) => void;
   openShotCtxMenu: (e: React.MouseEvent, shot: any) => void;

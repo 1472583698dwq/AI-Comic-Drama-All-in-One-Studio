@@ -1,5 +1,5 @@
 import React from 'react';
-import { Film, Sparkles, Volume2 } from 'lucide-react';
+import { Film, Link2, Sparkles, Volume2 } from 'lucide-react';
 import { actionRegistry, anchorRegistry, registerMode, tabRegistry } from './registry';
 import { BUILTIN_MODES } from './modes';
 import { CharacterAnchor, PropAnchor, SceneAnchor } from './anchors';
@@ -66,6 +66,15 @@ export function registerBuiltinSlots() {
     render: (ctx) => (
       <button onClick={ctx.handleBatchAllImages} className="flex-1 py-1 rounded-lg bg-brand/20 hover:bg-brand/30 border border-brand/30 text-brand-light font-bold flex items-center justify-center gap-1 transition-all" title="对所有选中/全部镜头批量并发生成画面">
         <Sparkles className="w-3 h-3 text-brand" /> 批量生图
+      </button>
+    ),
+  });
+  actionRegistry.register({
+    id: 'batch-bind',
+    order: 15,
+    render: (ctx) => (
+      <button onClick={ctx.handleBatchBind} className="flex-1 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 font-bold flex items-center justify-center gap-1 transition-all" title="按各镜所选生成源声明，批量把人物 / 场景 / 道具 / 参考音频填入参考列表（图片源 + 视频源，仅补空缺）">
+        <Link2 className="w-3 h-3 text-emerald-400" /> 批量绑定
       </button>
     ),
   });
