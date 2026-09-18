@@ -13,6 +13,7 @@ import { useCanvasStore } from '../../../stores/useCanvasStore';
 import { apiService } from '../../../services/api';
 import { paramsSchemaToSpecs } from '../providerSkills';
 import { DynamicControl } from '../controls/DynamicControl';
+import { ShotWriteBackControls } from './ShotWriteBackControl';
 import { getCanvasNodeSpec, registerCanvasNodeSpec, type CanvasNodeSpec } from '../canvasNodeSpecs';
 
 const TYPE_TOP: Record<string, string> = {
@@ -141,6 +142,8 @@ export const ExtNode: React.FC<NodeProps> = ({ id, data, selected }) => {
           <div className="text-[11px] text-white/70 bg-black/40 rounded-xl p-2 whitespace-pre-wrap max-h-24 overflow-y-auto">{d.text}</div>
         ) : null}
         {st.status === 'failed' && st.error && <div className="text-[10px] text-red-400">❌ {st.error}</div>}
+
+        <ShotWriteBackControls nodeId={id} nodeType="ext-node" data={d} />
 
         <div className="flex gap-2">
           <button onClick={run} disabled={running || !d.canvas_node_id}

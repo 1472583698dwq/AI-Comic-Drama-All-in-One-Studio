@@ -32,6 +32,7 @@ import { CanvasManagerModal } from './CanvasManagerModal';
 import { buildShotReferenceInputs } from '../storyboard/shotReference';
 import { collectResources, planBinding } from '../storyboard/referenceBinder';
 import { extractSlotsFromProvider } from './providerSkills';
+import { writeBackToShot } from './shotWriteBack';
 import { useCanvasShortcuts } from './hooks/useCanvasShortcuts';
 
 const nodeTypes: any = {
@@ -766,6 +767,9 @@ const InnerCanvas: React.FC = () => {
       imgNode = mk('image', 0, 480, {
         prompt: shot.image_prompt,
         provider_id: shot.image_provider || undefined,
+        // 分镜归属：节点可随时把结果回写该镜（底部控制台「回写到分镜」）
+        shotId: shot.id,
+        shotIndex: shot.shot_index,
         ...imgBind.data,
         ...(!imgBind.hasDeclared && refs.reference_images.length ? { reference_images: refs.reference_images } : {}),
         character_ids: shot.character_ids,
@@ -782,6 +786,9 @@ const InnerCanvas: React.FC = () => {
       duration: Math.round(shot.duration) || 5,
       provider_id: shot.video_provider || undefined,
       camera_prompt: camPrompt,
+      // 分镜归属：节点可随时把结果回写该镜（底部控制台「回写到分镜」）
+      shotId: shot.id,
+      shotIndex: shot.shot_index,
       // 直出（多参考）不带旧首帧：纯绑定驱动 r2v/t2v；图生才带真首帧
       first_frame: shot.production_mode === 'motion_comic' ? undefined : (shot.image_url || undefined),
       // 分镜绑定随镜迁移：该源声明的槽位（首帧/参考图/参考音频等）按一键绑定同一口径双写
@@ -828,8 +835,10 @@ const InnerCanvas: React.FC = () => {
     await handleNodeExecute(videoNode.id);
     const vd: any = (nodesRef.current || []).find((n: any) => n.id === videoNode.id)?.data;
     if (vd?.video_url) {
-      try { useProjectStore.getState().updateShot(shot.id, { video_url: vd.video_url, status: 'completed' }); } catch {}
-      alert(`分镜 #${shot.shot_index || ''} 视频已生成并回写`);
+      // 与节点控制台「回写到分镜」同一口径（含历史留存）
+      const wb = writeBackToShot({ shotId: shot.id, field: 'video_url', value: vd.video_url });
+      if (wb.ok) alert(`分镜 #${shot.shot_index || ''} 视频已生成并回写`);
+      else alert(`视频已生成，回写分镜失败：${wb.error || '未知错误'}（可在节点控制台手动回写）`);
     } else {
       alert('已在画布建好子图，视频未自动产出，请手动执行视频节点');
     }

@@ -11,6 +11,7 @@ import { useCanvasStore } from '../../../stores/useCanvasStore';
 import { apiService } from '../../../services/api';
 import { paramsSchemaToSpecs } from '../providerSkills';
 import { DynamicControl } from '../controls/DynamicControl';
+import { ShotWriteBackControls } from './ShotWriteBackControl';
 
 const HANDLE_MEDIA: Record<string, 'image' | 'video' | 'audio'> = {
   image: 'image', images: 'image', video: 'video', videos: 'video', audio: 'audio', audios: 'audio',
@@ -158,6 +159,8 @@ export const CustomNode: React.FC<NodeProps> = ({ id, data, selected }) => {
           <div className="text-[11px] text-white/70 bg-surface-secondary rounded-xl p-2 whitespace-pre-wrap max-h-24 overflow-y-auto">{d.text}</div>
         ) : null}
         {st.status === 'failed' && st.error && <div className="text-[10px] text-red-400">❌ {st.error}</div>}
+
+        <ShotWriteBackControls nodeId={id} nodeType="custom" data={d} />
 
         <div className="flex gap-2">
           <button onClick={run} disabled={running || !d.custom_node_id}

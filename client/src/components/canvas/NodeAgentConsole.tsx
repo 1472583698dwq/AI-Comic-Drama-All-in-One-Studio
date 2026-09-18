@@ -10,6 +10,7 @@ import { useCanvasStore } from '../../stores/useCanvasStore';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { toast } from '../../stores/useDialogStore';
 import { apiService } from '../../services/api';
+import { ShotWriteBackControls } from './nodes/ShotWriteBackControl';
 import { DynamicProviderInfo, extractSlotsFromProvider, AssetSlotDef, getSkillsForKind, describeProviderSlots, paramsSchemaToSpecs } from './providerSkills';
 import { collectResources, planBinding } from '../storyboard/referenceBinder';
 import { CanvasResourcePickerModal } from './CanvasResourcePickerModal';
@@ -414,6 +415,9 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
       )}
       {agentState?.status === 'running' && <div className="text-[11px] text-violet-300 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Agent 规划并调用 {agentState.tool}…</div>}
       {agentState?.status === 'failed' && <div className="text-[11px] text-red-400 flex items-center gap-1" title={agentState.error}><AlertTriangle className="w-3 h-3" /> {agentState.error}</div>}
+
+      {/* 结果回写分镜：画布结果 → 分镜字段（图片/首帧、视频、配音），覆盖前确认，历史自动留存 */}
+      <ShotWriteBackControls nodeId={nodeId} nodeType={node?.type || kind} data={d} />
 
       <div className="flex items-center gap-2">
         <span className="flex-1 min-w-0 text-[10px] text-white/30 truncate">{providerId ? `就绪 · ${currentProvider?.display_name || providerId}` : 'Agent 将自动选择最优生成源'}</span>
