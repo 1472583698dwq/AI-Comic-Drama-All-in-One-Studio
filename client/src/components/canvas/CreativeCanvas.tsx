@@ -30,6 +30,8 @@ import { WorkflowInspectorModal } from '../workflow/WorkflowInspectorModal';
 import { getNodeSpec } from './nodeRegistry';
 import { CanvasManagerModal } from './CanvasManagerModal';
 import { buildShotReferenceInputs } from '../storyboard/shotReference';
+import { collectResources, planBinding } from '../storyboard/referenceBinder';
+import { extractSlotsFromProvider } from './providerSkills';
 import { useCanvasShortcuts } from './hooks/useCanvasShortcuts';
 
 const nodeTypes: any = {
@@ -674,11 +676,60 @@ const InnerCanvas: React.FC = () => {
   const importRunnerRef = useRef<(p: any) => void>(() => {});
   const continuePendingBuildRef = useRef<() => void>(() => {});
 
+  // 分镜绑定 → 画布节点槽位（与分镜台一键绑定同一纯函数；按源声明键双写）
+  const providerDefCacheRef = useRef<Map<string, any>>(new Map());
+  const loadProviderDef = async (providerId: string): Promise<any> => {
+    if (!providerId) return null;
+    if (providerDefCacheRef.current.has(providerId)) return providerDefCacheRef.current.get(providerId);
+    try {
+      const res: any = await apiService.getProvider(providerId);
+      const def = res?.provider || res || null;
+      providerDefCacheRef.current.set(providerId, def);
+      return def;
+    } catch { return null; }
+  };
+
+  const loadProjectAssetsForCanvas = async (): Promise<any[]> => {
+    try {
+      const r: any = await apiService.listAssets({ project_id: pid || undefined, page: 1, limit: 100 });
+      return r?.assets || [];
+    } catch { return []; }
+  };
+
+  const buildNodeSlotData = async (
+    shot: any, kind: 'image' | 'video', providerId: string,
+    shotDynamic: Record<string, any>, projectAssets: any[],
+  ): Promise<{ hasDeclared: boolean; data: Record<string, any> }> => {
+    const def = await loadProviderDef(providerId);
+    if (!def) return { hasDeclared: false, data: {} };
+    const slots = extractSlotsFromProvider(def, kind) as any[];
+    if (!slots.length) return { hasDeclared: false, data: {} };
+    const project: any = useProjectStore.getState().project;
+    const includeFirstFrame = kind === 'video' && shot.production_mode !== 'motion_comic';
+    const resources = collectResources({ shot, project, projectAssets, kind, includeFirstFrame });
+    const plan = planBinding(resources, slots, shotDynamic, { overwrite: false });
+    const data: Record<string, any> = { ...plan.patch };
+    // 分镜手工值里该源声明的键也随镜迁移（归一键/源真实键双路读取）
+    for (const s of slots) {
+      for (const k of [s.key, s.originalKey]) {
+        if (!k) continue;
+        const v = shotDynamic[k];
+        if (v === undefined || v === null || v === '' || (Array.isArray(v) && !v.length)) continue;
+        if (data[k] === undefined) data[k] = v;
+      }
+    }
+    return { hasDeclared: true, data };
+  };
+
   const runShotOnCanvas = async (payload: any, targetCid: string, targetName?: string) => {
     const shot = payload?.shot;
     if (!shot?.id || !pid) return;
     const proj = useProjectStore.getState().project;
     const refs = buildShotReferenceInputs(shot, proj || { characters: [] }, 'video');
+    // 分镜侧绑定随镜迁移：手工/一键绑定值 + 资源池（角色三视图/参考音频/场景/道具/白模）
+    const shotDynamic: Record<string, any> = { ...(shot.dynamic_inputs || {}) };
+    const projectAssets = await loadProjectAssetsForCanvas();
+    const vidBind = await buildNodeSlotData(shot, 'video', shot.video_provider || '', shotDynamic, projectAssets);
     const vprompt = shot.video_prompt || shot.action_desc || shot.image_prompt || '';
     const camMatch = /\[(?:Camera|运镜):[^\]]+\]/.exec(vprompt);
     const camPrompt = camMatch ? camMatch[0] : '';
@@ -711,7 +762,19 @@ const InnerCanvas: React.FC = () => {
     newNodes.push(dirNode);
     let imgNode: Node | null = null;
     if (!shot.image_url && shot.image_prompt) {
-      imgNode = mk('image', 0, 480, { prompt: shot.image_prompt, provider_id: shot.image_provider || undefined });
+      const imgBind = await buildNodeSlotData(shot, 'image', shot.image_provider || '', shotDynamic, projectAssets);
+      imgNode = mk('image', 0, 480, {
+        prompt: shot.image_prompt,
+        provider_id: shot.image_provider || undefined,
+        ...imgBind.data,
+        ...(!imgBind.hasDeclared && refs.reference_images.length ? { reference_images: refs.reference_images } : {}),
+        character_ids: shot.character_ids,
+        character_weights: shot.character_weights,
+        scene_ref_image: shot.scene_ref_image,
+        scene_name: shot.scene_name,
+        prop_asset_ids: shot.prop_asset_ids,
+        ...(shot.provider_params?.image ? { params: shot.provider_params.image, provider_params: shot.provider_params.image } : {}),
+      });
       newNodes.push(imgNode);
     }
     const videoNode = mk('video', 420, 120, {
@@ -721,7 +784,20 @@ const InnerCanvas: React.FC = () => {
       camera_prompt: camPrompt,
       // 直出（多参考）不带旧首帧：纯绑定驱动 r2v/t2v；图生才带真首帧
       first_frame: shot.production_mode === 'motion_comic' ? undefined : (shot.image_url || undefined),
-      reference_images: refs.reference_images.length ? refs.reference_images : undefined,
+      // 分镜绑定随镜迁移：该源声明的槽位（首帧/参考图/参考音频等）按一键绑定同一口径双写
+      ...vidBind.data,
+      // 无源定义时回退通用参考列表（旧行为）
+      ...(!vidBind.hasDeclared && refs.reference_images.length ? { reference_images: refs.reference_images } : {}),
+      // 画布内再生成/一键绑定复用该镜的角色·场景·道具绑定
+      character_ids: shot.character_ids,
+      character_weights: shot.character_weights,
+      scene_ref_image: shot.scene_ref_image,
+      scene_name: shot.scene_name,
+      prop_asset_ids: shot.prop_asset_ids,
+      previz_url: shot.previz_url,
+      previz_video_url: shot.previz_video_url,
+      speaker_name: shot.speaker_name,
+      ...(shot.provider_params?.video ? { params: shot.provider_params.video, provider_params: shot.provider_params.video } : {}),
     });
     newNodes.push(videoNode);
     edge(promptNode, 'prompt', videoNode, 'prompt');
