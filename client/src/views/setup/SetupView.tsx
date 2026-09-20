@@ -72,7 +72,8 @@ export const SetupView: React.FC = () => {
   );
   const dirty = changed.length > 0;
 
-  useEscapeClose(!dirty, () => setActiveTab(project ? 'studio' : 'projects'));
+  // 精简链路：退出设置后回落创意画布（原回落分镜工作台，该页签已下线）
+  useEscapeClose(!dirty, () => setActiveTab(project ? 'canvas' : 'projects'));
 
   const save = async () => {
     if (!dirty) return;

@@ -16,8 +16,9 @@ export default defineConfig({
     chunkSizeWarningLimit: 900,
     rollupOptions: {
       input: {
+        // 精简链路：移动端卡片流入口（mobile.html / src/mobile-main.tsx）已随
+        // 「分镜工作台 → 移动卡片流」这条链路一起下线，只保留主应用单入口。
         main: `${import.meta.dirname}/index.html`,
-        mobile: `${import.meta.dirname}/mobile.html`,
       },
       output: {
         manualChunks: (id: string) => {

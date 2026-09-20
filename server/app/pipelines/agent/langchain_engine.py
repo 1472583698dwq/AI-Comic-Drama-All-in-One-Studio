@@ -128,6 +128,13 @@ def _build_context_block(context: Dict[str, Any]) -> str:
     ws = context.get("workspace")
     if ws:
         parts.append(f"【工作区模式】{ws}")
+    # 「加入会话」的画布节点：与 v2 引擎同一份实现（见 runtime/prompt.focus_nodes_section），
+    # 避免两条引擎对同一条上下文各自解释、行为不一致
+    try:
+        from app.agent.runtime.prompt import focus_nodes_section
+        parts.extend(focus_nodes_section(context))
+    except Exception:
+        pass
     return "\n\n".join(parts)[:16000]
 
 # ─── ChatModel 构造 ─────────────────────────────────────

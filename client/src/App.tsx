@@ -1,14 +1,8 @@
 import React, { useState, useEffect, Suspense } from 'react';
 import { Header } from './components/navbar/Header';
 import { Sidebar } from './components/navbar/Sidebar';
-import { ShotInspector } from './components/storyboard/ShotInspector';
-import { Director3DStage } from './components/director3d/Director3DStage';
-import { MultiTrackTimeline } from './components/timeline/MultiTrackTimeline';
-import { CharacterStudio } from './components/character/CharacterStudio';
 import { AssetLibrary } from './components/asset/AssetLibrary';
-import { MobileCardFlow } from './components/mobile/MobileCardFlow';
 import { AgentChatDrawer } from './components/agent/AgentChatDrawer';
-import { ScriptImportView } from './views/ScriptImportView';
 import { ExportModal } from './components/export/ExportModal';
 import { McpToolsModal } from './components/mcp/McpToolsModal';
 import { SkillStudioModal } from './components/skills/SkillStudioModal';
@@ -17,7 +11,7 @@ import { ProjectDashboard } from './views/ProjectDashboard';
 import { AgentModeView } from './views/AgentModeView';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
 import { ProviderManagerModal } from './components/provider/ProviderManagerModal';
-import { GlobalAiPolish } from './components/ui/GlobalAiPolish';
+import { SelectionPolish } from './components/ui/SelectionPolish';
 import { GlobalDialogContainer } from './components/ui/GlobalDialogContainer';
 import { FirstRunWizard } from './components/onboarding/FirstRunWizard';
 import { installGlobalDialogPatch, toast } from './stores/useDialogStore';
@@ -26,10 +20,9 @@ import { useProjectStore } from './stores/useProjectStore';
 import { useMcpStore } from './stores/useMcpStore';
 
 export function App() {
-  const { project, activeTab, platformMode, apiError, clearApiError } = useProjectStore();
+  const { project, activeTab, apiError, clearApiError } = useProjectStore();
   const { fetchTools } = useMcpStore();
 
-  const [isImportOpen, setIsImportOpen] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isMcpOpen, setIsMcpOpen] = useState(false);
   const [isSkillsOpen, setIsSkillsOpen] = useState(false);
@@ -83,7 +76,6 @@ export function App() {
     <div className="h-screen w-screen flex flex-col bg-background text-gray-100 overflow-hidden">
       {/* 1. Universal Top Navigation Header */}
       <Header
-        onOpenImport={() => setIsImportOpen(true)}
         onOpenExport={() => setIsExportOpen(true)}
         onOpenMcp={() => setIsMcpOpen(true)}
         onOpenSkills={() => setIsSkillsOpen(true)}
@@ -112,50 +104,43 @@ export function App() {
           onOpenProvider={() => setIsProviderOpen(true)}
         />
         <main className="flex-1 flex flex-col overflow-hidden relative min-w-0">
+          {/* ── 精简链路页签路由 ──────────────────────────────────────────────
+              只渲染 设置 / 项目看板 / AI 导演 / 素材库 / 创意画布 五个宿主。
+              已下线的分镜工作台（studio）/ 3D 片场（director3d）/ 多轨剪辑（timeline）/
+              角色设定（characters）由 store 的 normalizeTab 在执行跳转时重定向
+              （角色设定 → 素材库，其余 → 画布），此处兜底分支直接落到画布。 */}
           {activeTab === 'config' ? (
             <ErrorBoundary name="设置中心">
               <SetupView />
             </ErrorBoundary>
           ) : (!project || activeTab === 'projects') ? (
             <ProjectDashboard />
-          ) : activeTab === 'canvas' ? (
-            <Suspense fallback={<div className="flex-1 flex items-center justify-center text-xs text-gray-500">画布加载中…</div>}>
-              <CreativeCanvas />
-            </Suspense>
           ) : activeTab === 'agent' ? (
             <ErrorBoundary name="Agent模式页">
               <AgentModeView />
             </ErrorBoundary>
-          ) : activeTab === 'characters' ? (
-            <CharacterStudio />
           ) : activeTab === 'assets' ? (
             <AssetLibrary />
-          ) : platformMode === 'desktop' ? (
-            <div className="flex-1 flex flex-col overflow-hidden">
-              <div className="flex-1 flex overflow-hidden">
-                {(activeTab === 'studio' || activeTab === 'timeline') && <ShotInspector />}
-                {activeTab === 'director3d' && <Director3DStage />}
-              </div>
-              <MultiTrackTimeline />
-            </div>
           ) : (
-            <MobileCardFlow onOpenExport={() => setIsExportOpen(true)} />
+            <Suspense fallback={<div className="flex-1 flex items-center justify-center text-xs text-gray-500">画布加载中…</div>}>
+              <CreativeCanvas />
+            </Suspense>
           )}
         </main>
       </div>
 
-      {/* 3. Floating Multi-Modal Director Agent (仅当存在有效项目时启用) */}
-      {project && <AgentChatDrawer />}
+      {/* 3. 悬浮导演 Agent（仅当存在有效项目、且不在画布页时启用）
+          画布页有专属的右侧 Agent 侧栏（CanvasAgentSidebar），两者共用同一份会话；
+          此处加 activeTab 闸门，避免画布上同时出现两个功能重复的导演 Agent 入口。 */}
+      {project && activeTab !== 'canvas' && <AgentChatDrawer />}
 
-      {/* 3.1 Global AI Polish (covers all textareas) */}
-      <GlobalAiPolish />
+      {/* 3.1 选区级 AI 润色（多行文本域里选中文字才出现，只替换选区）。
+             原先"聚焦就飘一个按钮"的 GlobalAiPolish 已移除：它从不消失、
+             无差别命中搜索框/密钥框，且整段覆盖原值 —— 已由字段级
+             按钮（AiPolishButton）+ 本浮标两个明确入口取代。 */}
+      <SelectionPolish />
 
       {/* 4. Global Modals */}
-      <ScriptImportView
-        isOpen={isImportOpen}
-        onClose={() => setIsImportOpen(false)}
-      />
-
       <ExportModal
         isOpen={isExportOpen}
         onClose={() => setIsExportOpen(false)}

@@ -3,7 +3,7 @@ import {
   ReactFlow, Background, Controls, MiniMap, useNodesState, useEdgesState, addEdge, Connection, Edge, Node, ReactFlowProvider, useReactFlow
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Search, Sparkles, Image as ImageIcon, Film, Box, Boxes, Library, Save, Download, Mic, Type, Plus, Wand2, Layers } from 'lucide-react';
+import { Search, Sparkles, Image as ImageIcon, Film, Box, Boxes, Library, Save, Download, Mic, Type, Plus, Wand2, Layers, PanelLeft, PanelLeftClose } from 'lucide-react';
 import { useProjectListStore } from '../../stores/useProjectListStore';
 import { useThemeStore } from '../../stores/useThemeStore';
 import { useProjectStore } from '../../stores/useProjectStore';
@@ -25,7 +25,9 @@ import { PromptNode, ImageNode, VideoGenNode, AudioNode, Director3DMinimalNode, 
 import { CustomNode } from './nodes/CustomNode';
 import { ExtNode } from './nodes/ExtNode';
 import { syncCanvasNodeSpecs, listCanvasNodeSpecs, getCanvasNodeSpec } from './canvasNodeSpecs';
-import { FloatingAgentPromptBar } from './FloatingAgentPromptBar';
+import { NodeControlBar } from './NodeControlBar';
+import { CanvasAgentSidebar } from './CanvasAgentSidebar';
+import { NodeContextMenu, type NodeMenuState } from './NodeContextMenu';
 import { WorkflowInspectorModal } from '../workflow/WorkflowInspectorModal';
 import { getNodeSpec } from './nodeRegistry';
 import { CanvasManagerModal } from './CanvasManagerModal';
@@ -135,6 +137,15 @@ const InnerCanvas: React.FC = () => {
   const [canvasId, setCanvasId] = useState<string>('default');
   const [canvasList, setCanvasList] = useState<Array<{ id: string; name: string; updated_at: string; node_count: number }>>([]);
   const [showManager, setShowManager] = useState(false);
+  // 左侧工作台栏收起状态（持久化）；右侧 Agent 侧栏的收起状态由 CanvasAgentSidebar 自持
+  const [leftCollapsed, setLeftCollapsed] = useState<boolean>(() => {
+    try { return localStorage.getItem('canvas_left_panel_collapsed') === '1'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('canvas_left_panel_collapsed', leftCollapsed ? '1' : '0'); } catch { /* ignore */ }
+  }, [leftCollapsed]);
+  // 节点右键菜单（添加到会话 / 删除）
+  const [nodeMenu, setNodeMenu] = useState<NodeMenuState | null>(null);
   const canvasIdRef = useRef<string>('default');
   useEffect(() => { canvasIdRef.current = canvasId; }, [canvasId]);
   // 切换/新建/删除清空时的单次保存抑制，避免空画布写回旧 id 复活已删画布
@@ -1032,17 +1043,52 @@ const InnerCanvas: React.FC = () => {
 
   const isEmpty = nodes.length === 0;
 
+  /** 右键菜单删除：节点 + 挂在它身上的连线一起删，并把它移出会话关注 */
+  const handleDeleteNode = (nodeId: string) => {
+    setNodes(nds => nds.filter((n: any) => n.id !== nodeId));
+    setEdges(es => es.filter((e: any) => e.source !== nodeId && e.target !== nodeId));
+    try { useCanvasStore.getState().removeAgentFocusNode(nodeId); } catch { /* ignore */ }
+    if (selectedNodeId === nodeId) setSelectedNodeId(null);
+    toast.info('节点已删除');
+  };
+
   return (
     <div className="flex-1 flex overflow-hidden" style={{ background: isLight ? '#E8ECF1' : '#08080B', cursor: 'default' }}>
-      {/* 左侧：极简工具栏 */}
-      <div className="w-[280px] bg-surface border-r border-border flex flex-col shrink-0">
-        <div className="h-12 px-4 border-b border-border flex items-center gap-2 shrink-0 bg-surface">
-          <div className="w-7 h-7 rounded-lg bg-brand/10 border border-brand/20 flex items-center justify-center"><Layers className="w-3.5 h-3.5 text-brand" /></div>
-          <span className="text-sm font-bold [color:var(--color-text-main)]">漫剧工作流</span>
-          <span className="ml-auto text-[10px] px-2 py-1 rounded-full bg-surface-secondary border border-border [color:var(--color-text-muted)] font-mono">MiniMax Agent</span>
+      {/* 左侧：工作台栏（可收起；收起态为图标轨） */}
+      <div className={`${leftCollapsed ? 'w-[52px]' : 'w-[280px]'} bg-surface border-r border-border flex flex-col shrink-0 transition-[width] duration-200`}>
+        <div className={`h-12 border-b border-border flex items-center gap-2 shrink-0 bg-surface ${leftCollapsed ? 'justify-center px-0' : 'px-4'}`}>
+          {leftCollapsed ? (
+            <button onClick={() => setLeftCollapsed(false)} title="展开工作台" className="p-2 rounded-lg text-brand hover:bg-surface-secondary transition-colors">
+              <PanelLeft className="w-4 h-4" />
+            </button>
+          ) : (
+            <>
+              <div className="w-7 h-7 rounded-lg bg-brand/10 border border-brand/20 flex items-center justify-center shrink-0"><Layers className="w-3.5 h-3.5 text-brand" /></div>
+              <span className="text-sm font-bold [color:var(--color-text-main)] whitespace-nowrap">漫剧工作流</span>
+              <span className="ml-auto text-[10px] px-2 py-1 rounded-full bg-surface-secondary border border-border [color:var(--color-text-muted)] font-mono">MiniMax Agent</span>
+              <button onClick={() => setLeftCollapsed(true)} title="收起工作台" className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-secondary transition-colors shrink-0">
+                <PanelLeftClose className="w-3.5 h-3.5" />
+              </button>
+            </>
+          )}
         </div>
 
-        <div className="p-3 space-y-4 flex-1 overflow-y-auto">
+        {/* 收起态：图标轨（一键模板 / 保存 / 导出），不占画布横向空间 */}
+        {leftCollapsed && (
+          <div className="flex-1 flex flex-col items-center gap-2 py-3">
+            <button onClick={() => addTemplate(TEMPLATES[0])} title="一键标准链路：剧本 → 生图 → 视频" className="p-2 rounded-xl bg-surface-secondary border border-border hover:border-brand/40 hover:bg-surface-tertiary transition-all">
+              <Wand2 className="w-4 h-4 text-violet-400" />
+            </button>
+            <button onClick={handleManualSave} disabled={saving} title="保存画布" className="p-2 rounded-xl bg-surface-secondary border border-border hover:border-brand/40 hover:bg-surface-tertiary disabled:opacity-40 transition-all">
+              <Save className="w-4 h-4 text-brand" />
+            </button>
+            <button onClick={() => window.dispatchEvent(new CustomEvent('canvas-export-shots'))} title="导出为分镜工程" className="p-2 rounded-xl bg-surface-secondary border border-border hover:border-brand/40 hover:bg-surface-tertiary transition-all">
+              <Download className="w-4 h-4 [color:var(--color-text-main)]" />
+            </button>
+          </div>
+        )}
+
+        <div className={`p-3 space-y-4 flex-1 overflow-y-auto ${leftCollapsed ? 'hidden' : ''}`}>
           {/* 一键模板 */}
           <div>
             <div className="text-xs font-bold mb-2 [color:var(--color-text-main)]">一键模板</div>
@@ -1196,7 +1242,7 @@ const InnerCanvas: React.FC = () => {
           </div>
         </div>
 
-        <div className="p-3 border-t border-border space-y-2 bg-surface-secondary/30">
+        <div className={`p-3 border-t border-border space-y-2 bg-surface-secondary/30 ${leftCollapsed ? 'hidden' : ''}`}>
           <button onClick={handleManualSave} disabled={saving} className="w-full py-2.5 rounded-xl bg-brand text-white text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-40 hover:bg-brand-light shadow-md shadow-brand/20 transition-colors"><Save className="w-3.5 h-3.5" />{saving ? '保存中' : '保存画布'}</button>
           <button onClick={() => window.dispatchEvent(new CustomEvent('canvas-export-shots'))} className="w-full py-2 rounded-xl bg-surface-secondary border border-border text-xs font-bold [color:var(--color-text-main)] flex items-center justify-center gap-1.5 hover:bg-surface-tertiary transition-colors"><Download className="w-3.5 h-3.5" /> 导出为分镜工程</button>
         </div>
@@ -1328,7 +1374,13 @@ const InnerCanvas: React.FC = () => {
               isValidConnection={isValidConnection}
               nodeTypes={nodeTypes}
               onNodeClick={(_, node) => setSelectedNodeId(node.id)}
-              onPaneClick={() => setSelectedNodeId(null)}
+              onNodeContextMenu={(e, node) => {
+                e.preventDefault();
+                // 右键即选中，与主流编辑器一致：菜单里的「添加到会话」目标不会被误认
+                setSelectedNodeId(node.id);
+                setNodeMenu({ nodeId: node.id, x: (e as React.MouseEvent).clientX, y: (e as React.MouseEvent).clientY });
+              }}
+              onPaneClick={() => { setSelectedNodeId(null); setNodeMenu(null); }}
               onSelectionChange={handleSelectionChange}
               deleteKeyCode={null}  /* 删除交给 useCanvasShortcuts，统一处理节点+连线 */
               fitView
@@ -1343,24 +1395,22 @@ const InnerCanvas: React.FC = () => {
           )}
         </div>
 
-        {/* 底部全局编排控制台（节点级配置已下沉到卡内 NodeAgentBar） */}
-        {!isEmpty && (
-          <FloatingAgentPromptBar
-            onAddNode={(t) => {
-              const pos = { x: 120 + nodes.length * 40, y: 120 + nodes.length * 40 };
-              const n = createNode(t, pos);
-              setNodes(nds => [...nds, n]);
-              setSelectedNodeId(n.id);
-            }}
-            onOpenAssetLibrary={() => {
-              window.dispatchEvent(new CustomEvent('open-asset-library'));
-            }}
-            onExport={() => {
-              window.dispatchEvent(new CustomEvent('open-export-modal'));
-            }}
-          />
-        )}
+        {/* 底部：仅在选中「生图 / 视频 / 配音」节点时出现的节点控制块。
+            原先常驻的「全局导演 Agent GO + 快速添加」已撤销 —— 全局编排并入右侧 Agent 侧栏，
+            快速添加由左侧工作台栏承担，此处只做「选中哪个节点就控制哪个节点」。 */}
+        {!isEmpty && <NodeControlBar />}
       </div>
+
+      {/* 右侧：导演 Agent 侧栏（可收起）—— 画布上唯一的 Agent 入口。
+          合并了原先的悬浮胶囊/浮窗与底部全局编排栏，见 CanvasAgentSidebar 文件头注释。 */}
+      <CanvasAgentSidebar />
+
+      {/* 节点右键菜单（添加到会话 / 删除） */}
+      <NodeContextMenu
+        menu={nodeMenu}
+        onClose={() => setNodeMenu(null)}
+        onDelete={handleDeleteNode}
+      />
 
       {inspectWfId && <WorkflowInspectorModal workflowId={inspectWfId} isOpen={!!inspectWfId} onClose={() => setInspectWfId('')} onSaved={() => {}} />}
     </div>

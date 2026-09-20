@@ -15,6 +15,7 @@ export type FieldKind = 'text' | 'secret' | 'url' | 'number' | 'path';
 export type TestTarget =
   | 'openai' | 'responses_api' | 'minimax' | 'minimax_h3' | 'seedance'
   | 'kling' | 'wan3' | 'comfyui' | 'siliconflow' | 'dashscope'
+  | 'openai_image' | 'openai_video'
   | 'elevenlabs' | 'cosyvoice' | 'gpt_sovits' | 'jianyin';
 
 export interface CapField {
@@ -25,6 +26,8 @@ export interface CapField {
   /** 为空时该通道视为「未配置」 */
   required?: boolean;
   hint?: string;
+  /** 回退链：这些键任一有值也算「已填」（用于有兼容回退的字段，如生图 Key 可回退文本 Key） */
+  altKeys?: string[];
   /** 走后端原生目录选择器（/system/browse-folder），并给出"打开目录"入口 */
   pick?: boolean;
   /** 一键填入的常用值 */
@@ -170,12 +173,23 @@ export const CAPABILITIES: Capability[] = [
       },
       {
         id: 'openai_compat',
-        name: 'OpenAI 兼容生图',
+        name: '自定义（OpenAI 兼容）',
         where: 'cloud',
-        summary: '复用上面文本那把 OPENAI_API_KEY，默认打到 DALL·E 3；也可指向任何兼容的代理。',
+        summary: '接任何实现 OpenAI /v1/images/generations 协议的服务——官方 DALL·E、gpt-image、国内中转站、自建代理都走这条。Key / 地址 / 模型三项都自己填，不跟别人共用。',
+        test: 'openai_image',
         fields: [
-          KEY('OPENAI_IMAGE_MODEL', '模型名', { kind: 'text', placeholder: 'dall-e-3', required: false }),
-          KEY('OPENAI_IMAGE_BASE_URL', '接口地址', { kind: 'url', required: false, hint: '留空则复用文本大模型的地址' }),
+          KEY('OPENAI_IMAGE_API_KEY', 'API Key', {
+            placeholder: 'sk-...', altKeys: ['OPENAI_API_KEY'],
+            hint: '生图专用 Key（独立计费 / 独立代理）；留空才会回退复用「文本大模型」那把，属于旧配置兼容',
+          }),
+          KEY('OPENAI_IMAGE_BASE_URL', '接口地址', {
+            kind: 'url', required: false, placeholder: 'https://api.openai.com/v1',
+            hint: '填到 /v1 为止；留空则沿用文本大模型的地址',
+          }),
+          KEY('OPENAI_IMAGE_MODEL', '模型名', {
+            kind: 'text', required: false, placeholder: 'dall-e-3',
+            hint: '中转站的模型名以对方文档为准，如 dall-e-3 / gpt-image-1 / flux-schnell',
+          }),
         ],
       },
     ],
@@ -235,6 +249,27 @@ export const CAPABILITIES: Capability[] = [
           KEY('DASHSCOPE_API_KEY', 'API Key', { hint: '与「阿里通义万相」生图是同一把' }),
           KEY('WAN3_MODEL', '模型名', { kind: 'text', required: false }),
           KEY('WAN3_BASE_URL', '接口地址', { kind: 'url', placeholder: 'https://dashscope.aliyuncs.com', required: false }),
+        ],
+      },
+      {
+        id: 'openai_video',
+        name: '自定义（OpenAI 兼容视频）',
+        where: 'cloud',
+        summary: '按 OpenAI 官方的 /v1/videos 协议（Sora 系）对接任何中转站或自建网关。Key 单独一把，不和文本、生图共用。',
+        test: 'openai_video',
+        fields: [
+          KEY('OPENAI_VIDEO_API_KEY', 'API Key', {
+            placeholder: 'sk-...',
+            hint: '生视频专用 Key，与文本大模型 / 生图完全独立；不填就只走别的通道',
+          }),
+          KEY('OPENAI_VIDEO_BASE_URL', '接口地址', {
+            kind: 'url', required: false, placeholder: 'https://api.openai.com/v1',
+            hint: '填到 /v1 为止；可指向任何实现了该协议的中转站',
+          }),
+          KEY('OPENAI_VIDEO_MODEL', '模型名', {
+            kind: 'text', required: false, placeholder: 'sora-2',
+            hint: '如 sora-2 / sora-2-pro，或中转站自定的模型名',
+          }),
         ],
       },
       {
@@ -335,9 +370,15 @@ export const CAPABILITIES: Capability[] = [
   },
 ];
 
+/** 某个字段是否算"已填"：本键有值，或任一回退键（altKeys）有值 */
+function fieldFilled(f: CapField, cfg: Record<string, string>): boolean {
+  if (!!(cfg[f.key] || '').trim()) return true;
+  return (f.altKeys || []).some((k) => !!(cfg[k] || '').trim());
+}
+
 /** 某个通道是否算"已填"（所有 required 字段非空） */
 export function channelFilled(ch: Channel, cfg: Record<string, string>): boolean {
-  return ch.fields.filter((f) => f.required !== false).every((f) => !!(cfg[f.key] || '').trim());
+  return ch.fields.filter((f) => f.required !== false).every((f) => fieldFilled(f, cfg));
 }
 
 /** 能力当前选中的通道 id（读默认路由键；没有路由键的能力取第一个通道） */

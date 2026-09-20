@@ -58,7 +58,7 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
               className={`${compact ? 'max-w-[92%] p-3' : 'max-w-[85%] p-4'} rounded-2xl leading-relaxed text-xs relative group/msg ${
                 m.sender === 'user'
                   ? 'bg-brand text-white rounded-br-none'
-                  : 'bg-surface-secondary border border-border text-gray-100 rounded-bl-none'
+                  : 'bg-surface-secondary border border-border [color:var(--color-text-main)] rounded-bl-none'
               }`}
             >
               {!compact && (
@@ -200,7 +200,7 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
                     <button
                       key={s}
                       onClick={() => onSendSuggestion(s)}
-                      className="px-2 py-1 rounded-full bg-surface border border-border text-[10px] text-gray-300 hover:border-brand hover:text-white"
+                      className="px-2 py-1 rounded-full bg-surface border border-border text-[10px] [color:var(--color-text-secondary)] hover:border-brand hover:[color:var(--color-text-main)]"
                     >
                       {s}
                     </button>

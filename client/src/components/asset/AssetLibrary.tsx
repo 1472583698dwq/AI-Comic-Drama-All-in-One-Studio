@@ -356,8 +356,8 @@ export const AssetLibrary: React.FC = () => {
     }
     if (!Object.keys(patch).length) { alert('该素材无可用信息写入分镜'); return; }
     updateShot(shotId, patch);
-    // 切到分镜工作台并提示
-    st.setActiveTab('studio');
+    // 精简链路：分镜工作台已下线，落脚点改为创意画布（写入的数据仍落在 project.scenes）
+    st.setActiveTab('canvas');
     try { window.dispatchEvent(new CustomEvent('asset-applied', { detail: { assetId: asset.id, shotId: targetShotId } })); } catch {}
   };
 
@@ -395,7 +395,7 @@ export const AssetLibrary: React.FC = () => {
     const abs = url && url.startsWith('/') ? `http://127.0.0.1:8000${url}` : url;
     if (!abs) { alert('该素材无可用文件'); return; }
     updateShot(targetShotId, isVideoAsset(asset) ? { previz_video_url: abs } : { previz_url: abs });
-    st.setActiveTab('studio');
+    st.setActiveTab('canvas');
   };
 
   const handleAddAsCharacter = (asset: any) => {    const st = useProjectStore.getState();
@@ -421,7 +421,7 @@ export const AssetLibrary: React.FC = () => {
     const next = { ...curProject, characters: [...curProject.characters, newChar] } as any;
     st.setProject(next);
     alert(`已将素材《${asset.name}》添加为项目角色`);
-    st.setActiveTab('characters');
+    // 精简链路：角色设定视图已下线（角色数据落在 project.characters，可在素材库「角色」分类查看），不再跳转
   };
 
   const onDropFiles = (files: FileList | null) => {

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Sparkles, Layers, Users, Compass, Video, Library, FolderKanban, Bot,
+  Sparkles, Library, FolderKanban, Bot,
   Settings, Sun, Moon, PanelLeftClose, PanelLeft, Lock,
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
@@ -29,12 +29,8 @@ interface NavItem {
  * - 底部工具区固定放「生成源 / 技能 / MCP / 主题 / 系统设置」，设置永远可见。
  */
 export const Sidebar: React.FC<SidebarProps> = () => {
-  const { project, activeTab, setActiveTab, setWorkspace } = useProjectStore();
+  const { project, activeTab, setActiveTab } = useProjectStore();
   const { effectiveTheme, toggleTheme } = useThemeStore();
-
-  const shotsCount = (project?.scenes || []).reduce(
-    (n: number, s: any) => n + (s?.shots?.length || 0), 0);
-  const charactersCount = project?.characters?.length || 0;
 
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try {
@@ -54,20 +50,17 @@ export const Sidebar: React.FC<SidebarProps> = () => {
       toast.info('请先在看板创建或打开项目');
       return;
     }
-    if (id === 'canvas') { setWorkspace('creative'); setActiveTab('canvas'); }
-    else if (id === 'assets') { setWorkspace('production'); setActiveTab('assets'); }
-    else { setWorkspace('production'); setActiveTab(id as any); }
+    // 工作区（creative/production）与已下线页签的重定向统一由 store 的 setActiveTab 处理
+    setActiveTab(id as any);
   };
 
+  // 精简链路：仅保留 项目看板 / 素材库 / AI 导演 / 创意画布（设置固定在侧栏底部工具区）。
+  // 已下线：分镜工作台（studio）/ 角色设定（characters）/ 3D 片场（director3d）/ 多轨剪辑（timeline）。
   const groups: Array<{ title: string; items: NavItem[] }> = [
     {
-      title: '漫剧工坊',
+      title: '工作区',
       items: [
         { id: 'projects', label: '项目看板', icon: FolderKanban },
-        { id: 'studio', label: '分镜工作台', icon: Layers, count: shotsCount },
-        { id: 'characters', label: '角色设定', icon: Users, count: charactersCount },
-        { id: 'director3d', label: '3D 片场', icon: Compass },
-        { id: 'timeline', label: '多轨剪辑', icon: Video },
         { id: 'assets', label: '素材库', icon: Library, accent: 'pink' },
       ],
     },

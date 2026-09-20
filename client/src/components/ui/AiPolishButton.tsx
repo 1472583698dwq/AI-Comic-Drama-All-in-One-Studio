@@ -22,6 +22,8 @@ import {
 } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { useEscapeClose } from '../../hooks/useEscapeClose';
+// 技能清单加载与结果提取与「选区浮标」SelectionPolish 共用，避免两处各写一套口径
+import { loadPolishSkills, extractPolishResult } from './polishUtils';
 
 export interface AiPolishButtonProps {
   value: string;
@@ -102,17 +104,14 @@ export const AiPolishButton: React.FC<AiPolishButtonProps> = ({
   const loadSystemSkills = async () => {
     setLoadingSkills(true);
     try {
-      const list = await apiService.listSkills();
-      const all: SkillItem[] = Array.isArray(list) ? list : (list as any)?.skills || [];
-      if (all && all.length > 0) {
-        setSkills(all);
-        if (!selectedSkill) {
-          // 根据 contextType 挑选合适的初始技能
-          const defaultMatch = contextType === 'dialogue'
-            ? all.find(s => s.name.includes('dialogue') || s.name.includes('emotion'))
-            : all.find(s => s.name.includes('prompt') || s.category === 'prompt_optimization');
-          setSelectedSkill(defaultMatch ? defaultMatch.name : all[0].name);
-        }
+      const all = await loadPolishSkills();
+      setSkills(all);
+      if (!selectedSkill && all.length > 0) {
+        // 根据 contextType 挑选合适的初始技能
+        const defaultMatch = contextType === 'dialogue'
+          ? all.find(s => s.name.includes('dialogue') || s.name.includes('emotion'))
+          : all.find(s => s.name.includes('prompt') || s.category === 'prompt_optimization');
+        setSelectedSkill(defaultMatch ? defaultMatch.name : all[0].name);
       }
     } catch (err) {
       console.error('Failed to load system skills:', err);
@@ -169,31 +168,9 @@ export const AiPolishButton: React.FC<AiPolishButtonProps> = ({
 
       const res = await apiService.executeSkill(selectedSkill, contextPayload, userInstruction.trim() || textToPolish);
 
-      let finalResult = res?.modified_data?.polished_prompt || res?.modified_data?.polished_text || res?.result_message || '';
-
-      if (res?.modified_data?.suggested_emotion) {
-        setSuggestedEmotion(res.modified_data.suggested_emotion);
-      } else {
-        setSuggestedEmotion('');
-      }
-
-      // 如果返回为空尝试解析
-      if (!finalResult || finalResult === res?.result_message) {
-        if (res?.modified_data?.polished_prompt) finalResult = res.modified_data.polished_prompt;
-        else if (res?.modified_data?.polished_text) finalResult = res.modified_data.polished_text;
-      }
-
-      if (finalResult) {
-        finalResult = finalResult.trim();
-        // 清理 JSON 包裹
-        if (finalResult.startsWith('{') && finalResult.includes('polished_text')) {
-          try {
-            const j = JSON.parse(finalResult);
-            finalResult = j.polished_text || j.polished_prompt || finalResult;
-            if (j.suggested_emotion) setSuggestedEmotion(j.suggested_emotion);
-          } catch {}
-        }
-      }
+      // 结果提取收口到 polishUtils（各技能返回形态不一，统一口径后两处入口行为一致）
+      const { text: finalResult, suggestedEmotion: emo } = extractPolishResult(res);
+      setSuggestedEmotion(emo);
 
       if (!finalResult) {
         throw new Error('未能生成润色结果，请重试');

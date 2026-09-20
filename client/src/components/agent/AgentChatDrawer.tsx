@@ -21,6 +21,7 @@ export const AgentChatDrawer: React.FC = () => {
     messages, isRunning, wsStatus, approvals, mode, runMode,
     bindProject, send, abort, clearAll, approve,
     executePlan, proposalAction, applyArtifact,
+    setMode, setRunMode,
   } = useAgentStore();
 
   // 浮动按钮位置（可拖拽持久化）
@@ -283,8 +284,9 @@ export const AgentChatDrawer: React.FC = () => {
                 <Film className="w-3.5 h-3.5 shrink-0" />
                 <span className="font-semibold truncate">镜头 #{activeShot.shot_index}: {activeShot.action_desc || activeShot.image_prompt?.slice(0, 30)}</span>
               </span>
-              <button onClick={() => setActiveTab('director3d')} className="text-[10px] text-brand hover:underline ml-2 shrink-0 font-bold flex items-center gap-0.5">
-                3D机位 <ArrowUpRight className="w-2.5 h-2.5" />
+              {/* 精简链路：3D 片场视图已下线，机位调节改走画布的「3D导演台」节点 */}
+              <button onClick={() => setActiveTab('canvas')} className="text-[10px] text-brand hover:underline ml-2 shrink-0 font-bold flex items-center gap-0.5">
+                画布调机位 <ArrowUpRight className="w-2.5 h-2.5" />
               </button>
             </div>
           )}
@@ -322,6 +324,9 @@ export const AgentChatDrawer: React.FC = () => {
           <div className="p-3 border-t border-border bg-surface shrink-0">
             <AgentComposer
               compact
+              noPolish
+              onModeChange={setMode}
+              onRunModeChange={setRunMode}
               mode={mode}
               runMode={runMode}
               isRunning={isRunning}

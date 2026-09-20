@@ -33,8 +33,13 @@ class ToolOutcome:
 
 
 def is_destructive(name: str, args: Dict[str, Any]) -> bool:
-    """破坏性调用：删源 / 可信 fs 写操作 / shell 执行。"""
-    if name in ("shell_exec", "delete_custom_provider"):
+    """破坏性调用：删源 / 删画布节点 / 可信 fs 写操作 / shell 执行。
+
+    注意：这里的判定与 `mode_policy.TOOL_RISK` 是**两道并联的门**（见下方 need_confirm），
+    命中任一即需人审。删节点在风险表里已是 high，这里再列一次是刻意显式化
+    「这是破坏性动作」的语义，方便后续给前端标 HITL 徽标时不必反查风险表。
+    """
+    if name in ("shell_exec", "delete_custom_provider", "canvas_delete_node"):
         return True
     if name == "fs_file":
         return str((args or {}).get("action", "")).lower() in ("write", "append", "delete")

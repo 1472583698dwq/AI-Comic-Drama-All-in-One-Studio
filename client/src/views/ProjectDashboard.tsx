@@ -1,9 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { FolderKanban, Plus, Upload, Search, Trash2, Copy, Archive, ExternalLink, Sparkles, Clock, Film, Users, Filter, Zap } from 'lucide-react';
+import { FolderKanban, Plus, Upload, Search, Trash2, Copy, Archive, ExternalLink, Sparkles, Clock, Film, Users, Filter } from 'lucide-react';
 import { useProjectListStore } from '../stores/useProjectListStore';
 import { useProjectStore } from '../stores/useProjectStore';
 import { apiService } from '../services/api';
-import { OneKeyRunModal } from '../components/workflow/OneKeyRunModal';
 import { confirmAsync, toast } from '../stores/useDialogStore';
 import { useEscapeClose } from '../hooks/useEscapeClose';
 
@@ -15,7 +14,7 @@ export const ProjectDashboard: React.FC = () => {
   const [sort, setSort] = useState('updated_at');
   const [showCreate, setShowCreate] = useState(false);
   useEscapeClose(showCreate, () => setShowCreate(false));
-  const [showOneKey, setShowOneKey] = useState(false);
+  // 精简链路：「一键成片」（整集流水线）已随分镜/剪辑链路下线，入口与弹窗一并移除
   const [newTitle, setNewTitle] = useState('');
   const [newStyle, setNewStyle] = useState('donghua_xianxia');
   const [newRatio, setNewRatio] = useState('9:16');
@@ -51,7 +50,8 @@ export const ProjectDashboard: React.FC = () => {
       // 双 store 的 activeProjectId 保持一致（画布/素材按它隔离）
       try { useProjectListStore.getState().setActiveProjectId(meta.id); } catch {}
       try { localStorage.setItem('activeProjectId', meta.id); } catch {}
-      useProjectStore.getState().setActiveTab('studio');
+      // 精简链路：新建后直接进入创意画布（原落脚点是已下线的分镜工作台）
+      useProjectStore.getState().setActiveTab('canvas');
     } catch (e: any) {
       toast.error(e?.message || '创建项目失败');
     }
@@ -66,7 +66,7 @@ export const ProjectDashboard: React.FC = () => {
       try {
         const data = await apiService.getProject(res.id);
         if (data?.content?.scenes) setProject(data.content);
-        useProjectStore.getState().setActiveTab('studio');
+        useProjectStore.getState().setActiveTab('canvas');
       } catch {}
     } catch (err: any) { toast.error(err.message || '导入项目失败'); }
     e.target.value = '';
@@ -78,7 +78,7 @@ export const ProjectDashboard: React.FC = () => {
       const data = await apiService.getProject(id);
       if (data?.content?.scenes) {
         setProject(data.content);
-        useProjectStore.getState().setActiveTab('studio');
+        useProjectStore.getState().setActiveTab('canvas');
       } else {
         // 空白项目：创建一个默认空 Project 供编辑
         const meta = projects.find(p=>p.id===id);
@@ -93,7 +93,7 @@ export const ProjectDashboard: React.FC = () => {
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         } as any);
-        useProjectStore.getState().setActiveTab('studio');
+        useProjectStore.getState().setActiveTab('canvas');
       }
     } catch (e:any) { toast.error(e.message || '打开项目失败'); }
   };
@@ -126,7 +126,6 @@ export const ProjectDashboard: React.FC = () => {
           <label className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface border border-border text-xs font-medium text-[color:var(--color-text-main)] hover:border-border-active cursor-pointer">
             <Upload className="w-3.5 h-3.5"/> 导入 <input type="file" accept=".json,.zip" className="hidden" onChange={handleImport} />
           </label>
-          <button onClick={()=>setShowOneKey(true)} className="px-4 py-1.5 rounded-full bg-gradient-to-r from-amber-500 to-brand text-white text-xs font-bold shadow-md flex items-center gap-1.5"><Zap className="w-3.5 h-3.5"/> 一键成片</button>
           <button onClick={()=>setShowCreate(true)} className="px-4 py-1.5 rounded-full bg-brand text-white text-xs font-bold shadow-md shadow-brand/20 hover:bg-brand-light flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/> 新建项目</button>
         </div>
       </div>
@@ -232,9 +231,6 @@ export const ProjectDashboard: React.FC = () => {
           </div>
         </div>
       )}
-
-      {/* 一键成片 Agent */}
-      <OneKeyRunModal isOpen={showOneKey} onClose={()=>setShowOneKey(false)} />
     </div>
   );
 };

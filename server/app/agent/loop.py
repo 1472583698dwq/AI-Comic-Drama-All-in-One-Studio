@@ -25,11 +25,22 @@ MODE_BUDGETS: Dict[str, Dict[str, Any]] = {
 DESTRUCTIVE_TOOLS = {"delete_custom_provider", "shell_exec", "fs_file"}
 
 # 核心常驻工具（检索不到时也保留，保证基础编排可用）
+#
+# 精简链路（SLIM BUILD）：目标链路 = 无限画布 + 素材库 + AI 导演 + 生图/生视频。
+# 分镜工作台 / 多轨剪辑已下线，故摘除只服务它们、且在保留链路里没有宿主页签的工具：
+#   split_novel_script   → 小说拆解产分镜（宿主：分镜工作台）
+#   export_jianyin_draft → 剪映草稿装配（宿主：多轨剪辑）
+# 它们仍留在 MCP 注册表里（外部客户端 / 导出弹窗的剪映路径可用），只是不再无条件
+# 注入 Agent 的工具 schema —— 否则 Agent 会反复调用一个没有落地页签的能力并空转重试。
+#
+# 注意 director_3d_stage_plan **保留**：它不只服务已下线的「3D 片场」视图，画布的
+# 「3D导演台」节点（MinimalNodes 的 director3d）也走它（useDirectorAgent →
+# callMcpTool('director_3d_stage_plan')），属于保留链路的机位/运镜能力。
 CORE_TOOLS = {
     "generate_image", "generate_voice", "generate_video",
-    "split_novel_script", "director_3d_stage_plan", "export_jianyin_draft",
+    "director_3d_stage_plan",
     "canvas_query", "canvas_create_node", "canvas_connect", "canvas_execute",
-    "canvas_update_node", "list_assets", "search_tools",
+    "canvas_update_node", "canvas_delete_node", "list_assets", "search_tools",
 }
 
 

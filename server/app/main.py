@@ -58,100 +58,56 @@ async def _extension_project_scope(request, call_next):
             except Exception:
                 pass
 
-# Mount API routes
-app.include_router(router, prefix=settings.API_V1_STR)
-# 资产库路由
-try:
-    from app.api.asset_routes import router as asset_router
-    app.include_router(asset_router, prefix=settings.API_V1_STR)
-    print("[Main] Asset routes mounted at /api/v1/assets")
-except Exception as e:
-    print(f"[Main] Asset routes mount failed: {e}")
-# 项目管理路由 (P0)
-try:
-    from app.api.project_routes import router as project_router
-    app.include_router(project_router, prefix=settings.API_V1_STR)
-    print("[Main] Project routes mounted at /api/v1/projects")
-except Exception as e:
-    print(f"[Main] Project routes mount failed: {e}")
-# 画布执行路由 (P2)
-try:
-    from app.api.canvas_routes import router as canvas_router
-    app.include_router(canvas_router, prefix=settings.API_V1_STR)
-    print("[Main] Canvas routes mounted at /api/v1/canvas")
-except Exception as e:
-    print(f"[Main] Canvas routes mount failed: {e}")
-# Provider 管理路由（解耦：每个生成源为独立节点）
-try:
-    from app.api.provider_routes import router as provider_router
-    app.include_router(provider_router, prefix=settings.API_V1_STR)
-    print("[Main] Provider routes mounted at /api/v1/providers")
-except Exception as e:
-    print(f"[Main] Provider routes mount failed: {e}")
-# 一键成片 Agent 任务路由（异步 + 轮询）
-try:
-    from app.api.onekey_routes import router as onekey_router
-    app.include_router(onekey_router, prefix=settings.API_V1_STR)
-    print("[Main] OneKey routes mounted at /api/v1/onekey")
-except Exception as e:
-    print(f"[Main] OneKey routes mount failed: {e}")
-# 分镜槽路由（storyboard_slots 聚合 + 项目覆盖 + 裸件 CRUD）
-try:
-    from app.api.storyboard_slot_routes import router as storyboard_slot_router
-    app.include_router(storyboard_slot_router, prefix=settings.API_V1_STR)
-    print("[Main] StoryboardSlot routes mounted at /api/v1/storyboard/slots")
-except Exception as e:
-    print(f"[Main] StoryboardSlot routes mount failed: {e}")
-# 统一扩展注册表路由（聚合查看 + 统一执行 + 统一启停）
-try:
-    from app.api.extension_routes import router as extension_router
-    app.include_router(extension_router, prefix=settings.API_V1_STR)
-    print("[Main] Extension routes mounted at /api/v1/extensions")
-except Exception as e:
-    print(f"[Main] Extension routes mount failed: {e}")
-# 插件系统路由（P1：providers/skills/workflows/mcp_tools 四类扩展点）
-try:
-    from app.api.plugin_routes import router as plugin_router
-    app.include_router(plugin_router, prefix=settings.API_V1_STR)
-    print("[Main] Plugin routes mounted at /api/v1/plugins")
-except Exception as e:
-    print(f"[Main] Plugin routes mount failed: {e}")
-# 自定义代码节点路由（CRUD/体检/试运行/单次执行）
-try:
-    from app.api.custom_node_routes import router as custom_node_router
-    app.include_router(custom_node_router, prefix=settings.API_V1_STR)
-    print("[Main] CustomNode routes mounted at /api/v1/custom-nodes")
-except Exception as e:
-    print(f"[Main] CustomNode routes mount failed: {e}")
-# 声明式画布节点路由（canvas_nodes 声明 CRUD/单次执行）
-try:
-    from app.api.canvas_node_routes import router as canvas_node_router
-    app.include_router(canvas_node_router, prefix=settings.API_V1_STR)
-    print("[Main] CanvasNode routes mounted at /api/v1/canvas-nodes")
-except Exception as e:
-    print(f"[Main] CanvasNode routes mount failed: {e}")
-# 前端扩展点路由：主题包 / 导出器 / 导演包
-# 三个模块导出的都是 `router`（与其余路由模块一致），此前按 theme_router/exporter_router/
-# director_pack_router 取会 AttributeError，被 except 吞掉 → 三个扩展点静默未挂载
-for _mod, _name, _path in (
-    ("app.api.theme_routes", "router", "/api/v1/themes"),
-    ("app.api.exporter_routes", "router", "/api/v1/exporters"),
-    ("app.api.director_pack_routes", "router", "/api/v1/director-packs"),
-):
+# ══════════════════════════════════════════════════════════════════════════════
+# 路由挂载 —— 精简链路（SLIM BUILD）
+# ══════════════════════════════════════════════════════════════════════════════
+# 目标链路：基础配置 + 无限画布 + 素材库 + AI 导演 + 生图/生视频
+#
+# 保留：核心(router) / 素材库 / 项目 / 画布 / 生成源 / 扩展中心 / 插件中心 /
+#       代码节点 / 画布节点（画布工具栏）/ 首次引导
+# 裁掉：一键成片 / 分镜槽 / 主题包 / 导出器 / 导演包
+#       —— 这五类的宿主页签（分镜工作台 / 3D 片场 / 多轨剪辑）已从前端下线，
+#          路由留着只会变成"没人调用但仍在启动时 import"的冷负担。
+#
+# 回到全量对照测试：设环境变量 STUDIO_FULL_BUILD=1（.env 或启动脚本）。
+SLIM_BUILD = os.environ.get("STUDIO_FULL_BUILD", "0") not in ("1", "true", "True", "on")
+
+
+def _mount_router(module_path: str, attr: str, label: str) -> None:
+    """挂载单个路由模块：失败只告警不影响其余路由（原逐块 try/except 的收敛写法）。"""
     try:
-        import importlib as _il
-        _r = getattr(_il.import_module(_mod), _name)
+        import importlib
+        _r = getattr(importlib.import_module(module_path), attr)
         app.include_router(_r, prefix=settings.API_V1_STR)
-        print(f"[Main] FrontendExt routes mounted at {_path}")
+        print(f"[Main] {label} mounted")
     except Exception as e:
-        print(f"[Main] FrontendExt routes mount failed ({_mod}): {e}")
-# 首次启动引导路由（安装向导状态）
-try:
-    from app.api.setup_routes import router as setup_router
-    app.include_router(setup_router, prefix=settings.API_V1_STR)
-    print("[Main] Setup routes mounted at /api/v1/system/setup-status")
-except Exception as e:
-    print(f"[Main] Setup routes mount failed: {e}")
+        print(f"[Main] {label} mount failed: {e}")
+
+
+# ── 核心：Agent / MCP / 技能 / 任务 等主路由（始终保留） ──
+_mount_router("app.api.routes", "router", "Core routes")
+
+# ── 保留链路 ──
+_mount_router("app.api.asset_routes", "router", "Asset routes (/api/v1/assets)")
+_mount_router("app.api.project_routes", "router", "Project routes (/api/v1/projects)")
+_mount_router("app.api.canvas_routes", "router", "Canvas routes (/api/v1/canvas)")
+_mount_router("app.api.provider_routes", "router", "Provider routes (/api/v1/providers)")
+_mount_router("app.api.extension_routes", "router", "Extension routes (/api/v1/extensions)")
+_mount_router("app.api.plugin_routes", "router", "Plugin routes (/api/v1/plugins)")
+_mount_router("app.api.custom_node_routes", "router", "CustomNode routes (/api/v1/custom-nodes)")
+_mount_router("app.api.canvas_node_routes", "router", "CanvasNode routes (/api/v1/canvas-nodes)")
+_mount_router("app.api.setup_routes", "router", "Setup routes (/api/v1/system/setup-status)")
+
+# ── 已裁剪链路：宿主页签已下线，路由不挂 ──
+if not SLIM_BUILD:
+    _mount_router("app.api.onekey_routes", "router", "OneKey routes (/api/v1/onekey)")
+    _mount_router("app.api.storyboard_slot_routes", "router", "StoryboardSlot routes (/api/v1/storyboard/slots)")
+    _mount_router("app.api.theme_routes", "router", "Theme routes (/api/v1/themes)")
+    _mount_router("app.api.exporter_routes", "router", "Exporter routes (/api/v1/exporters)")
+    _mount_router("app.api.director_pack_routes", "router", "DirectorPack routes (/api/v1/director-packs)")
+else:
+    print("[Main] SLIM_BUILD=1：已跳过 一键成片 / 分镜槽 / 主题包 / 导出器 / 导演包 路由"
+          "（STUDIO_FULL_BUILD=1 可恢复全量）")
 # 自定义代码节点 MCP Tool 注册（一节点一Tool）
 try:
     from app.mcp.server import mcp_registry as _mcp_reg

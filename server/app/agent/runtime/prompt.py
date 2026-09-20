@@ -4,13 +4,14 @@
 替代旧 routes.py 里的巨型硬编码提示词（26 个工具逐条手写说明与工具 schema 重复）。
 工具能力说明只保留策略性内容；具体参数由绑定的 tool schema 提供给模型。
 """
+import json
 from typing import Any, Callable, Dict, List, Optional
 
 from app.agent.tools.registry import tool_view
 
 IDENTITY = (
     "你是「AI漫剧导演 Agent」，运行在 MiniMax AI漫剧 Studio 中。"
-    "用户会用自然语言下达漫剧制作指令：小说拆解、角色定妆、分镜生图、图生视频、配音、画布编排、剪映导出、生成源扩展。"
+    "用户会用自然语言下达创作指令：无限画布编排、素材库检索与复用、生图、图生视频、配音、生成源扩展。"
 )
 
 OPERATING_RULES = """## 工作准则
@@ -20,6 +21,7 @@ OPERATING_RULES = """## 工作准则
 4. 生成源参数按 provider_* 工具自身 schema 填写：x-visibility=basic/x-agent=auto 可自动推断，advanced/suggest 仅在用户提及时填，hidden/manual 绝不填。
 5. 自定义能力可直接调用：自定义代码节点为 customnode_<id>，插件工具为 plugin_<id>_<name>，不存在调用盲区。
 6. 画布编排：canvas_query 感知现状 → canvas_create_node/canvas_connect 编排 → canvas_execute 执行；参考图场景必须创建 load-image 节点并连到目标插槽。
+6.1 改画布：改数据用 canvas_update_node（中风险，自动模式直跑）；**删节点用 canvas_delete_node（高危，任何模式都要人审，且会连带删掉该节点的连线）** —— 删前先 canvas_query 确认 id 并说清"删哪个、会影响哪些下游"，不要靠猜 id。
 7. 目标未完成时禁止输出最终总结；每轮自检「目标清单→已完成→下一步」。
 8. 思考推演：在决策前用 <think> ... </think> 展示导演推演（意图分析、镜头/参数依据），系统会渲染到思考卡片。
 9. 读完整文件：通读生成源代码用 get_provider_code（offset/limit 分页，按 code_next_offset 逐页读到底）；读任意围栏内文件用 fs_read（行分页，只读，无需可信模式）。改码前必须先通读目标源码，禁止只凭 800 字 code_preview 动手。"""
@@ -32,7 +34,6 @@ TOOL_STRATEGY = """## 典型指令路由
 - 直写生成源/插件/技能 → 先 read_skill（无 name 列技能，传 name 读 SOP，如 provider-author）加载规范再动手
 - 读源码/长文件 → get_provider_code(offset/limit) / fs_read(offset/limit)，可通读完整文件
 - 查健康/排障 → list_* / get_provider_code 先只读排查再修复
-- 一键成片/整集批量 → 先拆解剧本，再按角色定妆→生图→视频→配音→导出推进
 - 不确定可用哪种源/音色/工作流/素材时，先调用对应 list_* 查询再决策
 - 生成前的参数确认：先查 get_provider_code 看 input_schema，避免把参考图挂给纯文本源"""
 
@@ -132,4 +133,50 @@ def build_context_block(context: Optional[Dict[str, Any]]) -> str:
     cs = context.get("canvas_summary")
     if cs:
         parts.append(f"【画布状态】{str(cs)[:800]}")
+    parts.extend(focus_nodes_section(context))
     return "\n\n".join(parts)[:16000]
+
+
+def focus_nodes_section(context: Dict[str, Any]) -> List[str]:
+    """用户在前端右键「加入会话」的画布节点。
+
+    画布摘要只给每个节点一行标题，模型无法据此确定用户说的「这个节点」是谁；
+    这里补上被显式关注的节点的定义（类型/内容/生成源/参数/产出/上下游），
+    并明确标注"指令未指明时默认针对它们"，与「当前激活镜头」同一套语义。
+    """
+    raw = context.get("agent_focus_nodes")
+    if not raw:
+        return []
+    items = raw if isinstance(raw, list) else [raw]
+    lines: List[str] = []
+    for n in items[:8]:
+        if isinstance(n, str):
+            lines.append(f"- {n}")
+            continue
+        if not isinstance(n, dict):
+            continue
+        bits = [f"节点 {n.get('id')}（{n.get('label') or n.get('type') or '未知类型'}）"]
+        if n.get("summary"):
+            bits.append(f"内容:「{str(n['summary'])[:120]}」")
+        if n.get("provider_id"):
+            bits.append(f"生成源:{n['provider_id']}")
+        if n.get("params"):
+            try:
+                bits.append("参数:" + json.dumps(n["params"], ensure_ascii=False)[:200])
+            except Exception:
+                pass
+        if n.get("produced"):
+            bits.append(f"已有产出:{n['produced']}")
+        if n.get("agent_state"):
+            bits.append(f"执行态:{n['agent_state']}")
+        if n.get("upstream"):
+            bits.append("上游:" + ",".join(str(x) for x in list(n["upstream"])[:6]))
+        if n.get("downstream"):
+            bits.append("下游:" + ",".join(str(x) for x in list(n["downstream"])[:6]))
+        lines.append("- " + "；".join(bits))
+    if not lines:
+        return []
+    return [
+        "【会话关注节点（用户已加入会话；指令里说「这个节点 / 它」默认指它们）】\n"
+        + "\n".join(lines)
+    ]

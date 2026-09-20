@@ -7,17 +7,21 @@ import { create } from 'zustand';
 import { apiService } from '../../services/api';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { useCanvasStore } from '../../stores/useCanvasStore';
+import { getNodeSpec } from '../canvas/nodeRegistry';
 import { toast } from '../../stores/useDialogStore';
 import { agentSocket } from './agentSocket';
+import { clearAgentDraft } from './agentDraftStore';
 import { collectFromExecutedTools, dispatchSideEffects, reduceAgentEvent } from './agentEventReducer';
 import type {
   AgentEvent, AgentMode, AgentSession, ApprovalInfo, ChatMsg, RunMode, WsStatus,
 } from './agentTypes';
 
-export const QUICK_ASK = ['这个项目怎么做分镜？', '首尾帧和参考图有什么区别？', '剪映导出需要什么前置条件？'];
-export const QUICK_DO = ['为当前镜头规划3D特写推镜', '生成主角怒吼配音并对齐时长', '把画布现有节点全量执行一遍', '导出剪映工程草稿'];
+// 快捷指令按当前链路（无限画布 + 素材库 + 生图/生视频）组织：
+// 分镜工作台 / 3D 片场 / 多轨剪辑 / 剪映导出已下线，不再引导这些方向。
+export const QUICK_ASK = ['无限画布怎么排连续镜头？', '首尾帧和参考图有什么区别？', '素材库的图怎么挂到画布节点上？'];
+export const QUICK_DO = ['在画布上生成一张主角特写并接到视频节点', '把画布现有节点全量执行一遍', '用素材库的道具图做参考生图', '给主角生成一段台词配音'];
 export const QUICK_CREATE = ['制作国风悬疑短剧插件包', '给H3视频源补first_frame插槽', '做个6格漫剧画布模板', '新建古风战斗Skill规范'];
-export const QUICK_PLAN = ['分析当前项目并给出完整制作计划', '为当前镜头规划最佳生成方案', '检查全部生成源与工作流并给修复计划'];
+export const QUICK_PLAN = ['分析当前项目并给出完整制作计划', '为当前画布规划最佳生成方案', '检查全部生成源与工作流并给修复计划'];
 
 function nowTime() {
   return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -32,7 +36,7 @@ function welcomeMsg(mode: AgentMode): ChatMsg {
     mode,
     text: mode === 'chat'
       ? '这里是 **问答模式**。我只做讲解不动手，不调用任何工具、零副作用。'
-      : '这里是 **执行模式**。我会按 ReAct 循环直接调生图/配音/视频/画布/剪映等工具；敏感操作（删源/写文件/跑命令）会弹窗确认。',
+      : '这里是 **执行模式**。我会按 ReAct 循环直接调生图/生视频/配音/画布/素材等工具；敏感操作（删源/写文件/跑命令）会弹窗确认。',
     suggested: mode === 'chat' ? QUICK_ASK : QUICK_DO,
     time: '就绪',
   };
@@ -64,6 +68,47 @@ function schedulePersist() {
   }, 600);
 }
 
+/**
+ * 把「已加入会话」的节点整理成给 LLM 看的紧凑定义。
+ *
+ * 只给必要字段：模型要能据此定位「这个节点」（id/类型/名称/生成源/参数/已有产出），
+ * 并知道它在流程图里的上下游关系 —— 不需要整份 data（里面有 URL 长串与运行时态）。
+ */
+function buildAgentFocusNodes(): any[] {
+  try {
+    const cs = useCanvasStore.getState();
+    const ids = cs.agentFocusNodeIds || [];
+    if (!ids.length) return [];
+    const byId = new Map((cs.nodes || []).map((n: any) => [n.id, n]));
+    return ids
+      .map((id) => byId.get(id))
+      .filter(Boolean)
+      .map((n: any) => {
+        const d: any = n.data || {};
+        const spec = getNodeSpec(String(n.type || ''));
+        const produced = [
+          d.image_url ? '图像' : '',
+          d.video_url ? '视频' : '',
+          d.audio_url ? '音频' : '',
+        ].filter(Boolean).join('/');
+        return {
+          id: n.id,
+          type: n.type,
+          label: spec?.label || n.type,
+          summary: (d.prompt || d.text || d.brief || d.ai_directive || '').slice(0, 160),
+          provider_id: d.provider_id || d.provider || '',
+          params: d.params || d.provider_params || undefined,
+          produced: produced || undefined,
+          agent_state: d.agent_state?.status || undefined,
+          upstream: (cs.edges || []).filter((e: any) => e.target === n.id).map((e: any) => e.source),
+          downstream: (cs.edges || []).filter((e: any) => e.source === n.id).map((e: any) => e.target),
+        };
+      });
+  } catch {
+    return [];
+  }
+}
+
 function buildContext(): Record<string, any> {
   const ps = useProjectStore.getState();
   const project = ps.project;
@@ -91,6 +136,8 @@ function buildContext(): Record<string, any> {
       : null,
     platform: 'desktop',
     canvas_summary,
+    // 用户显式「加入会话」的画布节点：让模型知道指令里的「这个节点」指谁
+    agent_focus_nodes: buildAgentFocusNodes(),
     workspace: ps.workspace,
   };
 }
@@ -265,9 +312,12 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
     bindProject(projectId) {
       if (!projectId) {
         set({ projectId: null, sessions: [], activeSessionId: '', messages: [], isRunning: false, streamingMsgId: null, approvals: {} });
+        clearAgentDraft();
         return;
       }
+      // 幂等早退：切 tab 会重复调用，这里必须原样返回，否则会把草稿一起清掉
       if (get().projectId === projectId && get().sessions.length > 0) return;
+      clearAgentDraft();
       if (get().projectId !== projectId && get().isRunning) get().abort();
       set({
         projectId,
@@ -325,6 +375,8 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
       schedulePersist();
     },
 
+    // 草稿已移到独立的 agentDraftStore（见该文件注释：避免每次按键重渲染整棵会话流）
+
     createSession() {
       const { projectId, sessions, mode, runMode } = get();
       if (!projectId) return;
@@ -339,6 +391,7 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
         isRunning: false,
       });
       persistNow();
+      clearAgentDraft();   // 草稿属于当前对话，换会话即清空
       toast.success('已新建独立会话');
     },
 
@@ -355,6 +408,7 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
             streamingMsgId: null,
         isRunning: false,
       });
+      clearAgentDraft();   // 草稿属于当前对话，换会话即清空
     },
 
     async deleteSession(id) {
@@ -371,6 +425,7 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
         const { mode, runMode } = get();
         const sess = makeSession('新会话', mode, runMode);
         set({ sessions: [sess], activeSessionId: sess.id, messages: sess.messages, approvals: {} });
+        clearAgentDraft();
       } else if (activeSessionId === id) {
         const first = remaining[0];
         set({
@@ -383,6 +438,7 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
                 streamingMsgId: null,
           isRunning: false,
         });
+        clearAgentDraft();   // 当前对话被切走 → 草稿跟着换（删别人的会话不动草稿）
       } else {
         set({ sessions: remaining });
       }
@@ -409,6 +465,9 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
       };
       commitMessages((prev) => [...prev, userMsg, agentMsg]);
       set({ isRunning: true, streamingMsgId: agentMsg.id, approvals: {} });
+      // 「添加到会话」是给**这一条消息**指定目标：上面的 buildContext 已经把节点定义
+      // 随上下文带出去了，消息发出即消费掉 —— 否则下一轮还挂着上次的焦点会误指向。
+      try { useCanvasStore.getState().clearAgentFocusNodes(); } catch { /* ignore */ }
 
       // 模式即约束（代码门控，非提示词）：
       // - plan：runtime 只绑定只读工具（绑定层）且执行口二次拒绝写工具，产出计划后由用户批准执行；

@@ -224,6 +224,7 @@ def init_all_providers():
     from .video.seedance import SeedanceVideoProvider
     from .video.kling import KlingVideoProvider
     from .video.wan3 import Wan3VideoProvider
+    from .video.openai_video import OpenAIVideoProvider
 
     # 清理旧注册（热重载）
     image_registry._providers.clear()
@@ -251,7 +252,7 @@ def init_all_providers():
     audio_registry.register(CosyVoiceProvider())
     audio_registry.register(GPTSoVITSProvider())
 
-    # 注册视频 (ComfyUI 本地 + 4 默认云端: H3/Seedance/Kling/Wan3 + 旧兼容通道)
+    # 注册视频 (ComfyUI 本地 + 4 默认云端: H3/Seedance/Kling/Wan3 + 旧兼容通道 + 自定义 OpenAI 兼容)
     # 缺 Key 的源 is_configured()=False, 注册表自动跳过, 配 Key 后即用
     video_registry.register(ComfyUIVideoProvider())
     video_registry.register(MiniMaxH3VideoProvider())
@@ -259,6 +260,7 @@ def init_all_providers():
     video_registry.register(KlingVideoProvider())
     video_registry.register(Wan3VideoProvider())
     video_registry.register(CloudVideoProvider())
+    video_registry.register(OpenAIVideoProvider())
 
     # 加载自定义 Providers（代码为唯一方式）
     try:

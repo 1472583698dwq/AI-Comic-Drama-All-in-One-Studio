@@ -2,11 +2,38 @@ import { create } from 'zustand';
 import { Project, StoryboardShot, Character, AspectRatio, StylePreset } from '../types';
 import { apiService } from '../services/api';
 
+/**
+ * 页签类型。
+ *
+ * 精简链路（SLIM BUILD）：`studio`（分镜工作台）/ `director3d`（3D 片场）/
+ * `timeline`（多轨剪辑）/ `characters`（角色设定）四个页签的宿主视图已下线。
+ * 类型与历史 localStorage 值保留不动（避免波及所有跳转调用的类型），
+ * 统一由 `normalizeTab` 在执行时重定向到保留页签 —— 这样旧缓存与残留跳转
+ * 都不会落到空白页，也不需要逐个调用点做类型改造。
+ */
+export type ActiveTab =
+  | 'projects' | 'studio' | 'director3d' | 'timeline' | 'characters'
+  | 'assets' | 'mcp' | 'config' | 'canvas' | 'agent';
+
+/** 已下线页签 → 保留页签的重定向表（角色设定归素材库：角色已按 category=character 入库） */
+const REMOVED_TAB_REDIRECT: Record<string, ActiveTab> = {
+  studio: 'canvas',
+  director3d: 'canvas',
+  timeline: 'canvas',
+  characters: 'assets',
+};
+
+/** 把（可能来自旧缓存或已下线页签的）页签归一到当前保留链路。 */
+export function normalizeTab(tab: string | null | undefined): ActiveTab {
+  const t = String(tab || '');
+  return REMOVED_TAB_REDIRECT[t] || (t as ActiveTab) || 'projects';
+}
+
 interface ProjectState {
   project: Project | null;
   activeProjectId: string | null; // P0: 关联 ProjectMeta
   activeShotId: string | null;
-  activeTab: 'projects' | 'studio' | 'director3d' | 'timeline' | 'characters' | 'assets' | 'mcp' | 'config' | 'canvas' | 'agent';
+  activeTab: ActiveTab;
   workspace: 'production' | 'creative'; // P0: 双工作台
   platformMode: 'desktop' | 'mobile';
   isPlaying: boolean;
@@ -21,7 +48,7 @@ interface ProjectState {
   // Actions
   setProject: (project: Project) => void;
   setActiveShotId: (shotId: string | null) => void;
-  setActiveTab: (tab: 'projects' | 'studio' | 'director3d' | 'timeline' | 'characters' | 'assets' | 'mcp' | 'config' | 'canvas' | 'agent') => void;
+  setActiveTab: (tab: ActiveTab) => void;
   setWorkspace: (w: 'production'|'creative') => void;
   setPlatformMode: (mode: 'desktop' | 'mobile') => void;
   setIsPlaying: (isPlaying: boolean) => void;
@@ -70,7 +97,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   project: null,
   activeProjectId: localStorage.getItem('activeProjectId') || null,
   activeShotId: null,
-  activeTab: (localStorage.getItem('activeProjectId') ? ((localStorage.getItem('app_active_tab') as any) || 'projects') : 'projects'),
+  // 旧缓存里可能还留着已下线页签（studio/director3d/timeline/characters），启动即归一
+  activeTab: (localStorage.getItem('activeProjectId') ? normalizeTab(localStorage.getItem('app_active_tab')) : 'projects'),
   workspace: (localStorage.getItem('app_workspace') as any) || 'production',
   platformMode: (localStorage.getItem('app_platform_mode') as any) || 'desktop',
   isPlaying: false,
@@ -151,19 +179,21 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ activeShotId: shotId });
   },
   setActiveTab: (tab) => {
+    // 已下线页签在此统一重定向：分镜工作台/3D 片场/多轨剪辑 → 画布，角色设定 → 素材库
+    const next = normalizeTab(tab);
     // 未选择项目时，严禁切换到项目内部功能（只允许 projects 和 config）
-    if (!get().project && tab !== 'projects' && tab !== 'config') {
+    if (!get().project && next !== 'projects' && next !== 'config') {
       return;
     }
-    localStorage.setItem('app_active_tab', tab);
-    if (tab === 'canvas') {
+    localStorage.setItem('app_active_tab', next);
+    if (next === 'canvas') {
       localStorage.setItem('app_workspace', 'creative');
-      set({ activeTab: tab, workspace: 'creative' });
-    } else if (['projects', 'studio', 'director3d', 'timeline', 'characters', 'assets', 'agent'].includes(tab)) {
+      set({ activeTab: next, workspace: 'creative' });
+    } else if (['projects', 'assets', 'agent'].includes(next)) {
       localStorage.setItem('app_workspace', 'production');
-      set({ activeTab: tab, workspace: 'production' });
+      set({ activeTab: next, workspace: 'production' });
     } else {
-      set({ activeTab: tab });
+      set({ activeTab: next });
     }
   },
   setWorkspace: (workspace) => {
@@ -173,8 +203,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       localStorage.setItem('app_active_tab', 'canvas');
       set({ workspace, activeTab: 'canvas' });
     } else {
+      // 离开创意画布时回落到保留的生产侧页签（原本回落分镜工作台，该页签已下线）
       const currentTab = get().activeTab;
-      const nextTab = currentTab === 'canvas' ? 'studio' : currentTab;
+      const nextTab: ActiveTab = currentTab === 'canvas' ? 'agent' : currentTab;
       localStorage.setItem('app_active_tab', nextTab);
       set({ workspace, activeTab: nextTab });
     }

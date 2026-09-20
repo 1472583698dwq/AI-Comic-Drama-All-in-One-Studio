@@ -25,6 +25,7 @@ import {
   Edit3
 } from 'lucide-react';
 import { useCanvasStore } from '../../../stores/useCanvasStore';
+import { AiPolishButton } from '../../ui/AiPolishButton';
 import { HIGH_LEVEL_AGENT_SKILLS } from '../providerSkills';
 // 导演预设与 3D 舞台同源（景别/运镜全量一致，避免节点选不出来的断层）
 import { FRAMING_PRESETS, MOTION_PRESETS, framingShortLabel, motionShortLabel } from '../../director3d/directorPresets';
@@ -47,7 +48,7 @@ const AgentShell: React.FC<{
   children: React.ReactNode;
   handles?: React.ReactNode;
 }> = ({ id, selected, icon: Icon, label, providerBadge, topActions, children, handles }) => {
-  const { setSelectedNodeId } = useCanvasStore();
+  const { setSelectedNodeId, agentFocusNodeIds } = useCanvasStore();
   const [showAddMenu, setShowAddMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -103,8 +104,18 @@ const AgentShell: React.FC<{
             {providerBadge}
           </span>
         )}
-        <span className="ml-auto text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/5 text-white/40 border border-white/10">
-          #{id.slice(-4)}
+        <span className="ml-auto flex items-center gap-1.5 shrink-0">
+          {agentFocusNodeIds.includes(id) && (
+            <span
+              className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 font-bold"
+              title="已加入会话：Agent 会把「这个节点」默认理解为它"
+            >
+              会话
+            </span>
+          )}
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/5 text-white/40 border border-white/10">
+            #{id.slice(-4)}
+          </span>
         </span>
       </div>
 
@@ -219,7 +230,14 @@ export const PromptNode: React.FC<NodeProps> = ({ id, data, selected }) => {
         </>
       }
     >
-      <div className="w-full flex flex-col gap-2" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+      {/* 未选中时不拦截事件：让点击冒泡到 AgentShell 的 onClick，整张卡片任意位置都能激活。
+          选中后才拦截，避免操作内部控件（技能/执行/润色）时把节点取消选中。
+          —— 此前无条件 stopPropagation，导致只有卡头那条窄条能点中，正文死活激活不了。 */}
+      <div
+        className="w-full flex flex-col gap-2"
+        onClick={selected ? (e) => e.stopPropagation() : undefined}
+        onMouseDown={selected ? (e) => e.stopPropagation() : undefined}
+      >
         {selected ? (
           <textarea
             value={content}
@@ -253,6 +271,15 @@ export const PromptNode: React.FC<NodeProps> = ({ id, data, selected }) => {
 
         {selected && (
           <>
+            {/* 字段级 AI 润色（整段按技能重写）；只改一句/一个词 → 选中文字后出现浮标 */}
+            <div className="flex items-center justify-end">
+              <AiPolishButton
+                value={content}
+                onPolish={(v: any) => updateNodeData(id, { text: v, prompt: v })}
+                contextType="prompt"
+                size="xs"
+              />
+            </div>
             <div className="flex flex-wrap items-center justify-center gap-1.5">
               {HIGH_LEVEL_AGENT_SKILLS.map((skill) => (
                 <button
@@ -504,7 +531,14 @@ export const Director3DMinimalNode: React.FC<NodeProps> = ({ id, data, selected 
         </>
       }
     >
-      <div className="w-full flex flex-col gap-2 p-1" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} onPaste={(e) => e.stopPropagation()}>
+      {/* 同 PromptNode：未选中时不拦截点击，让整卡可激活；选中后才拦住以免内部操作丢选中 */}
+      <div
+        className="w-full flex flex-col gap-2 p-1"
+        onClick={selected ? (e) => e.stopPropagation() : undefined}
+        onMouseDown={selected ? (e) => e.stopPropagation() : undefined}
+        onKeyDown={(e) => e.stopPropagation()}
+        onPaste={(e) => e.stopPropagation()}
+      >
         <div className="grid grid-cols-2 gap-2 text-[11px]">
           {selected ? (
             <>
@@ -550,6 +584,16 @@ export const Director3DMinimalNode: React.FC<NodeProps> = ({ id, data, selected 
             className="w-full bg-surface-secondary border border-white/10 rounded-xl px-2.5 py-2 text-[11px] text-white placeholder-white/40 focus:outline-none focus:border-blue-500 resize-none nodrag select-text"
             autoFocus
           />
+        )}
+        {selected && (
+          <div className="flex items-center justify-end">
+            <AiPolishButton
+              value={d.ai_directive || ''}
+              onPolish={(v: any) => updateNodeData(id, { ai_directive: v })}
+              contextType="prompt"
+              size="xs"
+            />
+          </div>
         )}
         {d.minimax_camera_prompt && (
           <div className="p-2.5 rounded-xl bg-blue-950/20 border border-blue-500/30 text-[10px] text-blue-200 font-mono line-clamp-3 select-text nodrag">

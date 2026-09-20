@@ -45,6 +45,8 @@ MANAGED_KEYS = [
     "SILICONFLOW_IMAGE_MODEL",
     "DASHSCOPE_API_KEY",
     "DASHSCOPE_IMAGE_MODEL",
+    # OpenAI 兼容生图（自定义通道：独立 Key / 地址 / 模型，与文本大模型互不影响）
+    "OPENAI_IMAGE_API_KEY",
     "OPENAI_IMAGE_MODEL",
     "OPENAI_IMAGE_BASE_URL",
     # Voice & TTS
@@ -67,6 +69,10 @@ MANAGED_KEYS = [
     "SEEDANCE_MODEL",
     "WAN3_MODEL",
     "WAN3_BASE_URL",
+    # OpenAI 兼容视频（自定义通道：独立 Key / 地址 / 模型，与文本/生图互不影响）
+    "OPENAI_VIDEO_API_KEY",
+    "OPENAI_VIDEO_BASE_URL",
+    "OPENAI_VIDEO_MODEL",
     # JianYing Draft & Paths
     "JIANYIN_DRAFT_PATH",
     # Trusted Mode 总闸（A档）
@@ -185,6 +191,8 @@ class Settings(BaseModel):
     SILICONFLOW_IMAGE_MODEL: str = os.getenv("SILICONFLOW_IMAGE_MODEL", "black-forest-labs/FLUX.1-schnell")
     DASHSCOPE_API_KEY: str = os.getenv("DASHSCOPE_API_KEY", "")
     DASHSCOPE_IMAGE_MODEL: str = os.getenv("DASHSCOPE_IMAGE_MODEL", "wanx2.1-t2i-turbo")
+    # OpenAI 兼容生图：OPENAI_IMAGE_API_KEY 为生图专用 Key；留空才回退复用文本大模型的 OPENAI_API_KEY
+    OPENAI_IMAGE_API_KEY: str = os.getenv("OPENAI_IMAGE_API_KEY", "")
     OPENAI_IMAGE_MODEL: str = os.getenv("OPENAI_IMAGE_MODEL", "dall-e-3")
     OPENAI_IMAGE_BASE_URL: str = os.getenv("OPENAI_IMAGE_BASE_URL", "")
 
@@ -212,6 +220,10 @@ class Settings(BaseModel):
     # Wan3.0 (阿里百炼 DashScope, 复用 DASHSCOPE_API_KEY)
     WAN3_MODEL: str = os.getenv("WAN3_MODEL", "wan3.0-video")
     WAN3_BASE_URL: str = os.getenv("WAN3_BASE_URL", "https://dashscope.aliyuncs.com")
+    # OpenAI 兼容视频（自定义通道，按 OpenAI /v1/videos 协议对接任意中转/自建网关）
+    OPENAI_VIDEO_API_KEY: str = os.getenv("OPENAI_VIDEO_API_KEY", "")
+    OPENAI_VIDEO_BASE_URL: str = os.getenv("OPENAI_VIDEO_BASE_URL", "https://api.openai.com/v1")
+    OPENAI_VIDEO_MODEL: str = os.getenv("OPENAI_VIDEO_MODEL", "sora-2")
 
     # JianYing Draft Custom Location
     JIANYIN_DRAFT_PATH: str = os.getenv("JIANYIN_DRAFT_PATH", get_default_jianyin_draft_path())

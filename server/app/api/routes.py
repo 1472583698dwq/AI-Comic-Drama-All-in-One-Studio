@@ -2,7 +2,7 @@ import os
 import json
 import asyncio
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Request
 from fastapi.responses import StreamingResponse
 from fastapi.concurrency import run_in_threadpool
 from app.models.schemas import (
@@ -1028,6 +1028,7 @@ AGENT_SYSTEM_PROMPT_BODY = """你是「AI漫剧导演 Agent」，运行在 MiniM
 20. canvas_query —— 查询画布摘要与节点清单，感知当前画布状态
 21. canvas_create_node —— 创建节点。参数：type(prompt/image/video/audio/director3d/export/custom/brief/script-split/shot-card/comfy-workflow/provider-image/provider-video/provider-audio/tts/load-image/load-image-batch/load-video/load-audio/text-prompt/timeline-export), position{x,y}, params(可选内部参数；type=custom 时 params 必带 custom_node_id，即 customnode_<id> 工具去掉前缀的 id，可直接调该工具执行)
 22. canvas_update_node —— 更新节点。参数：node_id, patch(要更新的 data 字段)
+22.5 canvas_delete_node —— 删除节点（连带删除挂在它身上的连线）。参数：node_id。【高危：任何模式都需人工审批】删前先用 canvas_query 确认真实 id，并说清会影响哪些下游
 23. canvas_connect —— 连线。参数：source, sourceHandle, target, targetHandle（类型需匹配 image/video/audio/text/provider）
 24. canvas_execute —— 执行画布 DAG。参数：target_ids(可选，仅执行选中), project_id
 
@@ -1524,6 +1525,7 @@ class ConfigUpdateRequest(BaseModel):
     SILICONFLOW_IMAGE_MODEL: Optional[str] = Field(default="black-forest-labs/FLUX.1-schnell")
     DASHSCOPE_API_KEY: Optional[str] = Field(default="")
     DASHSCOPE_IMAGE_MODEL: Optional[str] = Field(default="wanx2.1-t2i-turbo")
+    OPENAI_IMAGE_API_KEY: Optional[str] = Field(default="")
     OPENAI_IMAGE_MODEL: Optional[str] = Field(default="dall-e-3")
     OPENAI_IMAGE_BASE_URL: Optional[str] = Field(default="")
 
@@ -1548,6 +1550,10 @@ class ConfigUpdateRequest(BaseModel):
     SEEDANCE_MODEL: Optional[str] = Field(default="doubao-seedance-2-0-260128")
     WAN3_MODEL: Optional[str] = Field(default="wan3.0-video")
     WAN3_BASE_URL: Optional[str] = Field(default="https://dashscope.aliyuncs.com")
+    # 自定义视频通道（OpenAI 兼容 /v1/videos 协议，独立 Key）
+    OPENAI_VIDEO_API_KEY: Optional[str] = Field(default="")
+    OPENAI_VIDEO_BASE_URL: Optional[str] = Field(default="https://api.openai.com/v1")
+    OPENAI_VIDEO_MODEL: Optional[str] = Field(default="sora-2")
 
     # JianYing Draft Custom Location
     JIANYIN_DRAFT_PATH: Optional[str] = Field(default="")
@@ -1556,7 +1562,7 @@ class ConfigUpdateRequest(BaseModel):
     STUDIO_TRUSTED_MODE: Optional[str] = Field(default="0")
 
 class ConfigTestRequest(BaseModel):
-    target: str = Field(description="openai | responses_api | deepseek | qwen | minimax | comfyui | siliconflow | dashscope | elevenlabs | cosyvoice | gpt_sovits | jianyin | openai_compat")
+    target: str = Field(description="openai | responses_api | deepseek | qwen | minimax | openai_image | openai_video | comfyui | siliconflow | dashscope | elevenlabs | cosyvoice | gpt_sovits | jianyin")
     config: Dict[str, Any] | None = None
 
 class AgentChatRequest(BaseModel):
@@ -1596,11 +1602,25 @@ async def get_config(unmask: bool = True):
     }
 
 @router.put("/config")
-async def save_config(req: ConfigUpdateRequest):
-    """保存配置到 .env 及 storage/config_store.json 并热重载。"""
+async def save_config(req: ConfigUpdateRequest, request: Request):
+    """保存配置到 .env 及 storage/config_store.json 并热重载。
+
+    只写入**请求体里显式出现**的键：未出现的键一律保持原值。
+    （历史 bug：整包 model_dump 会把模型默认值一并写回，导致「保存后已配置的
+      Key/地址被清空或退回默认值」。这里以原始请求体为准，杜绝该问题。）
+    """
     raw_existing = read_env_file(unmask=True)
     updates: Dict[str, str] = {}
-    incoming = req.model_dump(exclude_unset=False)
+    try:
+        raw_body = await request.json()
+    except Exception:
+        raw_body = None
+    if isinstance(raw_body, dict):
+        incoming: Dict[str, Any] = {str(k): v for k, v in raw_body.items()}
+    else:
+        # 兜底：拿不到原始请求体时退回模型（仅含显式传入的字段 + 额外字段）
+        incoming = dict(req.model_dump(exclude_unset=True))
+        incoming.update(getattr(req, "model_extra", None) or {})
 
     for k in MANAGED_KEYS:
         new_val = incoming.get(k)
@@ -1848,7 +1868,79 @@ async def test_config_connection(req: ConfigTestRequest):
             return {"target": "wan3", "ok": False, "detail": "DASHSCOPE_API_KEY 未配置 (Wan3.0 复用此Key)"}
         return {"target": "wan3", "ok": True, "detail": "Wan3.0 Key 已配置 (wan3.0-video, 真实生成时校验)"}
 
-    raise HTTPException(status_code=400, detail="target 不支持，支持: openai | responses_api | deepseek | qwen | minimax | minimax_h3 | seedance | kling | wan3 | comfyui | siliconflow | dashscope | elevenlabs | cosyvoice | gpt_sovits | jianyin")
+    # 生图：自定义（OpenAI 兼容）通道。Key 独立，留空才回退文本大模型的 Key，
+    # 与 providers/image/openai_compat.py 的回退链保持一致，否则「设置里测通、生成时却报未配置」。
+    if target in ["openai_image", "openai_compat"]:
+        api_key = (
+            cfg.get("OPENAI_IMAGE_API_KEY")
+            or getattr(settings, "OPENAI_IMAGE_API_KEY", "")
+            or cfg.get("OPENAI_API_KEY")
+            or settings.OPENAI_API_KEY
+        )
+        if _is_masked_placeholder(api_key):
+            api_key = getattr(settings, "OPENAI_IMAGE_API_KEY", "") or settings.OPENAI_API_KEY
+        base = (
+            cfg.get("OPENAI_IMAGE_BASE_URL")
+            or getattr(settings, "OPENAI_IMAGE_BASE_URL", "")
+            or cfg.get("OPENAI_BASE_URL")
+            or settings.OPENAI_BASE_URL
+            or ""
+        ).strip().rstrip("/")
+        model = cfg.get("OPENAI_IMAGE_MODEL") or getattr(settings, "OPENAI_IMAGE_MODEL", "") or "dall-e-3"
+        if not api_key:
+            return {"target": "openai_image", "ok": False, "detail": "生图 Key 未配置：请填 OPENAI_IMAGE_API_KEY（或用文本大模型的 Key 兜底）"}
+        if not base:
+            return {"target": "openai_image", "ok": False, "detail": "生图接口地址未配置：请填 OPENAI_IMAGE_BASE_URL"}
+        # 归一化到 .../v1，兼容用户误填到具体端点
+        probe = base.replace("/images/generations", "").replace("/chat/completions", "").rstrip("/")
+        if not probe.endswith("/v1"):
+            probe = f"{probe}/v1"
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                r = await client.get(
+                    f"{probe}/models",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+                if r.status_code == 401:
+                    return {"target": "openai_image", "ok": False, "detail": "生图鉴权失败（401）：请检查 OPENAI_IMAGE_API_KEY"}
+                # 404 说明服务在线但没实现 /models，同样视为连通
+                if r.status_code in (200, 404):
+                    return {"target": "openai_image", "ok": True, "detail": f"生图接口连通正常（{model}）"}
+                return {"target": "openai_image", "ok": False, "detail": f"生图接口返回 {r.status_code}: {r.text[:200]}"}
+        except Exception as e:
+            return {"target": "openai_image", "ok": False, "detail": f"生图接口连接失败：{e}"}
+
+    # 生视频：自定义（OpenAI 兼容 /v1/videos）通道。Key 与文本、生图完全独立，无回退。
+    if target == "openai_video":
+        api_key = cfg.get("OPENAI_VIDEO_API_KEY") or getattr(settings, "OPENAI_VIDEO_API_KEY", "")
+        if _is_masked_placeholder(api_key):
+            api_key = getattr(settings, "OPENAI_VIDEO_API_KEY", "")
+        base = (
+            cfg.get("OPENAI_VIDEO_BASE_URL")
+            or getattr(settings, "OPENAI_VIDEO_BASE_URL", "")
+            or "https://api.openai.com/v1"
+        ).strip().rstrip("/")
+        model = cfg.get("OPENAI_VIDEO_MODEL") or getattr(settings, "OPENAI_VIDEO_MODEL", "") or "sora-2"
+        if not api_key:
+            return {"target": "openai_video", "ok": False, "detail": "OPENAI_VIDEO_API_KEY 未配置"}
+        if base.endswith("/videos"):
+            base = base[: -len("/videos")]
+        probe = base if base.endswith("/v1") else f"{base}/v1"
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                r = await client.get(
+                    f"{probe}/models",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+                if r.status_code == 401:
+                    return {"target": "openai_video", "ok": False, "detail": "自定义视频鉴权失败（401）：请检查 OPENAI_VIDEO_API_KEY"}
+                if r.status_code in (200, 404):
+                    return {"target": "openai_video", "ok": True, "detail": f"自定义视频接口连通正常（{model}）"}
+                return {"target": "openai_video", "ok": False, "detail": f"自定义视频接口返回 {r.status_code}: {r.text[:200]}"}
+        except Exception as e:
+            return {"target": "openai_video", "ok": False, "detail": f"自定义视频接口连接失败：{e}"}
+
+    raise HTTPException(status_code=400, detail="target 不支持，支持: openai | responses_api | deepseek | qwen | minimax | minimax_h3 | seedance | kling | wan3 | openai_image | openai_video | comfyui | siliconflow | dashscope | elevenlabs | cosyvoice | gpt_sovits | jianyin")
 
 @router.post("/agent/chat")
 async def http_agent_chat(req: AgentChatRequest):
@@ -2367,6 +2459,13 @@ async def agent_mode_policy():
 
 @router.get("/agent/traces")
 async def list_agent_traces(limit: int = 30):
+    """run 级审计（一次运行一个文件）。
+
+    写入方：v1 引擎（langchain_engine）、Creator 提案链、以及 v2 引擎在
+    turn 开始/工具结果/turn 结束三处的留痕（见 runtime/loop.py 的 `_trace`）。
+    返回空数组通常只说明"这段时间没跑过"，不代表引擎有问题；
+    要看逐事件全貌请用 `/agent/runs` + `/agent/runs/{id}/events`。
+    """
     from app.agent.trace import list_runs
     return {"runs": list_runs(limit=limit)}
 
@@ -2375,6 +2474,49 @@ async def list_agent_traces(limit: int = 30):
 async def get_agent_trace(run_id: str, limit: int = 500):
     from app.agent.trace import get_trace
     return {"run_id": run_id, "events": get_trace(run_id, limit=limit)}
+
+
+# ── 会话事件日志（v2 引擎的真实执行记录，append-only 事件溯源） ──────────────
+# 与 /agent/traces 的分工：traces 是"运行级审计摘要"，这里是"逐事件全貌"，
+# 也是模型记忆的来源（storage/agent_sessions/<proj>_<sess>/events.v1.jsonl）。
+@router.get("/agent/runs")
+async def list_agent_runs(limit: int = 30):
+    """列出所有会话执行日志（含 session_id / 修改时间 / 字节数），按最近修改排序。"""
+    from app.agent.runtime.store import store as _session_store
+    return {"runs": _session_store.list_sessions(limit=limit)}
+
+
+@router.get("/agent/runs/{session_id}/events")
+async def get_agent_run_events(session_id: str, limit: int = 500, offset: int = 0, type: str = "", tail: bool = True):
+    """读取某次会话的执行事件。
+
+    - `session_id` 可传磁盘目录名（`proj_xxx_sess_yyy`），也可只传前端的 `sess_yyy`，
+      由 `SessionStore.resolve` 解析；命中多个候选时响应里的 `ambiguous` > 1。
+    - `type` 按事件类型过滤（如 `tool/call`、`tool/result`、`turn/start`）。
+    - `tail=True`（默认）取最近 N 条，评估长会话时更顺手。
+    """
+    from app.agent.runtime.store import store as _session_store
+    real_id, candidates = _session_store.resolve(session_id)
+    if not real_id:
+        raise HTTPException(status_code=404, detail=f"未找到会话执行日志: {session_id}")
+    events = _session_store.read(real_id)
+    if type:
+        events = [e for e in events if str(e.get("type", "")) == type]
+    total = len(events)
+    n = max(1, min(int(limit or 500), 5000))
+    off = max(0, int(offset or 0))
+    if tail:
+        events = events[max(0, total - n - off): total - off]
+    else:
+        events = events[off: off + n]
+    return {
+        "session_id": real_id,
+        "requested": session_id,
+        "ambiguous": candidates,
+        "total": total,
+        "returned": len(events),
+        "events": events,
+    }
 
 # ============================================================
 # 系统原生文件夹选择器与资源管理器集成
