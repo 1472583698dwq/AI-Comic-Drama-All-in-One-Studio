@@ -24,6 +24,15 @@ ASPECT_TO_SIZE = {
     "4:3": "1472x1140",
 }
 
+# 新版同步接口（multimodal-generation/generation）尺寸用 * 分隔
+ASPECT_TO_SIZE_STAR = {
+    "9:16": "928*1664",
+    "16:9": "1664*928",
+    "1:1": "1328*1328",
+    "3:4": "1140*1472",
+    "4:3": "1472*1140",
+}
+
 
 class DashScopeProvider(ImageProvider):
     id = "dashscope"
@@ -57,43 +66,55 @@ class DashScopeProvider(ImageProvider):
 
         started = time.time()
         # 模型选择：优先 req.model，其次环境变量，最后默认
-        model = req.model or getattr(settings, "DASHSCOPE_IMAGE_MODEL", "") or "wanx2.1-t2i-turbo"
-        # DashScope 常见模型：wanx2.1-t2i-turbo / wan2.7-image 等
-        size = ASPECT_TO_SIZE.get(req.aspect_ratio, "1328x1328")
+        model = req.model or getattr(settings, "DASHSCOPE_IMAGE_MODEL", "") or "wan2.6-t2i"
+        # 两代接口并存（2026-09）：
+        # - wan2.5/2.6/2.7、qwen-image、z-image：同步多模态生成接口（messages 结构，尺寸用 * 分隔）
+        # - wanx2.1 / wan2.2 等旧模型：text2image 异步合成接口（input.prompt 结构，尺寸用 x 分隔）
+        modern = model.startswith(("wan2.5", "wan2.6", "wan2.7", "qwen-image", "z-image"))
         seed = req.seed if req.seed is not None else int.from_bytes(os.urandom(4), "little") % 999999999
-
-        # 尝试 OpenAI 兼容透传？DashScope 新版支持 /api/v1/services/aigc/text2image/image-synthesis
-        # 为兼容多种模型，先尝试通用 DashScope 图像合成接口
-        headers = {
-            "Authorization": f"Bearer {settings.DASHSCOPE_API_KEY}",
-            "Content-Type": "application/json",
-            "X-DashScope-Async": "disable",
-        }
-        # 负向提示词处理
         prompt = req.prompt.strip()
-        if req.negative_prompt:
-            # 部分模型支持 negative_prompt 字段
-            pass
 
-        payload = {
-            "model": model,
-            "input": {
-                "prompt": prompt,
-            },
-            "parameters": {
-                "size": size,
-                "n": 1,
-                "seed": seed,
+        if modern:
+            size = ASPECT_TO_SIZE_STAR.get(req.aspect_ratio, "1328*1328")
+            headers = {
+                "Authorization": f"Bearer {settings.DASHSCOPE_API_KEY}",
+                "Content-Type": "application/json",
             }
-        }
-        if req.negative_prompt:
-            payload["parameters"]["negative_prompt"] = req.negative_prompt
-        if req.steps:
-            payload["parameters"]["steps"] = int(req.steps)
-
-        # 兼容 siliconflow-like 的直接文本字段也尝试
-        # 对于 wan 模型，可能需要 prompt_enhancement
-        url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis"
+            payload = {
+                "model": model,
+                "input": {
+                    "messages": [{"role": "user", "content": [{"text": prompt}]}],
+                },
+                "parameters": {
+                    "size": size,
+                    "n": 1,
+                    "prompt_extend": True,
+                },
+            }
+            url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
+        else:
+            size = ASPECT_TO_SIZE.get(req.aspect_ratio, "1328x1328")
+            headers = {
+                "Authorization": f"Bearer {settings.DASHSCOPE_API_KEY}",
+                "Content-Type": "application/json",
+                "X-DashScope-Async": "disable",
+            }
+            payload = {
+                "model": model,
+                "input": {
+                    "prompt": prompt,
+                },
+                "parameters": {
+                    "size": size,
+                    "n": 1,
+                    "seed": seed,
+                }
+            }
+            if req.negative_prompt:
+                payload["parameters"]["negative_prompt"] = req.negative_prompt
+            if req.steps:
+                payload["parameters"]["steps"] = int(req.steps)
+            url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis"
 
         async with httpx.AsyncClient(timeout=1200.0) as client:
             resp = await client.post(url, headers=headers, json=payload)

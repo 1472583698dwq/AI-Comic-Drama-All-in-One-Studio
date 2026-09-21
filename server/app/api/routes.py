@@ -88,9 +88,12 @@ router = APIRouter()
 # ============================================================
 
 @router.get("/skills", response_model=List[SkillDefinition])
-async def list_skills():
-    """获取所有已加载的技能 (Skills)"""
-    return skill_engine.list_skills()
+async def list_skills(all: bool = False):
+    """获取已加载的技能 (Skills)。默认只给可执行的：润色按钮/技能工作室拿到的列表就该能跑。
+
+    all=true 才返回被关闭或在扩展中心停用的技能（界面要能看见它们才知道怎么恢复）。
+    """
+    return skill_engine.list_skills() if all else skill_engine.active_skills()
 
 @router.post("/skills/execute", response_model=SkillExecutionResult)
 async def execute_skill(req: SkillExecuteRequest):
@@ -884,13 +887,22 @@ async def generate_video(req: VideoGenerateRequestPayload):
         for k in ("fps","steps","cfg","aspect_ratio","resolution"):
             if k in extra and k not in dyn:
                 dyn[k] = extra[k]
+        # 白模动态预演自动作为视频参考：前端把 previz_video_url 放在 dynamic_inputs，
+        # 这里统一提升为 reference_videos（只有声明了视频参考槽的源才会消费）。
+        ref_videos = list(req.reference_videos or [])
+        if not ref_videos:
+            pv = dyn.get("previz_video_url") or dyn.get("previz_videos") or extra.get("previz_video_url")
+            if isinstance(pv, str) and pv.strip():
+                ref_videos = [pv.strip()]
+            elif isinstance(pv, (list, tuple)):
+                ref_videos = [str(x).strip() for x in pv if str(x).strip()]
         vid_req = VidReq(
             prompt=req.prompt,
             mode=req.mode or "i2v",
             first_frame_url=req.first_frame_url,
             last_frame_url=req.last_frame_url,
             reference_images=req.reference_images,
-            reference_videos=req.reference_videos,
+            reference_videos=ref_videos or None,
             reference_audios=getattr(req, 'reference_audios', None),
             duration=req.duration or 5,
             resolution=req.resolution or extra.get("resolution") or "720p",
@@ -1277,13 +1289,14 @@ async def websocket_agent_endpoint(websocket: WebSocket):
             context = data.get("context") or {}
             # 运行模式透传到引擎（plan=只读规划模式）
             try:
-                from app.agent.mode_policy import normalize_run_mode as _nrm
+                from app.agent.mode_policy import normalize_run_mode as _nrm, behavior_of as _beh
                 _rm = _nrm(str(data.get("run_mode") or (context.get("run_mode") if isinstance(context, dict) else "") or "approve"))
             except Exception:
                 _rm = "approve"
+                _beh = lambda m: "plan" if str(m).startswith("plan") else "standard"  # noqa: E731
             if isinstance(context, dict):
                 context["run_mode"] = _rm
-                context["plan_mode"] = (_rm == "plan")
+                context["plan_mode"] = (_beh(_rm) == "plan")
             if data.get("session_id"):
                 session_id = str(data.get("session_id"))
             elif context.get("project_id"):
@@ -1497,24 +1510,24 @@ class ConfigUpdateRequest(BaseModel):
     # MiniMax
     MINIMAX_API_KEY: Optional[str] = Field(default="")
     MINIMAX_GROUP_ID: Optional[str] = Field(default="")
-    MINIMAX_BASE_URL: Optional[str] = Field(default="https://api.minimax.chat/v1")
-    LLM_MODEL: Optional[str] = Field(default="abab6.5s-chat")
-    TTS_MODEL: Optional[str] = Field(default="speech-01-turbo")
-    VIDEO_MODEL: Optional[str] = Field(default="video-01")
+    MINIMAX_BASE_URL: Optional[str] = Field(default="https://api.minimaxi.com/v1")
+    LLM_MODEL: Optional[str] = Field(default="MiniMax-M2.5")
+    TTS_MODEL: Optional[str] = Field(default="speech-2.8-turbo")
+    VIDEO_MODEL: Optional[str] = Field(default="MiniMax-Hailuo-02")
 
     # LLM Provider & OpenAI / Responses API / DeepSeek
     LLM_PROVIDER: Optional[str] = Field(default="openai_compatible")
     LLM_API_TYPE: Optional[str] = Field(default="chat_completions")
     OPENAI_API_KEY: Optional[str] = Field(default="")
     OPENAI_BASE_URL: Optional[str] = Field(default="https://api.deepseek.com/v1")
-    OPENAI_MODEL: Optional[str] = Field(default="deepseek-chat")
+    OPENAI_MODEL: Optional[str] = Field(default="deepseek-v4-flash")
     OPENAI_CUSTOM_HEADERS: Optional[str] = Field(default="")
     RESPONSES_API_URL: Optional[str] = Field(default="https://api.openai.com/v1/responses")
     RESPONSES_API_KEY: Optional[str] = Field(default="")
-    RESPONSES_MODEL: Optional[str] = Field(default="gpt-4o")
+    RESPONSES_MODEL: Optional[str] = Field(default="gpt-5.2")
 
     # Image Generation
-    IMAGE_PROVIDER: Optional[str] = Field(default="comfyui")
+    IMAGE_PROVIDER: Optional[str] = Field(default="openai_compat")
     COMFYUI_SERVER_URL: Optional[str] = Field(default="http://127.0.0.1:8188")
     COMFYUI_CHECKPOINT: Optional[str] = Field(default="")
     COMFYUI_TIMEOUT_SECONDS: Optional[str] = Field(default="1200")
@@ -1523,9 +1536,10 @@ class ConfigUpdateRequest(BaseModel):
     SILICONFLOW_API_KEY: Optional[str] = Field(default="")
     SILICONFLOW_IMAGE_MODEL: Optional[str] = Field(default="black-forest-labs/FLUX.1-schnell")
     DASHSCOPE_API_KEY: Optional[str] = Field(default="")
-    DASHSCOPE_IMAGE_MODEL: Optional[str] = Field(default="wanx2.1-t2i-turbo")
-    OPENAI_IMAGE_MODEL: Optional[str] = Field(default="dall-e-3")
+    DASHSCOPE_IMAGE_MODEL: Optional[str] = Field(default="wan2.6-t2i")
+    OPENAI_IMAGE_MODEL: Optional[str] = Field(default="gpt-image-2.5-flare")
     OPENAI_IMAGE_BASE_URL: Optional[str] = Field(default="")
+    OPENAI_IMAGE_API_KEY: Optional[str] = Field(default="")
 
     # Voice & TTS
     TTS_PROVIDER: Optional[str] = Field(default="minimax")
@@ -1535,14 +1549,14 @@ class ConfigUpdateRequest(BaseModel):
     ELEVENLABS_MODEL: Optional[str] = Field(default="eleven_multilingual_v2")
 
     # Video Generation
-    VIDEO_PROVIDER: Optional[str] = Field(default="minimax")
+    VIDEO_PROVIDER: Optional[str] = Field(default="comfyui_video")
     COMFYUI_DEFAULT_VIDEO_WORKFLOW: Optional[str] = Field(default="")
     KLING_API_KEY: Optional[str] = Field(default="")
     KLING_BASE_URL: Optional[str] = Field(default="https://api-beijing.klingai.com")
     KLING_MODEL: Optional[str] = Field(default="kling-v3")
     VIDU_API_KEY: Optional[str] = Field(default="")
     MINIMAX_H3_MODEL: Optional[str] = Field(default="MiniMax-H3")
-    MINIMAX_H3_BASE_URL: Optional[str] = Field(default="https://api.minimax.chat")
+    MINIMAX_H3_BASE_URL: Optional[str] = Field(default="https://api.minimaxi.com")
     SEEDANCE_API_KEY: Optional[str] = Field(default="")
     SEEDANCE_BASE_URL: Optional[str] = Field(default="https://ark.cn-beijing.volces.com/api/v3")
     SEEDANCE_MODEL: Optional[str] = Field(default="doubao-seedance-2-0-260128")
@@ -1556,7 +1570,7 @@ class ConfigUpdateRequest(BaseModel):
     STUDIO_TRUSTED_MODE: Optional[str] = Field(default="0")
 
 class ConfigTestRequest(BaseModel):
-    target: str = Field(description="openai | responses_api | deepseek | qwen | minimax | comfyui | siliconflow | dashscope | elevenlabs | cosyvoice | gpt_sovits | jianyin | openai_compat")
+    target: str = Field(description="openai | responses_api | minimax | minimax_h3 | wan3 | seedance | kling | comfyui | siliconflow | dashscope | openai_image | elevenlabs | cosyvoice | gpt_sovits | jianyin")
     config: Dict[str, Any] | None = None
 
 class AgentChatRequest(BaseModel):
@@ -1600,7 +1614,9 @@ async def save_config(req: ConfigUpdateRequest):
     """保存配置到 .env 及 storage/config_store.json 并热重载。"""
     raw_existing = read_env_file(unmask=True)
     updates: Dict[str, str] = {}
-    incoming = req.model_dump(exclude_unset=False)
+    # 只写客户端显式提交的键：exclude_unset=False 会把模型里的默认值当"用户输入"，
+    # 保存任意一项都会把其余配置重置回默认值（旧版 bug）。
+    incoming = req.model_dump(exclude_unset=True)
 
     for k in MANAGED_KEYS:
         new_val = incoming.get(k)
@@ -1654,11 +1670,13 @@ async def test_config_connection(req: ConfigTestRequest):
             return {"target": "minimax", "ok": False, "detail": "MINIMAX_API_KEY 未配置"}
         try:
             async with httpx.AsyncClient(timeout=12.0) as client:
+                # M 系列（MiniMax-M3/M2.5…）走 OpenAI 兼容的 /chat/completions；
+                # 旧版 /text/chatcompletion_v2 仅 abab 时代使用，已随域名一起弃用。
                 r = await client.post(
-                    f"{base_url}/text/chatcompletion_v2",
+                    f"{base_url}/chat/completions",
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json={
-                        "model": cfg.get("LLM_MODEL") or settings.LLM_MODEL,
+                        "model": cfg.get("LLM_MODEL") or settings.LLM_MODEL or "MiniMax-M2.5",
                         "messages": [{"role": "user", "content": "hi"}],
                         "max_tokens": 1,
                     },
@@ -1677,7 +1695,7 @@ async def test_config_connection(req: ConfigTestRequest):
         if _is_masked_placeholder(api_key):
             api_key = settings.OPENAI_API_KEY
         base_url = (cfg.get("OPENAI_BASE_URL") or settings.OPENAI_BASE_URL).rstrip("/")
-        model = cfg.get("OPENAI_MODEL") or settings.OPENAI_MODEL or "deepseek-chat"
+        model = cfg.get("OPENAI_MODEL") or settings.OPENAI_MODEL or "deepseek-v4-flash"
         if not api_key:
             return {"target": "openai", "ok": False, "detail": "OPENAI_API_KEY 未配置"}
         try:
@@ -1725,7 +1743,7 @@ async def test_config_connection(req: ConfigTestRequest):
         url = (cfg.get("RESPONSES_API_URL") or settings.RESPONSES_API_URL).rstrip("/")
         if not url.endswith("/responses"):
             url = f"{url}/responses"
-        model = cfg.get("RESPONSES_MODEL") or cfg.get("OPENAI_MODEL") or settings.RESPONSES_MODEL or "gpt-4o"
+        model = cfg.get("RESPONSES_MODEL") or cfg.get("OPENAI_MODEL") or settings.RESPONSES_MODEL or "gpt-5.2"
         if not api_key:
             return {"target": "responses_api", "ok": False, "detail": "RESPONSES_API_KEY / OPENAI_API_KEY 未配置"}
         try:
@@ -1746,6 +1764,41 @@ async def test_config_connection(req: ConfigTestRequest):
             return {"target": "responses_api", "ok": False, "detail": f"Responses API 返回 {e.response.status_code}: {e.response.text[:200]}"}
         except Exception as e:
             return {"target": "responses_api", "ok": False, "detail": f"Responses API 连接失败：{e}"}
+
+    if target in ["openai_image", "openai_compat_image"]:
+        api_key = (cfg.get("OPENAI_IMAGE_API_KEY") or cfg.get("OPENAI_API_KEY")
+                   or getattr(settings, "OPENAI_IMAGE_API_KEY", "") or settings.OPENAI_API_KEY)
+        if _is_masked_placeholder(api_key):
+            api_key = getattr(settings, "OPENAI_IMAGE_API_KEY", "") or settings.OPENAI_API_KEY
+        base = (cfg.get("OPENAI_IMAGE_BASE_URL") or cfg.get("OPENAI_BASE_URL")
+                or getattr(settings, "OPENAI_IMAGE_BASE_URL", "") or settings.OPENAI_BASE_URL or "").rstrip("/")
+        model = cfg.get("OPENAI_IMAGE_MODEL") or getattr(settings, "OPENAI_IMAGE_MODEL", "") or "gpt-image-2.5-flare"
+        if not api_key:
+            return {"target": "openai_image", "ok": False, "detail": "OPENAI_IMAGE_API_KEY / OPENAI_API_KEY 未配置"}
+        if not base:
+            return {"target": "openai_image", "ok": False, "detail": "OPENAI_IMAGE_BASE_URL / OPENAI_BASE_URL 未配置"}
+        url = f"{base}/models" if base.endswith("/v1") else f"{base}/v1/models"
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                r = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
+                if r.status_code == 401:
+                    return {"target": "openai_image", "ok": False, "detail": "生图网关鉴权失败（401）：请检查 API Key"}
+                if r.status_code == 404:
+                    return {"target": "openai_image", "ok": True, "detail": f"网关可达（不支持 /models 列表，模型 {model} 将在生成时校验）"}
+                r.raise_for_status()
+                ids = []
+                try:
+                    ids = [str(m.get("id")) for m in (r.json().get("data") or []) if isinstance(m, dict)]
+                except Exception:
+                    ids = []
+                if ids and model not in ids:
+                    return {"target": "openai_image", "ok": True,
+                            "detail": f"网关可达，但模型列表里没有 {model}（示例：{', '.join(ids[:3])}…）"}
+                return {"target": "openai_image", "ok": True, "detail": f"生图网关连通正常（{model}）"}
+        except httpx.HTTPStatusError as e:
+            return {"target": "openai_image", "ok": False, "detail": f"生图网关返回 {e.response.status_code}: {e.response.text[:200]}"}
+        except Exception as e:
+            return {"target": "openai_image", "ok": False, "detail": f"生图网关连接失败：{e}"}
 
     if target == "siliconflow":
         api_key = cfg.get("SILICONFLOW_API_KEY") or settings.SILICONFLOW_API_KEY
@@ -1937,12 +1990,13 @@ async def http_agent_chat(req: AgentChatRequest):
         try:
             _ctx = dict(req.context or {})
             try:
-                from app.agent.mode_policy import normalize_run_mode as _nrm2
+                from app.agent.mode_policy import normalize_run_mode as _nrm2, behavior_of as _beh2
                 _rm2 = _nrm2(getattr(req, "run_mode", "approve"))
             except Exception:
                 _rm2 = "approve"
+                _beh2 = lambda m: "plan" if str(m).startswith("plan") else "standard"  # noqa: E731
             _ctx["run_mode"] = _rm2
-            _ctx["plan_mode"] = (_rm2 == "plan")
+            _ctx["plan_mode"] = (_beh2(_rm2) == "plan")
             result = await run_agent_with_langchain(
                 prompt=prompt_text,
                 context=_ctx,
@@ -2121,12 +2175,13 @@ async def http_agent_chat_stream(req: AgentChatRequest):
         # 运行模式透传（plan=只读规划模式）
         _ctx_s = dict(req.context or {})
         try:
-            from app.agent.mode_policy import normalize_run_mode as _nrm3
+            from app.agent.mode_policy import normalize_run_mode as _nrm3, behavior_of as _beh3
             _rm3 = _nrm3(getattr(req, "run_mode", "approve"))
         except Exception:
             _rm3 = "approve"
+            _beh3 = lambda m: "plan" if str(m).startswith("plan") else "standard"  # noqa: E731
         _ctx_s["run_mode"] = _rm3
-        _ctx_s["plan_mode"] = (_rm3 == "plan")
+        _ctx_s["plan_mode"] = (_beh3(_rm3) == "plan")
         # 启动后台任务执行 agent
         task = asyncio.create_task(run_agent_with_langchain(
             prompt=prompt_text,

@@ -2,7 +2,8 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from app.core.config import settings
+from fastapi.responses import JSONResponse
+from app.core.config import settings, cors_extra_origins, is_local_or_allowed_origin
 from app.api.routes import router
 from app.mcp.server import mcp_registry
 
@@ -29,13 +30,36 @@ app = FastAPI(
 )
 
 # Configure CORS for multi-platform Web / Desktop / Mobile clients
+# 只放行本机来源：打包态前端由本服务同源 serve，开发态 vite 在 localhost:5173 直连属真跨域。
+# 曾经的 allow_origins=["*"] 会让浏览器里任意网页在应用运行期间读写本服务。
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$",
+    allow_origins=cors_extra_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# 任意工具执行口：CORS 只挡浏览器读响应，跨源 POST 在服务端仍会执行（fire-and-forget）。
+# 这两个口能跑代码/花钱，故额外显式拒绝非本机 Origin；不带 Origin 的原生/同源请求不受影响。
+EXECUTION_PATHS = {
+    f"{settings.API_V1_STR}/mcp/call",
+    f"{settings.API_V1_STR}/extensions/execute",
+}
+
+
+@app.middleware("http")
+async def _origin_guard(request, call_next):
+    if request.url.path in EXECUTION_PATHS and request.method.upper() != "OPTIONS":
+        origin = request.headers.get("origin") or ""
+        if not is_local_or_allowed_origin(origin):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": f"已拒绝跨源调用（Origin={origin}）：本机工具执行口不对外站开放"},
+            )
+    return await call_next(request)
 
 
 # 项目作用域传播：从 query/header 读 project_id 注入 contextvar，
@@ -220,8 +244,10 @@ async def health_check():
     try:
         from app.providers.image.registry import image_registry
         from app.providers.audio.registry import audio_registry
+        from app.providers.video.registry import video_registry
         img_ids = image_registry.list_ids() if hasattr(image_registry, "list_ids") else []
         aud_ids = audio_registry.list_ids() if hasattr(audio_registry, "list_ids") else []
+        vid_ids = video_registry.list_ids() if hasattr(video_registry, "list_ids") else []
         return {
             "status": "healthy",
             "comfyui_online": False,
@@ -229,8 +255,10 @@ async def health_check():
             "providers": {
                 "image": img_ids,
                 "audio": aud_ids,
+                "video": vid_ids,
                 "image_count": len(img_ids),
                 "audio_count": len(aud_ids),
+                "video_count": len(vid_ids),
             },
         }
     except Exception as e:

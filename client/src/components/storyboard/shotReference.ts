@@ -42,7 +42,8 @@ export function boundCharRefs(shot: any, project: any): BoundCharRef[] {
   for (const id of ids) {
     const c = chars.find((x: any) => x.id === id);
     if (!c) continue;
-    const refUrl = c.three_views?.front || c.avatar_url || c.three_views?.three_quarter || '';
+    const tv = (c.three_views || {}) as Record<string, string>;
+    const refUrl = tv.front || c.avatar_url || tv.three_quarter || tv.side || '';
     if (!refUrl) continue;
     out.push({
       id,

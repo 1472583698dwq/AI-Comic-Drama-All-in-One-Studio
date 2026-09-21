@@ -139,6 +139,8 @@ export const apiService = {
     first_frame_url?: string;
     last_frame_url?: string;
     reference_images?: string[];
+    /** 参考视频（白模动态预演等；有声明的源才消费） */
+    reference_videos?: string[];
     duration?: number;
     resolution?: string;
     aspect_ratio?: string;
@@ -166,6 +168,7 @@ export const apiService = {
         first_frame_url: params.first_frame_url,
         last_frame_url: params.last_frame_url,
         reference_images: params.reference_images,
+        reference_videos: params.reference_videos,
         duration: params.duration || 5,
         resolution: params.resolution || '720p',
         aspect_ratio: params.aspect_ratio || '9:16',
@@ -359,8 +362,8 @@ export const apiService = {
   },
 
   // 5. 技能 (Skills)
-  async listSkills(): Promise<any[]> {
-    const res = await fetch(`${API_BASE_URL}/skills`);
+  async listSkills(all = false): Promise<any[]> {
+    const res = await fetch(`${API_BASE_URL}/skills${all ? "?all=true" : ""}`);
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
@@ -749,13 +752,15 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
-  async getProjectAgentSessions(projectId: string): Promise<{ project_id: string; sessions: any[] }> {
-    const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/agent-sessions`);
+  async getProjectAgentSessions(projectId: string, scope?: string): Promise<{ project_id: string; sessions: any[] }> {
+    const q = scope ? `?scope=${encodeURIComponent(scope)}` : '';
+    const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/agent-sessions${q}`);
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
-  async saveProjectAgentSessions(projectId: string, sessions: any[]): Promise<any> {
-    const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/agent-sessions`, {
+  async saveProjectAgentSessions(projectId: string, sessions: any[], scope?: string): Promise<any> {
+    const q = scope ? `?scope=${encodeURIComponent(scope)}` : '';
+    const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/agent-sessions${q}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sessions }),

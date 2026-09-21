@@ -7,7 +7,6 @@
 """
 from __future__ import annotations
 
-import json
 import os
 from typing import Any, Dict, List, Optional, Set
 
@@ -39,8 +38,17 @@ def _shadow_info(session) -> tuple[Set[int], Dict[int, str]]:
     return shadowed, replacements
 
 
-def maybe_prune_tool_results(session, max_chars: int = 2000) -> int:
+def _prune_max_chars() -> int:
+    """剪裁兜底阈值：留出余量给管线已压好的结果（pipeline.SPILL_CHARS=8000），避免二次盲剪。"""
+    try:
+        return max(1000, int(os.environ.get("AGENT_PRUNE_MAX_CHARS") or 9000))
+    except Exception:
+        return 9000
+
+
+def maybe_prune_tool_results(session, max_chars: Optional[int] = None) -> int:
     """把过大的 tool/result 替换为头尾预览（append-only，原文仍在日志）。"""
+    max_chars = _prune_max_chars() if max_chars is None else int(max_chars)
     shadowed, _ = _shadow_info(session)
     replacements: Dict[str, str] = {}
     seqs: List[int] = []
@@ -50,13 +58,7 @@ def maybe_prune_tool_results(session, max_chars: int = 2000) -> int:
         seq = int(ev.get("seq") or 0)
         if seq in shadowed:
             continue
-        d = ev.get("data") or {}
-        content = d.get("result")
-        if not isinstance(content, str):
-            try:
-                content = json.dumps(content, ensure_ascii=False, default=str)
-            except Exception:
-                content = str(content)
+        content = E.tool_result_content_text(ev.get("data") or {})
         if len(content) <= max_chars:
             continue
         half = max_chars // 2
@@ -84,13 +86,8 @@ def _surface_sequence(session) -> List[Dict[str, Any]]:
             tok = estimate_text(str(d.get("text") or "")) + estimate_text(str(d.get("tool_calls") or ""))
             out.append({"seq": seq, "role": "assistant", "tokens": tok, "type": t})
         elif t == E.TOOL_RESULT:
-            c = d.get("result")
-            if not isinstance(c, str):
-                try:
-                    c = json.dumps(c, ensure_ascii=False, default=str)
-                except Exception:
-                    c = str(c)
-            out.append({"seq": seq, "role": "tool", "tokens": estimate_text(c), "type": t})
+            out.append({"seq": seq, "role": "tool",
+                        "tokens": estimate_text(E.tool_result_content_text(d)), "type": t})
         elif t == E.SYSTEM_MESSAGE:
             out.append({"seq": seq, "role": "system", "tokens": estimate_text(str(d.get("text") or "")), "type": t})
     return out
@@ -132,12 +129,7 @@ def _transcript_of(session, surface: List[Dict[str, Any]], cut: int, limit_chars
             names = ",".join((tc or {}).get("name") or "" for tc in tcs)
             lines.append(f"[导演] {text}" + (f"（调用工具: {names}）" if names else ""))
         elif item["type"] == E.TOOL_RESULT:
-            c = d.get("result")
-            if not isinstance(c, str):
-                try:
-                    c = json.dumps(c, ensure_ascii=False, default=str)
-                except Exception:
-                    c = str(c)
+            c = E.tool_result_content_text(d)
             status = d.get("status") or ""
             err = d.get("error") or ""
             lines.append(f"[工具 {d.get('name') or ''} {status}] {(err if status != 'success' else c)[:1200]}")

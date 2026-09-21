@@ -4,7 +4,7 @@ import { StoryboardShot } from '../../types';
 import { apiService } from '../../services/api';
 import { extractSlotsFromProvider } from '../canvas/providerSkills';
 import { buildShotReferenceInputs, promptWithCharacterTags, withCameraIntent } from './shotReference';
-import { collectResources, planBinding } from './referenceBinder';
+import { collectResources, planBinding, missingBoundCharacters } from './referenceBinder';
 import { BindPreviewModal } from './slots/BindPreviewModal';
 import { getMode } from './slots/registry';
 import { registerBuiltinSlots } from './slots/builtin';
@@ -182,6 +182,13 @@ export const ShotInspector: React.FC = () => {
     });
     return planBinding(resources, slots, (shot as any).dynamic_inputs || {}, { overwrite: bindPreview.overwrite });
   }, [bindPreview, shots, project, _projectAssets, productionMode, videoMode]);
+
+  // 已绑定但无立绘/三视图的角色：预览里显式提示（否则弹框会"空"得没有理由）
+  const bindMissingChars = useMemo(() => {
+    if (!bindPreview) return [];
+    const shot = shots.find((s) => s.id === bindPreview.shotId);
+    return missingBoundCharacters(shot, project);
+  }, [bindPreview, shots, project]);
 
   useEffect(() => {
     if (activeShot?.production_mode) {
@@ -457,9 +464,10 @@ export const ShotInspector: React.FC = () => {
 
   const injectCharacterToSlot = (writeKeys: string[], multi: boolean) => {
     const currentChar = project?.characters.find(c => c.name === activeShot.speaker_name) || project?.characters?.[0];
-    const charImg = currentChar?.three_views?.front || currentChar?.avatar_url || currentChar?.three_views?.three_quarter;
+    const tv = (currentChar?.three_views || {}) as Record<string, string>;
+    const charImg = tv.front || currentChar?.avatar_url || tv.three_quarter || tv.side;
     if (!charImg) {
-      alert('当前角色未找到立绘或三视图图片，请在角色工坊生成');
+      alert(`角色「${currentChar?.name || '当前角色'}」没有可用立绘/三视图，请先在角色工坊生成`);
       return;
     }
     setSlotValue(writeKeys, multi ? [charImg] : charImg);
@@ -801,6 +809,8 @@ export const ShotInspector: React.FC = () => {
         duration: Math.round(activeShot.duration) || 5,
         provider: videoProvider,
         workflow_id: videoWorkflowId || undefined,
+        // 白模动态预演自动作为参考视频（有声明的源才消费；dynamic_inputs 里另留一份供插槽映射）
+        reference_videos: shotRefs.previz_video_url ? [shotRefs.previz_video_url] : undefined,
         dynamic_inputs,
         omit_first_frame: isDirect,
       });
@@ -962,6 +972,8 @@ export const ShotInspector: React.FC = () => {
           duration: Math.round(sh.duration) || 5,
           provider: prov,
           workflow_id: (sh as any).workflow_id || undefined,
+          // 白模动态预演自动作为参考视频（有声明的源才消费；dynamic_inputs 里另留一份供插槽映射）
+          reference_videos: bvRefs.previz_video_url ? [bvRefs.previz_video_url] : undefined,
           dynamic_inputs: bvInputs,
           omit_first_frame: shDirect,
         });
@@ -1064,6 +1076,7 @@ export const ShotInspector: React.FC = () => {
         providerName={bindPreview?.def?.display_name || bindPreview?.def?.name || bindPreview?.def?.id}
         shotLabel={activeShot?.shot_index ? `#${activeShot.shot_index}` : ''}
         plan={bindPlan}
+        missingChars={bindMissingChars}
         overwrite={!!bindPreview?.overwrite}
         onToggleOverwrite={(v) => setBindPreview((p) => (p ? { ...p, overwrite: v } : p))}
         onApply={applyBind}

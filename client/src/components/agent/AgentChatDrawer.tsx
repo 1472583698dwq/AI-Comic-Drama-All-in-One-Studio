@@ -1,5 +1,5 @@
 /**
- * 悬浮导演 Agent 抽屉 — 薄壳：拖拽外壳 + 统一消息流/运行时 store（与 Agent 页共用同一会话）
+ * 悬浮导演 Agent 抽屉 — 薄壳：拖拽外壳 + 独立会话 store（与 Agent 页各自独立、互不影响）
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { agentSocket } from './agentSocket';
-import { useAgentStore } from './agentStore';
+import { useAgentFloatStore } from './agentStore';
 import { AgentMessageList } from './AgentMessageList';
 import { AgentComposer } from './AgentComposer';
 
@@ -18,10 +18,18 @@ export const AgentChatDrawer: React.FC = () => {
   const [proposalBusy, setProposalBusy] = useState<Record<string, string>>({});
 
   const {
-    messages, isRunning, wsStatus, approvals, mode, runMode,
-    bindProject, send, abort, clearAll, approve,
+    messages, isRunning, wsStatus, approvals, mode, behavior, execution, autoAllowTools,
+    bindProject, setMode, setBehavior, setExecution, send, steer, abort, clearAll, approve, setAutoAllow,
     executePlan, proposalAction, applyArtifact,
-  } = useAgentStore();
+  } = useAgentFloatStore();
+
+  const handleApprove = useCallback((aid: string, ok: boolean, always: boolean) => {
+    if (always && ok) {
+      const a = approvals[aid];
+      if (a?.tool_name) setAutoAllow(a.tool_name, true);
+    }
+    approve(aid, ok);
+  }, [approvals, approve, setAutoAllow]);
 
   // 浮动按钮位置（可拖拽持久化）
   const [btnPos, setBtnPos] = useState<{ x: number; y: number }>(() => {
@@ -248,7 +256,7 @@ export const AgentChatDrawer: React.FC = () => {
                 <div className="text-[9px] [color:var(--color-text-muted)] flex items-center gap-1">
                   <span>多模态感知</span>
                   <span>·</span>
-                  <span>与 Agent 页会话同步</span>
+                  <span>独立会话（与 Agent 页互不影响）</span>
                 </div>
               </div>
             </div>
@@ -300,6 +308,9 @@ export const AgentChatDrawer: React.FC = () => {
               onProposalAction={handleProposalAction}
               proposalBusy={proposalBusy}
               onApplyArtifact={applyArtifact}
+              approvals={approvals}
+              autoAllowTools={autoAllowTools}
+              onApprove={handleApprove}
             />
             <div ref={messagesEndRef} />
           </div>
@@ -323,11 +334,19 @@ export const AgentChatDrawer: React.FC = () => {
             <AgentComposer
               compact
               mode={mode}
-              runMode={runMode}
+              behavior={behavior}
+              execution={execution}
               isRunning={isRunning}
               wsStatus={wsStatus}
               onSend={(t) => void send(t)}
               onAbort={abort}
+              onSteer={(t) => void steer(t)}
+              onCycleMode={() => setMode(mode === 'execute' ? 'chat' : 'execute')}
+              onCycleBehavior={() => {
+                const order = ['standard', 'create', 'plan'] as const;
+                setBehavior(order[(order.indexOf(behavior) + 1) % order.length]);
+              }}
+              onCycleExecution={() => setExecution(execution === 'auto' ? 'approve' : 'auto')}
             />
           </div>
         </div>

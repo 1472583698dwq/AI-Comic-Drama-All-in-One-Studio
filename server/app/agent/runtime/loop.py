@@ -48,12 +48,15 @@ class AgentLoop:
     ):
         self.session = Session.open(session_id, store=store)
         try:
-            from app.agent.mode_policy import normalize_run_mode
+            from app.agent.mode_policy import normalize_run_mode, behavior_of
             self.run_mode = normalize_run_mode(run_mode)
         except Exception:
             self.run_mode = run_mode or "approve"
+            behavior_of = lambda m: "plan" if str(m).startswith("plan") else ("create" if str(m).startswith("create") else "standard")  # noqa: E731
         self.mode = "chat" if str(mode or "execute").lower() == "chat" else "execute"
-        self.plan_mode = self.run_mode == "plan"
+        self.plan_mode = behavior_of(self.run_mode) == "plan"
+        # /plan off 回到进入计划前的行为（如 创造+自动），避免把行为维度一并重置
+        self._pre_plan_run_mode = "approve"
         self.context: Dict[str, Any] = dict(context or {})
         self.inbox = Inbox(on_wake=self._wake)
         self._sinks: List[Sink] = []
@@ -100,6 +103,12 @@ class AgentLoop:
             pass
 
     async def _emit(self, ev: Dict[str, Any]) -> None:
+        # 客户端按 session_id 分流（页面版与悬浮窗版独立会话共用一条 WS）。
+        try:
+            if isinstance(ev, dict) and "session_id" not in ev:
+                ev = {**ev, "session_id": self.session_id}
+        except Exception:
+            pass
         for sink in list(self._sinks):
             try:
                 r = sink(ev)
@@ -142,16 +151,26 @@ class AgentLoop:
 
     def set_run_mode(self, run_mode: str) -> None:
         try:
-            from app.agent.mode_policy import normalize_run_mode
+            from app.agent.mode_policy import normalize_run_mode, behavior_of, execution_of
             m = normalize_run_mode(run_mode)
+            behavior = behavior_of(m)
+            prev_behavior = behavior_of(self.run_mode)
         except Exception:
             m = str(run_mode or "approve")
+            behavior = "plan" if m.startswith("plan") else ("create" if m.startswith("create") else "standard")
+            prev_behavior = "plan" if str(self.run_mode).startswith("plan") else "standard"
+            execution_of = lambda x: "auto" if str(x).endswith("auto") else "approve"  # noqa: E731
+        if behavior == "plan" and prev_behavior != "plan":
+            self._pre_plan_run_mode = self.run_mode
         changed = m != self.run_mode
         self.run_mode = m
-        self.plan_mode = m == "plan"
+        self.plan_mode = behavior == "plan"
         self.pipeline.plan_mode = self.plan_mode
         if changed:
-            self.session.append(E.PLAN_MODE, {"active": self.plan_mode, "run_mode": m})
+            self.session.append(E.PLAN_MODE, {
+                "active": self.plan_mode, "run_mode": m,
+                "behavior": behavior, "execution": execution_of(m),
+            })
 
     def set_goal(self, objective: str, max_rounds: Optional[int] = None):
         from app.agent.runtime.goal import GoalState, save_goal, DEFAULT_MAX_ROUNDS
@@ -424,6 +443,7 @@ class AgentLoop:
             self.session.append(E.TOOL_RESULT, {
                 "call_id": tc.id, "name": tc.name, "status": outcome.status,
                 "result": outcome.result if outcome.status == "success" else None,
+                "model_content": outcome.model_content or "",
                 "error": outcome.error, "meta": outcome.meta or None,
             })
             await self._emit({

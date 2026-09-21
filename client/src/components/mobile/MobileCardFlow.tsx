@@ -159,7 +159,7 @@ export const MobileCardFlow: React.FC<MobileCardFlowProps> = ({ onOpenExport, st
           <img
             src={imgSrc}
             alt=""
-            className="w-full h-full object-cover animate-fade-in"
+            className="max-w-full max-h-full object-contain animate-fade-in"
           />
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center text-gray-500 text-xs space-y-3 p-4 text-center bg-surface-secondary">

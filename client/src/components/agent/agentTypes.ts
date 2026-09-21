@@ -4,7 +4,32 @@
  * 此文件为唯一口径，历史会话（steps/artifacts/errors/plan）与之兼容。
  */
 export type AgentMode = 'chat' | 'execute';
-export type RunMode = 'approve' | 'auto' | 'create' | 'plan';
+/** 行为模式：能干什么（standard 标准 / create 创造 / plan 计划-只读），与执行方式正交 */
+export type BehaviorMode = 'standard' | 'create' | 'plan';
+/** 执行方式：要不要逐项人审（approve 审批 / auto 自动执行） */
+export type ExecutionMode = 'approve' | 'auto';
+/** 组合后的运行模式 token（wire 与持久化口径；plan 只读，plan_auto 与 plan 等价仅为往返） */
+export type RunMode = 'approve' | 'auto' | 'create' | 'create_auto' | 'plan' | 'plan_auto';
+
+export function behaviorOfRunMode(r?: RunMode | string): BehaviorMode {
+  const s = String(r || 'approve').trim().toLowerCase();
+  if (s.startsWith('plan') || s.startsWith('planning') || s.startsWith('readonly')) return 'plan';
+  if (s.startsWith('create') || s.startsWith('creator') || s.startsWith('creation') || s.startsWith('creative')) return 'create';
+  return 'standard';
+}
+
+export function executionOfRunMode(r?: RunMode | string): ExecutionMode {
+  const s = String(r || 'approve').trim().toLowerCase();
+  return s.endsWith('auto') || s === 'yolo' || s === 'never' || s === 'automation' || s === 'automatic'
+    ? 'auto'
+    : 'approve';
+}
+
+export function composeRunMode(b: BehaviorMode, e: ExecutionMode): RunMode {
+  if (b === 'plan') return e === 'auto' ? 'plan_auto' : 'plan';
+  if (b === 'create') return e === 'auto' ? 'create_auto' : 'create';
+  return e === 'auto' ? 'auto' : 'approve';
+}
 export type ToolStatus = 'executing' | 'completed' | 'error';
 export type SideEffect =
   | { type: 'provider_refresh' }
@@ -20,6 +45,17 @@ export interface ToolStep {
   status: ToolStatus;
   result?: any;
   error?: string;
+  /** 调用参数（tool_calling 事件携带，用于行内卡展开查看） */
+  args?: Record<string, any>;
+  /** 调用开始时间戳（ms） */
+  startedAt?: number;
+  /** 耗时（ms，tool_result 回填） */
+  elapsedMs?: number;
+}
+
+export interface AgentTodoItem {
+  content: string;
+  status: 'pending' | 'in_progress' | 'completed';
 }
 
 export interface AgentArtifact {
@@ -56,6 +92,8 @@ export interface ChatMsg {
   planExecuted?: boolean;
   artifacts?: AgentArtifact[];
   errors?: AgentErrorCard[];
+  /** 待办清单（todo_write 事件实时更新） */
+  todo?: AgentTodoItem[];
 }
 
 export interface AgentSession {
@@ -89,6 +127,8 @@ export interface ApprovalInfo {
   tool_name: string;
   args: Record<string, any>;
   decided?: boolean;
+  /** 审批请求到达时间戳（ms），用于 120s 自动拒绝倒计时 */
+  createdAt?: number;
 }
 
 export type WsStatus = 'connecting' | 'open' | 'closed';

@@ -23,6 +23,7 @@ import { useCanvasStore } from '../../stores/useCanvasStore';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { apiService } from '../../services/api';
 import { useEscapeClose } from '../../hooks/useEscapeClose';
+import { AutoRatioMedia } from '../ui/AutoRatioMedia';
 
 const API_ORIGIN = typeof window !== 'undefined' && window.location.port === '5173' ? 'http://127.0.0.1:8000' : '';
 // 相对产物 URL（/storage、/assets）在 dev 下必须回源，否则缩略图 404；存值保持原样，仅展示拼接
@@ -348,7 +349,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
                 <div
                   className={
                     viewMode === 'grid'
-                      ? 'grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3'
+                      ? 'grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 items-start'
                       : 'flex flex-col gap-2'
                   }
                 >
@@ -364,12 +365,15 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
                             : 'border-white/10 hover:border-white/30 bg-white/[0.02]'
                         }`}
                       >
-                        <div className="aspect-[9/16] w-full bg-surface-secondary relative overflow-hidden flex items-center justify-center">
-                          {asset.type === 'video' ? (
-                            <video src={resolveUrl(asset.url)} className="w-full h-full object-cover" muted />
-                          ) : (
-                            <img src={resolveUrl(asset.url)} alt={asset.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-                          )}
+                        <AutoRatioMedia
+                          src={resolveUrl(asset.url)}
+                          kind={asset.type === 'video' ? 'video' : 'image'}
+                          alt={asset.name}
+                          fallbackAspect="9/16"
+                          className="w-full bg-surface-secondary"
+                          mediaClassName="group-hover:scale-105 transition-transform duration-300"
+                          videoProps={{ muted: true }}
+                        >
                           <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-surface/85 backdrop-blur-md text-[10px] font-mono text-white/80 border border-white/10">
                             {asset.sourceNodeType}
                           </div>
@@ -378,7 +382,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
                               <Check className="w-3.5 h-3.5" />
                             </div>
                           )}
-                        </div>
+                        </AutoRatioMedia>
                         <div className="p-2 bg-surface-secondary border-t border-white/5">
                           <div className="text-xs font-medium text-white/90 truncate">{asset.name}</div>
                           <div className="text-[10px] text-white/40 truncate">{asset.url.split('/').pop()}</div>
@@ -401,9 +405,10 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
                   <p className="text-xs text-white/30">可在角色工作台创建角色并上传三视图与设定立绘</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 items-start">
                   {filteredCharacters.map((char: any) => {
-                    const avatar = char.avatar_url || char.avatar || char.three_views?.front || (char.reference_images && char.reference_images[0]) || '';
+                    const _ctv = (char.three_views || {}) as Record<string, string>;
+                    const avatar = char.avatar_url || char.avatar || _ctv.front || _ctv.three_quarter || _ctv.side || (char.reference_images && char.reference_images[0]) || '';
                     const isSelected = selectedUrls.includes(avatar);
                     return (
                       <div
@@ -415,18 +420,25 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
                             : 'border-white/10 hover:border-white/30 bg-white/[0.02]'
                         }`}
                       >
-                        <div className="aspect-square w-full rounded-xl bg-surface-secondary overflow-hidden relative border border-white/10 flex items-center justify-center">
-                          {avatar ? (
-                            <img src={resolveUrl(avatar)} alt={char.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                          ) : (
+                        {avatar ? (
+                          <AutoRatioMedia
+                            src={resolveUrl(avatar)}
+                            alt={char.name}
+                            fallbackAspect="1/1"
+                            className="w-full rounded-xl bg-surface-secondary border border-white/10"
+                            mediaClassName="group-hover:scale-105 transition-transform"
+                          >
+                            {isSelected && (
+                              <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-violet-600 flex items-center justify-center text-white shadow-lg">
+                                <Check className="w-3.5 h-3.5" />
+                              </div>
+                            )}
+                          </AutoRatioMedia>
+                        ) : (
+                          <div className="aspect-square w-full rounded-xl bg-surface-secondary overflow-hidden relative border border-white/10 flex items-center justify-center">
                             <UserCheck className="w-10 h-10 text-white/20" />
-                          )}
-                          {isSelected && (
-                            <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-violet-600 flex items-center justify-center text-white shadow-lg">
-                              <Check className="w-3.5 h-3.5" />
-                            </div>
-                          )}
-                        </div>
+                          </div>
+                        )}
                         <div>
                           <div className="flex items-center justify-between">
                             <span className="text-xs font-bold text-white/95 truncate">{char.name}</span>
@@ -463,7 +475,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
                   <p className="text-xs text-white/30">可在素材库面板中添加场景概念图与道具参考</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 items-start">
                   {filteredProjectAssets.map((asset: any) => {
                     const u = asset.file_url || asset.url || asset.thumb_url || '';
                     const isSelected = selectedUrls.includes(u);
@@ -477,22 +489,45 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
                             : 'border-white/10 hover:border-white/30 bg-white/[0.02]'
                         }`}
                       >
-                        <div className="aspect-[4/3] w-full bg-surface-secondary relative overflow-hidden flex items-center justify-center">
-                          {asset.category === 'video' || asset.type === 'video' ? (
-                            u ? (<video src={resolveUrl(u)} className="w-full h-full object-cover" muted />) : (<Video className="w-8 h-8 text-orange-400" />)
-                          ) : asset.category === 'audio' || asset.type === 'audio' ? (
-                            <Music className="w-8 h-8 text-pink-400" />
-                          ) : u ? (
-                            <img src={resolveUrl(u)} alt={asset.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                        {asset.category === 'video' || asset.type === 'video' ? (
+                          u ? (
+                            <AutoRatioMedia
+                              src={resolveUrl(u)}
+                              kind="video"
+                              alt={asset.name}
+                              fallbackAspect="16/9"
+                              className="w-full bg-surface-secondary"
+                              mediaClassName="group-hover:scale-105 transition-transform"
+                              videoProps={{ muted: true }}
+                            >
+                              {isSelected && (
+                                <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-violet-600 flex items-center justify-center text-white shadow-lg">
+                                  <Check className="w-3.5 h-3.5" />
+                                </div>
+                              )}
+                            </AutoRatioMedia>
                           ) : (
-                            <ImageIcon className="w-8 h-8 text-white/30" />
-                          )}
-                          {isSelected && (
-                            <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-violet-600 flex items-center justify-center text-white shadow-lg">
-                              <Check className="w-3.5 h-3.5" />
-                            </div>
-                          )}
-                        </div>
+                            <div className="aspect-[4/3] w-full bg-surface-secondary relative overflow-hidden flex items-center justify-center"><Video className="w-8 h-8 text-orange-400" /></div>
+                          )
+                        ) : asset.category === 'audio' || asset.type === 'audio' ? (
+                          <div className="aspect-[4/3] w-full bg-surface-secondary relative overflow-hidden flex items-center justify-center"><Music className="w-8 h-8 text-pink-400" /></div>
+                        ) : u ? (
+                          <AutoRatioMedia
+                            src={resolveUrl(u)}
+                            alt={asset.name}
+                            fallbackAspect="4/3"
+                            className="w-full bg-surface-secondary"
+                            mediaClassName="group-hover:scale-105 transition-transform"
+                          >
+                            {isSelected && (
+                              <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-violet-600 flex items-center justify-center text-white shadow-lg">
+                                <Check className="w-3.5 h-3.5" />
+                              </div>
+                            )}
+                          </AutoRatioMedia>
+                        ) : (
+                          <div className="aspect-[4/3] w-full bg-surface-secondary relative overflow-hidden flex items-center justify-center"><ImageIcon className="w-8 h-8 text-white/30" /></div>
+                        )}
                         <div className="p-2 bg-surface-secondary border-t border-white/5">
                           <div className="text-xs font-medium text-white/90 truncate">{asset.name || '未命名资产'}</div>
                           <div className="text-[10px] text-white/40 truncate">{asset.category || asset.type || 'asset'}</div>

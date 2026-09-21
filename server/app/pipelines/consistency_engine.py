@@ -23,8 +23,6 @@ class ConsistencyEngine:
         base_desc = character.visual_prompt or f"1person, {character.name}, {character.description}"
         return {
             "front": f"{base_desc}, character sheet, full body front view, standing pose, neutral expression, white clean background, high detail turnaround, {style_preset}",
-            "side": f"{base_desc}, character sheet, full body profile side view, standing pose, neutral expression, white clean background, {style_preset}",
-            "three_quarter": f"{base_desc}, character sheet, 3/4 dynamic dynamic angle view, heroic standing posture, cinematic key lighting, {style_preset}"
         }
 
     def inject_character_consistency(

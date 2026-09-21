@@ -66,7 +66,12 @@ class ImageProviderRegistry:
             p = self._providers[oid]
             if p.is_configured():
                 return p
-        # 3) 兜底：请求的源（会给出明确错误）
+        # 3) 默认源未配置且没有任何云端源可用：回退本地占位源（ComfyUI），
+        #    避免把默认改成 openai_compat 后"没配 Key 就整个生图不可用"
+        ph = self._providers.get("comfyui")
+        if ph is not None and prov is not None and not prov.is_configured():
+            return ph
+        # 4) 兜底：请求的源（会给出明确错误）
         if prov:
             return prov
         raise RuntimeError(f"未找到图片Provider: {pid}，已注册: {list(self._providers.keys())}")

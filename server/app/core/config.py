@@ -8,6 +8,7 @@
 4. 支持内存热重载与多 Provider 动态即时生效
 """
 import os
+import re
 import sys
 import json
 from pathlib import Path
@@ -47,6 +48,7 @@ MANAGED_KEYS = [
     "DASHSCOPE_IMAGE_MODEL",
     "OPENAI_IMAGE_MODEL",
     "OPENAI_IMAGE_BASE_URL",
+    "OPENAI_IMAGE_API_KEY",
     # Voice & TTS
     "TTS_PROVIDER",
     "COSYVOICE_URL",
@@ -156,26 +158,27 @@ class Settings(BaseModel):
     # MiniMax API Configuration
     MINIMAX_API_KEY: str = os.getenv("MINIMAX_API_KEY", "")
     MINIMAX_GROUP_ID: str = os.getenv("MINIMAX_GROUP_ID", "")
-    MINIMAX_BASE_URL: str = os.getenv("MINIMAX_BASE_URL", "https://api.minimax.chat/v1")
+    MINIMAX_BASE_URL: str = os.getenv("MINIMAX_BASE_URL", "https://api.minimaxi.com/v1")
 
     # Model names
-    LLM_MODEL: str = os.getenv("LLM_MODEL", "abab6.5s-chat")
-    TTS_MODEL: str = os.getenv("TTS_MODEL", "speech-01-turbo")
-    VIDEO_MODEL: str = os.getenv("VIDEO_MODEL", "video-01")
+    LLM_MODEL: str = os.getenv("LLM_MODEL", "MiniMax-M2.5")
+    TTS_MODEL: str = os.getenv("TTS_MODEL", "speech-2.8-turbo")
+    VIDEO_MODEL: str = os.getenv("VIDEO_MODEL", "MiniMax-Hailuo-02")
 
     # LLM Provider & OpenAI-compatible / Responses API (DeepSeek / Qwen / SiliconFlow / Kimi / OpenAI)
     LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "openai_compatible")
     LLM_API_TYPE: str = os.getenv("LLM_API_TYPE", "chat_completions")
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     OPENAI_BASE_URL: str = os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com/v1")
-    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "deepseek-chat")
+    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "deepseek-v4-flash")
     OPENAI_CUSTOM_HEADERS: str = os.getenv("OPENAI_CUSTOM_HEADERS", "")
     RESPONSES_API_URL: str = os.getenv("RESPONSES_API_URL", "https://api.openai.com/v1/responses")
     RESPONSES_API_KEY: str = os.getenv("RESPONSES_API_KEY", "")
-    RESPONSES_MODEL: str = os.getenv("RESPONSES_MODEL", "gpt-4o")
+    RESPONSES_MODEL: str = os.getenv("RESPONSES_MODEL", "gpt-5.2")
 
     # Image Generation Providers
-    IMAGE_PROVIDER: str = os.getenv("IMAGE_PROVIDER", "comfyui")
+    # 默认走 OpenAI 兼容生图（gpt-image 系列）；未配置时注册表会自动回退到已配置的其它源（如 ComfyUI）
+    IMAGE_PROVIDER: str = os.getenv("IMAGE_PROVIDER", "openai_compat")
     COMFYUI_SERVER_URL: str = os.getenv("COMFYUI_SERVER_URL", "http://127.0.0.1:8188")
     COMFYUI_CHECKPOINT: str = os.getenv("COMFYUI_CHECKPOINT", "")
     COMFYUI_TIMEOUT_SECONDS: int = int(os.getenv("COMFYUI_TIMEOUT_SECONDS", "1200"))
@@ -184,9 +187,11 @@ class Settings(BaseModel):
     SILICONFLOW_API_KEY: str = os.getenv("SILICONFLOW_API_KEY", "")
     SILICONFLOW_IMAGE_MODEL: str = os.getenv("SILICONFLOW_IMAGE_MODEL", "black-forest-labs/FLUX.1-schnell")
     DASHSCOPE_API_KEY: str = os.getenv("DASHSCOPE_API_KEY", "")
-    DASHSCOPE_IMAGE_MODEL: str = os.getenv("DASHSCOPE_IMAGE_MODEL", "wanx2.1-t2i-turbo")
-    OPENAI_IMAGE_MODEL: str = os.getenv("OPENAI_IMAGE_MODEL", "dall-e-3")
+    DASHSCOPE_IMAGE_MODEL: str = os.getenv("DASHSCOPE_IMAGE_MODEL", "wan2.6-t2i")
+    OPENAI_IMAGE_MODEL: str = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2.5-flare")
     OPENAI_IMAGE_BASE_URL: str = os.getenv("OPENAI_IMAGE_BASE_URL", "")
+    # 生图专用 Key：留空则回退到 OPENAI_API_KEY（沿用文本网关）
+    OPENAI_IMAGE_API_KEY: str = os.getenv("OPENAI_IMAGE_API_KEY", "")
 
     # Voice & TTS Providers
     TTS_PROVIDER: str = os.getenv("TTS_PROVIDER", "minimax")
@@ -204,7 +209,7 @@ class Settings(BaseModel):
     VIDU_API_KEY: str = os.getenv("VIDU_API_KEY", "")
     # MiniMax H3 (V2 多模态视频, 与 MINIMAX_API_KEY 同平台, 模型固定 MiniMax-H3)
     MINIMAX_H3_MODEL: str = os.getenv("MINIMAX_H3_MODEL", "MiniMax-H3")
-    MINIMAX_H3_BASE_URL: str = os.getenv("MINIMAX_H3_BASE_URL", "https://api.minimax.chat")
+    MINIMAX_H3_BASE_URL: str = os.getenv("MINIMAX_H3_BASE_URL", "https://api.minimaxi.com")
     # Seedance (字节火山引擎 Ark, doubao-seedance 系列)
     SEEDANCE_API_KEY: str = os.getenv("SEEDANCE_API_KEY", "")
     SEEDANCE_BASE_URL: str = os.getenv("SEEDANCE_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3")
@@ -219,6 +224,11 @@ class Settings(BaseModel):
     # Trusted Mode（可信模式总闸）：允许自定义生成源 trusted=True 跳出沙箱 + Agent fs/shell 工具生效
     # 本地桌面端默认关闭，需显式 STUDIO_TRUSTED_MODE=1 开启。开启后仍需逐源勾选 trusted。
     STUDIO_TRUSTED_MODE: str = os.getenv("STUDIO_TRUSTED_MODE", "0")
+
+    # 跨源白名单：默认只认本机来源。打包态前端由本服务同源 serve（不受影响）；
+    # 开发态 vite 在 localhost:5173 直连本服务属真跨域，也在本机来源内。
+    # 需要放行别的机器（如局域网手机）时追加：STUDIO_CORS_EXTRA_ORIGINS=http://192.168.1.10:5173
+    STUDIO_CORS_EXTRA_ORIGINS: str = os.getenv("STUDIO_CORS_EXTRA_ORIGINS", "")
 
     # Local storage paths
     # 开发态：仓库根 storage；打包态：优先复用仓库根 storage（避免构建清空用户配置）
@@ -263,6 +273,27 @@ def is_trusted_mode_enabled() -> bool:
     except Exception:
         pass
     return False
+
+
+_LOCAL_ORIGIN_RE = re.compile(r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$", re.IGNORECASE)
+
+
+def cors_extra_origins() -> List[str]:
+    """STUDIO_CORS_EXTRA_ORIGINS 解析出的显式白名单（去尾斜杠）。"""
+    raw = str(getattr(settings, "STUDIO_CORS_EXTRA_ORIGINS", "") or "")
+    return [o.strip().rstrip("/") for o in raw.split(",") if o.strip()]
+
+
+def is_local_or_allowed_origin(origin: str) -> bool:
+    """跨源判断唯一口径：CORS 白名单与执行口 Origin 校验共用，避免两处规则漂移。
+
+    空 Origin（curl、原生壳、部分同源请求）放行；`null`（file:// 与沙箱页）拒绝。
+    """
+    o = (origin or "").strip().rstrip("/")
+    if not o:
+        return True
+    return bool(_LOCAL_ORIGIN_RE.match(o)) or o in cors_extra_origins()
+
 
 ENV_FILE = get_primary_env_file()
 JSON_CONFIG_FILE = os.path.join(settings.STORAGE_DIR, "config_store.json")

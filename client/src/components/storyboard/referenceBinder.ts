@@ -96,9 +96,22 @@ const isFirstFrameSlot = (s: BindSlotLike) =>
 const isLastFrameSlot = (s: BindSlotLike) =>
   s.role === 'last_frame' || /last.?frame|^last$|end.?frame/i.test(`${s.key} ${s.originalKey || ''}`);
 
-/** 角色主图：三视图优先，avatar 兜底（同一角色只出一张） */
+/** 角色主图：front > avatar > three_quarter > side（同一角色只出一张；旧数据可能只有侧/四分之三视图） */
 export function characterMainImage(c: any): string {
-  return c?.three_views?.front || c?.three_views?.three_quarter || c?.three_views?.side || c?.avatar_url || '';
+  const tv = c?.three_views || {};
+  return tv.front || c?.avatar_url || tv.three_quarter || tv.side || '';
+}
+
+/** 已绑定但没有任何可用参考图的角色名（一键绑定预览需要显式提示，避免"弹框里啥都没有"） */
+export function missingBoundCharacters(shot: any, project: any): string[] {
+  const chars: any[] = project?.characters || [];
+  const out: string[] = [];
+  for (const cid of (shot?.character_ids || [])) {
+    const c = chars.find((x: any) => x.id === cid);
+    if (!c) continue;
+    if (!characterMainImage(c)) out.push(c.name || cid);
+  }
+  return out;
 }
 
 function assetUrl(a: any): string {

@@ -103,6 +103,36 @@ class TestSession(TempStore):
         self.assertIn("a.png", msgs[3]["content"])
         self.assertEqual(msgs[4]["content"], "已完成")
 
+    def test_derive_prefers_pipeline_model_content(self):
+        """管线压好的内容进历史，result 原文留在日志供前端渲染与复盘（两者不再混用一份）。"""
+        sid = self.unique("sess_mc")
+        s = Session.open(sid, store=self.store)
+        s.append(E.USER_MESSAGE, {"text": "读源码"})
+        s.append(E.ASSISTANT_MESSAGE, {"text": "", "tool_calls": [
+            {"id": "c1", "name": "get_provider_code", "arguments": "{}"}]})
+        s.append(E.TOOL_RESULT, {
+            "call_id": "c1", "name": "get_provider_code", "status": "success",
+            "result": {"code": "X" * 5000, "code_next_offset": 200},
+            "model_content": '{"code":"窗口正文","code_next_offset":200}',
+        })
+        msgs = s.derive_messages()
+        self.assertEqual(msgs[2]["content"], '{"code":"窗口正文","code_next_offset":200}')
+        # 原文未被裁剪：日志里仍是完整 result
+        raw = [e for e in s.events if e["type"] == E.TOOL_RESULT][0]["data"]["result"]
+        self.assertEqual(len(raw["code"]), 5000)
+
+    def test_failed_tool_never_shows_model_content(self):
+        sid = self.unique("sess_mc_err")
+        s = Session.open(sid, store=self.store)
+        s.append(E.ASSISTANT_MESSAGE, {"text": "", "tool_calls": [
+            {"id": "c1", "name": "generate_video", "arguments": "{}"}]})
+        s.append(E.TOOL_RESULT, {"call_id": "c1", "name": "generate_video", "status": "error",
+                                 "result": None, "model_content": '{"ok":true}',
+                                 "error": "配额不足"})
+        content = s.derive_messages()[-1]["content"]
+        self.assertNotIn("ok", content)
+        self.assertIn("配额不足", content)
+
     def test_attempt_not_in_history(self):
         sid = self.unique("sess_attempt")
         s = Session.open(sid, store=self.store)
@@ -439,6 +469,41 @@ class TestCompaction(TempStore):
         self.assertIn("已剪裁", msgs[2]["content"])
         self.assertEqual(msgs[1]["tool_calls"][0]["id"], "c1")
         self.assertEqual(msgs[2]["tool_call_id"], "c1")
+
+    def test_prune_measures_model_content_not_raw_result(self):
+        """剪裁是兜底不是主刀：量的是进模型的那份文本。
+
+        否则 get_provider_code 的 6000 字分页窗口会被 2000 字通用剪盲切，
+        模型永远读不全源码（真实日志里 13/13 次调用全被剪过）。
+        """
+        from app.agent.runtime.compaction import maybe_prune_tool_results
+        sid = self.unique("prune_window")
+        s = Session.open(sid, store=self.store)
+        s.append(E.USER_MESSAGE, {"text": "读第 2 页"})
+        s.append(E.ASSISTANT_MESSAGE, {"text": "", "tool_calls": [
+            {"id": "c1", "name": "get_provider_code", "arguments": "{}"}]})
+        s.append(E.TOOL_RESULT, {
+            "call_id": "c1", "name": "get_provider_code", "status": "success",
+            "result": {"code": "Y" * 40000},                      # 原文很大
+            "model_content": '{"code":"' + "Z" * 6000 + '"}',      # 但已按页压好
+        })
+        self.assertEqual(maybe_prune_tool_results(s), 0)           # 兜底不该再动它
+        content = s.derive_messages()[-1]["content"]
+        self.assertEqual(content.count("Z"), 6000)
+        self.assertNotIn("已剪裁", content)
+
+    def test_prune_still_catches_unsummarized_giant_result(self):
+        from app.agent.runtime.compaction import maybe_prune_tool_results
+        sid = self.unique("prune_backstop")
+        s = Session.open(sid, store=self.store)
+        s.append(E.ASSISTANT_MESSAGE, {"text": "", "tool_calls": [
+            {"id": "c1", "name": "canvas_query", "arguments": "{}"}]})
+        s.append(E.TOOL_RESULT, {"call_id": "c1", "name": "canvas_query", "status": "success",
+                                 "result": {"blob": "W" * 60000}})
+        self.assertEqual(maybe_prune_tool_results(s), 1)
+        msgs = s.derive_messages()
+        self.assertIn("已剪裁", msgs[-1]["content"])
+        self.assertLess(len(msgs[-1]["content"]), 12000)
 
     def test_select_shadow_range_avoids_tool_start(self):
         from app.agent.runtime.compaction import select_shadow_range
@@ -897,6 +962,86 @@ class TestTransportIntegration(TempStore):
         self.assertIn("agent_response", body)
         self.assertIn("SSE 响应", body)
         self.assertIn("[DONE]", body)
+
+
+class TestApprovalAudit(TempStore):
+    """审批必须留痕并给出精确裁决：否则"用户拒绝"和"没人答/无通道"事后无法区分。"""
+
+    def _svc(self, interactive: bool, session=None):
+        from app.agent.tools.pipeline import ApprovalService
+
+        async def emit(ev):
+            pass
+        return ApprovalService(self.unique("appr"), emit, interactive=interactive, session=session)
+
+    def test_non_interactive_verdict_and_audit(self):
+        sid = self.unique("audit_ni")
+        s = Session.open(sid, store=self.store)
+        svc = self._svc(interactive=False, session=s)
+        verdict = run(svc.request("generate_video", {"prompt": "x"}))
+        self.assertEqual(verdict, "non_interactive")
+        types = [e["type"] for e in s.events]
+        self.assertEqual(types, [E.APPROVAL_ASKED, E.APPROVAL_DECIDED])
+        decided = s.events[-1]["data"]
+        self.assertFalse(decided["approved"])
+        self.assertEqual(decided["reason"], "non_interactive")
+
+    def test_rejected_by_human_verdict(self):
+        sid = self.unique("audit_rej")
+        s = Session.open(sid, store=self.store)
+        svc = self._svc(interactive=True, session=s)
+
+        async def scenario():
+            task = asyncio.create_task(svc.request("generate_video", {"prompt": "x"}))
+            for _ in range(100):
+                pending = list(svc._pending)
+                if pending:
+                    self.assertTrue(svc.resolve(pending[0], False))
+                    break
+                await asyncio.sleep(0.01)
+            return await task
+
+        self.assertEqual(run(scenario()), "rejected")
+        self.assertEqual(s.events[-1]["data"]["reason"], "rejected")
+
+    def test_pipeline_denial_carries_verdict_meta(self):
+        from app.agent.tools.pipeline import ToolPipeline
+
+        async def emit(ev):
+            pass
+        sid = self.unique("audit_pipe")
+        s = Session.open(sid, store=self.store)
+        p = ToolPipeline(sid, emit, interactive=False, session=s)
+        out = run(p.execute("c1", "generate_video", {"prompt": "x"}, run_mode="approve"))
+        self.assertEqual(out.status, "denied")
+        self.assertEqual(out.meta.get("approval"), "non_interactive")
+        self.assertIn("无交互", out.error)
+        # 记账失败不得阻断执行：审批事件确实落了账
+        self.assertIn(E.APPROVAL_DECIDED, [e["type"] for e in s.events])
+
+    def test_audit_write_failure_does_not_break_deny(self):
+        from app.agent.tools.pipeline import ApprovalService
+
+        class BrokenSession:
+            def append(self, *a, **k):
+                raise RuntimeError("disk gone")
+
+        async def emit(ev):
+            pass
+        svc = ApprovalService("s", emit, interactive=False, session=BrokenSession())
+        self.assertEqual(run(svc.request("generate_video", {})), "non_interactive")
+
+
+class TestUpstreamBlame(unittest.TestCase):
+    """网关转发的上游 400 该重试，不能当请求错误打死整轮。"""
+
+    def test_upstream_shapes(self):
+        from app.agent.llm.adapter import _is_upstream_blame
+        self.assertTrue(_is_upstream_blame(
+            '{"error":{"type":"server_error","message":"Upstream request failed: [400]"}}'))
+        self.assertTrue(_is_upstream_blame("Internal Server Error"))
+        self.assertFalse(_is_upstream_blame('{"error":{"message":"missing model"}}'))
+        self.assertFalse(_is_upstream_blame(""))
 
 
 if __name__ == "__main__":

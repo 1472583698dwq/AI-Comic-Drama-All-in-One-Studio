@@ -12,8 +12,10 @@
   "enabled": true,
   "language": "python",
   "code": "import base64\nimport aiohttp\n\nasync def generate(ctx, api):\n    api_key = ctx.get(\"api_key\") or (api.get(\"get_api_key\") or (lambda: \"\"))()\n    if not api_key:\n        raise RuntimeError(\"MiniMax 音频源缺少 API Key：请在生成源配置的 API Key 里填写 MiniMax Key 后重试\")\n    headers = {\n        \"Authorization\": f\"Bearer {api_key}\",\n        \"Content-Type\": \"application/json\",\n    }\n    url = \"https://api.minimax.chat/v1/t2a_v2\"\n    body = {\n        \"model\": ctx.get(\"model\") or \"speech-01-turbo\",\n        \"text\": ctx.get(\"text\") or \"\",\n        \"voice_id\": ctx.get(\"voice_id\") or \"male-qn-qingse\",\n        \"speed\": float(ctx.get(\"speed\") or 1.0),\n        \"vol\": float(ctx.get(\"vol\") or 1.0),\n        \"pitch\": int(ctx.get(\"pitch\") or 0),\n        \"emotion\": ctx.get(\"emotion\") or \"neutral\",\n    }\n    if not body[\"text\"]:\n        raise ValueError(\"缺少合成文本 text\")\n    async with aiohttp.ClientSession() as session:\n        async with session.post(url, json=body, headers=headers) as resp:\n            if resp.status != 200:\n                raise RuntimeError(f\"MiniMax TTS HTTP {resp.status}: {(await resp.text())[:300]}\")\n            data = await resp.json()\n    base = data.get(\"base_resp\", {})\n    if base.get(\"status_code\", 0) != 0:\n        raise RuntimeError(f\"MiniMax TTS 失败: {base}\")\n    audio_hex = (data.get(\"data\") or {}).get(\"audio\") or data.get(\"audio\") or \"\"\n    if not audio_hex:\n        raise RuntimeError(f\"MiniMax TTS 未返回音频数据: {str(data)[:200]}\")\n    # t2a_v2 返回 hex 编码音频 → 转 base64 data URI（框架 persist_media 会落盘）\n    audio_bytes = bytes.fromhex(audio_hex)\n    return {\"audio_url\": \"data:audio/mp3;base64,\" + base64.b64encode(audio_bytes).decode()}\n# PARAMS_SCHEMA: {\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\",\"title\":\"合成文本\",\"description\":\"配音台词/旁白（必填）\"},\"voice_id\":{\"type\":\"string\",\"title\":\"音色ID\",\"default\":\"male-qn-qingse\",\"description\":\"MiniMax 音色，如 male-qn-qingse / female-shaonv / male-badao\"},\"emotion\":{\"type\":\"string\",\"title\":\"情绪\",\"enum\":[\"neutral\",\"happy\",\"sad\",\"angry\",\"fear\",\"surprise\"],\"default\":\"neutral\",\"description\":\"情感标签\"},\"speed\":{\"type\":\"number\",\"title\":\"语速\",\"default\":1.0,\"minimum\":0.5,\"maximum\":2.0,\"description\":\"语速 0.5-2.0\"},\"vol\":{\"type\":\"number\",\"title\":\"音量\",\"default\":1.0,\"minimum\":0,\"maximum\":10,\"description\":\"音量 0-10\"},\"pitch\":{\"type\":\"integer\",\"title\":\"音调\",\"default\":0,\"minimum\":-12,\"maximum\":12,\"description\":\"音调 -12~+12\"},\"model\":{\"type\":\"string\",\"title\":\"模型\",\"default\":\"speech-01-turbo\",\"description\":\"MiniMax 语音模型\"}},\"required\":[\"text\"]}\n",
+  "code_file": null,
   "code_entry": "generate",
   "code_timeout": 120,
+  "trusted": false,
   "transport": {
     "method": "POST",
     "url": "",
@@ -38,7 +40,7 @@
     "expect_status": 200,
     "test_payload": null
   },
-  "legacy_json_mode": false,
+  "headers": {},
   "models": [],
   "default_model": null,
   "params_schema": {
@@ -53,7 +55,11 @@
         "type": "string",
         "title": "音色ID",
         "default": "male-qn-qingse",
-        "description": "MiniMax 音色，如 male-qn-qingse / female-shaonv / male-badao"
+        "description": "MiniMax 音色，如 male-qn-qingse / female-shaonv / male-badao",
+        "x-category": "audio",
+        "x-visibility": "basic",
+        "x-agent": "auto",
+        "x-priority": 5
       },
       "emotion": {
         "type": "string",
@@ -67,7 +73,11 @@
           "surprise"
         ],
         "default": "neutral",
-        "description": "情感标签"
+        "description": "情感标签",
+        "x-category": "audio",
+        "x-visibility": "basic",
+        "x-agent": "auto",
+        "x-priority": 6
       },
       "speed": {
         "type": "number",
@@ -75,7 +85,11 @@
         "default": 1.0,
         "minimum": 0.5,
         "maximum": 2.0,
-        "description": "语速 0.5-2.0"
+        "description": "语速 0.5-2.0",
+        "x-category": "audio",
+        "x-visibility": "basic",
+        "x-agent": "auto",
+        "x-priority": 10
       },
       "vol": {
         "type": "number",
@@ -91,7 +105,11 @@
         "default": 0,
         "minimum": -12,
         "maximum": 12,
-        "description": "音调 -12~+12"
+        "description": "音调 -12~+12",
+        "x-category": "audio",
+        "x-visibility": "advanced",
+        "x-agent": "suggest",
+        "x-priority": 20
       },
       "model": {
         "type": "string",
@@ -134,9 +152,11 @@
   "workflow_id": null,
   "workflow_hash": null,
   "workflow_exposed": null,
+  "schema_version": null,
+  "capabilities": [],
   "doc_url": null,
   "doc_text": "",
   "created_at": "2026-09-02T09:36:55.173084",
-  "updated_at": "2026-09-02T09:36:55.173430",
+  "updated_at": "2026-09-18T07:57:30.744731",
   "raw_api_doc": ""
 }

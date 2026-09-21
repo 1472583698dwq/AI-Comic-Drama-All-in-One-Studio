@@ -22,7 +22,8 @@ export const useSkillStore = create<SkillState>((set, get) => ({
   lastResult: null,
 
   fetchSkills: async () => {
-    const list = await apiService.listSkills();
+    // 技能工作室要能看见并改回被关闭的技能，所以取全量；润色下拉用 apiService.listSkills() 只要可执行的
+    const list = await apiService.listSkills(true);
     set({ skills: list, selectedSkill: list[0] || null });
   },
 

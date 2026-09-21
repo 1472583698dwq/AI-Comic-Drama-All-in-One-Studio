@@ -141,10 +141,11 @@ def _run_trusted_shell(command: str, cwd: str = "", timeout: int = 1200) -> dict
     return {"returncode": proc.returncode, "stdout": out, "stderr": err, "cwd": workdir, "truncated": bool(proc.stdout and len(proc.stdout) > 12000)}
 
 
-def _fs_read_action(path: str, offset: int = 0, limit: int = 500, encoding: str = "utf-8") -> dict:
+def _fs_read_action(path: str, offset: int = 0, limit: int = 500, encoding: str = "utf-8", numbered: bool = False) -> dict:
     """只读文件查看（无需可信模式）：围栏内 + 行分页（offset/limit），用于通读完整源码/JSON。
 
     - offset：起始行号（0 基）；limit：返回行数（默认 500，上限 2000）
+    - numbered：为每行加 1 基行号前缀（如 '  120  content'），便于模型定位后编辑
     - 明文密钥类文件（.env / config_store.json）拒绝直读，防止泄进模型上下文
     - dist/build 构建产物允许只读查看（写操作仍由 fs_file 拦截）
     """
@@ -175,12 +176,17 @@ def _fs_read_action(path: str, offset: int = 0, limit: int = 500, encoding: str 
             total = i + 1
             if off <= i < off + lim:
                 lines.append(line)
-    content = "".join(lines)
+    _numbered = bool(numbered)
+    if _numbered:
+        content = "".join(f"{off + i + 1:>5}  {ln}" for i, ln in enumerate(lines))
+    else:
+        content = "".join(lines)
     end = off + len(lines)
     return {
         "path": ap.replace("\\", "/"),
         "offset": off,
         "limit": lim,
+        "numbered": _numbered,
         "returned_lines": len(lines),
         "total_lines": total,
         "has_more": end < total,
@@ -426,11 +432,11 @@ class MCPServerRegistry:
             return {"providers": reg.list_providers()}
 
         @mcp_app.tool
-        async def generate_video(prompt: str, mode: str = "i2v", first_frame_url: str = "", reference_images: list = None, duration: int = 5, provider: str = "") -> dict:
+        async def generate_video(prompt: str, mode: str = "i2v", first_frame_url: str = "", reference_images: list = None, reference_videos: list = None, duration: int = 5, provider: str = "") -> dict:
             """通用视频生成（图生视频/参考生视频/文生视频）"""
             from app.providers.video.base import VideoGenerateRequest
             reg = _lazy_video_registry()
-            req = VideoGenerateRequest(prompt=prompt, mode=mode, first_frame_url=first_frame_url or None, reference_images=reference_images, duration=duration, provider=provider or None)
+            req = VideoGenerateRequest(prompt=prompt, mode=mode, first_frame_url=first_frame_url or None, reference_images=reference_images, reference_videos=reference_videos, duration=duration, provider=provider or None)
             res = await reg.generate(req, provider_id=provider or None)
             return {"video_url": res.video_url, "duration": res.duration, "provider": res.provider, "engine": res.engine, "task_id": res.task_id}
 
@@ -508,16 +514,22 @@ class MCPServerRegistry:
             raise RuntimeError(res.error)
 
         @mcp_app.tool
-        async def get_provider_code(provider_id: str, offset: int = 0, limit: int = 4000) -> dict:
-            res = await mcp_registry.execute_tool("get_provider_code", {"provider_id": provider_id, "offset": offset, "limit": limit})
+        async def get_provider_code(provider_id: str, offset: int = 0, limit: int = 4000, line_offset: int = -1, line_limit: int = 0) -> dict:
+            """[查询] 生成源代码：字符窗口（offset/limit）或逐行精读（line_offset/line_limit，带行号）"""
+            payload = {"provider_id": provider_id, "offset": offset, "limit": limit}
+            if line_offset is not None and line_offset >= 0:
+                payload["line_offset"] = line_offset
+            if line_limit is not None and line_limit > 0:
+                payload["line_limit"] = line_limit
+            res = await mcp_registry.execute_tool("get_provider_code", payload)
             if res.status == "success":
                 return res.result
             raise RuntimeError(res.error)
 
         @mcp_app.tool
-        async def fs_read(path: str, offset: int = 0, limit: int = 500, encoding: str = "utf-8") -> dict:
-            """[文件查看-只读] 围栏内文件行分页读取（无需可信模式）"""
-            res = await mcp_registry.execute_tool("fs_read", {"path": path, "offset": offset, "limit": limit, "encoding": encoding})
+        async def fs_read(path: str, offset: int = 0, limit: int = 500, encoding: str = "utf-8", numbered: bool = False) -> dict:
+            """[文件查看-只读] 围栏内文件行分页读取（无需可信模式），numbered=True 时加行号"""
+            res = await mcp_registry.execute_tool("fs_read", {"path": path, "offset": offset, "limit": limit, "encoding": encoding, "numbered": numbered})
             if res.status == "success":
                 return res.result
             raise RuntimeError(res.error)
@@ -703,7 +715,8 @@ class MCPServerRegistry:
             _video_ids = []
         self.register_tool(MCPToolDefinition(
             name="generate_video",
-            description="[通用视频] 动态选择视频Provider生成动态漫剧分镜视频。支持mode=i2v(图生视频)/r2v(参考生视频)/t2v(文生视频)。",
+            description="[通用视频] 动态选择视频Provider生成动态漫剧分镜视频。支持mode=i2v(图生视频)/r2v(参考生视频)/t2v(文生视频)。"
+                        "若当前镜头有导演台白模动态预演(previz_video_url)，不填 reference_videos 时会自动作为参考视频喂给有声明的源。",
             category="ai_generation",
             icon="Film",
             author="Dynamic Video Registry",
@@ -715,6 +728,7 @@ class MCPServerRegistry:
                     "mode": {"type": "string", "enum": ["i2v", "r2v", "t2v"], "default": "i2v", "description": "i2v: 图生视频; r2v: 参考生视频; t2v: 文生视频"},
                     "first_frame_url": {"type": "string", "description": "首帧图像 URL (i2v 必选)"},
                     "reference_images": {"type": "array", "items": {"type": "string"}, "description": "参考图 URL 列表 (r2v 模式)"},
+                    "reference_videos": {"type": "array", "items": {"type": "string"}, "description": "参考视频 URL 列表（白模预演/运动参考；不填则自动使用当前镜头的 previz_video_url）"},
                     "duration": {"type": "integer", "default": 5, "description": "视频时长秒数"},
                     "provider": {"type": "string", "enum": _video_ids, "description": "指定视频源，不填则使用系统默认 VIDEO_PROVIDER"}
                 },
@@ -963,7 +977,7 @@ class MCPServerRegistry:
         ))
         self.register_tool(MCPToolDefinition(
             name="get_provider_code",
-            description="[查询] 获取单个 Provider 的完整代码与参数结构，支持按 id/name/q 精准或模糊选择。代码支持 offset/limit 分页通读（默认窗口 4000 字符），配合 code_total_len/code_next_offset 逐页读完整源码，不再只看 800 字预览。",
+            description="[查询] 获取单个 Provider 的完整代码与参数结构，支持按 id/name/q 精准或模糊选择。推荐逐行精读模式：传 line_offset/line_limit 按行号分页读码（自动编号如 '120  def generate...'，配合 code_total_lines/code_next_line_offset 通读全文）；不传行参数时按 offset/limit 字符窗口返回。不再只看 800 字预览。",
             category="utility",
             icon="FileCode",
             author="Provider Extension",
@@ -975,8 +989,10 @@ class MCPServerRegistry:
                     "name": {"type": "string", "description": "按名称精确或模糊匹配，如 'MiniMax H3 音视频' 或 'H3'"},
                     "q": {"type": "string", "description": "模糊搜索关键词（名称/ID/描述/类型），如 'h3' 或 'video'"},
                     "kind": {"type": "string", "enum": ["image", "video", "audio", "llm"], "description": "可选：限定类型，避免同名跨类型歧义"},
-                    "offset": {"type": "integer", "default": 0, "description": "代码字符偏移（从 0 开始），用于分页通读完整代码"},
-                    "limit": {"type": "integer", "default": 4000, "description": "本次返回的代码字符数 200-6000（默认 4000）"}
+                    "offset": {"type": "integer", "default": 0, "description": "代码字符偏移（从 0 开始），字符窗口模式专用"},
+                    "limit": {"type": "integer", "default": 4000, "description": "字符窗口模式的字符数 200-6000（默认 4000）"},
+                    "line_offset": {"type": "integer", "default": 0, "description": "【逐行精读】起始行号（0 基）。只要传了 line_offset/line_limit 即进入行模式，返回带行号的代码段"},
+                    "line_limit": {"type": "integer", "default": 200, "description": "【逐行精读】本次返回的行数 1-400（默认 200）"}
                 },
                 "required": []
             }
@@ -1099,6 +1115,7 @@ class MCPServerRegistry:
                     "offset": {"type": "integer", "default": 0, "description": "起始行号（0 基），用于分页"},
                     "limit": {"type": "integer", "default": 500, "description": "返回行数 1-2000（默认 500）"},
                     "encoding": {"type": "string", "default": "utf-8", "description": "文件编码"},
+                    "numbered": {"type": "boolean", "default": False, "description": "为每行加 1 基行号前缀（如 '  120  content'），读码定位后编辑时打开"},
                 },
                 "required": ["path"]
             }
@@ -1647,11 +1664,22 @@ class MCPServerRegistry:
                 from app.providers.video.base import VideoGenerateRequest
                 reg = _lazy_video_registry()
                 provider = arguments.get("provider")
+                # 白模动态预演自动作为视频参考：模型未显式传 reference_videos 时，
+                # 从当前镜头上下文取 previz_video_url 注入（有声明的源自行消费）。
+                ref_videos = list(arguments.get("reference_videos") or [])
+                if not ref_videos and isinstance(project_context, dict):
+                    _shot = project_context.get("active_shot")
+                    if isinstance(_shot, dict):
+                        _pv = str(_shot.get("previz_video_url") or "").strip()
+                        if _pv:
+                            ref_videos = [_pv]
+                            print(f"[MCP] generate_video: 自动注入白模动态预演作为视频参考 {_pv}")
                 req = VideoGenerateRequest(
                     prompt=arguments.get("prompt", ""),
                     mode=arguments.get("mode", "i2v"),
                     first_frame_url=arguments.get("first_frame_url"),
                     reference_images=arguments.get("reference_images"),
+                    reference_videos=ref_videos or None,
                     duration=int(arguments.get("duration", 5)),
                     provider=provider,
                 )
@@ -1995,6 +2023,27 @@ class MCPServerRegistry:
                 _c_lim = max(200, min(_c_lim, 6000))
                 _chunk = full_code[_c_off:_c_off + _c_lim]
                 _next_off = _c_off + len(_chunk)
+                # 逐行精读模式：只要传了行参数即按行分页（带 1 基行号），便于模型逐行读完整源码
+                _l_req = arguments.get("line_offset") is not None or arguments.get("line_limit") is not None
+                _l_off, _l_lim, _n_lines, _code_mode = 0, 0, 0, "chars"
+                if _l_req:
+                    try:
+                        _l_off = max(0, int(arguments.get("line_offset") or 0))
+                    except Exception:
+                        _l_off = 0
+                    try:
+                        _l_lim = int(arguments.get("line_limit") or 200)
+                    except Exception:
+                        _l_lim = 200
+                    _l_lim = max(1, min(_l_lim, 400))
+                    _all_lines = full_code.splitlines()
+                    _n_lines = len(_all_lines)
+                    _seg = _all_lines[_l_off:_l_off + _l_lim]
+                    _end_line = _l_off + len(_seg)
+                    _chunk = "\n".join(f"{_l_off + i + 1:>5}  {ln}" for i, ln in enumerate(_seg))
+                    _code_mode = "lines"
+                else:
+                    _end_line = None
                 result = {
                     "provider_id": pd.id,
                     "id": pd.id,
@@ -2003,10 +2052,15 @@ class MCPServerRegistry:
                     "language": pd.language,
                     "code_entry": pd.code_entry,
                     "code": _chunk,
+                    "code_mode": _code_mode,
                     "code_offset": _c_off,
                     "code_total_len": len(full_code),
                     "code_has_more": _next_off < len(full_code),
                     "code_next_offset": _next_off if _next_off < len(full_code) else None,
+                    "code_line_offset": _l_off if _l_req else 0,
+                    "code_total_lines": _n_lines if _l_req else len(full_code.splitlines()),
+                    "code_lines_has_more": (_end_line < _n_lines) if _l_req else None,
+                    "code_next_line_offset": _end_line if (_l_req and _end_line < _n_lines) else None,
                     "code_preview": (full_code[:800] + f"…(共{len(full_code)}字符)") if len(full_code) > 800 else full_code,
                     "code_length": len(full_code),
                     "description": pd.description,
@@ -2050,19 +2104,21 @@ class MCPServerRegistry:
                     arguments.get("offset") or 0,
                     arguments.get("limit") or 500,
                     arguments.get("encoding") or "utf-8",
+                    bool(arguments.get("numbered") or False),
                 )
 
             elif tool_name == "read_skill":
                 from app.skills.engine import skill_engine as _se
                 _name = (arguments.get("name") or "").strip()
                 if not _name:
+                    _usable = _se.active_skills()
                     result = {
                         "skills": [
                             {"name": s.name, "description": (s.description or "")[:160],
                              "category": s.category or "", "version": s.version or ""}
-                            for s in _se.list_skills()
+                            for s in _usable
                         ],
-                        "total": len(_se.list_skills()),
+                        "total": len(_usable),
                         "hint": "传 name 读取对应技能的完整执行 SOP（SKILL.md）",
                     }
                 else:
@@ -2076,6 +2132,9 @@ class MCPServerRegistry:
                     if _skill is None:
                         _names = [s.name for s in _se.list_skills()][:30]
                         raise ValueError(f"未找到技能: {_name}，可选: {_names}")
+                    _ok, _why = _se.is_usable(_skill.name)
+                    if not _ok:
+                        raise ValueError(f"技能不可用: {_why}")
                     result = {
                         "name": _skill.name,
                         "description": _skill.description,

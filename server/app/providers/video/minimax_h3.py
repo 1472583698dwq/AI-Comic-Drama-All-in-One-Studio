@@ -116,7 +116,7 @@ class MiniMaxH3VideoProvider(VideoProvider):
         if not (req.prompt or "").strip():
             raise ValueError("提示词不能为空 (H3 要求 content 内必须有非空 text)")
         started = time.time()
-        base = (getattr(settings, "MINIMAX_H3_BASE_URL", "") or "https://api.minimax.chat").rstrip("/")
+        base = (getattr(settings, "MINIMAX_H3_BASE_URL", "") or "https://api.minimaxi.com").rstrip("/")
         model = (getattr(settings, "MINIMAX_H3_MODEL", "") or "MiniMax-H3").strip() or "MiniMax-H3"
         dyn = req.dynamic_inputs if isinstance(req.dynamic_inputs, dict) else {}
         extra = req.extra if isinstance(req.extra, dict) else {}

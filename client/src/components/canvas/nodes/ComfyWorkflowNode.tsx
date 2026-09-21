@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 import { Cpu, Settings, Image as ImageIcon, Type, Upload, Check } from 'lucide-react';
 import { apiService } from '../../../services/api';
+import { AutoRatioMedia } from '../../ui/AutoRatioMedia';
 
 const API_ORIGIN = window.location.port === '5173' ? 'http://127.0.0.1:8000' : '';
 
@@ -98,7 +99,7 @@ export const ComfyWorkflowNode: React.FC<NodeProps> = ({ data, id }) => {
                   </div>
                   {exp.type==='image' ? (
                     <div className="flex items-center gap-2">
-                      {val ? <div className="w-12 h-12 rounded border border-brand overflow-hidden"><img src={val.startsWith('/')? API_ORIGIN+val : val} alt="" className="w-full h-full object-cover"/></div> : null}
+                      {val ? <AutoRatioMedia src={val.startsWith('/')? API_ORIGIN+val : val} fallbackAspect="1/1" maxHeight={48} className="rounded border border-brand" /> : null}
                       <label className="flex-1 border border-dashed border-border hover:border-brand rounded-lg px-2 py-1.5 text-[11px] [color:var(--color-text-secondary)] cursor-pointer text-center bg-surface transition-colors">
                         <input type="file" accept="image/*" className="hidden" onChange={e=>{
                           const f=e.target.files?.[0]; if(!f) return;

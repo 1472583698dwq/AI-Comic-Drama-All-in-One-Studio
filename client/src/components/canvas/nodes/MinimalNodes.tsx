@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { useCanvasStore } from '../../../stores/useCanvasStore';
 import { HIGH_LEVEL_AGENT_SKILLS } from '../providerSkills';
+import { AutoRatioMedia } from '../../ui/AutoRatioMedia';
 // 导演预设与 3D 舞台同源（景别/运镜全量一致，避免节点选不出来的断层）
 import { FRAMING_PRESETS, MOTION_PRESETS, framingShortLabel, motionShortLabel } from '../../director3d/directorPresets';
 
@@ -318,8 +319,14 @@ export const ImageNode: React.FC<NodeProps> = ({ id, data, selected }) => {
       }
     >
       {imgUrl ? (
-        <div className="w-full max-h-[420px] rounded-2xl overflow-hidden bg-surface-secondary border border-white/10 relative group" style={aspectStyle}>
-          <img src={resolveMediaUrl(imgUrl)} alt="生成的画面" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+        <AutoRatioMedia
+          src={resolveMediaUrl(imgUrl)}
+          alt="生成的画面"
+          fallbackAspect={String(aspectStyle.aspectRatio)}
+          maxHeight={420}
+          className="rounded-2xl bg-surface-secondary border border-white/10 group"
+          mediaClassName="group-hover:scale-105 transition-transform duration-300"
+        >
           <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-surface/85 text-[9px] font-mono text-violet-300 border border-violet-500/30 flex items-center gap-1">
             <span>{d.skill_id || 'text_to_image'} · {d.provider || 'auto'}</span>
             {allRefs.length > 0 && <span className="text-violet-400">({allRefs.length}垫图)</span>}
@@ -333,7 +340,7 @@ export const ImageNode: React.FC<NodeProps> = ({ id, data, selected }) => {
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-3">
             <span className="text-[11px] text-white/90 line-clamp-2">{d.prompt || '已生成分镜图像'}</span>
           </div>
-        </div>
+        </AutoRatioMedia>
       ) : (
         <div className="w-full max-h-[320px] rounded-2xl border-2 border-dashed border-white/15 bg-surface-secondary flex flex-col items-center justify-center p-4 text-center" style={aspectStyle}>
           <ImageIcon className="w-8 h-8 text-violet-400/50 mb-2" />
@@ -391,8 +398,15 @@ export const VideoGenNode: React.FC<NodeProps> = ({ id, data, selected }) => {
       }
     >
       {vidUrl ? (
-        <div className="w-full max-h-[420px] rounded-2xl overflow-hidden bg-surface-secondary border border-white/10 relative group flex items-center justify-center" style={aspectStyle}>
-          <video ref={videoRef} src={resolveMediaUrl(vidUrl)} loop playsInline preload="metadata" onEnded={() => setIsPlaying(false)} className="w-full h-full object-cover" />
+        <AutoRatioMedia
+          kind="video"
+          src={resolveMediaUrl(vidUrl)}
+          fallbackAspect={String(aspectStyle.aspectRatio)}
+          maxHeight={420}
+          videoRef={videoRef}
+          className="rounded-2xl bg-surface-secondary border border-white/10 group"
+          videoProps={{ loop: true, playsInline: true, preload: 'metadata', onEnded: () => setIsPlaying(false) }}
+        >
           <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-surface/85 text-[9px] font-mono text-orange-300 border border-orange-500/30">{d.skill_id || 'video'} · {d.provider || 'auto'}</div>
           {st?.status === 'running' && (
             <div className="absolute inset-0 bg-surface/85 flex flex-col items-center justify-center gap-2">
@@ -403,7 +417,7 @@ export const VideoGenNode: React.FC<NodeProps> = ({ id, data, selected }) => {
           <button onClick={togglePlay} className="absolute w-12 h-12 rounded-full bg-surface/85 backdrop-blur-md border border-white/20 text-white flex items-center justify-center group-hover:scale-110 transition-transform shadow-xl">
             {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-0.5" />}
           </button>
-        </div>
+        </AutoRatioMedia>
       ) : (
         <div className="w-full max-h-[320px] rounded-2xl border-2 border-dashed border-white/15 bg-surface-secondary flex flex-col items-center justify-center p-4 text-center" style={aspectStyle}>
           <Film className="w-8 h-8 text-orange-400/50 mb-2" />

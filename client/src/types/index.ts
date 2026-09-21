@@ -84,10 +84,12 @@ export interface Character {
   ref_audio_url?: string;
   ref_audio_name?: string;
   avatar_url?: string;
+  /** 三视图/立绘：front 为主；旧数据可能只有 side / three_quarter，取参考时需回退 */
   three_views?: {
     front?: string;
     side?: string;
     three_quarter?: string;
+    [k: string]: string | undefined;
   };
 }
 
@@ -249,7 +251,7 @@ export interface Asset {
   workflow_id?: string;
   voice_id?: string;
   voice_name?: string;
-  three_views?: { front?: string; side?: string; three_quarter?: string };
+  three_views?: { front?: string; side?: string; three_quarter?: string; [k: string]: string | undefined };
   source: string;
   extra?: Record<string, any>;
   created_at: string;

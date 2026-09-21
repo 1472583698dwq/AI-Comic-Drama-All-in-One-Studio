@@ -1,6 +1,7 @@
 import React from 'react';
 import { AlertTriangle, Check, FolderOpen, Link2, Sparkles, X } from 'lucide-react';
 import type { BindPlan } from '../referenceBinder';
+import { AutoRatioMedia } from '../../ui/AutoRatioMedia';
 
 /**
  * 一键绑定预览抽屉：资源 → 槽位一目了然，缺口/超限/残留显式列出。
@@ -12,12 +13,14 @@ export const BindPreviewModal: React.FC<{
   providerName?: string;
   shotLabel?: string;
   plan: BindPlan | null;
+  /** 已绑定但没有立绘/三视图的角色名（显式提示，避免预览为空却不知原因） */
+  missingChars?: string[];
   overwrite: boolean;
   onToggleOverwrite: (v: boolean) => void;
   onApply: () => void;
   onClose: () => void;
   resolveUrl: (u?: string | null) => string;
-}> = ({ open, kind, providerName, shotLabel, plan, overwrite, onToggleOverwrite, onApply, onClose, resolveUrl }) => {
+}> = ({ open, kind, providerName, shotLabel, plan, missingChars = [], overwrite, onToggleOverwrite, onApply, onClose, resolveUrl }) => {
   if (!open || !plan) return null;
   const sourceLabel: Record<string, string> = {
     frame: '首帧', character: '角色', scene: '场景', prop: '道具/素材',
@@ -68,8 +71,18 @@ export const BindPreviewModal: React.FC<{
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-          {plan.filled.length === 0 && plan.gaps.length === 0 && (
+          {missingChars.length > 0 && (
+            <div className="px-2.5 py-2 rounded-lg bg-amber-500/10 border border-amber-500/25 text-[11px] text-amber-300 leading-relaxed">
+              <b>已绑定角色缺参考图：</b>{missingChars.join('、')}
+              —— 请到「角色工坊」为 TA 生成定妆图（正面），或在分镜台改绑其它角色。
+            </div>
+          )}
+
+          {plan.filled.length === 0 && plan.gaps.length === 0 && missingChars.length === 0 && (
             <div className="py-10 text-center text-xs text-gray-500">没有可绑定的资源：先在上方绑定角色 / 场景 / 道具，或给角色绑定参考音频</div>
+          )}
+          {plan.filled.length === 0 && plan.gaps.length === 0 && missingChars.length > 0 && (
+            <div className="py-2 text-center text-[11px] text-gray-500">除上述缺失参考图的角色外，本镜没有其它可自动绑定的资源</div>
           )}
 
           {plan.filled.length > 0 && (
@@ -84,7 +97,7 @@ export const BindPreviewModal: React.FC<{
                   ) : it.source === 'previz_video' ? (
                     <span className="w-12 h-12 shrink-0 rounded-lg bg-violet-500/10 border border-violet-500/30 flex items-center justify-center text-violet-300 text-sm">🎞</span>
                   ) : (
-                    <img src={resolveUrl(it.url)} alt="" className="w-12 h-12 shrink-0 rounded-lg object-cover border border-border" />
+                    <AutoRatioMedia src={resolveUrl(it.url)} fallbackAspect="1/1" maxHeight={48} className="shrink-0 rounded-lg border border-border" />
                   )}
                   <div className="flex-1 min-w-0">
                     <div className="text-[11px] font-bold text-white truncate">{it.slotLabel} <span className="text-[9px] font-mono text-gray-500">{it.slotKey}</span></div>

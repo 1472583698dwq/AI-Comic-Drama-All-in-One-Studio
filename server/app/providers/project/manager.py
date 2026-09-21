@@ -431,7 +431,7 @@ class ProjectManager:
             json.dump(data, f, ensure_ascii=False, indent=2)
         return {"deleted": canvas_id, "active_canvas_id": data.get("active_canvas_id")}
 
-    def get_agent_sessions(self, project_id: str) -> List[Dict[str, Any]]:
+    def get_agent_sessions(self, project_id: str, scope: str = "all") -> List[Dict[str, Any]]:
         project_id = _resolve_id(project_id)
         p = _agent_sessions_path(project_id)
         if not os.path.exists(p):
@@ -452,15 +452,33 @@ class ProjectManager:
                         m["isThinkingStreaming"] = False
                     if m.get("isStreaming"):
                         m["isStreaming"] = False
+            # scope 隔离：页面版(page)与悬浮窗版(float)各自读写自己的会话；无 scope 的历史会话归 page
+            scope = (scope or "all").strip()
+            if scope and scope != "all":
+                return [s for s in data if isinstance(s, dict) and (s.get("scope") or "page") == scope]
             return data
         except Exception:
             return []
 
-    def save_agent_sessions(self, project_id: str, sessions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def save_agent_sessions(self, project_id: str, sessions: List[Dict[str, Any]], scope: Optional[str] = None) -> List[Dict[str, Any]]:
         project_id = _resolve_id(project_id)
         proj_dir = os.path.join(PROJECTS_ROOT, project_id)
         if not os.path.exists(proj_dir):
             raise FileNotFoundError(f"项目不存在: {project_id}")
+        # scope 隔离写：只替换该 scope 的会话，保留另一端的会话不被覆盖
+        scope = (scope or "").strip() or None
+        if scope:
+            try:
+                existing = self.get_agent_sessions(project_id, scope="all")
+            except Exception:
+                existing = []
+            keep = [s for s in existing if isinstance(s, dict) and (s.get("scope") or "page") != scope]
+            stamped = []
+            for s in (sessions or []):
+                if isinstance(s, dict):
+                    s = {**s, "scope": scope}
+                stamped.append(s)
+            sessions = keep + stamped
         p = _agent_sessions_path(project_id)
         temp_p = p + f".tmp.{os.getpid()}"
         with open(temp_p, "w", encoding="utf-8") as f:

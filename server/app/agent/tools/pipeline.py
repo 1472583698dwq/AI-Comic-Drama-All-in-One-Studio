@@ -59,27 +59,57 @@ def _spill_dir() -> Path:
     return base
 
 
+# 审批裁决 → 归因文案（进日志、进模型错误、进 meta，缺一就没法事后复盘"谁拒的"）
+APPROVAL_VERDICT_TEXT = {
+    "rejected": "用户在确认框点了拒绝",
+    "timeout": "确认框无人应答已超时",
+    "non_interactive": "当前通道无交互（fail-closed 一律按拒绝）",
+    "disabled": "审批策略已关闭（policy=never）",
+}
+
+
 class ApprovalService:
     """人审接缝：ask/never 策略 + fail-closed。无交互通道时 ask=拒绝。"""
 
     def __init__(self, session_id: str, emit, policy: str = "ask", interactive: bool = True,
-                 timeout_s: Optional[float] = None):
+                 timeout_s: Optional[float] = None, session=None):
         self.session_id = session_id
         self.emit = emit
         self.policy = policy if policy in ("ask", "never") else "ask"
         self.interactive = bool(interactive)
+        self.session = session
         try:
             self.timeout_s = float(timeout_s or os.environ.get("AGENT_APPROVAL_TIMEOUT") or 120)
         except Exception:
             self.timeout_s = 120.0
         self._pending: Dict[str, asyncio.Future] = {}
 
-    async def request(self, tool_name: str, arguments: Dict[str, Any], reason: str = "") -> bool:
-        if self.policy == "never":
-            return False
-        if not self.interactive:
-            return False
+    def _log(self, event_type: str, data: Dict[str, Any]) -> None:
+        """审批留痕：仅 emit 不落账就无法区分"人拒了"和"没人答"。记账失败绝不阻断执行。"""
+        if self.session is None:
+            return
+        try:
+            self.session.append(event_type, data)
+        except Exception:
+            pass
+
+    async def request(self, tool_name: str, arguments: Dict[str, Any], reason: str = "") -> str:
+        """请求人审，返回裁决：approved | rejected | timeout | non_interactive | disabled。"""
         aid = f"appr_{uuid.uuid4().hex[:8]}"
+        if self.policy == "never":
+            verdict = "disabled"
+        elif not self.interactive:
+            verdict = "non_interactive"
+        else:
+            verdict = ""
+        self._log(E.APPROVAL_ASKED, {
+            "approval_id": aid, "tool_name": tool_name, "arguments": arguments or {}, "reason": reason,
+        })
+        if verdict:
+            self._log(E.APPROVAL_DECIDED, {
+                "approval_id": aid, "approved": False, "reason": verdict,
+            })
+            return verdict
         loop = asyncio.get_running_loop()
         fut: asyncio.Future = loop.create_future()
         self._pending[aid] = fut
@@ -92,11 +122,17 @@ class ApprovalService:
                 "reason": reason,
             })
             try:
-                return bool(await asyncio.wait_for(fut, timeout=self.timeout_s))
+                ok = bool(await asyncio.wait_for(fut, timeout=self.timeout_s))
             except asyncio.TimeoutError:
-                return False
+                verdict = "timeout"
+            else:
+                verdict = "approved" if ok else "rejected"
         finally:
             self._pending.pop(aid, None)
+        self._log(E.APPROVAL_DECIDED, {
+            "approval_id": aid, "approved": verdict == "approved", "reason": verdict,
+        })
+        return verdict
 
     def resolve(self, approval_id: str, approved: bool) -> bool:
         fut = self._pending.get(approval_id)
@@ -227,7 +263,8 @@ class ToolPipeline:
         self.emit = emit
         self.plan_mode = bool(plan_mode)
         self.session = session
-        self.approvals = ApprovalService(session_id, emit, policy=approval_policy, interactive=interactive)
+        self.approvals = ApprovalService(session_id, emit, policy=approval_policy,
+                                         interactive=interactive, session=session)
         self.guard = RepeatToolGuard()
 
     def resolve_approval(self, approval_id: str, approved: bool) -> bool:
@@ -237,8 +274,15 @@ class ToolPipeline:
                       project_context: Any = None, run_mode: str = "approve",
                       auto_approved: bool = False) -> ToolOutcome:
         args = args if isinstance(args, dict) else {}
+        # 运行模式两维：行为（standard/create/plan）× 执行（approve/auto）
+        try:
+            from app.agent.mode_policy import behavior_of as _behavior_of, execution_of as _execution_of
+            _behavior, _execution = _behavior_of(run_mode), _execution_of(run_mode)
+        except Exception:
+            _behavior = "plan" if str(run_mode).startswith("plan") else ("create" if str(run_mode).startswith("create") else "standard")
+            _execution = "auto" if str(run_mode).endswith("auto") else "approve"
         # ① 计划模式硬门控：只读白名单之外一律拒绝（含全部内部变更工具）
-        if self.plan_mode and name not in PLAN_READONLY_TOOLS:
+        if (self.plan_mode or _behavior == "plan") and name not in PLAN_READONLY_TOOLS:
             msg = f"计划模式只允许只读工具，已拦截 {name}（本轮不执行任何变更）"
             return ToolOutcome(call_id, name, "denied", error=msg, model_content=json.dumps({"error": msg}, ensure_ascii=False))
 
@@ -270,6 +314,13 @@ class ToolPipeline:
                 "in_progress": sum(1 for x in normalized if x["status"] == "in_progress"),
                 "pending": sum(1 for x in normalized if x["status"] == "pending"),
             }
+            # 推送给前端渲染待办清单（页面版/悬浮窗版按 session_id 自行分流）
+            try:
+                r = self.emit({"event": "todo_write", "items": normalized, "counts": counts})
+                if asyncio.iscoroutine(r):
+                    await r
+            except Exception:
+                pass
             return ToolOutcome(call_id, name, "success", result=counts,
                                model_content=json.dumps(counts, ensure_ascii=False))
 
@@ -317,12 +368,13 @@ class ToolPipeline:
             if not tool or not isinstance(items, list) or not items:
                 msg = "batch_run 需要 tool 与非空 items"
                 return ToolOutcome(call_id, name, "error", error=msg, model_content=json.dumps({"error": msg}, ensure_ascii=False))
-            if len(items) > 3 and run_mode != "auto" and not auto_approved:
-                ok = await self.approvals.request("batch_run", {"tool": tool, "count": len(items)},
-                                                  reason=f"批量执行 {len(items)} 项 {tool}")
-                if not ok:
-                    msg = f"用户拒绝或不可交互，已跳过批量执行 {tool}"
-                    return ToolOutcome(call_id, name, "denied", error=msg, model_content=json.dumps({"error": msg}, ensure_ascii=False))
+            if len(items) > 3 and _execution != "auto" and not auto_approved:
+                verdict = await self.approvals.request("batch_run", {"tool": tool, "count": len(items)},
+                                                       reason=f"批量执行 {len(items)} 项 {tool}")
+                if verdict != "approved":
+                    msg = f"已跳过批量执行 {tool}（{APPROVAL_VERDICT_TEXT.get(verdict, verdict)}）"
+                    return ToolOutcome(call_id, name, "denied", error=msg, meta={"approval": verdict},
+                                       model_content=json.dumps({"error": msg}, ensure_ascii=False))
             from app.agent.runtime.batch import run_batch
 
             async def _one(cid, t, a, ctx, rm):
@@ -376,11 +428,13 @@ class ToolPipeline:
                 need_confirm = _rc(name, run_mode, True)
             except Exception:
                 need_confirm = _risk(name) in ("high", "catastrophic")
-        if need_confirm and run_mode != "plan" and not auto_approved:
-            ok = await self.approvals.request(name, args, reason=f"risk={_risk(name)} mode={run_mode}")
-            if not ok:
-                msg = f"用户拒绝或不可交互，已跳过需确认的工具 {name}"
-                return ToolOutcome(call_id, name, "denied", error=msg, model_content=json.dumps({"error": msg}, ensure_ascii=False))
+        # plan 只读 / auto 自动执行：不弹确认（两维各自硬门控；风险由前端危险态明示 + 随时暂停兜底）
+        if need_confirm and _behavior != "plan" and _execution != "auto" and not auto_approved:
+            verdict = await self.approvals.request(name, args, reason=f"risk={_risk(name)} mode={run_mode}")
+            if verdict != "approved":
+                msg = f"已跳过需确认的工具 {name}（{APPROVAL_VERDICT_TEXT.get(verdict, verdict)}）"
+                return ToolOutcome(call_id, name, "denied", error=msg, meta={"approval": verdict},
+                                   model_content=json.dumps({"error": msg}, ensure_ascii=False))
 
         # ⑤ 执行（带 per-tool 超时）
         timeout = tool_timeout(name)
@@ -409,7 +463,7 @@ class ToolPipeline:
                 full = _spill_full(self.session_id, call_id, name, json.dumps(result, ensure_ascii=False, default=str))
                 if full:
                     meta["spill_path"] = full
-                    model_content = raw + f"\n[全文溢写: {full}（可用 fs_file read 查看）]"
+                    model_content = raw + f"\n[全文溢写: {full}（用 fs_read 分页读取，无需可信模式）]"
         else:
             model_content = json.dumps({"error": error or "工具执行失败"}, ensure_ascii=False)
 

@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Check, AlertTriangle, Loader2, Eye, EyeOff, Cloud, HardDrive,
-  CircleDot, Plug, ChevronRight, FolderOpen, FolderSearch,
+  CircleDot, Plug, ChevronRight, FolderOpen, FolderSearch, Activity,
+  ExternalLink, History,
 } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { toast } from '../../stores/useDialogStore';
@@ -12,6 +13,7 @@ import {
 } from './capabilityCatalog';
 
 type TestState = { running?: boolean; ok?: boolean; detail?: string };
+type BackendState = { configured?: boolean; ok?: boolean };
 
 interface Props {
   cfg: Record<string, string>;
@@ -28,6 +30,35 @@ export const CapabilitiesPanel: React.FC<Props> = ({ cfg, draft, setDraft, loadi
   const merged = useMemo(() => ({ ...cfg, ...draft }), [cfg, draft]);
   const [tests, setTests] = useState<Record<string, TestState>>({});
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
+  const [backend, setBackend] = useState<Record<string, BackendState>>({});
+  const [testingAll, setTestingAll] = useState(false);
+
+  /** 从后端注册表拉真实状态：通道 id 与 provider id 一致（如 image:comfyui / video:kling / audio:minimax） */
+  useEffect(() => {
+    let alive = true;
+    const put = (kind: string, list: any[]) => {
+      if (!alive || !Array.isArray(list)) return;
+      setBackend((prev) => {
+        const next = { ...prev };
+        list.forEach((p) => {
+          if (!p?.id) return;
+          next[`${kind}:${p.id}`] = {
+            configured: !!(p.is_configured ?? p.production_ready),
+            ok: p.health?.ok,
+          };
+        });
+        return next;
+      });
+    };
+    Promise.allSettled([
+      apiService.listImageProviders().then((r) => put('image', r?.providers)),
+      apiService.listVideoProviders().then((r) => put('video', Array.isArray(r) ? r : r?.providers)),
+      apiService.listTtsProviders().then((r) => put('audio', r?.providers)),
+    ]).catch(() => { /* 后端未起时静默 */ });
+    return () => { alive = false; };
+  }, [cfg]);
+
+  const testKey = (cap: Capability, ch: Channel) => `${cap.id}:${ch.id}`;
 
   const readyOf = (cap: Capability) => {
     const ch = cap.channels.find((c) => c.id === currentChannelId(cap, merged));
@@ -35,6 +66,11 @@ export const CapabilitiesPanel: React.FC<Props> = ({ cfg, draft, setDraft, loadi
   };
   const readyCount = CAPABILITIES.filter(readyOf).length;
   const essentialMissing = CAPABILITIES.filter((c) => c.essential && !readyOf(c));
+  const testable = useMemo(
+    () => CAPABILITIES.flatMap((c) => c.channels.filter((ch) => ch.test).map((ch) => ({ cap: c, ch }))),
+    [],
+  );
+  const testedCount = testable.filter(({ cap, ch }) => tests[testKey(cap, ch)]?.ok === true).length;
 
   const pickChannel = (cap: Capability, ch: Channel) => {
     setDraft((d) => {
@@ -43,19 +79,35 @@ export const CapabilitiesPanel: React.FC<Props> = ({ cfg, draft, setDraft, loadi
       Object.entries(ch.extraOnSelect || {}).forEach(([k, v]) => { next[k] = v; });
       return next;
     });
-    setTests((t) => ({ ...t, [cap.id]: {} }));
+    setTests((t) => ({ ...t, [testKey(cap, ch)]: {} }));
   };
 
   const runTest = async (cap: Capability, ch: Channel) => {
     if (!ch.test) return;
-    setTests((t) => ({ ...t, [cap.id]: { running: true } }));
+    const k = testKey(cap, ch);
+    setTests((t) => ({ ...t, [k]: { running: true } }));
     try {
       // 把当前草稿一并带上，这样不保存也能先测
       const res = await apiService.testConfig(ch.test as any, merged);
-      setTests((t) => ({ ...t, [cap.id]: { ok: !!res?.ok, detail: res?.detail || '' } }));
+      setTests((t) => ({ ...t, [k]: { ok: !!res?.ok, detail: res?.detail || '' } }));
     } catch (e: any) {
-      setTests((t) => ({ ...t, [cap.id]: { ok: false, detail: e?.message || '测试失败' } }));
+      setTests((t) => ({ ...t, [k]: { ok: false, detail: e?.message || '测试失败' } }));
     }
+  };
+
+  const runAllTests = async () => {
+    setTestingAll(true);
+    setTests((t) => {
+      const next = { ...t };
+      testable.forEach(({ cap, ch }) => { next[testKey(cap, ch)] = { running: true }; });
+      return next;
+    });
+    for (const { cap, ch } of testable) {
+      // 串行：避免同一时刻打爆各家限流，也能逐个看到进度
+      // eslint-disable-next-line no-await-in-loop
+      await runTest(cap, ch);
+    }
+    setTestingAll(false);
   };
 
   if (loading) {
@@ -75,7 +127,7 @@ export const CapabilitiesPanel: React.FC<Props> = ({ cfg, draft, setDraft, loadi
             <h2 className="text-sm font-bold text-[color:var(--color-text-main)]">配置进度</h2>
             <p className="text-[11.5px] text-gray-400 mt-0.5">
               下面 5 项能力各自独立，<b className="text-[color:var(--color-text-main)]">只有前两项是必须的</b>。
-              进度条统计的是「必填项已填」，填了不等于通——每张卡还要点一次<b className="text-[color:var(--color-text-main)]">测试连通</b>。
+              进度条统计的是「必填项已填」，填了不等于通——点一次<b className="text-[color:var(--color-text-main)]">测试连通</b>才算数。
             </p>
           </div>
           <div className="font-mono text-xs text-gray-400">
@@ -96,6 +148,20 @@ export const CapabilitiesPanel: React.FC<Props> = ({ cfg, draft, setDraft, loadi
           })}
         </div>
 
+        <div className="mt-4 flex items-center gap-2 flex-wrap">
+          <button
+            onClick={runAllTests}
+            disabled={testingAll}
+            className="px-3.5 py-1.5 rounded-xl bg-brand text-white text-[11.5px] font-bold hover:bg-brand-light disabled:opacity-40 flex items-center gap-1.5"
+          >
+            {testingAll ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Activity className="w-3.5 h-3.5" />}
+            {testingAll ? '逐个测试中…' : '一键测试全部通道'}
+          </button>
+          <span className="text-[11px] text-gray-500">
+            共 {testable.length} 条可测通道{testedCount > 0 ? ` · 本次已测通 ${testedCount}` : ''}
+          </span>
+        </div>
+
         {essentialMissing.length > 0 && (
           <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
             <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
@@ -109,7 +175,7 @@ export const CapabilitiesPanel: React.FC<Props> = ({ cfg, draft, setDraft, loadi
           <div className="mt-4 flex items-start gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5">
             <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
             <div className="text-[11.5px] text-emerald-200 leading-relaxed">
-              必需项都填了。接下来两步：右上角<b>保存</b> → 每张卡点一次<b>测试连通</b>。
+              必需项都填了。接下来两步：右上角<b>保存</b> → 点<b>一键测试全部通道</b>确认真的通。
               未配置 Key 的内置源不会出现在画布和分镜台的下拉里；自定义源接入即显示。
             </div>
           </div>
@@ -121,7 +187,8 @@ export const CapabilitiesPanel: React.FC<Props> = ({ cfg, draft, setDraft, loadi
         const chId = currentChannelId(cap, merged);
         const ch = cap.channels.find((c) => c.id === chId) || cap.channels[0];
         const filled = ch ? channelFilled(ch, merged) : false;
-        const t = tests[cap.id] || {};
+        const t = ch ? (tests[testKey(cap, ch)] || {}) : {};
+        const bk = ch?.providerKind ? backend[`${ch.providerKind}:${ch.id}`] : undefined;
 
         return (
           <section key={cap.id} className="rounded-2xl border border-border bg-surface overflow-hidden">
@@ -132,14 +199,21 @@ export const CapabilitiesPanel: React.FC<Props> = ({ cfg, draft, setDraft, loadi
                 {cap.essential
                   ? <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-brand/20 border border-brand/40 text-brand-light font-bold">必需</span>
                   : <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-surface-tertiary border border-border text-gray-400">可选</span>}
+                {ch?.legacy && (
+                  <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-gray-500/15 border border-gray-500/40 text-gray-400 font-bold flex items-center gap-1">
+                    <History className="w-2.5 h-2.5" />旧版
+                  </span>
+                )}
                 <span className="ml-auto">
                   {t.running
                     ? <span className="text-[10.5px] text-gray-400 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" />测试中</span>
                     : t.ok === true
                       ? <span className="text-[10.5px] text-emerald-400 flex items-center gap-1"><Check className="w-3 h-3" />已测通</span>
-                      : filled
-                        ? <span className="text-[10.5px] text-amber-300 flex items-center gap-1"><CircleDot className="w-3 h-3" />已填，待测试</span>
-                        : <span className="text-[10.5px] text-gray-500 flex items-center gap-1"><CircleDot className="w-3 h-3" />未配置</span>}
+                      : bk?.configured
+                        ? <span className="text-[10.5px] text-sky-300 flex items-center gap-1"><CircleDot className="w-3 h-3" />后端已就绪{bk.ok === false ? '（探测未通）' : ''}</span>
+                        : filled
+                          ? <span className="text-[10.5px] text-amber-300 flex items-center gap-1"><CircleDot className="w-3 h-3" />已填，待测试</span>
+                          : <span className="text-[10.5px] text-gray-500 flex items-center gap-1"><CircleDot className="w-3 h-3" />未配置</span>}
                 </span>
               </div>
               <p className="text-[12px] text-gray-400 leading-relaxed mt-1.5">{cap.why}</p>
@@ -157,6 +231,7 @@ export const CapabilitiesPanel: React.FC<Props> = ({ cfg, draft, setDraft, loadi
                 {cap.channels.map((c) => {
                   const active = c.id === chId;
                   const done = channelFilled(c, merged);
+                  const cb = c.providerKind ? backend[`${c.providerKind}:${c.id}`] : undefined;
                   return (
                     <button
                       key={c.id}
@@ -172,7 +247,9 @@ export const CapabilitiesPanel: React.FC<Props> = ({ cfg, draft, setDraft, loadi
                         ? <HardDrive className="w-3 h-3 text-emerald-400" />
                         : <Cloud className="w-3 h-3 text-sky-400" />}
                       <span>{c.name}</span>
+                      {c.legacy && <span className="text-[9px] text-gray-500">旧</span>}
                       {done && <Check className="w-3 h-3 text-emerald-400" />}
+                      {!done && cb?.configured && <span className="w-1.5 h-1.5 rounded-full bg-sky-400" title="后端已就绪" />}
                     </button>
                   );
                 })}
@@ -180,7 +257,15 @@ export const CapabilitiesPanel: React.FC<Props> = ({ cfg, draft, setDraft, loadi
 
               {ch && (
                 <>
-                  <p className="text-[11.5px] text-gray-400 leading-relaxed mt-3">{ch.summary}</p>
+                  <div className="flex items-center gap-2 mt-3 flex-wrap">
+                    <p className="text-[11.5px] text-gray-400 leading-relaxed flex-1 min-w-[240px]">{ch.summary}</p>
+                    {ch.docs && (
+                      <a href={ch.docs} target="_blank" rel="noreferrer"
+                        className="text-[10.5px] text-brand-light hover:text-white flex items-center gap-1 shrink-0">
+                        <ExternalLink className="w-3 h-3" />官方文档
+                      </a>
+                    )}
+                  </div>
 
                   {ch.warn && (
                     <div className="mt-2.5 flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2">
@@ -261,6 +346,7 @@ const FieldRow: React.FC<{
   onChange: (v: string) => void;
 }> = ({ field, value, revealed, onReveal, onChange }) => {
   const secret = field.kind === 'secret';
+  const listId = `dl_${field.key.replace(/[^A-Za-z0-9_]/g, '_')}`;
 
   const pickDir = async () => {
     try {
@@ -286,10 +372,16 @@ const FieldRow: React.FC<{
             type={secret && !revealed ? 'password' : 'text'}
             value={value}
             placeholder={field.placeholder || ''}
+            list={field.choices?.length ? listId : undefined}
             onChange={(e) => onChange(e.target.value)}
             spellCheck={false}
             className="w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-[12px] font-mono text-[color:var(--color-text-main)] placeholder-gray-600 focus:outline-none focus:border-brand/60 transition-colors pr-9"
           />
+          {field.choices?.length ? (
+            <datalist id={listId}>
+              {field.choices.map((c) => <option key={c} value={c} />)}
+            </datalist>
+          ) : null}
           {secret && (
             <button
               onClick={onReveal}

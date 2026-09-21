@@ -28,7 +28,7 @@ class LLMTransportError(RuntimeError):
 
 
 class LLMConfigError(RuntimeError):
-    """不可重试：缺 Key/参数错误/4xx。"""
+    """不可重试：缺 Key/参数错误/4xx（网关转发的上游瞬时错误除外，见 _is_upstream_blame）。"""
 
 
 @dataclass
@@ -67,6 +67,15 @@ class AssistantReply:
     @property
     def has_tool_calls(self) -> bool:
         return bool(self.tool_calls)
+
+
+def _is_upstream_blame(body: str) -> bool:
+    """网关代转的上游瞬时故障：形态是 400，责任不在本次请求，该重试而非打死回合。
+
+    真·请求错误（缺 model、参数非法）不带这类字样，仍按配置错误立即失败。
+    """
+    b = (body or "").lower()
+    return any(k in b for k in ("upstream", "server_error", "server error", "internal server", "bad gateway"))
 
 
 def _arguments_valid(raw: str) -> bool:
@@ -111,11 +120,13 @@ class OpenAICompatAdapter:
         provider = (getattr(settings, "LLM_PROVIDER", "") or "openai_compatible").lower()
         api_type = (getattr(settings, "LLM_API_TYPE", "") or "chat_completions").lower()
         if provider == "minimax" and not getattr(settings, "OPENAI_API_KEY", ""):
-            base = (getattr(settings, "MINIMAX_BASE_URL", "") or "https://api.minimax.chat/v1").rstrip("/")
+            # MiniMax M 系列（M3/M2.7/M2.5/M2.1/M2）统一走 OpenAI 兼容 /chat/completions；
+            # 旧版 /text/chatcompletion_v2（abab 世代）已随 api.minimax.chat 域名一起弃用。
+            base = (getattr(settings, "MINIMAX_BASE_URL", "") or "https://api.minimaxi.com/v1").rstrip("/")
             return {
-                "endpoint": f"{base}/text/chatcompletion_v2",
+                "endpoint": f"{base}/chat/completions",
                 "api_key": getattr(settings, "MINIMAX_API_KEY", "") or "",
-                "model": getattr(settings, "LLM_MODEL", "") or "abab6.5s-chat",
+                "model": getattr(settings, "LLM_MODEL", "") or "MiniMax-M2.5",
             }
         base = (getattr(settings, "OPENAI_BASE_URL", "") or "https://api.deepseek.com/v1").rstrip("/")
         if base.endswith("/chat/completions"):
@@ -184,6 +195,9 @@ class OpenAICompatAdapter:
                         if resp.status_code != 200:
                             body = (await resp.aread()).decode(errors="ignore")[:400]
                             retryable = resp.status_code in (408, 409, 425, 429) or resp.status_code >= 500
+                            # 网关转发的上游 400 交给外层重试（带退避），别按请求错误打死整轮
+                            if _is_upstream_blame(body):
+                                raise LLMTransportError(f"LLM HTTP {resp.status_code}: {body}", status=resp.status_code)
                             if not attempt_plain and resp.status_code == 400:
                                 continue  # 用剥离版重试
                             if retryable:

@@ -1,13 +1,15 @@
 /**
  * Agent 消息列表 — 页面与抽屉共用（含思考推演/计划模式执行按钮/产物卡/错误卡/工具步骤/建议）
+ * 工具步骤与待办走 IDE 风格卡片（AgentToolSteps / AgentTodoPanel），审批行内完成。
  */
 import React, { useState } from 'react';
 import {
-  Bot, User, Sparkles, Wrench, CheckCircle2, XCircle, RefreshCw, ChevronDown, Check, Copy,
+  Bot, User, Sparkles, ChevronDown, Check, Copy, Pencil, X,
 } from 'lucide-react';
 import { MarkdownText } from './MarkdownText';
 import { ArtifactCard, CapabilityProposalCard, ErrorCard } from './AgentCards';
-import type { ChatMsg } from './agentTypes';
+import { AgentToolSteps, AgentTodoPanel } from './AgentToolSteps';
+import type { ApprovalInfo, ChatMsg } from './agentTypes';
 
 export interface AgentMessageListProps {
   messages: ChatMsg[];
@@ -19,6 +21,10 @@ export interface AgentMessageListProps {
   onProposalAction: (msgId: string, proposalId: string, kind: 'start' | 'persist' | 'discard' | 'rollback') => void;
   proposalBusy: Record<string, string>;
   onApplyArtifact: (msgId: string, index: number) => void;
+  /** 行内审批所需：待确认清单、始终允许表、审批回调 */
+  approvals?: Record<string, ApprovalInfo>;
+  autoAllowTools?: Record<string, boolean>;
+  onApprove?: (aid: string, ok: boolean, always: boolean) => void;
 }
 
 export const AgentMessageList: React.FC<AgentMessageListProps> = ({
@@ -31,10 +37,14 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
   onProposalAction,
   proposalBusy,
   onApplyArtifact,
+  approvals,
+  autoAllowTools,
+  onApprove,
 }) => {
   const [expandedThinking, setExpandedThinking] = useState<Record<string, boolean>>({});
-  const [showSteps, setShowSteps] = useState<Record<string, boolean>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
 
   const copyMsg = async (e: React.MouseEvent, id: string, text: string) => {
     e.stopPropagation();
@@ -43,14 +53,27 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
     setTimeout(() => setCopiedId((v) => (v === id ? null : v)), 1200);
   };
 
+  // 用户消息编辑重发（Zed/Cline 式：改完作为新一轮发出）
+  const startEdit = (e: React.MouseEvent, id: string, text: string) => {
+    e.stopPropagation();
+    setEditingId(id);
+    setEditText(text);
+  };
+  const submitEdit = () => {
+    const t = editText.trim();
+    setEditingId(null);
+    if (t) onSendSuggestion(t);
+  };
+
   return (
     <>
       {messages.map((m) => {
         const isAgent = m.sender === 'agent';
         const hasThinking = isAgent && !!(m.thinking || m.isThinkingStreaming);
-        const thinkingOpen = expandedThinking[m.id] !== undefined ? expandedThinking[m.id] : true;
-        const stepsOpen = !!showSteps[m.id];
+        // IDE 式：思考过程默认折叠（流式进行中保持展开），不与正文混排
+        const thinkingOpen = expandedThinking[m.id] !== undefined ? expandedThinking[m.id] : !!m.isThinkingStreaming;
         const isPlaceholder = isAgent && isRunning && !m.text && !m.thinking;
+        const isEditing = editingId === m.id;
 
         return (
           <div key={m.id} className={`flex ${m.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -70,7 +93,18 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
                       {m.mode === 'execute' ? '执行' : '问答'}
                     </span>
                   )}
-                  <span className="ml-auto">{m.time}</span>
+                  <span className="ml-auto flex items-center gap-1">
+                    {m.sender === 'user' && !isRunning && (
+                      <button
+                        onClick={(e) => startEdit(e, m.id, m.text)}
+                        className="p-1 rounded hover:bg-white/10 text-gray-500 hover:text-white"
+                        title="编辑并重新发送"
+                      >
+                        <Pencil className="w-3 h-3" />
+                      </button>
+                    )}
+                    <span>{m.time}</span>
+                  </span>
                 </div>
               )}
 
@@ -81,6 +115,15 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
                   title="复制本条消息"
                 >
                   {copiedId === m.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                </button>
+              )}
+              {compact && m.sender === 'user' && !isRunning && (
+                <button
+                  onClick={(e) => startEdit(e, m.id, m.text)}
+                  className="absolute top-1.5 right-8 p-1 rounded-md opacity-0 group-hover/msg:opacity-100 transition-opacity bg-surface/85 text-white/70 hover:text-white"
+                  title="编辑并重新发送"
+                >
+                  <Pencil className="w-3 h-3" />
                 </button>
               )}
 
@@ -111,6 +154,31 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
 
               {isAgent ? (
                 <MarkdownText text={m.text || (isPlaceholder ? '思考中…' : '')} />
+              ) : isEditing ? (
+                <div className="space-y-1.5 min-w-[200px]" onClick={(e) => e.stopPropagation()}>
+                  <textarea
+                    value={editText}
+                    onChange={(e) => setEditText(e.target.value)}
+                    rows={Math.min(8, Math.max(2, editText.split('\n').length))}
+                    autoFocus
+                    className="w-full bg-surface border border-brand/50 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none resize-none"
+                  />
+                  <div className="flex gap-1.5 justify-end">
+                    <button
+                      onClick={() => setEditingId(null)}
+                      className="px-2.5 py-1 rounded-lg border border-white/20 text-[11px] text-gray-200 flex items-center gap-1"
+                    >
+                      <X className="w-3 h-3" />取消
+                    </button>
+                    <button
+                      onClick={submitEdit}
+                      disabled={!editText.trim()}
+                      className="px-2.5 py-1 rounded-lg bg-white text-brand text-[11px] font-bold disabled:opacity-40"
+                    >
+                      修改并重发
+                    </button>
+                  </div>
+                </div>
               ) : (
                 <div className="whitespace-pre-wrap">{m.text}</div>
               )}
@@ -165,34 +233,15 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
               )}
 
               {(m.steps?.length || 0) > 0 && (
-                <div className="mt-2 rounded-xl border border-border overflow-hidden">
-                  <button
-                    onClick={() => setShowSteps((p) => ({ ...p, [m.id]: !p[m.id] }))}
-                    className="w-full px-2.5 py-1.5 flex items-center gap-1.5 text-[10px] font-bold text-gray-300 hover:bg-white/5"
-                  >
-                    <Wrench className="w-3 h-3 text-accent-orange" />
-                    工具步骤 {m.steps!.filter((s) => s.status === 'completed').length}/{m.steps!.length}
-                    <ChevronDown className={`w-3 h-3 ml-auto transition-transform ${stepsOpen ? 'rotate-180' : ''}`} />
-                  </button>
-                  {stepsOpen && (
-                    <div className="border-t border-border divide-y divide-white/5">
-                      {m.steps!.map((s) => (
-                        <div key={s.id} className="px-2.5 py-1.5 flex items-center gap-2 text-[11px]">
-                          {s.status === 'completed' ? (
-                            <CheckCircle2 className="w-3.5 h-3.5 text-accent-green shrink-0" />
-                          ) : s.status === 'error' ? (
-                            <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />
-                          ) : (
-                            <RefreshCw className="w-3.5 h-3.5 text-amber-400 animate-spin shrink-0" />
-                          )}
-                          <span className="font-mono text-gray-200 truncate">{s.name}</span>
-                          {s.error && <span className="text-red-400 truncate">{s.error}</span>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <AgentToolSteps
+                  steps={m.steps!}
+                  approvals={approvals || {}}
+                  autoAllowTools={autoAllowTools || {}}
+                  onApprove={onApprove || (() => {})}
+                />
               )}
+
+              {isAgent && m.todo && m.todo.length > 0 && <AgentTodoPanel todo={m.todo} />}
 
               {m.suggested && m.suggested.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1.5">

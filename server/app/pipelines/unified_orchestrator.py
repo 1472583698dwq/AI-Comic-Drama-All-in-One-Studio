@@ -71,9 +71,10 @@ def _mentioned_roles(shot, characters):
 
 
 def _role_front(c) -> str:
+    """角色主参考图：front > avatar > three_quarter > side（旧数据可能只有侧/四分之三视图）。"""
     tv = getattr(c, "three_views", None) or {}
     if isinstance(tv, dict):
-        return tv.get("front") or tv.get("three_quarter") or getattr(c, "avatar_url", "") or ""
+        return (tv.get("front") or getattr(c, "avatar_url", "") or tv.get("three_quarter") or tv.get("side") or "")
     return getattr(c, "avatar_url", "") or ""
 
 
@@ -233,11 +234,14 @@ class UnifiedDramaPipeline:
                     cam = _camera_suffix(shot)
                     if cam and "[运镜:" not in vprompt and "[Camera:" not in vprompt:
                         vprompt = f"{vprompt}{cam}"
+                    # 白模动态预演：导演台录制的 webm 自动作为参考视频（有声明的源才消费）
+                    previz_vid = (getattr(shot, "previz_video_url", "") or "").strip()
                     vreq = VideoGenerateRequest(
                         prompt=vprompt or "cinematic camera move",
                         mode="i2v",
                         first_frame_url=shot.image_url,
                         reference_images=refs or None,
+                        reference_videos=[previz_vid] if previz_vid else None,
                         duration=int(getattr(shot, "duration", 0) or 5),
                         aspect_ratio=aspect_ratio,
                         workflow_id=video_workflow_id,

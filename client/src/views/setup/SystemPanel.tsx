@@ -36,6 +36,7 @@ const TEST_TARGETS: Array<{ k: string; label: string }> = [
   { k: 'comfyui', label: 'ComfyUI' },
   { k: 'siliconflow', label: '硅基流动' },
   { k: 'dashscope', label: '通义万相' },
+  { k: 'openai_image', label: 'OpenAI 生图' },
   { k: 'kling', label: '可灵 Kling' },
   { k: 'minimax_h3', label: 'MiniMax H3' },
   { k: 'seedance', label: 'Seedance' },
@@ -194,7 +195,7 @@ export const SystemPanel: React.FC<Props> = ({ cfg, draft, setDraft, envFile, js
           <KV label="文本大模型" value={health?.openai_configured ? '已配置' : '未配置'} ok={!!health?.openai_configured} />
           <KV label="ComfyUI" value={health?.comfyui_online ? '在线' : '未连接（用云端源时可忽略）'} ok={!!health?.comfyui_online} neutral={!health?.comfyui_online} />
           <KV label="已注册生成源"
-            value={`图 ${health?.providers?.image_count ?? '—'} · 音 ${health?.providers?.audio_count ?? '—'}`} neutral />
+            value={`图 ${health?.providers?.image_count ?? '—'} · 视 ${health?.providers?.video_count ?? '—'} · 音 ${health?.providers?.audio_count ?? '—'}`} neutral />
           <div className="pt-1.5">
             <div className="flex items-center gap-2 flex-wrap mb-2">
               <button onClick={runAllTests} disabled={testingAll}

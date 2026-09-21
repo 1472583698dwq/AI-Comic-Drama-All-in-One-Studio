@@ -30,7 +30,7 @@ interface ProjectState {
 
   // Script & Generation
   importNovelScript: (text: string, style?: StylePreset, ratio?: AspectRatio) => Promise<void>;
-  generateShotVideo: (shotId: string, options?: { mode?: 'i2v' | 'r2v' | 't2v'; prompt?: string; duration?: number; provider?: string; workflow_id?: string; dynamic_inputs?: Record<string, any>; omit_first_frame?: boolean }) => Promise<void>;
+  generateShotVideo: (shotId: string, options?: { mode?: 'i2v' | 'r2v' | 't2v'; prompt?: string; duration?: number; provider?: string; workflow_id?: string; dynamic_inputs?: Record<string, any>; omit_first_frame?: boolean; reference_videos?: string[] }) => Promise<void>;
   updateShot: (shotId: string, updates: Partial<StoryboardShot>) => void;
   updateCharacter: (charId: string, updates: Partial<Character>) => void;
   addCharacter: (character: Character) => void;
@@ -256,11 +256,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // （shotReference 唯一口径），不再把首帧重复塞进参考槽污染约束。
       // 直出（多参考 r2v）调用方传 omit_first_frame：旧首帧不再注入，纯绑定驱动。
       const diRefs = (options?.dynamic_inputs as any)?.reference_images ?? (options?.dynamic_inputs as any)?.reference_image;
+      // 白模动态预演自动作为参考视频：调用方没显式传时，取本镜 previz_video_url（有声明的源才消费）
+      const refVideos = options?.reference_videos
+        || ((shot as any).previz_video_url ? [(shot as any).previz_video_url] : undefined);
       const res: any = await apiService.generateShotVideo({
         prompt,
         mode,
         first_frame_url: options?.omit_first_frame ? undefined : (shot.image_url || undefined),
         reference_images: Array.isArray(diRefs) ? diRefs : (diRefs ? [diRefs] : undefined),
+        reference_videos: Array.isArray(refVideos) ? refVideos : undefined,
         duration,
         aspect_ratio: proj.aspect_ratio || '9:16',
         provider: options?.provider,

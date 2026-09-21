@@ -31,7 +31,7 @@ EMOTION_TAGS = {
 
 class MiniMaxTTSProvider(AudioProvider):
     id = "minimax"
-    display_name = "MiniMax Speech-01"
+    display_name = "MiniMax Speech"
     description = "MiniMax 超拟人语音，支持怒吼/低语/哭腔等情绪标签"
     icon = "Mic"
 
@@ -44,9 +44,9 @@ class MiniMaxTTSProvider(AudioProvider):
         try:
             async with httpx.AsyncClient(timeout=8.0) as client:
                 r = await client.post(
-                    f"{settings.MINIMAX_BASE_URL.rstrip('/')}/text/chatcompletion_v2",
+                    f"{settings.MINIMAX_BASE_URL.rstrip('/')}/chat/completions",
                     headers={"Authorization": f"Bearer {settings.MINIMAX_API_KEY}", "Content-Type": "application/json"},
-                    json={"model": settings.LLM_MODEL, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1},
+                    json={"model": settings.LLM_MODEL or "MiniMax-M2.5", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1},
                 )
                 return r.status_code in (200, 400, 401)  # 401说明key无效但服务通
         except Exception:

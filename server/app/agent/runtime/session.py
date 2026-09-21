@@ -210,19 +210,10 @@ class Session:
                         })
                 msgs.append(m)
             elif t == E.TOOL_RESULT:
-                d2 = d
-                content = d2.get("result")
-                if not isinstance(content, str):
-                    try:
-                        content = json.dumps(content, ensure_ascii=False, default=str)
-                    except Exception:
-                        content = str(content)
-                if d2.get("status") != "success":
-                    content = json.dumps({"error": d2.get("error") or "工具执行失败"}, ensure_ascii=False)
                 msgs.append({
                     "role": "tool",
-                    "tool_call_id": d2.get("call_id") or "",
-                    "content": content or "",
+                    "tool_call_id": d.get("call_id") or "",
+                    "content": E.tool_result_content_text(d),
                 })
             elif t == E.COMPACTION_SUMMARY and seq not in shadowed:
                 text = str(d.get("text") or "")

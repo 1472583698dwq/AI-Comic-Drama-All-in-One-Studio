@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 import { Image as ImageIcon, Video, Music, Type, Upload, Trash2 } from 'lucide-react';
 import { apiService } from '../../../services/api';
+import { AutoRatioMedia } from '../../ui/AutoRatioMedia';
 
 const API_ORIGIN = window.location.port === '5173' ? 'http://127.0.0.1:8000' : '';
 
@@ -29,10 +30,9 @@ export const LoadImageNode: React.FC<NodeProps> = ({ data, id })=>{
       <Handle type="source" position={Position.Right} id="image" className="!bg-violet-500 !w-3 !h-3 !border-2 !border-surface" style={{top:'50%'}}/>
       <div className="p-3 space-y-2">
         {url ? (
-          <div className="relative group">
-            <img src={getUrl(url)} alt="" className="w-full h-32 object-cover rounded-xl border border-border bg-surface-secondary"/>
+          <AutoRatioMedia src={getUrl(url)} fallbackAspect="4/3" maxHeight={220} className="rounded-xl border border-border bg-surface-secondary group">
             <button onClick={()=> set('')} className="absolute top-1.5 right-1.5 p-1 rounded-lg bg-red-500/80 text-white hover:bg-red-600 transition-colors shadow-sm"><Trash2 className="w-3 h-3"/></button>
-          </div>
+          </AutoRatioMedia>
         ) : (
           <label className="flex flex-col items-center justify-center h-24 rounded-xl border border-dashed border-violet-500/30 bg-violet-500/5 cursor-pointer hover:bg-violet-500/10 transition-colors">
             <Upload className="w-5 h-5 text-violet-500"/><span className="text-xs text-violet-600 dark:text-violet-300 mt-1 font-medium">上传参考图 / 拖素材</span>
@@ -69,12 +69,11 @@ export const LoadImageBatchNode: React.FC<NodeProps> = ({ data, id })=>{
       </div>
       <Handle type="source" position={Position.Right} id="images" className="!bg-violet-500 !w-3 !h-3 !border-2 !border-surface" />
       <div className="p-3 space-y-2">
-        <div className="grid grid-cols-3 gap-1.5 min-h-[80px]">
+        <div className="grid grid-cols-3 gap-1.5 min-h-[80px] items-start">
           {urls.map((u,i)=>(
-            <div key={i} className="relative group aspect-square rounded-lg overflow-hidden border border-border bg-surface-secondary">
-              <img src={getUrl(u)} alt="" className="w-full h-full object-cover"/>
+            <AutoRatioMedia key={i} src={getUrl(u)} fallbackAspect="1/1" className="rounded-lg border border-border bg-surface-secondary group">
               <button onClick={()=> removeAt(i)} className="absolute top-0.5 right-0.5 p-0.5 rounded bg-red-500 text-white opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 className="w-3 h-3"/></button>
-            </div>
+            </AutoRatioMedia>
           ))}
           {urls.length===0 && <div className="col-span-3 text-[11px] [color:var(--color-text-muted)] text-center py-6 border border-dashed border-border rounded-xl">拖入素材或上传多张</div>}
         </div>
@@ -106,7 +105,7 @@ export const LoadVideoNode: React.FC<NodeProps> = ({ data, id })=>{
       </div>
       <Handle type="source" position={Position.Right} id="video" className="!bg-orange-500 !w-3 !h-3 !border-2 !border-surface"/>
       <div className="p-3 space-y-2">
-        {url ? <video src={getUrl(url)} controls className="w-full h-28 rounded-xl bg-surface-secondary object-cover border border-border"/> : <div className="h-20 flex items-center justify-center text-xs [color:var(--color-text-muted)] border border-dashed border-border rounded-xl">暂无视频</div>}
+        {url ? <AutoRatioMedia kind="video" src={getUrl(url)} fallbackAspect="16/9" maxHeight={220} className="rounded-xl bg-surface-secondary border border-border" videoProps={{ controls: true }} /> : <div className="h-20 flex items-center justify-center text-xs [color:var(--color-text-muted)] border border-dashed border-border rounded-xl">暂无视频</div>}
         <input value={url} onChange={e=> sync(e.target.value)} placeholder="/storage/... 或 http" className="w-full bg-surface-secondary border border-border rounded-lg px-2.5 py-1.5 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] font-mono focus:outline-none focus:border-brand"/>
       </div>
     </div>

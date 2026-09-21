@@ -27,8 +27,8 @@ _TASK_STORE: Dict[str, Dict[str, Any]] = {}
 
 class CloudVideoProvider(VideoProvider):
     id = "minimax_video"
-    display_name = "云端视频 (MiniMax / Kling)"
-    description = "MiniMax / 快手可灵等云端视频模型，支持参考生视频 (R2V) 与图生视频 (I2V)"
+    display_name = "云端视频（旧版 MiniMax v1）"
+    description = "旧版 v1 视频通道（video-01/Hailuo 世代）；可灵回退未实现，新项目建议改用 MiniMax H3 / 可灵 / Seedance / Wan3.0"
     icon = "CloudLightning"
 
     def is_configured(self) -> bool:
@@ -63,10 +63,9 @@ class CloudVideoProvider(VideoProvider):
         raise RuntimeError("云端视频调用失败，且无可用的回退通道")
 
     async def _generate_minimax(self, req: VideoGenerateRequest, started: float) -> VideoGenerateResult:
-        base = getattr(settings, "MINIMAX_BASE_URL", "https://api.minimax.chat/v1").rstrip("/")
-        url = f"{base}/video_generation" if "video" not in base else base
-        if "hailuo" not in url and "minimax" in url:
-            url = "https://api.minimax.chat/v1/video_generation"
+        # 旧版 v1 通道（video-01/Hailuo 世代）：域名与模型名跟随配置，不再写死 api.minimax.chat
+        base = (getattr(settings, "MINIMAX_BASE_URL", "") or "https://api.minimaxi.com/v1").rstrip("/")
+        url = f"{base}/video_generation"
 
         headers = {
             "Authorization": f"Bearer {settings.MINIMAX_API_KEY}",
@@ -120,7 +119,7 @@ class CloudVideoProvider(VideoProvider):
             }
 
             # 启动后台轮询下载协程
-            asyncio.create_task(self._poll_and_download_minimax(task_id, settings.MINIMAX_API_KEY))
+            asyncio.create_task(self._poll_and_download_minimax(task_id, settings.MINIMAX_API_KEY, base))
 
             out_filename = f"minimax_{task_id}.mp4"
             out_path = os.path.join(VIDEOS_DIR, out_filename)
@@ -138,9 +137,10 @@ class CloudVideoProvider(VideoProvider):
                 raw=data,
             )
 
-    async def _poll_and_download_minimax(self, task_id: str, api_key: str):
+    async def _poll_and_download_minimax(self, task_id: str, api_key: str, base: str = ""):
         """后台轮询 MiniMax 视频生成进度，完成后自动下载到 storage/videos/"""
-        query_url = f"https://api.minimax.chat/v1/query/video_generation?task_id={task_id}"
+        base = (base or (getattr(settings, "MINIMAX_BASE_URL", "") or "https://api.minimaxi.com/v1")).rstrip("/")
+        query_url = f"{base}/query/video_generation?task_id={task_id}"
         headers = {"Authorization": f"Bearer {api_key}"}
         out_filename = f"minimax_{task_id}.mp4"
         out_path = os.path.join(VIDEOS_DIR, out_filename)

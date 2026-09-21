@@ -12,6 +12,7 @@ import { apiService } from '../../../services/api';
 import { paramsSchemaToSpecs } from '../providerSkills';
 import { DynamicControl } from '../controls/DynamicControl';
 import { ShotWriteBackControls } from './ShotWriteBackControl';
+import { AutoRatioMedia } from '../../ui/AutoRatioMedia';
 
 const HANDLE_MEDIA: Record<string, 'image' | 'video' | 'audio'> = {
   image: 'image', images: 'image', video: 'video', videos: 'video', audio: 'audio', audios: 'audio',
@@ -152,7 +153,7 @@ export const CustomNode: React.FC<NodeProps> = ({ id, data, selected }) => {
         {resultUrl ? (
           <div className="rounded-xl overflow-hidden border border-white/10 bg-surface-secondary">
             {resultKind === 'video' ? <video src={resultUrl} controls className="w-full max-h-40" />
-              : resultKind === 'image' ? <img src={resultUrl} alt="" className="w-full max-h-40 object-cover" />
+              : resultKind === 'image' ? <AutoRatioMedia src={resultUrl} fallbackAspect="1/1" maxHeight={160} />
               : <audio src={resultUrl} controls className="w-full" />}
           </div>
         ) : d.text && !d.prompt ? (

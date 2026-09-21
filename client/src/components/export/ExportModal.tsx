@@ -14,6 +14,7 @@ import { useProjectStore } from '../../stores/useProjectStore';
 import { apiService } from '../../services/api';
 import { syncExporterSpecs, listExporterSpecs, type ExporterInfo } from '../../services/exporterSpecs';
 import { useEscapeClose } from '../../hooks/useEscapeClose';
+import { AutoRatioMedia } from '../ui/AutoRatioMedia';
 
 interface ExportModalProps {
   isOpen: boolean;
@@ -119,17 +120,16 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
           {/* Project Summary Card */}
           <div className="bg-surface-secondary p-4 rounded-xl border border-border flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <div className="w-12 h-12 rounded-lg overflow-hidden bg-surface-secondary border border-border flex-shrink-0">
-                {project.scenes[0]?.shots[0]?.image_url ? (
-                  <img
-                    src={project.scenes[0].shots[0].image_url?.startsWith('/') ? API_ORIGIN + project.scenes[0].shots[0].image_url : project.scenes[0].shots[0].image_url}
-                    alt=""
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-[9px] text-gray-500">无图</div>
-                )}
-              </div>
+              {project.scenes[0]?.shots[0]?.image_url ? (
+                <AutoRatioMedia
+                  src={project.scenes[0].shots[0].image_url?.startsWith('/') ? API_ORIGIN + project.scenes[0].shots[0].image_url : project.scenes[0].shots[0].image_url}
+                  fallbackAspect="1/1"
+                  maxHeight={48}
+                  className="rounded-lg border border-border shrink-0"
+                />
+              ) : (
+                <div className="w-12 h-12 rounded-lg overflow-hidden bg-surface-secondary border border-border flex-shrink-0 flex items-center justify-center text-[9px] text-gray-500">无图</div>
+              )}
               <div>
                 <h3 className="text-xs font-bold text-white">{project.title}</h3>
                 <p className="text-[11px] text-gray-400 mt-0.5">
