@@ -5,19 +5,19 @@ import {
   RotateCcw, 
   ZoomIn, 
   ZoomOut, 
-  Volume2, 
   Film, 
   Mic, 
   Music, 
   Type, 
   MessageSquare,
   Sparkles,
-  Scissors,
   ChevronDown,
   ChevronUp
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { StoryboardShot } from '../../types';
+
+const API_ORIGIN = typeof window !== 'undefined' && window.location.port === '5173' ? 'http://127.0.0.1:8000' : '';
 
 export const MultiTrackTimeline: React.FC = () => {
   const { 
@@ -117,10 +117,11 @@ export const MultiTrackTimeline: React.FC = () => {
 
           <button
             onClick={() => setIsPlaying(!isPlaying)}
+            title="时间线走带：只推进播放头，不在此处播放画面与声音（素材预览/连播在分镜工作台）"
             className="p-1.5 px-3 rounded-lg bg-brand text-white font-medium flex items-center space-x-1.5 shadow-sm shadow-brand/30 hover:opacity-90 transition-all"
           >
             {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 fill-current" />}
-            <span>{isPlaying ? '暂停' : '播放'}</span>
+            <span>{isPlaying ? '暂停走带' : '时间线走带'}</span>
           </button>
 
           {/* Timecode */}
@@ -239,55 +240,53 @@ export const MultiTrackTimeline: React.FC = () => {
               </div>
             </div>
 
-            {/* Track 2: 🎙️ 角色对白配音轨 */}
+            {/* Track 2: 🎙️ 配音轨（对白与旁白共用同一份 TTS 素材） */}
             <div className="h-12 flex items-center hover:bg-surface-hover/30">
               <div className="w-44 flex-shrink-0 px-3 flex items-center space-x-2 border-r border-border bg-surface">
                 <Mic className="w-3.5 h-3.5 text-accent-pink" />
-                <span className="[color:var(--color-text-main)] font-semibold truncate">角色对白配音</span>
+                <span className="[color:var(--color-text-main)] font-semibold truncate">对白/旁白配音</span>
               </div>
               <div className="flex-1 h-full relative py-1">
-                {renderDialogueTrack(shots, zoom, activeShotId)}
+                {renderDialogueTrack(shots, zoom)}
               </div>
             </div>
 
-            {/* Track 3: 📢 史诗旁白解说轨 */}
-            <div className="h-11 flex items-center hover:bg-surface-hover/30">
-              <div className="w-44 flex-shrink-0 px-3 flex items-center space-x-2 border-r border-border bg-surface">
-                <Volume2 className="w-3.5 h-3.5 text-brand-blue" />
-                <span className="[color:var(--color-text-main)] font-semibold truncate">史诗旁白解说</span>
-              </div>
-              <div className="flex-1 h-full relative py-1">
-                {renderVoiceoverTrack(shots, zoom)}
-              </div>
-            </div>
-
-            {/* Track 4: 💬 动态花字字幕轨 */}
+            {/* Track 3: 💬 字幕轨 */}
             <div className="h-10 flex items-center hover:bg-surface-hover/30">
               <div className="w-44 flex-shrink-0 px-3 flex items-center space-x-2 border-r border-border bg-surface">
                 <Type className="w-3.5 h-3.5 text-accent-green" />
-                <span className="[color:var(--color-text-main)] font-semibold truncate">动态漫剧字幕</span>
+                <span className="[color:var(--color-text-main)] font-semibold truncate">漫剧字幕</span>
               </div>
               <div className="flex-1 h-full relative py-1">
                 {renderSubtitleTrack(shots, zoom)}
               </div>
             </div>
 
-            {/* Track 5: 🎵 BGM & 音效轨 */}
+            {/* Track 4: 🎵 BGM 轨（仅当项目绑定了真实音频素材） */}
             <div className="h-10 flex items-center hover:bg-surface-hover/30">
               <div className="w-44 flex-shrink-0 px-3 flex items-center space-x-2 border-r border-border bg-surface">
                 <Music className="w-3.5 h-3.5 text-accent-orange" />
                 <span className="[color:var(--color-text-main)] font-semibold truncate">BGM 氛围原声</span>
               </div>
               <div className="flex-1 h-full relative py-1">
-                <div
-                  className="absolute h-8 rounded-lg bg-accent-orange/15 border border-accent-orange/40 flex items-center px-3 space-x-2"
-                  style={{ left: '0px', width: `${totalDuration * zoom}px` }}
-                >
-                  <Sparkles className="w-3 h-3 text-accent-orange animate-pulse" />
-                  <span className="text-[10px] text-accent-orange font-medium truncate">
-                    {project?.bgm_name || 'Epic_Battle_Orchestra.mp3'} (智能节拍吸附)
-                  </span>
-                </div>
+                {project?.bgm_url ? (
+                  <div
+                    className="absolute h-8 rounded-lg bg-accent-orange/15 border border-accent-orange/40 flex items-center px-3 space-x-2"
+                    style={{ left: '0px', width: `${totalDuration * zoom}px` }}
+                  >
+                    <Music className="w-3 h-3 text-accent-orange shrink-0" />
+                    <span className="text-[10px] text-accent-orange font-medium truncate">
+                      {project.bgm_name || project.bgm_url.split('/').pop()} · 导出时按素材长度平铺
+                    </span>
+                  </div>
+                ) : (
+                  <div
+                    className="absolute h-8 rounded-lg border border-dashed border-border flex items-center px-3"
+                    style={{ left: '0px', width: `${totalDuration * zoom}px` }}
+                  >
+                    <span className="text-[10px] text-gray-500 truncate">未绑定 BGM 素材 · 导出的剪映草稿不含音乐轨</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -311,6 +310,7 @@ function renderShotTrack(
     const width = shot.duration * zoom;
     accumulated += shot.duration;
     const isActive = shot.id === activeShotId;
+    const frame = shot.video_url || shot.image_url || (shot as any).previz_video_url || (shot as any).previz_url;
 
     return (
       <div
@@ -322,13 +322,16 @@ function renderShotTrack(
         className={`absolute h-12 rounded-lg overflow-hidden border cursor-pointer transition-all flex items-center shadow-sm ${
           isActive
             ? 'border-brand bg-brand/20 ring-2 ring-brand/50 z-10'
-            : 'border-border bg-surface hover:border-brand/50'
+            : frame
+              ? 'border-border bg-surface hover:border-brand/50'
+              : 'border-dashed border-red-500/50 bg-red-500/5'
         }`}
         style={{ left: `${left}px`, width: `${width - 4}px` }}
+        title={frame ? undefined : '该镜没有任何画面素材（视频/图片/预演截图），导出剪映草稿时会被跳过'}
       >
         {shot.image_url && (
           <img 
-            src={shot.image_url.startsWith('/') ? 'http://127.0.0.1:8000' + shot.image_url : shot.image_url} 
+            src={shot.image_url.startsWith('/') ? API_ORIGIN + shot.image_url : shot.image_url} 
             alt={`Shot ${shot.shot_index}`} 
             className="w-12 h-full object-cover rounded-l opacity-90" 
           />
@@ -339,6 +342,11 @@ function renderShotTrack(
             <span className="text-[9px] px-1 rounded bg-surface-secondary border border-border text-brand font-mono">
               {shot.duration}s
             </span>
+            {shot.video_url
+              ? <span className="text-[9px] text-brand-blue/80">视频</span>
+              : shot.image_url
+                ? <span className="text-[9px] text-gray-500">静帧</span>
+                : <span className="text-[9px] text-red-300">无画面</span>}
           </div>
           <p className="text-[9px] [color:var(--color-text-muted)] truncate">{shot.action_desc || shot.image_prompt}</p>
         </div>
@@ -347,58 +355,49 @@ function renderShotTrack(
   });
 }
 
-// Helper: Render Dialogue Track with Audio Waveforms
-function renderDialogueTrack(shots: StoryboardShot[], zoom: number, activeShotId: string | null) {
+// Helper: Render Dialogue Track — 块的存在与否取决于"是否真的有配音文件"，与导出器口径一致
+function renderDialogueTrack(shots: StoryboardShot[], zoom: number) {
   let accumulated = 0;
   return shots.map((shot) => {
     const left = accumulated * zoom;
     const width = shot.duration * zoom;
     accumulated += shot.duration;
 
-    if (!shot.dialogue) return null;
+    const script = shot.dialogue || shot.voiceover || '';
+    const isVoiceover = !shot.dialogue && !!shot.voiceover;
+    const audioSec = shot.audio_duration || 0;
 
-    return (
-      <div
-        key={shot.id}
-        className="absolute h-9 rounded-lg bg-accent-pink/15 border border-accent-pink/40 flex items-center px-2 space-x-1.5 overflow-hidden"
-        style={{ left: `${left}px`, width: `${width - 4}px` }}
-      >
-        <span className="text-[10px] font-semibold text-accent-pink truncate">
-          {shot.speaker_name}: "{shot.dialogue}"
-        </span>
-        {/* Simulated Waveform Bars */}
-        <div className="flex items-center space-x-0.5 ml-auto opacity-70">
-          {[40, 70, 90, 60, 85, 45, 100, 50, 75, 30].map((h, i) => (
-            <div
-              key={i}
-              className="w-[2px] bg-accent-pink rounded-full"
-              style={{ height: `${h * 0.16}px` }}
-            />
-          ))}
+    if (!shot.audio_url) {
+      if (!script) return null;
+      return (
+        <div
+          key={shot.id}
+          className="absolute h-9 rounded-lg border border-dashed border-accent-pink/40 flex items-center px-2 overflow-hidden"
+          style={{ left: `${left}px`, width: `${width - 4}px` }}
+          title={`台词/旁白还没有配音文件，导出时该镜只有画面与字幕：${script}`}
+        >
+          <span className="text-[10px] text-accent-pink/60 truncate">#{shot.shot_index} 待配音 · {script}</span>
         </div>
-      </div>
-    );
-  });
-}
+      );
+    }
 
-// Helper: Render Voiceover Track
-function renderVoiceoverTrack(shots: StoryboardShot[], zoom: number) {
-  let accumulated = 0;
-  return shots.map((shot) => {
-    const left = accumulated * zoom;
-    const width = shot.duration * zoom;
-    accumulated += shot.duration;
-
-    if (!shot.voiceover) return null;
-
+    const clipped = audioSec > shot.duration + 0.05;
     return (
       <div
         key={shot.id}
-        className="absolute h-8 rounded-lg bg-brand-blue/15 border border-brand-blue/40 flex items-center px-2 space-x-1.5 overflow-hidden"
+        className={`absolute h-9 rounded-lg border flex items-center px-2 space-x-1.5 overflow-hidden ${
+          clipped
+            ? 'bg-red-500/15 border-red-500/50'
+            : 'bg-accent-pink/15 border-accent-pink/40'
+        }`}
         style={{ left: `${left}px`, width: `${width - 4}px` }}
+        title={clipped ? `配音 ${audioSec.toFixed(2)}s 超出该镜 ${shot.duration}s 槽位，导出时会被截断` : undefined}
       >
-        <span className="text-[10px] text-brand-blue font-medium truncate">
-          [旁白] {shot.voiceover}
+        <span className={`text-[10px] font-semibold truncate ${clipped ? 'text-red-300' : 'text-accent-pink'}`}>
+          {isVoiceover ? '[旁白] ' : `${shot.speaker_name || '未署名'}: `}“{script}”
+        </span>
+        <span className="text-[9px] font-mono ml-auto shrink-0 text-white/45">
+          {clipped ? '⚠ ' : ''}{audioSec ? `${audioSec.toFixed(1)}s` : '未测长'}
         </span>
       </div>
     );

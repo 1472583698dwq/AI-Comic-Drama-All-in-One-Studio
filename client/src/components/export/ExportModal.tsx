@@ -8,12 +8,15 @@ import {
   CheckCircle2, 
   Sparkles, 
   FolderDown,
-  Layers
+  Layers,
+  Music,
+  AlertTriangle
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { apiService } from '../../services/api';
 import { syncExporterSpecs, listExporterSpecs, type ExporterInfo } from '../../services/exporterSpecs';
 import { useEscapeClose } from '../../hooks/useEscapeClose';
+import { AssetPickerModal } from '../asset/AssetPickerModal';
 
 interface ExportModalProps {
   isOpen: boolean;
@@ -21,10 +24,12 @@ interface ExportModalProps {
 }
 
 export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => {
-  const { project, totalDuration } = useProjectStore();
+  const { project, totalDuration, setProject } = useProjectStore();
   const [isExporting, setIsExporting] = useState(false);
   const [exportedDraft, setExportedDraft] = useState<any>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [engine, setEngine] = useState<{ installed: boolean; error?: string | null } | null>(null);
+  const [pickingBgm, setPickingBgm] = useState(false);
   const [pluginExporters, setPluginExporters] = useState<ExporterInfo[]>([]);
   const [exporterBusyId, setExporterBusyId] = useState('');
   const [exporterResults, setExporterResults] = useState<Record<string, any>>({});
@@ -35,13 +40,17 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
     syncExporterSpecs(project?.id)
       .then(() => { if (!cancelled) setPluginExporters(listExporterSpecs()); })
       .catch(() => {});
+    apiService.jianyinEngine()
+      .then((s) => { if (!cancelled) setEngine(s); })
+      .catch(() => { if (!cancelled) setEngine({ installed: false, error: '引擎自检请求失败' }); });
     return () => { cancelled = true; };
   }, [isOpen, project?.id]);
 
   useEscapeClose(isOpen, onClose);
   if (!isOpen || !project) return null;
 
-  const API_ORIGIN = 'http://127.0.0.1:8000';
+  const API_ORIGIN = typeof window !== 'undefined' && window.location.port === '5173' ? 'http://127.0.0.1:8000' : '';
+  const engineReady = engine === null || engine.installed;
 
   const handleRunExporter = async (spec: ExporterInfo) => {
     setExporterBusyId(spec.id);
@@ -90,6 +99,16 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
     a.click();
   };
 
+  const bindBgm = (asset: { name: string; url: string }) => {
+    setProject({ ...project, bgm_url: asset.url, bgm_name: asset.name } as any);
+    setExportedDraft(null);
+  };
+
+  const clearBgm = () => {
+    setProject({ ...project, bgm_url: null, bgm_name: '' } as any);
+    setExportedDraft(null);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fade-in">
       <div className="w-full max-w-2xl bg-surface rounded-2xl border border-border flex flex-col overflow-hidden shadow-2xl">
@@ -102,7 +121,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
             <div>
               <h2 className="text-sm font-bold text-white">工程导出与成片分发中心</h2>
               <p className="text-[11px] text-gray-400">
-                支持剪映/CapCut 官方草稿工程无损导出，以及 4K/1080P 音画合成
+                导出剪映/CapCut 官方草稿工程（画面/配音/字幕/可选 BGM 轨）
               </p>
             </div>
           </div>
@@ -142,6 +161,24 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
             </span>
           </div>
 
+          {/* 全片 BGM 绑定：决定草稿里是否生成 bgm 轨 */}
+          <div className="flex items-center gap-2 text-[11px] bg-surface-secondary/60 border border-border rounded-xl px-3 py-2">
+            <Music className="w-3.5 h-3.5 text-accent-orange shrink-0" />
+            <span className="text-gray-400 shrink-0">全片 BGM</span>
+            {project.bgm_url ? (
+              <>
+                <span className="text-gray-200 truncate flex-1" title={project.bgm_url}>{project.bgm_name || project.bgm_url.split('/').pop()}</span>
+                <button onClick={() => setPickingBgm(true)} className="px-2 py-0.5 rounded-lg bg-surface-tertiary hover:bg-surface border border-border text-gray-300 shrink-0">更换</button>
+                <button onClick={clearBgm} className="px-2 py-0.5 rounded-lg hover:bg-surface-tertiary border border-border text-gray-500 hover:text-red-300 shrink-0">清除</button>
+              </>
+            ) : (
+              <>
+                <span className="text-gray-500 flex-1">未绑定音频素材，导出的草稿不会包含 BGM 轨</span>
+                <button onClick={() => setPickingBgm(true)} className="px-2 py-0.5 rounded-lg bg-accent-orange/15 hover:bg-accent-orange/25 border border-accent-orange/40 text-accent-orange shrink-0">绑定 BGM</button>
+              </>
+            )}
+          </div>
+
           {/* Export Options Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Option 1: 剪映官方草稿导出 (Highlight!) */}
@@ -156,21 +193,53 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
                   <h4 className="text-xs font-bold text-white">剪映 / CapCut 官方草稿工程</h4>
                 </div>
                 <p className="text-[11px] text-gray-400 leading-relaxed mb-4">
-                  直接导出为 <code className="text-brand-light font-mono">draft_content.json</code>，分镜画面轨、角色对白轨、旁白轨、动态字幕与 BGM 100% 自动精确对齐，可在剪映中二次精修。
+                  直接导出为 <code className="text-brand-light font-mono">draft_content.json</code>：主画面轨按<em className="not-italic text-gray-200">素材真实时长</em>排布（静帧可延长、视频不冻帧），配音与字幕对齐到同一槽位；缺素材的镜头会被明确列出而不是静默错轨。
                 </p>
               </div>
 
               {exportedDraft ? (
                 <div className="space-y-2">
-                  <div className="flex items-center space-x-1.5 text-xs text-accent-green font-semibold">
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>草稿生成完毕！（{exportedDraft.video_segments} 个画面片段 / {exportedDraft.caption_segments} 条字幕）</span>
+                  <div className="flex items-start space-x-1.5 text-xs text-accent-green font-semibold">
+                    <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>
+                      草稿已生成：{exportedDraft.video_segments} 画面 / {exportedDraft.audio_segments} 配音 / {exportedDraft.caption_segments} 字幕，
+                      全片实长 {Number(exportedDraft.duration_seconds || 0).toFixed(1)}s
+                      （设计 {Number(exportedDraft.design_duration_seconds || 0).toFixed(1)}s）
+                    </span>
                   </div>
+                  <div className="flex flex-wrap gap-1 text-[10px]">
+                    {(exportedDraft.tracks || []).map((t: string) => (
+                      <span key={t} className="px-1.5 py-0.5 rounded bg-surface-tertiary border border-border text-gray-300 font-mono">{t}</span>
+                    ))}
+                    <span className={`px-1.5 py-0.5 rounded border font-mono ${exportedDraft.bgm?.bound ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-surface-tertiary border-border text-gray-500'}`}>
+                      {exportedDraft.bgm?.bound ? `bgm ×${exportedDraft.bgm.segments}` : 'bgm 未绑定'}
+                    </span>
+                  </div>
+                  {exportedDraft.skipped_shots?.length > 0 && (
+                    <div className="text-[10px] text-red-300 bg-red-500/10 p-2 rounded border border-red-500/25 max-h-24 overflow-y-auto">
+                      <div className="font-bold mb-0.5">{exportedDraft.skipped_shots.length} 个镜头因无可用素材未进入草稿：</div>
+                      {exportedDraft.skipped_shots.map((s: any, i: number) => (<div key={i}>#{s.shot_index} {s.reason}</div>))}
+                    </div>
+                  )}
                   {exportedDraft.warnings?.length > 0 && (
                     <div className="text-[10px] text-amber-300 bg-amber-500/10 p-2 rounded border border-amber-500/20 max-h-20 overflow-y-auto">
                       {exportedDraft.warnings.map((w: string, i: number) => (<div key={i}>⚠️ {w}</div>))}
                     </div>
                   )}
+                  <details className="text-[10px]">
+                    <summary className="cursor-pointer text-gray-400 hover:text-gray-200">逐镜时间线回执（{exportedDraft.report?.length || 0} 条）</summary>
+                    <div className="mt-1 max-h-32 overflow-y-auto font-mono text-gray-400 space-y-0.5">
+                      {(exportedDraft.report || []).map((r: any, i: number) => (
+                        <div key={i} className="flex gap-2">
+                          <span className="text-gray-500 w-8 shrink-0">#{r.shot_index}</span>
+                          <span className="w-24 shrink-0">{(r.start_us / 1e6).toFixed(2)}s → {((r.start_us + r.slot_us) / 1e6).toFixed(2)}s</span>
+                          <span className="truncate flex-1" title={r.picture || ''}>{r.picture || '无画面'}</span>
+                          {r.audio && <span className="text-accent-pink">配音</span>}
+                          {(r.notes || []).map((n: string, j: number) => <span key={j} className="text-amber-300">{n}</span>)}
+                        </div>
+                      ))}
+                    </div>
+                  </details>
                   <div className="text-[10px] text-gray-500 font-mono break-all">📁 {exportedDraft.export_dir}</div>
                   <div className="flex items-center space-x-2">
                     {exportedDraft.export_dir && (
@@ -204,10 +273,16 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
               ) : (
                 <div className="space-y-2">
                   {exportError && <div className="text-xs text-red-300 bg-red-500/15 p-2 rounded border border-red-500/30">⚠️ {exportError}</div>}
+                  {!engineReady && (
+                    <div className="text-[10px] text-amber-200 bg-amber-500/10 p-2 rounded border border-amber-500/25 flex items-start gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                      <span>剪映导出引擎未就绪：{engine?.error || ''}<br />开发环境执行 <code className="font-mono">pip install pyJianYingDraft pymediainfo</code> 后重启服务（打包版已内置）</span>
+                    </div>
+                  )}
                   <button
                     onClick={handleExportJianYing}
-                    disabled={isExporting}
-                    className="w-full py-2.5 rounded-xl bg-gradient-to-r from-brand to-brand-blue text-white font-bold text-xs flex items-center justify-center space-x-2 shadow-lg shadow-brand/20 hover:opacity-90 transition-all"
+                    disabled={isExporting || !engineReady}
+                    className="w-full py-2.5 rounded-xl bg-gradient-to-r from-brand to-brand-blue text-white font-bold text-xs flex items-center justify-center space-x-2 shadow-lg shadow-brand/20 hover:opacity-90 transition-all disabled:opacity-40 disabled:pointer-events-none"
                   >
                     <Sparkles className={`w-4 h-4 ${isExporting ? 'animate-spin' : ''}`} />
                     <span>{isExporting ? '生成多轨草稿中...' : '一键导出剪映草稿 (真实 pyJianYingDraft)'}</span>
@@ -285,6 +360,15 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
           )}
         </div>
       </div>
+
+      <AssetPickerModal
+        isOpen={pickingBgm}
+        title="从素材库选择 BGM"
+        mediaType="audio"
+        defaultCategory="background"
+        onSelect={(asset) => { bindBgm(asset); setPickingBgm(false); }}
+        onClose={() => setPickingBgm(false)}
+      />
     </div>
   );
 };

@@ -61,6 +61,8 @@ class Project(BaseModel):
     characters: List[Character] = Field(default_factory=list)
     scenes: List[Scene] = Field(default_factory=list)
     bgm_name: Optional[str] = "Epic_Battle_Orchestra.mp3"
+    bgm_url: Optional[str] = None  # 真实 BGM 音频地址；导出剪映时按素材长度平铺到 bgm 轨
+    bgm_volume: float = 0.5
     created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.now().isoformat())
     engine: Optional[str] = None # 拆解引擎标识: minimax-llm / local-rule-fallback

@@ -203,7 +203,14 @@ class SkillEngine:
             })
             if res_export.status == "success":
                 modified_data.update({"draft_exported": True, "draft_info": res_export.result})
-                msg = "已执行【剪映多轨自动精修技能】：已通过 pyJianYingDraft 构建含画面轨/配音轨/字幕轨的剪映工程！"
+                info = res_export.result or {}
+                skipped = info.get("skipped_shots") or []
+                msg = (
+                    "已生成剪映草稿：" + " / ".join(info.get("tracks") or [])
+                    + f"，全片实长 {info.get('duration_seconds')}s"
+                    + f"（{info.get('placed_shots')}/{info.get('total_shots')} 个镜头入轨）"
+                    + (f"，{len(skipped)} 个镜头因无可用素材被跳过" if skipped else "")
+                )
             else:
                 msg = f"【剪映多轨自动精修技能】执行失败: {res_export.error}"
 

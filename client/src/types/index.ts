@@ -172,6 +172,8 @@ export interface Project {
   characters: Character[];
   scenes: Scene[];
   bgm_name?: string;
+  bgm_url?: string | null;
+  bgm_volume?: number;
   created_at: string;
   updated_at: string;
   engine?: string;

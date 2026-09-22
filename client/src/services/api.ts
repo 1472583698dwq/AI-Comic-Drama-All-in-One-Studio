@@ -416,6 +416,13 @@ export const apiService = {
     return await res.json();
   },
 
+  // 6.1 剪映导出引擎自检（未安装时前端直接给出安装指引，而不是点了按钮才报错）
+  async jianyinEngine(): Promise<{ installed: boolean; error?: string | null }> {
+    const res = await fetch(`${API_BASE_URL}/projects/export-jianyin/engine`);
+    if (!res.ok) return { installed: false, error: `HTTP ${res.status}` };
+    return await res.json();
+  },
+
   // 7. 系统配置
   async getConfig(): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/config`);

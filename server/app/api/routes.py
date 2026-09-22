@@ -13,7 +13,7 @@ from app.models.schemas import (
 )
 from app.pipelines.script_agent import script_agent
 from app.pipelines.llm_service import llm_service, LLMServiceError
-from app.pipelines.jianyin_exporter import jianyin_exporter
+from app.pipelines.jianyin_exporter import jianyin_exporter, DraftExportError, engine_status as jianyin_engine_status
 from app.pipelines.consistency_engine import consistency_engine
 from app.pipelines.unified_orchestrator import unified_orchestrator
 from app.mcp.server import mcp_registry
@@ -941,13 +941,21 @@ async def call_mcp_tool(req: MCPToolCallRequest):
 # 剪映草稿导出（pyJianYingDraft 真实工程）
 # ============================================================
 
+@router.get("/projects/export-jianyin/engine")
+async def export_jianyin_engine():
+    """导出引擎自检：前端在点击导出之前就能知道 pyJianYingDraft 是否就绪"""
+    return jianyin_engine_status()
+
+
 @router.post("/projects/export-jianyin")
 async def export_jianyin_draft(project: Project):
-    """一键导出剪映 / CapCut 官方草稿工程文件（含画面轨、配音轨、字幕轨）"""
+    """一键导出剪映 / CapCut 官方草稿工程文件（含画面轨、配音轨、字幕轨、可选 BGM 轨）"""
     try:
         return await jianyin_exporter.export_project_to_jianyin_draft_async(project)
+    except DraftExportError as e:
+        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"剪映草稿导出失败: {e}")
+        raise HTTPException(status_code=500, detail=f"剪映草稿导出失败: {type(e).__name__}: {e}")
 
 # ============================================================
 # 全链路编排（LLM 拆解 → 生图 → 配音 → 导出）
