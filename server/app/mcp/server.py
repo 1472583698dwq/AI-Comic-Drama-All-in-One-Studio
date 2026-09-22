@@ -837,7 +837,7 @@ class MCPServerRegistry:
         # 10. 剪映导出
         self.register_tool(MCPToolDefinition(
             name="export_jianyin_draft",
-            description="[pyJianYingDraft] 将漫剧多轨时间线无损导出为剪映/CapCut官方草稿工程",
+            description="[pyJianYingDraft] 按素材真实时长把分镜时间线导出为剪映/CapCut官方草稿（画面/配音/字幕/可选BGM轨），返回逐镜回执与跳过清单",
             category="export",
             icon="Share2",
             author="pyJianYingDraft",
