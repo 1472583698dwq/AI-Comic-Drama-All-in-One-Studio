@@ -206,14 +206,25 @@ export function createAgentStore(scope: AgentScope) {
       }
     };
 
-    /** 组合 token 落地：同步 behavior/execution 两维 + localStorage + 当前会话持久化 */
+    /** 运行模式热推后端：切「审批/自动」立即对当前运行轮生效（WS 优先，HTTP 兜底） */
+    const pushRunMode = (token: RunMode) => {
+      const sid = sessionKey();
+      if (!sid) return;
+      agentSocket.ensure();
+      const sent = agentSocket.send({ action: 'set_run_mode', session_id: sid, run_mode: token });
+      if (!sent) apiService.agentSetRunMode(sid, token).catch(() => {});
+    };
+
+    /** 组合 token 落地：同步 behavior/execution 两维 + localStorage + 当前会话持久化 + 热推后端 */
     const applyRunMode = (token: RunMode) => {
       const runMode = composeRunMode(behaviorOfRunMode(token), executionOfRunMode(token));
       set({ runMode, behavior: behaviorOfRunMode(runMode), execution: executionOfRunMode(runMode) });
       try { localStorage.setItem(RUNMODE_KEY, runMode); } catch {}
       const { activeSessionId, sessions } = get();
       set({ sessions: sessions.map((s) => (s.id === activeSessionId ? { ...s, run_mode: runMode, updated_at: new Date().toISOString() } : s)) });
-      schedulePersist();
+      // 立即持久化：避免防抖窗口内刷新导致服务端仍是旧模式（重开项目回退审批）
+      persistNow();
+      pushRunMode(runMode);
     };
 
     /** 会话 token → 两维状态（加载/切换会话时用） */
@@ -293,9 +304,9 @@ export function createAgentStore(scope: AgentScope) {
       // 重连成功：把服务端仍在运行的会话重新挂到新 socket，并取快照对账
       if (s === 'open' && prevWsStatus !== 'open') {
         try {
-          const { projectId, activeSessionId } = get();
+          const { projectId, activeSessionId, runMode } = get();
           if (projectId && activeSessionId) {
-            agentSocket.send({ action: 'attach_session', session_id: `proj_${projectId}_${activeSessionId}`, tail: 120 });
+            agentSocket.send({ action: 'attach_session', session_id: `proj_${projectId}_${activeSessionId}`, tail: 120, run_mode: runMode });
           }
         } catch {}
       }
@@ -347,7 +358,10 @@ export function createAgentStore(scope: AgentScope) {
           .getProjectAgentSessions(projectId, scope)
           .then((res) => {
             if (get().projectId !== projectId) return;
-            const list: AgentSession[] = Array.isArray(res?.sessions) ? res.sessions : [];
+            const list: AgentSession[] = (Array.isArray(res?.sessions) ? res.sessions : [])
+              .slice()
+              // 最近活跃会话优先：保证重开项目恢复到上次所在会话（其 run_mode/mode 才是用户刚设的）
+              .sort((a: AgentSession, b: AgentSession) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
             if (list.length > 0) {
               const first = list[0];
               const token = composeRunMode(behaviorOfRunMode(first.run_mode || runMode), executionOfRunMode(first.run_mode || runMode));
@@ -436,7 +450,10 @@ export function createAgentStore(scope: AgentScope) {
           approvals: {},
           streamingMsgId: null,
           isRunning: false,
+          sessions: get().sessions.map((s) => (s.id === id ? { ...s, updated_at: new Date().toISOString() } : s)),
         });
+        persistNow();
+        pushRunMode(token);
       },
 
       async deleteSession(id) {
@@ -454,7 +471,7 @@ export function createAgentStore(scope: AgentScope) {
           const sess = makeSession(scope, '新会话', mode, runMode);
           set({ sessions: [sess], activeSessionId: sess.id, messages: sess.messages, approvals: {} });
         } else if (activeSessionId === id) {
-          const first = remaining[0];
+          const first = [...remaining].sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')))[0];
           const token = composeRunMode(
             behaviorOfRunMode(first.run_mode || get().runMode),
             executionOfRunMode(first.run_mode || get().runMode)
@@ -592,6 +609,12 @@ export function createAgentStore(scope: AgentScope) {
             set((s) => ({ approvals: { ...s.approvals, [aid]: { tool_name: tool, args: ev.arguments || {}, createdAt: Date.now() } } }));
             // 本会话"始终允许"：自动放行（IDE 式免打扰）
             if (tool && get().autoAllowTools[tool]) {
+              set((s) => (s.approvals[aid] ? { approvals: { ...s.approvals, [aid]: { ...s.approvals[aid], decided: true } } } : {}));
+              get().approve(aid, true);
+              return;
+            }
+            // 全局「自动执行」兜底：模式热同步存在竞态（事件早于 set_run_mode 到达）时自动放行
+            if (get().execution === 'auto') {
               set((s) => (s.approvals[aid] ? { approvals: { ...s.approvals, [aid]: { ...s.approvals[aid], decided: true } } } : {}));
               get().approve(aid, true);
               return;

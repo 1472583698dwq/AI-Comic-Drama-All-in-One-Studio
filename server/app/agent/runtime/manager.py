@@ -91,6 +91,16 @@ class AgentManager:
         await lp.steer(text)
         return True
 
+    async def set_run_mode(self, session_id: str, run_mode: str) -> Optional[str]:
+        """热切换会话运行模式（审批/自动），对当前运行轮立即生效。
+
+        loop 尚未创建时返回 None——调用方无需处理，下一条 prompt 会携带 run_mode。
+        """
+        lp = self._loops.get(session_id)
+        if lp is None:
+            return None
+        return await lp.apply_run_mode(run_mode)
+
     # ── 目标（P4）────────────────────────────────────────
     async def set_goal(self, session_id: str, objective: str, max_rounds: Optional[int] = None) -> Dict[str, Any]:
         lp = await self.get_or_create(session_id)

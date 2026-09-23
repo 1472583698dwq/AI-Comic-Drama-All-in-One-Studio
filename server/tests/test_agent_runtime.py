@@ -733,6 +733,104 @@ class TestJobsSubagentBatch(TempStore):
         self.assertEqual(res2["status"], "error")
 
 
+class TestRunModeHotSwitch(TempStore):
+    """运行模式热切换：切「自动」必须立即放行挂起审批并回执，且对子代理/后台任务生效。"""
+
+    def test_switch_to_auto_resolves_pending_approvals(self):
+        from app.agent.runtime.loop import AgentLoop
+        sid = self.unique("hot_switch")
+        lp = AgentLoop(sid, run_mode="approve", mode="execute", interactive=True, store=self.store)
+        events = []
+        lp.attach(lambda ev: events.append(ev))
+
+        async def scenario():
+            task = asyncio.create_task(lp.pipeline.execute(
+                "c1", "generate_video", {"prompt": "x"}, run_mode=lp.run_mode))
+            for _ in range(200):
+                if any(e.get("event") == "approval_required" for e in events):
+                    break
+                await asyncio.sleep(0.01)
+            self.assertTrue(any(e.get("event") == "approval_required" for e in events))
+            await lp.apply_run_mode("auto")
+            return await task
+
+        out = run(scenario())
+        self.assertEqual(lp.run_mode, "auto")
+        # 审批已放行（工具不存在 → error 也算已放行）
+        self.assertIn(out.status, ("success", "error"))
+        acks = [e for e in events if e.get("event") == "approval_ack"]
+        self.assertEqual(len(acks), 1)
+        self.assertTrue(acks[0]["approved"])
+        self.assertTrue(acks[0]["resolved"])
+
+    def test_job_uses_live_run_mode(self):
+        from app.agent.runtime.jobs import JobManager
+        from app.agent.tools.pipeline import ToolOutcome
+        sid = self.unique("job_rm")
+        s = Session.open(sid, store=self.store)
+        calls = []
+
+        async def run_tool(call_id, name, args, ctx, run_mode):
+            calls.append(run_mode)
+            return ToolOutcome(call_id, name, "success", result={"ok": True})
+
+        async def emit(ev):
+            pass
+
+        jm = JobManager(s, emit, run_tool)
+        jm.get_run_mode = lambda: "auto"
+
+        async def scenario():
+            jm.start("generate_image", {"prompt": "x"}, None, "approve")
+            for _ in range(100):
+                if calls:
+                    break
+                await asyncio.sleep(0.01)
+
+        run(scenario())
+        self.assertEqual(calls, ["auto"])
+
+    def test_subagent_inherits_parent_run_mode(self):
+        import app.agent.runtime.loop as loop_mod
+        from app.agent.runtime.subagent import run_subagent
+
+        captured = {}
+
+        class FakeChild:
+            def __init__(self, child_sid, run_mode=None, mode=None, context=None,
+                         interactive=None, store=None, max_steps=None):
+                captured["run_mode"] = run_mode
+                self.session = type("S", (), {
+                    "id": child_sid, "seq": 0, "store": store,
+                    "last_assistant_text": lambda self: "子代理完成",
+                })()
+
+            async def prompt(self, text):
+                pass
+
+            async def wait_idle(self, timeout=None):
+                pass
+
+            def is_running(self):
+                return False
+
+        class FakeParent:
+            run_mode = "create_auto"
+            context = {}
+
+            class session:
+                id = "parent_x"
+                store = None
+
+        orig = loop_mod.AgentLoop
+        loop_mod.AgentLoop = FakeChild
+        self.addCleanup(lambda: setattr(loop_mod, "AgentLoop", orig))
+
+        r = run(run_subagent(FakeParent(), "独立任务", max_steps=5, timeout=5))
+        self.assertEqual(r["status"], "success")
+        self.assertEqual(captured.get("run_mode"), "create_auto")
+
+
 class TestCreatorMode(TempStore):
     def test_create_mode_prompt_contains_creator_flow(self):
         from app.agent.runtime.prompt import build_system_prompt
@@ -950,6 +1048,67 @@ class TestTransportIntegration(TempStore):
             self.assertIn("agent_response", names)
             final = next(e for e in events if e.get("event") == "agent_response")
             self.assertIn("WS 响应", final.get("message", ""))
+
+    def test_ws_set_run_mode_hot_switch(self):
+        """WS 运行中切自动：挂起审批立即放行（approval_ack），无需等超时。"""
+        sid = self.unique("ws_rm")
+        import app.agent.runtime.loop as loop_mod
+        replies = [
+            AssistantReply(content="", tool_calls=[ToolCall(
+                id="c1", name="generate_video",
+                arguments='{"prompt":"x"}', parsed={"prompt": "x"})]),
+            AssistantReply(content="已处理"),
+        ]
+
+        async def fake_complete(messages, tools=None, **kwargs):
+            return replies.pop(0) if replies else AssistantReply(content="完成")
+
+        orig = loop_mod.adapter.complete
+        loop_mod.adapter.complete = fake_complete
+        self.addCleanup(lambda: setattr(loop_mod.adapter, "complete", orig))
+
+        with self.client.websocket_connect("/api/v1/ws/agent") as ws:
+            ws.send_json({"action": "agent_prompt", "prompt": "生成视频", "session_id": sid,
+                          "mode": "execute", "run_mode": "approve", "context": {}})
+            events = []
+            for _ in range(60):
+                ev = ws.receive_json()
+                events.append(ev)
+                if ev.get("event") == "approval_required":
+                    break
+            self.assertTrue(any(e.get("event") == "approval_required" for e in events))
+            ws.send_json({"action": "set_run_mode", "session_id": sid, "run_mode": "auto"})
+            for _ in range(80):
+                ev = ws.receive_json()
+                events.append(ev)
+                if ev.get("event") == "agent_response":
+                    break
+        names = [e.get("event") for e in events]
+        self.assertIn("run_mode_set", names)
+        self.assertIn("approval_ack", names)
+        ack = next(e for e in events if e.get("event") == "approval_ack")
+        self.assertTrue(ack.get("approved"))
+        # 事件落账：运行模式切换留痕
+        snap = self.client.get(f"/api/v1/agent/session/{sid}/snapshot").json()
+        plan_evs = [e for e in snap["events"] if e["type"] == "plan/mode"]
+        self.assertTrue(any(e["data"].get("execution") == "auto" for e in plan_evs))
+
+    def test_http_set_run_mode_endpoint(self):
+        sid = self.unique("http_rm")
+        self.fake_model("ok")
+        resp = self.client.post("/api/v1/agent/chat", json={
+            "prompt": "hi", "session_id": sid, "mode": "execute", "run_mode": "approve"})
+        self.assertEqual(resp.status_code, 200)
+        r2 = self.client.post(f"/api/v1/agent/session/{sid}/run_mode", json={"run_mode": "auto"})
+        self.assertEqual(r2.status_code, 200)
+        data = r2.json()
+        self.assertEqual(data["run_mode"], "auto")
+        self.assertTrue(data["applied"])
+        # 未创建的会话：不报错，仅 applied=false（下一条 prompt 会携带）
+        r3 = self.client.post(f"/api/v1/agent/session/{self.unique('no_loop')}/run_mode",
+                              json={"run_mode": "auto"})
+        self.assertEqual(r3.status_code, 200)
+        self.assertFalse(r3.json()["applied"])
 
     def test_sse_chat_v2(self):
         sid = self.unique("sse")

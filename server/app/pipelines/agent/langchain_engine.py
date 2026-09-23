@@ -674,8 +674,8 @@ async def run_agent_with_langchain(
                                 executed_tools.append({"tool_name": name, "arguments": args, "status": "error", "result": None, "error": _msg})
                                 messages.append(ToolMessage(content=_msg, tool_call_id=tc.get("id") or name, name=name))
                                 continue
-                            # 兜底路径破坏性调用直接拒绝（避免无审批执行）
-                            if _is_destructive_call(name, args):
+                            # 兜底路径破坏性调用直接拒绝（auto 自动模式除外，避免无审批执行）
+                            if _is_destructive_call(name, args) and _execution != "auto":
                                 _msg = f"破坏性工具 {name} 需用户确认，兜底路径已跳过（请用WS执行模式确认后重试）"
                                 executed_tools.append({"tool_name": name, "arguments": args, "status": "error", "result": None, "error": _msg})
                                 messages.append(ToolMessage(content=_msg, tool_call_id=tc.get("id") or name, name=name))

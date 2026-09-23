@@ -144,6 +144,18 @@ class ApprovalService:
         except Exception:
             return False
 
+    def resolve_all(self, approved: bool) -> List[str]:
+        """一次性裁决全部挂起审批（如切到自动执行时放行）。
+
+        返回已成功裁决的 approval_id 列表；调用方负责补发 approval_ack 事件，
+        否则前端行内审批卡会因收不到回执而残留。
+        """
+        resolved: List[str] = []
+        for aid in list(self._pending.keys()):
+            if self.resolve(aid, approved):
+                resolved.append(aid)
+        return resolved
+
 
 class RepeatToolGuard:
     """重复调用/连续失败哨兵：只提醒不拦截（第 3/5/8 次注入 context）。"""
