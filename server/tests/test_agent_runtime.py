@@ -668,6 +668,104 @@ class TestJobsSubagentBatch(TempStore):
         self.assertEqual(res2["status"], "error")
 
 
+class TestRunModeHotSwitch(TempStore):
+    """运行模式热切换：切「自动」必须立即放行挂起审批并回执，且对子代理/后台任务生效。"""
+
+    def test_switch_to_auto_resolves_pending_approvals(self):
+        from app.agent.runtime.loop import AgentLoop
+        sid = self.unique("hot_switch")
+        lp = AgentLoop(sid, run_mode="approve", mode="execute", interactive=True, store=self.store)
+        events = []
+        lp.attach(lambda ev: events.append(ev))
+
+        async def scenario():
+            task = asyncio.create_task(lp.pipeline.execute(
+                "c1", "generate_video", {"prompt": "x"}, run_mode=lp.run_mode))
+            for _ in range(200):
+                if any(e.get("event") == "approval_required" for e in events):
+                    break
+                await asyncio.sleep(0.01)
+            self.assertTrue(any(e.get("event") == "approval_required" for e in events))
+            await lp.apply_run_mode("auto")
+            return await task
+
+        out = run(scenario())
+        self.assertEqual(lp.run_mode, "auto")
+        # 审批已放行（工具不存在 → error 也算已放行）
+        self.assertIn(out.status, ("success", "error"))
+        acks = [e for e in events if e.get("event") == "approval_ack"]
+        self.assertEqual(len(acks), 1)
+        self.assertTrue(acks[0]["approved"])
+        self.assertTrue(acks[0]["resolved"])
+
+    def test_job_uses_live_run_mode(self):
+        from app.agent.runtime.jobs import JobManager
+        from app.agent.tools.pipeline import ToolOutcome
+        sid = self.unique("job_rm")
+        s = Session.open(sid, store=self.store)
+        calls = []
+
+        async def run_tool(call_id, name, args, ctx, run_mode):
+            calls.append(run_mode)
+            return ToolOutcome(call_id, name, "success", result={"ok": True})
+
+        async def emit(ev):
+            pass
+
+        jm = JobManager(s, emit, run_tool)
+        jm.get_run_mode = lambda: "auto"
+
+        async def scenario():
+            jm.start("generate_image", {"prompt": "x"}, None, "approve")
+            for _ in range(100):
+                if calls:
+                    break
+                await asyncio.sleep(0.01)
+
+        run(scenario())
+        self.assertEqual(calls, ["auto"])
+
+    def test_subagent_inherits_parent_run_mode(self):
+        import app.agent.runtime.loop as loop_mod
+        from app.agent.runtime.subagent import run_subagent
+
+        captured = {}
+
+        class FakeChild:
+            def __init__(self, child_sid, run_mode=None, mode=None, context=None,
+                         interactive=None, store=None, max_steps=None):
+                captured["run_mode"] = run_mode
+                self.session = type("S", (), {
+                    "id": child_sid, "seq": 0, "store": store,
+                    "last_assistant_text": lambda self: "子代理完成",
+                })()
+
+            async def prompt(self, text):
+                pass
+
+            async def wait_idle(self, timeout=None):
+                pass
+
+            def is_running(self):
+                return False
+
+        class FakeParent:
+            run_mode = "auto"
+            context = {}
+
+            class session:
+                id = "parent_x"
+                store = None
+
+        orig = loop_mod.AgentLoop
+        loop_mod.AgentLoop = FakeChild
+        self.addCleanup(lambda: setattr(loop_mod, "AgentLoop", orig))
+
+        r = run(run_subagent(FakeParent(), "独立任务", max_steps=5, timeout=5))
+        self.assertEqual(r["status"], "success")
+        self.assertEqual(captured.get("run_mode"), "auto")
+
+
 class TestCreatorMode(TempStore):
     def test_create_mode_prompt_contains_creator_flow(self):
         from app.agent.runtime.prompt import build_system_prompt

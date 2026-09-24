@@ -278,6 +278,15 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
     }
   };
 
+  /** 运行模式热推后端：切「审批/自动」立即对当前运行轮生效（WS 优先，HTTP 兜底） */
+  const pushRunMode = (token: RunMode) => {
+    const sid = sessionKey();
+    if (!sid) return;
+    agentSocket.ensure();
+    const sent = agentSocket.send({ action: 'set_run_mode', session_id: sid, run_mode: token });
+    if (!sent) apiService.agentSetRunMode(sid, token).catch(() => {});
+  };
+
   const prefs = getPrefs();
 
   // 全局事件入口：WS 事件 + SSE 回调统一进这里
@@ -286,9 +295,9 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
     // 重连成功：把服务端仍在运行的会话重新挂到新 socket，并取快照对账
     if (s === 'open' && prevWsStatus !== 'open') {
       try {
-        const { projectId, activeSessionId } = get();
+        const { projectId, activeSessionId, runMode } = get();
         if (projectId && activeSessionId) {
-          agentSocket.send({ action: 'attach_session', session_id: `proj_${projectId}_${activeSessionId}`, tail: 120 });
+          agentSocket.send({ action: 'attach_session', session_id: `proj_${projectId}_${activeSessionId}`, tail: 120, run_mode: runMode });
         }
       } catch {}
     }
@@ -334,7 +343,10 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
         .getProjectAgentSessions(projectId)
         .then((res) => {
           if (get().projectId !== projectId) return;
-          const list: AgentSession[] = Array.isArray(res?.sessions) ? res.sessions : [];
+          const list: AgentSession[] = (Array.isArray(res?.sessions) ? res.sessions : [])
+            .slice()
+            // 最近活跃会话优先：保证重开项目恢复到上次所在会话（其 run_mode/mode 才是用户刚设的）
+            .sort((a: AgentSession, b: AgentSession) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
           if (list.length > 0) {
             const first = list[0];
             set({
@@ -372,7 +384,9 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
       try { localStorage.setItem('agent_run_mode', r); } catch {}
       const { activeSessionId, sessions } = get();
       set({ sessions: sessions.map((s) => (s.id === activeSessionId ? { ...s, run_mode: r, updated_at: new Date().toISOString() } : s)) });
-      schedulePersist();
+      // 立即持久化 + 热推后端：避免防抖窗口内刷新导致服务端仍是旧模式（重开项目回退审批）
+      persistNow();
+      pushRunMode(r);
     },
 
     // 草稿已移到独立的 agentDraftStore（见该文件注释：避免每次按键重渲染整棵会话流）
@@ -407,7 +421,11 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
         approvals: {},
             streamingMsgId: null,
         isRunning: false,
+        sessions: get().sessions.map((s) => (s.id === id ? { ...s, updated_at: new Date().toISOString() } : s)),
       });
+      // 切换即持久化 + 热推：避免服务端旧 run_mode 覆盖回审批
+      persistNow();
+      pushRunMode(get().runMode);
       clearAgentDraft();   // 草稿属于当前对话，换会话即清空
     },
 
@@ -427,7 +445,7 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
         set({ sessions: [sess], activeSessionId: sess.id, messages: sess.messages, approvals: {} });
         clearAgentDraft();
       } else if (activeSessionId === id) {
-        const first = remaining[0];
+        const first = [...remaining].sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')))[0];
         set({
           sessions: remaining,
           activeSessionId: first.id,
@@ -540,6 +558,12 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
       if (ev.event === 'approval_required') {
         const aid = String(ev.approval_id || '');
         if (aid) {
+          // 全局「自动执行」兜底：模式热同步存在竞态（事件早于 set_run_mode 到达）时自动放行
+          if (get().runMode === 'auto') {
+            set((s) => (s.approvals[aid] ? { approvals: { ...s.approvals, [aid]: { ...s.approvals[aid], decided: true } } } : {}));
+            get().approve(aid, true);
+            return;
+          }
           set((s) => ({ approvals: { ...s.approvals, [aid]: { tool_name: ev.tool_name || '', args: ev.arguments || {} } } }));
           const id = st.streamingMsgId;
           if (id) patchMsg(id, (m) => ({ ...m, text: `${m.text || ''}\n\n⚠️ 请求敏感操作 \`${ev.tool_name}\`，请在右侧确认卡允许/拒绝（120s 超时自动拒绝）。` }));

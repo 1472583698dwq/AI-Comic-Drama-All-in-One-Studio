@@ -1247,6 +1247,13 @@ async def websocket_agent_endpoint(websocket: WebSocket):
                     session_id = _sid
                     try:
                         await _v2_attach(_sid)
+                        # 前端带上当前偏好：重连/后端重启后热同步运行模式（含放行挂起审批）
+                        if data.get("run_mode"):
+                            try:
+                                from app.agent.mode_policy import normalize_run_mode as _nrm_att
+                                await agent_manager.set_run_mode(_sid, _nrm_att(str(data.get("run_mode"))))
+                            except Exception:
+                                pass
                         lp = agent_manager.get(_sid)
                         if lp is not None:
                             snap = lp.session.snapshot(tail=int(data.get("tail") or 100))
@@ -1259,6 +1266,27 @@ async def websocket_agent_endpoint(websocket: WebSocket):
                             await websocket.send_json({"event": "error", "message": f"attach 失败: {e}"})
                         except Exception:
                             pass
+                continue
+
+            # ── 运行模式热切换：切「自动」立即对当前轮生效并放行挂起审批 ──
+            if action == "set_run_mode":
+                _sid_rm = str(data.get("session_id") or session_id)
+                try:
+                    from app.agent.mode_policy import normalize_run_mode as _nrm_srm
+                    _rm_srm = _nrm_srm(str(data.get("run_mode") or "approve"))
+                except Exception:
+                    _rm_srm = "approve"
+                _applied_rm = None
+                if AGENT_V2:
+                    try:
+                        _applied_rm = await agent_manager.set_run_mode(_sid_rm, _rm_srm)
+                    except Exception as e:
+                        await websocket.send_json({"event": "error", "message": f"运行模式切换失败: {e}"})
+                        continue
+                await websocket.send_json({
+                    "event": "run_mode_set", "session_id": _sid_rm,
+                    "run_mode": _rm_srm, "applied": _applied_rm is not None,
+                })
                 continue
 
             if action not in ("agent_prompt", "clear_history", "abort"):
@@ -2310,6 +2338,25 @@ async def agent_session_steer(session_id: str, req: AgentChatRequest):
         raise HTTPException(status_code=400, detail="仅 v2 内核支持 steer")
     ok = await agent_manager.steer(session_id, req.prompt or "")
     return {"status": "accepted" if ok else "no_session", "session_id": session_id}
+
+
+class AgentRunModeRequest(BaseModel):
+    run_mode: str = Field(default="approve", description="运行模式（approve/auto/create/plan）")
+
+
+@router.post("/agent/session/{session_id}/run_mode")
+async def agent_session_set_run_mode(session_id: str, req: AgentRunModeRequest):
+    """运行模式热切换 HTTP 兜底（WS 不可用时）：切「自动」立即对当前轮生效并放行挂起审批。"""
+    try:
+        from app.agent.mode_policy import normalize_run_mode as _nrm_rm
+        rm = _nrm_rm(req.run_mode)
+    except Exception:
+        rm = "approve"
+    if not AGENT_V2:
+        # v1 内核按消息透传 run_mode，无会话级状态可切换
+        return {"run_mode": rm, "applied": False, "note": "v1 内核按每条消息透传 run_mode"}
+    applied = await agent_manager.set_run_mode(session_id, rm)
+    return {"run_mode": rm, "applied": applied is not None}
 
 
 @router.get("/agent/session/{session_id}/snapshot")

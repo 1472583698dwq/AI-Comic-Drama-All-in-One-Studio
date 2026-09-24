@@ -478,6 +478,12 @@ async def run_agent_with_langchain(
         return {"reply": clean_reply, "thinking": th, "suggested_actions": ["切换到执行模式让我直接做"], "executed_tools": [], "mode": "chat"}
     # 计划模式：只读侦察 + 产出计划（工具在绑定层硬门控，模型无变更工具可用）
     _plan_mode = bool((context or {}).get("plan_mode")) or str((context or {}).get("run_mode") or "").strip().lower() in ("plan", "planning")
+    # 执行维度（本地单维 run_mode）：auto 即全自动，v1 兜底路径据此放行破坏性工具
+    try:
+        from app.agent.mode_policy import normalize_run_mode as _nrm_rm
+        _execution = "auto" if _nrm_rm(str((context or {}).get("run_mode") or "approve")) == "auto" else "approve"
+    except Exception:
+        _execution = "auto" if str((context or {}).get("run_mode") or "").strip().lower() == "auto" else "approve"
     # 轮次预算：plan 模式 60，execute 模式 200（均可用 AGENT_MAX_ITERATIONS 覆盖）
     try:
         from app.agent.loop import MODE_BUDGETS
@@ -670,8 +676,8 @@ async def run_agent_with_langchain(
                                 executed_tools.append({"tool_name": name, "arguments": args, "status": "error", "result": None, "error": _msg})
                                 messages.append(ToolMessage(content=_msg, tool_call_id=tc.get("id") or name, name=name))
                                 continue
-                            # 兜底路径破坏性调用直接拒绝（避免无审批执行）
-                            if _is_destructive_call(name, args):
+                            # 兜底路径破坏性调用直接拒绝（auto 自动模式除外，避免无审批执行）
+                            if _is_destructive_call(name, args) and _execution != "auto":
                                 _msg = f"破坏性工具 {name} 需用户确认，兜底路径已跳过（请用WS执行模式确认后重试）"
                                 executed_tools.append({"tool_name": name, "arguments": args, "status": "error", "result": None, "error": _msg})
                                 messages.append(ToolMessage(content=_msg, tool_call_id=tc.get("id") or name, name=name))
@@ -805,7 +811,8 @@ async def run_agent_with_langchain(
                     messages.append(ToolMessage(content=msg, tool_call_id=tc.get("id") or name, name=name))
                     return None
                 # P1 HITL：破坏性调用先请示，无WS/超时/拒绝则跳过（HTTP无交互自动拒绝并引导走WS）
-                if _is_destructive_call(name, args):
+                # auto 模式：全自动执行，不再逐项弹确认（与 runtime pipeline 同口径）
+                if _is_destructive_call(name, args) and _execution != "auto":
                     if websocket is None:
                         msg = f"破坏性工具 {name} 需用户确认，已跳过（请用WS执行模式确认后重试）"
                         executed_tools.append({"tool_name": name, "arguments": args, "status": "error", "result": None, "error": msg})

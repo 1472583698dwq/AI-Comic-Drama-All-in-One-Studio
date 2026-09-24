@@ -531,6 +531,15 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
+  /** 运行模式热切换（WS 不可用时的 HTTP 兜底；切「自动」立即对当前轮生效并放行挂起审批） */
+  async agentSetRunMode(sessionId: string, runMode: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/agent/session/${encodeURIComponent(sessionId)}/run_mode`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ run_mode: runMode }),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
   async agentApprove(sessionId: string, approvalId: string, approved: boolean): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/agent/approve`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },

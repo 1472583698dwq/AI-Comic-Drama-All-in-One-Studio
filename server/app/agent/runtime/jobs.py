@@ -51,6 +51,13 @@ class JobManager:
 
     async def _run(self, jid: str, name: str, args: Dict[str, Any], project_context: Any, run_mode: str) -> None:
         job = self._jobs[jid]
+        # 优先取实时模式：任务入队后用户切了审批/自动，执行时按最新口径
+        get_rm = getattr(self, "get_run_mode", None)
+        if callable(get_rm):
+            try:
+                run_mode = get_rm() or run_mode
+            except Exception:
+                pass
         try:
             outcome = await self.run_tool(jid, name, args, project_context, run_mode)
             job["status"] = getattr(outcome, "status", "error")

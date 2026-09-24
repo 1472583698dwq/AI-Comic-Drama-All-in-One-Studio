@@ -40,7 +40,8 @@ async def run_subagent(parent_loop, task: str, context: Optional[Dict[str, Any]]
         "project_title": (parent_loop.context or {}).get("project_title"),
     }
     child = AgentLoop(
-        child_sid, run_mode="approve", mode="execute", context=ctx,
+        child_sid, run_mode=str(getattr(parent_loop, "run_mode", "") or "approve"),
+        mode="execute", context=ctx,
         interactive=False, store=parent_loop.session.store, max_steps=max_steps,
     )
     started = time.time()

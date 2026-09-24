@@ -84,6 +84,8 @@ class AgentLoop:
             from app.agent.runtime.jobs import JobManager
             self.jobs = JobManager(self.session, self._emit, self.pipeline.execute)
             self.jobs.notify_fn = lambda text: self.inbox.followup(text, source="job")
+            # 后台任务执行时读取实时 run_mode：运行中切「自动」也能立即生效
+            self.jobs.get_run_mode = lambda: self.run_mode
             self.pipeline.jobs = self.jobs
             self.pipeline.subagent_parent = self
         except Exception:
@@ -125,7 +127,7 @@ class AgentLoop:
         if mode:
             self.mode = "chat" if str(mode).lower() == "chat" else "execute"
         if run_mode:
-            self.set_run_mode(run_mode)
+            await self.apply_run_mode(run_mode)
         if context:
             self.context = dict(context)
         self.pipeline.guard.reset()
@@ -153,6 +155,30 @@ class AgentLoop:
         self.pipeline.plan_mode = self.plan_mode
         if changed:
             self.session.append(E.PLAN_MODE, {"active": self.plan_mode, "run_mode": m})
+
+    async def apply_run_mode(self, run_mode: str) -> str:
+        """热切换运行模式（对当前轮后续工具立即生效）。
+
+        切到「自动」时同步放行全部挂起审批并补发 approval_ack，
+        否则用户切了自动，之前弹出的审批卡仍会阻塞工具直到超时。
+        """
+        self.set_run_mode(run_mode)
+        try:
+            from app.agent.mode_policy import normalize_run_mode as _nrm
+            to_auto = _nrm(self.run_mode) == "auto"
+        except Exception:
+            to_auto = str(self.run_mode).strip().lower() == "auto"
+        if to_auto:
+            approvals = getattr(getattr(self, "pipeline", None), "approvals", None)
+            resolver = getattr(approvals, "resolve_all", None)
+            if callable(resolver):
+                for aid in resolver(True):
+                    try:
+                        await self._emit({"event": "approval_ack", "approval_id": aid,
+                                          "approved": True, "resolved": True})
+                    except Exception:
+                        pass
+        return self.run_mode
 
     def set_goal(self, objective: str, max_rounds: Optional[int] = None):
         from app.agent.runtime.goal import GoalState, save_goal, DEFAULT_MAX_ROUNDS
