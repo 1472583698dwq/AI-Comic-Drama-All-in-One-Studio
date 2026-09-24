@@ -2076,13 +2076,15 @@ class MCPServerRegistry:
                 from app.skills.engine import skill_engine as _se
                 _name = (arguments.get("name") or "").strip()
                 if not _name:
+                    # 与可执行清单同口径：模型看到的必须是 guard / 启停过滤后的技能
+                    _usable = _se.active_skills()
                     result = {
                         "skills": [
                             {"name": s.name, "description": (s.description or "")[:160],
                              "category": s.category or "", "version": s.version or ""}
-                            for s in _se.list_skills()
+                            for s in _usable
                         ],
-                        "total": len(_se.list_skills()),
+                        "total": len(_usable),
                         "hint": "传 name 读取对应技能的完整执行 SOP（SKILL.md）",
                     }
                 else:
@@ -2096,6 +2098,10 @@ class MCPServerRegistry:
                     if _skill is None:
                         _names = [s.name for s in _se.list_skills()][:30]
                         raise ValueError(f"未找到技能: {_name}，可选: {_names}")
+                    # 停用/被扩展守卫拦下的技能不再返回正文（否则等于绕过启停拿 SOP）
+                    _ok, _why = _se.is_usable(_skill.name)
+                    if not _ok:
+                        raise ValueError(f"技能不可用: {_why}")
                     result = {
                         "name": _skill.name,
                         "description": _skill.description,

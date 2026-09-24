@@ -7,6 +7,34 @@ from pydantic import BaseModel, Field
 from app.mcp.server import mcp_registry
 
 SKILLS_ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../skills"))
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+
+
+def _project_skill_dirs() -> List[str]:
+    """项目内技能目录（打包态随包走，开发态仓库根）。"""
+    return [
+        SKILLS_ROOT_DIR,
+        os.path.join(_REPO_ROOT, "skills"),
+        os.path.join(_REPO_ROOT, ".agent", "skills"),
+    ]
+
+
+def _extra_skill_dirs() -> List[str]:
+    """项目外技能目录：必须用 STUDIO_SKILL_EXTRA_DIRS 显式声明（逗号或分号分隔）。
+
+    以前这里硬编码扫 ~/.gemini/antigravity/skills，把别的装在本机上的产品的 SKILL.md
+    当成本项目技能列出并喂进模型 system prompt —— 技能是提示词注入面，默认不该越出项目边界。
+    """
+    raw = os.getenv("STUDIO_SKILL_EXTRA_DIRS", "")
+    out: List[str] = []
+    for part in re.split(r"[,;]", raw):
+        p = (part or "").strip()
+        if not p:
+            continue
+        p = os.path.abspath(os.path.expanduser(p))
+        if os.path.isdir(p):
+            out.append(p)
+    return out
 
 class SkillDefinition(BaseModel):
     name: str
@@ -18,6 +46,7 @@ class SkillDefinition(BaseModel):
     instructions: str = ""
     is_active: bool = True
     file_path: Optional[str] = None
+    external: bool = False  # 来自 STUDIO_SKILL_EXTRA_DIRS（项目外），界面与审计要看得见
 
 class SkillExecutionResult(BaseModel):
     skill_name: str
@@ -36,24 +65,35 @@ class SkillEngine:
     def __init__(self, skills_dir: str = SKILLS_ROOT_DIR):
         self.skills_dir = skills_dir
         self.skills: Dict[str, SkillDefinition] = {}
+        self.load_errors: List[str] = []
         self.reload_skills()
 
-    def reload_skills(self):
-        """扫描并加载系统所有有效路径下的真实 SKILL.md 规范文件"""
-        self.skills.clear()
+    def search_dirs(self) -> List[str]:
+        """当前生效的扫描根（供界面/审计展示来源，便于用户看清技能从哪来）。"""
+        return self._project_dirs() + _extra_skill_dirs()
 
-        search_dirs = [
-            self.skills_dir,
-            os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../skills")),
-            os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.agent/skills")),
-            os.path.expanduser("~/.gemini/antigravity/builtin/skills"),
-            os.path.expanduser("~/.gemini/antigravity/skills"),
-        ]
+    def _project_dirs(self) -> List[str]:
+        dirs = list(_project_skill_dirs())
+        if self.skills_dir and self.skills_dir not in dirs:
+            dirs.insert(0, self.skills_dir)
+        return dirs
+
+    def reload_skills(self):
+        """扫描并加载所有有效路径下的真实 SKILL.md 规范文件。
+
+        同名技能先到先得：项目目录排在前，项目外目录不得顶掉项目自带技能。
+        """
+        self.skills.clear()
+        self.load_errors = []
+
+        search_dirs = self.search_dirs()
 
         visited_paths = set()
         for s_dir in search_dirs:
             if not s_dir or not os.path.exists(s_dir):
                 continue
+            external = not any(os.path.normpath(s_dir).startswith(os.path.normpath(p))
+                               for p in _project_skill_dirs())
             for root, _, files in os.walk(s_dir):
                 for f in files:
                     if f == "SKILL.md" or f.endswith(".skill.md"):
@@ -63,10 +103,19 @@ class SkillEngine:
                         visited_paths.add(file_path)
                         try:
                             skill = self._parse_skill_file(file_path)
-                            if skill:
-                                self.skills[skill.name] = skill
+                            if skill is None:
+                                continue
+                            skill.external = external
+                            dup = self.skills.get(skill.name)
+                            if dup:
+                                self.load_errors.append(
+                                    f"技能重名被忽略: {skill.name} @ {file_path}（已加载 {dup.file_path}）")
+                                continue
+                            self.skills[skill.name] = skill
                         except Exception as e:
-                            print(f"[SkillEngine] Error parsing skill file {file_path}: {e}")
+                            err = f"技能解析失败 {file_path}: {e}"
+                            print(f"[SkillEngine] {err}")
+                            self.load_errors.append(err)
 
     def _parse_skill_file(self, file_path: str) -> Optional[SkillDefinition]:
         with open(file_path, "r", encoding="utf-8") as f:
@@ -79,23 +128,65 @@ class SkillEngine:
 
         frontmatter_str, body_str = match.group(1), match.group(2)
         meta = yaml.safe_load(frontmatter_str) or {}
+        if not isinstance(meta, dict):
+            return None
+        raw_active = meta.get("enabled", meta.get("is_active", True))
+        if isinstance(raw_active, str):
+            raw_active = raw_active.strip().lower() not in ("0", "false", "no", "off")
 
         return SkillDefinition(
-            name=meta.get("name", os.path.basename(os.path.dirname(file_path))),
-            description=meta.get("description", ""),
-            version=meta.get("version", "1.0.0"),
-            author=meta.get("author", "System"),
-            category=meta.get("category", "general"),
-            tools=meta.get("tools", []),
+            name=str(meta.get("name") or os.path.basename(os.path.dirname(file_path))),
+            description=str(meta.get("description") or ""),
+            version=str(meta.get("version", "1.0.0")),
+            author=str(meta.get("author", "System")),
+            category=str(meta.get("category", "general")),
+            tools=[str(t) for t in (meta.get("tools") or []) if t],
             instructions=body_str.strip(),
+            is_active=bool(raw_active),
             file_path=file_path
         )
+
+    # ── 可用性判定（list / read / execute 共用同一口径） ─────────
+    def is_usable(self, name: str) -> tuple:
+        """返回 (可用?, 原因)。frontmatter 关掉与扩展中心停用都算不可用。"""
+        skill = self.skills.get(name)
+        if skill is None:
+            return False, f"未找到系统技能 '{name}'，请确认该技能已存在于系统技能目录中"
+        if not skill.is_active:
+            return False, f"技能 {name} 已在 SKILL.md 里关闭（enabled: false）"
+        try:
+            from app.extensions import guard
+            if not guard.is_enabled("skill", name):
+                return False, f"技能已被停用：{name}（可在设置中心·扩展中心启用）"
+        except Exception:
+            pass  # 停用一个查不到的开关时按可用处理，别让扩展中心故障打死技能链路
+        return True, ""
+
+    def active_skills(self) -> List[SkillDefinition]:
+        return [s for s in self.skills.values() if self.is_usable(s.name)[0]]
 
     def list_skills(self) -> List[SkillDefinition]:
         return list(self.skills.values())
 
     def get_skill(self, name: str) -> Optional[SkillDefinition]:
         return self.skills.get(name)
+
+    def skill_brief(self, limit: int = 40, max_chars: int = 3000) -> str:
+        """技能索引（名称+一句话描述），常驻系统提示；正文 SOP 仍按需用 read_skill 取。
+
+        不含正文，所以 14+ 个技能的索引也只有 KB 级，但必须硬截断防失控。
+        """
+        lines: List[str] = []
+        try:
+            for s in sorted(self.active_skills(), key=lambda x: (x.category, x.name)):
+                desc = re.sub(r"\s+", " ", s.description or "").strip()[:90]
+                lines.append(f"- {s.name}（{s.category}）{desc}")
+                if len(lines) >= limit:
+                    break
+        except Exception as e:
+            print(f"[SkillEngine] skill_brief failed: {e}")
+            return ""
+        return "\n".join(lines)[:max_chars]
 
     async def execute_skill(
         self,
@@ -107,21 +198,14 @@ class SkillEngine:
         执行指定真实系统 Skill，自动调度其声明的 MCP 工具链与 SKILL.md 实际专业指引
         """
         start_time = time.time()
-        from app.extensions import guard
-        if not guard.is_enabled("skill", skill_name):
-            return SkillExecutionResult(
-                skill_name=skill_name,
-                status="error",
-                execution_time_ms=0,
-                result_message=f"技能已被停用：{skill_name}（可在设置中心·扩展中心启用）",
-            )
         skill = self.get_skill(skill_name)
-        if not skill:
+        usable, why = self.is_usable(skill_name)
+        if not usable:
             return SkillExecutionResult(
                 skill_name=skill_name,
                 status="error",
                 execution_time_ms=0,
-                result_message=f"未找到系统技能 '{skill_name}'，请确认该技能已存在于系统技能目录中"
+                result_message=why,
             )
 
         tool_calls_trace = []
@@ -329,9 +413,12 @@ class SkillEngine:
                 msg = f"系统技能执行异常（回退模式: {str(e)[:60]}）"
 
         elapsed = int((time.time() - start_time) * 1000)
+        # 状态由真实工具调用结果决定：以前这里恒定 success，出图/配音失败也报成功，前端只能去猜文案。
+        statuses = [str((t or {}).get("status")) for t in tool_calls_trace]
+        final_status = "success" if statuses and all(s == "success" for s in statuses) else "error"
         return SkillExecutionResult(
             skill_name=skill_name,
-            status="success",
+            status=final_status,
             execution_time_ms=elapsed,
             tool_calls=tool_calls_trace,
             result_message=msg,

@@ -31,7 +31,7 @@ TOOL_STRATEGY = """## 典型指令路由
 - 配音/换声线 → generate_voice（按角色/情绪选 provider 与 voice_id）
 - 视频/运镜 → generate_video（i2v 需要 first_frame_url）
 - 接入新源/贴 API 文档 cURL OpenAPI → register_custom_provider 自动解析注册
-- 直写生成源/插件/技能 → 先 read_skill（无 name 列技能，传 name 读 SOP，如 provider-author）加载规范再动手
+- 直写生成源/插件/技能 → 先 read_skill(name) 取完整 SOP（技能库索引已在下方给出，正文必须读了再动手）
 - 读源码/长文件 → get_provider_code(offset/limit) / fs_read(offset/limit)，可通读完整文件
 - 查健康/排障 → list_* / get_provider_code 先只读排查再修复
 - 不确定可用哪种源/音色/工作流/素材时，先调用对应 list_* 查询再决策
@@ -64,6 +64,16 @@ fs_file（list/read/write/append/delete）与 shell_exec 受围栏限制，写�
 长任务（视频等）已由框架统一阻塞到成片并返回 video_url；仅当工具提示「仍在生成中」时才用 task_wait 续等 / task_status 查询，不要用 shell_exec 反复轮询。"""
 
 
+def _skill_brief() -> str:
+    """技能索引。延迟导入：app.skills.engine 依赖 mcp 注册表，模块级导入会成环。"""
+    try:
+        from app.skills.engine import skill_engine
+        return skill_engine.skill_brief()
+    except Exception as e:
+        print(f"[Prompt] skill brief unavailable: {e}")
+        return ""
+
+
 def build_system_prompt(plan_mode: bool = False, extra_context: Optional[str] = None,
                         run_mode: str = "approve") -> str:
     """按固定顺序装配系统提示词；确定性输出保证请求前缀稳定（KV cache 友好）。"""
@@ -72,6 +82,12 @@ def build_system_prompt(plan_mode: bool = False, extra_context: Optional[str] = 
     brief = tool_view.provider_brief()
     if brief:
         sections.append("## 动态生成源速览（一源一工具，完整参数见工具 schema）\n" + brief)
+    skill_brief = _skill_brief()
+    if skill_brief:
+        sections.append(
+            "## 技能库索引（SOP 目录，只有一句话描述；动手前用 read_skill(name) 取完整规范）\n"
+            + skill_brief
+        )
     sections.append(TRUSTED_RULES)
     if plan_mode or mode == "plan":
         sections.append(PLAN_MODE_RULES)
