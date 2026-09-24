@@ -82,6 +82,12 @@ async def batch_create_assets(
     return {"imported": len(created), "total": len(files), "assets": created, "errors": errors}
 
 
+@router.post("/assets/clean-missing")
+async def clean_missing_assets():
+    """手动清理「文件已删、记录还在」的悬空素材（删除前先备份清单到 .missing_backup.jsonl）"""
+    report = asset_manager.cleanup_missing()
+    return {"status": "ok", **report}
+
 @router.post("/assets/generate")
 async def generate_asset(
     name: str = Form(...),

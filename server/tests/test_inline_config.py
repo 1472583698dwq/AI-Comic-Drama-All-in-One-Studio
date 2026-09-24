@@ -142,6 +142,27 @@ class TestScan(unittest.TestCase):
 
 
 class TestEffectiveConfig(TempStorage):
+    def test_reads_ctx_key_covers_all_injection_points(self):
+        """三个注入点都要认：ctx["api_key"] / api.get("get_api_key") / api["get_api_key"]。
+
+        漏认会让"填了生效"的源被误报成"填了不生效"——这条提示直接决定用户敢不敢点迁移。
+        """
+        head = 'async def generate(ctx, api):\n    k = '
+        tail = '\n    return {"image_url": k}\n'
+        exprs = (
+            'ctx.get("api_key") or ""',
+            'ctx["api_key"]',
+            'api.get("get_api_key", lambda: "")()',
+            'api["get_api_key"]()',
+            'api.get_api_key()',
+        )
+        for i, expr in enumerate(exprs):
+            eff = ic.effective_config(self.defn(f"prov_reads_{i}", head + expr + tail))
+            self.assertTrue(eff["reads_ctx_key"], f"漏判读取点: {expr}")
+        # 反向：完全不读注入 Key 的源必须判 False
+        no_read = 'async def generate(ctx, api):\n    return {"image_url": ctx.get("prompt") or ""}\n'
+        self.assertFalse(ic.effective_config(self.defn("prov_reads_no", no_read))["reads_ctx_key"])
+
     def test_lambda_chain_reports_inline_and_reads_ctx(self):
         """真机 prov_e3a19229 的口径：内联来源是 ctx 兜底字面量，且代码确实读 ctx。"""
         eff = ic.effective_config(self.defn("prov_lambda_0", LAMBDA_CHAIN_CODE))

@@ -39,10 +39,16 @@ _CTX_KEY_FALLBACK_RE = re.compile(
 # 任意字符串字面量（>=16 字符）：最后一道兜底，抓"不在 NAME = "xxx" 位置上的密钥"
 _ANY_STRING_RE = re.compile(r"(['\"])([^'\"\n]{16,})\1")
 
-# 运行时确实会读注入 Key 的写法 —— 决定「只写入配置存储」是否立刻生效
+# 运行时确实会读注入 Key 的写法 —— 决定「只写入配置存储」是否立刻生效。
+# 沙箱只有两个注入点：ctx["api_key"] 与 api["get_api_key"]（lambda: ctx.get("api_key","")），
+# 三种写法都要认，漏一种就会把"读得到"的源误报成"填了不生效"。
 _READS_CTX_KEY_RE = re.compile(
-    r"ctx\.get\(\s*['\"](?:api_key|key|token|api_token|access_token)['\"]|ctx\.(?:api_key|key|token)\b"
-    r"|api\.get\(\s*['\"](?:api_key|key|token)['\"]|api\.(?:api_key|key)\b"
+    r"ctx\.get\(\s*['\"](?:api_key|key|token|api_token|access_token)['\"]"
+    r"|ctx\[['\"](?:api_key|key|token|api_token|access_token)['\"]\]"
+    r"|ctx\.(?:api_key|key|token)\b"
+    r"|api\.get\(\s*['\"](?:api_key|key|token|get_api_key)['\"]"
+    r"|api\[['\"](?:api_key|key|get_api_key)['\"]\]"
+    r"|api\.(?:api_key|key|get_api_key)\b"
 )
 
 # 入口函数声明（改写时在其后注入 global 恢复语句）

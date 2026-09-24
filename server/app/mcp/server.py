@@ -1019,7 +1019,7 @@ class MCPServerRegistry:
         ))
         self.register_tool(MCPToolDefinition(
             name="canvas_update_node",
-            description="[画布] 更新节点数据",
+            description="[画布] 更新节点数据；结果键必须用 snake_case（视频结果用 video_url，勿用 videoUrl 驼峰——驼峰会被自动归一兼容，但节点组件只读 snake_case）",
             category="workflow",
             icon="Edit",
             author="Canvas Engine",
@@ -2343,10 +2343,27 @@ class MCPServerRegistry:
                         raise ValueError(f"项目 {pid} 画布不存在")
                     nodes = snap.get("nodes") or []
                     found = False
+                    # 别名归一层：驼峰键自动补写 snake_case 键（两种写法同时落盘），
+                    # 避免 Agent 回填 videoUrl 而前端节点只认 video_url 导致 UI 不出
+                    _KEY_ALIASES = {
+                        "videoUrl": "video_url",
+                        "imageUrl": "image_url",
+                        "audioUrl": "audio_url",
+                        "resultUrl": "result_url",
+                        "taskId": "task_id",
+                        "fallbackFrom": "fallback_from",
+                        "posterUrl": "poster_url",
+                    }
+                    _patch_norm = {}
+                    for _k, _v in (patch or {}).items():
+                        _patch_norm[_k] = _v
+                        _alias = _KEY_ALIASES.get(_k)
+                        if _alias and _alias not in patch:
+                            _patch_norm[_alias] = _v
                     for n in nodes:
                         if n.get("id") == nid:
                             d = n.get("data") or {}
-                            d.update(patch or {})
+                            d.update(_patch_norm)
                             n["data"] = d
                             found = True
                             break
@@ -2356,7 +2373,7 @@ class MCPServerRegistry:
                     import time as _time2
                     snap["updated_at"] = _time2.strftime("%Y-%m-%dT%H:%M:%SZ", _time2.gmtime())
                     _pm.save_canvas(pid, snap)
-                    result = {"status": "updated", "project_id": pid, "node_id": nid, "patch": patch}
+                    result = {"status": "updated", "project_id": pid, "node_id": nid, "patch": patch, "normalized_keys": sorted(set(_patch_norm) - set(patch or {}))}
                 elif tool_name == "canvas_delete_node":
                     if not pid:
                         raise ValueError("canvas_delete_node 需要 project_id（或在上下文中提供 project）")
