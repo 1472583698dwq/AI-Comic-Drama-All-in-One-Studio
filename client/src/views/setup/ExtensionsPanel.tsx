@@ -10,7 +10,7 @@ import { useThemeStore } from '../../stores/useThemeStore';
 import { WorkflowInspectorModal } from '../../components/workflow/WorkflowInspectorModal';
 import { ExtensionDetailDrawer } from './ExtensionDetailDrawer';
 
-/** 11 类扩展的中文名与一句话解释（与后端 ExtensionKind 对齐） */
+/** 13 类扩展的中文名与一句话解释（与后端 ExtensionKind 对齐） */
 const KIND_META: Record<string, { label: string; desc: string }> = {
   provider:        { label: '生成源',    desc: '一次生成调用的执行方：内置厂商 / 你写的代码 / 一个 ComfyUI 工作流' },
   skill:           { label: '技能',      desc: '带 YAML 头的 SKILL.md，提示词润色与固定工具链' },
@@ -22,7 +22,9 @@ const KIND_META: Record<string, { label: string; desc: string }> = {
   theme:           { label: '主题',      desc: '一包 CSS 变量，换整套配色' },
   exporter:        { label: '导出器',    desc: '声明式导出目标，如 SRT / 第三方草稿' },
   director_pack:   { label: '导演包',    desc: '3D 片场的机位预设 / 环境底图 / GLB 道具' },
-  plugin:          { label: '插件包',    desc: '容器：一个 zip 一次带进上面 10 类' },
+  agent_profile:   { label: '导演组成员', desc: '自定义专家子代理角色：系统提示 + 工具白名单，可被总导演委派' },
+  agent_team:      { label: '导演组',    desc: '一键成片的成员名单 + 总导演编排脚本（playbook）与质检门' },
+  plugin:          { label: '插件包',    desc: '容器：一个 zip 一次带进上面 12 类' },
 };
 
 const SOURCE_META: Record<string, { label: string; cls: string }> = {

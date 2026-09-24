@@ -108,6 +108,8 @@ Compress-Archive -Path hello-pack\* -DestinationPath hello-pack.zip
 | `themes` | `themes/*.json` | ❌ | 扩展中心「应用主题」 | CSS 变量注入 |
 | `exporters` | `exporters/*.json` | ❌ 声明式 | 导出中心 | 载荷装配 + 调扩展 |
 | `director_packs` | `director_packs/*.json` | ❌ | 3D 导演台预设/背景/道具 | 纯前端消费 |
+| `agent_profiles` | `agent_profiles/*.json` | ❌ 声明式 | 扩展中心「导演组成员」+ 子代理集群 | LLM 子代理（工具白名单） |
+| `agent_teams` | `agent_teams/*.json` | ❌ 声明式 | 扩展中心「导演组」+ 一键成片导演组选择器 | 总导演编排脚本（playbook） |
 | `mcp_tools` | `tools/*.py` | ✅ Python | Agent / MCP 工具面板 | **进程内直执行**（trusted 闸） |
 | （plugin 本身） | `plugin.json` | — | 插件中心 | 包生命周期 |
 
@@ -141,6 +143,8 @@ my-pack/
   themes/*.json              # 主题变量包
   exporters/*.json           # 导出器
   director_packs/*.json      # 导演包
+  agent_profiles/*.json      # 导演组成员（自定义专家角色）
+  agent_teams/*.json         # 导演组（成员名单 + 编排脚本）
   slots/*.json               # 分镜槽
   tools/*.py                 # MCP 工具（Python）
   code/*.py                  # 真实代码文件（custom_nodes / providers 用 code_file 引用，推荐）
@@ -202,7 +206,7 @@ discover → validate → install → enable ⇄ disable → uninstall
 ```
 
 - **install**：先复制到 `.staging-*` 再原子 `rename` 落位；失败自动清理。
-- **enable**：按扩展点逐类落地（见第 4 节），同时记录 `provider_ids / skill_names / workflow_ids / mcp_tools / custom_nodes / canvas_nodes / theme_ids / exporter_ids / director_pack_ids / installed_files`。
+- **enable**：按扩展点逐类落地（见第 4 节），同时记录 `provider_ids / skill_names / workflow_ids / mcp_tools / custom_nodes / canvas_nodes / theme_ids / exporter_ids / director_pack_ids / agent_profile_ids / agent_team_ids / installed_files`。
 - **disable**：**精确回滚**上述追踪产物（反注册源、删定义、删命名空间技能目录、反注册 MCP 工具），不留残留。
 - **uninstall**：disable + 删除包目录与索引记录。
 - **reload**：启用中插件 disable→enable 重读全部贡献；未启用仅重扫。
@@ -213,7 +217,7 @@ discover → validate → install → enable ⇄ disable → uninstall
 |---|---|---|
 | `plugin` | 原生（真实注册/反注册） | 覆盖层软停用（不动全局） |
 | 自定义 `provider` | 原生（registry 注册/反注册） | 覆盖层软停用 |
-| `skill/workflow/custom_node/canvas_node/theme/exporter/director_pack/storyboard_slot/mcp_tool` | 覆盖层（`extensions/state.json`） | 覆盖层 |
+| `skill/workflow/custom_node/canvas_node/theme/exporter/director_pack/agent_profile/agent_team/storyboard_slot/mcp_tool` | 覆盖层（`extensions/state.json`） | 覆盖层 |
 
 生效停用集 = **全局 ∪ 项目**。内置常驻项不可全局停用（可项目级软停用）。
 
@@ -231,6 +235,7 @@ discover → validate → install → enable ⇄ disable → uninstall
 | `storyboard.slots.list_effective_slots` | 分镜槽聚合过滤 |
 | `canvas_nodes.list_effective_nodes` | 画布节点工具栏过滤 |
 | `themes/exporters/director_packs` | 运行时列表过滤 |
+| `agent_profiles/agent_teams` | 运行时角色合并过滤（`list_effective_profiles/teams`） |
 
 项目上下文传播：HTTP 中间件读 `?project_id=` / `X-Project-Id`，canvas/统一执行口显式注入。
 
@@ -244,7 +249,7 @@ discover → validate → install → enable ⇄ disable → uninstall
 storage/plugins/<plugin_id>/            # 插件包实体
 storage/plugins/index.json              # 生命周期索引（产物追踪）
 storage/extensions/state.json           # 覆盖层启停（global/projects）
-storage/{providers,custom_nodes,canvas_nodes,themes,exporters,director_packs,storyboard_slots}/  # 各 kind 落盘
+storage/{providers,custom_nodes,canvas_nodes,themes,exporters,director_packs,storyboard_slots,agent_profiles,agent_teams}/  # 各 kind 落盘
 server/skills/.plugins/<plugin_id>/     # 命名空间化技能目录
 ```
 
@@ -761,7 +766,69 @@ def _ts(sec: float) -> str:
 - `props` 直接按 GLB URL 加载，可选中/拖拽/持久化
 - 注意：自定义预设 id 属本地语义；需要 MCP 精确控制时建议沿用内置 id（如 `medium/push_in/fight/solo`）
 
-### 4.10 mcp_tools — 插件 MCP 工具（Python）
+### 4.10 agent_profiles — 导演组成员（自定义专家子代理）
+
+插件包内的角色画像，启用后进入运行时角色表，可被总导演/任意会话通过 `subagent_run(agent="<id>")` 委派。
+
+```json
+{
+  "id": "colorist",
+  "name": "上色师",
+  "description": "分镜上色专家：何时委派我（给编排者看的一句话）",
+  "icon": "Palette",
+  "color": "pink",
+  "system_prompt": "你是上色子代理：调用 onekey_shot_image(...) 完成上色，只输出结论。",
+  "allow_tools": ["onekey_shot_image", "onekey_summary", "fs_read", "todo_write"],
+  "deny_tools": [],
+  "max_steps": 30,
+  "background_default": false
+}
+```
+
+字段与约束：
+
+| 字段 | 说明 |
+|---|---|
+| `id` | 角色名（`subagent_run.agent` 取值），小写字母数字 `_` `-`，2~64 字符 |
+| `name` / `description` | 展示名 / whenToUse（编排者据此决定是否委派） |
+| `icon` / `color` | 前端集群 chip 样式；icon ∈ 白名单（Bot/Palette/Film/…），color ∈ purple/blue/green/pink/amber/cyan/orange/red/gray |
+| `system_prompt` | 子代理系统提示（≤4000 字符） |
+| `allow_tools` | **显式白名单且非空**；工具名必须在注册表内；**禁止 `subagent_*` 委派类工具**（代码强制，防无限套娃编排） |
+| `deny_tools` | 额外拒绝项（在 allow 基础上叠加） |
+| `max_steps` | 1~120，默认 40 |
+| `background_default` | true=该角色默认后台化（适合长耗时角色） |
+| `override` | 与内置角色重名时需显式 `true` 才允许替换（默认拒绝并在 `/agent-profiles` 的 `errors` 上报） |
+
+- 生效链路：storage 落盘 → 运行时按 mtime 签名热重建 → `subagent_run` schema 的角色名单动态更新 → 集群面板显示自定义 icon/color
+- 越权双闸：绑定层裁剪模型可见工具 + 执行口二次拒绝（`工具 X 不在子代理角色（Y）的能力范围内，已拒绝`）
+- 手动管理 API：`GET/POST /api/v1/agent-profiles`、`GET/DELETE /api/v1/agent-profiles/{id}`、`GET /api/v1/agent-profiles/spec`（模板）
+
+### 4.11 agent_teams — 导演组（成员名单 + 编排脚本）
+
+声明一个可在一键成片（`engine=agent`）中选择的导演组：成员约束 + 总导演 playbook + 默认参数 + 质检门。
+
+```json
+{
+  "id": "quality-first",
+  "name": "质量优先组",
+  "description": "加双质检：导出前连贯性检查 + 导出后完整性复核",
+  "icon": "Target",
+  "color": "amber",
+  "members": ["screenwriter", "storyboard_artist", "video_operator", "continuity_checker", "qa_reviewer"],
+  "playbook": "执行一键成片任务。draft_id={draft_id}；标题：{title}；画幅 {aspect}。\n1. 调用 onekey_split(draft_id=\"{draft_id}\") 拆解；\n2. subagent_run(agent=\"storyboard_artist\", batch=[每镜一项]) 并行生图；\n3. subagent_wait(batch_id=视频批次) 收口后导出；\n4. onekey_summary 核对并输出总结。",
+  "defaults": {"gen_roles": true, "enable_video": true, "max_images": 12},
+  "qa_gate": true
+}
+```
+
+- `members`：允许委派的角色 id 列表（内置或自定义画像）；非空时导演提示词注入「只能委派上述成员」硬约束；空数组 = 全员可用
+- `playbook`：总导演编排脚本模板，占位符 `{draft_id}` `{title}` `{aspect}` `{max_images}` `{max_videos}`（未知占位符原样保留）；留空则用内置默认 6 阶段脚本
+- `qa_gate: true`：在导出后追加一步**强制委派 `qa_reviewer` 质检**并把缺失/失败镜头清单纳入总结（需 `qa_reviewer` 在 members 内）
+- `defaults`：仅前端弹窗选中该组时用于预填表单（可再手改）
+- 停用/启用：扩展中心统一覆盖层（`agent_team:<id>`），项目作用域可用 `?project_id=`
+- 手动管理 API：`GET/POST /api/v1/agent-teams`、`GET/DELETE /api/v1/agent-teams/{id}`、`GET /api/v1/agent-teams/spec`（模板）
+
+### 4.12 mcp_tools — 插件 MCP 工具（Python）
 
 契约：模块级 `PLUGIN_TOOLS` 声明列表 + 同模块入口函数。
 
@@ -849,7 +916,7 @@ def text_slice(args: dict, ctx: dict) -> dict:
 | `custom_node` | `custom_node:<publisher>/<id>` |
 | `canvas_node` | `canvas_node:<publisher>/<id>` |
 | `storyboard_slot` | `storyboard_slot:<publisher>/<slot>:<id>` |
-| `theme` / `exporter` / `director_pack` | `<kind>:<publisher>/<id>` |
+| `theme` / `exporter` / `director_pack` / `agent_profile` / `agent_team` | `<kind>:<publisher>/<id>` |
 | `skill` | `skill:<插件id>/<插件id>__<原名>`（文件也物理隔离） |
 | `mcp_tool` | `mcp_tool:plugin_<插件id>_<name>`（自带前缀） |
 | `plugin` | `plugin:<插件id>` |
@@ -894,6 +961,8 @@ def text_slice(args: dict, ctx: dict) -> dict:
 | 主题 | `/themes`（list/spec/get/save/delete） | |
 | 导出器 | `/exporters`（list/spec/get/save/delete/run） | |
 | 导演包 | `/director-packs`（list/spec/get/save/delete） | |
+| 导演组成员 | `/agent-profiles`（list/spec/get/save/delete） | list 附带 `catalog`（含内置）与重名 `errors` |
+| 导演组 | `/agent-teams`（list/spec/get/save/delete） | 保存时校验成员必须存在 |
 | 分镜槽 | `/storyboard/slots`、`/storyboard/slots/catalog`、`PUT /storyboard/slots/project`、`POST/DELETE /storyboard/slots/custom` | 项目覆盖 disabled/order |
 
 ---
@@ -964,6 +1033,8 @@ example-drama-pack/
   canvas_nodes/upscale_ext.json        # 声明式画布节点（包装上面代码节点）
   themes/ink-drama.json                # 主题包
   director_packs/wuxia-lite.json       # 导演包（预设/背景/GLB 道具）
+  agent_profiles/continuity_checker.json  # 导演组成员（自定义专家角色）
+  agent_teams/quality-first.json       # 导演组（成员名单 + playbook + 质检门）
 ```
 
 验证全链路步骤：
@@ -974,6 +1045,7 @@ example-drama-pack/
    - 技能列表出现 `example_drama_pack__climax_booster`
    - 画布工具栏出现「超分扩展节点」；「自定义节点」出现「视频超分演示」
    - 扩展中心出现 主题「水墨漫剧」/ 导演包「武侠轻量导演包」
+   - 扩展中心出现 导演组成员「连贯性检查员」/ 导演组「质量优先组」；一键成片弹窗导演组下拉出现「质量优先组」
    - （开 trusted 后）MCP 工具面板出现 `plugin_example_drama_pack_text_stats`
 4. 禁用：以上全部消失且存储无残留（精确回滚）
 5. 卸载：包目录与索引记录删除
@@ -1006,7 +1078,13 @@ python -m unittest discover -s server/tests -p "test_*.py" -v
 ## 12. FAQ
 
 **Q：插件能改前端界面吗？**
-A：只能通过声明式扩展点（分镜槽/画布节点/主题/导出器/导演包）间接影响 UI；不能注入 React 组件。
+A：只能通过声明式扩展点（分镜槽/画布节点/主题/导出器/导演包/导演组）间接影响 UI；不能注入 React 组件。
+
+**Q：自定义导演组成员能拿到哪些工具？**
+A：只能拿到 `allow_tools` 白名单里的工具，且必须是注册表内的真实工具；委派类 `subagent_*` 一律禁止（定义会被整体拒绝）。运行时绑定层裁剪 + 执行口二次拒绝双闸。
+
+**Q：导演组 playbook 里能写什么？**
+A：一段总导演编排脚本（≤8000 字符），可用 `{draft_id}`/`{title}`/`{aspect}`/`{max_images}`/`{max_videos}` 占位符；建议沿用「同步阻塞要结果 + 长耗时后台 + 关键节点 subagent_wait 收口」的既有范式。
 
 **Q：能在插件里加新的模型 API 吗？**
 A：能，用 `providers`（代码模式）。写 HTTP 调用 + 声明 schema，启用后自动成为生成源与 MCP 工具。
@@ -1025,4 +1103,4 @@ A：统一加 `plugin_<插件id>_` 前缀，避免与其他插件/内置工具�
 
 ---
 
-*— 对应代码：`server/app/plugins/`、`server/app/extensions/`、`server/app/{canvas_nodes,themes,exporters,director_packs}/`、`client/src/components/storyboard/slots/`、`client/src/components/canvas/`。未落地与路线图见 `docs/未落地清单_2026-09-15.md`。*
+*— 对应代码：`server/app/plugins/`、`server/app/extensions/`、`server/app/{canvas_nodes,themes,exporters,director_packs,agent_teams}/`、`client/src/components/storyboard/slots/`、`client/src/components/canvas/`。未落地与路线图见 `docs/未落地清单_2026-09-15.md`。*

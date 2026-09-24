@@ -9,7 +9,7 @@
 worker profile 的 allow 列表同时包含 onekey_* 原子工具与内部工具。
 """
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 # 只读侦察工具（各角色通用拼装件）
 _READ = [
@@ -165,20 +165,116 @@ _add(AgentProfile(
 ))
 
 
+# ── 外部导演组扩展（storage/agent_profiles/*.json + 插件贡献）────────
+# 签名变化时自动重建，实现热更新；外部角色与内置重名须显式 override=true。
+_EXTERNAL: Dict[str, AgentProfile] = {}
+_EXTERNAL_META: Dict[str, Dict[str, Any]] = {}
+_EXTERNAL_ERRORS: List[str] = []
+_EXTERNAL_SIG: str = ""
+
+
+def refresh_external_profiles(force: bool = False) -> None:
+    """按 mtime 签名重建外部角色表（签名未变则零成本跳过）。"""
+    global _EXTERNAL, _EXTERNAL_META, _EXTERNAL_ERRORS, _EXTERNAL_SIG
+    try:
+        from app.agent_teams import manager as _mgr
+        sig = _mgr.signature()
+    except Exception:
+        return
+    if not force and sig == _EXTERNAL_SIG:
+        return
+    _EXTERNAL_SIG = sig
+    external: Dict[str, AgentProfile] = {}
+    meta: Dict[str, Dict[str, Any]] = {}
+    errors: List[str] = []
+    try:
+        specs = _mgr.list_effective_profiles(include_disabled=False)
+    except Exception as e:
+        _EXTERNAL_ERRORS = [f"外部角色表加载失败: {e}"]
+        return
+    for spec in specs:
+        key = spec.id.strip().lower()
+        if key in _BUILTIN and not spec.override:
+            errors.append(f"角色 {spec.id} 与内置角色重名（需显式 override=true 才允许替换），已跳过")
+            continue
+        external[key] = AgentProfile(
+            name=key,
+            description=spec.description,
+            system_prompt=spec.system_prompt,
+            allow_tools=list(spec.allow_tools or []),
+            deny_tools=list(spec.deny_tools or []),
+            max_steps=spec.max_steps,
+            background_default=bool(spec.background_default),
+        )
+        meta[key] = {
+            "name": spec.name, "icon": spec.icon, "color": spec.color,
+            "source": "external", "override": bool(spec.override and key in _BUILTIN),
+        }
+    _EXTERNAL, _EXTERNAL_META, _EXTERNAL_ERRORS = external, meta, errors
+
+
+def external_load_errors() -> List[str]:
+    refresh_external_profiles()
+    return list(_EXTERNAL_ERRORS)
+
+
+def builtin_role_names() -> set:
+    """内置角色名集合（用于重名冲突检测 / 插件启用告警）。"""
+    return set(_BUILTIN.keys())
+
+
 def get_profile(name: str) -> AgentProfile:
     """取角色画像；未知角色回退 generalist（保持旧调用可用）。"""
+    refresh_external_profiles()
     key = (name or "").strip().lower()
-    return _BUILTIN.get(key) or _BUILTIN["generalist"]
+    return _EXTERNAL.get(key) or _BUILTIN.get(key) or _BUILTIN["generalist"]
 
 
 def list_profiles(include_internal: bool = False) -> List[AgentProfile]:
+    refresh_external_profiles()
     out = list(_BUILTIN.values())
+    for key, prof in _EXTERNAL.items():
+        if key in _BUILTIN:
+            # override：同位置替换，保持名单顺序稳定
+            out = [prof if p.name == key else p for p in out]
+        else:
+            out.append(prof)
     if not include_internal:
         out = [p for p in out if p.name not in ("generalist", "director")]
     return out
 
 
-def team_brief() -> str:
-    """给编排者的专家团队速览（name — description）。"""
-    lines = [f"- {p.name} — {p.description}" for p in list_profiles()]
-    return "可用专家团队（subagent_run.agent 取值）：\n" + "\n".join(lines)
+def profile_catalog(include_internal: bool = False) -> List[Dict[str, Any]]:
+    """角色目录（含来源/图标/配色），供 API 与前端集群视图使用。"""
+    refresh_external_profiles()
+    out: List[Dict[str, Any]] = []
+    for p in list_profiles(include_internal=include_internal):
+        meta = _EXTERNAL_META.get(p.name) or {}
+        out.append({
+            "id": p.name,
+            "name": meta.get("name") or p.name,
+            "description": p.description,
+            "icon": meta.get("icon") or "",
+            "color": meta.get("color") or "",
+            "source": meta.get("source") or "builtin",
+            "override": bool(meta.get("override")),
+            "max_steps": p.max_steps,
+            "background_default": bool(p.background_default),
+        })
+    return out
+
+
+def team_brief(members: Optional[List[str]] = None) -> str:
+    """给编排者的专家团队速览（name — description）。
+
+    members 非空时仅列出该导演组成员，并追加成员约束说明。
+    """
+    allowed = {str(m).strip().lower() for m in (members or []) if str(m or "").strip()}
+    profiles = list_profiles()
+    if allowed:
+        profiles = [p for p in profiles if p.name in allowed]
+    lines = [f"- {p.name} — {p.description}" for p in profiles]
+    brief = "可用专家团队（subagent_run.agent 取值）：\n" + "\n".join(lines)
+    if allowed:
+        brief += f"\n本任务导演组成员约束：只能委派上述成员，其他角色一律不允许。"
+    return brief

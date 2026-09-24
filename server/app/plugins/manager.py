@@ -293,7 +293,8 @@ def discover() -> List[Dict[str, Any]]:
                 "storyboard_slots": _glob_kind(pdir, eps.storyboard_slots),
             },
             "deferred": {
-                k: getattr(eps, k) for k in ("canvas_nodes", "director_packs", "exporters", "themes")
+                k: getattr(eps, k) for k in ("canvas_nodes", "director_packs", "exporters", "themes",
+                                             "agent_profiles", "agent_teams")
                 if getattr(eps, k)
             },
         })
@@ -561,7 +562,7 @@ def _enable_locked(pid: str) -> Dict[str, Any]:
     rec = idx.setdefault("plugins", {}).setdefault(pid, {"version": m.version, "enabled": False, "installed_at": "", "installed_files": [], "provider_ids": [], "skill_names": [], "workflow_ids": [], "mcp_tools": [], "custom_nodes": [], "canvas_nodes": [], "theme_ids": [], "exporter_ids": [], "director_pack_ids": []})
     if rec.get("enabled"):
         return {"id": pid, "enabled": True, "note": "已启用，无需重复操作"}
-    summary: Dict[str, Any] = {"providers": [], "skills": [], "workflows": [], "mcp_tools": [], "custom_nodes": [], "canvas_nodes": [], "themes": [], "exporters": [], "director_packs": [], "warnings": []}
+    summary: Dict[str, Any] = {"providers": [], "skills": [], "workflows": [], "mcp_tools": [], "custom_nodes": [], "canvas_nodes": [], "themes": [], "exporters": [], "director_packs": [], "agent_profiles": [], "agent_teams": [], "warnings": []}
     installed_files: List[str] = []
     provider_ids: List[str] = []
     skill_names: List[str] = []
@@ -800,6 +801,61 @@ def _enable_locked(pid: str) -> Dict[str, Any]:
     except Exception as e:
         summary["warnings"].append(f"director_packs子系统不可用: {e}")
 
+    # —— agent_profiles / agent_teams：导演组扩展（JSON），入库 + subagent_run 可委派 ——
+    agent_profile_ids: List[str] = []
+    agent_team_ids: List[str] = []
+    try:
+        from app.agent_teams.manager import agent_team_manager, validate_team_members
+        from app.agent_teams.models import AgentProfileSpec as _APS
+        from app.agent_teams.models import AgentTeamSpec as _ATS
+        try:
+            from app.agent.runtime.agents import builtin_role_names
+            _builtin_roles = builtin_role_names()
+        except Exception:
+            _builtin_roles = set()
+        for rel in _glob_kind(pdir, m.extensionPoints.agent_profiles):
+            if not rel.lower().endswith(".json"):
+                summary["warnings"].append(f"跳过非JSON: {rel}")
+                continue
+            try:
+                with open(os.path.join(pdir, rel), "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+                spec = _APS.model_validate(payload)
+                if spec.id in _builtin_roles and not spec.override:
+                    summary["warnings"].append(
+                        f"角色 {spec.id} 与内置角色重名（需 override=true 才允许替换）已跳过")
+                    continue
+                if agent_team_manager.get_profile_spec(spec.id):
+                    summary["warnings"].append(f"已存在同名角色已跳过: {spec.id}")
+                    continue
+                saved = agent_team_manager.save_profile(spec)
+                agent_profile_ids.append(saved.id)
+                summary["agent_profiles"].append({"id": saved.id, "override": bool(saved.override)})
+            except Exception as e:
+                summary["warnings"].append(f"角色失败 {rel}: {e}")
+        for rel in _glob_kind(pdir, m.extensionPoints.agent_teams):
+            if not rel.lower().endswith(".json"):
+                summary["warnings"].append(f"跳过非JSON: {rel}")
+                continue
+            try:
+                with open(os.path.join(pdir, rel), "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+                spec = _ATS.model_validate(payload)
+                if agent_team_manager.get_team(spec.id):
+                    summary["warnings"].append(f"已存在同名导演组已跳过: {spec.id}")
+                    continue
+                member_errors = validate_team_members(spec)
+                if member_errors:
+                    summary["warnings"].append(f"导演组 {spec.id} 成员校验失败已跳过: {'；'.join(member_errors)}")
+                    continue
+                saved = agent_team_manager.save_team(spec)
+                agent_team_ids.append(saved.id)
+                summary["agent_teams"].append({"id": saved.id, "members": len(saved.members)})
+            except Exception as e:
+                summary["warnings"].append(f"导演组失败 {rel}: {e}")
+    except Exception as e:
+        summary["warnings"].append(f"agent_teams子系统不可用: {e}")
+
     try:
         from app.mcp.server import mcp_registry
         mcp_registry.refresh_provider_tools()
@@ -811,7 +867,8 @@ def _enable_locked(pid: str) -> Dict[str, Any]:
                 "installed_files": installed_files, "provider_ids": provider_ids,
                 "skill_names": skill_names, "workflow_ids": workflow_ids, "mcp_tools": registered_tools,
                 "custom_nodes": custom_ids, "canvas_nodes": canvas_ids,
-                "theme_ids": theme_ids, "exporter_ids": exporter_ids, "director_pack_ids": pack_ids})
+                "theme_ids": theme_ids, "exporter_ids": exporter_ids, "director_pack_ids": pack_ids,
+                "agent_profile_ids": agent_profile_ids, "agent_team_ids": agent_team_ids})
     _save_index(idx)
     summary.update({"id": pid, "enabled": True})
     return summary
@@ -933,6 +990,23 @@ def _disable_locked(pid: str) -> Dict[str, Any]:
             removed.append(f"director_pack:{dpid}")
     except Exception as e:
         warnings.append(f"director_packs子系统不可用: {e}")
+    # 导演组扩展（角色画像 / 导演组）：删定义（仅追踪到的id）
+    try:
+        from app.agent_teams.manager import agent_team_manager
+        for apid in rec.get("agent_profile_ids", []):
+            try:
+                agent_team_manager.delete_profile(apid)
+            except Exception as e:
+                warnings.append(f"角色删除失败 {apid}: {e}")
+            removed.append(f"agent_profile:{apid}")
+        for atid in rec.get("agent_team_ids", []):
+            try:
+                agent_team_manager.delete_team(atid)
+            except Exception as e:
+                warnings.append(f"导演组删除失败 {atid}: {e}")
+            removed.append(f"agent_team:{atid}")
+    except Exception as e:
+        warnings.append(f"agent_teams子系统不可用: {e}")
     # 落盘文件：仅删追踪到的
     for fp in rec.get("installed_files", []):
         try:
@@ -959,7 +1033,7 @@ def _disable_locked(pid: str) -> Dict[str, Any]:
         mcp_registry.refresh_provider_tools()
     except Exception:
         pass
-    rec.update({"enabled": False, "installed_files": [], "provider_ids": [], "skill_names": [], "workflow_ids": [], "mcp_tools": [], "custom_nodes": [], "canvas_nodes": [], "theme_ids": [], "exporter_ids": [], "director_pack_ids": []})
+    rec.update({"enabled": False, "installed_files": [], "provider_ids": [], "skill_names": [], "workflow_ids": [], "mcp_tools": [], "custom_nodes": [], "canvas_nodes": [], "theme_ids": [], "exporter_ids": [], "director_pack_ids": [], "agent_profile_ids": [], "agent_team_ids": []})
     _save_index(idx)
     return {"id": pid, "enabled": False, "removed": removed, "warnings": warnings}
 

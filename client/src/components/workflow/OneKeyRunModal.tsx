@@ -5,13 +5,14 @@
  * agent 模式展示子代理花名册（角色/批次/状态/耗时），完成后落盘为正式项目并跳转分镜台。
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { X, Zap, Loader2, CheckCircle2, AlertTriangle, Clapperboard, Bot, Cog } from 'lucide-react';
+import { X, Zap, Loader2, CheckCircle2, AlertTriangle, Clapperboard, Bot, Cog, Users } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { autoBindShotCharacters } from '../storyboard/shotReference';
 import { ProviderPicker } from '../ui/ProviderPicker';
 import { useEscapeClose } from '../../hooks/useEscapeClose';
 import { AgentSwarmPanel } from '../agent/AgentSwarmPanel';
+import { loadRoleMetas } from '../agent/swarmMeta';
 import type { SubAgentInfo } from '../agent/agentTypes';
 
 interface Props { isOpen: boolean; onClose: () => void; }
@@ -28,6 +29,9 @@ export const OneKeyRunModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const [genRoles, setGenRoles] = useState(true);
   const [engine, setEngine] = useState<'agent' | 'pipeline'>('agent');
   const [ranEngine, setRanEngine] = useState<'agent' | 'pipeline'>('agent');
+  const [teams, setTeams] = useState<any[]>([]);
+  const [teamId, setTeamId] = useState('');
+  const [ranTeamName, setRanTeamName] = useState('');
   const [taskId, setTaskId] = useState<string | null>(null);
   const [status, setStatus] = useState<string>('idle');
   const [progress, setProgress] = useState(0);
@@ -51,6 +55,7 @@ export const OneKeyRunModal: React.FC<Props> = ({ isOpen, onClose }) => {
         setProgress(t.progress || 0);
         setLogs(t.logs || []);
         setSubagentMap(t.subagents || {});
+        if (t.team_name) setRanTeamName(t.team_name);
         if (t.status === 'success' || t.status === 'partial') {
           setResult(t.result);
         } else if (t.status === 'failed') {
@@ -77,6 +82,25 @@ export const OneKeyRunModal: React.FC<Props> = ({ isOpen, onClose }) => {
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
   }, [logs.length]);
+
+  // 打开时拉取可用导演组（插件/裸件贡献）并注册自定义角色样式
+  useEffect(() => {
+    if (!isOpen) return;
+    loadRoleMetas();
+    apiService.listAgentTeams()
+      .then((r) => setTeams(r?.teams || []))
+      .catch(() => setTeams([]));
+  }, [isOpen]);
+
+  // 选择导演组：套用其默认参数（可在表单继续调整）
+  const applyTeam = (tid: string) => {
+    setTeamId(tid);
+    const t = teams.find((x) => x?.id === tid);
+    const d = t?.defaults || {};
+    if (typeof d.gen_roles === 'boolean') setGenRoles(d.gen_roles);
+    if (typeof d.enable_video === 'boolean') setEnableVideo(d.enable_video);
+    if (typeof d.max_images === 'number') setMaxShots(Math.max(1, Math.min(30, d.max_images)));
+  };
 
   // 任务花名册 → 共享集群面板数据模型（角色图标/批次分组复用）
   const swarmList = useMemo<Record<string, SubAgentInfo>>(() => {
@@ -115,6 +139,7 @@ export const OneKeyRunModal: React.FC<Props> = ({ isOpen, onClose }) => {
     if (text.trim().length < 20) { setError('文本太短（至少20字），请粘贴小说章节或故事梗概'); return; }
     setError(null); setResult(null); setLogs([]); setProgress(0); setStatus('queued');
     setSubagentMap({}); setRanEngine(engine);
+    setRanTeamName(engine === 'agent' ? (teams.find((t) => t?.id === teamId)?.name || '') : '');
     try {
       const r = await apiService.onekeyRun({
         title: title.trim() || '一键成片',
@@ -128,8 +153,10 @@ export const OneKeyRunModal: React.FC<Props> = ({ isOpen, onClose }) => {
         max_videos: Math.min(maxShots, 12),
         gen_roles: genRoles,
         engine,
+        team_id: engine === 'agent' ? teamId : '',
       });
       setTaskId(r.task_id);
+      if (r?.team_name) setRanTeamName(r.team_name);
     } catch (e: any) {
       setError(e?.message || '提交失败');
       setStatus('idle');
@@ -213,6 +240,25 @@ export const OneKeyRunModal: React.FC<Props> = ({ isOpen, onClose }) => {
                     : '固定 6 阶段顺序执行（无并行调度与自愈）'}
                 </span>
               </div>
+              {engine === 'agent' && (
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="text-[11px] text-gray-400 flex items-center gap-1"><Users className="w-3 h-3" />导演组</span>
+                  <select
+                    value={teamId}
+                    onChange={(e) => applyTeam(e.target.value)}
+                    className="bg-surface-secondary border border-border rounded-lg px-2 py-1 text-xs text-white max-w-[220px]"
+                  >
+                    <option value="">内置默认（标准 6 阶段编排）</option>
+                    {teams.map((t) => (
+                      <option key={t.id} value={t.id}>{t.name}{t.qa_gate ? ' · 质检门' : ''}</option>
+                    ))}
+                  </select>
+                  <span className="text-[10px] text-gray-500">
+                    {(teams.find((t) => t?.id === teamId)?.description)
+                      || (teams.length ? '自定义成员名单与总导演编排脚本' : '暂无自定义导演组：在扩展中心或 storage/agent_teams 添加')}
+                  </span>
+                </div>
+              )}
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-gray-300">
                 <label className="flex items-center gap-1.5">画幅
                   <select value={aspect} onChange={e=>setAspect(e.target.value)} className="bg-surface-secondary border border-border rounded-lg px-2 py-1 text-xs text-white"><option value="9:16">竖屏 9:16</option><option value="16:9">横屏 16:9</option><option value="1:1">方形 1:1</option></select>
@@ -238,6 +284,7 @@ export const OneKeyRunModal: React.FC<Props> = ({ isOpen, onClose }) => {
                     <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-bold flex items-center gap-1 ${ranEngine === 'agent' ? 'bg-brand/10 text-brand-light border-brand/30' : 'bg-surface-tertiary text-gray-300 border-border'}`}>
                       {ranEngine === 'agent' ? <Bot className="w-3 h-3" /> : <Cog className="w-3 h-3" />}
                       {ranEngine === 'agent' ? '智能体集群' : '经典流水线'}
+                      {ranEngine === 'agent' && ranTeamName ? ` · ${ranTeamName}` : ''}
                     </span>
                   </span>
                   <span className="font-mono text-brand-light">{progress}%</span>

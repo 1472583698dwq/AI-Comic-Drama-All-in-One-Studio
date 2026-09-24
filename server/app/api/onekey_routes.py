@@ -30,6 +30,25 @@ HARD_CAP_SHOTS = 30
 class OneKeyRunRequest(PipelineRunRequest):
     title: str = "一键成片"
     engine: str = Field(default="pipeline", description="编排引擎：pipeline 经典流水线 / agent 智能体集群")
+    team_id: str = Field(default="", description="导演组（agent_team）id；空=内置默认编排")
+
+
+def _resolve_team(team_id: str):
+    """解析导演组：不存在/停用一律回退默认编排（None）。"""
+    tid = str(team_id or "").strip()
+    if not tid:
+        return None
+    try:
+        from app.agent_teams.manager import agent_team_manager
+        from app.extensions import state
+        spec = agent_team_manager.get_team(tid)
+        if not spec or not spec.enabled:
+            return None
+        if state.match_disabled("agent_team", tid):
+            return None
+        return spec
+    except Exception:
+        return None
 
 
 def _progress_of(stage: str) -> int:
@@ -59,7 +78,27 @@ _AGENT_STAGE = {
 }
 
 
-def _director_prompt(draft_id: str, req: "OneKeyRunRequest") -> str:
+def _director_prompt(draft_id: str, req: "OneKeyRunRequest", team=None) -> str:
+    members_line = ""
+    if team is not None and team.members:
+        members_line = f"本任务导演组成员约束：只能委派以下成员：{'、'.join(team.members)}；其他角色一律不允许。\n"
+    qa_line = ""
+    if team is not None and team.qa_gate:
+        qa_line = ("最后（导出后总结前）：用 subagent_run(agent=\"qa_reviewer\", "
+                   f"task=\"质检 draft_id={draft_id} 的产物完整性：调用 onekey_summary 汇总缺失/失败镜头清单并给出每项一句话原因\") "
+                   "同步复核，并把缺失/失败镜头清单如实纳入总结。\n")
+    if team is not None and (team.playbook or "").strip():
+        try:
+            from app.agent_teams.manager import render_playbook
+            ctx = {"draft_id": draft_id, "title": req.title or "一键成片",
+                   "aspect": req.aspect_ratio, "max_images": req.max_images,
+                   "max_videos": req.max_videos}
+            body = render_playbook(team, ctx)
+        except Exception:
+            body = team.playbook
+        return (f"执行一键成片任务（导演组：{team.name}）。\n"
+                f"{members_line}{body}\n{qa_line}"
+                "约束：单批不超过 30 项；单项失败不阻塞整体（记录后继续），最终总结必须如实汇报失败项。")
     roles_line = (
         "2. 用 subagent_run(agent=\"character_designer\", batch=[每角色一项]) 同步并行为全部角色定妆（阻塞等待结果）；\n"
         if req.gen_roles else "2. 本任务关闭角色定妆，跳过；\n"
@@ -81,12 +120,14 @@ def _director_prompt(draft_id: str, req: "OneKeyRunRequest") -> str:
         summary_no = 7
     return (
         f"执行一键成片任务（Agent 集群模式）。draft_id={draft_id}；标题：{req.title or '一键成片'}；画幅 {req.aspect_ratio}。\n"
+        f"{members_line}"
         "严格按阶段推进，同质任务必须用 subagent_run 的 batch 并行委派；需要结果才能继续的用同步阻塞，长耗时独立的用后台+收口：\n"
         f"1. 你自己先调用 onekey_split(draft_id=\"{draft_id}\") 拆解，拿到角色与分镜清单；\n"
         f"{roles_line}"
         "3. 用 subagent_run(agent=\"storyboard_artist\", batch=[每镜一项]) 同步并行生成全部分镜画面（每项 task 含 draft_id 和 shot_index）；\n"
         f"{video_block}"
         f"{export_no}. 用 subagent_run(agent=\"editor\", task=\"把 draft_id={draft_id} 的草稿导出剪映\") 同步导出；\n"
+        f"{qa_line}"
         f"{summary_no}. 调用 onekey_summary(draft_id) 核对结果，最后输出中文制作总结（角色/分镜/成图/成片/配音/导出数量与失败待补项）。\n"
         "约束：单批不超过 30 项；单项失败不阻塞整体（记录后继续），最终总结必须如实汇报失败项。"
     )
@@ -112,6 +153,14 @@ async def _run_agent_task(task_id: str, req: "OneKeyRunRequest") -> None:
     from app.agent.runtime.manager import agent_manager
     from app.agent.runtime.agents import get_profile, team_brief
     from app.pipelines import onekey_agent as oka
+
+    team = _resolve_team(getattr(req, "team_id", "") or "")
+    if team is not None:
+        task["team_id"] = team.id
+        task["team_name"] = team.name
+    elif (getattr(req, "team_id", "") or "").strip():
+        task["team_id"] = str(req.team_id)
+        task["team_name"] = ""
 
     try:
         max_shots = max(1, min(req.max_images, HARD_CAP_SHOTS))
@@ -189,10 +238,12 @@ async def _run_agent_task(task_id: str, req: "OneKeyRunRequest") -> None:
             pass
 
     try:
-        _log("启动", "总导演 Agent 已就绪，开始拆解与并行委派…", 5)
+        _log("启动", f"总导演 Agent 已就绪（导演组：{team.name if team else '内置默认'}），开始拆解与并行委派…", 5)
         await agent_manager.prompt(
-            session_id, f"{_director_prompt(draft.id, req)}\n\n{team_brief()}",
-            context={"project_title": req.title or "一键成片", "onekey": True},
+            session_id,
+            f"{_director_prompt(draft.id, req, team)}\n\n{team_brief(members=list(team.members) if (team and team.members) else None)}",
+            context={"project_title": req.title or "一键成片", "onekey": True,
+                     "team_id": team.id if team else ""},
             mode="execute", run_mode="auto", interactive=False, sink=sink,
             agent_profile=get_profile("director"),
         )
@@ -286,6 +337,7 @@ async def onekey_run(req: OneKeyRunRequest):
         raise HTTPException(status_code=400, detail="文本太短（至少20字），请粘贴小说章节或故事梗概")
     task_id = f"onekey_{uuid.uuid4().hex[:8]}"
     now = time.strftime("%Y-%m-%d %H:%M:%S")
+    _team = _resolve_team(getattr(req, "team_id", "") or "")
     TASKS[task_id] = {
         "task_id": task_id,
         "title": req.title or "一键成片",
@@ -293,13 +345,17 @@ async def onekey_run(req: OneKeyRunRequest):
         "progress": 0,
         "logs": [],
         "subagents": {},
+        "engine": (req.engine or "pipeline"),
+        "team_id": _team.id if _team else str(getattr(req, "team_id", "") or ""),
+        "team_name": _team.name if _team else "",
         "result": None,
         "error": None,
         "created_at": now,
         "updated_at": now,
     }
     asyncio.create_task(_run_task(task_id, req))
-    return {"task_id": task_id, "status": "queued", "engine": (req.engine or "pipeline")}
+    return {"task_id": task_id, "status": "queued", "engine": (req.engine or "pipeline"),
+            "team_id": _team.id if _team else "", "team_name": _team.name if _team else ""}
 
 
 @router.get("/onekey/tasks/{task_id}")

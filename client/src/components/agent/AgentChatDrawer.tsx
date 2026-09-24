@@ -11,6 +11,7 @@ import { useAgentFloatStore } from './agentStore';
 import { AgentMessageList } from './AgentMessageList';
 import { AgentComposer } from './AgentComposer';
 import { AgentSwarmPanel } from './AgentSwarmPanel';
+import { loadRoleMetas } from './swarmMeta';
 
 export const AgentChatDrawer: React.FC = () => {
   const { project, activeShotId, setActiveTab } = useProjectStore();
@@ -59,6 +60,11 @@ export const AgentChatDrawer: React.FC = () => {
   // 连接单例（自动重连）
   useEffect(() => {
     agentSocket.ensure();
+  }, []);
+
+  // 注册导演组扩展角色样式（自定义 icon/color，供集群面板使用）
+  useEffect(() => {
+    loadRoleMetas();
   }, []);
 
   // 打开时把窗口放到按钮附近

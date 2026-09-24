@@ -2,7 +2,7 @@
   "id": "example-drama-pack",
   "name": "示例漫剧包",
   "version": "1.0.0",
-  "description": "插件系统示例：1个通用打磨技能（零代码生效），演示安装→启用→技能库出现→禁用回滚全链路",
+  "description": "插件系统示例：1个通用打磨技能（零代码生效）、1个自定义导演组成员与1个自定义导演组，演示安装→启用→技能库/角色表出现→禁用回滚全链路",
   "author": "Studio",
   "license": "MIT",
   "extensionPoints": {
@@ -13,6 +13,8 @@
     "custom_nodes": ["custom_nodes/*.json"],
     "canvas_nodes": ["canvas_nodes/*.json"],
     "themes": ["themes/*.json"],
-    "director_packs": ["director_packs/*.json"]
+    "director_packs": ["director_packs/*.json"],
+    "agent_profiles": ["agent_profiles/*.json"],
+    "agent_teams": ["agent_teams/*.json"]
   }
 }

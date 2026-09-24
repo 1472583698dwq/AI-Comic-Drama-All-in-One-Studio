@@ -185,6 +185,7 @@ for _mod, _name, _path in (
     ("app.api.theme_routes", "router", "/api/v1/themes"),
     ("app.api.exporter_routes", "router", "/api/v1/exporters"),
     ("app.api.director_pack_routes", "router", "/api/v1/director-packs"),
+    ("app.api.agent_team_routes", "router", "/api/v1/agent-teams"),
 ):
     try:
         import importlib as _il

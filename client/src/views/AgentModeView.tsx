@@ -13,6 +13,7 @@ import { AgentMessageList } from '../components/agent/AgentMessageList';
 import { AgentComposer } from '../components/agent/AgentComposer';
 import { AgentTodoPanel } from '../components/agent/AgentToolSteps';
 import { AgentSwarmPanel } from '../components/agent/AgentSwarmPanel';
+import { loadRoleMetas } from '../components/agent/swarmMeta';
 import { SessionSidebar } from '../components/agent/SessionSidebar';
 import type { BehaviorMode, ExecutionMode } from '../components/agent/agentTypes';
 
@@ -37,6 +38,11 @@ export const AgentModeView: React.FC = () => {
   useEffect(() => {
     bindProject(project?.id || null);
   }, [project?.id, bindProject]);
+
+  // 拉取导演组扩展角色（自定义 icon/color）供集群面板使用
+  useEffect(() => {
+    loadRoleMetas();
+  }, []);
 
   // 自动跟随：用户上滑查看历史时停止自动滚，并给出"回到最新"胶囊（IDE 式）
   const onListScroll = () => {

@@ -1,0 +1,11 @@
+{
+  "id": "quality-first",
+  "name": "质量优先组",
+  "description": "在默认流程基础上加双质检：导出前连贯性检查 + 导出后完整性复核，适合精品短剧",
+  "icon": "Target",
+  "color": "amber",
+  "members": ["screenwriter", "character_designer", "storyboard_artist", "video_operator", "voice_operator", "editor", "continuity_checker", "qa_reviewer"],
+  "playbook": "执行一键成片任务（质量优先导演组）。draft_id={draft_id}；标题：{title}；画幅 {aspect}。严格按阶段推进：\n1. 调用 onekey_split(draft_id=\"{draft_id}\") 拆解，拿到角色与分镜清单；\n2. 用 subagent_run(agent=\"character_designer\", batch=[每角色一项]) 同步并行为全部角色定妆（阻塞等待结果）；\n3. 用 subagent_run(agent=\"storyboard_artist\", batch=[每镜一项]) 同步并行生成全部分镜画面；\n4. 用 subagent_run(agent=\"video_operator\", batch=[每镜一项], background=true) 后台提交图生视频，记下 batch_id；\n5. 用 subagent_run(agent=\"voice_operator\", batch=[每镜一项]) 同步并行为有台词分镜配音；\n6. 用 subagent_wait(batch_id=视频批次) 阻塞等待全部视频完成/超时快照；\n7. 用 subagent_run(agent=\"continuity_checker\", task=\"逐镜检查 draft_id={draft_id} 的角色造型/服装/场景连贯性，输出问题镜头清单\") 同步复核，把问题镜头清单纳入总结；\n8. 用 subagent_run(agent=\"editor\", task=\"把 draft_id={draft_id} 的草稿导出剪映\") 同步导出；\n9. 调用 onekey_summary(draft_id) 核对结果，输出中文制作总结（角色/分镜/成图/成片/配音/导出数量与失败待补项）。",
+  "defaults": { "gen_roles": true, "enable_video": true, "max_images": 12 },
+  "qa_gate": true
+}

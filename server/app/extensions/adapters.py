@@ -491,6 +491,68 @@ def list_director_pack_extensions() -> List[ExtensionInfo]:
     return out
 
 
+def list_agent_profile_extensions() -> List[ExtensionInfo]:
+    """导演组成员（自定义角色画像）：storage/agent_profiles + 插件贡献。"""
+    out: List[ExtensionInfo] = []
+    try:
+        from app.agent_teams.manager import agent_team_manager
+        for p in agent_team_manager.list_profiles():
+            pid = getattr(p, "id", "") or ""
+            if not pid:
+                continue
+            source, owner = _plugin_owner("agent_profile_ids", pid)
+            publisher = owner if source == ExtensionSource.PLUGIN else "local"
+            tools = list(getattr(p, "allow_tools", []) or [])
+            out.append(ExtensionInfo(
+                id=make_ext_id(ExtensionKind.AGENT_PROFILE, pid, publisher),
+                kind=ExtensionKind.AGENT_PROFILE,
+                local_id=pid,
+                publisher=publisher,
+                name=getattr(p, "name", pid) or pid,
+                description=getattr(p, "description", "") or "",
+                icon=getattr(p, "icon", "") or "Bot",
+                source=source,
+                source_detail=owner,
+                status=ExtensionStatus.ENABLED,
+                sub_kind=f"{len(tools)} 工具" + (" · override" if getattr(p, "override", False) else ""),
+                detail_hint="agent/teams",
+            ))
+    except Exception:
+        pass
+    return out
+
+
+def list_agent_team_extensions() -> List[ExtensionInfo]:
+    """导演组（成员名单 + 编排脚本）：storage/agent_teams + 插件贡献。"""
+    out: List[ExtensionInfo] = []
+    try:
+        from app.agent_teams.manager import agent_team_manager
+        for t in agent_team_manager.list_teams():
+            tid = getattr(t, "id", "") or ""
+            if not tid:
+                continue
+            source, owner = _plugin_owner("agent_team_ids", tid)
+            publisher = owner if source == ExtensionSource.PLUGIN else "local"
+            members = list(getattr(t, "members", []) or [])
+            out.append(ExtensionInfo(
+                id=make_ext_id(ExtensionKind.AGENT_TEAM, tid, publisher),
+                kind=ExtensionKind.AGENT_TEAM,
+                local_id=tid,
+                publisher=publisher,
+                name=getattr(t, "name", tid) or tid,
+                description=getattr(t, "description", "") or "",
+                icon=getattr(t, "icon", "") or "Users",
+                source=source,
+                source_detail=owner,
+                status=ExtensionStatus.ENABLED,
+                sub_kind=(f"{len(members)} 成员" if members else "全员") + (" · 质检门" if getattr(t, "qa_gate", False) else ""),
+                detail_hint="agent/teams",
+            ))
+    except Exception:
+        pass
+    return out
+
+
 ADAPTERS = {
     ExtensionKind.PROVIDER: list_provider_extensions,
     ExtensionKind.SKILL: list_skill_extensions,
@@ -503,4 +565,6 @@ ADAPTERS = {
     ExtensionKind.THEME: list_theme_extensions,
     ExtensionKind.EXPORTER: list_exporter_extensions,
     ExtensionKind.DIRECTOR_PACK: list_director_pack_extensions,
+    ExtensionKind.AGENT_PROFILE: list_agent_profile_extensions,
+    ExtensionKind.AGENT_TEAM: list_agent_team_extensions,
 }

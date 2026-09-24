@@ -655,8 +655,8 @@ export const apiService = {
     title?: string; text: string; style_preset?: string; aspect_ratio?: string; custom_instructions?: string;
     max_images?: number; image_provider?: string; image_workflow_id?: string; audio_provider?: string;
     video_provider?: string; video_workflow_id?: string; enable_video?: boolean; max_videos?: number;
-    gen_roles?: boolean; max_roles?: number; engine?: 'pipeline' | 'agent';
-  }): Promise<{ task_id: string; status: string }> {
+    gen_roles?: boolean; max_roles?: number; engine?: 'pipeline' | 'agent'; team_id?: string;
+  }): Promise<{ task_id: string; status: string; engine?: string; team_id?: string; team_name?: string }> {
     const res = await fetch(`${API_BASE_URL}/onekey/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -677,6 +677,7 @@ export const apiService = {
         gen_roles: params.gen_roles ?? true,
         max_roles: params.max_roles ?? 4,
         engine: params.engine || 'pipeline',
+        team_id: params.team_id || '',
       }),
     });
     if (!res.ok) {
@@ -1145,6 +1146,29 @@ export const apiService = {
   },
   async deleteDirectorPack(id: string): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/director-packs/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  // 导演组扩展（agent_profiles / agent_teams）
+  async listAgentProfiles(projectId?: string): Promise<{ profiles: any[]; total: number; catalog: any[]; errors: string[] }> {
+    const qs = projectId ? `?project_id=${encodeURIComponent(projectId)}` : '';
+    const res = await fetch(`${API_BASE_URL}/agent-profiles${qs}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async listAgentTeams(projectId?: string): Promise<{ teams: any[]; total: number }> {
+    const qs = projectId ? `?project_id=${encodeURIComponent(projectId)}` : '';
+    const res = await fetch(`${API_BASE_URL}/agent-teams${qs}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async saveAgentTeam(spec: Record<string, any>): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/agent-teams`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(spec) });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async deleteAgentTeam(id: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/agent-teams/${encodeURIComponent(id)}`, { method: 'DELETE' });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },

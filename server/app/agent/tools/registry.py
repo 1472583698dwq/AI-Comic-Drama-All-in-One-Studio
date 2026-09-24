@@ -50,7 +50,9 @@ _TODO_TOOL_SCHEMA: Dict[str, Any] = {
 
 INTERNAL_TOOL_NAMES = {"todo_write", "job_start", "job_list", "job_status", "job_cancel",
                        "subagent_run", "subagent_wait", "subagent_list", "subagent_status", "subagent_cancel", "subagent_steer",
-                       "batch_run", "task_status", "task_wait", "task_cancel"}
+                       "batch_run", "task_status", "task_wait", "task_cancel",
+                       "onekey_split", "onekey_role_image", "onekey_shot_image",
+                       "onekey_shot_video", "onekey_shot_voice", "onekey_export", "onekey_summary"}
 
 
 def _internal_schema(name: str, desc: str, props: Dict[str, Any], required: List[str]) -> Dict[str, Any]:
@@ -75,8 +77,7 @@ _JOB_CANCEL_SCHEMA = _internal_schema("job_cancel", "取消一个运行中的后
 _SUBAGENT_SCHEMA = _internal_schema(
     "subagent_run",
     "委派子任务给专家子代理（独立上下文，只回最终结果）。默认同步阻塞直到结果返回；background=true 立即返回句柄（完成自动通知，"
-    "关键节点用 subagent_wait 阻塞等待）。同质任务用 batch 数组一次扇出并行。"
-    "可用角色：generalist/screenwriter/character_designer/storyboard_artist/video_operator/voice_operator/editor/qa_reviewer。",
+    "关键节点用 subagent_wait 阻塞等待）。同质任务用 batch 数组一次扇出并行。",
     {"agent": {"type": "string", "description": "专家角色名（默认 generalist=全工具通用）"},
      "task": {"type": "string", "description": "清晰、自包含的子任务描述（带上全部必要上下文，如 draft_id/镜头号）"},
      "background": {"type": "boolean", "description": "缺省=按角色默认（多数同步阻塞）；true=后台执行立即返回；false=强制同步阻塞"},
@@ -86,6 +87,26 @@ _SUBAGENT_SCHEMA = _internal_schema(
      "timeout_s": {"type": "integer", "description": "子代理超时秒数（默认 600）"}},
     ["agent"],
 )
+
+
+def _subagent_schema_dynamic() -> Dict[str, Any]:
+    """动态角色名单：内置 + 外部导演组扩展（storage/agent_profiles + 插件贡献）。"""
+    roles = "generalist/screenwriter/character_designer/storyboard_artist/video_operator/voice_operator/editor/qa_reviewer"
+    extra = ""
+    try:
+        from app.agent.runtime.agents import list_profiles
+        builtin = "generalist/screenwriter/character_designer/storyboard_artist/video_operator/voice_operator/editor/qa_reviewer"
+        custom = [p.name for p in list_profiles() if p.name not in builtin.split("/")]
+        if custom:
+            extra = "；自定义导演组角色：" + "/".join(custom)
+    except Exception:
+        pass
+    schema = dict(_SUBAGENT_SCHEMA)
+    fn = dict(_SUBAGENT_SCHEMA["function"])
+    fn["description"] = f"{fn['description']}可用角色：{roles}{extra}。"
+    schema["function"] = fn
+    return schema
+
 _SUBAGENT_WAIT_SCHEMA = _internal_schema(
     "subagent_wait",
     "阻塞等待子代理（或整批）完成并回收结果——用于后台提交后的同步收口（如导出前等全部视频完成）。"
@@ -198,7 +219,15 @@ class ToolRegistryView:
             names = sorted(t.name for t in self._registry().get_all_tools() if getattr(t, "is_enabled", True))
         except Exception:
             names = []
-        h = hashlib.md5(("|".join(names)).encode("utf-8")).hexdigest()
+        extra = ""
+        try:
+            from app.agent.runtime.agents import refresh_external_profiles
+            refresh_external_profiles()
+            from app.agent_teams.manager import signature as _team_sig
+            extra = _team_sig()
+        except Exception:
+            extra = ""
+        h = hashlib.md5(("|".join(names) + "||" + extra).encode("utf-8")).hexdigest()
         return f"{len(names)}:{h}"
 
     def schemas(self, plan_mode: bool = False) -> List[Dict[str, Any]]:
@@ -232,7 +261,7 @@ class ToolRegistryView:
                          _SUBAGENT_LIST_SCHEMA, _SUBAGENT_STATUS_SCHEMA, _ONEKEY_SUMMARY_SCHEMA]
         else:
             internal += [_JOB_START_SCHEMA, _JOB_LIST_SCHEMA, _JOB_STATUS_SCHEMA, _JOB_CANCEL_SCHEMA,
-                         _SUBAGENT_SCHEMA, _SUBAGENT_WAIT_SCHEMA, _SUBAGENT_LIST_SCHEMA, _SUBAGENT_STATUS_SCHEMA,
+                         _subagent_schema_dynamic(), _SUBAGENT_WAIT_SCHEMA, _SUBAGENT_LIST_SCHEMA, _SUBAGENT_STATUS_SCHEMA,
                          _SUBAGENT_CANCEL_SCHEMA, _SUBAGENT_STEER_SCHEMA,
                          _BATCH_SCHEMA,
                          _TASK_STATUS_SCHEMA, _TASK_WAIT_SCHEMA, _TASK_CANCEL_SCHEMA,

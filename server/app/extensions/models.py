@@ -21,10 +21,13 @@ class ExtensionKind:
     EXPORTER = "exporter"
     THEME = "theme"
     CANVAS_NODE = "canvas_node"
+    AGENT_PROFILE = "agent_profile"
+    AGENT_TEAM = "agent_team"
 
     ALL = (
         "provider", "skill", "workflow", "custom_node", "plugin", "mcp_tool",
         "storyboard_slot", "director_pack", "exporter", "theme", "canvas_node",
+        "agent_profile", "agent_team",
     )
 
 
@@ -53,6 +56,8 @@ KIND_LABELS: Dict[str, str] = {
     "exporter": "导出器",
     "theme": "主题",
     "canvas_node": "画布节点",
+    "agent_profile": "导演组成员",
+    "agent_team": "导演组",
 }
 
 # 可经统一执行口运行的 kind
@@ -65,7 +70,7 @@ LIFECYCLE_KINDS = ("plugin", "provider")
 # （skill/workflow/custom_node/mcp_tool/slot/canvas_node/theme/exporter/director_pack）
 OVERLAY_LIFECYCLE_KINDS = (
     "skill", "workflow", "custom_node", "mcp_tool", "storyboard_slot", "canvas_node",
-    "theme", "exporter", "director_pack",
+    "theme", "exporter", "director_pack", "agent_profile", "agent_team",
 )
 
 # 已声明但执行尚未落地的 kind（只读占位，UI 需明确标注；当前为空）
