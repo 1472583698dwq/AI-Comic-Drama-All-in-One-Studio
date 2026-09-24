@@ -112,9 +112,10 @@ const isFirstFrameSlot = (s: BindSlotLike) =>
 const isLastFrameSlot = (s: BindSlotLike) =>
   s.role === 'last_frame' || /last.?frame|^last$|end.?frame/i.test(`${s.key} ${s.originalKey || ''}`);
 
-/** 角色主图：三视图优先，avatar 兜底（同一角色只出一张） */
+/** 角色主图：front > avatar > three_quarter > side（同一角色只出一张；旧数据可能只有侧/四分之三视图） */
 export function characterMainImage(c: any): string {
-  return c?.three_views?.front || c?.three_views?.three_quarter || c?.three_views?.side || c?.avatar_url || '';
+  const tv = c?.three_views || {};
+  return tv.front || c?.avatar_url || tv.three_quarter || tv.side || '';
 }
 
 function assetUrl(a: any): string {
