@@ -37,7 +37,7 @@ export async function pollVideoTask(taskId: string, opts: PollVideoTaskOptions =
   const interval = opts.intervalMs ?? 3000;
   const max = opts.maxAttempts ?? 500;
   for (let i = 0; i < max; i++) {
-    await new Promise((r) => setTimeout(r, interval));
+    if (i > 0) await new Promise((r) => setTimeout(r, interval)); // 首拍立即查询，避免任务其实已完成还白等一个周期
     let st: any;
     try {
       st = await apiService.getVideoTaskStatus(taskId);

@@ -9,7 +9,7 @@ import { useThemeStore } from '../../stores/useThemeStore';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { useCanvasStore } from '../../stores/useCanvasStore';
 import { apiService } from '../../services/api';
-import { API_ORIGIN } from '../../utils/devOrigin';
+import { API_ORIGIN, resolveMediaUrl } from '../../utils/devOrigin';
 import { confirmAsync, promptAsync, toast } from '../../stores/useDialogStore';
 import { useCanvasSync } from './hooks/useCanvasSync';
 import { executeAgentNode } from './hooks/nodeAgentExecutor';
@@ -970,7 +970,7 @@ const InnerCanvas: React.FC = () => {
       if (!asset) return;
       const node = createNode('image', position);
       const url = asset.thumb_url || asset.file_url;
-      const abs = url?.startsWith('/') ? `http://127.0.0.1:8000${url}` : url;
+      const abs = resolveMediaUrl(url);
       node.data = { ...node.data, reference: abs || url, image_url: abs || url };
       setNodes(nds => [...nds, node]);
       setSelectedNodeId(node.id);
@@ -1238,7 +1238,7 @@ const InnerCanvas: React.FC = () => {
             <div className="grid grid-cols-2 gap-2 max-h-[160px] overflow-y-auto pr-1 items-start">
               {assets.map((a: any) => {
                 const url = a.thumb_url || a.file_url;
-                const abs = url?.startsWith('/') ? `http://127.0.0.1:8000${url}` : url;
+                const abs = resolveMediaUrl(url);
                 return (
                   <div key={a.id} draggable onDragStart={e => { e.dataTransfer.setData('application/canvas-assetid', a.id); e.dataTransfer.setData('text/plain', abs || url); }} className="group bg-surface-secondary border border-border rounded-xl overflow-hidden cursor-grab hover:border-brand/30 hover:shadow-md transition-all">
                     {abs ? (
