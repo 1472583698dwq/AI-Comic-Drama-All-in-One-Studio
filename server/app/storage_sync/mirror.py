@@ -50,6 +50,20 @@ def _rel(local_path: str) -> str:
     return os.path.relpath(local_path, settings.STORAGE_DIR).replace("\\", "/")
 
 
+# 连续失败后的重试间隔：30s、60s、120s… 封顶 10 分钟
+BACKOFF_BASE_S = 30
+BACKOFF_MAX_S = 600
+
+
+def _in_backoff(entry: Dict[str, Any]) -> bool:
+    fails = int(entry.get("fail_count") or 0)
+    if fails <= 0:
+        return False
+    last = float(entry.get("failed_at") or 0) / 1000.0
+    wait = min(BACKOFF_MAX_S, BACKOFF_BASE_S * (2 ** (fails - 1)))
+    return (time.time() - last) < wait
+
+
 def is_mutable(rel: str) -> bool:
     return os.path.basename(rel) in MUTABLE_BASENAMES
 
@@ -169,7 +183,8 @@ class StorageMirror:
                     return
             await self.client.put(remote, local)
             self.journal.mark(rel, size=st.st_size, mtime=st.st_mtime,
-                              pushed_at=_now_ms(), remote=remote)
+                              pushed_at=_now_ms(), remote=remote,
+                              error="", fail_count=0)
         self.stats["uploaded"] += 1
 
     async def _worker(self) -> None:
@@ -184,7 +199,9 @@ class StorageMirror:
                         if attempt == 2:
                             self.stats["failed"] += 1
                             self.stats["last_error"] = f"{rel}: {e}"
-                            self.journal.mark(rel, error=str(e)[:300], failed_at=_now_ms())
+                            fails = int(self.journal.get(rel).get("fail_count") or 0) + 1
+                            self.journal.mark(rel, error=str(e)[:300], failed_at=_now_ms(),
+                                              fail_count=fails)
                         else:
                             await asyncio.sleep(2 ** attempt)
             finally:
@@ -232,6 +249,10 @@ class StorageMirror:
                 continue
             j = self.journal.get(rel)
             if j.get("size") == st.st_size and abs(float(j.get("mtime") or 0) - st.st_mtime) < 1e-6:
+                continue
+            if _in_backoff(j):
+                # 上次传失败还在退避期内。没有这道闸，一个传不上去的文件
+                # 会被每轮扫描重新排队，服务端挂掉时就成了死循环。
                 continue
             self.enqueue(rel)
             n += 1

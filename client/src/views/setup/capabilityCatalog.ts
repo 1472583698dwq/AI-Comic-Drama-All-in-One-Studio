@@ -516,31 +516,32 @@ export const CAPABILITIES: Capability[] = [
   {
     id: 'storage',
     name: '素材与工程云端同步',
-    why: '把本机 storage 里的素材、工程异步同步到你自己的 OpenList。换一台电脑打开，项目列表和素材都还在——素材是页面真要看它时才回拉，不会一上来就下一堆。',
-    ifMissing: '所有东西只存在这台机器上，换台电脑就是空的。',
+    why: '素材和工程异步传到共用的 OpenList，换一台电脑打开，项目列表立刻就在；素材等页面真要看它时才回拉，不会一上来就下一堆。',
+    ifMissing: '关掉之后所有东西只存在这台机器上，换台电脑就是空的。',
     channels: [
       {
         id: 'openlist',
         name: 'OpenList',
         where: 'cloud',
-        summary: '自建的 OpenList（AList 系）。只同步素材与工程，API Key 那些配置永远留在本机。',
+        summary: '已预置团队共用的地址与账号，默认就是开的，不用配。只同步素材与工程，API Key 那些配置不会传出去。',
         test: 'openlist',
         docs: 'https://doc.oplist.org/',
-        warn: '底层若是 HalalCloud / IPFS 这类内容寻址存储，文件是明文存的；敏感内容别往里放。',
+        warn: '账号密码随代码分发，拿到仓库的人都能读写这块存储；底层是内容寻址存储，文件明文存放——敏感素材别往里放。',
         fields: [
           KEY('OPENLIST_SYNC_ENABLED', '开启同步', {
-            kind: 'text', required: false, placeholder: '0',
-            hint: '填 1 开启、0 关闭。改完要重启服务才生效',
+            kind: 'text', required: false, placeholder: '1',
+            hint: '默认开。改完要重启服务才生效',
             quickFill: [{ label: '开', value: '1' }, { label: '关', value: '0' }],
           }),
           KEY('OPENLIST_BASE_URL', '服务地址', {
-            kind: 'url', placeholder: 'http://127.0.0.1:5244',
-            hint: '同机跑就填本地端口，最快；填公网域名也行',
+            kind: 'url', required: false, placeholder: 'https://openlist.apeiria.cc.cd',
+            hint: '默认走公网域名，哪台机器都通。和 OpenList 同机跑就改成本地端口，快很多',
+            quickFill: [{ label: '本机', value: 'http://127.0.0.1:5244' }],
           }),
-          KEY('OPENLIST_USERNAME', '用户名', { kind: 'text' }),
-          KEY('OPENLIST_PASSWORD', '密码'),
+          KEY('OPENLIST_USERNAME', '用户名', { kind: 'text', required: false }),
+          KEY('OPENLIST_PASSWORD', '密码', { required: false }),
           KEY('OPENLIST_ROOT', '远端根目录', {
-            kind: 'text', required: false, placeholder: '/comic-studio',
+            kind: 'text', required: false, placeholder: '/autoword/comic-studio',
             hint: '必须落在 OpenList 已挂载的存储路径下，否则写不进去。点测试会当场验它可不可写',
           }),
         ],
