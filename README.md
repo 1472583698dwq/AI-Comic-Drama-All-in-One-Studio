@@ -1,119 +1,129 @@
-# MiniMax AI 漫剧 Studio (Desktop + Mobile 双端跨平台工作台)
+# AI 漫剧 Studio · 精简新手版 (multi_ai_simpleuse)
 
-> **深度融合**：**字节跳动·小云雀AI**（长文小说拆解与一致性流水线） + **MiniMax Design**（3D 虚拟导演台与多模态 Agent 协作） + **OpenReel Video**（专业多轨剪辑引擎） + **MCP (Model Context Protocol)** 统一外部工具扩展标准。
-
----
-
-## 🌟 核心特性矩阵
-
-### 1. 🖥️ 桌面专业版 (Desktop Studio)
-- **3D 虚拟导演台 (MiniMax Design 核心创新)**：
-  - 基于 Three.js 60fps 实时渲染，3D 虚拟空间摆放角色素体、姿态控制（武道战斗、傲然站立、回眸、奔跑）。
-  - 自由调整机位与镜头轨迹（急进推镜、渐远拉出、360° 环绕、战斗震颤），导出空间强控参数（ControlNet / CameraCtrl Ready）。
-- **专业多轨音视频剪辑时间线 (OpenReel 架构)**：
-  - 包含：主画面轨、角色对白轨（波形可视化 + 情绪标签）、史诗旁白轨、BGM 氛围音效轨、动态花字字幕轨。
-  - 帧级拖拽、时间线平滑缩放、实时吸附与音画对齐播放。
-- **全生命周期角色一致性资产库 (Character Consistency Studio)**：
-  - 标准人物正面 (0°)、侧面 (90°)、3/4 动态视角三视图管理。
-  - 角色服饰、面部与特征词锁定（IP-Adapter / LoRA 权重绑定）。
-
-### 2. 📱 移动便携版 (Mobile Quick App - 小云雀卡片流)
-- **长篇小说一键成片**：支持整章网文粘贴，大模型秒级提炼人物关系与分镜。
-- **全屏 9:16 卡片流工作台**：上下滑动逐镜微调，单手点击一键【换图】、【换声线】、【改台词】、【智能重绘】。
-- **一键分发与成片**：支持竖屏短剧即时预览与快速成片导出。
-
-### 3. 🔌 MCP (Model Context Protocol) 统一外部工具扩展体系
-- **标准开放协议**：双端内置 MCP 客户端，支持一键调用与接入外部生态：
-  - `split_novel_script`: 小说长文本章节拆解与角色提取 Agent Tool。
-  - `generate_minimax_voice`: MiniMax Speech-01 超拟人配音 Tool（支持怒吼、低语、哭腔等情感）。
-  - `director_3d_stage_plan`: 3D 虚拟导演台空间轨迹计算 Tool。
-  - `comfyui_render_node`: 桥接用户本地/云端 ComfyUI (Flux/SDXL/ControlNet) 生图工作流。
-  - `export_jianyin_draft`: 剪映 / CapCut 官方草稿工程 (`draft_content.json`) 一键导出 Tool。
-- **自定义 MCP 插件市场**：支持用户自由添加自定义外部 MCP Server（如自建知识库、音效搜索、Web Search 等）。
+> 基于 AI 漫剧工作台项目裁剪而来的**简化新手版本**：保留核心创作流程，去掉进阶/实验性功能，让新机器和新用户拉下来就能跑、界面上少一半看不懂的东西。
+>
+> **上游完整版**：https://gitcode.com/dwq147/src （功能更全，进阶用户请移步）
 
 ---
 
-## 🛠️ 技术栈架构
+## ⚠️ 本仓库是什么
+
+- 这是一个**面向新手和轻量使用的精简版**，不是完整版。
+- 相比上游 `dwq147/src`，**裁掉了部分功能**（见下方清单），未跟随上游 `master` 合并。
+- 分支说明：本仓库 `master` 已同步推送为上游的 `multi_ai_simpleuse` 分支。
+- 精简版保持了独立演进：包含上游没有的多项修复与重构（开发环境回源统一、视频任务轮询收敛、画布选中态修复、LLM 规划超时护栏、悬空素材清理等）。
+
+### 与上游完整版相比，本版本裁掉的功能
+
+| 裁掉的功能 | 说明 |
+| --- | --- |
+| 导演组扩展系统 | `agent_profile` / `agent_team`：插件贡献、热加载、编排脚本、质检门 |
+| 子代理集群与一键成片 Agent 引擎 | 同步/异步/批量子代理调度 + `wait` 收口，集群可视化视图 |
+| Agent 模式双维拆分与配置中心重构 | 上游重构后的 Agent 执行方式体系 |
+| 导演台多机位与白模参考自动装配 | 3D 导演台的多机位编排新特性 |
+| IndexTTS 内置配音通道 | 设置页填地址即用的本地 TTS 通道（本版本仅保留云端 TTS） |
+| 启动器黑屏自愈等桌面端增强 | 构建更新后分片 404 自愈、Edge 独立 profile 等 |
+| 上游的 README / 使用说明重写 | 本仓库 README 为精简版自行维护 |
+
+> 需要以上任何功能，请使用上游完整版：https://gitcode.com/dwq147/src
+
+### 精简版保留并增强的核心能力
+
+- **无限画布（Creative Canvas）**：节点式创作流，图像/视频/音频/Comfy 工作流/分镜卡等节点自由连线，节点 Agent 控制台"说人话"生成。
+- **生成源（Provider）体系**：内置与自定义生成源统一管理，支持把密钥从代码内联迁移到配置存储；设置页明确提示"填了是否生效"。
+- **素材库**：人物/场景/道具等分类素材管理与拖拽上画布；悬空素材（文件已删、记录还在）一键清理，删除前自动备份清单。
+- **素材与工程云同步（OpenList）**：素材与工程异步同步到 OpenList，换台机器还是同一套。
+- **多轨时间线 / 分镜工作台 / 角色工坊 / 移动端卡片流 / 剪映草稿导出**：与主项目一致的基础创作链路。
+- **MCP 工具中枢**：统一的 Model Context Protocol 工具注册与调用，画布节点可被 Agent 读写（键名自动驼峰→snake_case 归一）。
+
+---
+
+## 🛠️ 技术栈
 
 ```mermaid
 graph TD
-    subgraph 客户端 (跨端统一)
+    subgraph 客户端
         A1[React 19 + TypeScript + Vite]
-        A2[Tailwind CSS v4 暗黑工业风设计系统]
-        A3[Three.js 3D 导演台引擎]
-        A4[Tauri 2.0 Rust 跨端运行时 Desktop/Mobile]
+        A2[Tailwind CSS v4]
+        A3[React Flow 无限画布]
     end
 
-    subgraph 后端与工具调度
-        B1[Python FastAPI 异步高性能服务]
-        B2[FastMCP 标准 Model Context Protocol 中枢]
-        B3[MiniMax API 驱动: abab LLM + Speech-01 + Video-01]
-        B4[剪映 / CapCut Draft Exporter v3]
+    subgraph 后端
+        B1[Python FastAPI]
+        B2[MCP 统一工具中枢]
+        B3[图像/视频/音频 Provider 调度]
+        B4[剪映草稿导出器]
     end
 
-    A1 --> A2 & A3 & A4
-    A1 <-->|RESTful API + WebSocket| B1
+    A1 <-->|REST + WebSocket| B1
     B1 --> B2 --> B3 & B4
 ```
 
+> 桌面打包基于 Python（PyInstaller），仓库内的 `.spec` 与 `launch_desktop_app.py` 负责无黑框启动。
+
 ---
 
-## 🚀 快速启动指南
+## 🚀 快速启动
 
 ### 方式一：Windows 一键启动（推荐）
-双击项目根目录下的 **`start_all.bat`** 即可自动启动后端与客户端！
 
-### 方式二：手动分步启动
+双击根目录 **`一键启动.bat`**（或 `start_all.bat`）。已打包过 `dist/Studio` 的话会直接拉起桌面版。
 
-#### 1. 启动 Python 后端服务
+### 方式二：开发模式分步启动
+
 ```bash
+# 1. 后端（http://127.0.0.1:8000 ，API 文档 /docs）
 cd server
 python run_server.py
-```
-> 后端服务运行于 `http://127.0.0.1:8000`，API 文档地址：`http://127.0.0.1:8000/docs`
 
-#### 2. 启动前端客户端
-```bash
+# 2. 前端（http://localhost:5173 ，与 51xx 段端口均可用）
 cd client
 npm run dev
 ```
-> 客户端运行于 `http://localhost:5173`
+
+### 双端开发模式
+
+`一键启动(双端开发模式).bat` 同时拉起前后端热更新环境。
+
+> 首次使用请在 **系统设置** 里配置各生成源（图像/视频/语音）的 API Key。密钥支持写入配置存储，避免明文散落在自定义生成源代码里。
 
 ---
 
-## 📂 项目工程目录
+## 📂 项目结构
 
 ```text
-d:/ai漫剧/
-├── client/                           # 双端跨平台前端 (React 19 + Vite + Tailwind + Three.js)
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── navbar/Header.tsx     # 顶部多端切换与全局控制器
-│   │   │   ├── director3d/           # [MiniMax Design] 3D 虚拟导演台 (Three.js)
-│   │   │   ├── timeline/             # [OpenReel] 多轨音视频剪辑时间线
-│   │   │   ├── storyboard/           # 分镜工作台与参数检查器
-│   │   │   ├── character/            # 角色三视图一致性资产库
-│   │   │   ├── mobile/               # [小云雀风格] 移动端全屏卡片流
-│   │   │   ├── agent/                # 导演 Agent 对话交互抽屉
-│   │   │   ├── mcp/                  # MCP 外部工具管理与沙盒测试弹窗
-│   │   │   └── export/               # 剪映草稿与成片导出中心
-│   │   ├── stores/                   # Zustand (useProjectStore, useMcpStore)
-│   │   ├── services/                 # API 通信层
-│   │   └── types/                    # TypeScript 类型定义
-│   └── package.json
-├── server/                           # 后端与 AI 调度中枢 (FastAPI + FastMCP)
-│   ├── app/
-│   │   ├── api/routes.py             # REST API 与 WebSocket 路由
-│   │   ├── mcp/server.py             # MCP 统一工具注册中枢 (ComfyUI/剪映/MiniMax)
-│   │   ├── pipelines/
-│   │   │   ├── script_agent.py       # 小说智能拆解与角色提取 Agent
-│   │   │   ├── minimax_tts.py        # MiniMax Speech-01 超拟人配音流水线
-│   │   │   ├── consistency_engine.py # 角色三视图与场景一致性引擎
-│   │   │   └── jianyin_exporter.py   # 剪映 / CapCut 官方草稿工程导出器
-│   │   ├── core/config.py            # 环境与配置
-│   │   └── main.py                   # FastAPI 应用入口
-│   ├── run_server.py
-│   └── requirements.txt
-├── start_all.bat                     # Windows 一键启动脚本
-└── README.md
+├── client/                 # 前端 (React 19 + Vite + Tailwind + React Flow)
+│   └── src/
+│       ├── components/
+│       │   ├── canvas/     # 无限画布：节点、Agent 控制台、控制条
+│       │   ├── asset/      # 素材库与素材选择器
+│       │   ├── timeline/   # 多轨时间线
+│       │   ├── storyboard/ # 分镜工作台与镜头检查器
+│       │   ├── character/  # 角色工坊
+│       │   ├── mobile/     # 移动端卡片流
+│       │   ├── mcp/        # MCP 工具管理
+│       │   └── export/     # 剪映草稿/成片导出
+│       ├── services/       # API 通信层
+│       ├── stores/         # Zustand 状态
+│       └── utils/          # devOrigin（回源统一）/ videoTask（轮询统一）等
+├── server/                 # 后端 (FastAPI + MCP)
+│   └── app/
+│       ├── api/            # REST 路由（素材、工程、画布…）
+│       ├── canvas/         # 画布引擎与 Agent 规划
+│       ├── mcp/            # MCP 工具注册中枢
+│       ├── providers/      # 生成源管理（含自定义内联源沙盒）
+│       └── pipelines/      # TTS / 一致性等流水线
+├── storage/                # 运行时数据（工程、画布、素材、提供方索引）
+├── plugins/                # 插件目录
+├── exports/                # 成片/导出产物
+├── 一键启动.bat             # Windows 一键启动
+└── 使用说明.md              # 通俗版使用手册（新手从这里开始）
 ```
+
+---
+
+## 📚 更多文档
+
+- `使用说明.md`：面向新手的操作手册
+- `docs/`：同步说明、链路测试与优化计划等开发文档
+- 上游完整版：https://gitcode.com/dwq147/src
