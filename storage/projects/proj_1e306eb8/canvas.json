@@ -92,7 +92,9 @@
               "duration": 5
             },
             "_polling": false,
-            "reference_images": []
+            "reference_images": [
+              "/storage/assets/ast_24895c5a/original.png"
+            ]
           },
           "measured": {
             "width": 360,
@@ -102,16 +104,35 @@
           "dragging": false
         },
         {
-          "id": "export_1789738085394_22",
-          "type": "export",
+          "id": "prompt_1789982935217_1",
+          "type": "prompt",
           "position": {
-            "x": 280,
-            "y": 280
+            "x": 94,
+            "y": -116
           },
-          "data": {},
+          "data": {
+            "prompt": ""
+          },
           "measured": {
             "width": 360,
-            "height": 263
+            "height": 253
+          },
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "prompt_1789982935245_2",
+          "type": "prompt",
+          "position": {
+            "x": 360,
+            "y": 360
+          },
+          "data": {
+            "prompt": ""
+          },
+          "measured": {
+            "width": 360,
+            "height": 253
           }
         }
       ],
@@ -136,7 +157,7 @@
           "selected": false
         }
       ],
-      "updated_at": "2026-09-18 21:43:45"
+      "updated_at": "2026-09-21 21:33:49"
     },
     "cv_mtpeb9n6": {
       "name": "画布2",
