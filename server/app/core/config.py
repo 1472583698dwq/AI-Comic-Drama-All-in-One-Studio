@@ -75,9 +75,20 @@ MANAGED_KEYS = [
     "WAN3_BASE_URL",
     # JianYing Draft & Paths
     "JIANYIN_DRAFT_PATH",
+    # 云端素材/工程同步（OpenList）
+    "OPENLIST_SYNC_ENABLED",
+    "OPENLIST_BASE_URL",
+    "OPENLIST_USERNAME",
+    "OPENLIST_PASSWORD",
+    "OPENLIST_ROOT",
     # Trusted Mode 总闸（A档）
     "STUDIO_TRUSTED_MODE",
 ]
+
+
+def _is_secret_key(key: str) -> bool:
+    """要打码后才能回显给前端的键。"""
+    return key.endswith("_API_KEY") or key in ("MINIMAX_API_KEY", "OPENLIST_PASSWORD")
 
 
 def _mask_value(value: str) -> str:
@@ -234,6 +245,22 @@ class Settings(BaseModel):
     # JianYing Draft Custom Location
     JIANYIN_DRAFT_PATH: str = os.getenv("JIANYIN_DRAFT_PATH", get_default_jianyin_draft_path())
 
+    # ── 云端素材/工程同步（OpenList）──────────────────────────
+    # 开了之后 storage/ 下的素材与工程会异步镜像到 OpenList，换台机器按需拉回。
+    # 密码是登录凭据，和 API Key 一样不会明文回显给前端。
+    OPENLIST_SYNC_ENABLED: str = os.getenv("OPENLIST_SYNC_ENABLED", "0")
+    OPENLIST_BASE_URL: str = os.getenv("OPENLIST_BASE_URL", "")
+    OPENLIST_USERNAME: str = os.getenv("OPENLIST_USERNAME", "")
+    OPENLIST_PASSWORD: str = os.getenv("OPENLIST_PASSWORD", "")
+    # 远端根目录：必须落在 OpenList 已挂载的存储下（本机那台挂的是 /autoword）
+    OPENLIST_ROOT: str = os.getenv("OPENLIST_ROOT", "/autoword/comic-studio")
+    # 以下三项只走 env，不进设置页：扫描间隔(秒) / 并发上传数 / 单次传输超时(秒)
+    OPENLIST_SCAN_INTERVAL: str = os.getenv("OPENLIST_SCAN_INTERVAL", "20")
+    OPENLIST_WORKERS: str = os.getenv("OPENLIST_WORKERS", "2")
+    OPENLIST_TIMEOUT: str = os.getenv("OPENLIST_TIMEOUT", "300")
+    # 每个可变文件在云端保留几个历史版本，超出的删掉
+    OPENLIST_KEEP_VERSIONS: str = os.getenv("OPENLIST_KEEP_VERSIONS", "20")
+
     # Trusted Mode（可信模式总闸）：允许自定义生成源 trusted=True 跳出沙箱 + Agent fs/shell 工具生效
     # 本地桌面端默认关闭，需显式 STUDIO_TRUSTED_MODE=1 开启。开启后仍需逐源勾选 trusted。
     STUDIO_TRUSTED_MODE: str = os.getenv("STUDIO_TRUSTED_MODE", "0")
@@ -261,7 +288,7 @@ class Settings(BaseModel):
         data: Dict[str, str] = {}
         for k in MANAGED_KEYS:
             v = str(getattr(self, k, ""))
-            if masked and (k.endswith("_API_KEY") or k == "MINIMAX_API_KEY") and v:
+            if masked and _is_secret_key(k) and v:
                 v = _mask_value(v)
             data[k] = v
         return data
@@ -377,7 +404,7 @@ def read_env_file(unmask: bool = True) -> Dict[str, str]:
 
     if not unmask:
         return {
-            k: (_mask_value(v) if (k.endswith("_API_KEY") or k == "MINIMAX_API_KEY") else v)
+            k: (_mask_value(v) if _is_secret_key(k) else v)
             for k, v in merged.items()
         }
     return {k: merged.get(k, "") for k in MANAGED_KEYS}

@@ -195,6 +195,12 @@ class AssetManager:
         asset.file_url = f"/storage/{rel}"
         asset.thumb_url = asset.file_url
         asset.file_path = out_path
+        # 排进云端同步队列：只是入队，不等它传完，素材立刻就能用
+        try:
+            from app.storage_sync.mirror import mirror
+            mirror.enqueue(rel)
+        except Exception:
+            pass
         # 尝试获取宽高（图片）
         try:
             from PIL import Image

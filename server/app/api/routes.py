@@ -18,7 +18,7 @@ from app.pipelines.consistency_engine import consistency_engine
 from app.pipelines.unified_orchestrator import unified_orchestrator
 from app.mcp.server import mcp_registry
 from app.skills.engine import skill_engine, SkillDefinition, SkillExecutionResult
-from app.core.config import settings, read_env_file, write_env_file, MANAGED_KEYS, get_primary_env_file, JSON_CONFIG_FILE
+from app.core.config import settings, read_env_file, write_env_file, MANAGED_KEYS, get_primary_env_file, JSON_CONFIG_FILE, _is_secret_key
 from pydantic import BaseModel, Field
 import httpx
 
@@ -1660,7 +1660,7 @@ async def save_config(req: ConfigUpdateRequest):
             continue
         new_val_str = str(new_val).strip()
         # 若传入脱敏占位符则保留已有真实密钥
-        if (k.endswith("_API_KEY") or k == "MINIMAX_API_KEY") and _is_masked_placeholder(new_val_str):
+        if _is_secret_key(k) and _is_masked_placeholder(new_val_str):
             updates[k] = raw_existing.get(k, "")
         else:
             updates[k] = new_val_str
@@ -1907,6 +1907,31 @@ async def test_config_connection(req: ConfigTestRequest):
             return {"target": "indextts", "ok": True, "url": url, "detail": f"服务在线，参考音频就绪（{os.path.basename(ref)}）"}
         except Exception as e:
             return {"target": "indextts", "ok": False, "url": url, "detail": f"无法连接 IndexTTS: {e}"}
+
+    if target == "openlist":
+        base = (cfg.get("OPENLIST_BASE_URL") or settings.OPENLIST_BASE_URL or "").strip().rstrip("/")
+        user = (cfg.get("OPENLIST_USERNAME") or settings.OPENLIST_USERNAME or "").strip()
+        pwd = cfg.get("OPENLIST_PASSWORD") or settings.OPENLIST_PASSWORD or ""
+        root = (cfg.get("OPENLIST_ROOT") or settings.OPENLIST_ROOT or "/autoword/comic-studio").rstrip("/")
+        if not base:
+            return {"target": "openlist", "ok": False, "detail": "服务地址未配置"}
+        if not user or not pwd:
+            return {"target": "openlist", "ok": False, "detail": "用户名 / 密码未配置"}
+        from app.storage_sync.openlist import OpenListClient
+        c = OpenListClient(base, user, pwd, timeout=20.0)
+        try:
+            await c.ping()
+        except Exception as e:
+            return {"target": "openlist", "ok": False, "url": base, "detail": f"登录失败：{e}"}
+        # 能登录还不够：根目录必须落在某个已挂载的存储下，否则写进去会一直失败
+        try:
+            await c.mkdirs(root)
+            items = await c.list_dir(root)
+            return {"target": "openlist", "ok": True, "url": base,
+                    "detail": f"连通正常，根目录 {root} 可写（当前 {len(items)} 项）"}
+        except Exception as e:
+            return {"target": "openlist", "ok": False, "url": base,
+                    "detail": f"登录成功，但根目录 {root} 不可用：{e}。检查它是否落在 OpenList 已挂载的存储路径下"}
 
     if target in ["gptsovits", "gpt_sovits"]:
         url = (cfg.get("GPTSOVITS_URL") or settings.GPTSOVITS_URL).rstrip("/")
@@ -2587,3 +2612,35 @@ async def open_system_folder(req: OpenFolderRequest):
         return {"status": "ok", "opened": path}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"打开文件夹失败: {e}")
+
+
+# ─────────────────────────── 云端素材同步（OpenList）───────────────────────────
+
+@router.get("/storage-sync/status")
+async def storage_sync_status():
+    """同步开没开、排了多少队、传过多少、最近一次错在哪。"""
+    from app.storage_sync.mirror import mirror
+    return mirror.status()
+
+
+@router.post("/storage-sync/scan")
+async def storage_sync_scan():
+    """立刻扫一遍本地 storage，把没传过的排进上传队列（不等它传完）。"""
+    from app.storage_sync.mirror import mirror
+    if not mirror.enabled():
+        raise HTTPException(status_code=400, detail="云端同步未开启")
+    n = await run_in_threadpool(mirror.scan_once)
+    return {"queued": n, "queue": mirror.queue.qsize()}
+
+
+@router.post("/storage-sync/pull")
+async def storage_sync_pull():
+    """
+    从云端把工程与素材的元数据拉齐 —— 新机器第一次打开、或想立刻看到别处的改动时用。
+    素材本体不在这里下载，等页面真去请求 /storage/xxx 时按需回拉。
+    """
+    from app.storage_sync.mirror import mirror
+    if not mirror.enabled():
+        raise HTTPException(status_code=400, detail="云端同步未开启")
+    changed = await mirror.pull_all_state()
+    return {"changed": changed, "count": len(changed)}
