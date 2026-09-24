@@ -18,9 +18,21 @@ export type BindResourceSource =
   | 'character'      // 角色三视图/立绘
   | 'scene'          // 场景底图
   | 'prop'           // 道具/背景/特效素材
+  | 'shot_image'     // 本镜自有图（首帧图/插槽里存的旧键图，可作参考图兜底）
   | 'previz'         // 3D 白模截图
   | 'previz_video'   // 3D 动态预演
   | 'audio_ref';     // 角色参考音频（音色克隆）
+
+/**
+ * 旧单数 / 带 _url 后缀写法 → 源声明键的归一别名（唯一口径）。
+ * 生成路径（keepDeclaredOnly）与一键绑定必须同表，否则预览显示"旧键被忽略"其实生成时会透传。
+ */
+export const LEGACY_SLOT_ALIASES: Record<string, string[]> = {
+  reference_image: ['reference_images', 'reference'],
+  first_frame_url: ['first_frame'],
+  last_frame_url: ['last_frame'],
+  reference_audio_url: ['reference_audio', 'reference_audios'],
+};
 
 export interface BindResource {
   id: string;
@@ -31,6 +43,8 @@ export interface BindResource {
   priority: number; // 越小越优先
   charId?: string;
   weight?: number;
+  /** 资源来源键（shot.dynamic_inputs 的旧键），用于残留键判定 */
+  fromKey?: string;
 }
 
 export interface BindSlotLike {
@@ -78,6 +92,8 @@ export interface BindPlan {
   truncated: BindTruncated[];
   /** 现有 dynamic_inputs 中不被该源任何插槽声明的键（切源残留） */
   stale: string[];
+  /** 该源声明的媒体插槽（预览显示"源要什么"，与资源池对照） */
+  slots: Array<{ key: string; label: string; type: 'image' | 'audio' | 'video'; required: boolean }>;
 }
 
 export interface CollectOptions {
@@ -104,6 +120,11 @@ export function characterMainImage(c: any): string {
 function assetUrl(a: any): string {
   return a?.file_url || a?.thumb_url || a?.image_url || '';
 }
+
+/** URL 形态判定：/storage 相对路径、http(s) 直链、或带图片扩展名 */
+const isImageLikeUrl = (v: any): v is string =>
+  typeof v === 'string' && v.length > 0 &&
+  (/^\/storage\//.test(v) || /^https?:\/\//i.test(v) || /\.(png|jpe?g|webp|gif|bmp|avif|tiff?)(\?|#|$)/i.test(v));
 
 /** 收集图片/视频资源（按优先级升序） */
 export function collectMediaResources(opts: CollectOptions): BindResource[] {
@@ -142,6 +163,24 @@ export function collectMediaResources(opts: CollectOptions): BindResource[] {
     if (!url) return;
     out.push({ id: `prop_${aid}`, type: 'image', url, name: a?.name || aid, source: 'prop', priority: 200 + i });
   });
+
+  // 3.5 本镜自有图（仅视频源：首帧图 / 插槽里存的旧键图，角色缺立绘时也能兜底出参考）
+  if (opts.kind === 'video') {
+    const skip = new Set<string>(
+      [shot?.previz_url, shot?.previz_video_url, shot?.scene_ref_image].filter(Boolean) as string[],
+    );
+    const pushStill = (url: any, key: string, label: string, priority: number) => {
+      if (!isImageLikeUrl(url) || skip.has(url)) return;
+      if (out.some((r) => r.url === url)) return;
+      out.push({ id: `shotimg_${key}_${priority}`, type: 'image', url, name: label, source: 'shot_image', priority, fromKey: key });
+    };
+    pushStill(shot?.image_url, 'image_url', `镜头#${shot?.shot_index || ''} 首帧图`, 250);
+    const di = (shot?.dynamic_inputs || {}) as Record<string, any>;
+    Object.entries(di).forEach(([k, v]) => {
+      const vals = Array.isArray(v) ? v : [v];
+      vals.forEach((u, i) => pushStill(u, k, `镜头#${shot?.shot_index || ''} 已存图·${k}`, 260 + i));
+    });
+  }
 
   // 4. 白模预演
   if (includePreviz && shot?.previz_url) {
@@ -205,13 +244,25 @@ export function planBinding(
   const used = new Set<string>();
 
   const slotKeys = (s: BindSlotLike) => Array.from(new Set([s.key, s.originalKey].filter(Boolean) as string[]));
+  /** 旧键 → 该源声明槽的别名（如 reference_image → reference_images）；生成路径同表透传 */
+  const aliasSlotKeys = (k: string) => (LEGACY_SLOT_ALIASES[k] || []).filter((a) => declared.has(a));
   const currentVal = (s: BindSlotLike) => {
     for (const k of slotKeys(s)) {
       const v = current?.[k];
       if (Array.isArray(v) ? v.length : (v !== undefined && v !== null && v !== '')) return v;
     }
+    // 旧键别名：切源后旧值仍会沿别名通道透传，这里也认（避免"保留原值"漏报 + 重复绑定）
+    for (const k of Object.keys(current || {})) {
+      if (declared.has(k)) continue;
+      if (!aliasSlotKeys(k).some((a) => slotKeys(s).includes(a))) continue;
+      const v = current[k];
+      if (Array.isArray(v) ? v.length : (v !== undefined && v !== null && v !== '')) return v;
+    }
     return undefined;
   };
+  /** 数组槽保留原值时补成数组（源声明为 array，字符串会挂） */
+  const asSlotValue = (s: BindSlotLike, v: any) =>
+    (s.multi || (typeof s.maxCount === 'number' && s.maxCount > 1)) && !Array.isArray(v) ? [v] : v;
   const write = (s: BindSlotLike, value: any, items: BindFillItem[]) => {
     for (const k of slotKeys(s)) patch[k] = value;
     filled.push(...items);
@@ -228,7 +279,7 @@ export function planBinding(
       // 仅填空槽：保留手工值，标记占用，避免同一资源重复进其他槽
       markExistingUsed(slot, existing);
       const arr = Array.isArray(existing) ? existing : [existing];
-      write(slot, existing, arr.filter(Boolean).map((u: any) => ({
+      write(slot, asSlotValue(slot, existing), arr.filter(Boolean).map((u: any) => ({
         slotKey: slot.key, slotLabel: slot.label, url: String(u), name: '保留手动值', source: 'existing' as const, kept: true,
       })));
       return;
@@ -271,6 +322,17 @@ export function planBinding(
     alloc(s, pool);
   }
 
-  const stale = Object.keys(current || {}).filter((k) => !declared.has(k));
-  return { patch, filled, gaps, truncated, stale };
+  // 残留键：既不是该源声明槽（含旧键别名通道），也没被重绑进新槽的值
+  const stale = Object.keys(current || {}).filter((k) => {
+    if (declared.has(k)) return false;
+    if (aliasSlotKeys(k).length) return false;
+    const v = current[k];
+    const vals = Array.isArray(v) ? v : [v];
+    if (vals.some((u) => typeof u === 'string' && u && used.has(u))) return false;
+    return true;
+  });
+  return {
+    patch, filled, gaps, truncated, stale,
+    slots: slots.map((s) => ({ key: s.key, label: s.label, type: s.type, required: !!s.required })),
+  };
 }
