@@ -2,6 +2,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import JSONResponse
 from app.core.config import settings, cors_extra_origins, is_local_or_allowed_origin
 from app.api.routes import router
@@ -22,11 +23,34 @@ except Exception as e:
 # FastMCP 标准协议应用（挂载到 /mcp-server，供外部 MCP 客户端直连）
 mcp_http_app = mcp_registry.get_mcp_http_app()
 
+from contextlib import asynccontextmanager
+
+from app.storage_sync.mirror import mirror
+
+
+@asynccontextmanager
+async def _lifespan(_app):
+    """MCP 原有 lifespan 照常走，另外把素材/工程的云端同步拉起来。"""
+    try:
+        await mirror.start()
+    except Exception as e:
+        print(f"[StorageSync] 启动失败（不影响主服务）: {e}")
+    if mcp_http_app:
+        async with mcp_http_app.lifespan(_app):
+            yield
+    else:
+        yield
+    try:
+        await mirror.stop()
+    except Exception:
+        pass
+
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description="AI 漫剧双端（移动端 App + 桌面端 Desktop）中枢引擎：MiniMax LLM 剧本拆解 / 动态多Provider生图(ComfyUI/硅基流动/通义万象) / 动态多Provider配音(MiniMax/ElevenLabs/CosyVoice/GPT-SoVITS) / pyJianYingDraft 剪映导出 / MCP 工具扩展（导演Agent全量暴露）",
     version="2.1.0",
-    lifespan=mcp_http_app.lifespan if mcp_http_app else None,
+    lifespan=_lifespan,
 )
 
 # Configure CORS for multi-platform Web / Desktop / Mobile clients
@@ -165,9 +189,32 @@ if mcp_http_app:
 
 from fastapi.responses import FileResponse
 
+class MirrorStaticFiles(StaticFiles):
+    """
+    /storage 的静态服务，多一条兜底：本机没有这个文件时，
+    先去 OpenList 把它拉回来再照常吐出去（Range、缓存头一切不变）。
+
+    换台机器打开同一个工程时，素材就是这样「自己长出来」的 ——
+    前端一行不用改，请求的还是原来的 /storage/xxx。
+    """
+
+    async def get_response(self, path: str, scope):
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as e:
+            if e.status_code != 404:
+                raise
+            try:
+                if await mirror.ensure_local(path.replace("\\", "/")):
+                    return await super().get_response(path, scope)
+            except Exception as pull_err:
+                print(f"[StorageSync] 回拉失败 {path}: {pull_err}")
+            raise
+
+
 # Mount static/export directories
 if os.path.exists(settings.STORAGE_DIR):
-    app.mount("/storage", StaticFiles(directory=settings.STORAGE_DIR), name="storage")
+    app.mount("/storage", MirrorStaticFiles(directory=settings.STORAGE_DIR), name="storage")
 
 if os.path.exists(settings.EXPORTS_DIR):
     app.mount("/exports", StaticFiles(directory=settings.EXPORTS_DIR), name="exports")

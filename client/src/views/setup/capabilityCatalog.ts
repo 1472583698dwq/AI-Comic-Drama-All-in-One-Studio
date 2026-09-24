@@ -14,10 +14,9 @@ export type FieldKind = 'text' | 'secret' | 'url' | 'number' | 'path';
 /** apiService.testConfig 支持的目标（与后端 /config/test 对齐） */
 export type TestTarget =
   | 'openai' | 'responses_api' | 'minimax' | 'minimax_h3' | 'seedance'
-  | 'openai' | 'responses_api' | 'minimax' | 'minimax_h3' | 'seedance'
   | 'kling' | 'wan3' | 'comfyui' | 'siliconflow' | 'dashscope'
   | 'openai_image' | 'openai_video'
-  | 'elevenlabs' | 'cosyvoice' | 'gpt_sovits' | 'indextts' | 'jianyin';
+  | 'elevenlabs' | 'cosyvoice' | 'gpt_sovits' | 'indextts' | 'jianyin' | 'openlist';
 
 export interface CapField {
   key: string;
@@ -475,6 +474,42 @@ export const CAPABILITIES: Capability[] = [
             kind: 'path', required: false, pick: true,
             placeholder: 'C:/Users/xxx/AppData/Local/JianyingPro/User Data/Projects/com.lveditor.draft',
             hint: 'Windows 会自动探测；macOS 需要手动填，留空则只导到 exports/ 目录',
+          }),
+        ],
+      },
+    ],
+  },
+
+  // ───────────────────────────── 6. 云端同步
+  {
+    id: 'storage',
+    name: '素材与工程云端同步',
+    why: '把本机 storage 里的素材、工程异步同步到你自己的 OpenList。换一台电脑打开，项目列表和素材都还在——素材是页面真要看它时才回拉，不会一上来就下一堆。',
+    ifMissing: '所有东西只存在这台机器上，换台电脑就是空的。',
+    channels: [
+      {
+        id: 'openlist',
+        name: 'OpenList',
+        where: 'cloud',
+        summary: '自建的 OpenList（AList 系）。只同步素材与工程，API Key 那些配置永远留在本机。',
+        test: 'openlist',
+        docUrl: 'https://doc.oplist.org/',
+        warn: '底层若是 HalalCloud / IPFS 这类内容寻址存储，文件是明文存的；敏感内容别往里放。',
+        fields: [
+          KEY('OPENLIST_SYNC_ENABLED', '开启同步', {
+            kind: 'text', required: false, placeholder: '0',
+            hint: '填 1 开启、0 关闭。改完要重启服务才生效',
+            quickFill: [{ label: '开', value: '1' }, { label: '关', value: '0' }],
+          }),
+          KEY('OPENLIST_BASE_URL', '服务地址', {
+            kind: 'url', placeholder: 'http://127.0.0.1:5244',
+            hint: '同机跑就填本地端口，最快；填公网域名也行',
+          }),
+          KEY('OPENLIST_USERNAME', '用户名', { kind: 'text' }),
+          KEY('OPENLIST_PASSWORD', '密码'),
+          KEY('OPENLIST_ROOT', '远端根目录', {
+            kind: 'text', required: false, placeholder: '/comic-studio',
+            hint: '必须落在 OpenList 已挂载的存储路径下，否则写不进去。点测试会当场验它可不可写',
           }),
         ],
       },
