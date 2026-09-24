@@ -540,7 +540,7 @@ export const CAPABILITIES: Capability[] = [
           KEY('OPENLIST_USERNAME', '用户名', { kind: 'text' }),
           KEY('OPENLIST_PASSWORD', '密码'),
           KEY('OPENLIST_ROOT', '远端根目录', {
-            kind: 'text', required: false, placeholder: '/autoword/comic-studio',
+            kind: 'text', required: false, placeholder: '/comic-studio',
             hint: '必须落在 OpenList 已挂载的存储路径下，否则写不进去。点测试会当场验它可不可写',
           }),
         ],

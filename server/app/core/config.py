@@ -252,8 +252,8 @@ class Settings(BaseModel):
     OPENLIST_BASE_URL: str = os.getenv("OPENLIST_BASE_URL", "")
     OPENLIST_USERNAME: str = os.getenv("OPENLIST_USERNAME", "")
     OPENLIST_PASSWORD: str = os.getenv("OPENLIST_PASSWORD", "")
-    # 远端根目录：必须落在 OpenList 已挂载的存储下（本机那台挂的是 /autoword）
-    OPENLIST_ROOT: str = os.getenv("OPENLIST_ROOT", "/autoword/comic-studio")
+    # 远端根目录：必须落在 OpenList 已挂载的存储下，各人的挂载点不一样，按自己的填
+    OPENLIST_ROOT: str = os.getenv("OPENLIST_ROOT", "/comic-studio")
     # 以下三项只走 env，不进设置页：扫描间隔(秒) / 并发上传数 / 单次传输超时(秒)
     OPENLIST_SCAN_INTERVAL: str = os.getenv("OPENLIST_SCAN_INTERVAL", "20")
     OPENLIST_WORKERS: str = os.getenv("OPENLIST_WORKERS", "2")
