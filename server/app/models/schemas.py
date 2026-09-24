@@ -3,6 +3,9 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 
 class Character(BaseModel):
+    # extra=allow：保留前端扩展字段（three_views 扩展槽/资产绑定等），保存时不再被 model_dump 丢弃
+    model_config = {"extra": "allow"}
+
     id: str
     name: str
     gender: str = "male" # male, female, other
@@ -19,6 +22,11 @@ class Character(BaseModel):
     three_views: Dict[str, str] = Field(default_factory=dict) # {"front": url, "side": url, "three_quarter": url}
 
 class StoryboardShot(BaseModel):
+    # extra=allow：分镜上挂着大量前端扩展字段（character_ids/character_weights/scene_ref_image/
+    # previz_url/previz_video_url/stage_cameras/previz_shots/lighting_config/walk_path/history…），
+    # 这些字段由导演台与参考装配消费，必须在保存时原样保留（否则重载项目即丢）。
+    model_config = {"extra": "allow"}
+
     id: str
     shot_index: int
     scene_index: int = 1
@@ -44,6 +52,8 @@ class StoryboardShot(BaseModel):
     props_config: Optional[List[str]] = Field(default_factory=list)
 
 class Scene(BaseModel):
+    model_config = {"extra": "allow"}
+
     id: str
     scene_index: int
     title: str
@@ -53,6 +63,9 @@ class Scene(BaseModel):
     shots: List[StoryboardShot] = Field(default_factory=list)
 
 class Project(BaseModel):
+    # extra=allow：项目级扩展字段（拼图/资产/封面等前端字段）保存时不丢
+    model_config = {"extra": "allow"}
+
     id: str
     title: str
     original_novel: str = ""
