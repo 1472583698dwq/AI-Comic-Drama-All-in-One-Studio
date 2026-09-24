@@ -407,14 +407,10 @@
           "title": "分辨率",
           "enum": [
             "480p竖",
-            "480p横",
-            "720p竖",
-            "720p横",
-            "1080p竖",
-            "1080p横"
+            "480p横"
           ],
           "default": "480p竖",
-          "description": "AutoDL 真实档位，竖=9:16 横=16:9",
+          "description": "AutoDL 实测可用档位（720p/1080p 远端已下线，提交时自动降级到同向 480p 并标注 degraded_from），竖=9:16 横=16:9",
           "x-category": "layout",
           "x-visibility": "basic",
           "x-agent": "auto",

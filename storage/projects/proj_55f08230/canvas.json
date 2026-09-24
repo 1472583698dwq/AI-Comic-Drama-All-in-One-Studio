@@ -9,8 +9,8 @@
           "id": "image_1788940941809_1",
           "type": "image",
           "position": {
-            "x": 696,
-            "y": 253
+            "x": 173.8427058758607,
+            "y": 1.4639715995237168
           },
           "data": {
             "prompt": "生成人物三视图",
@@ -100,11 +100,12 @@
             "width": 360,
             "height": 405
           },
-          "selected": false
+          "selected": true,
+          "dragging": false
         }
       ],
       "edges": [],
-      "updated_at": "2026-09-16 15:56:46"
+      "updated_at": "2026-09-24 15:01:37"
     },
     "cv_mttom7vo": {
       "name": "分镜#10画布",
