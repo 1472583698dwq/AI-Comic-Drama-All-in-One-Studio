@@ -1,35 +1,45 @@
-# MiniMax AI 漫剧 Studio (Desktop + Mobile 双端跨平台工作台)
+# MiniMax AI 漫剧 Studio（桌面 + 移动 双端工作台）
 
-> **深度融合**：**字节跳动·小云雀AI**（长文小说拆解与一致性流水线） + **MiniMax Design**（3D 虚拟导演台与多模态 Agent 协作） + **OpenReel Video**（专业多轨剪辑引擎） + **MCP (Model Context Protocol)** 统一外部工具扩展标准。
+> 长篇小说 → 一键成片：**总导演 Agent + 专家子代理集群**并行编排（拆解 / 定妆 / 生图 / 图生视频 / 配音 / 导出剪映）。
+> 内置 **3D 虚拟导演台**、多轨剪辑时间线、角色一致性资产库、**13 类插件扩展体系**（含自定义导演组），
+> 并以 **MCP (Model Context Protocol)** 对外开放工具生态。
 
 ---
 
-## 🌟 核心特性矩阵
+## 🌟 核心特性
 
-### 1. 🖥️ 桌面专业版 (Desktop Studio)
-- **3D 虚拟导演台 (MiniMax Design 核心创新)**：
-  - 基于 Three.js 60fps 实时渲染，3D 虚拟空间摆放角色素体、姿态控制（武道战斗、傲然站立、回眸、奔跑）。
-  - 自由调整机位与镜头轨迹（急进推镜、渐远拉出、360° 环绕、战斗震颤），导出空间强控参数（ControlNet / CameraCtrl Ready）。
-- **专业多轨音视频剪辑时间线 (OpenReel 架构)**：
-  - 包含：主画面轨、角色对白轨（波形可视化 + 情绪标签）、史诗旁白轨、BGM 氛围音效轨、动态花字字幕轨。
-  - 帧级拖拽、时间线平滑缩放、实时吸附与音画对齐播放。
-- **全生命周期角色一致性资产库 (Character Consistency Studio)**：
-  - 标准人物正面 (0°)、侧面 (90°)、3/4 动态视角三视图管理。
-  - 角色服饰、面部与特征词锁定（IP-Adapter / LoRA 权重绑定）。
+### 1. 🎬 一键成片（两种编排引擎）
+- **⚙️ 经典流水线**：固定 6 阶段确定性串行（拆解 → 角色定妆 → 逐镜生图 → 图生视频 → 配音 → 剪映导出），稳定可预期。
+- **🤖 智能体集群**：总导演 Agent 规划 + 专家子代理**并行扇出**（同质任务批量 batch、长耗时视频后台提交 + `subagent_wait` 关键节点收口），
+  单点失败不阻塞全片；前端实时花名册展示角色 / 批次 / 状态 / 耗时 / 当前工具。
+- **导演组（可扩展编排）**：在弹窗选择导演组即切换成员名单与总导演编排脚本（playbook），
+  支持 `qa_gate` 质检门（导出后强制质检员复核并汇总缺失镜头）。
+- 产出直接落盘为正式项目并跳转分镜台，可继续逐镜微调。
 
-### 2. 📱 移动便携版 (Mobile Quick App - 小云雀卡片流)
-- **长篇小说一键成片**：支持整章网文粘贴，大模型秒级提炼人物关系与分镜。
-- **全屏 9:16 卡片流工作台**：上下滑动逐镜微调，单手点击一键【换图】、【换声线】、【改台词】、【智能重绘】。
-- **一键分发与成片**：支持竖屏短剧即时预览与快速成片导出。
+### 2. 🖥️ 桌面专业版（Desktop Studio）
+- **3D 虚拟导演台**：Three.js 实时渲染，角色素体 / 姿态预设 / 机位轨迹（推拉摇移、环绕、震颤），可同步为分镜运镜参数。
+- **多轨音视频剪辑时间线**：主画面 / 对白 / 旁白 / BGM / 字幕多轨，帧级拖拽、缩放、吸附与音画对齐。
+- **角色一致性资产库**：三视图（正面 / 侧面 / 3/4）管理，服饰与特征词锁定，跨镜复用。
+- **桌面壳**：PyInstaller 独立包 + WebView2（pywebview，回退 Edge/Chrome App 模式），双击即用，无黑框。
 
-### 3. 🔌 MCP (Model Context Protocol) 统一外部工具扩展体系
-- **标准开放协议**：双端内置 MCP 客户端，支持一键调用与接入外部生态：
-  - `split_novel_script`: 小说长文本章节拆解与角色提取 Agent Tool。
-  - `generate_minimax_voice`: MiniMax Speech-01 超拟人配音 Tool（支持怒吼、低语、哭腔等情感）。
-  - `director_3d_stage_plan`: 3D 虚拟导演台空间轨迹计算 Tool。
-  - `comfyui_render_node`: 桥接用户本地/云端 ComfyUI (Flux/SDXL/ControlNet) 生图工作流。
-  - `export_jianyin_draft`: 剪映 / CapCut 官方草稿工程 (`draft_content.json`) 一键导出 Tool。
-- **自定义 MCP 插件市场**：支持用户自由添加自定义外部 MCP Server（如自建知识库、音效搜索、Web Search 等）。
+### 3. 📱 移动端卡片流（Mobile）
+- 整章粘贴 → 秒级拆解人物关系与分镜；9:16 全屏卡片流逐镜微调（换图 / 换声线 / 改台词 / 智能重绘）。
+
+### 4. 🔌 插件与扩展体系（13 类扩展点）
+- **统一扩展注册表**：生成源 / 技能 / 工作流 / 代码节点 / MCP 工具 / 画布节点 / 分镜槽 / 主题 / 导出器 / 导演包 / **导演组成员** / **导演组** / 插件包，
+  扩展中心统一查看、启停（支持项目级软停用）、执行与健康观测。
+- **插件包**：一个 zip 声明式带进全部扩展点；安装 → 启用（逐类落地）→ 禁用（精确回滚）→ 卸载，3 秒热重载。
+- **导演组扩展**：自定义专家角色（系统提示 + 工具白名单 + 预算）与导演组编排（成员 + playbook + 质检门），
+  插件贡献或直接落盘 `storage/agent_profiles|agent_teams/*.json` 即热生效。
+  规范见 [`docs/plugin-dev.md`](docs/plugin-dev.md)（4.10 / 4.11 节），示例见 `plugins/example-drama-pack/`。
+
+### 5. ☁️ 素材与工程云同步（OpenList）
+- 本机 `storage/` 的素材与工程后台异步同步到 OpenList，换机打开即见项目列表；前端零改动（`/storage/xxx` 本地缺就去云端取）。
+- 白名单同步（不涉 API Key 等配置），版本化快照 + 冲突保留；设置 →「素材与工程云端同步」可填自己的地址账号并测试联通。
+
+### 6. 🔗 MCP 统一工具生态
+- 内置 MCP 中枢：小说拆解、MiniMax 语音、3D 运镜规划、ComfyUI 桥接、剪映草稿导出等；
+- 支持接入外部 MCP Server，自定义工具在 Agent 会话中可被直接调用。
 
 ---
 
@@ -37,47 +47,60 @@
 
 ```mermaid
 graph TD
-    subgraph 客户端 (跨端统一)
+    subgraph 客户端
         A1[React 19 + TypeScript + Vite]
-        A2[Tailwind CSS v4 暗黑工业风设计系统]
-        A3[Three.js 3D 导演台引擎]
-        A4[Tauri 2.0 Rust 跨端运行时 Desktop/Mobile]
+        A2[Tailwind CSS v4 暗黑工业风]
+        A3[Three.js 3D 导演台]
+        A4[Zustand 状态层 + WebSocket 流式]
     end
 
-    subgraph 后端与工具调度
-        B1[Python FastAPI 异步高性能服务]
-        B2[FastMCP 标准 Model Context Protocol 中枢]
-        B3[MiniMax API 驱动: abab LLM + Speech-01 + Video-01]
-        B4[剪映 / CapCut Draft Exporter v3]
+    subgraph 后端
+        B1[FastAPI 异步服务]
+        B2[Agent 运行时: AgentLoop + SubAgentPool 子代理集群]
+        B3[统一扩展注册表 + 插件生命周期]
+        B4[FastMCP 工具中枢 / 生成源注册表]
+        B5[流水线: 一键成片 unified_orchestrator / onekey_agent]
+        B6[剪映 Draft 导出器 + 素材云同步]
     end
 
     A1 --> A2 & A3 & A4
-    A1 <-->|RESTful API + WebSocket| B1
-    B1 --> B2 --> B3 & B4
+    A4 <-->|REST + WebSocket / SSE| B1
+    B1 --> B2 & B3 & B4 & B5
+    B2 --> B4
+    B5 --> B4 & B6
 ```
 
 ---
 
-## 🚀 快速启动指南
+## 🚀 快速启动
 
-### 方式一：Windows 一键启动（推荐）
-双击项目根目录下的 **`start_all.bat`** 即可自动启动后端与客户端！
+### 方式一：Windows 桌面版（推荐给最终用户）
+- 双击发布包内的 **`Studio.exe`**（或同目录 **`一键启动.bat`**），几秒后自动打开工作台。
+- 使用说明见 [`使用说明.md`](使用说明.md)；首次使用在「设置 → 生成源」填 API Key 并点「测试」。
 
-### 方式二：手动分步启动
-
-#### 1. 启动 Python 后端服务
+### 方式二：源码运行（开发）
 ```bash
+# 1) 启动后端
 cd server
-python run_server.py
-```
-> 后端服务运行于 `http://127.0.0.1:8000`，API 文档地址：`http://127.0.0.1:8000/docs`
+python run_server.py            # http://127.0.0.1:8000 （文档 /docs）
 
-#### 2. 启动前端客户端
-```bash
+# 2) 启动前端
 cd client
-npm run dev
+npm install
+npm run dev                     # http://localhost:5173
 ```
-> 客户端运行于 `http://localhost:5173`
+
+### 打包桌面 exe（一键全量构建）
+```powershell
+python build_release.py         # 前端构建 + PyInstaller → dist\Studio\Studio.exe（保留用户配置）
+python build_release.py --release   # 干净发布包 → dist\AI漫剧Studio_0.1.0（剔除 Key/数据，附使用说明）
+```
+
+### 回归与检查
+```bash
+cd server && python -m unittest discover -s tests -p "test_*.py"   # 后端全量用例
+cd client && npx tsc -b && npm run lint && npm run build           # 前端类型 / 规范 / 构建
+```
 
 ---
 
@@ -85,35 +108,43 @@ npm run dev
 
 ```text
 d:/ai漫剧/
-├── client/                           # 双端跨平台前端 (React 19 + Vite + Tailwind + Three.js)
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── navbar/Header.tsx     # 顶部多端切换与全局控制器
-│   │   │   ├── director3d/           # [MiniMax Design] 3D 虚拟导演台 (Three.js)
-│   │   │   ├── timeline/             # [OpenReel] 多轨音视频剪辑时间线
-│   │   │   ├── storyboard/           # 分镜工作台与参数检查器
-│   │   │   ├── character/            # 角色三视图一致性资产库
-│   │   │   ├── mobile/               # [小云雀风格] 移动端全屏卡片流
-│   │   │   ├── agent/                # 导演 Agent 对话交互抽屉
-│   │   │   ├── mcp/                  # MCP 外部工具管理与沙盒测试弹窗
-│   │   │   └── export/               # 剪映草稿与成片导出中心
-│   │   ├── stores/                   # Zustand (useProjectStore, useMcpStore)
-│   │   ├── services/                 # API 通信层
-│   │   └── types/                    # TypeScript 类型定义
-│   └── package.json
-├── server/                           # 后端与 AI 调度中枢 (FastAPI + FastMCP)
-│   ├── app/
-│   │   ├── api/routes.py             # REST API 与 WebSocket 路由
-│   │   ├── mcp/server.py             # MCP 统一工具注册中枢 (ComfyUI/剪映/MiniMax)
-│   │   ├── pipelines/
-│   │   │   ├── script_agent.py       # 小说智能拆解与角色提取 Agent
-│   │   │   ├── minimax_tts.py        # MiniMax Speech-01 超拟人配音流水线
-│   │   │   ├── consistency_engine.py # 角色三视图与场景一致性引擎
-│   │   │   └── jianyin_exporter.py   # 剪映 / CapCut 官方草稿工程导出器
-│   │   ├── core/config.py            # 环境与配置
-│   │   └── main.py                   # FastAPI 应用入口
-│   ├── run_server.py
-│   └── requirements.txt
-├── start_all.bat                     # Windows 一键启动脚本
+├── client/                              # 前端（React 19 + Vite + TS + Tailwind v4 + Three.js + Zustand）
+│   └── src/
+│       ├── components/
+│       │   ├── agent/                   # Agent 会话 / 集群面板 / 工具步骤卡（子代理可视化）
+│       │   ├── director3d/              # 3D 虚拟导演台
+│       │   ├── timeline/                # 多轨剪辑时间线
+│       │   ├── storyboard/              # 分镜工作台与参数检查器
+│       │   ├── workflow/                # 一键成片弹窗 / 工作流检查器
+│       │   ├── skills/ mcp/ export/ character/ mobile/ ...
+│       ├── services/ stores/ views/     # API 层 / 状态层 / 页面（含设置·扩展中心）
+├── server/                              # 后端（FastAPI + FastMCP）
+│   └── app/
+│       ├── agent/                       # Agent 运行时（loop / manager / subagent 集群 / 工具管线 / trace）
+│       ├── agent_teams/                 # 导演组扩展（角色画像 + 导演组编排 + 校验/热加载）
+│       ├── api/                         # REST/WS 路由（onekey_routes / agent_team_routes / extension_routes ...）
+│       ├── extensions/                  # 统一扩展注册表（13 kind 聚合 / 启停 / guard 审计 / 遥测）
+│       ├── plugins/                     # 插件生命周期（安装 / 启用 / 精确回滚 / 热重载）
+│       ├── pipelines/                   # 一键成片（unified_orchestrator / onekey_agent 草稿与原子工具）
+│       ├── providers/                   # 生成源（图像 / 视频 / 音频[含 IndexTTS] / 素材）
+│       ├── director_packs/ themes/ exporters/ canvas_nodes/ custom_nodes/ storyboard/ skills/ mcp/
+│       ├── storage_sync/                # 素材与工程云同步（OpenList 镜像）
+│       └── main.py                      # 应用入口与路由挂载
+├── plugins/example-drama-pack/          # 示例插件包（技能/代码节点/画布节点/主题/导演包/导演组成员/导演组）
+├── docs/plugin-dev.md                   # 插件开发规范（扩展点 / manifest / 生命周期 / API）
+├── storage/                             # 运行时数据（项目 / 素材 / 配置 / 插件 / 扩展状态）
+├── build_release.py                     # 一键全量构建（前端 + PyInstaller + 配置保留）
+├── dist/Studio/Studio.exe               # 桌面产物（onedir）
+├── 使用说明.md                           # 发布包用户手册
 └── README.md
 ```
+
+---
+
+## 📚 相关文档
+
+| 文档 | 内容 |
+|---|---|
+| [`docs/plugin-dev.md`](docs/plugin-dev.md) | 插件开发规范：13 类扩展点详解、manifest 字段、生命周期与热重载、统一执行口、HTTP API、安全模型 |
+| [`使用说明.md`](使用说明.md) | 发布包安装与配置（用户向） |
+| [`docs/`](docs/) | 各阶段设计文档与未落地清单 |

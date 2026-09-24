@@ -194,7 +194,23 @@ if not RELEASE:
                 except Exception as _e:
                     print(f"  还原失败 {_rt}: {_e}")
 
-# 3.6 发布模式：剔除个人 Key / 数据 / 开发残留，附《使用说明.md》与 .env 模板
+# 3.6 附带文档与示例插件包（使用说明引用的 plugin-dev.md / 可直接安装的示例导演组包）
+try:
+    _pkg_docs = os.path.join(OUT_DIR, "docs")
+    os.makedirs(_pkg_docs, exist_ok=True)
+    _pd = os.path.join(ROOT, "docs", "plugin-dev.md")
+    if os.path.isfile(_pd):
+        shutil.copyfile(_pd, os.path.join(_pkg_docs, "plugin-dev.md"))
+    _demo_src = os.path.join(ROOT, "plugins", "example-drama-pack")
+    _demo_dst = os.path.join(OUT_DIR, "plugins", "example-drama-pack")
+    if os.path.isdir(_demo_src):
+        shutil.rmtree(_demo_dst, ignore_errors=True)
+        shutil.copytree(_demo_src, _demo_dst)
+    print("  已附: docs/plugin-dev.md 与 plugins/example-drama-pack（示例插件包/导演组）")
+except Exception as _e:
+    print(f"  附带文档/示例包跳过: {_e}")
+
+# 3.7 发布模式：剔除个人 Key / 数据 / 开发残留，附《使用说明.md》与 .env 模板
 if RELEASE:
     print("\n[release] 正在生成干净发布包（递归剔除 Key / 数据 / 测试残留）...")
     _removed = 0
