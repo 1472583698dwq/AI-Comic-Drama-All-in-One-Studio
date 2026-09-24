@@ -16,7 +16,7 @@ import {
   behaviorOfRunMode, composeRunMode, executionOfRunMode,
 } from './agentTypes';
 import type {
-  AgentEvent, AgentMode, AgentSession, ApprovalInfo, BehaviorMode, ChatMsg, ExecutionMode, RunMode, WsStatus,
+  AgentEvent, AgentMode, AgentSession, ApprovalInfo, BehaviorMode, ChatMsg, ExecutionMode, RunMode, SubAgentInfo, WsStatus,
 } from './agentTypes';
 
 export type AgentScope = 'page' | 'float';
@@ -102,6 +102,8 @@ interface AgentStoreState {
   wsStatus: WsStatus;
   streamingMsgId: string | null;
   approvals: Record<string, ApprovalInfo>;
+  /** 子代理集群（父会话可见的并行子代理状态） */
+  subagents: Record<string, SubAgentInfo>;
   mode: AgentMode;
   /** 组合 token（wire 口径）；UI 请用 behavior/execution 两个维度 */
   runMode: RunMode;
@@ -330,6 +332,7 @@ export function createAgentStore(scope: AgentScope) {
       wsStatus: agentSocket.status,
       streamingMsgId: null,
       approvals: {},
+      subagents: {},
       mode: prefs.mode,
       runMode: prefs.runMode,
       behavior: behaviorOfRunMode(prefs.runMode),
@@ -511,7 +514,7 @@ export function createAgentStore(scope: AgentScope) {
           planMode: isPlanMode,
         };
         commitMessages((prev) => [...prev, userMsg, agentMsg]);
-        set({ isRunning: true, streamingMsgId: agentMsg.id, approvals: {} });
+        set({ isRunning: true, streamingMsgId: agentMsg.id, approvals: {}, subagents: {} });
 
         // 模式即约束（代码门控，非提示词），两维正交：
         // - 行为 plan：只绑定只读工具（绑定层）+ 执行口二次拒绝写工具，产出计划后由用户批准执行；
@@ -551,7 +554,7 @@ export function createAgentStore(scope: AgentScope) {
           userMsg,
           agentMsg,
         ]);
-        set({ isRunning: true, streamingMsgId: agentMsg.id, approvals: {} });
+        set({ isRunning: true, streamingMsgId: agentMsg.id, approvals: {}, subagents: {} });
         await dispatchRun(agentMsg.id, text, ctx, 'execute', nextToken);
       },
 
@@ -589,12 +592,50 @@ export function createAgentStore(scope: AgentScope) {
         agentSocket.send({ action: 'clear_history', session_id: key });
         const reset: ChatMsg[] = [{ id: uid('welcome_'), sender: 'agent', mode: st.mode, text: '记忆已清空，从头开始吧。', time: '就绪' }];
         commitMessages(() => reset);
-        set({ approvals: {}, streamingMsgId: null, isRunning: false });
+        set({ approvals: {}, subagents: {}, streamingMsgId: null, isRunning: false });
         toast.info('已清空当前会话记忆');
       },
 
       applyAgentEvent(ev) {
         const st = get();
+        if (ev.event === 'subagent_started' || ev.event === 'subagent_progress' || ev.event === 'subagent_settled') {
+          const sid = String((ev as any).subagent_id || '');
+          if (!sid) return;
+          if (ev.event === 'subagent_started') {
+            set((s) => ({
+              subagents: {
+                ...s.subagents,
+                [sid]: {
+                  id: sid,
+                  agent: String((ev as any).agent || ''),
+                  task: String((ev as any).task || ''),
+                  status: 'running',
+                  startedAt: Date.now(),
+                  batchId: String((ev as any).batch_id || ''),
+                },
+              },
+            }));
+          } else if (ev.event === 'subagent_progress') {
+            set((s) => (s.subagents[sid]
+              ? { subagents: { ...s.subagents, [sid]: { ...s.subagents[sid], tool: String((ev as any).tool_name || '') } } }
+              : {}));
+          } else {
+            set((s) => (s.subagents[sid]
+              ? {
+                  subagents: {
+                    ...s.subagents,
+                    [sid]: {
+                      ...s.subagents[sid],
+                      status: String((ev as any).status || 'success'),
+                      elapsedMs: Number((ev as any).elapsed_ms || 0),
+                      error: String((ev as any).error || ''),
+                    },
+                  },
+                }
+              : {}));
+          }
+          return;
+        }
         if (ev.event === 'approval_ack') {
           const aid = String(ev.approval_id || '');
           if (aid) {

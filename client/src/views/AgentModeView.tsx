@@ -12,6 +12,7 @@ import { useAgentStore, QUICK_ASK, QUICK_DO, QUICK_CREATE, QUICK_PLAN } from '..
 import { AgentMessageList } from '../components/agent/AgentMessageList';
 import { AgentComposer } from '../components/agent/AgentComposer';
 import { AgentTodoPanel } from '../components/agent/AgentToolSteps';
+import { AgentSwarmPanel } from '../components/agent/AgentSwarmPanel';
 import { SessionSidebar } from '../components/agent/SessionSidebar';
 import type { BehaviorMode, ExecutionMode } from '../components/agent/agentTypes';
 
@@ -25,7 +26,7 @@ export const AgentModeView: React.FC = () => {
 
   const {
     sessions, activeSessionId, loadingSessions,
-    messages, isRunning, wsStatus, approvals, autoAllowTools,
+    messages, isRunning, wsStatus, approvals, subagents, autoAllowTools,
     mode, behavior, execution,
     bindProject, setMode, setBehavior, setExecution, setAutoAllow,
     createSession, selectSession, deleteSession,
@@ -175,6 +176,8 @@ export const AgentModeView: React.FC = () => {
             </div>
           </div>
         </div>
+
+        <AgentSwarmPanel subagents={subagents} />
 
         <div ref={listRef} onScroll={onListScroll} className="flex-1 overflow-y-auto p-5 space-y-4 custom-scrollbar">
           <AgentMessageList

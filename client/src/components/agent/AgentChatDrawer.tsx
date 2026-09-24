@@ -10,6 +10,7 @@ import { agentSocket } from './agentSocket';
 import { useAgentFloatStore } from './agentStore';
 import { AgentMessageList } from './AgentMessageList';
 import { AgentComposer } from './AgentComposer';
+import { AgentSwarmPanel } from './AgentSwarmPanel';
 
 export const AgentChatDrawer: React.FC = () => {
   const { project, activeShotId, setActiveTab } = useProjectStore();
@@ -18,7 +19,7 @@ export const AgentChatDrawer: React.FC = () => {
   const [proposalBusy, setProposalBusy] = useState<Record<string, string>>({});
 
   const {
-    messages, isRunning, wsStatus, approvals, mode, behavior, execution, autoAllowTools,
+    messages, isRunning, wsStatus, approvals, subagents, mode, behavior, execution, autoAllowTools,
     bindProject, setMode, setBehavior, setExecution, send, steer, abort, clearAll, approve, setAutoAllow,
     executePlan, proposalAction, applyArtifact,
   } = useAgentFloatStore();
@@ -296,6 +297,8 @@ export const AgentChatDrawer: React.FC = () => {
               </button>
             </div>
           )}
+
+          <AgentSwarmPanel subagents={subagents} compact />
 
           <div className="flex-1 overflow-y-auto p-4 space-y-3.5 custom-scrollbar text-xs">
             <AgentMessageList

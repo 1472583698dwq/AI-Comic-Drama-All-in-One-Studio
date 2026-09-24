@@ -650,12 +650,12 @@ export const apiService = {
     return await res.json();
   },
 
-  // 9.1 一键成片 Agent（异步任务 + 轮询）
+  // 9.1 一键成片 Agent（异步任务 + 轮询；engine=agent 时走总导演+子代理集群）
   async onekeyRun(params: {
     title?: string; text: string; style_preset?: string; aspect_ratio?: string; custom_instructions?: string;
     max_images?: number; image_provider?: string; image_workflow_id?: string; audio_provider?: string;
     video_provider?: string; video_workflow_id?: string; enable_video?: boolean; max_videos?: number;
-    gen_roles?: boolean; max_roles?: number;
+    gen_roles?: boolean; max_roles?: number; engine?: 'pipeline' | 'agent';
   }): Promise<{ task_id: string; status: string }> {
     const res = await fetch(`${API_BASE_URL}/onekey/run`, {
       method: 'POST',
@@ -676,6 +676,7 @@ export const apiService = {
         max_videos: params.max_videos ?? 6,
         gen_roles: params.gen_roles ?? true,
         max_roles: params.max_roles ?? 4,
+        engine: params.engine || 'pipeline',
       }),
     });
     if (!res.ok) {

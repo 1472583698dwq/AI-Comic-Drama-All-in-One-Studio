@@ -58,6 +58,24 @@ export interface AgentTodoItem {
   status: 'pending' | 'in_progress' | 'completed';
 }
 
+/** 子代理集群：父会话可见的并行子代理状态（subagent_* 事件驱动，Kimi 式 roster） */
+export interface SubAgentInfo {
+  id: string;
+  /** 角色名（generalist/screenwriter/character_designer/...） */
+  agent: string;
+  /** 子任务描述（截断展示） */
+  task: string;
+  /** queued | running | success | error | cancelled */
+  status: string;
+  startedAt?: number;
+  elapsedMs?: number;
+  /** 最近一次工具调用名（进度闪烁） */
+  tool?: string;
+  /** 批次 ID（同批并行的子代理归为一组展示） */
+  batchId?: string;
+  error?: string;
+}
+
 export interface AgentArtifact {
   kind: 'image' | 'video' | 'audio';
   url: string;

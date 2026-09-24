@@ -9,6 +9,7 @@ import {
   Circle, Loader2, ListTodo, Film, Mic,
 } from 'lucide-react';
 import type { ApprovalInfo, AgentTodoItem, ToolStep } from './agentTypes';
+import { roleMeta } from './swarmMeta';
 
 /** 服务端审批超时（与 ApprovalService 默认 120s 对齐） */
 const APPROVAL_TIMEOUT_S = 120;
@@ -152,6 +153,12 @@ const ToolStepRow: React.FC<{
         <span className="font-mono text-gray-200 shrink-0 max-w-[32%] truncate" title={s.name}>
           {indexLabel ? `${s.name} #${indexLabel}` : s.name}
         </span>
+        {s.name === 'subagent_run' && (s.args as any)?.agent && (
+          <span className={`shrink-0 inline-flex items-center gap-1 px-1.5 py-px rounded border text-[9px] font-bold ${roleMeta(String((s.args as any).agent)).cls}`}>
+            {(() => { const M = roleMeta(String((s.args as any).agent)); return <M.Icon className="w-2.5 h-2.5" />; })()}
+            {roleMeta(String((s.args as any).agent)).label}
+          </span>
+        )}
         {media && (
           <span className="w-8 h-8 rounded-md overflow-hidden bg-surface-secondary border border-border shrink-0 flex items-center justify-center" title="结果预览">
             {media.kind === 'image' ? (

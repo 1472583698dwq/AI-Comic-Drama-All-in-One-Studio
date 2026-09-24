@@ -1,16 +1,18 @@
 // -*- coding: utf-8 -*-
 /**
  * 一键成片 Agent Modal（桌面端）
- * 长文本 → 后台 6 阶段编排（拆解/角色/生图/视频/配音/导出），3s 轮询进度，
- * 完成后落盘为正式项目并跳转分镜台。
+ * 长文本 → 后台编排（经典 6 阶段流水线 / 智能体集群），3s 轮询进度，
+ * agent 模式展示子代理花名册（角色/批次/状态/耗时），完成后落盘为正式项目并跳转分镜台。
  */
-import React, { useEffect, useRef, useState } from 'react';
-import { X, Zap, Loader2, CheckCircle2, AlertTriangle, Clapperboard } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { X, Zap, Loader2, CheckCircle2, AlertTriangle, Clapperboard, Bot, Cog } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { autoBindShotCharacters } from '../storyboard/shotReference';
 import { ProviderPicker } from '../ui/ProviderPicker';
 import { useEscapeClose } from '../../hooks/useEscapeClose';
+import { AgentSwarmPanel } from '../agent/AgentSwarmPanel';
+import type { SubAgentInfo } from '../agent/agentTypes';
 
 interface Props { isOpen: boolean; onClose: () => void; }
 
@@ -24,10 +26,13 @@ export const OneKeyRunModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const [audioProvider, setAudioProvider] = useState('');
   const [enableVideo, setEnableVideo] = useState(true);
   const [genRoles, setGenRoles] = useState(true);
+  const [engine, setEngine] = useState<'agent' | 'pipeline'>('agent');
+  const [ranEngine, setRanEngine] = useState<'agent' | 'pipeline'>('agent');
   const [taskId, setTaskId] = useState<string | null>(null);
   const [status, setStatus] = useState<string>('idle');
   const [progress, setProgress] = useState(0);
   const [logs, setLogs] = useState<any[]>([]);
+  const [subagentMap, setSubagentMap] = useState<Record<string, any>>({});
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -36,36 +41,70 @@ export const OneKeyRunModal: React.FC<Props> = ({ isOpen, onClose }) => {
   useEffect(() => {
     if (!taskId) return;
     let stop = false;
-    const poll = async () => {
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const TERMINAL = new Set(['success', 'partial', 'failed']);
+    const poll = async (): Promise<string | undefined> => {
       try {
         const t = await apiService.onekeyStatus(taskId);
-        if (stop) return;
+        if (stop) return t.status;
         setStatus(t.status);
         setProgress(t.progress || 0);
         setLogs(t.logs || []);
+        setSubagentMap(t.subagents || {});
         if (t.status === 'success' || t.status === 'partial') {
           setResult(t.result);
         } else if (t.status === 'failed') {
           setError(t.error || '任务失败');
         }
+        return t.status;
       } catch (e: any) {
         if (!stop) setError(e?.message || '轮询失败');
+        return undefined;
       }
     };
-    poll();
-    const timer = setInterval(async () => {
-      if (stop) return;
-      await poll();
-      const cur = status;
-      if (cur === 'success' || cur === 'partial' || cur === 'failed') clearInterval(timer);
-    }, 3000);
-    return () => { stop = true; clearInterval(timer); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const tick = async () => {
+      const s = await poll();
+      if (s && TERMINAL.has(s) && timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+    tick();
+    timer = setInterval(tick, 3000);
+    return () => { stop = true; if (timer) clearInterval(timer); };
   }, [taskId]);
 
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
   }, [logs.length]);
+
+  // 任务花名册 → 共享集群面板数据模型（角色图标/批次分组复用）
+  const swarmList = useMemo<Record<string, SubAgentInfo>>(() => {
+    const out: Record<string, SubAgentInfo> = {};
+    for (const [id, s] of Object.entries(subagentMap || {})) {
+      const rec = s as any;
+      out[id] = {
+        id,
+        agent: rec.agent || '',
+        task: rec.task || '',
+        status: rec.status || 'running',
+        tool: rec.tool || '',
+        elapsedMs: rec.elapsed_ms || 0,
+        batchId: rec.batch_id || '',
+        error: rec.error || '',
+        startedAt: rec.started_at ? rec.started_at * 1000 : undefined,
+      };
+    }
+    return out;
+  }, [subagentMap]);
+
+  const stageTone = (stage: string) => {
+    if (stage.startsWith('Stage')) return 'text-brand-light';
+    if (stage === '子代理集群') return 'text-accent-purple';
+    if (stage === '错误') return 'text-red-400';
+    if (stage === '超时') return 'text-amber-300';
+    return 'text-gray-400';
+  };
 
   useEscapeClose(isOpen, onClose);
   if (!isOpen) return null;
@@ -75,6 +114,7 @@ export const OneKeyRunModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const handleRun = async () => {
     if (text.trim().length < 20) { setError('文本太短（至少20字），请粘贴小说章节或故事梗概'); return; }
     setError(null); setResult(null); setLogs([]); setProgress(0); setStatus('queued');
+    setSubagentMap({}); setRanEngine(engine);
     try {
       const r = await apiService.onekeyRun({
         title: title.trim() || '一键成片',
@@ -87,6 +127,7 @@ export const OneKeyRunModal: React.FC<Props> = ({ isOpen, onClose }) => {
         enable_video: enableVideo,
         max_videos: Math.min(maxShots, 12),
         gen_roles: genRoles,
+        engine,
       });
       setTaskId(r.task_id);
     } catch (e: any) {
@@ -152,6 +193,26 @@ export const OneKeyRunModal: React.FC<Props> = ({ isOpen, onClose }) => {
                   <ProviderPicker kind="audio" value={audioProvider} onChange={(pid)=>setAudioProvider(pid)} compact placeholder="— 自动 —" />
                 </div>
               </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="text-[11px] text-gray-400">编排引擎</span>
+                <div className="flex items-center rounded-xl bg-surface-secondary border border-border p-0.5">
+                  <button
+                    onClick={() => setEngine('agent')}
+                    title="总导演 Agent + 专家子代理集群：同质任务批量并行，失败不阻塞整体"
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${engine === 'agent' ? 'bg-brand/20 text-brand-light' : 'text-gray-500 hover:text-white'}`}
+                  >🤖 智能体集群</button>
+                  <button
+                    onClick={() => setEngine('pipeline')}
+                    title="固定 6 阶段确定性流水线（稳定串行）"
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${engine === 'pipeline' ? 'bg-gray-500/25 text-white' : 'text-gray-500 hover:text-white'}`}
+                  >⚙️ 经典流水线</button>
+                </div>
+                <span className="text-[10px] text-gray-500">
+                  {engine === 'agent'
+                    ? '总导演规划 + 子代理并行（拆解→定妆→生图→视频→配音→导出），单点失败不阻塞全片'
+                    : '固定 6 阶段顺序执行（无并行调度与自愈）'}
+                </span>
+              </div>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-gray-300">
                 <label className="flex items-center gap-1.5">画幅
                   <select value={aspect} onChange={e=>setAspect(e.target.value)} className="bg-surface-secondary border border-border rounded-lg px-2 py-1 text-xs text-white"><option value="9:16">竖屏 9:16</option><option value="16:9">横屏 16:9</option><option value="1:1">方形 1:1</option></select>
@@ -174,15 +235,25 @@ export const OneKeyRunModal: React.FC<Props> = ({ isOpen, onClose }) => {
                     {done && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />}
                     {status === 'failed' && <AlertTriangle className="w-3.5 h-3.5 text-red-400" />}
                     <span className="font-bold">{running ? 'Agent 制作中…' : done ? '制作完成' : status === 'failed' ? '制作失败' : status}</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-bold flex items-center gap-1 ${ranEngine === 'agent' ? 'bg-brand/10 text-brand-light border-brand/30' : 'bg-surface-tertiary text-gray-300 border-border'}`}>
+                      {ranEngine === 'agent' ? <Bot className="w-3 h-3" /> : <Cog className="w-3 h-3" />}
+                      {ranEngine === 'agent' ? '智能体集群' : '经典流水线'}
+                    </span>
                   </span>
                   <span className="font-mono text-brand-light">{progress}%</span>
                 </div>
                 <div className="h-2 rounded-full bg-surface-secondary overflow-hidden"><div className="h-full bg-gradient-to-r from-brand to-amber-400 transition-all" style={{ width: `${progress}%` }} /></div>
               </div>
+              {ranEngine === 'agent' && Object.keys(swarmList).length > 0 && (
+                <AgentSwarmPanel subagents={swarmList} />
+              )}
               <div ref={logRef} className="h-48 overflow-y-auto rounded-xl bg-surface-secondary border border-border p-3 space-y-1 custom-scrollbar">
                 {logs.length === 0 && <div className="text-[11px] text-gray-500">等待 Agent 上报进度…</div>}
                 {logs.map((l: any, i: number) => (
-                  <div key={i} className="text-[11px] leading-relaxed"><span className="text-brand-light font-bold">[{l.stage}]</span> <span className="text-gray-300">{l.message}</span></div>
+                  <div key={i} className="text-[11px] leading-relaxed">
+                    <span className={`font-bold ${stageTone(String(l.stage || ''))}`}>[{l.stage}]</span>{' '}
+                    <span className="text-gray-300">{l.message}</span>
+                  </div>
                 ))}
               </div>
               {done && (
