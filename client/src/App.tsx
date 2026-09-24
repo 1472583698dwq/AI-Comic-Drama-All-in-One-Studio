@@ -21,7 +21,25 @@ import { GlobalAiPolish } from './components/ui/GlobalAiPolish';
 import { GlobalDialogContainer } from './components/ui/GlobalDialogContainer';
 import { FirstRunWizard } from './components/onboarding/FirstRunWizard';
 import { installGlobalDialogPatch, toast } from './stores/useDialogStore';
-const CreativeCanvas = React.lazy(()=> import('./components/canvas/CreativeCanvas').then(m=> ({default: m.CreativeCanvas})));
+/**
+ * 懒加载视图 + 构建更新自愈：
+ * 旧窗口在构建更新后请求已被替换的分片会 404，React.lazy 直接抛错 → 整树卸载 = 黑屏。
+ * 这里捕获加载失败并整页刷新一次（拿到新 index.html），刷新后再失败才交给 ErrorBoundary 显示红框。
+ */
+const lazyView = (loader: () => Promise<any>) =>
+  React.lazy(() =>
+    loader().catch((err) => {
+      const KEY = 'studio_chunk_reload_once';
+      if (!sessionStorage.getItem(KEY)) {
+        sessionStorage.setItem(KEY, '1');
+        try { location.reload(); } catch {}
+        return new Promise<any>(() => {}); // 挂起，等待刷新
+      }
+      throw err;
+    })
+  );
+
+const CreativeCanvas = lazyView(()=> import('./components/canvas/CreativeCanvas').then(m=> ({default: m.CreativeCanvas})));
 import { useProjectStore } from './stores/useProjectStore';
 import { useMcpStore } from './stores/useMcpStore';
 
@@ -38,6 +56,8 @@ export function App() {
   const [mcpError, setMcpError] = useState<string | null>(null);
 
   useEffect(() => {
+    // 启动成功即清掉分片自愈标记，让下一次构建更新仍能自动刷新一次
+    try { sessionStorage.removeItem('studio_chunk_reload_once'); } catch {}
     installGlobalDialogPatch();
     fetchTools().catch((e: any) => setMcpError(e?.message || 'MCP 服务连接失败'));
     useProjectStore.getState().loadActiveProject();
@@ -112,6 +132,8 @@ export function App() {
           onOpenProvider={() => setIsProviderOpen(true)}
         />
         <main className="flex-1 flex flex-col overflow-hidden relative min-w-0">
+          {/* 兜底边界：任何视图运行时崩溃都显示可读错误 + 重试，而不是黑屏/白屏 */}
+          <ErrorBoundary name="当前页面">
           {activeTab === 'config' ? (
             <ErrorBoundary name="设置中心">
               <SetupView />
@@ -119,9 +141,11 @@ export function App() {
           ) : (!project || activeTab === 'projects') ? (
             <ProjectDashboard />
           ) : activeTab === 'canvas' ? (
-            <Suspense fallback={<div className="flex-1 flex items-center justify-center text-xs text-gray-500">画布加载中…</div>}>
-              <CreativeCanvas />
-            </Suspense>
+            <ErrorBoundary name="创意画布">
+              <Suspense fallback={<div className="flex-1 flex items-center justify-center text-xs text-gray-500">画布加载中…</div>}>
+                <CreativeCanvas />
+              </Suspense>
+            </ErrorBoundary>
           ) : activeTab === 'agent' ? (
             <ErrorBoundary name="Agent模式页">
               <AgentModeView />
@@ -141,6 +165,7 @@ export function App() {
           ) : (
             <MobileCardFlow onOpenExport={() => setIsExportOpen(true)} />
           )}
+          </ErrorBoundary>
         </main>
       </div>
 

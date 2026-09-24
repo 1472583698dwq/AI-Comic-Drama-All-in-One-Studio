@@ -92,7 +92,34 @@ def wait_for_server(timeout: float = 30.0) -> bool:
             time.sleep(0.4)
     return False
 
+def _app_window_args():
+    """App 窗口参数：独立 profile + 每次启动带版本参数。
+
+    旧行为直接用默认 profile + 固定 URL，Edge 会复用已存在的旧窗口（旧构建），
+    构建更新后旧窗口懒加载分片 404 → 黑屏。独立 profile 避免与用户浏览器混用，
+    版本参数保证每次启动都是新窗口/新 index.html。
+    """
+    profile_dir = os.path.join(
+        os.path.expandvars(r"%LocalAppData%"), "AIStudioManju", "edge_profile"
+    )
+    try:
+        os.makedirs(profile_dir, exist_ok=True)
+    except Exception:
+        profile_dir = ""
+    stamp = str(int(time.time()))
+    args = [
+        f"--app={URL}/?v={stamp}",
+        "--window-size=1440,920",
+        "--no-first-run",
+        "--no-default-browser-check",
+    ]
+    if profile_dir:
+        args.append(f"--user-data-dir={profile_dir}")
+    return args, stamp
+
+
 def launch_app_browser_mode():
+    args, stamp = _app_window_args()
     edge_paths = [
         os.path.expandvars(r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"),
         os.path.expandvars(r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"),
@@ -100,8 +127,8 @@ def launch_app_browser_mode():
     for p in edge_paths:
         if os.path.exists(p):
             try:
-                subprocess.Popen([p, f"--app={URL}", "--window-size=1440,920"])
-                safe_log(f"[Browser Mode] Launched Edge App mode: {p}")
+                subprocess.Popen([p] + args)
+                safe_log(f"[Browser Mode] Launched Edge App mode: {p} (build {stamp})")
                 return
             except Exception:
                 pass
@@ -113,13 +140,13 @@ def launch_app_browser_mode():
     for p in chrome_paths:
         if os.path.exists(p):
             try:
-                subprocess.Popen([p, f"--app={URL}", "--window-size=1440,920"])
-                safe_log(f"[Browser Mode] Launched Chrome App mode: {p}")
+                subprocess.Popen([p] + args)
+                safe_log(f"[Browser Mode] Launched Chrome App mode: {p} (build {stamp})")
                 return
             except Exception:
                 pass
     safe_log("[Browser Mode] Opening default browser...")
-    webbrowser.open(URL)
+    webbrowser.open(f"{URL}/?v={stamp}")
 
 def main():
     safe_log("========================================================")
