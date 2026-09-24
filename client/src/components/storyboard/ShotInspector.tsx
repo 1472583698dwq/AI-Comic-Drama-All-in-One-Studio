@@ -4,7 +4,7 @@ import { StoryboardShot } from '../../types';
 import { apiService } from '../../services/api';
 import { extractSlotsFromProvider } from '../canvas/providerSkills';
 import { buildShotReferenceInputs, promptWithCharacterTags, withCameraIntent } from './shotReference';
-import { collectResources, planBinding, missingBoundCharacters } from './referenceBinder';
+import { collectResources, planBinding, missingBoundCharacters, LEGACY_SLOT_ALIASES } from './referenceBinder';
 import { BindPreviewModal } from './slots/BindPreviewModal';
 import { getMode } from './slots/registry';
 import { registerBuiltinSlots } from './slots/builtin';
@@ -170,7 +170,7 @@ export const ShotInspector: React.FC = () => {
   const isPlayingAudio = activeShot ? audioPlayingIds.has(activeShot.id) : false;
 
   // 一键绑定预览编排（资源×源插槽声明；hook 必须在 early return 之前）
-  const bindPlan = useMemo(() => {
+  const bindPreviewData = useMemo(() => {
     if (!bindPreview) return null;
     const shot = shots.find((s) => s.id === bindPreview.shotId);
     if (!shot) return null;
@@ -180,8 +180,12 @@ export const ShotInspector: React.FC = () => {
     const resources = collectResources({
       shot, project, projectAssets: _projectAssets, kind: bindPreview.kind, includeFirstFrame,
     });
-    return planBinding(resources, slots, (shot as any).dynamic_inputs || {}, { overwrite: bindPreview.overwrite });
+    return {
+      resources,
+      plan: planBinding(resources, slots, (shot as any).dynamic_inputs || {}, { overwrite: bindPreview.overwrite }),
+    };
   }, [bindPreview, shots, project, _projectAssets, productionMode, videoMode]);
+  const bindPlan = bindPreviewData?.plan ?? null;
 
   // 已绑定但无立绘/三视图的角色：预览里显式提示（否则弹框会"空"得没有理由）
   const bindMissingChars = useMemo(() => {
@@ -517,14 +521,7 @@ export const ShotInspector: React.FC = () => {
 
   // 只提交该源声明过的键（input_schema + params_schema 的并集），杜绝切换源后残留上一源的参数；
   // 未选源（definition 为空）时原样放行，保持系统默认通道的旧行为。
-  // LEGACY_SLOT_ALIASES：旧代码里的单数 / 带 _url 后缀写法，归并到源真正声明的槽位键。
-  const LEGACY_SLOT_ALIASES: Record<string, string[]> = {
-    reference_image: ['reference_images', 'reference'],
-    first_frame_url: ['first_frame'],
-    last_frame_url: ['last_frame'],
-    reference_audio_url: ['reference_audio', 'reference_audios'],
-  };
-
+  // LEGACY_SLOT_ALIASES 来自 referenceBinder（与一键绑定的归一别名同表，避免预览与生成口径漂移）。
   const keepDeclaredOnly = (def: any, values: Record<string, any>): Record<string, any> => {
     const declared = new Set<string>([
       ...Object.keys(def?.input_schema?.properties || {}),
@@ -576,7 +573,12 @@ export const ShotInspector: React.FC = () => {
     if (activeShot?.id === bindPreview.shotId) setShotDynamicInputs(merged);
     setBindUndo([{ shotId: bindPreview.shotId, prev }]);
     const realCount = bindPlan.filled.filter((f) => !f.kept).length;
-    toast.success(`已绑定 ${realCount} 项参考${bindPlan.gaps.length ? `，${bindPlan.gaps.length} 个必填缺口待补` : ''}`);
+    const slotNames = [...new Set(bindPlan.filled.map((f) => f.slotLabel))].slice(0, 3).join('、');
+    if (realCount === 0) {
+      toast.success(`该镜旧键参考已归一到「${slotNames || '源声明槽'}」${bindPlan.gaps.length ? `，${bindPlan.gaps.length} 个必填缺口待补` : ''}`);
+    } else {
+      toast.success(`已绑定 ${realCount} 项参考${bindPlan.gaps.length ? `，${bindPlan.gaps.length} 个必填缺口待补` : ''}`);
+    }
     setBindPreview(null);
   };
 
@@ -1076,6 +1078,7 @@ export const ShotInspector: React.FC = () => {
         providerName={bindPreview?.def?.display_name || bindPreview?.def?.name || bindPreview?.def?.id}
         shotLabel={activeShot?.shot_index ? `#${activeShot.shot_index}` : ''}
         plan={bindPlan}
+        resources={bindPreviewData?.resources}
         missingChars={bindMissingChars}
         overwrite={!!bindPreview?.overwrite}
         onToggleOverwrite={(v) => setBindPreview((p) => (p ? { ...p, overwrite: v } : p))}

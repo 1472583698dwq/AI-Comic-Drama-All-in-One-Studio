@@ -1,6 +1,6 @@
 import React from 'react';
 import { AlertTriangle, Check, FolderOpen, Link2, Sparkles, X } from 'lucide-react';
-import type { BindPlan } from '../referenceBinder';
+import type { BindPlan, BindResource, BindResourceSource } from '../referenceBinder';
 import { AutoRatioMedia } from '../../ui/AutoRatioMedia';
 
 /**
@@ -13,6 +13,8 @@ export const BindPreviewModal: React.FC<{
   providerName?: string;
   shotLabel?: string;
   plan: BindPlan | null;
+  /** 本镜资源池（角色/场景/素材/白模/本镜图/参考音频），用于"资源池 → 槽位"对照 */
+  resources?: BindResource[];
   /** 已绑定但没有立绘/三视图的角色名（显式提示，避免预览为空却不知原因） */
   missingChars?: string[];
   overwrite: boolean;
@@ -20,12 +22,16 @@ export const BindPreviewModal: React.FC<{
   onApply: () => void;
   onClose: () => void;
   resolveUrl: (u?: string | null) => string;
-}> = ({ open, kind, providerName, shotLabel, plan, missingChars = [], overwrite, onToggleOverwrite, onApply, onClose, resolveUrl }) => {
+}> = ({ open, kind, providerName, shotLabel, plan, resources = [], missingChars = [], overwrite, onToggleOverwrite, onApply, onClose, resolveUrl }) => {
   if (!open || !plan) return null;
   const sourceLabel: Record<string, string> = {
-    frame: '首帧', character: '角色', scene: '场景', prop: '道具/素材',
+    frame: '首帧', character: '角色', scene: '场景', prop: '道具/素材', shot_image: '本镜图',
     previz: '白模截图', previz_video: '白模视频', audio_ref: '参考音频', existing: '保留原值',
   };
+  const poolOrder: BindResourceSource[] = ['frame', 'character', 'scene', 'prop', 'shot_image', 'previz', 'previz_video', 'audio_ref'];
+  const pool = poolOrder
+    .map((s) => ({ source: s, count: resources.filter((r) => r.source === s).length }))
+    .filter((x) => x.count > 0);
   return (
     <div className="fixed inset-0 bg-black/75 backdrop-blur-md z-[80] flex items-center justify-center p-4" onClick={onClose}>
       <div className="w-full max-w-2xl bg-surface border border-border rounded-2xl shadow-2xl flex flex-col overflow-hidden max-h-[85vh]" onClick={(e) => e.stopPropagation()}>
@@ -71,6 +77,24 @@ export const BindPreviewModal: React.FC<{
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+          {/* 源要什么 × 本镜有什么：两行对照，避免"弹框空白却不知为何" */}
+          <div className="flex items-start gap-2 flex-wrap text-[10px] leading-5">
+            <span className="shrink-0 font-bold text-gray-300">该源插槽</span>
+            {plan.slots.length ? plan.slots.map((s) => (
+              <span key={s.key} className={`px-1.5 py-0.5 rounded border font-mono ${s.required ? 'border-red-500/30 text-red-300 bg-red-500/5' : 'border-border text-gray-400 bg-surface-secondary'}`}>
+                {s.label}<span className="opacity-60">({s.key})</span>
+              </span>
+            )) : <span className="text-gray-500">该源未声明媒体插槽</span>}
+          </div>
+          <div className="flex items-start gap-2 flex-wrap text-[10px] leading-5">
+            <span className="shrink-0 font-bold text-gray-300">资源池{pool.length ? '' : ''}</span>
+            {pool.length ? pool.map((p) => (
+              <span key={p.source} className="px-1.5 py-0.5 rounded border border-border bg-surface-secondary text-gray-300">
+                {sourceLabel[p.source] || p.source} ×{p.count}
+              </span>
+            )) : <span className="text-gray-500">本镜暂无可用资源（角色立绘 / 场景底图 / 道具素材 / 白模 / 本镜图 / 参考音频）</span>}
+          </div>
+
           {missingChars.length > 0 && (
             <div className="px-2.5 py-2 rounded-lg bg-amber-500/10 border border-amber-500/25 text-[11px] text-amber-300 leading-relaxed">
               <b>已绑定角色缺参考图：</b>{missingChars.join('、')}
@@ -78,11 +102,12 @@ export const BindPreviewModal: React.FC<{
             </div>
           )}
 
-          {plan.filled.length === 0 && plan.gaps.length === 0 && missingChars.length === 0 && (
-            <div className="py-10 text-center text-xs text-gray-500">没有可绑定的资源：先在上方绑定角色 / 场景 / 道具，或给角色绑定参考音频</div>
-          )}
-          {plan.filled.length === 0 && plan.gaps.length === 0 && missingChars.length > 0 && (
-            <div className="py-2 text-center text-[11px] text-gray-500">除上述缺失参考图的角色外，本镜没有其它可自动绑定的资源</div>
+          {plan.filled.length === 0 && plan.gaps.length === 0 && (
+            <div className="py-6 text-center text-[11px] text-gray-500 leading-relaxed">
+              本镜这些槽位当前无可自动填入的资源。<br />
+              去「角色工坊」给绑定角色生成立绘、或在分镜台绑定场景/素材/白模截图后重试；
+              也可直接在下方插槽表单里手工上传参考图。
+            </div>
           )}
 
           {plan.filled.length > 0 && (
@@ -141,12 +166,12 @@ export const BindPreviewModal: React.FC<{
 
         {/* Footer */}
         <div className="px-4 py-3 border-t border-border bg-surface-secondary/40 flex items-center justify-between shrink-0">
-          <span className="text-[10px] text-gray-500">写入后可在各槽位手工微调；生图/生视频时按源声明自动透传</span>
+          <span className="text-[10px] text-gray-500">写入后可在各槽位手工微调；生图/生视频时按源声明自动透传{plan.filled.some((f) => !f.kept) ? '' : '（本次仅把旧键归一到源声明槽）'}</span>
           <div className="flex items-center gap-2">
             <button onClick={onClose} className="px-3.5 py-1.5 rounded-xl border border-border text-xs text-gray-300 hover:bg-surface-tertiary hover:text-white transition">取消</button>
             <button
               onClick={onApply}
-              disabled={plan.filled.filter((f) => !f.kept).length === 0}
+              disabled={Object.keys(plan.patch).length === 0}
               className="px-4 py-1.5 rounded-xl bg-gradient-to-r from-brand to-emerald-600 hover:opacity-90 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-brand/20 transition disabled:opacity-40"
             >
               <Sparkles className="w-3.5 h-3.5" />
