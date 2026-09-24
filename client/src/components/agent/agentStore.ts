@@ -12,6 +12,9 @@ import { toast } from '../../stores/useDialogStore';
 import { agentSocket } from './agentSocket';
 import { clearAgentDraft } from './agentDraftStore';
 import { collectFromExecutedTools, dispatchSideEffects, reduceAgentEvent } from './agentEventReducer';
+import {
+  behaviorOfRunMode, composeRunMode, executionOfRunMode, normalizeRunMode,
+} from './agentTypes';
 import type {
   AgentEvent, AgentMode, AgentSession, ApprovalInfo, ChatMsg, RunMode, WsStatus,
 } from './agentTypes';
@@ -183,7 +186,8 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
       const m = localStorage.getItem('agent_mode');
       if (m === 'chat' || m === 'execute') mode = m;
       const r = localStorage.getItem('agent_run_mode');
-      if (r === 'approve' || r === 'auto' || r === 'create' || r === 'plan') runMode = r;
+      // 组合 token 归一：兼容历史单维值与口语值（create_auto / plan_auto 也在此恢复）
+      if (r) runMode = composeRunMode(behaviorOfRunMode(r), executionOfRunMode(r));
     } catch {}
     return { mode, runMode };
   };
@@ -354,7 +358,9 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
               activeSessionId: first.id,
               messages: (first.messages || []).map((m) => ({ ...m, isThinkingStreaming: false, isStreaming: false })),
               mode: first.mode || mode,
-              runMode: first.run_mode || runMode,
+              runMode: first.run_mode
+                ? composeRunMode(behaviorOfRunMode(first.run_mode), executionOfRunMode(first.run_mode))
+                : runMode,
               loadingSessions: false,
             });
           } else {
@@ -417,7 +423,10 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
         activeSessionId: id,
         messages: (target.messages || []).map((m) => ({ ...m, isThinkingStreaming: false, isStreaming: false })),
         mode: target.mode || get().mode,
-        runMode: target.run_mode || get().runMode,
+        // 历史会话可能存旧值/单维值：切会话时按组合口径归一
+        runMode: target.run_mode
+          ? composeRunMode(behaviorOfRunMode(target.run_mode), executionOfRunMode(target.run_mode))
+          : get().runMode,
         approvals: {},
             streamingMsgId: null,
         isRunning: false,
@@ -451,7 +460,9 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
           activeSessionId: first.id,
           messages: (first.messages || []).map((m) => ({ ...m, isThinkingStreaming: false, isStreaming: false })),
           mode: first.mode || get().mode,
-          runMode: first.run_mode || get().runMode,
+          runMode: first.run_mode
+            ? composeRunMode(behaviorOfRunMode(first.run_mode), executionOfRunMode(first.run_mode))
+            : get().runMode,
           approvals: {},
                 streamingMsgId: null,
           isRunning: false,
@@ -468,7 +479,7 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
       const text = (raw || '').trim();
       const st = get();
       if (!text || st.isRunning || !st.projectId || !st.activeSessionId) return;
-      const isPlanMode = st.runMode === 'plan';
+      const isPlanMode = behaviorOfRunMode(st.runMode) === 'plan';
       const ctx: Record<string, any> = { ...buildContext(), run_mode: st.runMode, plan_mode: isPlanMode };
       const userMsg: ChatMsg = { id: uid('u'), sender: 'user', text, time: nowTime() };
       const agentMsg: ChatMsg = {
@@ -499,9 +510,11 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
       if (!planMsg || !planMsg.planMode || planMsg.planExecuted || st.isRunning) return;
       const planText = planMsg.text || '';
       if (!planText.trim()) return;
-      get().setRunMode('approve');
+      // 批准计划：行为维回标准、执行维沿用用户当前选择（审批=逐步确认 / 自动=直接跑）
+      const nextToken = composeRunMode('standard', executionOfRunMode(st.runMode));
+      get().setRunMode(nextToken);
       const text = '按已批准的计划执行';
-      const ctx: Record<string, any> = { ...buildContext(), run_mode: 'approve', approved_plan: planText };
+      const ctx: Record<string, any> = { ...buildContext(), run_mode: nextToken, approved_plan: planText };
       const userMsg: ChatMsg = { id: uid('u'), sender: 'user', text, time: nowTime() };
       const agentMsg: ChatMsg = { id: uid('m'), sender: 'agent', text: '', mode: 'execute', time: nowTime(), thinking: '', isThinkingStreaming: true };
       commitMessages((prev) => [
@@ -510,7 +523,7 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
         agentMsg,
       ]);
       set({ isRunning: true, streamingMsgId: agentMsg.id, approvals: {} });
-      await dispatchRun(agentMsg.id, text, ctx, 'execute', 'approve');
+      await dispatchRun(agentMsg.id, text, ctx, 'execute', nextToken);
     },
 
     abort() {
@@ -558,8 +571,9 @@ export const useAgentStore = create<AgentStoreState>()((set, get) => {
       if (ev.event === 'approval_required') {
         const aid = String(ev.approval_id || '');
         if (aid) {
-          // 全局「自动执行」兜底：模式热同步存在竞态（事件早于 set_run_mode 到达）时自动放行
-          if (get().runMode === 'auto') {
+          // 全局「自动执行」兜底：模式热同步存在竞态（事件早于 set_run_mode 到达）时自动放行。
+          // 按执行维判断：create_auto / plan_auto 同属自动执行。
+          if (executionOfRunMode(get().runMode) === 'auto') {
             set((s) => (s.approvals[aid] ? { approvals: { ...s.approvals, [aid]: { ...s.approvals[aid], decided: true } } } : {}));
             get().approve(aid, true);
             return;

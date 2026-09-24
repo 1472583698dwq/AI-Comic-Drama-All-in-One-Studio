@@ -43,10 +43,11 @@ class MiniMaxTTSProvider(AudioProvider):
             return False
         try:
             async with httpx.AsyncClient(timeout=8.0) as client:
+                # 健康检查走 M 系列 OpenAI 兼容端点（旧 /text/chatcompletion_v2 已随域名弃用）
                 r = await client.post(
-                    f"{settings.MINIMAX_BASE_URL.rstrip('/')}/text/chatcompletion_v2",
+                    f"{settings.MINIMAX_BASE_URL.rstrip('/')}/chat/completions",
                     headers={"Authorization": f"Bearer {settings.MINIMAX_API_KEY}", "Content-Type": "application/json"},
-                    json={"model": settings.LLM_MODEL, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1},
+                    json={"model": settings.LLM_MODEL or "MiniMax-M2.5", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1},
                 )
                 return r.status_code in (200, 400, 401)  # 401说明key无效但服务通
         except Exception:

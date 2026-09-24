@@ -254,8 +254,15 @@ class ToolPipeline:
                       project_context: Any = None, run_mode: str = "approve",
                       auto_approved: bool = False) -> ToolOutcome:
         args = args if isinstance(args, dict) else {}
+        # 运行模式两维：行为（standard/create/plan）× 执行（approve/auto），见 app.agent.mode_policy
+        try:
+            from app.agent.mode_policy import behavior_of as _behavior_of, execution_of as _execution_of
+            _behavior, _execution = _behavior_of(run_mode), _execution_of(run_mode)
+        except Exception:
+            _behavior = "plan" if str(run_mode).startswith("plan") else ("create" if str(run_mode).startswith("create") else "standard")
+            _execution = "auto" if str(run_mode).endswith("auto") else "approve"
         # ① 计划模式硬门控：只读白名单之外一律拒绝（含全部内部变更工具）
-        if self.plan_mode and name not in PLAN_READONLY_TOOLS:
+        if (self.plan_mode or _behavior == "plan") and name not in PLAN_READONLY_TOOLS:
             msg = f"计划模式只允许只读工具，已拦截 {name}（本轮不执行任何变更）"
             return ToolOutcome(call_id, name, "denied", error=msg, model_content=json.dumps({"error": msg}, ensure_ascii=False))
 
@@ -334,7 +341,7 @@ class ToolPipeline:
             if not tool or not isinstance(items, list) or not items:
                 msg = "batch_run 需要 tool 与非空 items"
                 return ToolOutcome(call_id, name, "error", error=msg, model_content=json.dumps({"error": msg}, ensure_ascii=False))
-            if len(items) > 3 and run_mode != "auto" and not auto_approved:
+            if len(items) > 3 and _execution != "auto" and not auto_approved:
                 ok = await self.approvals.request("batch_run", {"tool": tool, "count": len(items)},
                                                   reason=f"批量执行 {len(items)} 项 {tool}")
                 if not ok:
@@ -393,7 +400,8 @@ class ToolPipeline:
                 need_confirm = _rc(name, run_mode, True)
             except Exception:
                 need_confirm = _risk(name) in ("high", "catastrophic")
-        if need_confirm and run_mode != "plan" and not auto_approved:
+        # plan 只读 / auto 自动执行：不弹确认（两维各自硬门控；风险由前端危险态明示 + 随时暂停兜底）
+        if need_confirm and _behavior != "plan" and _execution != "auto" and not auto_approved:
             ok = await self.approvals.request(name, args, reason=f"risk={_risk(name)} mode={run_mode}")
             if not ok:
                 msg = f"用户拒绝或不可交互，已跳过需确认的工具 {name}"

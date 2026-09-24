@@ -20,6 +20,7 @@ import { apiService } from '../../services/api';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { AssetCategory } from '../../types';
 import { useEscapeClose } from '../../hooks/useEscapeClose';
+import { AutoRatioMedia } from '../ui/AutoRatioMedia';
 
 interface AssetPickerModalProps {
   isOpen: boolean;
@@ -230,7 +231,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
               <span>正在检索素材库...</span>
             </div>
           ) : assets.length > 0 ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5 items-start">
               {assets.map((asset) => {
                 const img = asset.file_url || asset.thumb_url || asset.image_url;
                 if (!img) return null;
@@ -251,34 +252,44 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
                     }}
                     className="group rounded-2xl overflow-hidden border border-border bg-surface-secondary/70 cursor-pointer hover:border-brand hover:ring-2 hover:ring-brand/40 transition-all flex flex-col relative shadow-sm"
                   >
-                    <div className="aspect-[3/4] bg-surface-secondary overflow-hidden relative">
-                      {isAudioUrl(img) ? (
+                    {isAudioUrl(img) ? (
+                      <div className="aspect-[3/4] bg-surface-secondary overflow-hidden relative">
                         <div className="w-full h-full flex flex-col items-center justify-center gap-2 bg-gradient-to-br from-surface-secondary to-surface-tertiary">
                           <Music className="w-10 h-10 text-brand-light/70" />
                           <span className="text-[10px] text-gray-400 font-mono px-2 truncate max-w-full">{String(img).split('/').pop()}</span>
                         </div>
-                      ) : (
-                        <img
-                          src={resolveUrl(img)}
-                          alt={asset.name}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                        />
-                      )}
-                      <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-surface/85 text-[9px] text-gray-200 border border-white/10 font-mono">
-                        {catLabel}
-                      </span>
-                      {asset.scope === 'global' && (
-                        <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded bg-brand/80 text-[8px] text-white font-bold">
-                          全局
+                        <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-surface/85 text-[9px] text-gray-200 border border-white/10 font-mono">
+                          {catLabel}
                         </span>
-                      )}
-
-                      <div className="absolute inset-0 bg-brand/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                        <span className="px-3 py-1 rounded-full bg-brand text-white text-xs font-bold shadow-lg flex items-center gap-1">
-                          <Check className="w-3 h-3" /> 点击选用
-                        </span>
+                        <div className="absolute inset-0 bg-brand/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                          <span className="px-3 py-1 rounded-full bg-brand text-white text-xs font-bold shadow-lg flex items-center gap-1">
+                            <Check className="w-3 h-3" /> 点击选用
+                          </span>
+                        </div>
                       </div>
-                    </div>
+                    ) : (
+                      <AutoRatioMedia
+                        src={resolveUrl(img)}
+                        alt={asset.name}
+                        fallbackAspect="3/4"
+                        className="bg-surface-secondary"
+                        mediaClassName="group-hover:scale-105 transition-transform duration-300"
+                      >
+                        <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-surface/85 text-[9px] text-gray-200 border border-white/10 font-mono">
+                          {catLabel}
+                        </span>
+                        {asset.scope === 'global' && (
+                          <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded bg-brand/80 text-[8px] text-white font-bold">
+                            全局
+                          </span>
+                        )}
+                        <div className="absolute inset-0 bg-brand/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                          <span className="px-3 py-1 rounded-full bg-brand text-white text-xs font-bold shadow-lg flex items-center gap-1">
+                            <Check className="w-3 h-3" /> 点击选用
+                          </span>
+                        </div>
+                      </AutoRatioMedia>
+                    )}
 
                     <div className="p-2">
                       <p className="text-xs font-bold text-white truncate">{asset.name}</p>

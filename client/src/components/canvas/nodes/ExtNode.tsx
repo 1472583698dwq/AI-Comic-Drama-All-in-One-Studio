@@ -15,6 +15,7 @@ import { paramsSchemaToSpecs } from '../providerSkills';
 import { DynamicControl } from '../controls/DynamicControl';
 import { ShotWriteBackControls } from './ShotWriteBackControl';
 import { getCanvasNodeSpec, registerCanvasNodeSpec, type CanvasNodeSpec } from '../canvasNodeSpecs';
+import { AutoRatioMedia } from '../../ui/AutoRatioMedia';
 
 const TYPE_TOP: Record<string, string> = {
   image: 'image', images: 'image',
@@ -135,7 +136,7 @@ export const ExtNode: React.FC<NodeProps> = ({ id, data, selected }) => {
         {resultUrl ? (
           <div className="rounded-xl overflow-hidden border border-white/10 bg-black/50">
             {resultKind === 'video' ? <video src={resultUrl} controls className="w-full max-h-40" />
-              : resultKind === 'image' ? <img src={resultUrl} alt="" className="w-full max-h-40 object-cover" />
+              : resultKind === 'image' ? <AutoRatioMedia src={resultUrl} fallbackAspect="1/1" maxHeight={160} />
               : <audio src={resultUrl} controls className="w-full" />}
           </div>
         ) : (d.text && !d.prompt) ? (

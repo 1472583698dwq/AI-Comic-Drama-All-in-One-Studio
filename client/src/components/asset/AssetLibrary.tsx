@@ -6,6 +6,7 @@ import { useProjectListStore } from '../../stores/useProjectListStore';
 import { apiService } from '../../services/api';
 import { AssetCategory } from '../../types';
 import { WorkflowInspectorModal } from '../workflow/WorkflowInspectorModal';
+import { AutoRatioMedia } from '../ui/AutoRatioMedia';
 import { confirmAsync, toast } from '../../stores/useDialogStore';
 import { useEscapeClose } from '../../hooks/useEscapeClose';
 
@@ -529,20 +530,20 @@ export const AssetLibrary: React.FC = () => {
             </div>
             ) : (
             <>
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 items-start">
                 {assets.map((a: any) => {
                   const url = a.file_url || a.thumb_url;
                   const abs = url && url.startsWith('/') ? `http://127.0.0.1:8000${url}` : url;
                   return (
                   <div key={a.id} draggable onDragStart={e=>{ e.dataTransfer.setData('text/plain', abs||url||''); e.dataTransfer.setData('application/canvas-assetid', a.id); e.dataTransfer.setData('application/asset-category', a.category||''); e.dataTransfer.effectAllowed='copy'; }} onClick={()=>{selectAsset(a.id); setDetailAsset(a);}} title="拖拽到分镜垫图槽或画布" className={`group bg-surface border rounded-2xl overflow-hidden cursor-grab active:cursor-grabbing transition-all hover:shadow-lg ${selectedId===a.id ? 'border-brand ring-1 ring-brand/30' : 'border-border hover:border-border-active'}`}>
-                    <div className="aspect-square bg-surface-secondary relative overflow-hidden">
-                      {a.thumb_url || a.file_url ? (
-                        <img src={resolveUrl(a.thumb_url||a.file_url)} alt={a.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                      ) : (
-                        <div className="w-full h-full flex flex-col items-center justify-center text-gray-600">
-                          <ImageIcon className="w-6 h-6 mb-1" /><span className="text-[10px]">{a.category}</span>
-                        </div>
-                      )}
+                    {a.thumb_url || a.file_url ? (
+                      <AutoRatioMedia
+                        src={resolveUrl(a.thumb_url||a.file_url) || ''}
+                        alt={a.name}
+                        fallbackAspect="1/1"
+                        className="bg-surface-secondary"
+                        mediaClassName="group-hover:scale-105 transition-transform"
+                      >
                       <div className="absolute top-2 left-2 flex items-center space-x-1">
                         <span className={`text-[9px] px-1.5 py-0.5 rounded-full border font-medium ${a.category==='character'?'bg-accent-pink/20 text-accent-pink border-accent-pink/30': a.category==='scene'?'bg-accent-green/20 text-accent-green border-accent-green/30':'bg-brand/20 text-brand-light border-brand/30'}`}>{a.category}</span>
                         {a.status!=='approved' && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">{a.status}</span>}
@@ -554,7 +555,12 @@ export const AssetLibrary: React.FC = () => {
                         <button onClick={(e)=>{e.stopPropagation(); duplicateAsset(a.id);}} className="p-1 rounded-lg bg-white/20 text-white hover:bg-white/30"><Copy className="w-3 h-3" /></button>
                         <button onClick={(e)=>{e.stopPropagation(); openEdit(a);}} className="p-1 rounded-lg bg-white/20 text-white hover:bg-white/30" title="编辑"><Pencil className="w-3 h-3" /></button>
                       </div>
-                    </div>
+                      </AutoRatioMedia>
+                    ) : (
+                      <div className="aspect-square bg-surface-secondary relative overflow-hidden flex flex-col items-center justify-center text-gray-600">
+                        <ImageIcon className="w-6 h-6 mb-1" /><span className="text-[10px]">{a.category}</span>
+                      </div>
+                    )}
                     <div className="p-2.5">
                       <div className="text-xs font-semibold text-white truncate">{a.name}</div>
                       <div className="text-[10px] text-gray-400 truncate mt-0.5">{a.description || a.visual_prompt?.slice(0,40) || '—'}</div>
@@ -583,9 +589,11 @@ export const AssetLibrary: React.FC = () => {
             <button onClick={()=>{selectAsset(null); setDetailAsset(null);}} className="text-gray-400 hover:text-white"><X className="w-4 h-4" /></button>
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            <div className="aspect-square rounded-xl overflow-hidden bg-surface-secondary border border-border">
-              {selected.file_url ? <img src={resolveUrl(selected.file_url)} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-gray-500">无预览</div>}
-            </div>
+            {selected.file_url ? (
+              <AutoRatioMedia src={resolveUrl(selected.file_url) || ''} fallbackAspect="1/1" className="rounded-xl bg-surface-secondary border border-border" />
+            ) : (
+              <div className="aspect-square rounded-xl overflow-hidden bg-surface-secondary border border-border flex items-center justify-center text-gray-500">无预览</div>
+            )}
             <div>
               <div className="text-sm font-bold text-white">{selected.name}</div>
               <div className="text-xs text-gray-400 mt-1">{selected.category} {selected.subcategory && `· ${selected.subcategory}`} · {selected.source==='generate'?'AI生成':selected.source==='upload'?'本地导入':'迁移'}</div>
@@ -832,12 +840,13 @@ export const AssetLibrary: React.FC = () => {
                         {exp.type === 'image' ? (
                           <div className="flex items-center gap-3">
                             {val ? (
-                              <div className="relative w-14 h-14 rounded-lg border border-brand overflow-hidden group shrink-0 bg-surface-secondary">
-                                <img
-                                  src={resolveUrl(val)}
-                                  alt="Preview"
-                                  className="w-full h-full object-cover"
-                                />
+                              <AutoRatioMedia
+                                src={resolveUrl(val) || ''}
+                                alt="Preview"
+                                fallbackAspect="1/1"
+                                maxHeight={56}
+                                className="rounded-lg border border-brand group shrink-0 bg-surface-secondary"
+                              >
                                 <button
                                   type="button"
                                   onClick={() => setDynamicInputs(p => ({ ...p, [key]: '' }))}
@@ -845,7 +854,7 @@ export const AssetLibrary: React.FC = () => {
                                 >
                                   ✕ 移除
                                 </button>
-                              </div>
+                              </AutoRatioMedia>
                             ) : null}
 
                             <div className="flex-1 flex items-center gap-2">

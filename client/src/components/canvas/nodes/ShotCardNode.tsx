@@ -3,6 +3,7 @@ import { Handle, Position, NodeProps } from '@xyflow/react';
 import { Film, Image as ImageIcon, Play, RefreshCw, Sparkles } from 'lucide-react';
 import { apiService } from '../../../services/api';
 import { useProjectStore } from '../../../stores/useProjectStore';
+import { AutoRatioMedia } from '../../ui/AutoRatioMedia';
 
 const API_ORIGIN = window.location.port === '5173' ? 'http://127.0.0.1:8000' : '';
 
@@ -77,7 +78,8 @@ export const ShotCardNode: React.FC<NodeProps> = ({ data, id }) => {
           {(liveShot.character_ids || []).map((cid: string) => {
             const char = project?.characters.find(c => c.id === cid);
             if (!char) return null;
-            const avatar = char.three_views?.front || char.avatar_url;
+            const _ctv = (char.three_views || {}) as Record<string, string>;
+            const avatar = _ctv.front || char.avatar_url || _ctv.three_quarter || _ctv.side;
             return (
               <span key={cid} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-brand/20 text-brand-light text-[9px] font-bold border border-brand/30">
                 {avatar && <img src={avatar.startsWith('/') ? API_ORIGIN + avatar : avatar} alt="" className="w-2.5 h-2.5 rounded-full object-cover" />}
@@ -98,10 +100,16 @@ export const ShotCardNode: React.FC<NodeProps> = ({ data, id }) => {
         </div>
       )}
 
-      <div className="aspect-[9/16] max-h-[220px] bg-surface-secondary relative overflow-hidden flex items-center justify-center border-b border-border">
-        {imgUrl ? <img src={imgUrl} alt="" className="w-full h-full object-cover"/> : <div className="text-xs [color:var(--color-text-muted)] flex flex-col items-center gap-1"><ImageIcon className="w-6 h-6 opacity-50"/><span>{generating ? '生成中…' : '暂无画面'}</span></div>}
-        {localData.subtitle_text && <div className="absolute bottom-2 left-2 right-2 bg-surface/85 backdrop-blur px-2 py-1 rounded text-[11px] text-white text-center border border-white/10">{localData.subtitle_text}</div>}
-      </div>
+      {imgUrl ? (
+        <AutoRatioMedia src={imgUrl} fallbackAspect="9/16" maxHeight={220} className="bg-surface-secondary border-b border-border">
+          {localData.subtitle_text && <div className="absolute bottom-2 left-2 right-2 bg-surface/85 backdrop-blur px-2 py-1 rounded text-[11px] text-white text-center border border-white/10">{localData.subtitle_text}</div>}
+        </AutoRatioMedia>
+      ) : (
+        <div className="aspect-[9/16] max-h-[220px] bg-surface-secondary relative overflow-hidden flex items-center justify-center border-b border-border">
+          <div className="text-xs [color:var(--color-text-muted)] flex flex-col items-center gap-1"><ImageIcon className="w-6 h-6 opacity-50"/><span>{generating ? '生成中…' : '暂无画面'}</span></div>
+          {localData.subtitle_text && <div className="absolute bottom-2 left-2 right-2 bg-surface/85 backdrop-blur px-2 py-1 rounded text-[11px] text-white text-center border border-white/10">{localData.subtitle_text}</div>}
+        </div>
+      )}
 
       <div className="p-2.5 space-y-2 bg-surface">
         <textarea value={localData.action_desc || ''} onChange={e=>{ const v=e.target.value; setLocalData((p:any)=>({...p, action_desc:v})); (d.onUpdate as any)?.(id,{action_desc:v}); }} placeholder="画面动作描述…（支持多行）" rows={2} className="w-full bg-surface-secondary border border-border rounded-xl p-2 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand resize-none"/>

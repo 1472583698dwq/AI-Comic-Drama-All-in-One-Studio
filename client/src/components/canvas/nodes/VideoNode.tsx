@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 import { Video, Play, Film, Settings } from 'lucide-react';
 import { apiService } from '../../../services/api';
+import { AutoRatioMedia } from '../../ui/AutoRatioMedia';
 
 const API_ORIGIN = window.location.port === '5173' ? 'http://127.0.0.1:8000' : '';
 
@@ -110,7 +111,7 @@ export const VideoNode: React.FC<NodeProps> = ({ data, id }) => {
           <input type="range" min={3} max={10} value={duration} onChange={e=>{setDuration(Number(e.target.value)); (d.onUpdate as any)?.(id,{duration:Number(e.target.value)});}} className="flex-1 accent-orange-500"/>
           <span className="text-xs text-orange-500 font-mono font-bold">{duration}s</span>
         </div>
-        {firstFrame && <div className="rounded-xl overflow-hidden border border-border h-20 bg-surface-secondary"><img src={firstFrame.startsWith('/')? API_ORIGIN+firstFrame : firstFrame} alt="" className="w-full h-full object-cover"/></div>}
+        {firstFrame && <AutoRatioMedia src={firstFrame.startsWith('/')? API_ORIGIN+firstFrame : firstFrame} fallbackAspect="16/9" maxHeight={200} className="rounded-xl border border-border bg-surface-secondary" />}
         {videoUrl ? <video src={videoUrl.startsWith('/')? API_ORIGIN+videoUrl : videoUrl} controls autoPlay loop className="w-full rounded-xl border border-border max-h-[160px] bg-surface-secondary"/> : null}
         <button onClick={handleGenerate} disabled={generating} className="w-full py-2.5 rounded-xl bg-brand hover:bg-brand-light text-white text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-40 shadow-sm transition-colors">
           {generating ? <><div className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin"/> 生成中…</> : <><Play className="w-3.5 h-3.5"/> 生成视频</>}

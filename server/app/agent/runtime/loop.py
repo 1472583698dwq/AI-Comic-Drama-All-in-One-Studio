@@ -48,12 +48,16 @@ class AgentLoop:
     ):
         self.session = Session.open(session_id, store=store)
         try:
-            from app.agent.mode_policy import normalize_run_mode
+            from app.agent.mode_policy import normalize_run_mode, behavior_of
             self.run_mode = normalize_run_mode(run_mode)
         except Exception:
             self.run_mode = run_mode or "approve"
+            behavior_of = lambda m: "plan" if str(m).startswith("plan") else ("create" if str(m).startswith("create") else "standard")  # noqa: E731
         self.mode = "chat" if str(mode or "execute").lower() == "chat" else "execute"
-        self.plan_mode = self.run_mode == "plan"
+        # 行为维（standard/create/plan）决定只读门控与提示词；执行维（approve/auto）只决定是否逐项人审
+        self.plan_mode = behavior_of(self.run_mode) == "plan"
+        # /plan off 回到进入计划前的行为（如 创造+自动），避免把行为维度一并重置
+        self._pre_plan_run_mode = "approve"
         self.context: Dict[str, Any] = dict(context or {})
         self.inbox = Inbox(on_wake=self._wake)
         self._sinks: List[Sink] = []
@@ -145,29 +149,40 @@ class AgentLoop:
 
     def set_run_mode(self, run_mode: str) -> None:
         try:
-            from app.agent.mode_policy import normalize_run_mode
+            from app.agent.mode_policy import normalize_run_mode, behavior_of, execution_of
             m = normalize_run_mode(run_mode)
+            behavior = behavior_of(m)
+            prev_behavior = behavior_of(self.run_mode)
         except Exception:
             m = str(run_mode or "approve")
+            behavior = "plan" if m.startswith("plan") else ("create" if m.startswith("create") else "standard")
+            prev_behavior = "plan" if str(self.run_mode).startswith("plan") else "standard"
+            execution_of = lambda x: "auto" if str(x).endswith("auto") else "approve"  # noqa: E731
+        # 进计划前记住原组合，供 /plan off 原样退回
+        if behavior == "plan" and prev_behavior != "plan":
+            self._pre_plan_run_mode = self.run_mode
         changed = m != self.run_mode
         self.run_mode = m
-        self.plan_mode = m == "plan"
+        self.plan_mode = behavior == "plan"
         self.pipeline.plan_mode = self.plan_mode
         if changed:
-            self.session.append(E.PLAN_MODE, {"active": self.plan_mode, "run_mode": m})
+            self.session.append(E.PLAN_MODE, {
+                "active": self.plan_mode, "run_mode": m,
+                "behavior": behavior, "execution": execution_of(m),
+            })
 
     async def apply_run_mode(self, run_mode: str) -> str:
         """热切换运行模式（对当前轮后续工具立即生效）。
 
-        切到「自动」时同步放行全部挂起审批并补发 approval_ack，
+        切到「自动」（执行维=auto，含 create_auto / plan_auto）时同步放行全部挂起审批并补发 approval_ack，
         否则用户切了自动，之前弹出的审批卡仍会阻塞工具直到超时。
         """
         self.set_run_mode(run_mode)
         try:
-            from app.agent.mode_policy import normalize_run_mode as _nrm
-            to_auto = _nrm(self.run_mode) == "auto"
+            from app.agent.mode_policy import execution_of as _execution_of
+            to_auto = _execution_of(self.run_mode) == "auto"
         except Exception:
-            to_auto = str(self.run_mode).strip().lower() == "auto"
+            to_auto = str(self.run_mode).strip().lower().endswith("auto")
         if to_auto:
             approvals = getattr(getattr(self, "pipeline", None), "approvals", None)
             resolver = getattr(approvals, "resolve_all", None)

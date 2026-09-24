@@ -1252,6 +1252,76 @@ async def set_provider_api_key(provider_id: str, body: Dict[str, Any] = Body(...
     return {"status": "success", "provider_id": provider_id, "has_key": True}
 
 
+# ─────────────────── 代码源「隐式配置」显式化（见 custom/inline_config.py） ───────────────────
+#
+# 代码型生成源常把 Key / 网关地址 / 工作流 ID 写在代码里，设置页只能看到一个空 Key 输入框：
+# 用户不知道这个源实际用哪把 Key、连哪个网关，想更换还得翻代码，且明文值随定义落盘。
+# 两个接口把「配置里存的」与「代码里写的」一起摊开，并支持把内联 Key 迁到配置存储。
+
+class MigrateInlineKeyRequest(BaseModel):
+    rewrite_code: bool = True
+
+
+@router.get("/providers/{provider_id}/effective-config")
+async def get_provider_effective_config(provider_id: str):
+    """自定义代码源的生效配置：Key 来源（配置存储 / 代码内联 / 未配置）+ 代码里写死的常量。
+
+    与 GET /config 同一口径（本地桌面默认明文），明文与掩码两份都返回，由前端决定默认展示。
+    """
+    from app.providers.custom.inline_config import effective_config
+    pd = custom_provider_manager.get_definition(provider_id)
+    if not pd:
+        raise HTTPException(status_code=404, detail=f"Provider 不存在: {provider_id}")
+    if getattr(pd, "provider_type", "") != "code":
+        raise HTTPException(status_code=400, detail="仅代码型自定义源存在「隐式配置」")
+    return {"effective": effective_config(pd)}
+
+
+@router.post("/providers/{provider_id}/migrate-inline-key")
+async def migrate_provider_inline_key(provider_id: str, body: Optional[MigrateInlineKeyRequest] = Body(None)):
+    """把代码里的内联 Key 迁到配置存储 CUSTOM_PROVIDER_<id>，可选同时改写代码改走 ctx。"""
+    from app.providers.custom.inline_config import effective_config, mask_secret, rewrite_inline_key
+    pd = custom_provider_manager.get_definition(provider_id)
+    if not pd:
+        raise HTTPException(status_code=404, detail=f"Provider 不存在: {provider_id}")
+    eff = effective_config(pd)
+    literal = eff.get("inline_key") or ""
+    if not literal:
+        raise HTTPException(status_code=400, detail="代码里没有找到内联 Key，无需迁移")
+
+    rewrite = True if body is None else bool(body.rewrite_code)
+    _save_api_key(provider_id, literal)
+    if not pd.auth.key_env:
+        pd.auth.key_env = f"CUSTOM_PROVIDER_{provider_id}"
+
+    notes: List[str] = []
+    if rewrite:
+        const_name = eff.get("inline_key_name") or ""
+        new_code, notes = rewrite_inline_key(
+            pd.code or "", pd.language or "python", literal, const_name or None, pd.auth.key_env,
+        )
+        if new_code != (pd.code or ""):
+            pd.code = new_code
+
+    custom_provider_manager.save_definition(pd)
+    try:
+        from app.providers.init_providers import register_single_custom_provider
+        register_single_custom_provider(pd)  # 热注册：运行中的进程立刻用上新代码/新 Key
+    except Exception as e:
+        print(f"[ProviderRoutes] migrate inline key hot register failed {provider_id}: {e}")
+    verification.clear(provider_id)  # 代码或 Key 变更 → 需重新测试
+    return {
+        "status": "success",
+        "provider_id": provider_id,
+        "env_name": pd.auth.key_env,
+        "key_source": "stored",
+        "stored_masked": mask_secret(literal),
+        "rewritten": bool(notes),
+        "notes": notes,
+        "effective": effective_config(pd),
+    }
+
+
 @router.get("/providers/custom/stats")
 async def custom_provider_stats():
     customs = custom_provider_manager.list_definitions()

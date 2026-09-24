@@ -12,6 +12,7 @@ import { apiService } from '../../services/api';
 import { confirmAsync, promptAsync, toast } from '../../stores/useDialogStore';
 import { useCanvasSync } from './hooks/useCanvasSync';
 import { executeAgentNode } from './hooks/nodeAgentExecutor';
+import { AutoRatioMedia } from '../ui/AutoRatioMedia';
 import { ShotCardNode } from './nodes/ShotCardNode';
 import { ComfyWorkflowNode } from './nodes/ComfyWorkflowNode';
 import { BriefNode, ScriptSplitNode } from './nodes/BriefNode';
@@ -1226,13 +1227,17 @@ const InnerCanvas: React.FC = () => {
           {/* 素材库 */}
           <div className="rounded-2xl border border-border bg-surface p-3">
             <div className="text-xs font-bold [color:var(--color-text-main)] mb-2 flex items-center gap-1.5"><Library className="w-3.5 h-3.5 text-brand" /> 素材库 <span className="ml-auto text-[10px] [color:var(--color-text-muted)]">{assets.length} 个</span></div>
-            <div className="grid grid-cols-2 gap-2 max-h-[160px] overflow-y-auto pr-1">
+            <div className="grid grid-cols-2 gap-2 max-h-[160px] overflow-y-auto pr-1 items-start">
               {assets.map((a: any) => {
                 const url = a.thumb_url || a.file_url;
                 const abs = url?.startsWith('/') ? `http://127.0.0.1:8000${url}` : url;
                 return (
                   <div key={a.id} draggable onDragStart={e => { e.dataTransfer.setData('application/canvas-assetid', a.id); e.dataTransfer.setData('text/plain', abs || url); }} className="group bg-surface-secondary border border-border rounded-xl overflow-hidden cursor-grab hover:border-brand/30 hover:shadow-md transition-all">
-                    <div className="aspect-square bg-surface-secondary flex items-center justify-center overflow-hidden">{abs ? <img src={abs} alt="" className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform" /> : <ImageIcon className="w-5 h-5 text-gray-500" />}</div>
+                    {abs ? (
+                      <AutoRatioMedia src={abs} fallbackAspect="1/1" className="bg-surface-secondary" mediaClassName="group-hover:scale-[1.02] transition-transform" />
+                    ) : (
+                      <div className="aspect-square bg-surface-secondary flex items-center justify-center overflow-hidden"><ImageIcon className="w-5 h-5 text-gray-500" /></div>
+                    )}
                     <div className="p-1.5"><div className="text-[11px] font-medium truncate [color:var(--color-text-main)]">{a.name}</div></div>
                   </div>
                 );

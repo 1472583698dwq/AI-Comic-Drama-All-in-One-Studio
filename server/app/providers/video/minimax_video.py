@@ -63,10 +63,9 @@ class CloudVideoProvider(VideoProvider):
         raise RuntimeError("云端视频调用失败，且无可用的回退通道")
 
     async def _generate_minimax(self, req: VideoGenerateRequest, started: float) -> VideoGenerateResult:
-        base = getattr(settings, "MINIMAX_BASE_URL", "https://api.minimax.chat/v1").rstrip("/")
-        url = f"{base}/video_generation" if "video" not in base else base
-        if "hailuo" not in url and "minimax" in url:
-            url = "https://api.minimax.chat/v1/video_generation"
+        # 旧版 v1 通道（video-01/Hailuo 世代）：域名跟随配置，不再写死 api.minimax.chat
+        base = (getattr(settings, "MINIMAX_BASE_URL", "") or "https://api.minimaxi.com/v1").rstrip("/")
+        url = f"{base}/video_generation"
 
         headers = {
             "Authorization": f"Bearer {settings.MINIMAX_API_KEY}",
@@ -119,8 +118,8 @@ class CloudVideoProvider(VideoProvider):
                 "provider": self.id,
             }
 
-            # 启动后台轮询下载协程
-            asyncio.create_task(self._poll_and_download_minimax(task_id, settings.MINIMAX_API_KEY))
+            # 启动后台轮询下载协程（把本次用的 base 传下去，避免轮询打到别的域名）
+            asyncio.create_task(self._poll_and_download_minimax(task_id, settings.MINIMAX_API_KEY, base))
 
             out_filename = f"minimax_{task_id}.mp4"
             out_path = os.path.join(VIDEOS_DIR, out_filename)
@@ -138,9 +137,10 @@ class CloudVideoProvider(VideoProvider):
                 raw=data,
             )
 
-    async def _poll_and_download_minimax(self, task_id: str, api_key: str):
+    async def _poll_and_download_minimax(self, task_id: str, api_key: str, base: str = ""):
         """后台轮询 MiniMax 视频生成进度，完成后自动下载到 storage/videos/"""
-        query_url = f"https://api.minimax.chat/v1/query/video_generation?task_id={task_id}"
+        base = (base or (getattr(settings, "MINIMAX_BASE_URL", "") or "https://api.minimaxi.com/v1")).rstrip("/")
+        query_url = f"{base}/query/video_generation?task_id={task_id}"
         headers = {"Authorization": f"Bearer {api_key}"}
         out_filename = f"minimax_{task_id}.mp4"
         out_path = os.path.join(VIDEOS_DIR, out_filename)

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 import { Library, Tag } from 'lucide-react';
+import { AutoRatioMedia } from '../../ui/AutoRatioMedia';
 
 const API_ORIGIN = window.location.port === '5173' ? 'http://127.0.0.1:8000' : '';
 
@@ -15,9 +16,13 @@ export const AssetNode: React.FC<NodeProps> = ({ data }) => {
       </div>
       <Handle type="source" position={Position.Right} className="!bg-pink-500 !w-3 !h-3 !border-2 !border-surface"/>
       <Handle type="source" position={Position.Bottom} id="image" className="!bg-brand !w-3 !h-3 !border-2 !border-surface"/>
-      <div className="aspect-square bg-surface-secondary flex items-center justify-center overflow-hidden border-b border-border">
-        {url ? <img src={url.startsWith('/')? API_ORIGIN+url : url} alt="" className="w-full h-full object-cover"/> : <span className="text-xs [color:var(--color-text-muted)]">无预览</span>}
-      </div>
+      {url ? (
+        <AutoRatioMedia src={url.startsWith('/')? API_ORIGIN+url : url} fallbackAspect="1/1" className="bg-surface-secondary border-b border-border" />
+      ) : (
+        <div className="aspect-square bg-surface-secondary flex items-center justify-center overflow-hidden border-b border-border">
+          <span className="text-xs [color:var(--color-text-muted)]">无预览</span>
+        </div>
+      )}
       <div className="p-2 space-y-1 bg-surface">
         <div className="text-[10px] [color:var(--color-text-muted)] truncate">{d.visual_prompt?.slice(0,60) || d.description?.slice(0,40) || '—'}</div>
         {d.tags?.length>0 && <div className="flex gap-1 flex-wrap">{d.tags.slice(0,3).map((t:string)=><span key={t} className="text-[9px] px-1 py-0.5 rounded bg-surface-secondary text-[color:var(--color-text-secondary)] border border-border"><Tag className="w-2 h-2 inline mr-0.5"/>{t}</span>)}</div>}

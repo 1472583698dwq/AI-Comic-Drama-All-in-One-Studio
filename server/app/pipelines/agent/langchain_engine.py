@@ -476,14 +476,16 @@ async def run_agent_with_langchain(
         except Exception:
             pass
         return {"reply": clean_reply, "thinking": th, "suggested_actions": ["切换到执行模式让我直接做"], "executed_tools": [], "mode": "chat"}
-    # 计划模式：只读侦察 + 产出计划（工具在绑定层硬门控，模型无变更工具可用）
-    _plan_mode = bool((context or {}).get("plan_mode")) or str((context or {}).get("run_mode") or "").strip().lower() in ("plan", "planning")
-    # 执行维度（本地单维 run_mode）：auto 即全自动，v1 兜底路径据此放行破坏性工具
+    # 运行模式两维（行为 × 执行）：plan 硬门控看行为维，破坏性确认看执行维
     try:
-        from app.agent.mode_policy import normalize_run_mode as _nrm_rm
-        _execution = "auto" if _nrm_rm(str((context or {}).get("run_mode") or "approve")) == "auto" else "approve"
+        from app.agent.mode_policy import behavior_of as _behavior_of, execution_of as _execution_of
     except Exception:
-        _execution = "auto" if str((context or {}).get("run_mode") or "").strip().lower() == "auto" else "approve"
+        _behavior_of = lambda m: "plan" if str(m or "").startswith("plan") else ("create" if str(m or "").startswith("create") else "standard")  # noqa: E731
+        _execution_of = lambda m: "auto" if str(m or "").endswith("auto") else "approve"  # noqa: E731
+    _behavior = _behavior_of((context or {}).get("run_mode"))
+    _execution = _execution_of((context or {}).get("run_mode"))
+    # 计划模式：只读侦察 + 产出计划（工具在绑定层硬门控，模型无变更工具可用）
+    _plan_mode = bool((context or {}).get("plan_mode")) or _behavior == "plan"
     # 轮次预算：plan 模式 60，execute 模式 200（均可用 AGENT_MAX_ITERATIONS 覆盖）
     try:
         from app.agent.loop import MODE_BUDGETS
@@ -546,6 +548,9 @@ async def run_agent_with_langchain(
     if _plan_mode:
         system_extra += ("\n\n【PLAN MODE / 计划模式】当前只允许只读侦察：查询画布/素材/生成源/代码/项目状态，禁止任何生成、写盘、执行、删改动作。"
                          "侦察充分后，输出一份完整可执行的 markdown 计划（以 `# 计划：` 开头：目标、按序步骤（工具+关键参数+产出）、风险与注意、验收标准）。不要执行。")
+    if _execution == "auto" and not _plan_mode:
+        system_extra += ("\n\n【AUTO MODE / 自动模式】当前全部工具自动执行、不再弹窗打断；请持续推进直到目标完成，不要停下来问是否确认。"
+                         "诊断生成源代码优先用 get_provider_code 的 line_offset/line_limit 逐行精读（带行号）。")
     messages: List[BaseMessage] = [SystemMessage(content=get_agent_system_prompt(loop=True) + system_extra)]
     for h in history:
         messages.append(h)

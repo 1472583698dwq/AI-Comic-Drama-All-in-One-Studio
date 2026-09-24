@@ -60,8 +60,16 @@ CREATE_MODE_RULES = """## 创造模式（Creator）
 - 提案卡由界面展示给用户，你只负责生成与解释，不要替用户执行 Start/Persist。"""
 
 TRUSTED_RULES = """## 可信模式（仅 STUDIO_TRUSTED_MODE=1 时生效）
-fs_file（list/read/write/append/delete）与 shell_exec 受围栏限制，写操作与命令执行会先弹窗确认。
+fs_file（list/read/write/append/delete）与 shell_exec 受围栏限制；写操作与命令执行默认先弹窗确认（auto 自动模式除外：一律自动执行）。
 长任务（视频等）已由框架统一阻塞到成片并返回 video_url；仅当工具提示「仍在生成中」时才用 task_wait 续等 / task_status 查询，不要用 shell_exec 反复轮询。"""
+
+AUTO_MODE_RULES = """## 自动执行（YOLO）
+用户已选择自动执行：全部工具（含删源/写文件/跑命令）自动执行、不会再弹窗打断你。
+你应持续推进直到目标完成；不要停下来问"是否继续/是否确认"，直接动手；风险由用户随时暂停兜底。
+诊断生成源代码优先用 get_provider_code 的 line_offset/line_limit 逐行精读（带行号），或 fs_read 加 numbered=true 带行号查看；定位问题后用 update_custom_provider 增量修复。"""
+
+CREATE_AUTO_BRIDGE = """注意：当前执行方式为自动，提案链中的「Start 试跑 / 持久化」不再等待人工点击，你按流程自行推进；
+每一步都要在回复里说明改了什么、验证结果与如何回滚（creator_finalize(action=discard) 即卸载临时包）。"""
 
 
 def _skill_brief() -> str:
@@ -76,8 +84,18 @@ def _skill_brief() -> str:
 
 def build_system_prompt(plan_mode: bool = False, extra_context: Optional[str] = None,
                         run_mode: str = "approve") -> str:
-    """按固定顺序装配系统提示词；确定性输出保证请求前缀稳定（KV cache 友好）。"""
-    mode = (run_mode or "approve").strip().lower()
+    """按固定顺序装配系统提示词；确定性输出保证请求前缀稳定（KV cache 友好）。
+
+    两个正交维度：行为（standard/create/plan）× 执行（approve/auto），见 app.agent.mode_policy。
+    """
+    try:
+        from app.agent.mode_policy import behavior_of, execution_of
+        behavior = behavior_of(run_mode)
+        execution = execution_of(run_mode)
+    except Exception:
+        m = (run_mode or "approve").strip().lower()
+        behavior = "plan" if m.startswith("plan") else ("create" if m.startswith("create") else "standard")
+        execution = "auto" if m.endswith("auto") else "approve"
     sections: List[str] = [IDENTITY, OPERATING_RULES, TOOL_STRATEGY]
     brief = tool_view.provider_brief()
     if brief:
@@ -89,10 +107,15 @@ def build_system_prompt(plan_mode: bool = False, extra_context: Optional[str] = 
             + skill_brief
         )
     sections.append(TRUSTED_RULES)
-    if plan_mode or mode == "plan":
+    if plan_mode or behavior == "plan":
         sections.append(PLAN_MODE_RULES)
-    elif mode == "create":
-        sections.append(CREATE_MODE_RULES)
+    else:
+        if behavior == "create":
+            sections.append(CREATE_MODE_RULES)
+            if execution == "auto":
+                sections.append(CREATE_AUTO_BRIDGE)
+        if execution == "auto":
+            sections.append(AUTO_MODE_RULES)
     if extra_context:
         sections.append(extra_context)
     return "\n\n".join(s for s in sections if s)

@@ -2,10 +2,10 @@
  * Agent 输入区 — 页面 / 悬浮抽屉 / 画布侧栏共用。
  *
  * 形态：一整块圆角输入框 —— 上方是「上下文 chip 槽 + 多行输入」，下方是一条工具条
- * （左侧模式/运行模式下拉、右侧停止与发送），整体 `focus-within` 变色。
+ * （左侧模式 + 行为/执行两个下拉、右侧停止与发送），整体 `focus-within` 变色。
  *
  * 两处刻意的分工：
- * - `compact` 才渲染模式/运行模式切换。全屏「AI 导演」页的头部已经有这两个切换器，
+ * - `compact` 才渲染这三组切换。全屏「AI 导演」页的头部已经有这些切换器，
  *   在这里再放一份就是重复；而抽屉与画布侧栏原本**没有**切换入口，属于真实缺口。
  * - 输入框顶部留 `headerSlot` 插槽（画布侧栏用来放「已加入会话」的节点 chip）。
  *   组件本身不读画布状态 —— 那会把通用 Agent 组件绑死在画布上。
@@ -13,7 +13,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Send, Square, ChevronUp, Check } from 'lucide-react';
 import { useAgentDraftStore } from './agentDraftStore';
-import type { AgentMode, RunMode, WsStatus } from './agentTypes';
+import {
+  behaviorOfRunMode, composeRunMode, executionOfRunMode,
+} from './agentTypes';
+import type {
+  AgentMode, BehaviorMode, ExecutionMode, RunMode, WsStatus,
+} from './agentTypes';
 
 export interface AgentComposerProps {
   mode: AgentMode;
@@ -29,7 +34,7 @@ export interface AgentComposerProps {
    * 这里是"跟 Agent 说话"的指令框，润色技能是给画面提示词/台词用的，挂上来不对路。
    */
   noPolish?: boolean;
-  /** 紧凑态下的模式 / 运行模式切换（不传则不渲染，如全屏页） */
+  /** 紧凑态下的模式 / 行为 / 执行切换（不传则不渲染，如全屏页） */
   onModeChange?: (m: AgentMode) => void;
   onRunModeChange?: (r: RunMode) => void;
   /** 输入框顶部附加内容（如画布「已加入会话」的节点 chip） */
@@ -41,11 +46,17 @@ const MODE_OPTIONS: Array<{ value: AgentMode; label: string; hint: string }> = [
   { value: 'execute', label: '执行', hint: 'ReAct 循环调工具生成' },
 ];
 
-const RUN_MODE_OPTIONS: Array<{ value: RunMode; label: string; hint: string }> = [
-  { value: 'approve', label: '审批', hint: '变异动作先审后干（默认）' },
-  { value: 'auto', label: '自动', hint: '低/中风险直跑，高风险才拦' },
-  { value: 'create', label: '创造', hint: '缺能力先提案再造' },
+/** 行为维：能干什么（standard 标准 / create 创造 / plan 计划只读），代码硬门控 */
+const BEHAVIOR_OPTIONS: Array<{ value: BehaviorMode; label: string; hint: string }> = [
+  { value: 'standard', label: '标准', hint: '常规工具集，按风险分级放行' },
+  { value: 'create', label: '创造', hint: '缺能力先提案再造，能力变更类需人审' },
   { value: 'plan', label: '计划', hint: '只读侦察，产出计划待批准' },
+];
+
+/** 执行维：要不要逐项人审（approve 审批 / auto 自动） */
+const EXECUTION_OPTIONS: Array<{ value: ExecutionMode; label: string; hint: string }> = [
+  { value: 'approve', label: '审批', hint: '变异动作先审后干（默认）' },
+  { value: 'auto', label: '自动', hint: '全部工具自动执行、不再逐项确认（含删源/写文件/跑命令），可随时暂停' },
 ];
 
 /** 工具条上的下拉药丸（菜单向上弹，因为输入框常在屏幕底部） */
@@ -140,8 +151,12 @@ export const AgentComposer: React.FC<AgentComposerProps> = ({
     setInput('');   // 发送即清空
   };
 
+  // 两维派生：行为维决定只读/创造提示，执行维决定是否逐项人审
+  const behavior = behaviorOfRunMode(runMode);
+  const execution = executionOfRunMode(runMode);
+
   // 紧凑态（抽屉 / 画布侧栏）输入框行数少，长 placeholder 会被纵向裁掉 → 用短文案
-  const placeholder = runMode === 'plan'
+  const placeholder = behavior === 'plan'
     ? (compact ? '计划模式 · 只读侦察出计划' : '计划模式：只读侦察并产出完整计划，如“分析当前项目给出制作计划”')
     : mode === 'chat'
       ? (compact ? '问答模式 · 只讲解不生成' : '问答模式：只讲解不生成，如“首尾帧和参考图有什么区别？”')
@@ -193,19 +208,29 @@ export const AgentComposer: React.FC<AgentComposerProps> = ({
                 />
               )}
               {onRunModeChange && runMode && (
-                <ToolPill
-                  label="运行"
-                  title="变异动作的放行策略与是否只读侦察"
-                  options={RUN_MODE_OPTIONS}
-                  value={runMode}
-                  onChange={onRunModeChange}
-                  accent={
-                    runMode === 'plan' ? 'text-sky-300'
-                      : runMode === 'create' ? 'text-violet-300'
-                        : runMode === 'approve' ? 'text-amber-300' : 'text-brand-light'
-                  }
-                  disabled={isRunning}
-                />
+                <>
+                  <ToolPill
+                    label="行为"
+                    title="能干什么：标准 / 创造（缺能力先造） / 计划（只读侦察）"
+                    options={BEHAVIOR_OPTIONS}
+                    value={behavior}
+                    onChange={(b: BehaviorMode) => onRunModeChange(composeRunMode(b, execution))}
+                    accent={
+                      behavior === 'plan' ? 'text-sky-300'
+                        : behavior === 'create' ? 'text-violet-300' : 'text-brand-light'
+                    }
+                    disabled={isRunning}
+                  />
+                  <ToolPill
+                    label="执行"
+                    title="要不要逐项人审：审批=先审后干 / 自动=全部自动执行（含删源/写文件/跑命令）"
+                    options={EXECUTION_OPTIONS}
+                    value={execution}
+                    onChange={(e: ExecutionMode) => onRunModeChange(composeRunMode(behavior, e))}
+                    accent={execution === 'auto' ? 'text-red-300' : 'text-amber-300'}
+                    disabled={isRunning}
+                  />
+                </>
               )}
             </>
           )}

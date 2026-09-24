@@ -32,6 +32,8 @@ export interface CapField {
   pick?: boolean;
   /** 一键填入的常用值 */
   quickFill?: Array<{ label: string; value: string }>;
+  /** 官方可选值：模型名这类输入框带 datalist 候选（仍可自由手填，不被枚举锁死） */
+  options?: string[];
 }
 
 export interface Channel {
@@ -46,6 +48,18 @@ export interface Channel {
   extraOnSelect?: Record<string, string>;
   /** 显眼的风险提示 */
   warn?: string;
+  /** 官方文档：核对模型名 / 接口口径，新窗口打开 */
+  docUrl?: string;
+  /** 旧版通道：有值即打「旧版」标记并展开说明（不代表不可用，是"官方当前在用哪档"的辨识） */
+  legacy?: string;
+  /** 由「自定义生成源」动态并入的通道（不在本文件的静态表里） */
+  custom?: boolean;
+  /** custom 通道对应的生成源 id（prov_xxx），用于单测与就地填 Key */
+  providerId?: string;
+  /** custom 通道：后端登记了独立 Key 位（CUSTOM_PROVIDER_<id>）；false 通常是 Key 写在代码里 */
+  hasKey?: boolean;
+  /** custom 通道：该生成源已被停用（选为默认通道也会在生成时被守卫拦下） */
+  disabled?: boolean;
 }
 
 export interface Capability {
@@ -82,11 +96,16 @@ export const CAPABILITIES: Capability[] = [
         where: 'cloud',
         summary: '最通用的一档。DeepSeek / 通义 / Kimi / 硅基流动 / 自建代理 / 本地 Ollama 都走这条。',
         test: 'openai',
+        docUrl: 'https://api-docs.deepseek.com/zh-cn/',
         extraOnSelect: { LLM_API_TYPE: 'chat_completions' },
         fields: [
           KEY('OPENAI_API_KEY', 'API Key', { placeholder: 'sk-...' }),
           KEY('OPENAI_BASE_URL', '接口地址', { kind: 'url', placeholder: 'https://api.deepseek.com/v1', hint: '留空则用默认的 DeepSeek' , required: false }),
-          KEY('OPENAI_MODEL', '模型名', { kind: 'text', placeholder: 'deepseek-chat', required: false }),
+          KEY('OPENAI_MODEL', '模型名', {
+            kind: 'text', placeholder: 'deepseek-v4-flash', required: false,
+            options: ['deepseek-v4-flash', 'deepseek-chat', 'deepseek-reasoner'],
+            hint: '点输入框可下拉选常见档；中转站的模型名以对方文档为准，可直接手填',
+          }),
           KEY('OPENAI_CUSTOM_HEADERS', '自定义请求头', { kind: 'text', required: false, placeholder: '{"X-Foo":"bar"}', hint: 'JSON 格式，接私有网关时才需要' }),
         ],
       },
@@ -96,25 +115,34 @@ export const CAPABILITIES: Capability[] = [
         where: 'cloud',
         summary: 'OpenAI 的新式 /v1/responses 接口，走这条时会自动降级兼容。',
         test: 'responses_api',
+        docUrl: 'https://platform.openai.com/docs/api-reference/responses',
         extraOnSelect: { LLM_API_TYPE: 'responses_api' },
         fields: [
           KEY('RESPONSES_API_KEY', 'API Key', { placeholder: 'sk-...' }),
           KEY('RESPONSES_API_URL', '接口地址', { kind: 'url', placeholder: 'https://api.openai.com/v1/responses', required: false }),
-          KEY('RESPONSES_MODEL', '模型名', { kind: 'text', placeholder: 'gpt-4o', required: false }),
+          KEY('RESPONSES_MODEL', '模型名', {
+            kind: 'text', placeholder: 'gpt-5.2', required: false,
+            options: ['gpt-5.2', 'gpt-5', 'gpt-4o'],
+          }),
         ],
       },
       {
         id: 'minimax',
-        name: 'MiniMax abab',
+        name: 'MiniMax 文本',
         where: 'cloud',
         summary: '一把 Key 同时供文本、配音、视频三种能力用。',
         test: 'minimax',
+        docUrl: 'https://platform.minimaxi.com/document',
         extraOnSelect: { LLM_API_TYPE: 'chat_completions' },
         fields: [
           KEY('MINIMAX_API_KEY', 'API Key'),
           KEY('MINIMAX_GROUP_ID', 'Group ID', { kind: 'text' }),
           KEY('MINIMAX_BASE_URL', '接口地址', { kind: 'url', placeholder: 'https://api.minimax.chat/v1', required: false }),
-          KEY('LLM_MODEL', '模型名', { kind: 'text', placeholder: 'abab6.5s-chat', required: false }),
+          KEY('LLM_MODEL', '模型名', {
+            kind: 'text', placeholder: 'MiniMax-M2.5', required: false,
+            options: ['MiniMax-M2.5', 'abab6.5s-chat'],
+            hint: 'abab 系列是旧版文本模型，官方现行档为 MiniMax-M2.5',
+          }),
         ],
       },
     ],
@@ -135,6 +163,7 @@ export const CAPABILITIES: Capability[] = [
         where: 'local',
         summary: '本机或自建的 ComfyUI。不花钱、可控性最强，导入的每个工作流还会各自变成一个独立生成源。',
         test: 'comfyui',
+        docUrl: 'https://docs.comfy.org/',
         fields: [
           KEY('COMFYUI_SERVER_URL', '服务地址', {
             kind: 'url', placeholder: 'http://127.0.0.1:8188',
@@ -155,9 +184,13 @@ export const CAPABILITIES: Capability[] = [
         where: 'cloud',
         summary: '国内直连，默认 FLUX.1-schnell，出图快。',
         test: 'siliconflow',
+        docUrl: 'https://docs.siliconflow.cn/',
         fields: [
           KEY('SILICONFLOW_API_KEY', 'API Key'),
-          KEY('SILICONFLOW_IMAGE_MODEL', '模型名', { kind: 'text', placeholder: 'black-forest-labs/FLUX.1-schnell', required: false }),
+          KEY('SILICONFLOW_IMAGE_MODEL', '模型名', {
+            kind: 'text', placeholder: 'black-forest-labs/FLUX.1-schnell', required: false,
+            options: ['black-forest-labs/FLUX.1-schnell', 'black-forest-labs/FLUX.1-dev'],
+          }),
         ],
       },
       {
@@ -166,9 +199,14 @@ export const CAPABILITIES: Capability[] = [
         where: 'cloud',
         summary: '阿里百炼 DashScope。这把 Key 同时也是视频侧「万相 Wan3.0」要用的。',
         test: 'dashscope',
+        docUrl: 'https://help.aliyun.com/zh/model-studio/',
         fields: [
           KEY('DASHSCOPE_API_KEY', 'API Key'),
-          KEY('DASHSCOPE_IMAGE_MODEL', '模型名', { kind: 'text', placeholder: 'wanx2.1-t2i-turbo', required: false }),
+          KEY('DASHSCOPE_IMAGE_MODEL', '模型名', {
+            kind: 'text', placeholder: 'wan2.6-t2i', required: false,
+            options: ['wan2.6-t2i', 'wanx2.1-t2i-turbo'],
+            hint: '万相 2.5 及以后走新版同步接口，老版模型名（wanx…）仍兼容',
+          }),
         ],
       },
       {
@@ -177,6 +215,7 @@ export const CAPABILITIES: Capability[] = [
         where: 'cloud',
         summary: '接任何实现 OpenAI /v1/images/generations 协议的服务——官方 DALL·E、gpt-image、国内中转站、自建代理都走这条。Key / 地址 / 模型三项都自己填，不跟别人共用。',
         test: 'openai_image',
+        docUrl: 'https://platform.openai.com/docs/api-reference/images',
         fields: [
           KEY('OPENAI_IMAGE_API_KEY', 'API Key', {
             placeholder: 'sk-...', altKeys: ['OPENAI_API_KEY'],
@@ -187,8 +226,9 @@ export const CAPABILITIES: Capability[] = [
             hint: '填到 /v1 为止；留空则沿用文本大模型的地址',
           }),
           KEY('OPENAI_IMAGE_MODEL', '模型名', {
-            kind: 'text', required: false, placeholder: 'dall-e-3',
-            hint: '中转站的模型名以对方文档为准，如 dall-e-3 / gpt-image-1 / flux-schnell',
+            kind: 'text', required: false, placeholder: 'gpt-image-2.5-flare',
+            options: ['gpt-image-2.5-flare', 'gpt-image-1', 'dall-e-3', 'flux-schnell'],
+            hint: '中转站的模型名以对方文档为准；gpt-image 系列返回 b64、不接受 response_format，本通道已兼容',
           }),
         ],
       },
@@ -209,10 +249,15 @@ export const CAPABILITIES: Capability[] = [
         where: 'cloud',
         summary: '快手可灵，默认 kling-v3。',
         test: 'kling',
+        docUrl: 'https://app.klingai.com/cn/dev/document-api',
         fields: [
           KEY('KLING_API_KEY', 'API Key'),
           KEY('KLING_BASE_URL', '接口地址', { kind: 'url', placeholder: 'https://api-beijing.klingai.com', required: false }),
-          KEY('KLING_MODEL', '模型名', { kind: 'text', placeholder: 'kling-v3', required: false }),
+          KEY('KLING_MODEL', '模型名', {
+            kind: 'text', placeholder: 'kling-v3', required: false,
+            options: ['kling-v3'],
+            hint: '下拉只是本版默认档，其它版本按官方文档手填',
+          }),
         ],
       },
       {
@@ -221,10 +266,14 @@ export const CAPABILITIES: Capability[] = [
         where: 'cloud',
         summary: '与 MiniMax 文本/配音共用同一把 Key，768P~2K、4~15 秒。',
         test: 'minimax_h3',
+        docUrl: 'https://platform.minimaxi.com/document',
         fields: [
           KEY('MINIMAX_API_KEY', 'API Key', { hint: '与文本大模型那栏是同一把' }),
-          KEY('MINIMAX_H3_MODEL', '模型名', { kind: 'text', placeholder: 'MiniMax-H3', required: false }),
-          KEY('MINIMAX_H3_BASE_URL', '接口地址', { kind: 'url', placeholder: 'https://api.minimax.chat', required: false }),
+          KEY('MINIMAX_H3_MODEL', '模型名', {
+            kind: 'text', placeholder: 'MiniMax-H3', required: false,
+            options: ['MiniMax-H3'],
+          }),
+          KEY('MINIMAX_H3_BASE_URL', '接口地址', { kind: 'url', placeholder: 'https://api.minimaxi.com', required: false }),
         ],
       },
       {
@@ -233,10 +282,15 @@ export const CAPABILITIES: Capability[] = [
         where: 'cloud',
         summary: '字节火山方舟 Ark 上的 doubao-seedance 系列。',
         test: 'seedance',
+        docUrl: 'https://www.volcengine.com/docs/82379',
         fields: [
           KEY('SEEDANCE_API_KEY', 'API Key'),
           KEY('SEEDANCE_BASE_URL', '接口地址', { kind: 'url', placeholder: 'https://ark.cn-beijing.volces.com/api/v3', required: false }),
-          KEY('SEEDANCE_MODEL', '模型名', { kind: 'text', required: false }),
+          KEY('SEEDANCE_MODEL', '模型名', {
+            kind: 'text', required: false, placeholder: 'doubao-seedance-2-0-260128',
+            options: ['doubao-seedance-2-0-260128'],
+            hint: 'Ark 上的接入点 ID 也可填这里',
+          }),
         ],
       },
       {
@@ -245,10 +299,17 @@ export const CAPABILITIES: Capability[] = [
         where: 'cloud',
         summary: '阿里百炼，复用生图那栏的 DASHSCOPE_API_KEY。',
         test: 'wan3',
+        docUrl: 'https://help.aliyun.com/zh/model-studio/',
         fields: [
           KEY('DASHSCOPE_API_KEY', 'API Key', { hint: '与「阿里通义万相」生图是同一把' }),
-          KEY('WAN3_MODEL', '模型名', { kind: 'text', required: false }),
-          KEY('WAN3_BASE_URL', '接口地址', { kind: 'url', placeholder: 'https://dashscope.aliyuncs.com', required: false }),
+          KEY('WAN3_MODEL', '模型名', {
+            kind: 'text', required: false, placeholder: 'wan3.0-video',
+            options: ['wan3.0-video', 'wan3.0-video-prime'],
+          }),
+          KEY('WAN3_BASE_URL', '接口地址', {
+            kind: 'url', placeholder: 'https://dashscope.aliyuncs.com', required: false,
+            hint: '私有部署 / 专属推理端点时换成自己的网关地址',
+          }),
         ],
       },
       {
@@ -257,6 +318,7 @@ export const CAPABILITIES: Capability[] = [
         where: 'cloud',
         summary: '按 OpenAI 官方的 /v1/videos 协议（Sora 系）对接任何中转站或自建网关。Key 单独一把，不和文本、生图共用。',
         test: 'openai_video',
+        docUrl: 'https://platform.openai.com/docs/api-reference',
         fields: [
           KEY('OPENAI_VIDEO_API_KEY', 'API Key', {
             placeholder: 'sk-...',
@@ -268,18 +330,25 @@ export const CAPABILITIES: Capability[] = [
           }),
           KEY('OPENAI_VIDEO_MODEL', '模型名', {
             kind: 'text', required: false, placeholder: 'sora-2',
-            hint: '如 sora-2 / sora-2-pro，或中转站自定的模型名',
+            options: ['sora-2', 'sora-2-pro'],
+            hint: '下拉只是常见档；中转站自定的模型名直接手填',
           }),
         ],
       },
       {
         id: 'minimax_video',
-        name: 'MiniMax Video',
+        name: 'MiniMax Video（通用）',
         where: 'cloud',
         summary: 'MiniMax 的通用云端视频通道。',
+        docUrl: 'https://platform.minimaxi.com/document',
+        legacy: '旧版通用视频通道：官方现行档是 MiniMax-Hailuo-02 / H3，Key 与「MiniMax H3」那条完全相同。除非对接旧账号，优先用 H3。',
         fields: [
           KEY('MINIMAX_API_KEY', 'API Key', { hint: '与文本大模型那栏是同一把' }),
-          KEY('VIDEO_MODEL', '模型名', { kind: 'text', placeholder: 'video-01', required: false }),
+          KEY('VIDEO_MODEL', '模型名', {
+            kind: 'text', placeholder: 'MiniMax-Hailuo-02', required: false,
+            options: ['MiniMax-Hailuo-02', 'video-01'],
+            hint: 'video-01 是旧档，本版默认已改为 MiniMax-Hailuo-02',
+          }),
         ],
       },
       {
@@ -287,6 +356,8 @@ export const CAPABILITIES: Capability[] = [
         name: 'ComfyUI 视频',
         where: 'local',
         summary: '本机 ComfyUI 跑 SVD / AnimateDiff 一类的视频工作流。',
+        docUrl: 'https://docs.comfy.org/',
+        legacy: '出厂占位通道：不绑工作流时会走 Mock 兜底（详见下方风险提示），接了云端源后建议把默认通道换掉。',
         warn: '这是系统的出厂默认值，但它有 Mock 兜底：没绑视频工作流、或工作流执行失败时，会把首帧循环成一段 5 秒"视频"当成片返回（没有 ffmpeg 时甚至直接把图片复制成 .mp4）。想要真视频，请绑好工作流，或把默认通道换成上面任一云端源。',
         fields: [
           KEY('COMFYUI_DEFAULT_VIDEO_WORKFLOW', '默认视频工作流 ID', { kind: 'text', required: false, hint: '不绑就会走 Mock 兜底' }),
@@ -305,14 +376,19 @@ export const CAPABILITIES: Capability[] = [
     channels: [
       {
         id: 'minimax',
-        name: 'MiniMax Speech-01',
+        name: 'MiniMax 语音',
         where: 'cloud',
         summary: '超拟人配音，支持怒吼/低语/哭腔等情绪。与文本大模型共用一把 Key。',
         test: 'minimax',
+        docUrl: 'https://platform.minimaxi.com/document',
         fields: [
           KEY('MINIMAX_API_KEY', 'API Key', { hint: '与文本大模型那栏是同一把' }),
           KEY('MINIMAX_GROUP_ID', 'Group ID', { kind: 'text' }),
-          KEY('TTS_MODEL', '模型名', { kind: 'text', placeholder: 'speech-01-turbo', required: false }),
+          KEY('TTS_MODEL', '模型名', {
+            kind: 'text', placeholder: 'speech-2.8-turbo', required: false,
+            options: ['speech-2.8-turbo', 'speech-01-turbo'],
+            hint: 'speech-01 系列是旧档，本版默认已改为 speech-2.8-turbo',
+          }),
         ],
       },
       {
@@ -321,9 +397,13 @@ export const CAPABILITIES: Capability[] = [
         where: 'cloud',
         summary: '多语种音色库最全的一档。',
         test: 'elevenlabs',
+        docUrl: 'https://elevenlabs.io/docs/api-reference',
         fields: [
           KEY('ELEVENLABS_API_KEY', 'API Key'),
-          KEY('ELEVENLABS_MODEL', '模型名', { kind: 'text', placeholder: 'eleven_multilingual_v2', required: false }),
+          KEY('ELEVENLABS_MODEL', '模型名', {
+            kind: 'text', placeholder: 'eleven_multilingual_v2', required: false,
+            options: ['eleven_multilingual_v2'],
+          }),
         ],
       },
       {
@@ -332,6 +412,7 @@ export const CAPABILITIES: Capability[] = [
         where: 'local',
         summary: '本机部署，不花钱不出网。先把服务跑起来再填地址。',
         test: 'cosyvoice',
+        docUrl: 'https://github.com/FunAudioLLM/CosyVoice',
         fields: [KEY('COSYVOICE_URL', '服务地址', { kind: 'url', placeholder: 'http://127.0.0.1:9233' })],
       },
       {
@@ -340,6 +421,7 @@ export const CAPABILITIES: Capability[] = [
         where: 'local',
         summary: '本机部署，适合做音色克隆。',
         test: 'gpt_sovits',
+        docUrl: 'https://github.com/RVC-Boss/GPT-SoVITS',
         fields: [KEY('GPTSOVITS_URL', '服务地址', { kind: 'url', placeholder: 'http://127.0.0.1:9880' })],
       },
     ],
@@ -358,6 +440,7 @@ export const CAPABILITIES: Capability[] = [
         where: 'local',
         summary: '填了草稿目录后，导出的工程会自动拷进去，打开剪映就能看到。',
         test: 'jianyin',
+        docUrl: 'https://www.capcut.cn/',
         fields: [
           KEY('JIANYIN_DRAFT_PATH', '剪映草稿目录', {
             kind: 'path', required: false, pick: true,
@@ -381,12 +464,66 @@ export function channelFilled(ch: Channel, cfg: Record<string, string>): boolean
   return ch.fields.filter((f) => f.required !== false).every((f) => fieldFilled(f, cfg));
 }
 
+// ───────────────────────────── 自定义生成源并入通道表 ─────────────────────────────
+//
+// 静态表只写内置厂商；用户自己接的代码源（AutoDL / RunningHub / 中转站…）在
+// /providers 里，按 kind 折成通道并进对应能力卡——否则会出现"实际在用自定义源，
+// 页面却高亮第一个内置通道（并显示未配置）"的误导，保存时还会把默认通道顶掉。
+
+/** 自定义生成源的 kind → 能力 id（llm 无独立注册表，不并入） */
+const KIND_TO_CAPABILITY: Record<string, string> = {
+  image: 'image',
+  video: 'video',
+  audio: 'audio',
+};
+
+/** 该自定义生成源属于哪个能力；不归属时返回空串 */
+export function capabilityIdForKind(kind: string): string {
+  return KIND_TO_CAPABILITY[String(kind || '').toLowerCase()] || '';
+}
+
+/** 把一条自定义生成源（GET /providers 的条目）折算成通道 */
+export function customChannelFrom(p: {
+  id: string; name?: string; display_name?: string; description?: string;
+  auth?: { has_key?: boolean } | null; enabled?: boolean;
+}): Channel {
+  return {
+    id: p.id,
+    name: p.display_name || p.name || p.id,
+    where: 'cloud',
+    summary: p.description || '你自己接入的自定义生成源（代码协程 / HTTP 模板）。',
+    // 参数与代码在「扩展」页编辑；这里只做"选为默认通道 + 填 Key + 单测"三件事
+    fields: [],
+    custom: true,
+    providerId: p.id,
+    hasKey: !!p.auth?.has_key,
+    disabled: p.enabled === false,
+  };
+}
+
+/** 能力当前完整的通道表 = 静态内置表 + 动态并入的自定义源 */
+export function channelsOf(cap: Capability, customs: Channel[] = []): Channel[] {
+  return [...cap.channels, ...customs.filter((c) => c.custom)];
+}
+
 /** 能力当前选中的通道 id（读默认路由键；没有路由键的能力取第一个通道） */
-export function currentChannelId(cap: Capability, cfg: Record<string, string>): string {
-  if (!cap.routeKey) return cap.channels[0]?.id || '';
+export function currentChannelId(cap: Capability, cfg: Record<string, string>, customs: Channel[] = []): string {
+  const list = channelsOf(cap, customs);
+  if (!cap.routeKey) return list[0]?.id || '';
   const v = (cfg[cap.routeKey] || '').trim();
-  if (v && cap.channels.some((c) => c.id === v)) return v;
-  return cap.channels[0]?.id || '';
+  if (v && list.some((c) => c.id === v)) return v;
+  return list[0]?.id || '';
+}
+
+/**
+ * 默认路由键指向的通道不在可选表里时返回那个 id（源被删/停用），否则空串。
+ * 用于把"当前默认通道已失效"明说出来，而不是静默显示第一个通道。
+ */
+export function unmatchedRoute(cap: Capability, cfg: Record<string, string>, customs: Channel[] = []): string {
+  if (!cap.routeKey) return '';
+  const v = (cfg[cap.routeKey] || '').trim();
+  if (!v) return '';
+  return channelsOf(cap, customs).some((c) => c.id === v) ? '' : v;
 }
 
 /** 整页涉及的全部键（用于只提交改过的那些） */

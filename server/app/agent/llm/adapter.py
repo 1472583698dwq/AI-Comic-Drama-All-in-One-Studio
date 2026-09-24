@@ -111,11 +111,13 @@ class OpenAICompatAdapter:
         provider = (getattr(settings, "LLM_PROVIDER", "") or "openai_compatible").lower()
         api_type = (getattr(settings, "LLM_API_TYPE", "") or "chat_completions").lower()
         if provider == "minimax" and not getattr(settings, "OPENAI_API_KEY", ""):
-            base = (getattr(settings, "MINIMAX_BASE_URL", "") or "https://api.minimax.chat/v1").rstrip("/")
+            # MiniMax M 系列（M3/M2.7/M2.5/M2.1/M2）统一走 OpenAI 兼容 /chat/completions；
+            # 旧版 /text/chatcompletion_v2（abab 世代）已随 api.minimax.chat 域名一起弃用。
+            base = (getattr(settings, "MINIMAX_BASE_URL", "") or "https://api.minimaxi.com/v1").rstrip("/")
             return {
-                "endpoint": f"{base}/text/chatcompletion_v2",
+                "endpoint": f"{base}/chat/completions",
                 "api_key": getattr(settings, "MINIMAX_API_KEY", "") or "",
-                "model": getattr(settings, "LLM_MODEL", "") or "abab6.5s-chat",
+                "model": getattr(settings, "LLM_MODEL", "") or "MiniMax-M2.5",
             }
         base = (getattr(settings, "OPENAI_BASE_URL", "") or "https://api.deepseek.com/v1").rstrip("/")
         if base.endswith("/chat/completions"):

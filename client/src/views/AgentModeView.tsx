@@ -11,6 +11,7 @@ import { useAgentStore, QUICK_ASK, QUICK_DO, QUICK_CREATE, QUICK_PLAN } from '..
 import { AgentMessageList } from '../components/agent/AgentMessageList';
 import { AgentComposer } from '../components/agent/AgentComposer';
 import { SessionSidebar } from '../components/agent/SessionSidebar';
+import { behaviorOfRunMode, composeRunMode, executionOfRunMode } from '../components/agent/agentTypes';
 
 export const AgentModeView: React.FC = () => {
   const { project, activeShotId } = useProjectStore();
@@ -38,7 +39,10 @@ export const AgentModeView: React.FC = () => {
   const shots = project?.scenes.flatMap((s) => s.shots) || [];
   const activeShot = shots.find((s) => s.id === activeShotId);
   const pendingList = useMemo(() => Object.entries(approvals).filter(([, v]) => v.decided === undefined), [approvals]);
-  const quickCommands = mode === 'chat' ? QUICK_ASK : runMode === 'plan' ? QUICK_PLAN : runMode === 'create' ? QUICK_CREATE : QUICK_DO;
+  // 运行模式两维（与后端 app/agent/mode_policy.py 同口径）：行为决定提示词与工具门控，执行决定是否逐项人审
+  const behavior = behaviorOfRunMode(runMode);
+  const execution = executionOfRunMode(runMode);
+  const quickCommands = mode === 'chat' ? QUICK_ASK : behavior === 'plan' ? QUICK_PLAN : behavior === 'create' ? QUICK_CREATE : QUICK_DO;
   const activeSessionTitle = sessions.find((s) => s.id === activeSessionId)?.title || 'Agent 独立模式';
 
   const handleProposalAction = async (msgId: string, proposalId: string, kind: 'start' | 'persist' | 'discard' | 'rollback') => {
@@ -103,11 +107,14 @@ export const AgentModeView: React.FC = () => {
             </div>
           </div>
           <div className="ml-auto flex items-center gap-2">
-            <div className="flex items-center rounded-xl bg-surface border border-border p-1" title="运行模式：审批=每步确认 / 自动=高风险才拦 / 创造=先造能力 / 计划=只读规划">
-              <button onClick={() => setRunMode('approve')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${runMode === 'approve' ? 'bg-amber-500/20 text-amber-300' : 'text-gray-500 hover:text-white'}`}>审批</button>
-              <button onClick={() => setRunMode('auto')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${runMode === 'auto' ? 'bg-brand/20 text-brand-light' : 'text-gray-500 hover:text-white'}`}>自动</button>
-              <button onClick={() => setRunMode('create')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${runMode === 'create' ? 'bg-violet-500/20 text-violet-300' : 'text-gray-500 hover:text-white'}`}>创造</button>
-              <button onClick={() => setRunMode('plan')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${runMode === 'plan' ? 'bg-sky-500/20 text-sky-300' : 'text-gray-500 hover:text-white'}`}>计划</button>
+            <div className="flex items-center rounded-xl bg-surface border border-border p-1" title="行为：能干什么 —— 标准 / 创造（缺能力先造） / 计划（只读侦察）">
+              <button onClick={() => setRunMode(composeRunMode('standard', execution))} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${behavior === 'standard' ? 'bg-brand/20 text-brand-light' : 'text-gray-500 hover:text-white'}`}>标准</button>
+              <button onClick={() => setRunMode(composeRunMode('create', execution))} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${behavior === 'create' ? 'bg-violet-500/20 text-violet-300' : 'text-gray-500 hover:text-white'}`}>创造</button>
+              <button onClick={() => setRunMode(composeRunMode('plan', execution))} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${behavior === 'plan' ? 'bg-sky-500/20 text-sky-300' : 'text-gray-500 hover:text-white'}`}>计划</button>
+            </div>
+            <div className="flex items-center rounded-xl bg-surface border border-border p-1" title="执行：要不要逐项人审 —— 审批=先审后干 / 自动=全部自动执行（含删源/写文件/跑命令）">
+              <button onClick={() => setRunMode(composeRunMode(behavior, 'approve'))} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${execution === 'approve' ? 'bg-amber-500/20 text-amber-300' : 'text-gray-500 hover:text-white'}`}>审批</button>
+              <button onClick={() => setRunMode(composeRunMode(behavior, 'auto'))} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${execution === 'auto' ? 'bg-red-500/20 text-red-300' : 'text-gray-500 hover:text-white'}`}>自动</button>
             </div>
             <div className="flex items-center rounded-xl bg-surface border border-border p-1">
               <button onClick={() => setMode('chat')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${mode === 'chat' ? 'bg-accent-green/20 text-accent-green' : 'text-gray-500 hover:text-white'}`}>问答</button>
@@ -145,13 +152,22 @@ export const AgentModeView: React.FC = () => {
         <div className="rounded-2xl border border-border bg-surface p-3 space-y-2">
           <div className="text-xs font-bold text-white flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-brand-light" />模式说明</div>
           <div className={`text-[11px] leading-4 p-2 rounded-xl ${mode === 'chat' ? 'bg-accent-green/10 text-accent-green' : 'bg-brand/10 text-brand-light'}`}>
-            {mode === 'chat' ? '问答：纯 LLM 讲解，不进工具循环，零副作用不烧生成费用。' : '执行：ReAct 循环调全部工具；删源/写文件/跑命令会弹窗确认，120s 超时自动拒绝。'}
+            {mode === 'chat'
+              ? '问答：纯 LLM 讲解，不进工具循环，零副作用不烧生成费用。'
+              : execution === 'auto'
+                ? '执行：ReAct 循环调全部工具；自动执行下不再逐项确认（可随时暂停）。'
+                : '执行：ReAct 循环调全部工具；删源/写文件/跑命令会弹窗确认，120s 超时自动拒绝。'}
           </div>
-          <div className="text-[11px] leading-4 p-2 rounded-xl bg-surface-secondary border border-border text-gray-300">
-            {runMode === 'approve' && '审批模式：变异动作先审后干，Plan 必确认（默认）。'}
-            {runMode === 'auto' && '自动模式：低/中风险直跑，仅高风险/删源拦截。'}
-            {runMode === 'create' && '创造模式：缺能力先提案，Start 试跑→持久化/丢弃，默认不写生产。'}
-            {runMode === 'plan' && '计划模式：只读侦察（不生成不执行），产出完整计划，批准后才执行。'}
+          <div className="text-[11px] leading-4 p-2 rounded-xl bg-surface-secondary border border-border text-gray-300 space-y-1">
+            <div>
+              {behavior === 'standard' && '行为=标准：常规工具集，按风险分级放行。'}
+              {behavior === 'create' && '行为=创造：缺能力先提案，Start 试跑→持久化/丢弃，默认不写生产。'}
+              {behavior === 'plan' && '行为=计划：只读侦察（不生成不执行），产出完整计划，批准后才执行。'}
+            </div>
+            <div>
+              {execution === 'approve' && '执行=审批：变异动作先审后干，120s 无人应答自动拒绝。'}
+              {execution === 'auto' && '执行=自动：全部工具自动执行、不再逐项确认（含删源/写文件/跑命令），可随时暂停。'}
+            </div>
           </div>
           <div className="flex gap-2">
             <button onClick={() => void clearAll()} className="flex-1 py-1.5 rounded-lg bg-surface-secondary border border-border text-[11px] text-gray-300 hover:text-white flex items-center justify-center gap-1"><Trash2 className="w-3 h-3" />清空记忆</button>
@@ -185,7 +201,7 @@ export const AgentModeView: React.FC = () => {
         </div>
 
         <div className="rounded-2xl border border-border bg-surface p-3 space-y-2">
-          <div className="text-xs font-bold text-white">快捷指令{runMode === 'create' ? ' · 创造' : ''}</div>
+          <div className="text-xs font-bold text-white">快捷指令{behavior === 'create' ? ' · 创造' : behavior === 'plan' ? ' · 计划' : ''}</div>
           {quickCommands.map((q) => (
             <button key={q} onClick={() => void send(q)} className="w-full text-left px-2.5 py-1.5 rounded-lg bg-surface-secondary border border-border text-[11px] text-gray-300 hover:border-brand hover:text-white">{q}</button>
           ))}

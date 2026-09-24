@@ -4,7 +4,55 @@
  * 此文件为唯一口径，历史会话（steps/artifacts/errors/plan）与之兼容。
  */
 export type AgentMode = 'chat' | 'execute';
-export type RunMode = 'approve' | 'auto' | 'create' | 'plan';
+/** 组合 token：行为 × 执行，wire/持久化的唯一口径（与后端 app/agent/mode_policy.py 一一对应） */
+export type RunMode = 'approve' | 'auto' | 'create' | 'create_auto' | 'plan' | 'plan_auto';
+/** 行为维：能干什么（standard 标准 / create 创造 / plan 计划只读），代码硬门控 */
+export type BehaviorMode = 'standard' | 'create' | 'plan';
+/** 执行维：要不要逐项人审（approve 审批 / auto 自动） */
+export type ExecutionMode = 'approve' | 'auto';
+
+export const RUN_MODES: RunMode[] = ['approve', 'auto', 'create', 'create_auto', 'plan', 'plan_auto'];
+
+/** 旧值 / 口语值 → 组合 token（与后端 normalize_run_mode 的别名表同口径） */
+const RUN_MODE_ALIASES: Record<string, RunMode> = {
+  supervisor: 'approve', approval: 'approve', ask: 'approve',
+  standard: 'approve', normal: 'approve', default: 'approve',
+  automation: 'auto', automatic: 'auto', never: 'auto', yolo: 'auto',
+  creator: 'create', creation: 'create', creative: 'create',
+  planning: 'plan', plan_mode: 'plan', readonly: 'plan',
+  'create-auto': 'create_auto', 'create+auto': 'create_auto', 'create:auto': 'create_auto',
+  createauto: 'create_auto', creator_auto: 'create_auto', auto_create: 'create_auto',
+  'plan-auto': 'plan_auto', 'plan+auto': 'plan_auto', 'plan:auto': 'plan_auto',
+  planauto: 'plan_auto', auto_plan: 'plan_auto',
+};
+
+export function normalizeRunMode(value?: string | null): RunMode {
+  const s = String(value ?? '').trim().toLowerCase() || 'approve';
+  const t = (RUN_MODE_ALIASES[s] || s) as RunMode;
+  return RUN_MODES.includes(t) ? t : 'approve';
+}
+
+/** 行为维：standard / create / plan */
+export function behaviorOfRunMode(value?: string | null): BehaviorMode {
+  const m = normalizeRunMode(value);
+  if (m.startsWith('plan')) return 'plan';
+  if (m.startsWith('create')) return 'create';
+  return 'standard';
+}
+
+/** 执行维：approve / auto */
+export function executionOfRunMode(value?: string | null): ExecutionMode {
+  return normalizeRunMode(value).endsWith('auto') ? 'auto' : 'approve';
+}
+
+/** 行为 × 执行 → 组合 token（UI 两个选择器的唯一合成口径） */
+export function composeRunMode(behavior?: string | null, execution?: string | null): RunMode {
+  const b = behavior === 'plan' || behavior === 'create' ? behavior : 'standard';
+  const e = execution === 'auto' ? 'auto' : 'approve';
+  if (b === 'plan') return e === 'auto' ? 'plan_auto' : 'plan';
+  if (b === 'create') return e === 'auto' ? 'create_auto' : 'create';
+  return e === 'auto' ? 'auto' : 'approve';
+}
 export type ToolStatus = 'executing' | 'completed' | 'error';
 export type SideEffect =
   | { type: 'provider_refresh' }

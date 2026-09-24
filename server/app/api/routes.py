@@ -1314,13 +1314,14 @@ async def websocket_agent_endpoint(websocket: WebSocket):
             context = data.get("context") or {}
             # 运行模式透传到引擎（plan=只读规划模式）
             try:
-                from app.agent.mode_policy import normalize_run_mode as _nrm
+                from app.agent.mode_policy import normalize_run_mode as _nrm, behavior_of as _beh
                 _rm = _nrm(str(data.get("run_mode") or (context.get("run_mode") if isinstance(context, dict) else "") or "approve"))
             except Exception:
                 _rm = "approve"
+                _beh = lambda m: "plan" if str(m).startswith("plan") else "standard"  # noqa: E731
             if isinstance(context, dict):
                 context["run_mode"] = _rm
-                context["plan_mode"] = (_rm == "plan")
+                context["plan_mode"] = (_beh(_rm) == "plan")
             if data.get("session_id"):
                 session_id = str(data.get("session_id"))
             elif context.get("project_id"):
@@ -1710,8 +1711,10 @@ async def test_config_connection(req: ConfigTestRequest):
             return {"target": "minimax", "ok": False, "detail": "MINIMAX_API_KEY 未配置"}
         try:
             async with httpx.AsyncClient(timeout=12.0) as client:
+                # M 系列（MiniMax-M3/M2.5…）走 OpenAI 兼容的 /chat/completions；
+                # 旧版 /text/chatcompletion_v2 仅 abab 时代使用，已随域名一起弃用。
                 r = await client.post(
-                    f"{base_url}/text/chatcompletion_v2",
+                    f"{base_url}/chat/completions",
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json={
                         "model": cfg.get("LLM_MODEL") or settings.LLM_MODEL or "MiniMax-M2.5",
@@ -2065,12 +2068,13 @@ async def http_agent_chat(req: AgentChatRequest):
         try:
             _ctx = dict(req.context or {})
             try:
-                from app.agent.mode_policy import normalize_run_mode as _nrm2
+                from app.agent.mode_policy import normalize_run_mode as _nrm2, behavior_of as _beh2
                 _rm2 = _nrm2(getattr(req, "run_mode", "approve"))
             except Exception:
                 _rm2 = "approve"
+                _beh2 = lambda m: "plan" if str(m).startswith("plan") else "standard"  # noqa: E731
             _ctx["run_mode"] = _rm2
-            _ctx["plan_mode"] = (_rm2 == "plan")
+            _ctx["plan_mode"] = (_beh2(_rm2) == "plan")
             result = await run_agent_with_langchain(
                 prompt=prompt_text,
                 context=_ctx,
@@ -2249,12 +2253,13 @@ async def http_agent_chat_stream(req: AgentChatRequest):
         # 运行模式透传（plan=只读规划模式）
         _ctx_s = dict(req.context or {})
         try:
-            from app.agent.mode_policy import normalize_run_mode as _nrm3
+            from app.agent.mode_policy import normalize_run_mode as _nrm3, behavior_of as _beh3
             _rm3 = _nrm3(getattr(req, "run_mode", "approve"))
         except Exception:
             _rm3 = "approve"
+            _beh3 = lambda m: "plan" if str(m).startswith("plan") else "standard"  # noqa: E731
         _ctx_s["run_mode"] = _rm3
-        _ctx_s["plan_mode"] = (_rm3 == "plan")
+        _ctx_s["plan_mode"] = (_beh3(_rm3) == "plan")
         # 启动后台任务执行 agent
         task = asyncio.create_task(run_agent_with_langchain(
             prompt=prompt_text,
