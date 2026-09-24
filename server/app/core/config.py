@@ -163,26 +163,27 @@ class Settings(BaseModel):
     # MiniMax API Configuration
     MINIMAX_API_KEY: str = os.getenv("MINIMAX_API_KEY", "")
     MINIMAX_GROUP_ID: str = os.getenv("MINIMAX_GROUP_ID", "")
-    MINIMAX_BASE_URL: str = os.getenv("MINIMAX_BASE_URL", "https://api.minimax.chat/v1")
+    MINIMAX_BASE_URL: str = os.getenv("MINIMAX_BASE_URL", "https://api.minimaxi.com/v1")
 
     # Model names
-    LLM_MODEL: str = os.getenv("LLM_MODEL", "abab6.5s-chat")
-    TTS_MODEL: str = os.getenv("TTS_MODEL", "speech-01-turbo")
-    VIDEO_MODEL: str = os.getenv("VIDEO_MODEL", "video-01")
+    LLM_MODEL: str = os.getenv("LLM_MODEL", "MiniMax-M2.5")
+    TTS_MODEL: str = os.getenv("TTS_MODEL", "speech-2.8-turbo")
+    VIDEO_MODEL: str = os.getenv("VIDEO_MODEL", "MiniMax-Hailuo-02")
 
     # LLM Provider & OpenAI-compatible / Responses API (DeepSeek / Qwen / SiliconFlow / Kimi / OpenAI)
     LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "openai_compatible")
     LLM_API_TYPE: str = os.getenv("LLM_API_TYPE", "chat_completions")
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     OPENAI_BASE_URL: str = os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com/v1")
-    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "deepseek-chat")
+    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "deepseek-v4-flash")
     OPENAI_CUSTOM_HEADERS: str = os.getenv("OPENAI_CUSTOM_HEADERS", "")
     RESPONSES_API_URL: str = os.getenv("RESPONSES_API_URL", "https://api.openai.com/v1/responses")
     RESPONSES_API_KEY: str = os.getenv("RESPONSES_API_KEY", "")
-    RESPONSES_MODEL: str = os.getenv("RESPONSES_MODEL", "gpt-4o")
+    RESPONSES_MODEL: str = os.getenv("RESPONSES_MODEL", "gpt-5.2")
 
     # Image Generation Providers
-    IMAGE_PROVIDER: str = os.getenv("IMAGE_PROVIDER", "comfyui")
+    # 默认走 OpenAI 兼容生图（gpt-image 系列）；未配置时注册表会自动回退到已配置的其它源（如 ComfyUI）
+    IMAGE_PROVIDER: str = os.getenv("IMAGE_PROVIDER", "openai_compat")
     COMFYUI_SERVER_URL: str = os.getenv("COMFYUI_SERVER_URL", "http://127.0.0.1:8188")
     COMFYUI_CHECKPOINT: str = os.getenv("COMFYUI_CHECKPOINT", "")
     COMFYUI_TIMEOUT_SECONDS: int = int(os.getenv("COMFYUI_TIMEOUT_SECONDS", "1200"))
@@ -191,10 +192,10 @@ class Settings(BaseModel):
     SILICONFLOW_API_KEY: str = os.getenv("SILICONFLOW_API_KEY", "")
     SILICONFLOW_IMAGE_MODEL: str = os.getenv("SILICONFLOW_IMAGE_MODEL", "black-forest-labs/FLUX.1-schnell")
     DASHSCOPE_API_KEY: str = os.getenv("DASHSCOPE_API_KEY", "")
-    DASHSCOPE_IMAGE_MODEL: str = os.getenv("DASHSCOPE_IMAGE_MODEL", "wanx2.1-t2i-turbo")
+    DASHSCOPE_IMAGE_MODEL: str = os.getenv("DASHSCOPE_IMAGE_MODEL", "wan2.6-t2i")
     # OpenAI 兼容生图：OPENAI_IMAGE_API_KEY 为生图专用 Key；留空才回退复用文本大模型的 OPENAI_API_KEY
     OPENAI_IMAGE_API_KEY: str = os.getenv("OPENAI_IMAGE_API_KEY", "")
-    OPENAI_IMAGE_MODEL: str = os.getenv("OPENAI_IMAGE_MODEL", "dall-e-3")
+    OPENAI_IMAGE_MODEL: str = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2.5-flare")
     OPENAI_IMAGE_BASE_URL: str = os.getenv("OPENAI_IMAGE_BASE_URL", "")
 
     # Voice & TTS Providers
@@ -213,7 +214,7 @@ class Settings(BaseModel):
     VIDU_API_KEY: str = os.getenv("VIDU_API_KEY", "")
     # MiniMax H3 (V2 多模态视频, 与 MINIMAX_API_KEY 同平台, 模型固定 MiniMax-H3)
     MINIMAX_H3_MODEL: str = os.getenv("MINIMAX_H3_MODEL", "MiniMax-H3")
-    MINIMAX_H3_BASE_URL: str = os.getenv("MINIMAX_H3_BASE_URL", "https://api.minimax.chat")
+    MINIMAX_H3_BASE_URL: str = os.getenv("MINIMAX_H3_BASE_URL", "https://api.minimaxi.com")
     # Seedance (字节火山引擎 Ark, doubao-seedance 系列)
     SEEDANCE_API_KEY: str = os.getenv("SEEDANCE_API_KEY", "")
     SEEDANCE_BASE_URL: str = os.getenv("SEEDANCE_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3")

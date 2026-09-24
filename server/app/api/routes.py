@@ -1534,24 +1534,24 @@ class ConfigUpdateRequest(BaseModel):
     # MiniMax
     MINIMAX_API_KEY: Optional[str] = Field(default="")
     MINIMAX_GROUP_ID: Optional[str] = Field(default="")
-    MINIMAX_BASE_URL: Optional[str] = Field(default="https://api.minimax.chat/v1")
-    LLM_MODEL: Optional[str] = Field(default="abab6.5s-chat")
-    TTS_MODEL: Optional[str] = Field(default="speech-01-turbo")
-    VIDEO_MODEL: Optional[str] = Field(default="video-01")
+    MINIMAX_BASE_URL: Optional[str] = Field(default="https://api.minimaxi.com/v1")
+    LLM_MODEL: Optional[str] = Field(default="MiniMax-M2.5")
+    TTS_MODEL: Optional[str] = Field(default="speech-2.8-turbo")
+    VIDEO_MODEL: Optional[str] = Field(default="MiniMax-Hailuo-02")
 
     # LLM Provider & OpenAI / Responses API / DeepSeek
     LLM_PROVIDER: Optional[str] = Field(default="openai_compatible")
     LLM_API_TYPE: Optional[str] = Field(default="chat_completions")
     OPENAI_API_KEY: Optional[str] = Field(default="")
     OPENAI_BASE_URL: Optional[str] = Field(default="https://api.deepseek.com/v1")
-    OPENAI_MODEL: Optional[str] = Field(default="deepseek-chat")
+    OPENAI_MODEL: Optional[str] = Field(default="deepseek-v4-flash")
     OPENAI_CUSTOM_HEADERS: Optional[str] = Field(default="")
     RESPONSES_API_URL: Optional[str] = Field(default="https://api.openai.com/v1/responses")
     RESPONSES_API_KEY: Optional[str] = Field(default="")
-    RESPONSES_MODEL: Optional[str] = Field(default="gpt-4o")
+    RESPONSES_MODEL: Optional[str] = Field(default="gpt-5.2")
 
     # Image Generation
-    IMAGE_PROVIDER: Optional[str] = Field(default="comfyui")
+    IMAGE_PROVIDER: Optional[str] = Field(default="openai_compat")
     COMFYUI_SERVER_URL: Optional[str] = Field(default="http://127.0.0.1:8188")
     COMFYUI_CHECKPOINT: Optional[str] = Field(default="")
     COMFYUI_TIMEOUT_SECONDS: Optional[str] = Field(default="1200")
@@ -1560,9 +1560,9 @@ class ConfigUpdateRequest(BaseModel):
     SILICONFLOW_API_KEY: Optional[str] = Field(default="")
     SILICONFLOW_IMAGE_MODEL: Optional[str] = Field(default="black-forest-labs/FLUX.1-schnell")
     DASHSCOPE_API_KEY: Optional[str] = Field(default="")
-    DASHSCOPE_IMAGE_MODEL: Optional[str] = Field(default="wanx2.1-t2i-turbo")
+    DASHSCOPE_IMAGE_MODEL: Optional[str] = Field(default="wan2.6-t2i")
     OPENAI_IMAGE_API_KEY: Optional[str] = Field(default="")
-    OPENAI_IMAGE_MODEL: Optional[str] = Field(default="dall-e-3")
+    OPENAI_IMAGE_MODEL: Optional[str] = Field(default="gpt-image-2.5-flare")
     OPENAI_IMAGE_BASE_URL: Optional[str] = Field(default="")
 
     # Voice & TTS
@@ -1573,14 +1573,14 @@ class ConfigUpdateRequest(BaseModel):
     ELEVENLABS_MODEL: Optional[str] = Field(default="eleven_multilingual_v2")
 
     # Video Generation
-    VIDEO_PROVIDER: Optional[str] = Field(default="minimax")
+    VIDEO_PROVIDER: Optional[str] = Field(default="comfyui_video")
     COMFYUI_DEFAULT_VIDEO_WORKFLOW: Optional[str] = Field(default="")
     KLING_API_KEY: Optional[str] = Field(default="")
     KLING_BASE_URL: Optional[str] = Field(default="https://api-beijing.klingai.com")
     KLING_MODEL: Optional[str] = Field(default="kling-v3")
     VIDU_API_KEY: Optional[str] = Field(default="")
     MINIMAX_H3_MODEL: Optional[str] = Field(default="MiniMax-H3")
-    MINIMAX_H3_BASE_URL: Optional[str] = Field(default="https://api.minimax.chat")
+    MINIMAX_H3_BASE_URL: Optional[str] = Field(default="https://api.minimaxi.com")
     SEEDANCE_API_KEY: Optional[str] = Field(default="")
     SEEDANCE_BASE_URL: Optional[str] = Field(default="https://ark.cn-beijing.volces.com/api/v3")
     SEEDANCE_MODEL: Optional[str] = Field(default="doubao-seedance-2-0-260128")
@@ -1714,7 +1714,7 @@ async def test_config_connection(req: ConfigTestRequest):
                     f"{base_url}/text/chatcompletion_v2",
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json={
-                        "model": cfg.get("LLM_MODEL") or settings.LLM_MODEL,
+                        "model": cfg.get("LLM_MODEL") or settings.LLM_MODEL or "MiniMax-M2.5",
                         "messages": [{"role": "user", "content": "hi"}],
                         "max_tokens": 1,
                     },
@@ -1733,7 +1733,7 @@ async def test_config_connection(req: ConfigTestRequest):
         if _is_masked_placeholder(api_key):
             api_key = settings.OPENAI_API_KEY
         base_url = (cfg.get("OPENAI_BASE_URL") or settings.OPENAI_BASE_URL).rstrip("/")
-        model = cfg.get("OPENAI_MODEL") or settings.OPENAI_MODEL or "deepseek-chat"
+        model = cfg.get("OPENAI_MODEL") or settings.OPENAI_MODEL or "deepseek-v4-flash"
         if not api_key:
             return {"target": "openai", "ok": False, "detail": "OPENAI_API_KEY 未配置"}
         try:
@@ -1781,7 +1781,7 @@ async def test_config_connection(req: ConfigTestRequest):
         url = (cfg.get("RESPONSES_API_URL") or settings.RESPONSES_API_URL).rstrip("/")
         if not url.endswith("/responses"):
             url = f"{url}/responses"
-        model = cfg.get("RESPONSES_MODEL") or cfg.get("OPENAI_MODEL") or settings.RESPONSES_MODEL or "gpt-4o"
+        model = cfg.get("RESPONSES_MODEL") or cfg.get("OPENAI_MODEL") or settings.RESPONSES_MODEL or "gpt-5.2"
         if not api_key:
             return {"target": "responses_api", "ok": False, "detail": "RESPONSES_API_KEY / OPENAI_API_KEY 未配置"}
         try:
@@ -1922,7 +1922,7 @@ async def test_config_connection(req: ConfigTestRequest):
             or settings.OPENAI_BASE_URL
             or ""
         ).strip().rstrip("/")
-        model = cfg.get("OPENAI_IMAGE_MODEL") or getattr(settings, "OPENAI_IMAGE_MODEL", "") or "dall-e-3"
+        model = cfg.get("OPENAI_IMAGE_MODEL") or getattr(settings, "OPENAI_IMAGE_MODEL", "") or "gpt-image-2.5-flare"
         if not api_key:
             return {"target": "openai_image", "ok": False, "detail": "生图 Key 未配置：请填 OPENAI_IMAGE_API_KEY（或用文本大模型的 Key 兜底）"}
         if not base:
