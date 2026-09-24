@@ -686,8 +686,9 @@ class TestJobsSubagentBatch(TempStore):
 
     def test_subagent_depth_limit(self):
         from app.agent.runtime.loop import AgentLoop
-        from app.agent.runtime.subagent import run_subagent
-        lp = AgentLoop(self.unique("sub_depth"), context={"subagent_depth": 1}, store=self.store)
+        from app.agent.runtime.subagent import run_subagent, subagent_pool
+        max_depth = subagent_pool._max_depth()
+        lp = AgentLoop(self.unique("sub_depth"), context={"subagent_depth": max_depth}, store=self.store)
         r = run(run_subagent(lp, "调研"))
         self.assertEqual(r["status"], "error")
         self.assertIn("深度", r["error"])
@@ -798,8 +799,9 @@ class TestRunModeHotSwitch(TempStore):
 
         class FakeChild:
             def __init__(self, child_sid, run_mode=None, mode=None, context=None,
-                         interactive=None, store=None, max_steps=None):
+                         interactive=None, store=None, max_steps=None, agent_profile=None):
                 captured["run_mode"] = run_mode
+                captured["profile"] = getattr(agent_profile, "name", None)
                 self.session = type("S", (), {
                     "id": child_sid, "seq": 0, "store": store,
                     "last_assistant_text": lambda self: "子代理完成",
@@ -829,6 +831,209 @@ class TestRunModeHotSwitch(TempStore):
         r = run(run_subagent(FakeParent(), "独立任务", max_steps=5, timeout=5))
         self.assertEqual(r["status"], "success")
         self.assertEqual(captured.get("run_mode"), "create_auto")
+
+
+class TestSubAgentPool(TempStore):
+    """子代理集群：并发限流/批量扇出/后台通知/取消/角色裁剪（参考 Kimi Agent Swarm）。"""
+
+    def _install_fake_children(self, sleep_s=0.1):
+        import app.agent.runtime.loop as loop_mod
+        tracker = {"active": 0, "peak": 0}
+
+        class FakeSession:
+            def __init__(self, sid):
+                self.id = sid
+                self.seq = 0
+                self.store = None
+
+            def last_assistant_text(self):
+                return "子代理产物OK"
+
+        class FakeChild:
+            def __init__(self, sid, run_mode=None, mode=None, context=None,
+                         interactive=None, store=None, max_steps=None, agent_profile=None):
+                self.session = FakeSession(sid)
+                self.run_mode = run_mode
+                self.profile = getattr(agent_profile, "name", None)
+                self._running = False
+
+            async def prompt(self, text):
+                self._running = True
+                tracker["active"] += 1
+                tracker["peak"] = max(tracker["peak"], tracker["active"])
+                try:
+                    await asyncio.sleep(sleep_s)
+                finally:
+                    tracker["active"] -= 1
+                    self._running = False
+
+            async def wait_idle(self, timeout=None):
+                pass
+
+            def is_running(self):
+                return False
+
+            async def steer(self, text):
+                pass
+
+            async def abort(self, cause="user"):
+                pass
+
+        orig = loop_mod.AgentLoop
+        loop_mod.AgentLoop = FakeChild
+        self.addCleanup(lambda: setattr(loop_mod, "AgentLoop", orig))
+        return tracker
+
+    def _fake_parent(self):
+        from app.agent.runtime.inbox import Inbox
+        from app.agent.runtime.session import Session
+
+        class P:
+            pass
+
+        p = P()
+        p.session = Session.open(self.unique("pool_parent"), store=self.store)
+        p.context = {}
+        p.run_mode = "auto"
+        p.inbox = Inbox()
+        p.events = []
+
+        async def _emit(ev):
+            p.events.append(ev)
+
+        p._emit = _emit
+        return p
+
+    def test_batch_semaphore_and_metrics(self):
+        from app.agent.runtime.subagent import SubAgentPool
+        tracker = self._install_fake_children(0.08)
+        os.environ["AGENT_SUBAGENT_MAX_CONCURRENCY"] = "2"
+        self.addCleanup(lambda: os.environ.pop("AGENT_SUBAGENT_MAX_CONCURRENCY", None))
+        pool = SubAgentPool()
+        parent = self._fake_parent()
+        res = run(pool.spawn_batch(parent, "storyboard_artist",
+                                   [{"task": f"生成分镜#{i} 画面"} for i in range(5)]))
+        self.assertEqual(res["status"], "success")
+        self.assertEqual(res["success"], 5)
+        self.assertLessEqual(tracker["peak"], 2)
+        self.assertGreaterEqual(res["parallel_width"], 2)
+        self.assertGreater(res["critical_steps_ms"], 0)
+        metrics = [e for e in parent.events if e.get("event") == "subagent_metrics"]
+        self.assertTrue(metrics)
+        self.assertEqual(metrics[0]["total"], 5)
+
+    def test_background_notifies_parent_inbox(self):
+        from app.agent.runtime.subagent import SubAgentPool
+        self._install_fake_children(0.05)
+        pool = SubAgentPool()
+        parent = self._fake_parent()
+        res = run(pool.spawn(parent, "video_operator", "给分镜#1做图生视频", background=True))
+        self.assertEqual(res["status"], "launched")
+
+        async def wait():
+            for _ in range(200):
+                if parent.inbox.pending_count() > 0:
+                    return True
+                await asyncio.sleep(0.01)
+            return False
+
+        self.assertTrue(run(wait()))
+        msgs = parent.inbox.claim()
+        self.assertIn("子代理", msgs[0].text)
+        self.assertEqual(pool.get(res["subagent_id"]).status, "success")
+
+    def test_cancel_running_subagent(self):
+        from app.agent.runtime.subagent import SubAgentPool
+        self._install_fake_children(2.0)
+        pool = SubAgentPool()
+        parent = self._fake_parent()
+        res = run(pool.spawn(parent, "storyboard_artist", "慢任务", background=True))
+        sid = res["subagent_id"]
+
+        async def wait_cancel():
+            await asyncio.sleep(0.05)
+            await pool.cancel(sid)
+            for _ in range(200):
+                h = pool.get(sid)
+                if h and h.status in ("cancelled", "error", "success"):
+                    return h.status
+                await asyncio.sleep(0.01)
+            return None
+
+        self.assertEqual(run(wait_cancel()), "cancelled")
+
+    def test_subagent_wait_blocks_until_settled(self):
+        from app.agent.runtime.subagent import SubAgentPool
+        self._install_fake_children(0.1)
+        pool = SubAgentPool()
+        parent = self._fake_parent()
+        res = run(pool.spawn(parent, "storyboard_artist", "后台生图", background=True))
+        self.assertEqual(res["status"], "launched")
+        # 立即 wait：阻塞到子代理完成并回收结果
+        out = run(pool.wait(subagent_id=res["subagent_id"], timeout_s=5))
+        self.assertEqual(out["status"], "success")
+        self.assertIn("产物", out["result"])
+        self.assertFalse(out["timed_out"])
+
+    def test_batch_background_then_wait(self):
+        from app.agent.runtime.subagent import SubAgentPool
+        self._install_fake_children(0.08)
+        pool = SubAgentPool()
+        parent = self._fake_parent()
+        res = run(pool.spawn_batch(parent, "voice_operator",
+                                   [{"task": f"配音#{i}"} for i in range(3)], background=True))
+        self.assertEqual(res["status"], "launched")
+        out = run(pool.wait(batch_id=res["batch_id"], timeout_s=5))
+        self.assertEqual(out["status"], "success")
+        self.assertEqual(out["success"], 3)
+        self.assertFalse(out["timed_out"])
+        self.assertEqual(len(out["items"]), 3)
+
+    def test_explicit_sync_forces_blocking_over_auto_bg(self):
+        from app.agent.runtime.subagent import SubAgentPool
+        self._install_fake_children(0.2)
+        os.environ["AGENT_SUBAGENT_AUTO_BG_S"] = "0.01"
+        self.addCleanup(lambda: os.environ.pop("AGENT_SUBAGENT_AUTO_BG_S", None))
+        pool = SubAgentPool()
+        parent = self._fake_parent()
+        # 显式同步（auto_bg_ok=False）→ 严格阻塞直到结果
+        r1 = run(pool.spawn(parent, "storyboard_artist", "任务A", background=False, auto_bg_ok=False))
+        self.assertEqual(r1["status"], "success")
+        # 允许自动后台 → 超时转后台返回句柄
+        r2 = run(pool.spawn(parent, "storyboard_artist", "任务B", background=False, auto_bg_ok=True))
+        self.assertEqual(r2["status"], "launched")
+        self.assertTrue(r2.get("auto_background"))
+
+    def test_wait_tool_registered(self):
+        from app.agent.tools.registry import tool_view
+        names = [x["function"]["name"] for x in tool_view.schemas()]
+        self.assertIn("subagent_wait", names)
+
+    def test_profile_tool_filter_at_pipeline(self):
+        from app.agent.runtime.agents import get_profile
+        from app.agent.tools.pipeline import ToolPipeline
+
+        async def emit(ev):
+            pass
+
+        prof = get_profile("qa_reviewer")
+        p = ToolPipeline(self.unique("profile_pipe"), emit, interactive=True, agent_profile=prof)
+        out = run(p.execute("c1", "generate_image", {"prompt": "x"}, run_mode="auto"))
+        self.assertEqual(out.status, "denied")
+        self.assertIn("能力范围", out.error)
+        # 白名单内工具：正常进入执行（draft 不存在 → onekey 处理返回错误，但非 denied）
+        out2 = run(p.execute("c2", "onekey_summary", {"draft_id": "nope"}, run_mode="auto"))
+        self.assertNotEqual(out2.status, "denied")
+
+    def test_profiles_registry(self):
+        from app.agent.runtime.agents import get_profile, list_profiles, team_brief
+        self.assertEqual(get_profile("unknown_agent").name, "generalist")
+        self.assertFalse(get_profile("qa_reviewer").allows("generate_image"))
+        self.assertTrue(get_profile("qa_reviewer").allows("onekey_summary"))
+        names = {p.name for p in list_profiles()}
+        self.assertIn("storyboard_artist", names)
+        self.assertNotIn("generalist", names)
+        self.assertIn("screenwriter", team_brief())
 
 
 class TestCreatorMode(TempStore):

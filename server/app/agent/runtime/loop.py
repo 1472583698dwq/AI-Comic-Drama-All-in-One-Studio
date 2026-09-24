@@ -45,6 +45,7 @@ class AgentLoop:
         interactive: bool = True,
         store: Optional[SessionStore] = None,
         max_steps: Optional[int] = None,
+        agent_profile: Any = None,
     ):
         self.session = Session.open(session_id, store=store)
         try:
@@ -54,6 +55,7 @@ class AgentLoop:
             self.run_mode = run_mode or "approve"
             behavior_of = lambda m: "plan" if str(m).startswith("plan") else ("create" if str(m).startswith("create") else "standard")  # noqa: E731
         self.mode = "chat" if str(mode or "execute").lower() == "chat" else "execute"
+        self.agent_profile = agent_profile
         self.plan_mode = behavior_of(self.run_mode) == "plan"
         # /plan off 回到进入计划前的行为（如 创造+自动），避免把行为维度一并重置
         self._pre_plan_run_mode = "approve"
@@ -73,6 +75,7 @@ class AgentLoop:
             approval_policy="ask",
             interactive=interactive,
             session=self.session,
+            agent_profile=agent_profile,
         )
         try:
             from app.agent.runtime.goal import load_goal
@@ -80,7 +83,8 @@ class AgentLoop:
         except Exception:
             self.goal = None
         self._last_turn_reason = ""
-        self._max_steps = int(max_steps or _env_int("AGENT_MAX_ITERATIONS", 200))
+        _profile_steps = int(getattr(agent_profile, "max_steps", 0) or 0)
+        self._max_steps = int(max_steps or _profile_steps or _env_int("AGENT_MAX_ITERATIONS", 200))
         # 后台任务（P5）：长耗时工具调用异步化，完成后注入通知
         try:
             from app.agent.runtime.jobs import JobManager
@@ -313,6 +317,12 @@ class AgentLoop:
             first_text = claimed[0].text[:40] if claimed else ""
             await self._emit({"event": "agent_thinking", "message": f"正在解析导演指令: 「{first_text}」..."})
             system_text = build_system_prompt(plan_mode=self.plan_mode, run_mode=self.run_mode)
+            _profile = getattr(self, "agent_profile", None)
+            if _profile is not None:
+                try:
+                    system_text = f"{system_text}\n\n{_profile.system_prompt}"
+                except Exception:
+                    pass
             self.session.append(E.SYSTEM_MESSAGE, {"text": system_text})
             context_block = build_context_block(self.context)
             if context_block:
@@ -484,7 +494,14 @@ class AgentLoop:
     def _tool_schemas(self) -> List[Dict[str, Any]]:
         if self.mode != "execute":
             return []
-        return tool_view.schemas(plan_mode=self.plan_mode)
+        schemas = tool_view.schemas(plan_mode=self.plan_mode)
+        _profile = getattr(self, "agent_profile", None)
+        if _profile is not None:
+            schemas = [
+                s for s in schemas
+                if _profile.allows(str((((s.get("function") or {}).get("name")) or "")))
+            ]
+        return schemas
 
     async def _call_model(self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]]) -> AssistantReply:
         retries = _env_int("AGENT_LLM_RETRIES", 2)

@@ -270,11 +270,13 @@ class ToolPipeline:
     SPILL_CHARS = 8000
 
     def __init__(self, session_id: str, emit, plan_mode: bool = False,
-                 approval_policy: str = "ask", interactive: bool = True, session=None):
+                 approval_policy: str = "ask", interactive: bool = True, session=None,
+                 agent_profile=None):
         self.session_id = session_id
         self.emit = emit
         self.plan_mode = bool(plan_mode)
         self.session = session
+        self.agent_profile = agent_profile
         self.approvals = ApprovalService(session_id, emit, policy=approval_policy,
                                          interactive=interactive, session=session)
         self.guard = RepeatToolGuard()
@@ -296,6 +298,12 @@ class ToolPipeline:
         # ① 计划模式硬门控：只读白名单之外一律拒绝（含全部内部变更工具）
         if (self.plan_mode or _behavior == "plan") and name not in PLAN_READONLY_TOOLS:
             msg = f"计划模式只允许只读工具，已拦截 {name}（本轮不执行任何变更）"
+            return ToolOutcome(call_id, name, "denied", error=msg, model_content=json.dumps({"error": msg}, ensure_ascii=False))
+
+        # ①.5 子代理角色裁剪：执行口二次拒绝越权工具（角色约束靠代码，不靠提示词）
+        _profile = getattr(self, "agent_profile", None)
+        if _profile is not None and not _profile.allows(name):
+            msg = f"工具 {name} 不在子代理角色（{_profile.name}）的能力范围内，已拒绝"
             return ToolOutcome(call_id, name, "denied", error=msg, model_content=json.dumps({"error": msg}, ensure_ascii=False))
 
         # ② 内置工具：todo_write 直接写会话事件（不经过 MCP）
@@ -358,21 +366,99 @@ class ToolPipeline:
 
         if name == "subagent_run":
             parent = getattr(self, "subagent_parent", None)
-            task = str(args.get("task") or "").strip()
-            if parent is None or not task:
-                msg = "子代理服务未就绪或 task 为空"
+            if parent is None:
+                msg = "子代理服务未就绪"
                 return ToolOutcome(call_id, name, "error", error=msg, model_content=json.dumps({"error": msg}, ensure_ascii=False))
+            agent = str(args.get("agent") or "generalist").strip().lower()
+            from app.agent.runtime.agents import get_profile
+            prof = get_profile(agent)
+            batch = args.get("batch")
+            # 三态背景：显式 background=true/false 优先；缺省按角色画像默认（多数同步阻塞）
+            explicit_bg = "background" in args
+            if explicit_bg:
+                background = bool(args.get("background"))
+            else:
+                background = bool(getattr(prof, "background_default", False))
+            auto_bg_ok = not (explicit_bg and not background)  # 显式要同步 → 禁止自动转后台
             try:
-                ms = max(5, min(int(args.get("max_steps") or 40), 120))
+                ms = max(5, min(int(args.get("max_steps") or 0), 200)) or None
             except Exception:
-                ms = 40
-            from app.agent.runtime.subagent import run_subagent
-            result = await run_subagent(parent, task, max_steps=ms)
-            if result.get("status") != "success":
+                ms = None
+            try:
+                to = float(args.get("timeout_s") or 0) or None
+            except Exception:
+                to = None
+            from app.agent.runtime.subagent import subagent_pool
+            if isinstance(batch, list) and batch:
+                result = await subagent_pool.spawn_batch(
+                    parent, agent, batch, background=background, max_steps=ms, timeout_s=to)
+            else:
+                task = str(args.get("task") or "").strip()
+                if not task:
+                    msg = "subagent_run 需要 task（或 batch 数组）"
+                    return ToolOutcome(call_id, name, "error", error=msg, model_content=json.dumps({"error": msg}, ensure_ascii=False))
+                result = await subagent_pool.spawn(
+                    parent, agent, task, background=background, max_steps=ms, timeout_s=to,
+                    auto_bg_ok=auto_bg_ok)
+            if result.get("status") in ("error",):
                 return ToolOutcome(call_id, name, "error", error=str(result.get("error") or "子代理失败"),
                                    result=result, model_content=json.dumps(result, ensure_ascii=False)[:4000])
             return ToolOutcome(call_id, name, "success", result=result,
-                               model_content=json.dumps(result, ensure_ascii=False)[:8000])
+                               model_content=json.dumps(result, ensure_ascii=False, default=str)[:6000])
+
+        if name in ("subagent_status", "subagent_list", "subagent_cancel", "subagent_steer", "subagent_wait"):
+            parent = getattr(self, "subagent_parent", None)
+            from app.agent.runtime.subagent import subagent_pool
+            if name == "subagent_list":
+                result = {"subagents": subagent_pool.list(parent=parent, limit=int(args.get("limit") or 50))}
+            elif name == "subagent_status":
+                sid = str(args.get("subagent_id") or "")
+                h = subagent_pool.get(sid)
+                if h is None:
+                    msg = f"子代理不存在: {sid}"
+                    return ToolOutcome(call_id, name, "error", error=msg, model_content=json.dumps({"error": msg}, ensure_ascii=False))
+                result = {**h.brief(), "result": (h.result[:3000] if h.status == "success" else None),
+                          "error": h.error or None}
+            elif name == "subagent_cancel":
+                result = await subagent_pool.cancel(str(args.get("subagent_id") or ""))
+                if result.get("status") == "error":
+                    return ToolOutcome(call_id, name, "error", error=str(result.get("error")),
+                                       result=result, model_content=json.dumps(result, ensure_ascii=False))
+            elif name == "subagent_wait":
+                try:
+                    _wto = float(args.get("timeout_s") or 0) or None
+                except Exception:
+                    _wto = None
+                result = await subagent_pool.wait(
+                    subagent_id=str(args.get("subagent_id") or ""),
+                    batch_id=str(args.get("batch_id") or ""),
+                    timeout_s=_wto,
+                )
+                if result.get("status") == "error":
+                    return ToolOutcome(call_id, name, "error", error=str(result.get("error")),
+                                       result=result, model_content=json.dumps(result, ensure_ascii=False))
+            else:
+                result = await subagent_pool.steer(str(args.get("subagent_id") or ""), str(args.get("text") or ""))
+                if result.get("status") == "error":
+                    return ToolOutcome(call_id, name, "error", error=str(result.get("error")),
+                                       result=result, model_content=json.dumps(result, ensure_ascii=False))
+            return ToolOutcome(call_id, name, "success", result=result,
+                               model_content=json.dumps(result, ensure_ascii=False, default=str)[:4000])
+
+        if name.startswith("onekey_"):
+            try:
+                from app.pipelines.onekey_agent import handle_onekey_tool
+            except Exception as e:
+                msg = f"一键成片工具加载失败: {e}"
+                return ToolOutcome(call_id, name, "error", error=msg, model_content=json.dumps({"error": msg}, ensure_ascii=False))
+            result = await handle_onekey_tool(name, args)
+            if not isinstance(result, dict):
+                result = {"result": result}
+            if result.get("error"):
+                return ToolOutcome(call_id, name, "error", error=str(result.get("error")),
+                                   result=result, model_content=json.dumps(result, ensure_ascii=False, default=str)[:4000])
+            return ToolOutcome(call_id, name, "success", result=result,
+                               model_content=json.dumps(result, ensure_ascii=False, default=str)[:6000])
 
         if name == "batch_run":
             tool = str(args.get("tool") or "").strip()

@@ -50,6 +50,12 @@ TODO_WRITE = "todo/write"                # data: {items}
 JOB_STARTED = "job/started"              # data: {job_id, kind, label}
 JOB_SETTLED = "job/settled"              # data: {job_id, status, result_summary}
 
+# ── 子代理集群（P6）──────────────────────────────────────
+SUBAGENT_STARTED = "subagent/started"    # data: {subagent_id, agent, task, background, batch_id}
+SUBAGENT_PROGRESS = "subagent/progress"  # data: {subagent_id, tool_name, status}
+SUBAGENT_SETTLED = "subagent/settled"    # data: {subagent_id, status, elapsed_ms, result_summary, error}
+SUBAGENT_METRICS = "subagent/metrics"    # data: {batch_id, total, success, failed, critical_steps_ms, parallel_width}
+
 # ── 上下文压缩（P3）──────────────────────────────────────
 COMPACTION_SUMMARY = "compaction/summary"  # data: {text, shadowed_seqs}
 COMPACTION_PRUNE = "compaction/prune"      # data: {shadowed_seqs, replacements}
@@ -62,6 +68,7 @@ KNOWN_EVENT_TYPES = {
     APPROVAL_ASKED, APPROVAL_DECIDED,
     PLAN_MODE, GOAL_CHANGE, TODO_WRITE,
     JOB_STARTED, JOB_SETTLED,
+    SUBAGENT_STARTED, SUBAGENT_PROGRESS, SUBAGENT_SETTLED, SUBAGENT_METRICS,
     COMPACTION_SUMMARY, COMPACTION_PRUNE,
 }
 
