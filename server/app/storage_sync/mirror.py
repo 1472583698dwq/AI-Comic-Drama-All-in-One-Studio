@@ -364,19 +364,27 @@ class StorageMirror:
             out["projects/index.json"] = await self._pull_state_file("projects/index.json")
         except Exception as e:
             out["projects/index.json"] = f"失败: {e}"
+
+        rels: List[str] = []
         for kind, sub in (("projects", ("content", "canvas", "agent_sessions")), ("assets", ("meta",))):
-            for it in await self.client.list_dir(f"{self.root}/state/{kind}"):
-                if not it.get("is_dir"):
-                    continue
-                ident = it["name"]
-                for leaf in sub:
-                    rel = f"{kind}/{ident}/{leaf}.json"
-                    try:
-                        r = await self._pull_state_file(rel)
-                        if r not in ("远端无快照", "已是最新"):
-                            out[rel] = r
-                    except Exception as e:
-                        out[rel] = f"失败: {e}"
+            for it in await self.client.list_dir(f"{self.root}/state/{kind}", refresh=True):
+                if it.get("is_dir"):
+                    rels.extend(f"{kind}/{it['name']}/{leaf}.json" for leaf in sub)
+
+        # 每条都要单独列一次远端目录，串行跑几十个项目会等很久（公网尤其明显），
+        # 所以开一把小信号量并发拉，但别把对面打爆。
+        sem = asyncio.Semaphore(6)
+
+        async def one(rel: str) -> None:
+            async with sem:
+                try:
+                    r = await self._pull_state_file(rel)
+                    if r not in ("远端无快照", "已是最新"):
+                        out[rel] = r
+                except Exception as e:
+                    out[rel] = f"失败: {e}"
+
+        await asyncio.gather(*(one(r) for r in rels))
         return out
 
     # ── 生命周期 ────────────────────────────────────────────
