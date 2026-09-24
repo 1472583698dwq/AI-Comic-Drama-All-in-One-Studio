@@ -8,6 +8,7 @@
 4. 支持内存热重载与多 Provider 动态即时生效
 """
 import os
+import re
 import sys
 import json
 from pathlib import Path
@@ -232,6 +233,11 @@ class Settings(BaseModel):
     # 本地桌面端默认关闭，需显式 STUDIO_TRUSTED_MODE=1 开启。开启后仍需逐源勾选 trusted。
     STUDIO_TRUSTED_MODE: str = os.getenv("STUDIO_TRUSTED_MODE", "0")
 
+    # 跨源白名单：默认只认本机来源。打包态前端由本服务同源 serve（不受影响）；
+    # 开发态 vite 在 localhost:5173 直连本服务属真跨域，也在本机来源内。
+    # 需要放行别的机器（如局域网手机）时追加：STUDIO_CORS_EXTRA_ORIGINS=http://192.168.1.10:5173
+    STUDIO_CORS_EXTRA_ORIGINS: str = os.getenv("STUDIO_CORS_EXTRA_ORIGINS", "")
+
     # Local storage paths
     # 开发态：仓库根 storage；打包态：优先复用仓库根 storage（避免构建清空用户配置）
     STORAGE_DIR: str = os.path.abspath(
@@ -275,6 +281,27 @@ def is_trusted_mode_enabled() -> bool:
     except Exception:
         pass
     return False
+
+
+_LOCAL_ORIGIN_RE = re.compile(r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$", re.IGNORECASE)
+
+
+def cors_extra_origins() -> List[str]:
+    """STUDIO_CORS_EXTRA_ORIGINS 解析出的显式白名单（去尾斜杠）。"""
+    raw = str(getattr(settings, "STUDIO_CORS_EXTRA_ORIGINS", "") or "")
+    return [o.strip().rstrip("/") for o in raw.split(",") if o.strip()]
+
+
+def is_local_or_allowed_origin(origin: str) -> bool:
+    """跨源判断唯一口径：CORS 白名单与执行口 Origin 校验共用，避免两处规则漂移。
+
+    空 Origin（curl、原生壳、部分同源请求）放行；`null`（file:// 与沙箱页）拒绝。
+    """
+    o = (origin or "").strip().rstrip("/")
+    if not o:
+        return True
+    return bool(_LOCAL_ORIGIN_RE.match(o)) or o in cors_extra_origins()
+
 
 ENV_FILE = get_primary_env_file()
 JSON_CONFIG_FILE = os.path.join(settings.STORAGE_DIR, "config_store.json")
