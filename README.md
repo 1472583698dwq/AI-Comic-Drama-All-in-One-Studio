@@ -41,22 +41,27 @@
 ## 🛠️ 技术栈
 
 ```mermaid
-graph TD
-    subgraph 客户端
-        A1[React 19 + TypeScript + Vite]
-        A2[Tailwind CSS v4]
-        A3[React Flow 无限画布]
+flowchart TD
+    subgraph FE["客户端 client/"]
+        direction LR
+        A1["React 19 + TypeScript + Vite"]
+        A2["Tailwind CSS v4"]
+        A3["React Flow 无限画布"]
+        A1 --- A2
+        A1 --- A3
     end
 
-    subgraph 后端
-        B1[Python FastAPI]
-        B2[MCP 统一工具中枢]
-        B3[图像/视频/音频 Provider 调度]
-        B4[剪映草稿导出器]
+    subgraph BE["后端 server/"]
+        B1["Python FastAPI"]
+        B2["MCP 统一工具中枢"]
+        B3["图像/视频/音频 Provider 调度"]
+        B4["剪映草稿导出器"]
+        B1 --> B2
+        B2 --> B3
+        B2 --> B4
     end
 
-    A1 <-->|REST + WebSocket| B1
-    B1 --> B2 --> B3 & B4
+    A1 <-->|"REST + WebSocket"| B1
 ```
 
 > 桌面打包基于 Python（PyInstaller），仓库内的 `.spec` 与 `launch_desktop_app.py` 负责无黑框启动。
