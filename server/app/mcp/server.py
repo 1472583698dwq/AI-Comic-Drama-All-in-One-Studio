@@ -1656,11 +1656,22 @@ class MCPServerRegistry:
                 from app.providers.video.base import VideoGenerateRequest
                 reg = _lazy_video_registry()
                 provider = arguments.get("provider")
+                # 白模动态预演自动作为视频参考：模型未显式传 reference_videos 时，
+                # 从当前镜头上下文取 previz_video_url 注入（有声明的源自行消费）。
+                ref_videos = list(arguments.get("reference_videos") or [])
+                if not ref_videos and isinstance(project_context, dict):
+                    _shot = project_context.get("active_shot")
+                    if isinstance(_shot, dict):
+                        _pv = str(_shot.get("previz_video_url") or "").strip()
+                        if _pv:
+                            ref_videos = [_pv]
+                            print(f"[MCP] generate_video: 自动注入白模动态预演作为视频参考 {_pv}")
                 req = VideoGenerateRequest(
                     prompt=arguments.get("prompt", ""),
                     mode=arguments.get("mode", "i2v"),
                     first_frame_url=arguments.get("first_frame_url"),
                     reference_images=arguments.get("reference_images"),
+                    reference_videos=ref_videos or None,
                     duration=int(arguments.get("duration", 5)),
                     provider=provider,
                 )

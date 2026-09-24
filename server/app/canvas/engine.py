@@ -678,6 +678,11 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
                 ref_vids = [ref_vids.strip()]
             elif not isinstance(ref_vids, list):
                 ref_vids = None
+            # 白模动态预演自动作为视频参考（分镜挂载的 previz_video_url；有声明的源才消费）
+            if not ref_vids:
+                _pv = merged.get("previz_video_url") or upstream.get("previz_video_url")
+                if isinstance(_pv, str) and _pv.strip():
+                    ref_vids = [_pv.strip()]
             ref_auds = merged.get("reference_audios") or upstream.get("reference_audios")
             if isinstance(ref_auds, str) and ref_auds.strip():
                 ref_auds = [ref_auds.strip()]
