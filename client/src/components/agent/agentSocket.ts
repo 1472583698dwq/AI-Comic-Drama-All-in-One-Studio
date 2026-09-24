@@ -3,8 +3,8 @@
  * 旧实现两个组件各建各的 WS 且断线不重连；此模块全局唯一，页面与抽屉共用。
  */
 import type { WsStatus } from './agentTypes';
+import { isDev } from '../../utils/devOrigin';
 
-const isDev = typeof window !== 'undefined' && window.location.port === '5173';
 export const AGENT_WS_URL = isDev
   ? 'ws://127.0.0.1:8000/api/v1/ws/agent'
   : (typeof window !== 'undefined'

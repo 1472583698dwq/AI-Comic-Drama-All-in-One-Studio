@@ -11,6 +11,7 @@ import {
 import { useProjectStore } from '../../stores/useProjectStore';
 import { Character } from '../../types';
 import { apiService } from '../../services/api';
+import { API_ORIGIN } from '../../utils/devOrigin';
 import { AssetPickerModal } from '../asset/AssetPickerModal';
 import { confirmAsync, toast } from '../../stores/useDialogStore';
 
@@ -33,7 +34,6 @@ export const CharacterStudio: React.FC = () => {
 
   const selectedChar = characters.find((c) => c.id === selectedCharId) || characters[0];
 
-  const API_ORIGIN = 'http://127.0.0.1:8000';
   const resolveUrl = (u?: string) => {
     if (!u) return '';
     return u.startsWith('/') ? API_ORIGIN + u : u;

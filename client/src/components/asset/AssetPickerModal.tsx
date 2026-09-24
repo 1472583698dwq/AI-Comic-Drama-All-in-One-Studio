@@ -41,7 +41,7 @@ const CATEGORY_TABS: { key: AssetCategory | 'all'; label: string; icon: any }[] 
   { key: 'other', label: '其他', icon: Layers },
 ];
 
-const API_ORIGIN = 'http://127.0.0.1:8000';
+import { API_ORIGIN } from '../../utils/devOrigin';
 const resolveUrl = (u?: string) => {
   if (!u) return '';
   return u.startsWith('/') ? API_ORIGIN + u : u;

@@ -4,7 +4,7 @@ import { Plug, Cpu, Globe, Mic, Video, Settings, Activity, Trash2, Edit3, Plus, 
 import { apiService } from '../../../services/api';
 import { confirmAsync, toast } from '../../../stores/useDialogStore';
 
-const API_ORIGIN = window.location.port === '5173' ? 'http://127.0.0.1:8000' : '';
+import { API_ORIGIN } from '../../../utils/devOrigin';
 
 type ProviderKind = 'image' | 'video' | 'audio' | 'llm';
 

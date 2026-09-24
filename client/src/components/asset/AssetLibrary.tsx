@@ -21,8 +21,7 @@ const CATEGORY_TABS: { key: AssetCategory | 'all'; label: string; icon: React.Re
   { key: 'other', label: '其他', icon: <Layers className="w-3.5 h-3.5" /> },
 ];
 
-const isDev = typeof window !== 'undefined' && window.location.port === '5173';
-const API_ORIGIN = isDev ? 'http://127.0.0.1:8000' : '';
+import { API_ORIGIN } from '../../utils/devOrigin';
 const resolveUrl = (u?: string) => u && u.startsWith('/') ? API_ORIGIN + u : u;
 
 export const AssetLibrary: React.FC = () => {

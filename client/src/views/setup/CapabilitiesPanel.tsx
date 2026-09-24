@@ -246,8 +246,8 @@ export const CapabilitiesPanel: React.FC<Props> = ({ cfg, draft, setDraft, loadi
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-sm font-bold text-[color:var(--color-text-main)]">{cap.name}</h3>
                 {cap.essential
-                  ? <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-brand/20 border border-brand/40 text-brand-light font-bold">必需</span>
-                  : <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-surface-tertiary border border-border text-gray-400">可选</span>}
+                  ? <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-brand/20 text-brand-light font-bold">必需</span>
+                  : <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-surface-tertiary text-gray-400">可选</span>}
                 <span className="ml-auto">
                   {t.running
                     ? <span className="text-[10.5px] text-gray-400 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" />测试中</span>
@@ -287,7 +287,7 @@ export const CapabilitiesPanel: React.FC<Props> = ({ cfg, draft, setDraft, loadi
                         active
                           ? 'bg-brand/15 border-brand/50 text-[color:var(--color-text-main)] ring-1 ring-brand/30'
                           : 'bg-surface-secondary border-border text-gray-400 hover:text-[color:var(--color-text-main)] hover:border-brand/40'
-                      } ${c.legacy ? 'border-dashed' : ''}`}
+                      }`}
                     >
                       {c.custom
                         ? <Landmark className="w-3 h-3 text-amber-300" />
@@ -296,17 +296,17 @@ export const CapabilitiesPanel: React.FC<Props> = ({ cfg, draft, setDraft, loadi
                           : <Cloud className="w-3 h-3 text-sky-400" />}
                       <span>{c.name}</span>
                       {c.custom && (
-                        <span className="text-[9px] px-1 rounded bg-amber-500/15 border border-amber-500/40 text-amber-300">
+                        <span className="text-[9px] px-1 rounded bg-amber-500/15 text-amber-300">
                           自定义
                         </span>
                       )}
                       {c.disabled && (
-                        <span className="text-[9px] px-1 rounded bg-surface-tertiary border border-border text-gray-400">
+                        <span className="text-[9px] px-1 rounded bg-surface-tertiary text-gray-400">
                           已停用
                         </span>
                       )}
                       {c.legacy && (
-                        <span className="text-[9px] px-1 rounded bg-surface-tertiary border border-border text-gray-500 flex items-center gap-0.5">
+                        <span className="text-[9px] px-1 rounded bg-surface-tertiary text-gray-400 flex items-center gap-0.5">
                           <History className="w-2.5 h-2.5" />旧版
                         </span>
                       )}
@@ -516,24 +516,28 @@ const CustomSourceBox: React.FC<{
   };
 
   const badge = eff?.key_source === 'stored'
-    ? { text: 'Key 来自配置存储', cls: 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300' }
+    ? { text: 'Key 来自配置存储', cls: 'bg-emerald-500/15 text-emerald-300' }
     : eff?.key_source === 'inline'
-      ? { text: 'Key 写在代码里', cls: 'bg-amber-500/15 border-amber-500/40 text-amber-300' }
-      : { text: '未找到 Key', cls: 'bg-surface-tertiary border-border text-gray-400' };
-  /** 常量 + 表达式内字面量（ctx 兜底链 / 未命名）合成一张只读清单 */
-  const rows: any[] = [
-    ...(eff?.constants || []).map((c: any) => ({
-      ...c, label: c.name, where: c.module_level ? '模块级' : '函数内',
-    })),
-    ...(eff?.ctx_fallbacks || []).map((c: any) => ({
-      ...c, label: '(表达式字面量)', where: 'ctx 兜底链',
-    })),
-    ...(eff?.loose_literals || []).map((c: any) => ({
-      ...c, label: '(表达式字面量)', where: '未命名',
-    })),
+      ? { text: 'Key 写在代码里', cls: 'bg-amber-500/15 text-amber-300' }
+      : { text: '未找到 Key', cls: 'bg-surface-tertiary text-gray-400' };
+
+  // 这块只列两类"写死的配置"：接口地址 + 密钥（其余常量如工作流 ID 不展示，保持一屏可读）
+  const allRows: any[] = [
+    ...(eff?.constants || []),
+    ...(eff?.ctx_fallbacks || []),
+    ...(eff?.loose_literals || []),
   ];
-  const hasSecretRow = rows.some((c) => c.kind === 'secret');
-  const kindCls = (k: string) => (k === 'secret' ? 'text-amber-300' : k === 'url' ? 'text-sky-300' : 'text-gray-300');
+  const urlRows: any[] = (eff?.constants || []).filter((c: any) => c.kind === 'url');
+  const keyHit = eff?.inline_key ? allRows.find((c: any) => c.value === eff.inline_key) : null;
+  const keyRow = eff?.inline_key
+    ? {
+        name: eff.inline_key_name || (eff.inline_key_origin === 'ctx_fallback' ? 'ctx 兜底链' : '表达式内字面量'),
+        value: eff.inline_key as string,
+        masked: eff.inline_key_masked as string,
+        line: keyHit?.line as number | undefined,
+      }
+    : null;
+  const hasImplicit = urlRows.length > 0 || !!keyRow;
 
   return (
     <div className="mt-3.5 rounded-xl border border-border bg-surface-secondary/60 px-3 py-2.5">
@@ -541,7 +545,7 @@ const CustomSourceBox: React.FC<{
       <div className="flex items-center gap-1.5 flex-wrap">
         <KeyRound className="w-3.5 h-3.5 text-brand-light" />
         <span className="text-[11.5px] font-bold text-[color:var(--color-text-main)]">这个自定义源的 API Key</span>
-        <span className={`text-[9.5px] px-1.5 py-0.5 rounded border ${badge.cls}`}>{badge.text}</span>
+        <span className={`text-[9.5px] px-1.5 py-0.5 rounded ${badge.cls}`}>{badge.text}</span>
       </div>
       <div className="mt-2 flex items-center gap-1.5">
         <input
@@ -563,17 +567,17 @@ const CustomSourceBox: React.FC<{
         {eff?.stored_key ? <> 当前配置存储里已有值：<code className="font-mono">{revealed ? eff.stored_key : eff.stored_masked}</code>。</> : null}
       </div>
 
-      {/* ── 隐式配置：代码里写死的那一侧 ── */}
-      {rows.length > 0 && (
+      {/* ── 隐式配置：代码里写死的那一侧（只列 接口地址 + API Key） ── */}
+      {hasImplicit && (
         <div className="mt-3 border-t border-border/70 pt-2.5">
           <div className="flex items-center gap-1.5 flex-wrap">
             <FileCode2 className="w-3.5 h-3.5 text-gray-400" />
             <span className="text-[11.5px] font-bold text-[color:var(--color-text-main)]">代码里写死的配置</span>
             <span className="text-[10px] text-gray-500">识别自源码，只读</span>
-            {hasSecretRow && (
+            {keyRow && (
               <button
                 onClick={() => setRevealed((v) => !v)}
-                className="px-2 py-0.5 rounded-lg bg-surface border border-border text-[10.5px] text-gray-400 hover:text-white"
+                className="px-2 py-0.5 rounded-lg bg-surface text-[10.5px] text-gray-400 hover:text-white"
               >
                 {revealed ? '隐藏密钥' : '显示密钥'}
               </button>
@@ -582,13 +586,13 @@ const CustomSourceBox: React.FC<{
               <span className="ml-auto flex items-center gap-1.5">
                 <button
                   onClick={() => migrate(false)} disabled={migrating}
-                  className="px-2 py-0.5 rounded-lg bg-surface border border-border text-[10.5px] text-gray-300 hover:border-brand/50 disabled:opacity-40"
+                  className="px-2 py-0.5 rounded-lg bg-surface text-[10.5px] text-gray-300 hover:text-white disabled:opacity-40"
                 >
                   只写入配置存储
                 </button>
                 <button
                   onClick={() => migrate(true)} disabled={migrating}
-                  className="px-2 py-0.5 rounded-lg bg-brand/15 border border-brand/40 text-[10.5px] text-brand-light hover:bg-brand/25 disabled:opacity-40 flex items-center gap-1"
+                  className="px-2 py-0.5 rounded-lg bg-brand/15 text-[10.5px] text-brand-light hover:bg-brand/25 disabled:opacity-40 flex items-center gap-1"
                 >
                   {migrating ? <Loader2 className="w-3 h-3 animate-spin" /> : <ArrowRight className="w-3 h-3" />}
                   迁移并改写代码
@@ -598,39 +602,41 @@ const CustomSourceBox: React.FC<{
           </div>
 
           <div className="mt-2 space-y-1">
-            {rows.map((c, i) => (
-              <div key={`${c.label}-${i}`} className="flex items-center gap-2 flex-wrap text-[11px]">
-                <code className="font-mono text-gray-500">{c.label}</code>
-                <code className={`font-mono break-all ${kindCls(c.kind)}`}>
-                  {c.kind === 'secret' && !revealed ? c.masked : c.value}
-                </code>
-                <span className="text-[9.5px] text-gray-600">
-                  {c.kind_label} · 第 {c.line} 行 · {c.where}
-                </span>
+            {urlRows.map((c, i) => (
+              <div key={`url-${i}`} className="flex items-center gap-2 flex-wrap text-[11px]">
+                <span className="text-gray-500 w-[58px] shrink-0">接口地址</span>
+                <code className="font-mono break-all text-sky-300">{c.value}</code>
+                <span className="text-[9.5px] text-gray-600">{c.name} · 第 {c.line} 行</span>
               </div>
             ))}
+            {keyRow && (
+              <div className="flex items-center gap-2 flex-wrap text-[11px]">
+                <span className="text-gray-500 w-[58px] shrink-0">API Key</span>
+                <code className="font-mono break-all text-amber-300">{revealed ? keyRow.value : keyRow.masked}</code>
+                <span className="text-[9.5px] text-gray-600">
+                  {keyRow.name}{keyRow.line ? ` · 第 ${keyRow.line} 行` : ''}
+                </span>
+              </div>
+            )}
           </div>
 
           {eff?.inline_key && (eff?.reads_ctx_key ? (
             <div className="mt-2 text-[10.5px] text-emerald-300/90 leading-relaxed">
-              代码里有 <code className="font-mono">ctx.get("api_key")</code> 读取点：写入配置存储后即刻优先用配置值，代码里那句自动变成兜底。
+              代码会读注入的 Key（<code className="font-mono">ctx["api_key"]</code> /
+              <code className="font-mono">api.get("get_api_key")</code>）——
+              在设置页填的 Key <b>即刻生效</b>，代码里那句仅是兜底。
             </div>
           ) : (
             <div className="mt-2 flex items-start gap-1.5 text-[10.5px] text-amber-200 leading-relaxed">
               <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0 text-amber-400" />
               <span>
-                代码里没有 <code className="font-mono">ctx.get("api_key")</code> 的读取点 ——
-                <b>只写入配置存储不生效</b>，要换 Key 得走「迁移并改写代码」，或去「扩展」页手工改源码。
+                代码没读注入的 Key（<code className="font-mono">ctx["api_key"]</code> /
+                <code className="font-mono">api.get("get_api_key")</code>），只认自己写死的那句 ——
+                <b>在设置页填的 Key 不会生效</b>，当前仍用代码里那句明文。要换 Key 请点「迁移并改写代码」。
               </span>
             </div>
           ))}
 
-          {eff?.key_source === 'inline' && (
-            <div className="mt-1.5 text-[10.5px] text-gray-500 leading-relaxed">
-              这些明文值会随生成源定义一起落盘（<code className="font-mono">storage/providers/custom/*.json</code>），
-              迁移到配置存储后可以再手工把源码里的字面量删掉。
-            </div>
-          )}
         </div>
       )}
 

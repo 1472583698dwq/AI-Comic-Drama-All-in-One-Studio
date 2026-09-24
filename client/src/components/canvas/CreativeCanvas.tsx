@@ -9,6 +9,7 @@ import { useThemeStore } from '../../stores/useThemeStore';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { useCanvasStore } from '../../stores/useCanvasStore';
 import { apiService } from '../../services/api';
+import { API_ORIGIN } from '../../utils/devOrigin';
 import { confirmAsync, promptAsync, toast } from '../../stores/useDialogStore';
 import { useCanvasSync } from './hooks/useCanvasSync';
 import { executeAgentNode } from './hooks/nodeAgentExecutor';
@@ -191,13 +192,13 @@ const InnerCanvas: React.FC = () => {
             };
             nd._polling = false;
           }
-          return { ...n, data: { ...nd, onUpdate: handleNodeUpdate, onExecute: handleNodeExecute } };
+          // selected 不还原：开合是纯 UI 态，落盘的 selected:true 重载时会复活选中 → 控制台自动弹出（P2-2）
+          return { ...n, selected: false, data: { ...nd, onUpdate: handleNodeUpdate, onExecute: handleNodeExecute } };
         });
         setNodes(withHandlers);
         if (Array.isArray(snap.edges)) setEdges(snap.edges);
-        if (withHandlers.length > 0 && !selectedNodeId) {
-          setSelectedNodeId(withHandlers[0].id);
-        }
+        // 不在加载时自动选中第一个节点：刷新后控制台自动弹出即由此而来（P2-2）；
+        // 用户点哪个节点，控制台才服务哪个节点。
       }
       clearTimeout(timer);
       setIsLoading(false);
@@ -223,7 +224,8 @@ const InnerCanvas: React.FC = () => {
     if (suppressSaveRef.current) { suppressSaveRef.current = false; return; }
     let vp: any = {};
     try { vp = getViewport(); } catch {}
-    const snap = { nodes, edges, viewport: vp, updated_at: new Date().toISOString(), version: 2 };
+    // 选中态不落盘（纯 UI 态）：否则带着 selected:true 的快照在重载时会复活选中（P2-2）
+    const snap = { nodes: nodes.map((n) => ({ ...n, selected: false })), edges, viewport: vp, updated_at: new Date().toISOString(), version: 2 };
     debouncedSave(snap, canvasIdRef.current);
     try { useCanvasStore.getState().setFromFlow(nodes as any, edges as any); } catch {}
   }, [nodes, edges]);
@@ -297,7 +299,7 @@ const InnerCanvas: React.FC = () => {
         } else if (skillId === 'proposal_generation') {
           const r: any = await apiService.callMcpTool('split_novel_script', { novel_text: textToProcess, style_preset: d.style_preset || 'donghua_xianxia', aspect_ratio: d.aspect_ratio || '9:16' }).catch(async () => {
             // 降级：直接调 LLM 透传
-            const res2 = await fetch(`${(window as any).location?.port === '5173' ? 'http://127.0.0.1:8000' : ''}/api/v1/agent/chat`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ prompt: textToProcess, context: { skill: 'proposal' } })}).then(r=>r.json()).catch(()=>null);
+            const res2 = await fetch(`${API_ORIGIN}/api/v1/agent/chat`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ prompt: textToProcess, context: { skill: 'proposal' } })}).then(r=>r.json()).catch(()=>null);
             return { result: res2 };
           });
           const content = r?.result?.content || r?.result?.project || textToProcess;
@@ -328,7 +330,6 @@ const InnerCanvas: React.FC = () => {
         const d: any = { ...node.data, ...(customData || {}) };
         if (node.type === 'ext-node') delete d.definition; // 大字段不上行，引擎按 canvas_node_id 重读声明
         const projectId = (window as any).__activePid || useProjectStore.getState().project?.id || undefined;
-        const API_ORIGIN = (window as any).location?.port === '5173' ? 'http://127.0.0.1:8000' : '';
         const resp = await fetch(`${API_ORIGIN}/api/v1/canvas/node/execute`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ node: { id: nodeId, type: node.type, data: d }, project_id: projectId }) }).then(r=>r.json());
         if (resp?.result?.status === 'success') {
           const rr = resp.result;
@@ -356,6 +357,13 @@ const InnerCanvas: React.FC = () => {
   const handleSelectionChange = useCallback(({ nodes: sel }: { nodes: Node[] }) => {
     setSelectedNodeId(sel.length ? sel[sel.length - 1].id : null);
   }, []);
+
+  // 关闭节点控制台：除清 store 外，同步清掉 React Flow 的节点选中态——
+  // 否则残留的 selected 会在下一次选中事件里把控制台拉回来（P2-2）
+  const closeNodeConsole = useCallback(() => {
+    setSelectedNodeId(null);
+    setNodes((nds) => nds.map((n) => (n.selected ? { ...n, selected: false } : n)));
+  }, [setSelectedNodeId, setNodes]);
 
   // 节点运行时回调：撤销/粘贴还原节点后必须重新挂上，否则卡上的按钮全哑
   const attachHandlers = useCallback(
@@ -1403,7 +1411,7 @@ const InnerCanvas: React.FC = () => {
         {/* 底部：仅在选中「生图 / 视频 / 配音」节点时出现的节点控制块。
             原先常驻的「全局导演 Agent GO + 快速添加」已撤销 —— 全局编排并入右侧 Agent 侧栏，
             快速添加由左侧工作台栏承担，此处只做「选中哪个节点就控制哪个节点」。 */}
-        {!isEmpty && <NodeControlBar />}
+        {!isEmpty && <NodeControlBar onClose={closeNodeConsole} />}
       </div>
 
       {/* 右侧：导演 Agent 侧栏（可收起）—— 画布上唯一的 Agent 入口。

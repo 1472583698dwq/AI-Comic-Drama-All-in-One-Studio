@@ -13,6 +13,7 @@ import {
   AlertTriangle
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
+import { API_ORIGIN } from '../../utils/devOrigin';
 import { apiService } from '../../services/api';
 import { syncExporterSpecs, listExporterSpecs, type ExporterInfo } from '../../services/exporterSpecs';
 import { useEscapeClose } from '../../hooks/useEscapeClose';
@@ -49,7 +50,6 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
   useEscapeClose(isOpen, onClose);
   if (!isOpen || !project) return null;
 
-  const API_ORIGIN = typeof window !== 'undefined' && window.location.port === '5173' ? 'http://127.0.0.1:8000' : '';
   const engineReady = engine === null || engine.installed;
 
   const handleRunExporter = async (spec: ExporterInfo) => {

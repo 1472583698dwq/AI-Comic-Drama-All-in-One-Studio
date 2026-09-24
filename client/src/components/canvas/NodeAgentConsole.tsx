@@ -15,6 +15,7 @@ import { DynamicProviderInfo, extractSlotsFromProvider, AssetSlotDef, getSkillsF
 import { collectResources, planBinding } from '../storyboard/referenceBinder';
 import { CanvasResourcePickerModal } from './CanvasResourcePickerModal';
 import { DynamicControl, groupSpecs, CATEGORY_LABEL } from './controls/DynamicControl';
+import { pollVideoTask } from '../../utils/videoTask';
 
 type GenKind = 'image' | 'video' | 'audio';
 
@@ -220,31 +221,10 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
       const res: any = await apiService.canvasAgentGenerate({ node_type: kind, idea: raw, provider_id: pid, skill_id: skillId, slots: slotsPayload, params: paramsOverride, node_id: nodeId } as any);
       if (res.status === 'error') throw new Error(res.error || '生成失败');
       const plan = res.plan || {}; const result = res.result || {};
-      // 异步视频提交即返 task_id：先落盘 task_id（重启可恢复），再轮询状态接口直到出片，不吞结果
+      // 异步视频提交即返 task_id：先落盘 task_id（重启可恢复），再统一轮询直到出片
       if (kind === 'video' && !result.video_url && result.task_id) {
         updateNodeData(nodeId, { _taskId: result.task_id, _polling: true });
-        let url = '';
-        for (let i = 0; i < 500; i++) {
-          await new Promise((r) => setTimeout(r, 3000));
-          let st: any;
-          try {
-            st = await apiService.getVideoTaskStatus(result.task_id);
-          } catch {
-            continue; // 状态接口网络抖动：继续轮询，不误杀任务
-          }
-          const s = (st.status || st.state || '').toString().toUpperCase();
-          if (s === 'SUCCESS' || s === 'COMPLETED') {
-            url = st.video_url || st.videoUrl || st.results?.[0] || st.url || '';
-            if (url) break;
-            continue;
-          }
-          // 终态失败：把后端真实错误上抛（含 last_error 兜底），不再静默轮询
-          if (s === 'FAILED' || s === 'FAIL' || s === 'ERROR' || s === 'TIMEOUT' || s === 'CANCELLED' || s === 'CANCELED') {
-            throw new Error(st.error || st.msg || st.last_error || '视频任务失败');
-          }
-        }
-        if (!url) throw new Error(`视频排队超时 task_id=${result.task_id}，task_id 已保留在节点，可恢复查询`);
-        result.video_url = url;
+        result.video_url = await pollVideoTask(result.task_id);
         updateNodeData(nodeId, { _polling: false });
       }
       const patch: Record<string, any> = { _last_agent_plan: plan };
@@ -409,11 +389,12 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
           <div className="flex items-center gap-1.5 text-violet-300 font-bold"><Sparkles className="w-3 h-3" /> Agent 决策</div>
           <div className="text-white/70 mt-1"><span className="text-white/40">skill</span> {lastPlan.skill_id} · <span className="text-white/40">源</span> {(providers.find((p) => p.id === lastPlan.provider_id)?.display_name) || lastPlan.provider_id} · <span className="text-white/40">模型</span> {lastPlan.model || '默认'}</div>
           {lastPlan.reasoning && <div className="text-white/50 mt-0.5">{lastPlan.reasoning}</div>}
+          {lastPlan.plan_source === 'rule' && <div className="text-amber-400/80 mt-0.5 text-[10px]">规则规划结果（LLM 不可用/超时自动降级）</div>}
           {lastPlan.prompt && <div className="text-white/60 mt-1 line-clamp-2">润色后 prompt：{lastPlan.prompt}</div>}
           {lastPlan.params && Object.keys(lastPlan.params).length > 0 && <div className="text-white/40 mt-0.5 font-mono text-[10px]">参数 {JSON.stringify(lastPlan.params)}</div>}
         </div>
       )}
-      {agentState?.status === 'running' && <div className="text-[11px] text-violet-300 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Agent 规划并调用 {agentState.tool}…</div>}
+      {agentState?.status === 'running' && <div className="text-[11px] text-violet-300 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Agent 规划并调用 {agentState.tool}…<span className="text-white/30">（LLM 润色最长 30s，超时自动降级规则规划）</span></div>}
       {agentState?.status === 'failed' && <div className="text-[11px] text-red-400 flex items-center gap-1" title={agentState.error}><AlertTriangle className="w-3 h-3" /> {agentState.error}</div>}
 
       {/* 结果回写分镜：画布结果 → 分镜字段（图片/首帧、视频、配音），覆盖前确认，历史自动留存 */}

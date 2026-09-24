@@ -25,7 +25,7 @@ import { apiService } from '../../services/api';
 import { useEscapeClose } from '../../hooks/useEscapeClose';
 import { AutoRatioMedia } from '../ui/AutoRatioMedia';
 
-const API_ORIGIN = typeof window !== 'undefined' && window.location.port === '5173' ? 'http://127.0.0.1:8000' : '';
+import { API_ORIGIN } from '../../utils/devOrigin';
 // 相对产物 URL（/storage、/assets）在 dev 下必须回源，否则缩略图 404；存值保持原样，仅展示拼接
 const resolveUrl = (u?: string) => (u && u.startsWith('/') ? API_ORIGIN + u : (u || ''));
 

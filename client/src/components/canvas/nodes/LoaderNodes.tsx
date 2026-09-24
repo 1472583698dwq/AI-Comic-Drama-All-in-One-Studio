@@ -4,7 +4,7 @@ import { Image as ImageIcon, Video, Music, Type, Upload, Trash2 } from 'lucide-r
 import { apiService } from '../../../services/api';
 import { AutoRatioMedia } from '../../ui/AutoRatioMedia';
 
-const API_ORIGIN = window.location.port === '5173' ? 'http://127.0.0.1:8000' : '';
+import { API_ORIGIN } from '../../../utils/devOrigin';
 
 function getUrl(u?:string){ if(!u) return ''; return u.startsWith('/') ? API_ORIGIN+u : u; }
 

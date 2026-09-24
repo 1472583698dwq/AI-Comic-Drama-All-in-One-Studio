@@ -1,7 +1,5 @@
 import { Project, StoryboardShot, MCPToolDefinition } from '../types';
-
-const isDev = typeof window !== 'undefined' && window.location.port === '5173';
-const API_BASE_URL = isDev ? 'http://127.0.0.1:8000/api/v1' : '/api/v1';
+import { API_BASE_URL } from '../utils/devOrigin';
 
 function extractErrorMessage(res: Response, body: any): string {
   if (body?.detail) {

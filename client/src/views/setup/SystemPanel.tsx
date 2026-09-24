@@ -6,8 +6,7 @@ import {
 import { apiService } from '../../services/api';
 import { toast } from '../../stores/useDialogStore';
 
-const API_ORIGIN = typeof window !== 'undefined' && window.location.port === '5173'
-  ? 'http://127.0.0.1:8000' : '';
+import { API_ORIGIN } from '../../utils/devOrigin';
 
 /** 只能改 .env 的 Agent / 任务中心参数：界面里改不了，但至少别再是黑盒 */
 const ENV_ONLY: Array<{ key: string; def: string; desc: string }> = [

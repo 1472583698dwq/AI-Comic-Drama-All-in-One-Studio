@@ -31,12 +31,8 @@ import { HIGH_LEVEL_AGENT_SKILLS } from '../providerSkills';
 // 导演预设与 3D 舞台同源（景别/运镜全量一致，避免节点选不出来的断层）
 import { FRAMING_PRESETS, MOTION_PRESETS, framingShortLabel, motionShortLabel } from '../../director3d/directorPresets';
 
-const API_ORIGIN = typeof window !== 'undefined' && window.location.port === '5173' ? 'http://127.0.0.1:8000' : '';
-// 相对 /storage 产物 URL 在 dev（5173）下必须回源到后端，否则 Vite 直接 404，节点黑盒无法回显
-const resolveMediaUrl = (u: any): string => {
-  if (!u || typeof u !== 'string') return '';
-  return u.startsWith('/') ? API_ORIGIN + u : u;
-};
+// 相对 /storage 产物 URL 在 dev 下必须回源到后端（统一走 devOrigin）
+import { API_ORIGIN, resolveMediaUrl } from '../../../utils/devOrigin';
 
 // 统一的 Agent 卡片外壳
 const AgentShell: React.FC<{

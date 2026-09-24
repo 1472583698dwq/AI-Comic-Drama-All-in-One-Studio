@@ -17,7 +17,7 @@ import { SlotManagerModal } from './slots/SlotManagerModal';
 import { toast } from '../../stores/useDialogStore';
 import type { ProductionMode, ShotSlotContext } from './slots/types';
 
-const API_ORIGIN = 'http://127.0.0.1:8000';
+import { API_ORIGIN } from '../../utils/devOrigin';
 
 // 内置 Slot 注册（P0）：P1 时替换为插件 slots/*.json 加载，宿主不动
 registerBuiltinSlots();

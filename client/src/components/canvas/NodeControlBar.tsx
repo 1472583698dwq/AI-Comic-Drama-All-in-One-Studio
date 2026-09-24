@@ -15,17 +15,24 @@
 import React from 'react';
 import { X } from 'lucide-react';
 import { useCanvasStore } from '../../stores/useCanvasStore';
+import { useEscapeClose } from '../../hooks/useEscapeClose';
 import { NodeAgentConsole } from './NodeAgentConsole';
 
 const AGENT_NODE_TYPES = ['image', 'video', 'audio'];
 
-export const NodeControlBar: React.FC = () => {
+export const NodeControlBar: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
   const selectedNodeId = useCanvasStore((s) => s.selectedNodeId);
   const nodes = useCanvasStore((s) => s.nodes);
   const setSelectedNodeId = useCanvasStore((s) => s.setSelectedNodeId);
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
   const isAgentNode = !!selectedNode && AGENT_NODE_TYPES.includes(selectedNode.type || '');
+  const close = React.useCallback(() => {
+    if (onClose) onClose();
+    else setSelectedNodeId(null);
+  }, [onClose, setSelectedNodeId]);
+  // Esc 关闭：与全站弹窗同一套栈管理（LIFO，不会一次关穿多层）
+  useEscapeClose(true, close);
   if (!isAgentNode) return null;
 
   const kind = selectedNode!.type as 'image' | 'video' | 'audio';
@@ -37,9 +44,9 @@ export const NodeControlBar: React.FC = () => {
           <span className="text-[11px] font-bold text-violet-300">节点 Agent 控制台</span>
           <span className="text-[11px] text-white/40 hidden sm:inline">· 只说人话，Agent 选源 / 润色 / 组参 / 调 API</span>
           <button
-            onClick={() => setSelectedNodeId(null)}
+            onClick={close}
             className="ml-auto p-1 rounded hover:bg-white/10 text-white/40 hover:text-white"
-            title="收起（也可点画布空白）"
+            title="收起（也可点画布空白 / Esc）"
           >
             <X className="w-3.5 h-3.5" />
           </button>

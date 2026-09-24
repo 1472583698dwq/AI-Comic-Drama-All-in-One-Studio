@@ -17,7 +17,7 @@ import {
 import { useProjectStore } from '../../stores/useProjectStore';
 import { StoryboardShot } from '../../types';
 
-const API_ORIGIN = typeof window !== 'undefined' && window.location.port === '5173' ? 'http://127.0.0.1:8000' : '';
+import { API_ORIGIN } from '../../utils/devOrigin';
 
 export const MultiTrackTimeline: React.FC = () => {
   const { 
