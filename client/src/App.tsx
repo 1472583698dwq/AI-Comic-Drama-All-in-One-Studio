@@ -8,6 +8,7 @@ import { McpToolsModal } from './components/mcp/McpToolsModal';
 import { SkillStudioModal } from './components/skills/SkillStudioModal';
 import { SetupView } from './views/setup/SetupView';
 import { ProjectDashboard } from './views/ProjectDashboard';
+import { HomeView } from './views/HomeView';
 import { AgentModeView } from './views/AgentModeView';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
 import { ProviderManagerModal } from './components/provider/ProviderManagerModal';
@@ -34,11 +35,13 @@ const lazyView = (loader: () => Promise<any>) =>
   );
 
 const CreativeCanvas = lazyView(()=> import('./components/canvas/CreativeCanvas').then(m=> ({default: m.CreativeCanvas})));
+/** 角色设定：角色三视图与参考音频的唯一生产端（分镜/画布消费这些字段，故保留启用） */
+const CharacterStudio = lazyView(()=> import('./components/character/CharacterStudio').then(m=> ({default: m.CharacterStudio})));
 import { useProjectStore } from './stores/useProjectStore';
 import { useMcpStore } from './stores/useMcpStore';
 
 export function App() {
-  const { project, activeTab, apiError, clearApiError } = useProjectStore();
+  const { project, activeTab, apiError, clearApiError, isLoading } = useProjectStore();
   const { fetchTools } = useMcpStore();
 
   const [isExportOpen, setIsExportOpen] = useState(false);
@@ -53,7 +56,14 @@ export function App() {
     try { sessionStorage.removeItem('studio_chunk_reload_once'); } catch {}
     installGlobalDialogPatch();
     fetchTools().catch((e: any) => setMcpError(e?.message || 'MCP 服务连接失败'));
-    useProjectStore.getState().loadActiveProject();
+    // 启动友好化：自动恢复/接管项目；全新环境落首页（快速创建/模板入口在首页）
+    useProjectStore.getState().ensureActiveProject().then((status) => {
+      // 有项目时直达工作台：项目看板退居「管理入口」，不再作为首屏。
+      // 仅在启动接管成功且仍停留在看板时跳转一次；用户主动进的看板不受影响。
+      const st = useProjectStore.getState();
+      if (st.project && st.activeTab === 'projects') st.setActiveTab('canvas');
+      if (status === 'adopted') toast.info(`已自动打开最近项目「${st.project?.title || '未命名项目'}」`);
+    });
     const h = (e: any) => { setProviderEdit(e?.detail?.provider || null); setIsProviderOpen(true); };
     // 画布底部栏 / 导出节点派发的全局意图事件，此前无人监听导致按钮点了没反应
     const onOpenExport = () => setIsExportOpen(true);
@@ -86,11 +96,13 @@ export function App() {
   }, []);
 
   // 严格 UI 准入拦截：未选择或创建项目时，禁止停留在任何项目内部功能页，自动重定向至项目看板
+  // 首页/看板/设置属于全局页，放行。isLoading 期间跳过：ensureActiveProject 正在自动恢复项目。
   useEffect(() => {
-    if (!project && activeTab !== 'projects' && activeTab !== 'config') {
+    if (isLoading) return;
+    if (!project && activeTab !== 'home' && activeTab !== 'projects' && activeTab !== 'config') {
       useProjectStore.getState().setActiveTab('projects');
     }
-  }, [project, activeTab]);
+  }, [project, activeTab, isLoading]);
 
   return (
     <div className="h-screen w-screen flex flex-col bg-background text-gray-100 overflow-hidden">
@@ -116,8 +128,9 @@ export function App() {
         </div>
       )}
 
-      {/* 2. 左侧主导航 + 内容区（设置页为全屏，自带子导航） */}
-      <div className="flex-1 flex overflow-hidden">
+      {/* 2. 左侧主导航 + 内容区（设置页为全屏，自带子导航）
+             relative：画布态侧栏隐藏时，Sidebar 的悬浮展开按钮以此容器左上角定位 */}
+      <div className="flex-1 flex overflow-hidden relative">
         <Sidebar
           onOpenMcp={() => setIsMcpOpen(true)}
           onOpenSkills={() => setIsSkillsOpen(true)}
@@ -125,15 +138,21 @@ export function App() {
         />
         <main className="flex-1 flex flex-col overflow-hidden relative min-w-0">
           {/* ── 精简链路页签路由 ──────────────────────────────────────────────
-              只渲染 设置 / 项目看板 / AI 导演 / 素材库 / 创意画布 五个宿主。
-              已下线的分镜工作台（studio）/ 3D 片场（director3d）/ 多轨剪辑（timeline）/
-              角色设定（characters）由 store 的 normalizeTab 在执行跳转时重定向
-              （角色设定 → 素材库，其余 → 画布），此处兜底分支直接落到画布。 */}
-          {/* 兜底边界：任何视图运行时崩溃都显示可读错误 + 重试，而不是黑屏/白屏 */}
-          <ErrorBoundary name="当前页面">
+              只渲染 设置 / 项目看板 / AI 导演 / 素材库 / 角色设定 / 创意画布 六个宿主。
+              已下线的分镜工作台（studio）/ 3D 片场（director3d）/ 多轨剪辑（timeline）
+              由 store 的 normalizeTab 在执行跳转时重定向到画布，此处兜底分支也落到画布。
+              角色设定（characters）保留启用：它是三视图/参考音频的唯一生产端。 */}
+          {/* 兜底边界：任何视图运行时崩溃都显示可读错误 + 重试，而不是黑屏/白屏
+              key 绑定项目 id：切换项目时强制重挂载所有视图，清掉各视图按旧项目
+              初始化的本地状态（画布节点/素材列表/Agent 会话等），免刷新即时生效 */}
+          <ErrorBoundary name="当前页面" key={project?.id || 'no-project'}>
           {activeTab === 'config' ? (
             <ErrorBoundary name="设置中心">
               <SetupView />
+            </ErrorBoundary>
+          ) : activeTab === 'home' ? (
+            <ErrorBoundary name="首页">
+              <HomeView />
             </ErrorBoundary>
           ) : (!project || activeTab === 'projects') ? (
             <ProjectDashboard />
@@ -143,6 +162,12 @@ export function App() {
             </ErrorBoundary>
           ) : activeTab === 'assets' ? (
             <AssetLibrary />
+          ) : activeTab === 'characters' ? (
+            <ErrorBoundary name="角色设定">
+              <Suspense fallback={<div className="flex-1 flex items-center justify-center text-xs text-gray-500">角色设定加载中…</div>}>
+                <CharacterStudio />
+              </Suspense>
+            </ErrorBoundary>
           ) : (
             <Suspense fallback={<div className="flex-1 flex items-center justify-center text-xs text-gray-500">画布加载中…</div>}>
               <CreativeCanvas />
@@ -154,8 +179,9 @@ export function App() {
 
       {/* 3. 悬浮导演 Agent（仅当存在有效项目、且不在画布页时启用）
           画布页有专属的右侧 Agent 侧栏（CanvasAgentSidebar），两者共用同一份会话；
-          此处加 activeTab 闸门，避免画布上同时出现两个功能重复的导演 Agent 入口。 */}
-      {project && activeTab !== 'canvas' && <AgentChatDrawer />}
+          此处加 activeTab 闸门，避免画布上同时出现两个功能重复的导演 Agent 入口。
+          key 绑定项目 id：切换项目即重建会话侧栏，避免串到上一个项目的会话。 */}
+      {project && activeTab !== 'canvas' && <AgentChatDrawer key={project.id} />}
 
       {/* 3.1 选区级 AI 润色（多行文本域里选中文字才出现，只替换选区）。
              原先"聚焦就飘一个按钮"的 GlobalAiPolish 已移除：它从不消失、

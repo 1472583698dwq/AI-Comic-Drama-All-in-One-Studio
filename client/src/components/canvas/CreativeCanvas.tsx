@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ReactFlow, Background, Controls, MiniMap, useNodesState, useEdgesState, addEdge, Connection, Edge, Node, ReactFlowProvider, useReactFlow
+  ReactFlow, Background, Controls, ControlButton, MiniMap, useNodesState, useEdgesState, addEdge, Connection, Edge, Node, ReactFlowProvider, useReactFlow
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Search, Sparkles, Image as ImageIcon, Film, Box, Boxes, Library, Save, Download, Mic, Type, Plus, Wand2, Layers, PanelLeft, PanelLeftClose } from 'lucide-react';
+import { Search, Sparkles, Image as ImageIcon, Film, Box, Boxes, Library, Save, Download, Mic, Type, Plus, Wand2, Layers, PanelLeft, ChevronsUp, ArrowLeftRight, MoreHorizontal, Pencil, Trash2, Keyboard, X, FolderOpen } from 'lucide-react';
 import { useProjectListStore } from '../../stores/useProjectListStore';
 import { useThemeStore } from '../../stores/useThemeStore';
 import { useProjectStore } from '../../stores/useProjectStore';
@@ -88,8 +88,77 @@ const TEMPLATES = [
   { id: 't3', label: '连续镜头视频流', desc: '首帧 + 尾帧 → 连续动态视频', nodes: ['image', 'video'] },
 ];
 
+/** 工作台分块：悬浮条上的小块，点块即展开面板并定位到该小节 */
+type WorkbenchSection = 'template' | 'mine' | 'nodes' | 'assets';
+
+const WORKBENCH_TABS: Array<{ id: WorkbenchSection; label: string; icon: any }> = [
+  { id: 'template', label: '模板', icon: Wand2 },
+  { id: 'mine', label: '我的', icon: Sparkles },
+  { id: 'nodes', label: '节点', icon: Boxes },
+  { id: 'assets', label: '素材', icon: Library },
+];
+
+/** 顶部工具条「更多」菜单项样式（精简态使用） */
+const TOOLBAR_MENU_ITEM =
+  'w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-[11.5px] ' +
+  '[color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] hover:bg-surface-secondary transition-colors';
+
+/** 操作台小节标题 */
+const WorkbenchGroupTitle: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <div className="px-3 pt-3 pb-1 flex items-center gap-1.5 text-[10.5px] font-semibold tracking-wider [color:var(--color-text-muted)]">
+    {children}
+  </div>
+);
+
+/**
+ * 操作台条目（参考主流操作台样式）：图标方块 + 名称/说明两行 + 悬停出现的主操作。
+ * 整条可点击创建、可拖入画布；不用卡片盒子包裹。
+ */
+const WorkbenchRow: React.FC<{
+  icon: any;
+  iconCls?: string;
+  label: string;
+  desc?: string;
+  title?: string;
+  /** 悬停时右侧出现的主操作（默认「添加」） */
+  actionLabel?: string;
+  onClick?: () => void;
+  draggable?: boolean;
+  onDragStart?: (e: React.DragEvent) => void;
+}> = ({ icon: Icon, iconCls, label, desc, title, actionLabel = '添加', onClick, draggable, onDragStart }) => (
+  <div
+    role={onClick ? 'button' : undefined}
+    tabIndex={onClick ? 0 : undefined}
+    draggable={draggable}
+    onDragStart={onDragStart}
+    onClick={onClick}
+    onKeyDown={(e) => {
+      if (onClick && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onClick(); }
+    }}
+    title={title}
+    className="group flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-transparent hover:border-border hover:bg-surface-secondary transition-colors cursor-pointer select-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand active:cursor-grabbing"
+  >
+    <span className="w-8 h-8 rounded-lg bg-surface-secondary border border-border flex items-center justify-center shrink-0">
+      <Icon className={`w-4 h-4 ${iconCls || '[color:var(--color-text-secondary)]'}`} strokeWidth={1.7} />
+    </span>
+    <span className="min-w-0 flex-1">
+      <span className="block text-[13px] font-medium [color:var(--color-text-main)] truncate">{label}</span>
+      {desc && <span className="block text-[10.5px] [color:var(--color-text-muted)] truncate">{desc}</span>}
+    </span>
+    {onClick && (
+      <span
+        title={actionLabel}
+        aria-hidden="true"
+        className="w-6 h-6 rounded-md shrink-0 hidden group-hover:flex items-center justify-center [color:var(--color-text-muted)] group-hover:[color:var(--color-text-main)] group-hover:bg-surface-tertiary transition-colors"
+      >
+        <Plus className="w-3.5 h-3.5" strokeWidth={1.7} />
+      </span>
+    )}
+  </div>
+);
+
 const InnerCanvas: React.FC = () => {
-  const { project } = useProjectStore();
+  const { project, canvasRailOpen, setCanvasRailOpen } = useProjectStore();
   const { activeProjectId } = useProjectListStore();
   const { effectiveTheme } = useThemeStore();
   const { selectedNodeId, setSelectedNodeId } = useCanvasStore();
@@ -139,13 +208,67 @@ const InnerCanvas: React.FC = () => {
   const [canvasId, setCanvasId] = useState<string>('default');
   const [canvasList, setCanvasList] = useState<Array<{ id: string; name: string; updated_at: string; node_count: number }>>([]);
   const [showManager, setShowManager] = useState(false);
-  // 左侧工作台栏收起状态（持久化）；右侧 Agent 侧栏的收起状态由 CanvasAgentSidebar 自持
-  const [leftCollapsed, setLeftCollapsed] = useState<boolean>(() => {
-    try { return localStorage.getItem('canvas_left_panel_collapsed') === '1'; } catch { return false; }
-  });
+  // 左侧工作台：悬浮条 + 下拉面板（不再占用画布宽度）
+  // 条上分块 → 点块展开面板并直接滚到该小节；点外部 / Esc / 再点同块收起
+  const [workbenchOpen, setWorkbenchOpen] = useState(false);
+  const [workbenchSection, setWorkbenchSection] = useState<WorkbenchSection>('template');
+  const workbenchRef = useRef<HTMLDivElement>(null);
+  const workbenchSectionRefs = useRef<Record<string, HTMLElement | null>>({});
   useEffect(() => {
-    try { localStorage.setItem('canvas_left_panel_collapsed', leftCollapsed ? '1' : '0'); } catch { /* ignore */ }
-  }, [leftCollapsed]);
+    if (!workbenchOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setWorkbenchOpen(false); };
+    const onDown = (e: MouseEvent) => {
+      // 注意：本文件从 @xyflow/react 引入了 Node（节点类型），DOM 判断要用 Element
+      const t = e.target;
+      if (t instanceof Element && !workbenchRef.current?.contains(t)) setWorkbenchOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onDown);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousedown', onDown);
+    };
+  }, [workbenchOpen]);
+  // 展开/切换分块后滚到对应小节（scroll-behavior 由容器 motion-safe:scroll-smooth 决定，
+  // prefers-reduced-motion 下自动降级为瞬时跳转）
+  useEffect(() => {
+    if (!workbenchOpen) return;
+    const el = workbenchSectionRefs.current[workbenchSection];
+    if (!el) return;
+    const t = window.setTimeout(() => el.scrollIntoView({ block: 'start' }), 20);
+    return () => window.clearTimeout(t);
+  }, [workbenchOpen, workbenchSection]);
+  // 画布顶部工具条：按自身可用宽度切「完整 / 精简」两态（低频动作在精简态收入「更多」）
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const toolbarMenuRef = useRef<HTMLDivElement>(null);
+  const [toolbarLevel, setToolbarLevel] = useState<'compact' | 'normal' | 'wide'>('normal');
+  const [toolbarMenuOpen, setToolbarMenuOpen] = useState(false);
+  useEffect(() => {
+    const el = toolbarRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const measure = () => {
+      const w = el.clientWidth;
+      setToolbarLevel(w >= 1280 ? 'wide' : w >= 1000 ? 'normal' : 'compact');
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [pid]);
+  useEffect(() => {
+    if (!toolbarMenuOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setToolbarMenuOpen(false); };
+    const onDown = (e: MouseEvent) => {
+      const t = e.target;
+      if (t instanceof Element && !toolbarMenuRef.current?.contains(t)) setToolbarMenuOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onDown);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousedown', onDown);
+    };
+  }, [toolbarMenuOpen]);
   // 节点右键菜单（添加到会话 / 删除）
   const [nodeMenu, setNodeMenu] = useState<NodeMenuState | null>(null);
   const canvasIdRef = useRef<string>('default');
@@ -352,7 +475,7 @@ const InnerCanvas: React.FC = () => {
     }
   }, [nodes]);
 
-  // ⚠️ 必须 memo：ReactFlow 把 onSelectionChange 放进 effect 依赖，
+  // 必须 memo：ReactFlow 把 onSelectionChange 放进 effect 依赖，
   // 传内联箭头会每次渲染重订阅→回调→setState→再渲染，直接 Maximum update depth
   const handleSelectionChange = useCallback(({ nodes: sel }: { nodes: Node[] }) => {
     setSelectedNodeId(sel.length ? sel[sel.length - 1].id : null);
@@ -1042,7 +1165,9 @@ const InnerCanvas: React.FC = () => {
   if (!pid) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-3" style={{ background: isLight ? '#E8ECF1' : '#08080B' }}>
-        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-brand to-accent-pink flex items-center justify-center text-xl shadow-lg shadow-brand/20">📁</div>
+        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-brand to-accent-pink flex items-center justify-center shadow-lg shadow-brand/20">
+          <FolderOpen className="w-5 h-5 text-white" strokeWidth={1.7} />
+        </div>
         <p className="text-sm [color:var(--color-text-main)] font-semibold">请先在「漫剧制作 → 项目看板」创建或打开项目</p>
         <p className="text-xs text-gray-400">画布按项目隔离持久化</p>
         <button onClick={() => useProjectStore.getState().setActiveTab('projects')} className="px-4 py-2 rounded-xl bg-brand text-white text-xs font-bold hover:bg-brand-light shadow-md">前往项目看板</button>
@@ -1061,218 +1186,102 @@ const InnerCanvas: React.FC = () => {
     toast.info('节点已删除');
   };
 
+  /** 工作台分块：点块 → 展开面板并定位到该小节；再点同一块收起 */
+  const openWorkbench = (section: WorkbenchSection) => {
+    if (workbenchOpen && workbenchSection === section) { setWorkbenchOpen(false); return; }
+    setWorkbenchSection(section);
+    setWorkbenchOpen(true);
+  };
+  const setWorkbenchSectionRef = (id: WorkbenchSection) => (el: HTMLElement | null) => {
+    workbenchSectionRefs.current[id] = el;
+  };
+  /** 自定义 / 扩展节点入口：设置 → 插件中心 */
+  const goPluginCenter = () => {
+    try { localStorage.setItem('config_pending_tab', 'plugins'); } catch { /* ignore */ }
+    useProjectStore.getState().setActiveTab('config');
+  };
+  /** 新建画布并切换（顶部工具条完整/精简两态共用） */
+  const handleCreateCanvas = async () => {
+    const n = canvasList.length + 1;
+    const cid = await createCanvas(`画布${n}`);
+    if (cid) toast.success(`已新建画布${n}并切换`);
+  };
+  /** 重命名当前画布 */
+  const handleRenameCanvas = async () => {
+    if (!pid) return;
+    const cur = canvasList.find(c => c.id === canvasIdRef.current);
+    const nv = await promptAsync({
+      title: '重命名画布',
+      message: '请输入新的画布名称：',
+      defaultValue: cur?.name || currentCanvasName,
+      placeholder: '画布名称'
+    });
+    if (!nv || !nv.trim()) return;
+    try {
+      await apiService.renameProjectCanvas(pid, canvasIdRef.current, nv.trim());
+      const r = await apiService.listProjectCanvases(pid).catch(() => null);
+      if (r) setCanvasList(r.canvases || []);
+      toast.success(`画布已更名为「${nv.trim()}」`);
+    } catch (e: any) { toast.error(e.message || '重命名失败'); }
+  };
+  /** 删除当前画布 */
+  const handleDeleteCanvas = async () => {
+    if (!pid) return;
+    if (canvasList.length <= 1) { toast.warning('至少保留一个画布'); return; }
+    const cur = canvasList.find(c => c.id === canvasIdRef.current)?.name || currentCanvasName;
+    const confirmed = await confirmAsync({
+      title: '删除画布',
+      message: `确定要删除画布「${cur}」吗？\n画布内的所有节点与编排数据将丢失且无法撤销。`,
+      isDanger: true,
+      confirmText: '确认删除',
+      cancelText: '取消'
+    });
+    if (!confirmed) return;
+    try {
+      const r: any = await apiService.deleteProjectCanvas(pid, canvasIdRef.current);
+      const list = await apiService.listProjectCanvases(pid).catch(() => null);
+      if (list) setCanvasList(list.canvases || []);
+      const next = r?.active_canvas_id || 'default';
+      suppressSaveRef.current = true;
+      setNodes([]); setEdges([]); setSelectedNodeId(null);
+      setCanvasId(next);
+      toast.success(`已删除画布「${cur}」`);
+    } catch (e: any) { toast.error(e.message || '删除失败'); }
+  };
+  /** 清空当前画布 */
+  const handleClearCanvas = async () => {
+    const ok = await confirmAsync({
+      title: '清空画布',
+      message: '确定要清空当前画布上的所有节点和连线吗？',
+      isDanger: true,
+      confirmText: '确认清空',
+      cancelText: '取消'
+    });
+    if (ok) { setNodes([]); setEdges([]); setSelectedNodeId(null); toast.info('画布已清空'); }
+  };
+  /** 横向排布：把所有节点排成一行（原顶栏按钮，现并入左下角画布控件竖条） */
+  const handleArrangeHorizontally = () => {
+    if (!nodes.length) return;
+    setNodes(nds => nds.map((n, i) => ({ ...n, position: { x: 120 + i * 400, y: 120 } })));
+  };
+
   return (
     <div className="flex-1 flex overflow-hidden" style={{ background: isLight ? '#E8ECF1' : '#08080B', cursor: 'default' }}>
-      {/* 左侧：工作台栏（可收起；收起态为图标轨） */}
-      <div className={`${leftCollapsed ? 'w-[52px]' : 'w-[280px]'} bg-surface border-r border-border flex flex-col shrink-0 transition-[width] duration-200`}>
-        <div className={`h-12 border-b border-border flex items-center gap-2 shrink-0 bg-surface ${leftCollapsed ? 'justify-center px-0' : 'px-4'}`}>
-          {leftCollapsed ? (
-            <button onClick={() => setLeftCollapsed(false)} title="展开工作台" className="p-2 rounded-lg text-brand hover:bg-surface-secondary transition-colors">
-              <PanelLeft className="w-4 h-4" />
-            </button>
-          ) : (
-            <>
-              <div className="w-7 h-7 rounded-lg bg-brand/10 border border-brand/20 flex items-center justify-center shrink-0"><Layers className="w-3.5 h-3.5 text-brand" /></div>
-              <span className="text-sm font-bold [color:var(--color-text-main)] whitespace-nowrap">漫剧工作流</span>
-              <span className="ml-auto text-[10px] px-2 py-1 rounded-full bg-surface-secondary border border-border [color:var(--color-text-muted)] font-mono">MiniMax Agent</span>
-              <button onClick={() => setLeftCollapsed(true)} title="收起工作台" className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-secondary transition-colors shrink-0">
-                <PanelLeftClose className="w-3.5 h-3.5" />
-              </button>
-            </>
-          )}
-        </div>
-
-        {/* 收起态：图标轨（一键模板 / 保存 / 导出），不占画布横向空间 */}
-        {leftCollapsed && (
-          <div className="flex-1 flex flex-col items-center gap-2 py-3">
-            <button onClick={() => addTemplate(TEMPLATES[0])} title="一键标准链路：剧本 → 生图 → 视频" className="p-2 rounded-xl bg-surface-secondary border border-border hover:border-brand/40 hover:bg-surface-tertiary transition-all">
-              <Wand2 className="w-4 h-4 text-violet-400" />
-            </button>
-            <button onClick={handleManualSave} disabled={saving} title="保存画布" className="p-2 rounded-xl bg-surface-secondary border border-border hover:border-brand/40 hover:bg-surface-tertiary disabled:opacity-40 transition-all">
-              <Save className="w-4 h-4 text-brand" />
-            </button>
-            <button onClick={() => window.dispatchEvent(new CustomEvent('canvas-export-shots'))} title="导出为分镜工程" className="p-2 rounded-xl bg-surface-secondary border border-border hover:border-brand/40 hover:bg-surface-tertiary transition-all">
-              <Download className="w-4 h-4 [color:var(--color-text-main)]" />
-            </button>
-          </div>
-        )}
-
-        <div className={`p-3 space-y-4 flex-1 overflow-y-auto ${leftCollapsed ? 'hidden' : ''}`}>
-          {/* 一键模板 */}
-          <div>
-            <div className="text-xs font-bold mb-2 [color:var(--color-text-main)]">一键模板</div>
-            <div className="space-y-2">
-              {TEMPLATES.map(t => (
-                <button key={t.id} onClick={() => addTemplate(t)} className="w-full text-left p-3 rounded-2xl border border-border bg-surface-secondary hover:border-brand/40 hover:bg-surface-tertiary hover:shadow-md transition-all">
-                  <div className="text-sm font-semibold [color:var(--color-text-main)]">{t.label}</div>
-                  <div className="text-xs [color:var(--color-text-muted)] mt-0.5">{t.desc}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Creator 模板：Agent 创造模式沉淀，可从模板新建节点链 */}
-          <div>
-            <div className="text-xs font-bold mb-2 [color:var(--color-text-main)] flex items-center gap-1.5">
-              我的模板 · Creator
-              <button onClick={refreshCreatorTemplates} title="刷新模板列表" className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-violet-500/10 border border-violet-500/30 text-violet-300 hover:bg-violet-500/20">刷新</button>
-            </div>
-            {creatorTemplates.length === 0 ? (
-              <div className="text-[11px] [color:var(--color-text-muted)] px-1">暂无。去 Agent 创造模式说“做个漫剧模板”，持久化后即出现在这里。</div>
-            ) : (
-              <div className="space-y-2">
-                {creatorTemplates.map((t: any) => (
-                  <button key={t.id} onClick={() => addCreatorTemplate(t)} title="从模板新建节点链到当前画布" className="w-full text-left p-3 rounded-2xl border border-violet-500/25 bg-violet-500/5 hover:border-violet-500/50 hover:bg-violet-500/10 hover:shadow-md transition-all">
-                    <div className="text-sm font-semibold [color:var(--color-text-main)]">{t.name || t.id}</div>
-                    <div className="text-xs [color:var(--color-text-muted)] mt-0.5">{(t.nodes || []).length} 节点 · 点击从模板新建</div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* 6 核心 Agent 节点 */}
-          <div>
-            <div className="text-xs font-bold mb-2 [color:var(--color-text-main)]">核心 Agent 节点</div>
-            <div className="grid grid-cols-2 gap-2">
-              {CORE_LIBRARY.map(n => (
-                <div
-                  key={n.type}
-                  draggable
-                  onDragStart={e => e.dataTransfer.setData('application/canvas-nodetype', n.type)}
-                  onClick={() => {
-                    const pos = { x: 120 + nodes.length * 40, y: 120 + nodes.length * 40 };
-                    const node = createNode(n.type, pos);
-                    setNodes(nds => [...nds, node]);
-                    setSelectedNodeId(node.id);
-                  }}
-                  className="flex flex-col gap-1.5 p-3 rounded-2xl bg-surface-secondary border border-border hover:border-brand/40 hover:bg-surface-tertiary hover:shadow-md cursor-grab active:cursor-grabbing transition-all"
-                >
-                  <n.icon className={`w-5 h-5 ${n.color}`} />
-                  <div>
-                    <div className="text-xs font-bold [color:var(--color-text-main)] leading-none">{n.label}</div>
-                    <div className="text-[10px] [color:var(--color-text-muted)] mt-1">{n.desc}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* 自定义代码节点（来自插件包 custom_nodes，一段代码即一节点） */}
-          <div>
-            <div className="text-xs font-bold mb-2 [color:var(--color-text-main)] flex items-center gap-1.5">
-              自定义节点
-              <button onClick={() => { try { localStorage.setItem('config_pending_tab', 'plugins'); } catch { /* ignore */ } useProjectStore.getState().setActiveTab('config'); }} title="去设置 → 插件中心安装含自定义节点的插件包"
-                className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-teal-500/10 border border-teal-500/30 text-teal-300 hover:bg-teal-500/20">插件安装</button>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              {customNodes.map((c: any) => (
-                <div
-                  key={c.id}
-                  draggable
-                  onDragStart={e => e.dataTransfer.setData('application/canvas-nodetype', 'custom')}
-                  onClick={() => {
-                    const pos = { x: 120 + nodes.length * 40, y: 120 + nodes.length * 40 };
-                    const node = createNode('custom', pos, { custom_node_id: c.id });
-                    setNodes(nds => [...nds, node]);
-                    setSelectedNodeId(node.id);
-                  }}
-                  className="flex flex-col gap-1.5 p-3 rounded-2xl bg-surface-secondary border border-border hover:border-teal-500/40 hover:bg-surface-tertiary hover:shadow-md cursor-grab active:cursor-grabbing transition-all"
-                >
-                  <Boxes className="w-5 h-5 text-teal-400" />
-                  <div>
-                    <div className="text-xs font-bold [color:var(--color-text-main)] leading-none truncate">{c.name}</div>
-                    <div className="text-[10px] [color:var(--color-text-muted)] mt-1">{c.kind}/{c.language}</div>
-                  </div>
-                </div>
-              ))}
-              {customNodes.length === 0 && (
-                <div className="col-span-2 p-3 rounded-2xl border border-dashed border-border text-[11px] [color:var(--color-text-muted)]">
-                  暂无自定义节点，去设置 → 插件中心安装含节点的插件包
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* 声明式扩展节点（来自插件包 canvas_nodes，无需前端代码） */}
-          <div>
-            <div className="text-xs font-bold mb-2 [color:var(--color-text-main)] flex items-center gap-1.5">
-              扩展节点
-              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 font-mono">canvas_nodes</span>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              {extNodes.map((s: any) => (
-                <div
-                  key={s.id}
-                  draggable
-                  onDragStart={e => {
-                    e.dataTransfer.setData('application/canvas-nodetype', 'ext-node');
-                    e.dataTransfer.setData('application/canvas-nodeid', s.id);
-                  }}
-                  onClick={() => {
-                    const pos = { x: 120 + nodes.length * 40, y: 120 + nodes.length * 40 };
-                    const node = createNode('ext-node', pos, { canvas_node_id: s.id, definition: s });
-                    setNodes(nds => [...nds, node]);
-                    setSelectedNodeId(node.id);
-                  }}
-                  className="flex flex-col gap-1.5 p-3 rounded-2xl bg-surface-secondary border border-border hover:border-cyan-500/40 hover:bg-surface-tertiary hover:shadow-md cursor-grab active:cursor-grabbing transition-all"
-                >
-                  <Wand2 className="w-5 h-5 text-cyan-400" />
-                  <div>
-                    <div className="text-xs font-bold [color:var(--color-text-main)] leading-none truncate">{s.name}</div>
-                    <div className="text-[10px] [color:var(--color-text-muted)] mt-1 truncate">{(s.inputs || []).length} 入 / {(s.outputs || []).length} 出 · {s.kind || 'utility'}</div>
-                  </div>
-                </div>
-              ))}
-              {extNodes.length === 0 && (
-                <div className="col-span-2 p-3 rounded-2xl border border-dashed border-border text-[11px] [color:var(--color-text-muted)]">
-                  暂无扩展节点：插件包声明 canvas_nodes 后在此出现
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* 素材库 */}
-          <div className="rounded-2xl border border-border bg-surface p-3">
-            <div className="text-xs font-bold [color:var(--color-text-main)] mb-2 flex items-center gap-1.5"><Library className="w-3.5 h-3.5 text-brand" /> 素材库 <span className="ml-auto text-[10px] [color:var(--color-text-muted)]">{assets.length} 个</span></div>
-            <div className="grid grid-cols-2 gap-2 max-h-[160px] overflow-y-auto pr-1 items-start">
-              {assets.map((a: any) => {
-                const url = a.thumb_url || a.file_url;
-                const abs = resolveMediaUrl(url);
-                return (
-                  <div key={a.id} draggable onDragStart={e => { e.dataTransfer.setData('application/canvas-assetid', a.id); e.dataTransfer.setData('text/plain', abs || url); }} className="group bg-surface-secondary border border-border rounded-xl overflow-hidden cursor-grab hover:border-brand/30 hover:shadow-md transition-all">
-                    {abs ? (
-                      <AutoRatioMedia src={abs} fallbackAspect="1/1" className="bg-surface-secondary" mediaClassName="group-hover:scale-[1.02] transition-transform" />
-                    ) : (
-                      <div className="aspect-square bg-surface-secondary flex items-center justify-center overflow-hidden"><ImageIcon className="w-5 h-5 text-gray-500" /></div>
-                    )}
-                    <div className="p-1.5"><div className="text-[11px] font-medium truncate [color:var(--color-text-main)]">{a.name}</div></div>
-                  </div>
-                );
-              })}
-              {assets.length === 0 && <div className="col-span-2 text-xs [color:var(--color-text-muted)] text-center py-4">暂无素材</div>}
-            </div>
-          </div>
-        </div>
-
-        <div className={`p-3 border-t border-border space-y-2 bg-surface-secondary/30 ${leftCollapsed ? 'hidden' : ''}`}>
-          <button onClick={handleManualSave} disabled={saving} className="w-full py-2.5 rounded-xl bg-brand text-white text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-40 hover:bg-brand-light shadow-md shadow-brand/20 transition-colors"><Save className="w-3.5 h-3.5" />{saving ? '保存中' : '保存画布'}</button>
-          <button onClick={() => window.dispatchEvent(new CustomEvent('canvas-export-shots'))} className="w-full py-2 rounded-xl bg-surface-secondary border border-border text-xs font-bold [color:var(--color-text-main)] flex items-center justify-center gap-1.5 hover:bg-surface-tertiary transition-colors"><Download className="w-3.5 h-3.5" /> 导出为分镜工程</button>
-        </div>
-      </div>
-
       {/* 中间无限画布 */}
       <div ref={wrapperRef} className="flex-1 relative flex flex-col min-w-0" style={{ background: isLight ? '#E8ECF1' : '#08080B' }} onDrop={onDrop} onDragOver={onDragOver}>
-        <div className="h-11 px-4 border-b border-border bg-surface flex items-center gap-2 shrink-0">
-          <div className="flex items-center gap-2 text-xs">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow shadow-emerald-500/30" />
-            <span className="[color:var(--color-text-secondary)]">项目</span>
-            <span className="font-mono [color:var(--color-text-main)] font-bold">{pid.slice(0, 8)}</span>
-            <span className="[color:var(--color-text-muted)] hidden sm:inline">· 点卡片右侧 + 快速衍生 · 点击卡片在底部控制台操作</span>
+        {/* 画布顶部工具条：完整态（wide/normal）与精简态（compact，窄屏时低频操作收入「更多」） */}
+        <div ref={toolbarRef} className="h-11 px-4 border-b border-border bg-surface flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2 text-xs min-w-0">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow shadow-emerald-500/30 shrink-0" />
+            <span className="[color:var(--color-text-secondary)] shrink-0">项目</span>
+            <span className="font-mono [color:var(--color-text-main)] font-bold shrink-0">{pid.slice(0, 8)}</span>
+            {toolbarLevel === 'wide' && (
+              <span className="[color:var(--color-text-muted)] truncate">· 点卡片右侧 + 快速衍生 · 点击卡片在底部控制台操作</span>
+            )}
           </div>
           <div className="flex-1" />
-          <div className="flex items-center gap-2">
-            <select value={canvasId} onChange={e=>switchCanvas(e.target.value)} title="隶属画布：分镜视频在此画布生成" className="px-2 py-1 rounded-full bg-surface-secondary border border-border text-xs [color:var(--color-text-main)] focus:outline-none max-w-[160px]">
+          <div className="flex items-center gap-2 shrink-0">
+            <select value={canvasId} onChange={e=>switchCanvas(e.target.value)} title="隶属画布：分镜视频在此画布生成" className={`px-2 py-1 rounded-full bg-surface-secondary border border-border text-xs [color:var(--color-text-main)] focus:outline-none ${toolbarLevel === 'compact' ? 'max-w-[104px]' : 'max-w-[160px]'}`}>
               {canvasList.length === 0 && <option value={canvasId}>{currentCanvasName}</option>}
               {canvasList.map(c=> <option key={c.id} value={c.id}>{c.name}（{c.node_count}节点）</option>)}
             </select>
@@ -1286,62 +1295,315 @@ const InnerCanvas: React.FC = () => {
               onChanged={() => { if (pid) apiService.listProjectCanvases(pid).then(r => setCanvasList(r.canvases || [])).catch(() => {}); }}
             />
 
-            <button onClick={async()=>{ const n = canvasList.length + 1; const cid = await createCanvas(`画布${n}`); if (cid) toast.success(`已新建画布${n}并切换`); }} className="px-3 py-1 rounded-full bg-surface-secondary border border-border text-xs font-medium [color:var(--color-text-main)] hover:bg-surface-tertiary transition-colors">+ 新画布</button>
-            <button onClick={async()=>{
-              if (!pid) return;
-              const cur = canvasList.find(c => c.id === canvasIdRef.current);
-              const nv = await promptAsync({
-                title: '重命名画布',
-                message: '请输入新的画布名称：',
-                defaultValue: cur?.name || currentCanvasName,
-                placeholder: '画布名称'
-              });
-              if (!nv || !nv.trim()) return;
-              try {
-                await apiService.renameProjectCanvas(pid, canvasIdRef.current, nv.trim());
-                const r = await apiService.listProjectCanvases(pid).catch(() => null);
-                if (r) setCanvasList(r.canvases || []);
-                toast.success(`画布已更名为「${nv.trim()}」`);
-              } catch (e: any) { toast.error(e.message || '重命名失败'); }
-            }} className="px-3 py-1 rounded-full bg-surface-secondary border border-border text-xs font-medium [color:var(--color-text-main)] hover:bg-surface-tertiary transition-colors" title="重命名当前画布">✎</button>
-            <button onClick={async()=>{
-              if (!pid) return;
-              if (canvasList.length <= 1) { toast.warning('至少保留一个画布'); return; }
-              const cur = canvasList.find(c => c.id === canvasIdRef.current)?.name || currentCanvasName;
-              const confirmed = await confirmAsync({
-                title: '删除画布',
-                message: `确定要删除画布「${cur}」吗？\n画布内的所有节点与编排数据将丢失且无法撤销。`,
-                isDanger: true,
-                confirmText: '确认删除',
-                cancelText: '取消'
-              });
-              if (!confirmed) return;
-              try {
-                const r: any = await apiService.deleteProjectCanvas(pid, canvasIdRef.current);
-                const list = await apiService.listProjectCanvases(pid).catch(() => null);
-                if (list) setCanvasList(list.canvases || []);
-                const next = r?.active_canvas_id || 'default';
-                suppressSaveRef.current = true;
-                setNodes([]); setEdges([]); setSelectedNodeId(null);
-                setCanvasId(next);
-                toast.success(`已删除画布「${cur}」`);
-              } catch (e: any) { toast.error(e.message || '删除失败'); }
-            }} className="w-7 h-7 rounded-full bg-surface-secondary border border-border text-[color:var(--color-text-muted)] hover:text-red-400 flex items-center justify-center transition-colors" title="删除当前画布">🗑</button>
-            <span className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-secondary border border-border text-[10px] text-[color:var(--color-text-muted)] whitespace-nowrap"
-              title="Ctrl/⌘+C 复制 · Ctrl/⌘+V 粘贴 · Ctrl/⌘+Z 撤销 · Ctrl/⌘+Y 重做 · Delete 删除；Shift+拖 框选，Ctrl/⌘+点 多选">
-              ⌨️ ⌘C/V 复制粘贴 · ⌘Z/Y 撤销重做 · Del 删除
-            </span>
-            <button onClick={() => setNodes(nds => nds.map((n, i) => ({ ...n, position: { x: 120 + i * 400, y: 120 } })))} className="px-3 py-1 rounded-full bg-surface-secondary border border-border text-xs font-medium [color:var(--color-text-main)] hover:bg-surface-tertiary transition-colors">横向排布</button>
-            <button onClick={async () => { 
-              const ok = await confirmAsync({
-                title: '清空画布',
-                message: '确定要清空当前画布上的所有节点和连线吗？',
-                isDanger: true,
-                confirmText: '确认清空',
-                cancelText: '取消'
-              });
-              if (ok) { setNodes([]); setEdges([]); setSelectedNodeId(null); toast.info('画布已清空'); } 
-            }} className="w-7 h-7 rounded-full bg-surface-secondary border border-border text-[color:var(--color-text-muted)] hover:text-red-400 flex items-center justify-center transition-colors" title="清空">×</button>
+            {/* 完整态：画布级低频操作直接铺开（快捷键提示仅在很宽时出现） */}
+            {toolbarLevel !== 'compact' && (
+              <>
+                <button onClick={handleCreateCanvas} className="px-3 py-1 rounded-full bg-surface-secondary border border-border text-xs font-medium [color:var(--color-text-main)] hover:bg-surface-tertiary transition-colors">+ 新画布</button>
+                <button onClick={handleRenameCanvas} aria-label="重命名当前画布" title="重命名当前画布" className="w-7 h-7 rounded-full bg-surface-secondary border border-border [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] flex items-center justify-center transition-colors">
+                  <Pencil className="w-3.5 h-3.5" strokeWidth={1.7} />
+                </button>
+                <button onClick={handleDeleteCanvas} aria-label="删除当前画布" title="删除当前画布" className="w-7 h-7 rounded-full bg-surface-secondary border border-border [color:var(--color-text-muted)] hover:text-red-400 flex items-center justify-center transition-colors">
+                  <Trash2 className="w-3.5 h-3.5" strokeWidth={1.7} />
+                </button>
+                {toolbarLevel === 'wide' && (
+                  <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-secondary border border-border text-[10px] [color:var(--color-text-muted)] whitespace-nowrap"
+                    title="Ctrl/⌘+C 复制 · Ctrl/⌘+V 粘贴 · Ctrl/⌘+Z 撤销 · Ctrl/⌘+Y 重做 · Delete 删除；Shift+拖 框选，Ctrl/⌘+点 多选">
+                    <Keyboard className="w-3.5 h-3.5 shrink-0" strokeWidth={1.7} />
+                    ⌘C/V 复制粘贴 · ⌘Z/Y 撤销重做 · Del 删除
+                  </span>
+                )}
+              </>
+            )}
+
+            {/* 精简态：同一批操作收入「更多」，避免窄屏挤压/换行 */}
+            {toolbarLevel === 'compact' && (
+              <div className="relative" ref={toolbarMenuRef}>
+                <button
+                  onClick={() => setToolbarMenuOpen(v => !v)}
+                  aria-haspopup="menu"
+                  aria-expanded={toolbarMenuOpen}
+                  aria-label="更多画布操作"
+                  title="更多画布操作"
+                  className={`w-7 h-7 rounded-full border flex items-center justify-center transition-colors ${
+                    toolbarMenuOpen
+                      ? 'bg-brand/15 text-brand border-brand/40'
+                      : 'bg-surface-secondary border-border [color:var(--color-text-muted)] hover:[color:var(--color-text-main)]'
+                  }`}
+                >
+                  <MoreHorizontal className="w-3.5 h-3.5" strokeWidth={1.7} />
+                </button>
+                <div
+                  role="menu"
+                  aria-label="更多画布操作"
+                  aria-hidden={!toolbarMenuOpen}
+                  className={`absolute right-0 top-[calc(100%+6px)] w-[200px] p-1 rounded-[14px] bg-surface border border-border shadow-xl z-40 origin-top-right transition-all duration-[260ms] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none ${
+                    toolbarMenuOpen
+                      ? 'opacity-100 scale-100 visible pointer-events-auto'
+                      : 'opacity-0 scale-[.98] invisible pointer-events-none'
+                  }`}
+                >
+                  <button role="menuitem" className={TOOLBAR_MENU_ITEM} onClick={() => { setToolbarMenuOpen(false); handleCreateCanvas(); }}>
+                    <Plus className="w-4 h-4 shrink-0" strokeWidth={1.7} />新建画布
+                  </button>
+                  <button role="menuitem" className={TOOLBAR_MENU_ITEM} onClick={() => { setToolbarMenuOpen(false); handleRenameCanvas(); }}>
+                    <Pencil className="w-4 h-4 shrink-0" strokeWidth={1.7} />重命名画布
+                  </button>
+                  <button role="menuitem" className={`${TOOLBAR_MENU_ITEM} hover:text-red-400 hover:bg-red-500/10`} onClick={() => { setToolbarMenuOpen(false); handleDeleteCanvas(); }}>
+                    <Trash2 className="w-4 h-4 shrink-0" strokeWidth={1.7} />删除画布
+                  </button>
+                  <div className="h-px bg-border-subtle mx-1 my-1" />
+                  <div className="px-2.5 py-1 text-[10.5px] leading-relaxed [color:var(--color-text-muted)]">
+                    ⌘C/V 复制粘贴 · ⌘Z/Y 撤销重做 · Del 删除
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <button onClick={handleClearCanvas} aria-label="清空画布" title="清空画布" className="w-7 h-7 rounded-full bg-surface-secondary border border-border [color:var(--color-text-muted)] hover:text-red-400 flex items-center justify-center transition-colors">
+              <X className="w-3.5 h-3.5" strokeWidth={1.7} />
+            </button>
+          </div>
+        </div>
+
+        {/* ── 画布操作台条（左上角，left-3 / top-[52px]）──
+              · 第一条按钮 = 唤出系统左侧栏（画布内不再单独悬浮一个图标按钮）
+              · 分块（模板 / 我的 / 节点 / 素材）：点块 → 展开操作台并直接滚到该小节 */}
+        <div ref={workbenchRef} className="absolute left-3 top-[52px] bottom-3 z-30 flex flex-col items-start gap-2 pointer-events-none">
+          {/* 悬浮条 */}
+          <div className="pointer-events-auto flex items-center gap-0.5 p-1 rounded-md bg-surface border border-border shadow-md select-none">
+            <button
+              onClick={() => setCanvasRailOpen(!canvasRailOpen)}
+              aria-pressed={canvasRailOpen}
+              aria-label={canvasRailOpen ? '收起系统左侧栏' : '展开系统左侧栏'}
+              title={canvasRailOpen ? '收起系统左侧栏' : '展开系统左侧栏'}
+              className={`w-7 h-7 inline-flex items-center justify-center rounded-md transition-colors ${
+                canvasRailOpen
+                  ? 'bg-brand/15 text-brand'
+                  : '[color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-secondary'
+              }`}
+            >
+              <PanelLeft className="w-4 h-4" strokeWidth={1.7} />
+            </button>
+            <span className="w-px h-4 bg-border-subtle mx-0.5 shrink-0" />
+            {WORKBENCH_TABS.map((t) => {
+              const on = workbenchOpen && workbenchSection === t.id;
+              const Icon = t.icon;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => openWorkbench(t.id)}
+                  aria-current={on ? 'true' : undefined}
+                  title={`${t.label}：展开画布操作台并定位到该分区`}
+                  className={`h-7 px-2 inline-flex items-center gap-1 rounded-md text-[11.5px] font-medium transition-colors ${
+                    on
+                      ? 'bg-brand/15 text-brand'
+                      : '[color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] hover:bg-surface-secondary'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5" strokeWidth={1.7} />
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* 画布操作台：高度占满画布列可用高度（宽 248px 浮层，不占画布宽度） */}
+          <div
+            role="dialog"
+            aria-label="画布操作台"
+            aria-hidden={!workbenchOpen}
+            className={`w-[248px] flex-1 min-h-0 flex flex-col rounded-[18px] bg-surface border border-border shadow-xl overflow-hidden origin-top-left transition-all duration-[260ms] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none ${
+              workbenchOpen
+                ? 'opacity-100 scale-100 visible pointer-events-auto'
+                : 'opacity-0 scale-[.98] invisible pointer-events-none'
+            }`}
+          >
+            <div className="h-9 px-2.5 flex items-center gap-2 border-b border-border shrink-0">
+              <Layers className="w-3.5 h-3.5 text-brand shrink-0" strokeWidth={1.7} />
+              <span className="text-[13px] font-semibold [color:var(--color-text-main)]">画布操作台</span>
+              <button
+                onClick={() => setWorkbenchOpen(false)}
+                aria-label="收起画布操作台"
+                title="收起画布操作台（向上折叠）"
+                className="ml-auto w-6 h-6 inline-flex items-center justify-center rounded-md [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-secondary transition-colors"
+              >
+                <ChevronsUp className="w-3.5 h-3.5" strokeWidth={1.7} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto custom-scrollbar px-1.5 py-1.5 motion-safe:scroll-smooth">
+              {/* 一键模板 */}
+              <section ref={setWorkbenchSectionRef('template')} className="scroll-mt-2">
+                <WorkbenchGroupTitle>一键模板</WorkbenchGroupTitle>
+                {TEMPLATES.map(t => (
+                  <WorkbenchRow
+                    key={t.id}
+                    icon={Wand2}
+                    iconCls="text-violet-400"
+                    label={t.label}
+                    desc={t.desc}
+                    title="点击：把该模板链路生成到当前画布"
+                    onClick={() => addTemplate(t)}
+                  />
+                ))}
+              </section>
+
+              {/* 我的模板 · Creator */}
+              <section ref={setWorkbenchSectionRef('mine')} className="scroll-mt-2">
+                <WorkbenchGroupTitle>
+                  我的模板 · Creator
+                  <button
+                    onClick={refreshCreatorTemplates}
+                    title="刷新模板列表"
+                    className="ml-auto px-1.5 py-0.5 rounded-full text-[10px] font-normal text-violet-300 bg-violet-500/10 border border-violet-500/30 hover:bg-violet-500/20 transition-colors"
+                  >刷新</button>
+                </WorkbenchGroupTitle>
+                {creatorTemplates.length === 0 ? (
+                  <div className="px-3 py-1 text-[10.5px] leading-relaxed [color:var(--color-text-muted)]">
+                    暂无。在 Agent 创造模式沉淀模板后出现在这里。
+                  </div>
+                ) : (
+                  creatorTemplates.map((t: any) => (
+                    <WorkbenchRow
+                      key={t.id}
+                      icon={Sparkles}
+                      iconCls="text-violet-400"
+                      label={t.name || t.id}
+                      desc={`${(t.nodes || []).length} 节点`}
+                      title="点击：从模板新建节点链到当前画布"
+                      onClick={() => addCreatorTemplate(t)}
+                    />
+                  ))
+                )}
+              </section>
+
+              {/* 节点：核心 Agent 节点 + 自定义 / 扩展节点 */}
+              <section ref={setWorkbenchSectionRef('nodes')} className="scroll-mt-2">
+                <WorkbenchGroupTitle>核心 Agent 节点</WorkbenchGroupTitle>
+                {CORE_LIBRARY.map(n => (
+                  <WorkbenchRow
+                    key={n.type}
+                    icon={n.icon}
+                    iconCls={n.color}
+                    label={n.label}
+                    desc={n.desc}
+                    draggable
+                    onDragStart={e => e.dataTransfer.setData('application/canvas-nodetype', n.type)}
+                    title="拖入画布，或点击直接创建"
+                    onClick={() => {
+                      const pos = { x: 120 + nodes.length * 40, y: 120 + nodes.length * 40 };
+                      const node = createNode(n.type, pos);
+                      setNodes(nds => [...nds, node]);
+                      setSelectedNodeId(node.id);
+                    }}
+                  />
+                ))}
+
+                {customNodes.map((c: any) => (
+                  <WorkbenchRow
+                    key={c.id}
+                    icon={Boxes}
+                    iconCls="text-teal-400"
+                    label={c.name}
+                    desc={`${c.kind}/${c.language}`}
+                    draggable
+                    onDragStart={e => e.dataTransfer.setData('application/canvas-nodetype', 'custom')}
+                    title="自定义节点：拖入画布，或点击直接创建"
+                    onClick={() => {
+                      const pos = { x: 120 + nodes.length * 40, y: 120 + nodes.length * 40 };
+                      const node = createNode('custom', pos, { custom_node_id: c.id });
+                      setNodes(nds => [...nds, node]);
+                      setSelectedNodeId(node.id);
+                    }}
+                  />
+                ))}
+
+                {extNodes.map((s: any) => (
+                  <WorkbenchRow
+                    key={s.id}
+                    icon={Wand2}
+                    iconCls="text-cyan-400"
+                    label={s.name}
+                    desc={`${(s.inputs || []).length}入/${(s.outputs || []).length}出`}
+                    draggable
+                    onDragStart={e => {
+                      e.dataTransfer.setData('application/canvas-nodetype', 'ext-node');
+                      e.dataTransfer.setData('application/canvas-nodeid', s.id);
+                    }}
+                    title={`扩展节点（canvas_nodes）· ${s.kind || 'utility'}：拖入画布，或点击直接创建`}
+                    onClick={() => {
+                      const pos = { x: 120 + nodes.length * 40, y: 120 + nodes.length * 40 };
+                      const node = createNode('ext-node', pos, { canvas_node_id: s.id, definition: s });
+                      setNodes(nds => [...nds, node]);
+                      setSelectedNodeId(node.id);
+                    }}
+                  />
+                ))}
+
+                {customNodes.length === 0 && extNodes.length === 0 && (
+                  <button
+                    onClick={goPluginCenter}
+                    title="去设置 → 插件中心安装插件包"
+                    className="w-full text-left px-3 py-2 rounded-lg text-[10.5px] [color:var(--color-text-muted)] hover:bg-surface-secondary transition-colors"
+                  >
+                    自定义 / 扩展节点：去设置 → 插件中心安装插件包
+                  </button>
+                )}
+              </section>
+
+              {/* 素材库 */}
+              <section ref={setWorkbenchSectionRef('assets')} className="scroll-mt-2">
+                <WorkbenchGroupTitle>
+                  素材库
+                  <span className="ml-auto font-normal">{assets.length} 个</span>
+                </WorkbenchGroupTitle>
+                <div className="grid grid-cols-3 gap-2 px-2.5 pb-1">
+                  {assets.map((a: any) => {
+                    const url = a.thumb_url || a.file_url;
+                    const abs = resolveMediaUrl(url);
+                    return (
+                      <div
+                        key={a.id}
+                        draggable
+                        onDragStart={e => {
+                          e.dataTransfer.setData('application/canvas-assetid', a.id);
+                          e.dataTransfer.setData('text/plain', abs || url);
+                        }}
+                        title={`拖入画布：${a.name}`}
+                        className="aspect-square rounded-md overflow-hidden border border-border bg-surface-secondary cursor-grab hover:border-brand/40 transition-colors"
+                      >
+                        {abs ? (
+                          <AutoRatioMedia src={abs} fallbackAspect="1/1" className="w-full h-full" mediaClassName="group-hover:scale-[1.03] transition-transform" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center"><ImageIcon className="w-4 h-4 text-gray-500" /></div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                {assets.length === 0 && (
+                  <div className="px-3 py-1 text-[10.5px] [color:var(--color-text-muted)]">暂无素材，先去素材库上传</div>
+                )}
+              </section>
+            </div>
+
+            {/* 底部动作：保存 / 导出 */}
+            <div className="p-2.5 border-t border-border flex items-center gap-2 shrink-0">
+              <button
+                onClick={handleManualSave}
+                disabled={saving}
+                className="flex-1 h-8 rounded-md bg-brand text-white text-[11.5px] font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-40 hover:bg-brand-light transition-colors"
+              >
+                <Save className="w-3.5 h-3.5" strokeWidth={1.7} />{saving ? '保存中' : '保存画布'}
+              </button>
+              <button
+                onClick={() => window.dispatchEvent(new CustomEvent('canvas-export-shots'))}
+                title="导出为分镜工程"
+                className="h-8 px-2.5 rounded-md bg-surface-secondary border border-border inline-flex items-center justify-center gap-1.5 text-[11.5px] font-medium [color:var(--color-text-main)] hover:bg-surface-tertiary transition-colors"
+              >
+                <Download className="w-3.5 h-3.5" strokeWidth={1.7} />导出
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1359,7 +1621,7 @@ const InnerCanvas: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="text-base font-bold [color:var(--color-text-main)]">从一个想法开始漫剧创作</h3>
-                  <p className="text-xs [color:var(--color-text-muted)] mt-1">选择模板一键生成连贯的 Agent 节点链，或从左侧直接拖入节点</p>
+                  <p className="text-xs [color:var(--color-text-muted)] mt-1">选择模板一键生成连贯的 Agent 节点链，或从左上角「画布操作台」拖入节点</p>
                 </div>
                 <div className="grid grid-cols-3 gap-3 pt-2">
                   {TEMPLATES.map(t => (
@@ -1402,7 +1664,12 @@ const InnerCanvas: React.FC = () => {
               style={{ background: isLight ? '#E8ECF1' : '#08080B', cursor: isDragging ? 'grabbing' : 'crosshair' }}
             >
               <Background color={isLight ? '#CBD5E1' : '#1E1E2A'} gap={24} size={1.2} />
-              <Controls className="!bg-surface !border-border !rounded-2xl shadow-xl ![color:var(--color-text-main)] [&_button]:!bg-surface [&_button]:!border-border [&_button]:![color:var(--color-text-main)]" />
+              <Controls className="!bg-surface !border-border !rounded-2xl shadow-xl ![color:var(--color-text-main)] [&_button]:!bg-surface [&_button]:!border-border [&_button]:![color:var(--color-text-main)]">
+                {/* 横向排布：原顶栏按钮，并入左下角缩放/适应竖条 */}
+                <ControlButton onClick={handleArrangeHorizontally} title="横向排布：把所有节点排成一行" aria-label="横向排布">
+                  <ArrowLeftRight className="w-3.5 h-3.5" strokeWidth={1.7} />
+                </ControlButton>
+              </Controls>
               <MiniMap className="!bg-surface !border-border !rounded-xl" maskColor="rgba(10,10,12,0.8)" nodeColor={(n: any) => n.type === 'image' ? '#7C3AED' : n.type === 'video' ? '#F97316' : n.type === 'audio' ? '#EC4899' : n.type === 'prompt' ? '#06B6D4' : '#3F3F50'} />
             </ReactFlow>
           )}

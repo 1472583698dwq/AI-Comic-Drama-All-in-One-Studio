@@ -1,31 +1,34 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Sliders, Boxes, Cog, Loader2, Save, RotateCcw, Check, AlertTriangle,
+  Sparkles, Boxes, Cog, Loader2, Save, RotateCcw, Check, AlertTriangle, HardDriveDownload,
 } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { toast } from '../../stores/useDialogStore';
 import { useEscapeClose } from '../../hooks/useEscapeClose';
-import { CapabilitiesPanel } from './CapabilitiesPanel';
+import { CapabilitiesArea } from './CapabilitiesPanel';
 import { ExtensionsPanel } from './ExtensionsPanel';
 import { SystemPanel } from './SystemPanel';
 
-type TabKey = 'capabilities' | 'extensions' | 'system';
+type TabKey = 'core' | 'output' | 'extensions' | 'system';
 
 const TABS: Array<{ key: TabKey; label: string; sub: string; icon: any }> = [
-  { key: 'capabilities', label: '能力配置', sub: '要做什么 · 谁来做 · 填什么', icon: Sliders },
-  { key: 'extensions',   label: '扩展',     sub: '装插件 · 管全部扩展',        icon: Boxes },
-  { key: 'system',       label: '系统',     sub: '安全 · 内核参数 · 诊断',     icon: Cog },
+  { key: 'core',       label: '核心能力',   sub: '文本 · 生图 · 生视频 · 配音', icon: Sparkles },
+  { key: 'output',     label: '输出与存储', sub: '剪映导出 · 云端同步',        icon: HardDriveDownload },
+  { key: 'extensions', label: '扩展',       sub: '装插件 · 管全部扩展',        icon: Boxes },
+  { key: 'system',     label: '系统',       sub: '安全 · 内核参数 · 诊断',     icon: Cog },
 ];
 
 /**
- * 设置中心（重构版）。
+ * 设置中心（能力配置拆分版）。
  *
- * 旧版 7 个页签按「对象」分：概览 / 生成源 / 扩展中心 / 插件 / 默认路由 / 基础设施 / 系统诊断，
- * 同一件事的配置散在三处。这里收敛成 3 个，按「任务」分：
- *   能力配置 —— 我要做什么，选谁做，填什么（默认路由内嵌进选择动作，不再是独立页）
- *   扩展     —— 装包和管颗粒本是一件事的两头，合并
- *   系统     —— 与厂商无关的本机路径、安全闸、诊断、数据位置
+ * 旧版 3 个页签里「能力配置」把 6 个能力 × 22 个通道平铺成一页长滚动。
+ * 现在按生产链路拆成 4 个一级页签：
+ *   核心能力   —— 文本 / 生图 / 生视频 / 配音 + 配置进度总览（左侧子导航切换）
+ *   输出与存储 —— 剪映导出 / 云端同步
+ *   扩展       —— 装包和管颗粒本是一件事的两头，合并
+ *   系统       —— 与厂商无关的本机路径、安全闸、诊断、数据位置
+ * 单个能力内部用「通道列表 + 字段面板」的 Master-Detail，右侧只显示选中通道的字段。
  */
 export const SetupView: React.FC = () => {
   const { setActiveTab, project } = useProjectStore();
@@ -34,12 +37,13 @@ export const SetupView: React.FC = () => {
       const pending = localStorage.getItem('config_pending_tab');
       if (pending) {
         localStorage.removeItem('config_pending_tab');
-        // 兼容旧入口：plugins / extensions 都落到「扩展」
+        // 兼容旧入口：capabilities → 核心能力；plugins / extensions → 扩展；infra / system → 系统
+        if (pending === 'capabilities') return 'core';
         if (pending === 'plugins' || pending === 'extensions') return 'extensions';
         if (pending === 'infra' || pending === 'system') return 'system';
       }
     } catch { /* ignore */ }
-    return 'capabilities';
+    return 'core';
   });
 
   const [cfg, setCfg] = useState<Record<string, string>>({});
@@ -95,7 +99,7 @@ export const SetupView: React.FC = () => {
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-background">
-      {/* ── 顶栏 ── */}
+      {/* ── 顶栏（唯一的保存入口） ── */}
       <div className="h-12 shrink-0 bg-surface border-b border-border px-5 flex items-center gap-3">
         {/* 左侧主导航常驻，这里不再放重复的返回入口 */}
         <span className="text-[12.5px] font-bold text-[color:var(--color-text-main)]">设置</span>
@@ -124,7 +128,7 @@ export const SetupView: React.FC = () => {
         </div>
       </div>
 
-      {/* ── 页签 ── */}
+      {/* ── 一级页签 ── */}
       <div className="shrink-0 bg-surface border-b border-border px-5">
         <div className="flex gap-1 overflow-x-auto">
           {TABS.map((t) => {
@@ -148,32 +152,17 @@ export const SetupView: React.FC = () => {
       </div>
 
       {/* ── 内容 ── */}
-      <div className="flex-1 overflow-y-auto custom-scrollbar">
-        <div className="max-w-[900px] mx-auto px-5 py-6">
-          {tab === 'capabilities' && (
-            <CapabilitiesPanel cfg={cfg} draft={draft} setDraft={setDraft} loading={loading} />
-          )}
-          {tab === 'extensions' && <ExtensionsPanel />}
-          {tab === 'system' && (
-            <SystemPanel cfg={cfg} draft={draft} setDraft={setDraft} envFile={envFile} jsonFile={jsonFile} />
-          )}
-        </div>
-      </div>
-
-      {/* ── 底部常驻保存条（有改动时才出现，免得翻到顶） ── */}
-      {dirty && (
-        <div className="shrink-0 border-t border-brand/30 bg-brand/[0.06] px-5 py-2.5 flex items-center gap-3">
-          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-          <span className="text-[11.5px] text-[color:var(--color-text-main)]">
-            有 <b>{changed.length}</b> 项改动还没写进 <code className="font-mono text-[10.5px]">.env</code>
-          </span>
-          <span className="text-[10.5px] font-mono text-gray-500 truncate hidden md:inline">
-            {changed.slice(0, 6).join(' · ')}{changed.length > 6 ? ` …+${changed.length - 6}` : ''}
-          </span>
-          <button onClick={save} disabled={saving}
-            className="ml-auto px-4 py-1.5 rounded-xl bg-brand text-white text-[11.5px] font-bold hover:bg-brand-light disabled:opacity-60 flex items-center gap-1.5">
-            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}保存并热重载
-          </button>
+      {(tab === 'core' || tab === 'output') ? (
+        // 能力配置：左侧能力子导航 + 右侧内容，各自滚动
+        <CapabilitiesArea tab={tab} cfg={cfg} draft={draft} setDraft={setDraft} loading={loading} />
+      ) : (
+        <div className="flex-1 overflow-y-auto custom-scrollbar">
+          <div className="max-w-[900px] mx-auto px-5 py-6">
+            {tab === 'extensions' && <ExtensionsPanel />}
+            {tab === 'system' && (
+              <SystemPanel cfg={cfg} draft={draft} setDraft={setDraft} envFile={envFile} jsonFile={jsonFile} />
+            )}
+          </div>
         </div>
       )}
     </div>

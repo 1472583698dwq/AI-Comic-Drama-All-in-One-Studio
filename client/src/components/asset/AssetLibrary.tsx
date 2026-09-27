@@ -421,7 +421,8 @@ export const AssetLibrary: React.FC = () => {
     const next = { ...curProject, characters: [...curProject.characters, newChar] } as any;
     st.setProject(next);
     alert(`已将素材《${asset.name}》添加为项目角色`);
-    // 精简链路：角色设定视图已下线（角色数据落在 project.characters，可在素材库「角色」分类查看），不再跳转
+    // 角色设定页已恢复：此路径只写入 avatar 兜底图，去该页补三视图与参考音频（角色一致性的生产端）
+    st.setActiveTab('characters');
   };
 
   const onDropFiles = (files: FileList | null) => {

@@ -6,21 +6,24 @@ import { apiService } from '../services/api';
  * 页签类型。
  *
  * 精简链路（SLIM BUILD）：`studio`（分镜工作台）/ `director3d`（3D 片场）/
- * `timeline`（多轨剪辑）/ `characters`（角色设定）四个页签的宿主视图已下线。
+ * `timeline`（多轨剪辑）三个页签的宿主视图已下线。
+ * `characters`（角色设定）**保留启用**：它是角色三视图与参考音频的唯一生产端，
+ * 而画布链路仍在消费这两个字段（`referenceBinder.characterMainImage` /
+ * `collectAudioResources`，经 `NodeAgentConsole` / `CreativeCanvas` 生效），
+ * 下线会让角色一致性退化为「只有单张 avatar 兜底」。
  * 类型与历史 localStorage 值保留不动（避免波及所有跳转调用的类型），
  * 统一由 `normalizeTab` 在执行时重定向到保留页签 —— 这样旧缓存与残留跳转
  * 都不会落到空白页，也不需要逐个调用点做类型改造。
  */
 export type ActiveTab =
-  | 'projects' | 'studio' | 'director3d' | 'timeline' | 'characters'
+  | 'home' | 'projects' | 'studio' | 'director3d' | 'timeline' | 'characters'
   | 'assets' | 'mcp' | 'config' | 'canvas' | 'agent';
 
-/** 已下线页签 → 保留页签的重定向表（角色设定归素材库：角色已按 category=character 入库） */
+/** 已下线页签 → 保留页签的重定向表 */
 const REMOVED_TAB_REDIRECT: Record<string, ActiveTab> = {
   studio: 'canvas',
   director3d: 'canvas',
   timeline: 'canvas',
-  characters: 'assets',
 };
 
 /** 把（可能来自旧缓存或已下线页签的）页签归一到当前保留链路。 */
@@ -42,13 +45,21 @@ interface ProjectState {
   isLoading: boolean;
   loadingMessage: string;
   apiError: string | null;
+  /** 画布态：系统左侧栏（图标轨）是否被唤出 —— 由画布左上角「画布操作台」条上的按钮控制 */
+  canvasRailOpen: boolean;
 
   loadActiveProject: (projectId?: string) => Promise<void>;
+  /**
+   * 启动友好化：确保有可用项目。
+   * 'restored' 恢复了缓存项目 / 'adopted' 自动接管了最近项目 / 'empty' 无任何项目（落首页）。
+   */
+  ensureActiveProject: () => Promise<'restored' | 'adopted' | 'empty'>;
   closeProject: () => void;
   // Actions
   setProject: (project: Project) => void;
   setActiveShotId: (shotId: string | null) => void;
   setActiveTab: (tab: ActiveTab) => void;
+  setCanvasRailOpen: (open: boolean) => void;
   setWorkspace: (w: 'production'|'creative') => void;
   setPlatformMode: (mode: 'desktop' | 'mobile') => void;
   setIsPlaying: (isPlaying: boolean) => void;
@@ -102,6 +113,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   workspace: (localStorage.getItem('app_workspace') as any) || 'production',
   platformMode: (localStorage.getItem('app_platform_mode') as any) || 'desktop',
   isPlaying: false,
+  canvasRailOpen: false,
   currentTime: 0,
   totalDuration: 0,
   isLoading: false,
@@ -145,6 +157,30 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     });
   },
 
+  /**
+   * 启动友好化：优先恢复缓存项目，其次自动接管最近更新的项目；
+   * 全新环境不再自动创建项目 —— 落到首页（快速创建/模板入口在那里）。
+   * 全部失败（如后端未启动）同样视为 'empty'，由既有兜底逻辑留在安全页。
+   */
+  ensureActiveProject: async () => {
+    await get().loadActiveProject();
+    if (get().project) return 'restored';
+    try {
+      const res = await apiService.listProjects({ sort: 'updated_at' });
+      const list: any[] = (res.projects || []).slice().sort(
+        (a, b) => String(b?.updated_at || '').localeCompare(String(a?.updated_at || '')));
+      if (list.length > 0) {
+        await get().loadActiveProject(list[0].id);
+        if (get().project) return 'adopted';
+      }
+    } catch (e: any) {
+      console.warn('ensureActiveProject failed:', e);
+    }
+    localStorage.setItem('app_active_tab', 'home');
+    set({ activeTab: 'home' });
+    return 'empty';
+  },
+
   setProject: (project) => {
     // 归一化兜底：任何缺 scenes/characters 的畸形内容都不得打崩整屏黑屏
     const rawScenes = Array.isArray((project as any)?.scenes) ? (project as any).scenes : [];
@@ -179,10 +215,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ activeShotId: shotId });
   },
   setActiveTab: (tab) => {
-    // 已下线页签在此统一重定向：分镜工作台/3D 片场/多轨剪辑 → 画布，角色设定 → 素材库
+    // 已下线页签在此统一重定向：分镜工作台/3D 片场/多轨剪辑 → 画布（角色设定保留启用，不再重定向）
     const next = normalizeTab(tab);
-    // 未选择项目时，严禁切换到项目内部功能（只允许 projects 和 config）
-    if (!get().project && next !== 'projects' && next !== 'config') {
+    // 未选择项目时，严禁切换到项目内部功能（首页/看板/设置属于全局页，放行）
+    if (!get().project && next !== 'home' && next !== 'projects' && next !== 'config') {
       return;
     }
     localStorage.setItem('app_active_tab', next);
@@ -196,6 +232,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       set({ activeTab: next });
     }
   },
+  setCanvasRailOpen: (open) => set({ canvasRailOpen: !!open }),
   setWorkspace: (workspace) => {
     if (!get().project) return;
     localStorage.setItem('app_workspace', workspace);

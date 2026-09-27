@@ -34,6 +34,8 @@ export interface CapField {
   quickFill?: Array<{ label: string; value: string }>;
   /** 官方可选值：模型名这类输入框带 datalist 候选（仍可自由手填，不被枚举锁死） */
   options?: string[];
+  /** 进阶选填：默认收进「选填 / 高级」折叠区，主界面只留 Key / 地址 / 模型 */
+  advanced?: boolean;
 }
 
 export interface Channel {
@@ -64,6 +66,8 @@ export interface Channel {
 
 export interface Capability {
   id: string;
+  /** 一级页签分组：core = 核心能力（生成链路）/ output = 输出与存储 */
+  group: 'core' | 'output';
   name: string;
   /** 这个能力是干什么的——用大白话，给不懂的人看 */
   why: string;
@@ -76,6 +80,12 @@ export interface Capability {
   channels: Channel[];
 }
 
+/** 能力配置的一级页签（取代旧的单页「能力配置」长滚动） */
+export const CAP_GROUPS: Array<{ key: 'core' | 'output'; label: string; sub: string }> = [
+  { key: 'core', label: '核心能力', sub: '文本 · 生图 · 生视频 · 配音' },
+  { key: 'output', label: '输出与存储', sub: '剪映导出 · 云端同步' },
+];
+
 const KEY = (key: string, label: string, extra: Partial<CapField> = {}): CapField => ({
   key, label, kind: 'secret', required: true, ...extra,
 });
@@ -84,6 +94,7 @@ export const CAPABILITIES: Capability[] = [
   // ───────────────────────────── 1. 文本大模型
   {
     id: 'llm',
+    group: 'core',
     name: '文本大模型',
     why: '把整章小说读懂，拆成角色表和一个个镜头（景别、运镜、台词、生图提示词）。AI 导演、提示词润色也都靠它。',
     ifMissing: '导入小说后无法拆分镜，AI 导演不会回话——整个流程的第一步就卡住。',
@@ -106,7 +117,7 @@ export const CAPABILITIES: Capability[] = [
             options: ['deepseek-v4-flash', 'deepseek-chat', 'deepseek-reasoner'],
             hint: '点输入框可下拉选常见档；中转站的模型名以对方文档为准，可直接手填',
           }),
-          KEY('OPENAI_CUSTOM_HEADERS', '自定义请求头', { kind: 'text', required: false, placeholder: '{"X-Foo":"bar"}', hint: 'JSON 格式，接私有网关时才需要' }),
+          KEY('OPENAI_CUSTOM_HEADERS', '自定义请求头', { kind: 'text', required: false, placeholder: '{"X-Foo":"bar"}', hint: 'JSON 格式，接私有网关时才需要', advanced: true }),
         ],
       },
       {
@@ -151,6 +162,7 @@ export const CAPABILITIES: Capability[] = [
   // ───────────────────────────── 2. 生图
   {
     id: 'image',
+    group: 'core',
     name: '生图',
     why: '给每个镜头画出画面，也用来生成角色的定妆三视图——后面所有镜头靠它保证"这人长这样"。',
     ifMissing: '分镜有文字没画面，视频那一步也没法开始（图生视频要拿图当首帧）。',
@@ -170,12 +182,12 @@ export const CAPABILITIES: Capability[] = [
             quickFill: [{ label: '本机', value: 'http://127.0.0.1:8188' }],
           }),
           KEY('COMFYUI_CHECKPOINT', '首选底模', { kind: 'text', required: false, hint: '留空用工作流里自带的' }),
-          KEY('COMFYUI_TIMEOUT_SECONDS', '超时（秒）', { kind: 'number', required: false, placeholder: '240', hint: '本机跑大模型慢就调大' }),
+          KEY('COMFYUI_TIMEOUT_SECONDS', '超时（秒）', { kind: 'number', required: false, placeholder: '240', hint: '本机跑大模型慢就调大', advanced: true }),
           KEY('COMFYUI_WORKFLOWS_DIR', '工作流目录', {
             kind: 'path', required: false, pick: true,
-            hint: '填了可直读本机 ComfyUI 的工作流，不用一个个上传',
+            hint: '填了可直读本机 ComfyUI 的工作流，不用一个个上传', advanced: true,
           }),
-          KEY('COMFYUI_DEFAULT_IMAGE_WORKFLOW', '默认生图工作流', { kind: 'text', required: false, hint: '不指定时用哪个工作流出图；可在下方工作流列表里点「设默认生图」' }),
+          KEY('COMFYUI_DEFAULT_IMAGE_WORKFLOW', '默认生图工作流', { kind: 'text', required: false, hint: '不指定时用哪个工作流出图；可在下方工作流列表里点「设默认生图」', advanced: true }),
         ],
       },
       {
@@ -238,6 +250,7 @@ export const CAPABILITIES: Capability[] = [
   // ───────────────────────────── 3. 生视频
   {
     id: 'video',
+    group: 'core',
     name: '生视频',
     why: '把静态画面变成会动的镜头：拿生图的结果当首帧，加上运镜提示词让它动起来。',
     ifMissing: '成片只有静止画面，做不了"漫剧"只能做"漫画"。这一步可以先跳过。',
@@ -378,6 +391,7 @@ export const CAPABILITIES: Capability[] = [
   // ───────────────────────────── 4. 配音
   {
     id: 'audio',
+    group: 'core',
     name: '配音',
     why: '把镜头里的台词和旁白读出来，按角色绑定的音色、带情绪标签合成语音。',
     ifMissing: '成片没有人声，只有画面和字幕。这一步可以先跳过。',
@@ -449,7 +463,7 @@ export const CAPABILITIES: Capability[] = [
             placeholder: '/Users/you/project/tts/refs/ref.wav',
             hint: '一段 wav，决定默认音色；也可以给单个角色绑别的 wav 路径当它的音色',
           }),
-          KEY('INDEXTTS_LANG', '默认语言', { kind: 'text', required: false, placeholder: 'ZH', hint: 'ZH / EN / JA / KO' }),
+          KEY('INDEXTTS_LANG', '默认语言', { kind: 'text', required: false, placeholder: 'ZH', hint: 'ZH / EN / JA / KO', advanced: true }),
         ],
       },
     ],
@@ -458,6 +472,7 @@ export const CAPABILITIES: Capability[] = [
   // ───────────────────────────── 5. 导出
   {
     id: 'export',
+    group: 'output',
     name: '导出到剪映',
     why: '把攒好的画面、视频、配音按时间轴拼成剪映 / CapCut 能直接打开的草稿工程，最后一公里在剪映里精修。',
     ifMissing: '仍然可以导出草稿文件，只是不会自动出现在剪映的草稿列表里，得手动拷。',
@@ -483,6 +498,7 @@ export const CAPABILITIES: Capability[] = [
   // ───────────────────────────── 6. 云端同步
   {
     id: 'storage',
+    group: 'output',
     name: '素材与工程云端同步',
     why: '把本机 storage 里的素材、工程异步同步到你自己的 OpenList。换一台电脑打开，项目列表和素材都还在——素材是页面真要看它时才回拉，不会一上来就下一堆。',
     ifMissing: '所有东西只存在这台机器上，换台电脑就是空的。',
@@ -509,7 +525,7 @@ export const CAPABILITIES: Capability[] = [
           KEY('OPENLIST_PASSWORD', '密码'),
           KEY('OPENLIST_ROOT', '远端根目录', {
             kind: 'text', required: false, placeholder: '/comic-studio',
-            hint: '必须落在 OpenList 已挂载的存储路径下，否则写不进去。点测试会当场验它可不可写',
+            hint: '必须落在 OpenList 已挂载的存储路径下，否则写不进去。点测试会当场验它可不可写', advanced: true,
           }),
         ],
       },

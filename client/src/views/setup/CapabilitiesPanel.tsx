@@ -3,7 +3,7 @@ import {
   Check, AlertTriangle, Loader2, Eye, EyeOff, Cloud, HardDrive,
   CircleDot, Plug, ChevronRight, FolderOpen, FolderSearch,
   ExternalLink, History, FlaskConical, KeyRound, Landmark,
-  FileCode2, ArrowRight,
+  FileCode2, ArrowRight, LayoutGrid, ArrowLeftRight,
 } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { toast, confirmAsync } from '../../stores/useDialogStore';
@@ -18,6 +18,8 @@ import {
 type TestState = { running?: boolean; ok?: boolean; detail?: string; skipped?: boolean };
 
 interface Props {
+  /** 一级页签：core = 核心能力（含总览）/ output = 输出与存储 */
+  tab: 'core' | 'output';
   cfg: Record<string, string>;
   draft: Record<string, string>;
   setDraft: React.Dispatch<React.SetStateAction<Record<string, string>>>;
@@ -28,8 +30,36 @@ interface Props {
 const val = (draft: Record<string, string>, cfg: Record<string, string>, k: string) =>
   draft[k] !== undefined ? draft[k] : (cfg[k] || '');
 
-export const CapabilitiesPanel: React.FC<Props> = ({ cfg, draft, setDraft, loading }) => {
+const OVERVIEW = '__overview';
+
+/** 状态点：ok=已测通 / fill=已填待测 / none=未配置 */
+type ReadyState = 'ok' | 'fill' | 'none';
+const DOT_CLS: Record<ReadyState, string> = {
+  ok: 'bg-emerald-400',
+  fill: 'bg-amber-400',
+  none: 'bg-surface-tertiary',
+};
+
+/**
+ * 能力配置区（一级页签「核心能力 / 输出与存储」的内容）。
+ *
+ * 旧版把 6 个能力 × 22 个通道平铺在一页里，找一个 Key 要滚很久。
+ * 这里拆成三层：一级页签 → 左侧能力子导航 → 单能力内「通道列表 + 字段面板」
+ * 的 Master-Detail，右侧永远只显示选中通道的字段。
+ */
+export const CapabilitiesArea: React.FC<Props> = ({ tab, cfg, draft, setDraft, loading }) => {
   const merged = useMemo(() => ({ ...cfg, ...draft }), [cfg, draft]);
+  const groupCaps = useMemo(() => CAPABILITIES.filter((c) => c.group === tab), [tab]);
+
+  /** 当前查看的能力（core 组的 __overview 是配置进度总览页） */
+  const [cap, setCap] = useState<string>(() => (tab === 'core' ? OVERVIEW : groupCaps[0]?.id || ''));
+  /** 每个能力当前「查看」的通道（区别于默认通道：看一眼不等于切默认） */
+  const [selChan, setSelChan] = useState<Record<string, string>>({});
+  /** 进阶选填字段是否展开 */
+  const [more, setMore] = useState<Record<string, boolean>>({});
+  /** 子导航搜索：跨能力直达通道 / 配置键 */
+  const [q, setQ] = useState('');
+
   const [tests, setTests] = useState<Record<string, TestState>>({});
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   /** 自定义生成源按能力分组（它们只存在于 /providers，不在静态目录里） */
@@ -69,38 +99,56 @@ export const CapabilitiesPanel: React.FC<Props> = ({ cfg, draft, setDraft, loadi
     return () => window.removeEventListener('provider-list-refresh', h);
   }, []);
 
-  const customsOf = (cap: Capability) => customsByCap[cap.id] || [];
-  const channelsFor = (cap: Capability) => channelsOf(cap, customsOf(cap));
-  const activeOf = (cap: Capability): Channel | undefined => {
-    const list = channelsFor(cap);
-    return list.find((c) => c.id === currentChannelId(cap, merged, customsOf(cap))) || list[0];
+  // 切一级页签时回到该组默认位置（core 落总览，output 落第一项）
+  useEffect(() => {
+    setCap(tab === 'core' ? OVERVIEW : CAPABILITIES.find((c) => c.group === tab)?.id || '');
+    setQ('');
+  }, [tab]);
+
+  const customsOf = (c: Capability) => customsByCap[c.id] || [];
+  const channelsFor = (c: Capability) => channelsOf(c, customsOf(c));
+  /** 默认通道（状态统计用它：默认通道填没填才算数） */
+  const defaultOf = (c: Capability): Channel | undefined => {
+    const list = channelsFor(c);
+    return list.find((x) => x.id === currentChannelId(c, merged, customsOf(c))) || list[0];
+  };
+  /** 当前查看的通道：搜索跳转指定的优先，否则跟随默认通道 */
+  const viewedOf = (c: Capability): Channel | undefined => {
+    const list = channelsFor(c);
+    const sel = selChan[c.id];
+    if (sel && list.some((x) => x.id === sel)) return list.find((x) => x.id === sel);
+    return defaultOf(c);
   };
 
-  const readyOf = (cap: Capability) => {
-    const ch = activeOf(cap);
+  const readyOf = (c: Capability) => {
+    const ch = defaultOf(c);
     return !!ch && channelFilled(ch, merged);
   };
-  const readyCount = CAPABILITIES.filter(readyOf).length;
-  const essentialMissing = CAPABILITIES.filter((c) => c.essential && !readyOf(c));
+  const stateOf = (c: Capability): ReadyState => {
+    if (tests[c.id]?.ok === true) return 'ok';
+    return readyOf(c) ? 'fill' : 'none';
+  };
 
-  const pickChannel = (cap: Capability, ch: Channel) => {
+  /** 把某个通道设为默认（写入路由键 + 通道附带键），这是显式动作，看一眼不改配置 */
+  const setDefaultChannel = (c: Capability, ch: Channel) => {
     setDraft((d) => {
       const next = { ...d };
-      if (cap.routeKey) next[cap.routeKey] = ch.id;
+      if (c.routeKey) next[c.routeKey] = ch.id;
       Object.entries(ch.extraOnSelect || {}).forEach(([k, v]) => { next[k] = v; });
       return next;
     });
-    setTests((t) => ({ ...t, [cap.id]: {} }));
+    setTests((t) => ({ ...t, [c.id]: {} }));
+    toast.success(`「${ch.name}」已设为「${c.name}」的默认通道（记得保存）`);
   };
 
   /** 单通道连通测试：内置走 /config/test，自定义源走 /providers/{id}/test */
-  const runTest = async (cap: Capability, ch: Channel): Promise<TestState> => {
+  const runTest = async (c: Capability, ch: Channel): Promise<TestState> => {
     if (!ch.test && !ch.providerId) {
       const st: TestState = { skipped: true, detail: '该通道无独立连通测试' };
-      setTests((t) => ({ ...t, [cap.id]: st }));
+      setTests((t) => ({ ...t, [c.id]: st }));
       return st;
     }
-    setTests((t) => ({ ...t, [cap.id]: { running: true } }));
+    setTests((t) => ({ ...t, [c.id]: { running: true } }));
     let st: TestState;
     try {
       if (ch.providerId) {
@@ -115,7 +163,7 @@ export const CapabilitiesPanel: React.FC<Props> = ({ cfg, draft, setDraft, loadi
     } catch (e: any) {
       st = { ok: false, detail: e?.message || '测试失败' };
     }
-    setTests((t) => ({ ...t, [cap.id]: st }));
+    setTests((t) => ({ ...t, [c.id]: st }));
     return st;
   };
 
@@ -123,7 +171,7 @@ export const CapabilitiesPanel: React.FC<Props> = ({ cfg, draft, setDraft, loadi
   const runAllTests = async () => {
     if (bulk.running) return;
     const jobs = CAPABILITIES
-      .map((cap) => ({ cap, ch: activeOf(cap) }))
+      .map((c) => ({ cap: c, ch: defaultOf(c) }))
       .filter((j) => !!j.ch) as Array<{ cap: Capability; ch: Channel }>;
     setBulk({ running: true, done: 0, total: jobs.length });
     let done = 0;
@@ -154,6 +202,25 @@ export const CapabilitiesPanel: React.FC<Props> = ({ cfg, draft, setDraft, loadi
     }
   };
 
+  /** 自定义源就地保存 Key：写 CUSTOM_PROVIDER_<id> 并重拉源列表 */
+  const saveCustomKey = async (ch: Channel) => {
+    const pid = ch.providerId as string;
+    const key = (keyDraft[pid] || '').trim();
+    if (!pid) return;
+    if (!key) { toast.error('先填 Key 再保存'); return; }
+    setKeyBusy(pid);
+    try {
+      await apiService.setProviderApiKey(pid, key);
+      toast.success(`已保存「${ch.name}」的 Key`);
+      setKeyDraft((k) => ({ ...k, [pid]: '' }));
+      await loadCustoms();
+    } catch (e: any) {
+      toast.error(e?.message || '保存 Key 失败');
+    } finally {
+      setKeyBusy('');
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center text-xs text-gray-500 gap-2">
@@ -162,308 +229,555 @@ export const CapabilitiesPanel: React.FC<Props> = ({ cfg, draft, setDraft, loadi
     );
   }
 
+  // ── 子导航搜索结果 ──
+  const query = q.trim().toLowerCase();
+  const searchHits: Array<{ cap: Capability; ch: Channel }> = [];
+  if (query) {
+    groupCaps.forEach((c) => channelsFor(c).forEach((ch) => {
+      const hay = [ch.name, ch.id, ...(ch.fields || []).map((f) => `${f.key} ${f.label}`)].join(' ').toLowerCase();
+      if (hay.includes(query)) searchHits.push({ cap: c, ch });
+    }));
+  }
+
+  const readyCount = CAPABILITIES.filter(readyOf).length;
+  const essentialMissing = CAPABILITIES.filter((c) => c.essential && !readyOf(c));
+
+  const navItem = (active: boolean, onClick: () => void, dot: ReadyState | null, label: React.ReactNode, extra?: React.ReactNode) => (
+    <button
+      onClick={onClick}
+      className={`w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-[11.5px] font-medium transition-all text-left ${
+        active ? 'bg-brand/15 text-[color:var(--color-text-main)] ring-1 ring-brand/30' : 'text-gray-400 hover:text-[color:var(--color-text-main)] hover:bg-surface-secondary'
+      }`}
+    >
+      {dot ? <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${DOT_CLS[dot]}`} /> : <LayoutGrid className="w-3.5 h-3.5 shrink-0 text-brand-light" />}
+      <span className="truncate flex-1">{label}</span>
+      {extra}
+    </button>
+  );
+
   return (
-    <div className="space-y-5">
-      {/* ── 就绪度总览 ── */}
-      <div className="rounded-2xl border border-border bg-surface p-5">
-        <div className="flex items-baseline justify-between gap-3 flex-wrap">
-          <div>
-            <h2 className="text-sm font-bold text-[color:var(--color-text-main)]">配置进度</h2>
-            <p className="text-[11.5px] text-gray-400 mt-0.5">
-              下面 5 项能力各自独立，<b className="text-[color:var(--color-text-main)]">只有前两项是必须的</b>。
-              进度条统计的是「必填项已填」，填了不等于通——点右边的
-              <b className="text-[color:var(--color-text-main)]">一键测试全部</b>，
-              或每张卡单独点一次<b className="text-[color:var(--color-text-main)]">测试连通</b>。
-              <span className="block mt-0.5 text-gray-500">
-                一键测试跑的是每项能力「当前选中的通道」；云端源会真实打一次接口（可能消耗一次配额），本地源只探地址。
-              </span>
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={runAllTests}
-              disabled={bulk.running || loading}
-              className="px-3 py-1.5 rounded-xl bg-surface-secondary border border-border text-[11.5px] font-bold text-[color:var(--color-text-main)] hover:border-brand/50 disabled:opacity-40 flex items-center gap-1.5"
-            >
-              {bulk.running
-                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                : <FlaskConical className="w-3.5 h-3.5 text-brand-light" />}
-              {bulk.running ? `测试中 ${bulk.done}/${bulk.total}` : '一键测试全部'}
-            </button>
-            <div className="font-mono text-xs text-gray-400">
-              <span className="text-2xl font-bold text-brand-light">{readyCount}</span>
-              <span className="mx-1">/</span>{CAPABILITIES.length}
-            </div>
-          </div>
+    <div className="flex-1 flex min-h-0">
+      {/* ── 左侧：能力子导航 ── */}
+      <aside className="w-[200px] shrink-0 border-r border-border bg-surface/50 flex flex-col">
+        <div className="p-2.5 border-b border-border/70">
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="搜通道 / 配置键…"
+            spellCheck={false}
+            className="w-full bg-surface-secondary border border-border rounded-xl px-2.5 py-1.5 text-[11px] text-[color:var(--color-text-main)] placeholder-gray-600 focus:outline-none focus:border-brand/60"
+          />
         </div>
-
-        <div className="mt-3 flex gap-1.5">
-          {CAPABILITIES.map((c) => {
-            const ok = readyOf(c);
-            return (
-              <div key={c.id} className="flex-1 space-y-1">
-                <div className={`h-1.5 rounded-full ${ok ? 'bg-emerald-400' : c.essential ? 'bg-amber-400/40' : 'bg-surface-tertiary'}`} />
-                <div className={`text-[10px] truncate ${ok ? 'text-emerald-400' : 'text-gray-500'}`}>{c.name}</div>
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-0.5">
+          {query ? (
+            <>
+              <div className="px-2.5 pb-1 text-[9.5px] font-bold uppercase tracking-wider text-gray-500">
+                搜索结果 · {searchHits.length}
               </div>
-            );
-          })}
+              {searchHits.length === 0 && (
+                <div className="px-2.5 py-2 text-[10.5px] text-gray-500">没有匹配的通道或配置键</div>
+              )}
+              {searchHits.map(({ cap: c, ch }) => navItem(
+                cap === c.id && (selChan[c.id] || defaultOf(c)?.id) === ch.id,
+                () => { setCap(c.id); setSelChan((s) => ({ ...s, [c.id]: ch.id })); },
+                channelFilled(ch, merged) ? 'fill' : 'none',
+                <span>
+                  {ch.name}
+                  <span className="block text-[9.5px] text-gray-500">{c.name}</span>
+                </span>,
+              ))}
+            </>
+          ) : (
+            <>
+              {tab === 'core' && (
+                <>
+                  {navItem(cap === OVERVIEW, () => setCap(OVERVIEW), essentialMissing.length ? 'fill' : 'ok', '配置进度')}
+                  <div className="px-2.5 pt-3 pb-1 text-[9.5px] font-bold uppercase tracking-wider text-gray-500">生成链路</div>
+                </>
+              )}
+              {groupCaps.map((c) => navItem(
+                cap === c.id,
+                () => setCap(c.id),
+                stateOf(c),
+                c.name,
+                <span className="text-[9.5px] font-mono text-gray-500">{channelsFor(c).length}</span>,
+              ))}
+            </>
+          )}
         </div>
+        <div className="p-2 border-t border-border/70">
+          <button
+            onClick={runAllTests}
+            disabled={bulk.running || loading}
+            className="w-full px-2.5 py-1.5 rounded-xl bg-surface-secondary border border-border text-[11px] font-bold text-[color:var(--color-text-main)] hover:border-brand/50 disabled:opacity-40 flex items-center justify-center gap-1.5"
+          >
+            {bulk.running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FlaskConical className="w-3.5 h-3.5 text-brand-light" />}
+            {bulk.running ? `${bulk.done}/${bulk.total}` : '一键测试全部'}
+          </button>
+        </div>
+      </aside>
 
-        {essentialMissing.length > 0 && (
-          <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
-            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-            <div className="text-[11.5px] text-amber-200 leading-relaxed">
-              还差 <b>{essentialMissing.map((c) => c.name).join(' / ')}</b> 没配 ——
-              {essentialMissing.length > 1 ? '这两项' : '这项'}缺了，导入小说后就走不到出画面那一步。
-            </div>
+      {/* ── 右侧：总览 / 单个能力 ── */}
+      <div className="flex-1 overflow-y-auto custom-scrollbar min-w-0">
+        <div className="max-w-[880px] mx-auto px-5 py-5 space-y-5">
+          {cap === OVERVIEW ? (
+            <OverviewPanel
+              caps={groupCaps}
+              readyCount={readyCount}
+              essentialMissing={essentialMissing}
+              bulk={bulk}
+              onRunAll={runAllTests}
+              stateOf={stateOf}
+              defaultNameOf={(c) => defaultOf(c)?.name || '—'}
+              channelCountOf={(c) => channelsFor(c).length}
+              onJump={(id) => setCap(id)}
+            />
+          ) : (() => {
+            const c = CAPABILITIES.find((x) => x.id === cap);
+            if (!c) return null;
+            return (
+              <CapabilityDetail
+                cap={c}
+                merged={merged}
+                cfg={cfg} draft={draft} setDraft={setDraft}
+                channelsFor={channelsFor}
+                defaultOf={defaultOf}
+                viewedOf={viewedOf}
+                onView={(chId) => setSelChan((s) => ({ ...s, [c.id]: chId }))}
+                onSetDefault={setDefaultChannel}
+                test={tests[c.id] || {}}
+                onTest={() => { const ch = viewedOf(c); if (ch) runTest(c, ch); }}
+                moreOpen={!!more[c.id]}
+                onToggleMore={() => setMore((m) => ({ ...m, [c.id]: !m[c.id] }))}
+                revealed={revealed}
+                onReveal={(k) => setRevealed((r) => ({ ...r, [k]: !r[k] }))}
+                customsReady={customsReady}
+                keyDraft={keyDraft}
+                setKeyDraft={setKeyDraft}
+                keyBusy={keyBusy}
+                onSaveKey={saveCustomKey}
+                reloadCustoms={loadCustoms}
+              />
+            );
+          })()}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ═══════════════════════ 总览页 ═══════════════════════ */
+
+const OverviewPanel: React.FC<{
+  caps: Capability[];
+  readyCount: number;
+  essentialMissing: Capability[];
+  bulk: { running: boolean; done: number; total: number };
+  onRunAll: () => void;
+  stateOf: (c: Capability) => ReadyState;
+  defaultNameOf: (c: Capability) => string;
+  channelCountOf: (c: Capability) => number;
+  onJump: (id: string) => void;
+}> = ({ caps, readyCount, essentialMissing, bulk, onRunAll, stateOf, defaultNameOf, channelCountOf, onJump }) => (
+  <>
+    <div className="rounded-2xl border border-border bg-surface p-5">
+      <div className="flex items-baseline justify-between gap-3 flex-wrap">
+        <div>
+          <h2 className="text-sm font-bold text-[color:var(--color-text-main)]">配置进度</h2>
+          <p className="text-[11.5px] text-gray-400 mt-0.5">
+            共 <b className="text-[color:var(--color-text-main)]">{CAPABILITIES.length}</b> 项能力，各自独立，
+            <b className="text-[color:var(--color-text-main)]">只有「{CAPABILITIES.filter((c) => c.essential).map((c) => c.name).join(' / ')}」是必须的</b>。
+            进度统计的是「必填项已填」，填了不等于通——点
+            <b className="text-[color:var(--color-text-main)]">一键测试全部</b>，或进每个能力单独点
+            <b className="text-[color:var(--color-text-main)]">测试连通</b>。
+            <span className="block mt-0.5 text-gray-500">
+              测试跑的是每项能力「当前默认通道」；云端源会真实打一次接口（可能消耗一次配额），本地源只探地址。
+            </span>
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onRunAll}
+            disabled={bulk.running}
+            className="px-3 py-1.5 rounded-xl bg-surface-secondary border border-border text-[11.5px] font-bold text-[color:var(--color-text-main)] hover:border-brand/50 disabled:opacity-40 flex items-center gap-1.5"
+          >
+            {bulk.running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FlaskConical className="w-3.5 h-3.5 text-brand-light" />}
+            {bulk.running ? `测试中 ${bulk.done}/${bulk.total}` : '一键测试全部'}
+          </button>
+          <div className="font-mono text-xs text-gray-400">
+            <span className="text-2xl font-bold text-brand-light">{readyCount}</span>
+            <span className="mx-1">/</span>{CAPABILITIES.length}
           </div>
-        )}
-        {essentialMissing.length === 0 && (
-          <div className="mt-4 flex items-start gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5">
-            <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-            <div className="text-[11.5px] text-emerald-200 leading-relaxed">
-              必需项都填了。接下来两步：右上角<b>保存</b> → 每张卡点一次<b>测试连通</b>。
-              未配置 Key 的内置源不会出现在画布和分镜台的下拉里；自定义源接入即显示。
-            </div>
-          </div>
-        )}
+        </div>
       </div>
 
-      {/* ── 能力卡 ── */}
-      {CAPABILITIES.map((cap) => {
-        const chs = channelsFor(cap);
-        const chId = currentChannelId(cap, merged, customsOf(cap));
-        const ch = chs.find((c) => c.id === chId) || chs[0];
-        const orphan = customsReady ? unmatchedRoute(cap, merged, customsOf(cap)) : '';
-        const customCount = customsOf(cap).length;
-        const filled = ch ? channelFilled(ch, merged) : false;
-        const t = tests[cap.id] || {};
-
-        return (
-          <section key={cap.id} className="rounded-2xl border border-border bg-surface overflow-hidden">
-            {/* 卡头 */}
-            <div className="px-5 pt-4 pb-3 border-b border-border/70">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-sm font-bold text-[color:var(--color-text-main)]">{cap.name}</h3>
-                {cap.essential
-                  ? <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-brand/20 text-brand-light font-bold">必需</span>
-                  : <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-surface-tertiary text-gray-400">可选</span>}
-                <span className="ml-auto">
-                  {t.running
-                    ? <span className="text-[10.5px] text-gray-400 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" />测试中</span>
-                    : t.ok === true
-                      ? <span className="text-[10.5px] text-emerald-400 flex items-center gap-1"><Check className="w-3 h-3" />已测通</span>
-                      : filled
-                        ? <span className="text-[10.5px] text-amber-300 flex items-center gap-1"><CircleDot className="w-3 h-3" />已填，待测试</span>
-                        : <span className="text-[10.5px] text-gray-500 flex items-center gap-1"><CircleDot className="w-3 h-3" />未配置</span>}
-                </span>
-              </div>
-              <p className="text-[12px] text-gray-400 leading-relaxed mt-1.5">{cap.why}</p>
-              <p className="text-[11px] text-gray-500 leading-relaxed mt-1">
-                <span className="text-gray-600">不配会怎样：</span>{cap.ifMissing}
-              </p>
+      <div className="mt-3 flex gap-1.5">
+        {CAPABILITIES.map((c) => {
+          const st = stateOf(c);
+          return (
+            <div key={c.id} className="flex-1 space-y-1">
+              <div className={`h-1.5 rounded-full ${st === 'ok' ? 'bg-emerald-400' : st === 'fill' ? 'bg-amber-400/60' : 'bg-surface-tertiary'}`} />
+              <div className={`text-[10px] truncate ${st === 'ok' ? 'text-emerald-400' : c.essential && st === 'none' ? 'text-amber-300' : 'text-gray-500'}`}>{c.name}</div>
             </div>
+          );
+        })}
+      </div>
 
-            {/* 通道选择 */}
-            <div className="px-5 py-3.5">
-              <div className="text-[10.5px] font-bold uppercase tracking-wider text-gray-500 mb-2">
-                {cap.routeKey ? '选一个通道（同时就是默认通道）' : '通道'}
-                {customCount > 0 && (
-                  <span className="ml-2 font-normal normal-case tracking-normal text-gray-500">
-                    · 已并入 {customCount} 个自定义源，选中即写默认通道
-                  </span>
-                )}
+      {essentialMissing.length > 0 ? (
+        <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
+          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          <div className="text-[11.5px] text-amber-200 leading-relaxed">
+            还差 <b>{essentialMissing.map((c) => c.name).join(' / ')}</b> 没配 ——
+            {essentialMissing.length > 1 ? '这两项' : '这项'}缺了，导入小说后就走不到出画面那一步。
+            <button
+              onClick={() => onJump(essentialMissing[0].id)}
+              className="ml-1.5 px-2 py-0.5 rounded-lg bg-amber-500/20 text-[10.5px] text-amber-100 hover:bg-amber-500/30"
+            >去配置 →</button>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-4 flex items-start gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5">
+          <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+          <div className="text-[11.5px] text-emerald-200 leading-relaxed">
+            必需项都填了。接下来两步：右上角<b>保存</b> → 每个能力点一次<b>测试连通</b>。
+            未配置 Key 的内置源不会出现在画布和分镜台的下拉里；自定义源接入即显示。
+          </div>
+        </div>
+      )}
+    </div>
+
+    {/* 能力一览：点一下直达（旧版这些卡全部堆在一页里） */}
+    <div className="rounded-2xl border border-border bg-surface overflow-hidden">
+      <div className="px-5 pt-4 pb-3 border-b border-border/70">
+        <h3 className="text-sm font-bold text-[color:var(--color-text-main)]">能力一览</h3>
+        <p className="text-[11px] text-gray-500 mt-0.5">点任意一项进入它的通道列表，逐个配置。</p>
+      </div>
+      <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-2.5">
+        {caps.map((c) => {
+          const st = stateOf(c);
+          return (
+            <button
+              key={c.id}
+              onClick={() => onJump(c.id)}
+              className="text-left rounded-xl border border-border bg-surface-secondary/60 px-3.5 py-3 hover:border-brand/50 transition-all"
+            >
+              <div className="flex items-center gap-2">
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${DOT_CLS[st]}`} />
+                <span className="text-[12px] font-bold text-[color:var(--color-text-main)]">{c.name}</span>
+                {c.essential
+                  ? <span className="text-[9px] px-1.5 py-0.5 rounded bg-brand/20 text-brand-light font-bold">必需</span>
+                  : <span className="text-[9px] px-1.5 py-0.5 rounded bg-surface-tertiary text-gray-400">可选</span>}
               </div>
-              <div className="flex flex-wrap gap-1.5">
-                {chs.map((c) => {
-                  const active = c.id === chId;
-                  const done = channelFilled(c, merged);
-                  return (
-                    <button
-                      key={c.id}
-                      onClick={() => pickChannel(cap, c)}
-                      title={c.legacy ? `${c.summary}\n旧版通道：${c.legacy}` : c.summary}
-                      className={`px-3 py-1.5 rounded-xl text-[11.5px] font-medium border transition-all flex items-center gap-1.5 ${
-                        active
-                          ? 'bg-brand/15 border-brand/50 text-[color:var(--color-text-main)] ring-1 ring-brand/30'
-                          : 'bg-surface-secondary border-border text-gray-400 hover:text-[color:var(--color-text-main)] hover:border-brand/40'
-                      }`}
-                    >
-                      {c.custom
-                        ? <Landmark className="w-3 h-3 text-amber-300" />
-                        : c.where === 'local'
-                          ? <HardDrive className="w-3 h-3 text-emerald-400" />
-                          : <Cloud className="w-3 h-3 text-sky-400" />}
-                      <span>{c.name}</span>
-                      {c.custom && (
-                        <span className="text-[9px] px-1 rounded bg-amber-500/15 text-amber-300">
-                          自定义
-                        </span>
-                      )}
-                      {c.disabled && (
-                        <span className="text-[9px] px-1 rounded bg-surface-tertiary text-gray-400">
-                          已停用
-                        </span>
-                      )}
-                      {c.legacy && (
-                        <span className="text-[9px] px-1 rounded bg-surface-tertiary text-gray-400 flex items-center gap-0.5">
-                          <History className="w-2.5 h-2.5" />旧版
-                        </span>
-                      )}
-                      {done && <Check className="w-3 h-3 text-emerald-400" />}
-                    </button>
-                  );
-                })}
+              <div className="text-[10.5px] text-gray-500 mt-1 truncate">默认 {defaultNameOf(c)} · {channelCountOf(c)} 个通道</div>
+              <div className="mt-2 h-1 rounded-full bg-surface-tertiary overflow-hidden">
+                <div className={`h-full ${st === 'ok' ? 'bg-emerald-400' : st === 'fill' ? 'bg-amber-400' : 'bg-surface-tertiary'}`}
+                  style={{ width: st === 'ok' ? '100%' : st === 'fill' ? '55%' : '8%' }} />
               </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  </>
+);
 
-              {orphan && (
-                <div className="mt-2.5 flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2">
-                  <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
-                  <div className="text-[11px] text-amber-200 leading-relaxed">
-                    当前默认通道 <code className="font-mono">{orphan}</code> 不在可选列表里（对应的源可能已被删除或停用），
-                    下面显示的是第一个可用通道。<b>不改通道就不会写这条默认值</b>，点了任意通道并保存才会改写。
+/* ═══════════════════════ 单能力：通道 Master-Detail ═══════════════════════ */
+
+const CapabilityDetail: React.FC<{
+  cap: Capability;
+  merged: Record<string, string>;
+  cfg: Record<string, string>;
+  draft: Record<string, string>;
+  setDraft: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  channelsFor: (c: Capability) => Channel[];
+  defaultOf: (c: Capability) => Channel | undefined;
+  viewedOf: (c: Capability) => Channel | undefined;
+  onView: (chId: string) => void;
+  onSetDefault: (c: Capability, ch: Channel) => void;
+  test: TestState;
+  onTest: () => void;
+  moreOpen: boolean;
+  onToggleMore: () => void;
+  revealed: Record<string, boolean>;
+  onReveal: (k: string) => void;
+  customsReady: boolean;
+  keyDraft: Record<string, string>;
+  setKeyDraft: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  keyBusy: string;
+  onSaveKey: (ch: Channel) => Promise<void>;
+  reloadCustoms: () => Promise<void>;
+}> = (p) => {
+  const { cap, merged } = p;
+  const chs = p.channelsFor(cap);
+  const defCh = p.defaultOf(cap);
+  const ch = p.viewedOf(cap) || defCh;
+  if (!ch) return null;
+  const isDefault = ch.id === defCh?.id;
+  const orphan = p.customsReady ? unmatchedRoute(cap, merged, p.channelsFor(cap)) : '';
+  const t = p.test;
+
+  // 必填项填写进度（通道列表里的小进度条）
+  const reqOf = (c: Channel) => (c.fields || []).filter((f) => f.required !== false);
+  const pctOf = (c: Channel) => {
+    const req = reqOf(c);
+    if (!req.length) return c.custom ? 100 : 0;
+    return Math.round(req.filter((f) => !!(merged[f.key] || '').trim() || (f.altKeys || []).some((k) => !!(merged[k] || '').trim())).length / req.length * 100);
+  };
+
+  const fields = ch.fields || [];
+  const mainFields = fields.filter((f) => !f.advanced);
+  const advFields = fields.filter((f) => f.advanced);
+
+  return (
+    <section className="rounded-2xl border border-border bg-surface overflow-hidden">
+      {/* 卡头 */}
+      <div className="px-5 pt-4 pb-3 border-b border-border/70">
+        <div className="flex items-center gap-2 flex-wrap">
+          <h3 className="text-sm font-bold text-[color:var(--color-text-main)]">{cap.name}</h3>
+          {cap.essential
+            ? <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-brand/20 text-brand-light font-bold">必需</span>
+            : <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-surface-tertiary text-gray-400">可选</span>}
+          <span className="ml-auto">
+            {t.running
+              ? <span className="text-[10.5px] text-gray-400 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" />测试中</span>
+              : t.ok === true
+                ? <span className="text-[10.5px] text-emerald-400 flex items-center gap-1"><Check className="w-3 h-3" />已测通</span>
+                : defCh && channelFilled(defCh, merged)
+                  ? <span className="text-[10.5px] text-amber-300 flex items-center gap-1"><CircleDot className="w-3 h-3" />已填，待测试</span>
+                  : <span className="text-[10.5px] text-gray-500 flex items-center gap-1"><CircleDot className="w-3 h-3" />未配置</span>}
+          </span>
+        </div>
+        <p className="text-[12px] text-gray-400 leading-relaxed mt-1.5">{cap.why}</p>
+        <p className="text-[11px] text-gray-500 leading-relaxed mt-1">
+          <span className="text-gray-600">不配会怎样：</span>{cap.ifMissing}
+        </p>
+      </div>
+
+      <div className="px-5 py-4">
+        <div className="grid grid-cols-1 lg:grid-cols-[224px_1fr] gap-4 items-start">
+          {/* 通道列表 */}
+          <div className="space-y-1.5">
+            <div className="text-[10.5px] font-bold uppercase tracking-wider text-gray-500 px-0.5">
+              通道（{chs.length}）
+            </div>
+            {chs.map((c) => {
+              const active = c.id === ch.id;
+              const done = channelFilled(c, merged);
+              const isDef = c.id === defCh?.id;
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => p.onView(c.id)}
+                  title={c.legacy ? `${c.summary}\n旧版通道：${c.legacy}` : c.summary}
+                  className={`w-full text-left rounded-xl px-3 py-2 border transition-all ${
+                    active
+                      ? 'bg-brand/15 border-brand/50 ring-1 ring-brand/30'
+                      : 'bg-surface-secondary/60 border-border hover:border-brand/40'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    {c.custom
+                      ? <Landmark className="w-3 h-3 shrink-0 text-amber-300" />
+                      : c.where === 'local'
+                        ? <HardDrive className="w-3 h-3 shrink-0 text-emerald-400" />
+                        : <Cloud className="w-3 h-3 shrink-0 text-sky-400" />}
+                    <span className={`text-[11.5px] font-medium truncate flex-1 ${active ? 'text-[color:var(--color-text-main)]' : 'text-gray-300'}`}>{c.name}</span>
+                    {done && <Check className="w-3 h-3 shrink-0 text-emerald-400" />}
                   </div>
-                </div>
-              )}
-
-              {ch && (
-                <>
-                  <p className="text-[11.5px] text-gray-400 leading-relaxed mt-3">{ch.summary}</p>
-
-                  {ch.docUrl && (
-                    <a
-                      href={ch.docUrl} target="_blank" rel="noreferrer"
-                      className="mt-2 inline-flex items-center gap-1 text-[11px] text-brand-light hover:underline"
-                    >
-                      <ExternalLink className="w-3 h-3" />官方文档（核对模型名 / 参数口径）
-                    </a>
-                  )}
-
-                  {ch.legacy && (
-                    <div className="mt-2.5 flex items-start gap-2 rounded-xl border border-border bg-surface-secondary px-3 py-2">
-                      <History className="w-3.5 h-3.5 text-gray-500 shrink-0 mt-0.5" />
-                      <div className="text-[11px] text-gray-400 leading-relaxed">
-                        <b className="text-gray-300">旧版通道</b> · {ch.legacy}
-                      </div>
-                    </div>
-                  )}
-
-                  {ch.disabled && (
-                    <div className="mt-2.5 flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2">
-                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
-                      <div className="text-[11px] text-amber-200 leading-relaxed">
-                        这个生成源在「扩展」页被停用了。即使选成默认通道，生成时也会被守卫拦下
-                        ——先去「扩展」页把它启用。
-                      </div>
-                    </div>
-                  )}
-
-                  {ch.warn && (
-                    <div className="mt-2.5 flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2">
-                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
-                      <div className="text-[11px] text-amber-200 leading-relaxed">{ch.warn}</div>
-                    </div>
-                  )}
-
-                  {/* 字段 */}
-                  <div className="mt-3.5 space-y-2.5">
-                    {ch.fields.map((f) => (
-                      <FieldRow
-                        key={`${ch.id}:${f.key}`}
-                        field={f}
-                        listId={`${ch.id}:${f.key}`}
-                        value={val(draft, cfg, f.key)}
-                        revealed={!!revealed[f.key]}
-                        onReveal={() => setRevealed((r) => ({ ...r, [f.key]: !r[f.key] }))}
-                        onChange={(v) => setDraft((d) => ({ ...d, [f.key]: v }))}
-                      />
-                    ))}
-                  </div>
-
-                  {/* ComfyUI 通道：工作流列表就近管理，不用再去别的页 */}
-                  {ch.id === 'comfyui' && (
-                    <ComfyWorkflowList
-                      defaultImage={val(draft, cfg, 'COMFYUI_DEFAULT_IMAGE_WORKFLOW')}
-                      defaultVideo={val(draft, cfg, 'COMFYUI_DEFAULT_VIDEO_WORKFLOW')}
-                      onSetDefault={(k, v) => setDraft((d) => ({ ...d, [k]: v }))}
-                    />
-                  )}
-
-                  {/* 自定义源：Key 不走 .env，就地写 CUSTOM_PROVIDER_<id> */}
-                  {ch.custom && ch.providerId && (
-                    <CustomSourceBox
-                      channel={ch}
-                      value={keyDraft[ch.providerId] ?? ''}
-                      busy={keyBusy === ch.providerId}
-                      onChange={(v) => {
-                        const pid = ch.providerId as string;
-                        setKeyDraft((k) => ({ ...k, [pid]: v }));
-                      }}
-                      onSave={async () => {
-                        const pid = ch.providerId as string;
-                        const key = (keyDraft[pid] || '').trim();
-                        if (!key) { toast.error('先填 Key 再保存'); return; }
-                        setKeyBusy(pid);
-                        try {
-                          await apiService.setProviderApiKey(pid, key);
-                          toast.success(`已保存「${ch.name}」的 Key`);
-                          setKeyDraft((k) => ({ ...k, [pid]: '' }));
-                          await loadCustoms();
-                        } catch (e: any) {
-                          toast.error(e?.message || '保存 Key 失败');
-                        } finally {
-                          setKeyBusy('');
-                        }
-                      }}
-                      onMigrated={async () => {
-                        await loadCustoms();
-                      }}
-                    />
-                  )}
-
-                  {/* 操作 */}
-                  <div className="mt-3.5 flex items-center gap-2 flex-wrap">
-                    {(ch.test || ch.providerId) ? (
-                      <button
-                        onClick={() => runTest(cap, ch)}
-                        disabled={t.running}
-                        className="px-3.5 py-1.5 rounded-xl bg-brand text-white text-[11.5px] font-bold hover:bg-brand-light disabled:opacity-40 flex items-center gap-1.5"
-                      >
-                        {t.running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plug className="w-3.5 h-3.5" />}
-                        {ch.providerId ? '测试这个源' : '测试连通'}
-                      </button>
-                    ) : (
-                      <span className="text-[11px] text-gray-500">该通道无独立连通测试，保存后在生成源里验证</span>
-                    )}
-
-                    {t.detail && (
-                      <span className={`text-[11px] flex items-center gap-1 ${
-                        t.skipped ? 'text-gray-500' : t.ok ? 'text-emerald-400' : 'text-red-300'
-                      }`}>
-                        {t.skipped
-                          ? <CircleDot className="w-3.5 h-3.5" />
-                          : t.ok ? <Check className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
-                        {t.detail}
+                  <div className="flex items-center gap-1 flex-wrap mt-1">
+                    <span className={`text-[9px] px-1 rounded ${done ? 'bg-emerald-500/15 text-emerald-300' : 'bg-surface-tertiary text-gray-500'}`}>
+                      {done ? '已填' : '未填'}
+                    </span>
+                    {isDef && <span className="text-[9px] px-1 rounded bg-brand text-white">默认</span>}
+                    {c.custom && <span className="text-[9px] px-1 rounded bg-amber-500/15 text-amber-300">自定义</span>}
+                    {c.disabled && <span className="text-[9px] px-1 rounded bg-surface-tertiary text-gray-400">已停用</span>}
+                    {c.legacy && (
+                      <span className="text-[9px] px-1 rounded bg-surface-tertiary text-gray-400 flex items-center gap-0.5">
+                        <History className="w-2 h-2" />旧版
                       </span>
                     )}
                   </div>
-                </>
+                  <div className="mt-1.5 h-[3px] rounded-full bg-surface-tertiary overflow-hidden">
+                    <div className="h-full bg-emerald-400" style={{ width: `${pctOf(c)}%` }} />
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* 选中通道的字段面板 */}
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[13px] font-bold text-[color:var(--color-text-main)]">{ch.name}</span>
+              <span className={`text-[9.5px] px-1.5 py-0.5 rounded font-bold ${ch.where === 'local' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-sky-500/15 text-sky-300'}`}>
+                {ch.where === 'local' ? '本地' : '云端'}
+              </span>
+              {ch.custom && <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 font-bold">自定义源</span>}
+              <span className="ml-auto">
+                {isDefault
+                  ? <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-brand text-white font-bold">✓ 当前默认通道</span>
+                  : (
+                    <button
+                      onClick={() => p.onSetDefault(cap, ch)}
+                      className="px-2 py-0.5 rounded-lg bg-surface-secondary border border-border text-[10.5px] text-gray-300 hover:text-white hover:border-brand/50 flex items-center gap-1"
+                    >
+                      <ArrowLeftRight className="w-3 h-3" />设为默认通道
+                    </button>
+                  )}
+              </span>
+            </div>
+            <p className="text-[11.5px] text-gray-400 leading-relaxed mt-1.5">{ch.summary}</p>
+
+            {ch.docUrl && (
+              <a
+                href={ch.docUrl} target="_blank" rel="noreferrer"
+                className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-brand-light hover:underline"
+              >
+                <ExternalLink className="w-3 h-3" />官方文档（核对模型名 / 参数口径）
+              </a>
+            )}
+
+            {orphan && (
+              <div className="mt-2.5 flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                <div className="text-[11px] text-amber-200 leading-relaxed">
+                  当前默认通道 <code className="font-mono">{orphan}</code> 不在可选列表里（对应的源可能已被删除或停用），
+                  下面显示的是第一个可用通道。<b>不改通道就不会写这条默认值</b>，点了「设为默认通道」并保存才会改写。
+                </div>
+              </div>
+            )}
+
+            {ch.legacy && (
+              <div className="mt-2.5 flex items-start gap-2 rounded-xl border border-border bg-surface-secondary px-3 py-2">
+                <History className="w-3.5 h-3.5 text-gray-500 shrink-0 mt-0.5" />
+                <div className="text-[11px] text-gray-400 leading-relaxed">
+                  <b className="text-gray-300">旧版通道</b> · {ch.legacy}
+                </div>
+              </div>
+            )}
+
+            {ch.disabled && (
+              <div className="mt-2.5 flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                <div className="text-[11px] text-amber-200 leading-relaxed">
+                  这个生成源在「扩展」页被停用了。即使选成默认通道，生成时也会被守卫拦下
+                  ——先去「扩展」页把它启用。
+                </div>
+              </div>
+            )}
+
+            {ch.warn && (
+              <div className="mt-2.5 flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                <div className="text-[11px] text-amber-200 leading-relaxed">{ch.warn}</div>
+              </div>
+            )}
+
+            {/* 字段：主界面只留必填 / 常用，进阶选填收进折叠区 */}
+            <div className="mt-3.5 space-y-2.5">
+              {mainFields.map((f) => (
+                <FieldRow
+                  key={`${ch.id}:${f.key}`}
+                  field={f}
+                  listId={`${ch.id}:${f.key}`}
+                  value={val(p.draft, p.cfg, f.key)}
+                  revealed={!!p.revealed[f.key]}
+                  onReveal={() => p.onReveal(f.key)}
+                  onChange={(v) => p.setDraft((d) => ({ ...d, [f.key]: v }))}
+                />
+              ))}
+            </div>
+
+            {advFields.length > 0 && (
+              <>
+                <button
+                  onClick={p.onToggleMore}
+                  className="mt-3 w-full flex items-center gap-1.5 text-[11px] text-gray-500 hover:text-[color:var(--color-text-main)] border-t border-dashed border-border pt-2.5"
+                >
+                  {p.moreOpen ? '▾' : '▸'} 选填 / 高级（{advFields.length} 项）
+                </button>
+                <div className={`space-y-2.5 ${p.moreOpen ? 'mt-2.5' : 'hidden'}`}>
+                  {advFields.map((f) => (
+                    <FieldRow
+                      key={`${ch.id}:${f.key}`}
+                      field={f}
+                      listId={`${ch.id}:${f.key}`}
+                      value={val(p.draft, p.cfg, f.key)}
+                      revealed={!!p.revealed[f.key]}
+                      onReveal={() => p.onReveal(f.key)}
+                      onChange={(v) => p.setDraft((d) => ({ ...d, [f.key]: v }))}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
+
+            {/* ComfyUI 通道：工作流列表就近管理，不用再去别的页 */}
+            {ch.id === 'comfyui' && (
+              <ComfyWorkflowList
+                defaultImage={val(p.draft, p.cfg, 'COMFYUI_DEFAULT_IMAGE_WORKFLOW')}
+                defaultVideo={val(p.draft, p.cfg, 'COMFYUI_DEFAULT_VIDEO_WORKFLOW')}
+                onSetDefault={(k, v) => p.setDraft((d) => ({ ...d, [k]: v }))}
+              />
+            )}
+
+            {/* 自定义源：Key 不走 .env，就地写 CUSTOM_PROVIDER_<id> */}
+            {ch.custom && ch.providerId && (
+              <CustomSourceBox
+                channel={ch}
+                value={p.keyDraft[ch.providerId] ?? ''}
+                busy={p.keyBusy === ch.providerId}
+                onChange={(v) => {
+                  const pid = ch.providerId as string;
+                  p.setKeyDraft((k) => ({ ...k, [pid]: v }));
+                }}
+                onSave={() => p.onSaveKey(ch)}
+                onMigrated={async () => {
+                  await p.reloadCustoms();
+                }}
+              />
+            )}
+
+            {/* 操作 */}
+            <div className="mt-3.5 flex items-center gap-2 flex-wrap">
+              {(ch.test || ch.providerId) ? (
+                <button
+                  onClick={p.onTest}
+                  disabled={t.running}
+                  className="px-3.5 py-1.5 rounded-xl bg-brand text-white text-[11.5px] font-bold hover:bg-brand-light disabled:opacity-40 flex items-center gap-1.5"
+                >
+                  {t.running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plug className="w-3.5 h-3.5" />}
+                  {ch.providerId ? '测试这个源' : '测试连通'}
+                </button>
+              ) : (
+                <span className="text-[11px] text-gray-500">该通道无独立连通测试，保存后在生成源里验证</span>
+              )}
+
+              {t.detail && (
+                <span className={`text-[11px] flex items-center gap-1 ${
+                  t.skipped ? 'text-gray-500' : t.ok ? 'text-emerald-400' : 'text-red-300'
+                }`}>
+                  {t.skipped
+                    ? <CircleDot className="w-3.5 h-3.5" />
+                    : t.ok ? <Check className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
+                  {t.detail}
+                </span>
               )}
             </div>
-          </section>
-        );
-      })}
+          </div>
+        </div>
+      </div>
 
-      <div className="rounded-2xl border border-border bg-surface-secondary/60 p-4 flex items-start gap-2.5">
+      <div className="border-t border-border/70 bg-surface-secondary/40 px-5 py-3 flex items-start gap-2.5">
         <ChevronRight className="w-4 h-4 text-brand-light shrink-0 mt-0.5" />
         <div className="text-[11.5px] text-gray-400 leading-relaxed">
           <b className="text-[color:var(--color-text-main)]">想接的厂商不在上面？</b>
           去「扩展」页新建一个自定义生成源——写一段 Python/JavaScript 协程就能接任意 API，
           或者导入一个 ComfyUI 工作流，它本身就会变成一个独立生成源。
-          新建的代码源（生图 / 生视频 / 配音）会自动并入本页对应能力的通道行，可在这里选为默认通道并就地填 Key。
+          新建的代码源（生图 / 生视频 / 配音）会自动并入本能力的通道列表，可在这里设为默认通道并就地填 Key。
         </div>
       </div>
-    </div>
+    </section>
   );
 };
 
