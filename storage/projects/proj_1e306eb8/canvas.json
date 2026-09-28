@@ -26,8 +26,8 @@
           "id": "prompt_1789737991813_19",
           "type": "prompt",
           "position": {
-            "x": 921.0703132707986,
-            "y": 395.00847590160924
+            "x": 1643.0703132707986,
+            "y": 503.00847590160924
           },
           "data": {
             "prompt": ""
@@ -43,8 +43,8 @@
           "id": "image_1789738007390_20",
           "type": "image",
           "position": {
-            "x": 613.0703132707986,
-            "y": -268.99152409839076
+            "x": 931.0703132707986,
+            "y": 85.00847590160922
           },
           "data": {
             "prompt": "",
@@ -62,7 +62,8 @@
               "steps": 20,
               "cfg": 7
             },
-            "_polling": false
+            "_polling": false,
+            "skill_id": "text_to_image"
           },
           "measured": {
             "width": 360,
@@ -81,15 +82,17 @@
           "data": {
             "prompt": "",
             "duration": 5,
-            "provider_id": "prov_6131876a",
-            "provider": "prov_6131876a",
+            "provider_id": "prov_d76c351f",
+            "provider": "prov_d76c351f",
             "params": {
-              "resolution": "768p竖",
-              "duration": 5
+              "duration": 5,
+              "aspect_ratio": "9:16 (Portrait Widescreen)",
+              "instance_type": "default"
             },
             "provider_params": {
-              "resolution": "768p竖",
-              "duration": 5
+              "duration": 5,
+              "aspect_ratio": "9:16 (Portrait Widescreen)",
+              "instance_type": "default"
             },
             "_polling": false,
             "reference_images": [
@@ -100,15 +103,15 @@
             "width": 360,
             "height": 405
           },
-          "selected": true,
+          "selected": false,
           "dragging": false
         },
         {
           "id": "prompt_1789982935217_1",
           "type": "prompt",
           "position": {
-            "x": 94,
-            "y": -116
+            "x": 408,
+            "y": -88
           },
           "data": {
             "prompt": ""
@@ -124,8 +127,8 @@
           "id": "prompt_1789982935245_2",
           "type": "prompt",
           "position": {
-            "x": 360,
-            "y": 360
+            "x": 256.6171480502669,
+            "y": 254.31975134027283
           },
           "data": {
             "prompt": ""
@@ -133,7 +136,9 @@
           "measured": {
             "width": 360,
             "height": 253
-          }
+          },
+          "selected": false,
+          "dragging": false
         }
       ],
       "edges": [
@@ -157,7 +162,7 @@
           "selected": false
         }
       ],
-      "updated_at": "2026-09-21 21:33:49"
+      "updated_at": "2026-09-28 15:47:15"
     },
     "cv_mtpeb9n6": {
       "name": "画布2",
@@ -726,6 +731,57 @@
         }
       ],
       "updated_at": "2026-09-18 21:32:38"
+    },
+    "cv_mukwaphl": {
+      "name": "画布11",
+      "nodes": [
+        {
+          "id": "prompt_1790579044285_4",
+          "type": "prompt",
+          "position": {
+            "x": 18.000000000000057,
+            "y": 98
+          },
+          "data": {
+            "prompt": ""
+          },
+          "measured": {
+            "width": 360,
+            "height": 253
+          },
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "video_1790579063164_6",
+          "type": "video",
+          "position": {
+            "x": 418.00000000000006,
+            "y": 98
+          },
+          "data": {
+            "prompt": "",
+            "duration": 5
+          },
+          "measured": {
+            "width": 360,
+            "height": 405
+          },
+          "selected": false
+        }
+      ],
+      "edges": [
+        {
+          "id": "e_prompt_1790579044285_4_video_1790579063164_6",
+          "source": "prompt_1790579044285_4",
+          "target": "video_1790579063164_6",
+          "type": "smoothstep",
+          "animated": true,
+          "sourceHandle": "prompt",
+          "targetHandle": "prompt"
+        }
+      ],
+      "updated_at": "2026-09-28 15:04:28"
     }
   }
 }

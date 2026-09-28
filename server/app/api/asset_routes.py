@@ -82,6 +82,13 @@ async def batch_create_assets(
     return {"imported": len(created), "total": len(files), "assets": created, "errors": errors}
 
 
+@router.post("/assets/clean-missing")
+async def clean_missing_assets():
+    """手动清理「文件已删、记录还在」的悬空素材（删除前先备份清单到 .missing_backup.jsonl）"""
+    report = asset_manager.cleanup_missing()
+    return {"status": "ok", **report}
+
+
 @router.post("/assets/generate")
 async def generate_asset(
     name: str = Form(...),
@@ -182,6 +189,7 @@ async def create_asset(
     description: Optional[str] = Form(None),
     tags: Optional[str] = Form(None, description="JSON数组或逗号分隔"),
     visual_prompt: Optional[str] = Form(None),
+    content: Optional[str] = Form(None, description="文本/提示词素材正文（category=text）"),
     style_preset: Optional[str] = Form(None),
     project_id: Optional[str] = Form(None),
     scope: str = Form("project", description="project|global"),
@@ -222,6 +230,7 @@ async def create_asset(
         "description": description or "",
         "tags": tag_list,
         "visual_prompt": visual_prompt or "",
+        "content": content or "",
         "style_preset": style_preset,
         "project_id": eff_project_id,
         "scope": eff_scope,
@@ -252,6 +261,7 @@ async def update_asset(
     description: Optional[str] = Form(None),
     tags: Optional[str] = Form(None),
     visual_prompt: Optional[str] = Form(None),
+    content: Optional[str] = Form(None, description="文本/提示词素材正文"),
     style_preset: Optional[str] = Form(None),
     status: Optional[str] = Form(None),
     file_url: Optional[str] = Form(None),
@@ -284,6 +294,8 @@ async def update_asset(
         updates["tags"] = tag_list
     if visual_prompt is not None:
         updates["visual_prompt"] = visual_prompt
+    if content is not None:
+        updates["content"] = content
     if style_preset is not None:
         updates["style_preset"] = style_preset
     if status is not None:

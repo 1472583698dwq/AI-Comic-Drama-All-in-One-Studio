@@ -42,7 +42,7 @@ export const VisualTab: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
         // NOTE: 条件与原代码一致 —— motion_comic 隐藏生图表单
         const hide = productionMode === 'motion_comic';
         if (hide) {
-          return <div className="text-[11px] text-gray-500 bg-surface-secondary/60 border border-border rounded-lg px-2.5 py-1.5">直出模式跳过生图：绑定上方角色 / 场景 / 道具后，直接去「运镜动态」页生成参考生视频</div>;
+          return <div className="text-[11px] text-gray-500 bg-surface-secondary/60 border border-border rounded-lg px-2.5 py-1.5">漫剧模式跳过生图：绑定上方角色 / 场景 / 道具后，直接去「视频与运镜」页生成视频</div>;
         }
         return (
         <div className="p-3 rounded-2xl bg-surface-secondary/50 border border-border space-y-3">
@@ -57,7 +57,7 @@ export const VisualTab: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
                 title="一键将角色特征、场景环境、道具法宝、3D机位词融合成完整提示词"
               >
                 <Sparkles className="w-3 h-3" />
-                <span>⚡ 全要素合成</span>
+                <span>合成提示词</span>
               </button>
               <button
                 onClick={() => handleOneClickBind('image')}

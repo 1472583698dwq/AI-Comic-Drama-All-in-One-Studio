@@ -339,7 +339,8 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
                             message:`清除「${editing.name || editing.id}」已保存的 Key？清除后这个源会变成未配置。` });
                           if (!ok) return;
                           try {
-                            await apiService.setProviderApiKey(editing.id, '');
+                            // 清 Key 走 PUT（api_key:"" = 删除，走 POST /api-key 会被 400 拒绝）
+                            await apiService.updateProvider(editing.id, { api_key: '' });
                             toast.success('已清除');
                             window.dispatchEvent(new Event('provider-list-refresh'));
                           } catch(e:any){ toast.error(e?.message || '清除失败'); }

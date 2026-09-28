@@ -5,9 +5,8 @@ import {
 } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { toast } from '../../stores/useDialogStore';
-
-const API_ORIGIN = typeof window !== 'undefined' && window.location.port === '5173'
-  ? 'http://127.0.0.1:8000' : '';
+import { API_ORIGIN } from '../../utils/devOrigin';
+import { resetContextTips } from '../../utils/guideFlags';
 
 /** 只能改 .env 的 Agent / 任务中心参数：界面里改不了，但至少别再是黑盒 */
 const ENV_ONLY: Array<{ key: string; def: string; desc: string }> = [
@@ -236,6 +235,10 @@ export const SystemPanel: React.FC<Props> = ({ cfg, draft, setDraft, envFile, js
             <button onClick={() => window.dispatchEvent(new Event('open-first-run-wizard'))}
               className="px-2.5 py-1 rounded-lg bg-surface-secondary border border-border text-[11px] text-brand-light hover:text-white">
               重新运行安装向导
+            </button>
+            <button onClick={() => { resetContextTips(); toast.success('已重置：下次进入画布 / 分镜台会重新显示新手提示'); }}
+              className="px-2.5 py-1 rounded-lg bg-surface-secondary border border-border text-[11px] text-gray-300 hover:text-white">
+              重置新手提示
             </button>
           </div>
         </div>

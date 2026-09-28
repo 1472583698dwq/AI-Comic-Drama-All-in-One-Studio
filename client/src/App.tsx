@@ -20,6 +20,7 @@ import { ProviderManagerModal } from './components/provider/ProviderManagerModal
 import { GlobalAiPolish } from './components/ui/GlobalAiPolish';
 import { GlobalDialogContainer } from './components/ui/GlobalDialogContainer';
 import { FirstRunWizard } from './components/onboarding/FirstRunWizard';
+import { ContextTipCard } from './components/onboarding/ContextTipCard';
 import { installGlobalDialogPatch, toast } from './stores/useDialogStore';
 /**
  * 懒加载视图 + 构建更新自愈：
@@ -166,6 +167,21 @@ export function App() {
             <MobileCardFlow onOpenExport={() => setIsExportOpen(true)} />
           )}
           </ErrorBoundary>
+          {/* 上下文轻引导卡：每页首进只出现 1 张，读过不再出现（设置 → 系统 可重置） */}
+          {project && activeTab === 'canvas' && (
+            <ContextTipCard
+              storageKey="canvas_first"
+              title="画布这样玩"
+              desc="按住节点右侧圆点拖到下一个节点即连线；选中生图 / 视频 / 配音节点，底部会弹出它的 Agent 控制台，用一句大白话描述你要什么即可。"
+            />
+          )}
+          {project && platformMode === 'desktop' && (activeTab === 'studio' || activeTab === 'timeline') && (
+            <ContextTipCard
+              storageKey="studio_first"
+              title="分镜台这样用"
+              desc="先用顶栏「导入」粘贴小说章节，AI 会自动拆分镜；选中镜头后可在检查器里生成首帧 / 视频 / 配音，底部时间线控制整体节奏。"
+            />
+          )}
         </main>
       </div>
 
@@ -205,7 +221,7 @@ export function App() {
       {/* Modern Global Toast / Confirm / Prompt Dialogs */}
       <GlobalDialogContainer />
 
-      {/* 首次启动安装向导（未完成引导时自动弹出；可通过事件重新打开） */}
+      {/* 安装向导：首次启动且未配置能力时自动弹出（可跳过）；设置 → 系统 可随时重开 */}
       <FirstRunWizard />
     </div>
   );

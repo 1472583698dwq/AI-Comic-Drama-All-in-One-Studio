@@ -1,11 +1,11 @@
 // -*- coding: utf-8 -*-
 /**
  * 一键成片 Agent Modal（桌面端）
- * 长文本 → 后台编排（经典 6 阶段流水线 / 智能体集群），3s 轮询进度，
- * agent 模式展示子代理花名册（角色/批次/状态/耗时），完成后落盘为正式项目并跳转分镜台。
+ * 长文本 → 总导演 Agent + 子代理集群（可换导演组），3s 轮询进度，
+ * 实时展示子代理花名册（角色/批次/状态/耗时），完成后落盘为正式项目并跳转分镜台。
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { X, Zap, Loader2, CheckCircle2, AlertTriangle, Clapperboard, Bot, Cog, Users } from 'lucide-react';
+import { X, Zap, Loader2, CheckCircle2, AlertTriangle, Clapperboard, Bot, Users } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { autoBindShotCharacters } from '../storyboard/shotReference';
@@ -27,8 +27,6 @@ export const OneKeyRunModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const [audioProvider, setAudioProvider] = useState('');
   const [enableVideo, setEnableVideo] = useState(true);
   const [genRoles, setGenRoles] = useState(true);
-  const [engine, setEngine] = useState<'agent' | 'pipeline'>('agent');
-  const [ranEngine, setRanEngine] = useState<'agent' | 'pipeline'>('agent');
   const [teams, setTeams] = useState<any[]>([]);
   const [teamId, setTeamId] = useState('');
   const [ranTeamName, setRanTeamName] = useState('');
@@ -138,8 +136,8 @@ export const OneKeyRunModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const handleRun = async () => {
     if (text.trim().length < 20) { setError('文本太短（至少20字），请粘贴小说章节或故事梗概'); return; }
     setError(null); setResult(null); setLogs([]); setProgress(0); setStatus('queued');
-    setSubagentMap({}); setRanEngine(engine);
-    setRanTeamName(engine === 'agent' ? (teams.find((t) => t?.id === teamId)?.name || '') : '');
+    setSubagentMap({});
+    setRanTeamName(teams.find((t) => t?.id === teamId)?.name || '');
     try {
       const r = await apiService.onekeyRun({
         title: title.trim() || '一键成片',
@@ -152,8 +150,7 @@ export const OneKeyRunModal: React.FC<Props> = ({ isOpen, onClose }) => {
         enable_video: enableVideo,
         max_videos: Math.min(maxShots, 12),
         gen_roles: genRoles,
-        engine,
-        team_id: engine === 'agent' ? teamId : '',
+        team_id: teamId,
       });
       setTaskId(r.task_id);
       if (r?.team_name) setRanTeamName(r.team_name);
@@ -221,44 +218,29 @@ export const OneKeyRunModal: React.FC<Props> = ({ isOpen, onClose }) => {
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span className="text-[11px] text-gray-400">编排引擎</span>
-                <div className="flex items-center rounded-xl bg-surface-secondary border border-border p-0.5">
-                  <button
-                    onClick={() => setEngine('agent')}
-                    title="总导演 Agent + 专家子代理集群：同质任务批量并行，失败不阻塞整体"
-                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${engine === 'agent' ? 'bg-brand/20 text-brand-light' : 'text-gray-500 hover:text-white'}`}
-                  >🤖 智能体集群</button>
-                  <button
-                    onClick={() => setEngine('pipeline')}
-                    title="固定 6 阶段确定性流水线（稳定串行）"
-                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${engine === 'pipeline' ? 'bg-gray-500/25 text-white' : 'text-gray-500 hover:text-white'}`}
-                  >⚙️ 经典流水线</button>
-                </div>
+                <span className="text-[11px] text-gray-400">编排</span>
+                <span className="px-3 py-1 rounded-lg text-xs font-bold bg-brand/20 text-brand-light" title="总导演 Agent + 专家子代理集群：同质任务批量并行，失败不阻塞整体">🤖 智能体集群</span>
                 <span className="text-[10px] text-gray-500">
-                  {engine === 'agent'
-                    ? '总导演规划 + 子代理并行（拆解→定妆→生图→视频→配音→导出），单点失败不阻塞全片'
-                    : '固定 6 阶段顺序执行（无并行调度与自愈）'}
+                  总导演规划 + 子代理并行（拆解→定妆→生图→视频→配音→导出），单点失败不阻塞全片
                 </span>
               </div>
-              {engine === 'agent' && (
-                <div className="flex flex-wrap items-center gap-2 text-xs">
-                  <span className="text-[11px] text-gray-400 flex items-center gap-1"><Users className="w-3 h-3" />导演组</span>
-                  <select
-                    value={teamId}
-                    onChange={(e) => applyTeam(e.target.value)}
-                    className="bg-surface-secondary border border-border rounded-lg px-2 py-1 text-xs text-white max-w-[220px]"
-                  >
-                    <option value="">内置默认（标准 6 阶段编排）</option>
-                    {teams.map((t) => (
-                      <option key={t.id} value={t.id}>{t.name}{t.qa_gate ? ' · 质检门' : ''}</option>
-                    ))}
-                  </select>
-                  <span className="text-[10px] text-gray-500">
-                    {(teams.find((t) => t?.id === teamId)?.description)
-                      || (teams.length ? '自定义成员名单与总导演编排脚本' : '暂无自定义导演组：在扩展中心或 storage/agent_teams 添加')}
-                  </span>
-                </div>
-              )}
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="text-[11px] text-gray-400 flex items-center gap-1"><Users className="w-3 h-3" />导演组</span>
+                <select
+                  value={teamId}
+                  onChange={(e) => applyTeam(e.target.value)}
+                  className="bg-surface-secondary border border-border rounded-lg px-2 py-1 text-xs text-white max-w-[220px]"
+                >
+                  <option value="">内置默认（标准 6 阶段编排）</option>
+                  {teams.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}{t.qa_gate ? ' · 质检门' : ''}</option>
+                  ))}
+                </select>
+                <span className="text-[10px] text-gray-500">
+                  {(teams.find((t) => t?.id === teamId)?.description)
+                    || (teams.length ? '自定义成员名单与总导演编排脚本' : '暂无自定义导演组：在扩展中心或 storage/agent_teams 添加')}
+                </span>
+              </div>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-gray-300">
                 <label className="flex items-center gap-1.5">画幅
                   <select value={aspect} onChange={e=>setAspect(e.target.value)} className="bg-surface-secondary border border-border rounded-lg px-2 py-1 text-xs text-white"><option value="9:16">竖屏 9:16</option><option value="16:9">横屏 16:9</option><option value="1:1">方形 1:1</option></select>
@@ -281,17 +263,16 @@ export const OneKeyRunModal: React.FC<Props> = ({ isOpen, onClose }) => {
                     {done && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />}
                     {status === 'failed' && <AlertTriangle className="w-3.5 h-3.5 text-red-400" />}
                     <span className="font-bold">{running ? 'Agent 制作中…' : done ? '制作完成' : status === 'failed' ? '制作失败' : status}</span>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-bold flex items-center gap-1 ${ranEngine === 'agent' ? 'bg-brand/10 text-brand-light border-brand/30' : 'bg-surface-tertiary text-gray-300 border-border'}`}>
-                      {ranEngine === 'agent' ? <Bot className="w-3 h-3" /> : <Cog className="w-3 h-3" />}
-                      {ranEngine === 'agent' ? '智能体集群' : '经典流水线'}
-                      {ranEngine === 'agent' && ranTeamName ? ` · ${ranTeamName}` : ''}
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-bold flex items-center gap-1 bg-brand/10 text-brand-light border-brand/30">
+                      <Bot className="w-3 h-3" />
+                      {ranTeamName ? `导演组 · ${ranTeamName}` : '智能体集群'}
                     </span>
                   </span>
                   <span className="font-mono text-brand-light">{progress}%</span>
                 </div>
                 <div className="h-2 rounded-full bg-surface-secondary overflow-hidden"><div className="h-full bg-gradient-to-r from-brand to-amber-400 transition-all" style={{ width: `${progress}%` }} /></div>
               </div>
-              {ranEngine === 'agent' && Object.keys(swarmList).length > 0 && (
+              {Object.keys(swarmList).length > 0 && (
                 <AgentSwarmPanel subagents={swarmList} />
               )}
               <div ref={logRef} className="h-48 overflow-y-auto rounded-xl bg-surface-secondary border border-border p-3 space-y-1 custom-scrollbar">

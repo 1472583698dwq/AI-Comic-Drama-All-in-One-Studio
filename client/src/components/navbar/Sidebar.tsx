@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   Sparkles, Layers, Users, Compass, Video, Library, FolderKanban, Bot,
-  Settings, Sun, Moon, PanelLeftClose, PanelLeft, Lock,
+  Settings, Sun, Moon, PanelLeftClose, PanelLeft, Lock, Plug,
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { useThemeStore } from '../../stores/useThemeStore';
@@ -26,9 +26,9 @@ interface NavItem {
 /**
  * 左侧主导航（SaaS 惯例：主导航常驻侧栏 + 设置沉到底部工具区）。
  * - 顶栏只保留全局上下文；本项目主频道全部收敛到这里，支持折叠成图标栏。
- * - 底部工具区固定放「生成源 / 技能 / MCP / 主题 / 系统设置」，设置永远可见。
+ * - 底部工具区固定放「生成源 / 主题 / 系统设置」，设置永远可见（技能与 MCP 入口在 设置→扩展）。
  */
-export const Sidebar: React.FC<SidebarProps> = () => {
+export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
   const { project, activeTab, setActiveTab, setWorkspace } = useProjectStore();
   const { effectiveTheme, toggleTheme } = useThemeStore();
 
@@ -64,7 +64,7 @@ export const Sidebar: React.FC<SidebarProps> = () => {
       title: '漫剧工坊',
       items: [
         { id: 'projects', label: '项目看板', icon: FolderKanban },
-        { id: 'studio', label: '分镜工作台', icon: Layers, count: shotsCount },
+        { id: 'studio', label: '分镜台', icon: Layers, count: shotsCount },
         { id: 'characters', label: '角色设定', icon: Users, count: charactersCount },
         { id: 'director3d', label: '3D 片场', icon: Compass },
         { id: 'timeline', label: '多轨剪辑', icon: Video },
@@ -152,6 +152,14 @@ export const Sidebar: React.FC<SidebarProps> = () => {
 
       {/* 底部工具区：设置永远可见 */}
       <div className="p-2 border-t border-border space-y-0.5 bg-surface/95">
+        <UtilButton
+          icon={Plug}
+          label="生成源"
+          collapsed={collapsed}
+          onClick={() => onOpenProvider?.()}
+          iconCls="text-brand-light"
+        />
+
         <UtilButton
           icon={effectiveTheme === 'dark' ? Sun : Moon}
           label="切换主题"

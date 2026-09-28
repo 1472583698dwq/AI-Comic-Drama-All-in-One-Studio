@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 import { Image as ImageIcon, Video, Music, Type, Upload, Trash2 } from 'lucide-react';
 import { apiService } from '../../../services/api';
 import { AutoRatioMedia } from '../../ui/AutoRatioMedia';
 
-const API_ORIGIN = window.location.port === '5173' ? 'http://127.0.0.1:8000' : '';
+import { API_ORIGIN } from '../../../utils/devOrigin';
 
 function getUrl(u?:string){ if(!u) return ''; return u.startsWith('/') ? API_ORIGIN+u : u; }
 
@@ -134,13 +134,22 @@ export const LoadAudioNode: React.FC<NodeProps> = ({ data, id })=>{
 export const TextPromptNode: React.FC<NodeProps> = ({ data, id })=>{
   const d:any = data;
   const [prompt,setPrompt]=useState(d.prompt||d.text||'');
-  const sync=(v:string)=>{ setPrompt(v); (d.onUpdate as any)?.(id,{prompt:v, text:v}); };
+  // 外部填充（拖放/连线/上游级联）同步进本地编辑态；自己 sync 的回声忽略
+  const lastLocal = useRef<string|null>(null);
+  const external = d.prompt ?? d.text ?? '';
+  useEffect(()=>{
+    if (lastLocal.current !== null && external === lastLocal.current) return;
+    lastLocal.current = null;
+    if (external !== prompt) setPrompt(external);
+  }, [external]); // eslint-disable-line react-hooks/exhaustive-deps
+  const sync=(v:string)=>{ setPrompt(v); lastLocal.current = v; (d.onUpdate as any)?.(id,{prompt:v, text:v}); };
   return (
     <div className="w-[300px] bg-surface border border-border rounded-2xl shadow-xl overflow-hidden">
       <div className="px-3 py-2.5 bg-surface border-b border-border flex items-center gap-1.5">
         <div className="w-6 h-6 rounded-lg bg-surface-secondary border border-border flex items-center justify-center"><Type className="w-3.5 h-3.5 text-sky-500"/></div>
         <span className="text-xs font-bold [color:var(--color-text-main)]">文本提示词</span>
       </div>
+      <Handle type="target" position={Position.Left} id="prompt" className="!bg-sky-500 !w-3 !h-3 !border-2 !border-surface"/>
       <Handle type="source" position={Position.Right} id="prompt" className="!bg-sky-500 !w-3 !h-3 !border-2 !border-surface"/>
       <Handle type="source" position={Position.Bottom} id="text" className="!bg-sky-500 !w-3 !h-3 !border-2 !border-surface"/>
       <div className="p-3">

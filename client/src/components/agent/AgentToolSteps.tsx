@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import type { ApprovalInfo, AgentTodoItem, ToolStep } from './agentTypes';
 import { roleMeta } from './swarmMeta';
+import { resolveMediaUrl as resolveOriginUrl } from '../../utils/devOrigin';
 
 /** 服务端审批超时（与 ApprovalService 默认 120s 对齐） */
 const APPROVAL_TIMEOUT_S = 120;
@@ -44,7 +45,7 @@ function resultSummary(result: any): string {
 
 function resolveMediaUrl(u?: string): string {
   if (!u) return '';
-  return u.startsWith('http') ? u : `http://127.0.0.1:8000${u.startsWith('/') ? '' : '/'}${u}`;
+  return resolveOriginUrl(u.startsWith('/') || /^(https?:|data:|blob:)/.test(u) ? u : `/${u}`);
 }
 
 /** 从工具结果里找可预览的媒体（image_url/video_url/audio_url/url，限两层） */

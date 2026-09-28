@@ -1035,12 +1035,21 @@ class MCPServerRegistry:
         ))
         self.register_tool(MCPToolDefinition(
             name="canvas_update_node",
-            description="[画布] 更新节点数据",
+            description="[画布] 更新节点数据；结果键必须用 snake_case（视频结果用 video_url，勿用 videoUrl 驼峰——驼峰会被自动归一兼容，但节点组件只读 snake_case）",
             category="workflow",
             icon="Edit",
             author="Canvas Engine",
             is_enabled=True,
             input_schema={"type":"object","properties":{"node_id":{"type":"string"},"patch":{"type":"object"},"project_id":{"type":"string"}},"required":["node_id","patch"]}
+        ))
+        self.register_tool(MCPToolDefinition(
+            name="canvas_delete_node",
+            description="[画布] 删除节点（连带删除挂在它身上的连线，避免留下悬空边）。高危操作（审批模式下需人工确认）；删前先用 canvas_query 确认 node_id 与它连了什么",
+            category="workflow",
+            icon="Trash2",
+            author="Canvas Engine",
+            is_enabled=True,
+            input_schema={"type":"object","properties":{"node_id":{"type":"string","description":"要删除的节点 id（先用 canvas_query 取真实 id）"},"project_id":{"type":"string","description":"归属项目ID，不传则使用上下文项目"}},"required":["node_id"]}
         ))
         self.register_tool(MCPToolDefinition(
             name="canvas_connect",
@@ -2182,7 +2191,7 @@ class MCPServerRegistry:
                         raise ValueError("proposal_id 不能为空")
                     result = await _creator.finalize(pid, act, {"project": project_context} if project_context else {})
 
-            elif tool_name in ("canvas_query","canvas_create_node","canvas_update_node","canvas_connect","canvas_execute","canvas_dispatch_skill","canvas_query_assets"):
+            elif tool_name in ("canvas_query","canvas_create_node","canvas_update_node","canvas_delete_node","canvas_connect","canvas_execute","canvas_dispatch_skill","canvas_query_assets"):
                 # 画布工具：真实持久化到 storage/projects/{id}/canvas.json，前端通过轮询/事件同步
                 from app.providers.project.manager import project_manager as _pm
                 # 尝试从参数或上下文获取 project_id
@@ -2376,10 +2385,27 @@ class MCPServerRegistry:
                         raise ValueError(f"项目 {pid} 画布不存在")
                     nodes = snap.get("nodes") or []
                     found = False
+                    # 别名归一层：驼峰键自动补写 snake_case 键（两种写法同时落盘），
+                    # 避免 Agent 回填 videoUrl 而前端节点只认 video_url 导致 UI 不出
+                    _KEY_ALIASES = {
+                        "videoUrl": "video_url",
+                        "imageUrl": "image_url",
+                        "audioUrl": "audio_url",
+                        "resultUrl": "result_url",
+                        "taskId": "task_id",
+                        "fallbackFrom": "fallback_from",
+                        "posterUrl": "poster_url",
+                    }
+                    _patch_norm = {}
+                    for _k, _v in (patch or {}).items():
+                        _patch_norm[_k] = _v
+                        _alias = _KEY_ALIASES.get(_k)
+                        if _alias and _alias not in patch:
+                            _patch_norm[_alias] = _v
                     for n in nodes:
                         if n.get("id") == nid:
                             d = n.get("data") or {}
-                            d.update(patch or {})
+                            d.update(_patch_norm)
                             n["data"] = d
                             found = True
                             break
@@ -2389,7 +2415,37 @@ class MCPServerRegistry:
                     import time as _time2
                     snap["updated_at"] = _time2.strftime("%Y-%m-%dT%H:%M:%SZ", _time2.gmtime())
                     _pm.save_canvas(pid, snap)
-                    result = {"status": "updated", "project_id": pid, "node_id": nid, "patch": patch}
+                    result = {"status": "updated", "project_id": pid, "node_id": nid, "patch": patch, "normalized_keys": sorted(set(_patch_norm) - set(patch or {}))}
+                elif tool_name == "canvas_delete_node":
+                    if not pid:
+                        raise ValueError("canvas_delete_node 需要 project_id（或在上下文中提供 project）")
+                    nid = str(arguments.get("node_id") or "").strip()
+                    if not nid:
+                        raise ValueError("node_id 不能为空")
+                    snap = _pm.get_canvas(pid)
+                    if not snap:
+                        raise ValueError(f"项目 {pid} 画布不存在")
+                    nodes = snap.get("nodes") or []
+                    edges = snap.get("edges") or []
+                    hit = next((n for n in nodes if n.get("id") == nid), None)
+                    if not hit:
+                        raise ValueError(f"节点不存在: {nid}（先用 canvas_query 确认真实 id）")
+                    # 连带删掉挂在它身上的连线：只删节点会留下 source/target 指向不存在节点的悬空边，
+                    # 前端渲染与后端 canvas_execute 的拓扑排序都会受影响。
+                    drop_edges = [e for e in edges if e.get("source") == nid or e.get("target") == nid]
+                    snap["nodes"] = [n for n in nodes if n.get("id") != nid]
+                    snap["edges"] = [e for e in edges if e.get("source") != nid and e.get("target") != nid]
+                    import time as _time5
+                    snap["updated_at"] = _time5.strftime("%Y-%m-%dT%H:%M:%SZ", _time5.gmtime())
+                    _pm.save_canvas(pid, snap)
+                    result = {
+                        "status": "deleted",
+                        "project_id": pid,
+                        "deleted_node": {"id": nid, "type": hit.get("type")},
+                        "deleted_edges": len(drop_edges),
+                        "total_nodes": len(snap["nodes"]),
+                        "total_edges": len(snap["edges"]),
+                    }
                 elif tool_name == "canvas_connect":
                     if not pid:
                         raise ValueError("canvas_connect 需要 project_id")

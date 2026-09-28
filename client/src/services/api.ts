@@ -1,7 +1,5 @@
 import { Project, StoryboardShot, MCPToolDefinition } from '../types';
-
-const isDev = typeof window !== 'undefined' && window.location.port === '5173';
-const API_BASE_URL = isDev ? 'http://127.0.0.1:8000/api/v1' : '/api/v1';
+import { API_BASE_URL } from '../utils/devOrigin';
 
 function extractErrorMessage(res: Response, body: any): string {
   if (body?.detail) {
@@ -650,13 +648,13 @@ export const apiService = {
     return await res.json();
   },
 
-  // 9.1 一键成片 Agent（异步任务 + 轮询；engine=agent 时走总导演+子代理集群）
+  // 9.1 一键成片 Agent（异步任务 + 轮询；总导演 + 子代理集群，可传 team_id 选择导演组）
   async onekeyRun(params: {
     title?: string; text: string; style_preset?: string; aspect_ratio?: string; custom_instructions?: string;
     max_images?: number; image_provider?: string; image_workflow_id?: string; audio_provider?: string;
     video_provider?: string; video_workflow_id?: string; enable_video?: boolean; max_videos?: number;
-    gen_roles?: boolean; max_roles?: number; engine?: 'pipeline' | 'agent'; team_id?: string;
-  }): Promise<{ task_id: string; status: string; engine?: string; team_id?: string; team_name?: string }> {
+    gen_roles?: boolean; max_roles?: number; team_id?: string;
+  }): Promise<{ task_id: string; status: string; team_id?: string; team_name?: string }> {
     const res = await fetch(`${API_BASE_URL}/onekey/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -676,7 +674,6 @@ export const apiService = {
         max_videos: params.max_videos ?? 6,
         gen_roles: params.gen_roles ?? true,
         max_roles: params.max_roles ?? 4,
-        engine: params.engine || 'pipeline',
         team_id: params.team_id || '',
       }),
     });

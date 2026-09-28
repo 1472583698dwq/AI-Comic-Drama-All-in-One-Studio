@@ -20,6 +20,9 @@ os.makedirs(ASSETS_ROOT, exist_ok=True)
 # 兼容旧角色库：若 assets 为空，可从 project 迁移的占位
 MIGRATED_MARKER = os.path.join(ASSETS_ROOT, ".migrated")
 
+# 悬空素材清理前的备份清单（jsonl，逐条追加，可人工找回）
+MISSING_BACKUP = os.path.join(ASSETS_ROOT, ".missing_backup.jsonl")
+
 def _asset_dir(asset_id: str) -> str:
     return os.path.join(ASSETS_ROOT, asset_id)
 
@@ -45,10 +48,19 @@ def _save_asset(asset: Asset):
         json.dump(asset.model_dump(), f, ensure_ascii=False, indent=2)
 
 class AssetManager:
+    # 悬空记录懒校验：每进程只在首次 list_assets 时清扫一次，避免每次列表都全量 stat
+    _missing_swept = False
+
     def list_assets(self, category: Optional[str] = None, status: Optional[str] = None, tag: Optional[str] = None, q: Optional[str] = None, project_id: Optional[str] = None, page: int = 1, limit: int = 24, sort: str = "updated_at", scope: Optional[str] = None, include_shared: bool = True) -> Dict[str, Any]:
         assets: List[Asset] = []
         if not os.path.exists(ASSETS_ROOT):
             return {"assets": [], "total": 0, "page": page, "limit": limit}
+        if not AssetManager._missing_swept:
+            AssetManager._missing_swept = True
+            try:
+                self.cleanup_missing()
+            except Exception:
+                pass
         for entry in os.listdir(ASSETS_ROOT):
             adir = os.path.join(ASSETS_ROOT, entry)
             if not os.path.isdir(adir):
@@ -131,6 +143,45 @@ class AssetManager:
     def get_asset(self, asset_id: str) -> Optional[Asset]:
         return _load_asset(asset_id)
 
+    def _is_file_missing(self, asset: Asset) -> bool:
+        """本地 /storage 引用做存在性校验；http(s)/data: 外链不校验"""
+        for u in (getattr(asset, "file_url", None), getattr(asset, "thumb_url", None)):
+            if isinstance(u, str) and u.startswith("/storage/"):
+                local = os.path.join(settings.STORAGE_DIR, u[len("/storage/"):])
+                if not os.path.exists(local):
+                    return True
+        return False
+
+    def cleanup_missing(self) -> Dict[str, Any]:
+        """
+        清理「文件已删、记录还在」的悬空素材（P3-2）。
+        删除前把清单追加备份到 storage/assets/.missing_backup.jsonl，可人工找回。
+        """
+        removed: List[Dict[str, Any]] = []
+        kept = 0
+        if not os.path.exists(ASSETS_ROOT):
+            return {"removed": removed, "count": 0, "kept": kept}
+        for entry in os.listdir(ASSETS_ROOT):
+            adir = os.path.join(ASSETS_ROOT, entry)
+            if not os.path.isdir(adir):
+                continue
+            a = _load_asset(entry)
+            if not a:
+                continue
+            if self._is_file_missing(a):
+                removed.append({"id": a.id, "name": a.name, "file_url": a.file_url, "cleaned_at": time.strftime("%Y-%m-%dT%H:%M:%S")})
+                shutil.rmtree(adir, ignore_errors=True)
+            else:
+                kept += 1
+        if removed:
+            try:
+                with open(MISSING_BACKUP, "a", encoding="utf-8") as f:
+                    for r in removed:
+                        f.write(json.dumps(r, ensure_ascii=False) + "\n")
+            except Exception:
+                pass
+        return {"removed": removed, "count": len(removed), "kept": kept}
+
     def create_asset(self, data: Dict[str, Any], file_bytes: Optional[bytes] = None, filename: Optional[str] = None) -> Asset:
         # 校验 category
         cat = data.get("category", "other")
@@ -157,6 +208,7 @@ class AssetManager:
             description=data.get("description", ""),
             tags=data.get("tags", []) or [],
             visual_prompt=data.get("visual_prompt", "") or "",
+            content=data.get("content", "") or "",
             negative_prompt=data.get("negative_prompt"),
             style_preset=data.get("style_preset"),
             project_id=proj_id_val,
@@ -216,7 +268,7 @@ class AssetManager:
         if not asset:
             return None
         # 允许更新的字段
-        for k in ["name","category","subcategory","description","tags","visual_prompt","negative_prompt","style_preset","status","style_anchor_id","lora_trigger","voice_id","voice_name","three_views","extra","project_id","scope","shared_to"]:
+        for k in ["name","category","subcategory","description","tags","visual_prompt","content","negative_prompt","style_preset","status","style_anchor_id","lora_trigger","voice_id","voice_name","three_views","extra","project_id","scope","shared_to"]:
             if k in updates and updates[k] is not None:
                 if k == "category" and updates[k] not in ASSET_CATEGORIES:
                     continue

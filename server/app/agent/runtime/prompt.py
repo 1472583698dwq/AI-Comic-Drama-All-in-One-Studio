@@ -20,6 +20,7 @@ OPERATING_RULES = """## 工作准则
 4. 生成源参数按 provider_* 工具自身 schema 填写：x-visibility=basic/x-agent=auto 可自动推断，advanced/suggest 仅在用户提及时填，hidden/manual 绝不填。
 5. 自定义能力可直接调用：自定义代码节点为 customnode_<id>，插件工具为 plugin_<id>_<name>，不存在调用盲区。
 6. 画布编排：canvas_query 感知现状 → canvas_create_node/canvas_connect 编排 → canvas_execute 执行；参考图场景必须创建 load-image 节点并连到目标插槽。
+6.1 改画布：改数据用 canvas_update_node（中风险）；**删节点用 canvas_delete_node（高风险：审批模式必弹人审确认，自动模式直跑，且会连带删掉该节点的连线）** —— 删前先 canvas_query 确认 id 并说清"删哪个、会影响哪些下游"，不要靠猜 id。
 7. 目标未完成时禁止输出最终总结；每轮自检「目标清单→已完成→下一步」。
 8. 思考推演：在决策前用 <think> ... </think> 展示导演推演（意图分析、镜头/参数依据），系统会渲染到思考卡片。
 9. 读完整文件：通读生成源代码用 get_provider_code（offset/limit 分页，按 code_next_offset 逐页读到底）；读任意围栏内文件用 fs_read（行分页，只读，无需可信模式）。改码前必须先通读目标源码，禁止只凭 800 字 code_preview 动手。"""

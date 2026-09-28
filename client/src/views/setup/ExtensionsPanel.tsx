@@ -18,7 +18,7 @@ const KIND_META: Record<string, { label: string; desc: string }> = {
   mcp_tool:        { label: 'MCP 工具',  desc: 'AI 导演能调用的工具，也对外开放给别的 AI' },
   workflow:        { label: '工作流',    desc: '导入的 ComfyUI 工作流与它的槽位映射' },
   canvas_node:     { label: '画布节点',  desc: '声明式节点：端口 + 参数 + 指向某个可执行扩展' },
-  storyboard_slot: { label: '分镜槽',    desc: '往分镜工作台插页签 / 锚点 / 按钮 / 制作模式' },
+  storyboard_slot: { label: '分镜槽',    desc: '往分镜台插页签 / 锚点 / 按钮 / 制作模式' },
   theme:           { label: '主题',      desc: '一包 CSS 变量，换整套配色' },
   exporter:        { label: '导出器',    desc: '声明式导出目标，如 SRT / 第三方草稿' },
   director_pack:   { label: '导演包',    desc: '3D 片场的机位预设 / 环境底图 / GLB 道具' },

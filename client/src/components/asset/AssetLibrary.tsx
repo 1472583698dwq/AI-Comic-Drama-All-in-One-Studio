@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Search, Plus, Layers, Users, Mountain, Box, Image as ImageIcon, Sparkles, Copy, Trash2, Tag, Filter, Library, Upload, Wand2, X, Loader2, Check, Files, Pencil, Save, Edit3, Clapperboard, Send } from 'lucide-react';
+import { Search, Plus, Layers, Users, Mountain, Box, Image as ImageIcon, Sparkles, Copy, Trash2, Tag, Filter, Library, Upload, Wand2, X, Loader2, Check, Files, Pencil, Save, Edit3, Clapperboard, Send, FileText } from 'lucide-react';
 import { useAssetStore } from '../../stores/useAssetStore';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { useProjectListStore } from '../../stores/useProjectListStore';
@@ -18,11 +18,11 @@ const CATEGORY_TABS: { key: AssetCategory | 'all'; label: string; icon: React.Re
   { key: 'background', label: '背景', icon: <ImageIcon className="w-3.5 h-3.5" /> },
   { key: 'effect', label: '特效', icon: <Sparkles className="w-3.5 h-3.5" /> },
   { key: 'previz', label: '预演', icon: <Clapperboard className="w-3.5 h-3.5" /> },
+  { key: 'text', label: '提示词', icon: <FileText className="w-3.5 h-3.5" /> },
   { key: 'other', label: '其他', icon: <Layers className="w-3.5 h-3.5" /> },
 ];
 
-const isDev = typeof window !== 'undefined' && window.location.port === '5173';
-const API_ORIGIN = isDev ? 'http://127.0.0.1:8000' : '';
+import { API_ORIGIN } from '../../utils/devOrigin';
 const resolveUrl = (u?: string) => u && u.startsWith('/') ? API_ORIGIN + u : u;
 
 export const AssetLibrary: React.FC = () => {
@@ -34,6 +34,10 @@ export const AssetLibrary: React.FC = () => {
 
   const [showImport, setShowImport] = useState(false);
   const [showGenerate, setShowGenerate] = useState(false);
+  // 新建文本/提示词素材（无文件资源，正文存 content）
+  const [showText, setShowText] = useState(false);
+  const [textForm, setTextForm] = useState({ name: '', content: '', tags: '' });
+  const [creatingText, setCreatingText] = useState(false);
 
   const [importFiles, setImportFiles] = useState<File[]>([]);
   const [importMeta, setImportMeta] = useState({ category: 'character' as AssetCategory, tags: '', visual_prompt: '' });
@@ -53,7 +57,8 @@ export const AssetLibrary: React.FC = () => {
   useEscapeClose(showEdit, () => setShowEdit(false));
   useEscapeClose(showImport, () => setShowImport(false));
   useEscapeClose(showGenerate, () => setShowGenerate(false));
-  const [editForm, setEditForm] = useState({ name: '', category: 'character' as AssetCategory, description: '', visual_prompt: '', tags: '', status: 'approved' as string });
+  useEscapeClose(showText, () => setShowText(false));
+  const [editForm, setEditForm] = useState({ name: '', category: 'character' as AssetCategory, description: '', visual_prompt: '', content: '', tags: '', status: 'approved' as string });
   const [editFile, setEditFile] = useState<File | null>(null);
   const [updating, setUpdating] = useState(false);
   const editFileRef = useRef<HTMLInputElement>(null);
@@ -117,6 +122,27 @@ export const AssetLibrary: React.FC = () => {
   const refreshStats = () => apiService.getAssetStats().then(setStats).catch(()=>{});
 
   const handleSearch = () => fetchAssets({ q: searchInput, page: 1 });
+
+  /** 新建文本/提示词素材：无文件，正文进 content，category=text */
+  const handleCreateText = async () => {
+    if (!textForm.name.trim()) { toast.warning('请填写素材名称'); return; }
+    if (!textForm.content.trim()) { toast.warning('正文不能为空'); return; }
+    setCreatingText(true);
+    try {
+      const fd = new FormData();
+      fd.append('name', textForm.name.trim());
+      fd.append('category', 'text');
+      fd.append('content', textForm.content);
+      fd.append('description', textForm.content.slice(0, 80));
+      if (textForm.tags.trim()) fd.append('tags', textForm.tags.trim());
+      await createAsset(fd as any);
+      setShowText(false);
+      setTextForm({ name: '', content: '', tags: '' });
+      toast.success('文本素材已创建，可在列表中拖入画布');
+      fetchAssets({ category, page: 1 });
+      refreshStats();
+    } catch (e: any) { toast.error(e?.message || '创建失败'); } finally { setCreatingText(false); }
+  };
 
   const handleImport = async () => {
     if (importFiles.length === 0) { alert('请选择至少一个文件'); return; }
@@ -217,6 +243,7 @@ export const AssetLibrary: React.FC = () => {
       category: (asset.category as AssetCategory) || 'character',
       description: asset.description || '',
       visual_prompt: asset.visual_prompt || '',
+      content: asset.content || '',
       tags: asset.tags?.join(', ') || '',
       status: asset.status || 'approved',
     });
@@ -234,6 +261,7 @@ export const AssetLibrary: React.FC = () => {
       fd.append('category', editForm.category);
       if (editForm.description) fd.append('description', editForm.description);
       if (editForm.visual_prompt) fd.append('visual_prompt', editForm.visual_prompt);
+      fd.append('content', editForm.content || '');
       if (editForm.tags) fd.append('tags', editForm.tags);
       if (editForm.status) fd.append('status', editForm.status);
       if (editFile) fd.append('file', editFile);
@@ -312,7 +340,7 @@ export const AssetLibrary: React.FC = () => {
       }
     }
     const shot: any = curProject.scenes.flatMap((s:any)=>s.shots).find((s:any)=>s.id===targetShotId);
-    if (!shot || !targetShotId) { alert('请先在分镜工作台选中一个镜头'); return; }
+    if (!shot || !targetShotId) { alert('请先在分镜台选中一个镜头'); return; }
     const shotId: string = targetShotId;
     const url = asset.file_url || asset.thumb_url;
     const abs = url && url.startsWith('/') ? `http://127.0.0.1:8000${url}` : url;
@@ -351,13 +379,17 @@ export const AssetLibrary: React.FC = () => {
       // 预演 → 白模参考（图/视频各归其位）
       if (abs && /\.(mp4|webm|mov)$/i.test(abs)) patch.previz_video_url = abs;
       else if (abs) patch.previz_url = abs;
+    } else if (asset.category === 'text') {
+      // 文本/提示词素材 → 正文追加进镜头提示词
+      const desc = asset.content || asset.visual_prompt || '';
+      if (desc) patch.image_prompt = appendPromptOnce(shot.image_prompt || '', desc);
     } else {
       const desc = asset.visual_prompt || asset.name;
       if (desc) patch.image_prompt = appendPromptOnce(shot.image_prompt || '', `${desc}, detailed prop`);
     }
     if (!Object.keys(patch).length) { alert('该素材无可用信息写入分镜'); return; }
     updateShot(shotId, patch);
-    // 切到分镜工作台并提示
+    // 切到分镜台并提示
     st.setActiveTab('studio');
     try { window.dispatchEvent(new CustomEvent('asset-applied', { detail: { assetId: asset.id, shotId: targetShotId } })); } catch {}
   };
@@ -376,6 +408,7 @@ export const AssetLibrary: React.FC = () => {
           id: asset.id, name: asset.name, category: asset.category,
           file_url: asset.file_url || asset.thumb_url, visual_prompt: asset.visual_prompt || '',
           description: asset.description || '',
+          content: asset.content || '',
         },
       };
       localStorage.setItem('canvas_pending_asset', JSON.stringify(payload));
@@ -525,6 +558,7 @@ export const AssetLibrary: React.FC = () => {
               <span className="text-xs">拖拽文件到此处导入，或点击「生成」AI 创作</span>
               <div className="flex space-x-2 pt-1">
                 <button onClick={()=>setShowImport(true)} className="px-4 py-2 rounded-xl bg-brand text-white text-xs font-bold flex items-center space-x-1"><Upload className="w-3.5 h-3.5" /><span>导入素材</span></button>
+                <button onClick={()=>setShowText(true)} className="px-4 py-2 rounded-xl bg-surface border border-border text-xs text-white flex items-center space-x-1 hover:border-brand" title="新建纯文本/提示词素材（可拖入画布自动填充）"><FileText className="w-3.5 h-3.5" /><span>新建文本</span></button>
                 <button onClick={()=>setShowGenerate(true)} className="px-4 py-2 rounded-xl bg-surface border border-border text-xs text-white flex items-center space-x-1"><Wand2 className="w-3.5 h-3.5" /><span>AI 生成</span></button>
               </div>
             </div>
@@ -535,8 +569,22 @@ export const AssetLibrary: React.FC = () => {
                   const url = a.file_url || a.thumb_url;
                   const abs = url && url.startsWith('/') ? `http://127.0.0.1:8000${url}` : url;
                   return (
-                  <div key={a.id} draggable onDragStart={e=>{ e.dataTransfer.setData('text/plain', abs||url||''); e.dataTransfer.setData('application/canvas-assetid', a.id); e.dataTransfer.setData('application/asset-category', a.category||''); e.dataTransfer.effectAllowed='copy'; }} onClick={()=>{selectAsset(a.id); setDetailAsset(a);}} title="拖拽到分镜垫图槽或画布" className={`group bg-surface border rounded-2xl overflow-hidden cursor-grab active:cursor-grabbing transition-all hover:shadow-lg ${selectedId===a.id ? 'border-brand ring-1 ring-brand/30' : 'border-border hover:border-border-active'}`}>
-                    {a.thumb_url || a.file_url ? (
+                  <div key={a.id} draggable onDragStart={e=>{ e.dataTransfer.setData('text/plain', abs||url||''); e.dataTransfer.setData('application/canvas-assetid', a.id); e.dataTransfer.setData('application/asset-category', a.category||''); if (a.category==='text') { e.dataTransfer.setData('application/canvas-assetkind','text'); e.dataTransfer.setData('application/canvas-text', a.content || a.visual_prompt || ''); } e.dataTransfer.effectAllowed='copy'; }} onClick={()=>{selectAsset(a.id); setDetailAsset(a);}} title={a.category==='text' ? '拖入画布：填充到命中的节点，或新建文本节点' : '拖拽到分镜垫图槽或画布'} className={`group bg-surface border rounded-2xl overflow-hidden cursor-grab active:cursor-grabbing transition-all hover:shadow-lg ${selectedId===a.id ? 'border-brand ring-1 ring-brand/30' : 'border-border hover:border-border-active'}`}>
+                    {a.category === 'text' ? (
+                      <div className="aspect-square bg-surface-secondary relative overflow-hidden p-3">
+                        <div className="absolute top-2 left-2 flex items-center space-x-1 z-10">
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-full border font-medium bg-sky-500/15 text-sky-400 border-sky-500/30">text</span>
+                        </div>
+                        <div className="text-[10px] text-gray-400 leading-relaxed overflow-hidden whitespace-pre-wrap break-words" style={{ display: '-webkit-box', WebkitLineClamp: 7, WebkitBoxOrient: 'vertical' }}>
+                          {(a.content || a.visual_prompt || '').slice(0, 240) || '（空文本素材）'}
+                        </div>
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-2 space-x-1">
+                          <button onClick={(e)=>{e.stopPropagation(); handleSendToCanvas(a);}} className="flex-1 py-1 rounded-lg bg-brand text-white text-[10px] font-bold">发送到画布</button>
+                          <button onClick={(e)=>{e.stopPropagation(); const t=a.content||a.visual_prompt||''; if(t&&navigator.clipboard){navigator.clipboard.writeText(t); toast.success('已复制文本');} }} className="p-1 rounded-lg bg-white/20 text-white hover:bg-white/30" title="复制文本"><Copy className="w-3 h-3" /></button>
+                          <button onClick={(e)=>{e.stopPropagation(); openEdit(a);}} className="p-1 rounded-lg bg-white/20 text-white hover:bg-white/30" title="编辑"><Pencil className="w-3 h-3" /></button>
+                        </div>
+                      </div>
+                    ) : a.thumb_url || a.file_url ? (
                       <AutoRatioMedia
                         src={resolveUrl(a.thumb_url||a.file_url) || ''}
                         alt={a.name}
@@ -598,6 +646,12 @@ export const AssetLibrary: React.FC = () => {
               <div className="text-sm font-bold text-white">{selected.name}</div>
               <div className="text-xs text-gray-400 mt-1">{selected.category} {selected.subcategory && `· ${selected.subcategory}`} · {selected.source==='generate'?'AI生成':selected.source==='upload'?'本地导入':'迁移'}</div>
               {selected.description && <p className="text-xs text-gray-300 mt-2 leading-5">{selected.description}</p>}
+              {selected.category === 'text' && (
+                <div className="mt-2">
+                  <label className="text-xs font-semibold text-white block mb-1">正文</label>
+                  <div className="bg-surface-secondary border border-border rounded-xl p-2.5 text-xs text-gray-300 max-h-40 overflow-y-auto whitespace-pre-wrap break-words leading-5">{selected.content || selected.visual_prompt || '—'}</div>
+                </div>
+              )}
             </div>
             <div>
               <label className="text-xs font-semibold text-white block mb-1">视觉提示词</label>
@@ -677,6 +731,12 @@ export const AssetLibrary: React.FC = () => {
               <label className="text-xs text-gray-300">描述</label>
               <textarea value={editForm.description} onChange={e=>setEditForm({...editForm, description:e.target.value})} rows={2} placeholder="素材描述" className="mt-1 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white font-mono" />
             </div>
+            {(editForm.category === 'text' || selected.category === 'text') && (
+              <div>
+                <label className="text-xs text-gray-300">正文（文本/提示词素材）</label>
+                <textarea value={editForm.content} onChange={e=>setEditForm({...editForm, content:e.target.value})} rows={5} placeholder="提示词 / 剧本片段正文" className="mt-1 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white font-mono" />
+              </div>
+            )}
             <div>
               <label className="text-xs text-gray-300">视觉提示词</label>
               <textarea value={editForm.visual_prompt} onChange={e=>setEditForm({...editForm, visual_prompt:e.target.value})} rows={3} placeholder="英文提示词，用于一致性生成" className="mt-1 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs font-mono text-white" />
@@ -753,6 +813,34 @@ export const AssetLibrary: React.FC = () => {
             <div className="flex justify-end space-x-2 pt-1">
               <button onClick={()=>setShowImport(false)} className="px-4 py-2 rounded-xl bg-surface-secondary border border-border text-xs text-white">取消</button>
               <button onClick={handleImport} disabled={importing || importFiles.length===0} className="px-5 py-2 rounded-xl bg-brand text-white text-xs font-bold disabled:opacity-40 flex items-center space-x-1.5">{importing? <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span>导入中…</span></> : <><Check className="w-3.5 h-3.5" /><span>确认导入{importFiles.length?` · ${importFiles.length}个`:''}</span></>}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showText && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={()=>setShowText(false)}>
+          <div className="bg-surface border border-border rounded-2xl w-full max-w-lg p-5 space-y-4 max-h-[90vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white flex items-center space-x-2"><FileText className="w-4 h-4 text-sky-400" /><span>新建文本 / 提示词素材</span><span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-400 border border-sky-500/20">可拖入画布</span></h3>
+              <button onClick={()=>setShowText(false)} className="text-gray-400 hover:text-white"><X className="w-4 h-4" /></button>
+            </div>
+            <div>
+              <label className="text-xs text-gray-300">名称 *</label>
+              <input value={textForm.name} onChange={e=>setTextForm({...textForm, name:e.target.value})} placeholder="如：玄幻打斗运镜提示词" className="mt-1 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-brand" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-300">正文 *（提示词 / 剧本片段）</label>
+              <textarea value={textForm.content} onChange={e=>setTextForm({...textForm, content:e.target.value})} rows={8} placeholder="粘贴提示词或文本，创建后可拖入画布填充到任意生成节点，或连线自动填充下游" className="mt-1 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-brand resize-y" />
+              <div className="text-[10px] text-gray-500 mt-1">{textForm.content.length} 字符</div>
+            </div>
+            <div>
+              <label className="text-xs text-gray-300">标签（逗号分隔）</label>
+              <input value={textForm.tags} onChange={e=>setTextForm({...textForm, tags:e.target.value})} placeholder="如：运镜, 打斗" className="mt-1 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white" />
+            </div>
+            <div className="flex justify-end space-x-2 pt-1">
+              <button onClick={()=>setShowText(false)} className="px-4 py-2 rounded-xl bg-surface-secondary border border-border text-xs text-white">取消</button>
+              <button onClick={handleCreateText} disabled={creatingText} className="px-5 py-2 rounded-xl bg-brand text-white text-xs font-bold disabled:opacity-40 flex items-center space-x-1.5">{creatingText ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span>创建中…</span></> : <><Check className="w-3.5 h-3.5" /><span>创建素材</span></>}</button>
             </div>
           </div>
         </div>

@@ -67,6 +67,7 @@ class AgentLoop:
         self._open_step = False
         self._turn_seq = 0
         self._run_id = ""
+        self._turn_started_at = 0.0
         self._lock = asyncio.Lock()
         self.pipeline = ToolPipeline(
             session_id,
@@ -295,13 +296,36 @@ class AgentLoop:
         return True
 
     # ── 单轮 ─────────────────────────────────────────────
+    def _trace(self, event: str, data: Dict[str, Any]) -> None:
+        """run 级审计留痕：一次运行一个文件 `storage/agent_traces/<run_id>.jsonl`。
+
+        与「会话事件日志」（`storage/agent_sessions/*/events.v1.jsonl`，全量事件溯源、
+        给模型当记忆用）分工不同：这里只记**审计关心的骨架**（回合边界、工具名/状态/
+        耗时/错误），一个文件对应一次运行，便于按运行检索与统计。
+
+        注意：**不落工具入参的值** —— provider_* 类工具的参数里带 api_key，
+        写进磁盘就是泄密面。只留参数名，够定位"调了什么"即可。
+        """
+        try:
+            from app.agent.trace import log_event
+            log_event(self._run_id, event, data)
+        except Exception:
+            pass
+
     async def _run_turn(self) -> None:
         claimed = self.inbox.claim()
         if not claimed:
             return
         self._turn_seq += 1
         self._run_id = f"{self.session.id}_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+        self._turn_started_at = time.time()
         self.session.append(E.TURN_START, {"mode": self.mode, "run_mode": self.run_mode, "run_id": self._run_id})
+        self._trace("turn_start", {
+            "session_id": self.session.id,
+            "mode": self.mode,
+            "run_mode": self.run_mode,
+            "input": (claimed[0].text[:200] if claimed else ""),
+        })
         self._open_turn = True
         reason = "completed"
         final_text = ""
@@ -440,6 +464,11 @@ class AgentLoop:
         if not self._open_turn:
             return
         self.session.append(E.TURN_END, {"reason": reason, "cause": cause or reason})
+        self._trace("turn_end", {
+            "reason": reason,
+            "cause": cause or reason,
+            "elapsed_ms": int((time.time() - self._turn_started_at) * 1000) if self._turn_started_at else None,
+        })
         self._open_turn = False
         if self._open_step:
             self.session.append(E.STEP_END, {"index": -1, "note": "interrupted"})
@@ -463,6 +492,7 @@ class AgentLoop:
                 "event": "tool_calling", "tool_name": tc.name,
                 "arguments": tc.parsed or {}, "status": "executing",
             })
+            _t0 = time.time()
             try:
                 outcome = await self.pipeline.execute(
                     tc.id, tc.name, tc.parsed or {},
@@ -486,6 +516,16 @@ class AgentLoop:
                 "event": "tool_result", "tool_name": tc.name, "status": outcome.status,
                 "result": outcome.result if outcome.status == "success" else None,
                 "error": outcome.error, "meta": outcome.meta or None,
+            })
+            # 审计：被拒（denied）/超时（error）也会走到这里，正好把"没执行成功"的原因留痕
+            self._trace("tool", {
+                "name": tc.name,
+                "status": outcome.status,
+                "elapsed_ms": int((time.time() - _t0) * 1000),
+                "error": ((outcome.error or "")[:300] or None),
+                # 只记参数名不记值（provider_* 会带 api_key）
+                "arg_keys": sorted((tc.parsed or {}).keys()),
+                "spill": (outcome.meta or {}).get("spill_path"),
             })
             if outcome.additional_context:
                 self.inbox.inject(outcome.additional_context, source="plugin", form="notice")

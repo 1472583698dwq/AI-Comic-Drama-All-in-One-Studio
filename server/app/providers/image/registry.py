@@ -94,7 +94,9 @@ class ImageProviderRegistry:
         from app.extensions import guard
         _pid = (req.extra.get("project_id") if req.extra and isinstance(req.extra, dict) else None)
         guard.ensure_provider_enabled(getattr(prov, "id", target_provider or ""), _pid)
-        return await prov.generate(req)
+        from app.providers.gen_timer import with_timer
+        return await with_timer("image", getattr(prov, "id", "") or "unknown", prov.generate(req),
+                                detail=(req.prompt or "")[:40])
 
     async def check_health_all(self) -> Dict[str, Any]:
         results = {}

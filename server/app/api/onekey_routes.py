@@ -2,9 +2,8 @@
 """
 一键成片 Agent 任务 API（异步 + 轮询）
 
-POST /api/v1/onekey/run   提交长文本 → 后台跑编排（拆解/角色/生图/视频/配音/导出）
-  - engine="pipeline"（默认）：经典确定性流水线（unified_orchestrator）
-  - engine="agent"：总导演 Agent + 子代理集群（SubAgentPool 并行委派，参考 Kimi Agent Swarm）
+POST /api/v1/onekey/run   提交长文本 → 后台跑「总导演 Agent + 子代理集群」编排
+                          （拆解/角色/生图/视频/配音/导出；可用 team_id 选择导演组）
 GET  /api/v1/onekey/tasks/{task_id}  轮询进度与结果
 长任务不阻塞 HTTP，前端 3s 轮询一次即可。
 """
@@ -18,7 +17,6 @@ from fastapi import APIRouter, HTTPException
 from pydantic import Field
 
 from app.models.schemas import PipelineRunRequest
-from app.pipelines.unified_orchestrator import unified_orchestrator
 
 router = APIRouter()
 
@@ -29,7 +27,6 @@ HARD_CAP_SHOTS = 30
 
 class OneKeyRunRequest(PipelineRunRequest):
     title: str = "一键成片"
-    engine: str = Field(default="pipeline", description="编排引擎：pipeline 经典流水线 / agent 智能体集群")
     team_id: str = Field(default="", description="导演组（agent_team）id；空=内置默认编排")
 
 
@@ -49,22 +46,6 @@ def _resolve_team(team_id: str):
         return spec
     except Exception:
         return None
-
-
-def _progress_of(stage: str) -> int:
-    if "Stage 1" in stage:
-        return 10
-    if "Stage 2" in stage:
-        return 25
-    if "Stage 3" in stage:
-        return 50
-    if "Stage 4" in stage:
-        return 70
-    if "Stage 5" in stage:
-        return 85
-    if "Stage 6" in stage:
-        return 95
-    return 5
 
 
 # ── Agent 集群模式（总导演 + 子代理并行）────────────────────────
@@ -277,59 +258,6 @@ async def _run_agent_task(task_id: str, req: "OneKeyRunRequest") -> None:
     task["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
 
 
-async def _run_task(task_id: str, req: OneKeyRunRequest) -> None:
-    task = TASKS.get(task_id)
-    if not task:
-        return
-    task["status"] = "running"
-    if (getattr(req, "engine", "") or "pipeline").strip().lower() == "agent":
-        await _run_agent_task(task_id, req)
-        return
-
-    async def cb(entry: Dict[str, Any]) -> None:
-        try:
-            task["logs"].append(entry)
-            if len(task["logs"]) > MAX_LOGS:
-                task["logs"] = task["logs"][-MAX_LOGS:]
-            task["progress"] = max(task.get("progress", 0), _progress_of(str(entry.get("stage", ""))))
-            task["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-        except Exception:
-            pass
-
-    try:
-        res = await unified_orchestrator.execute_full_pipeline(
-            novel_text=req.text,
-            style_preset=req.style_preset,
-            aspect_ratio=req.aspect_ratio,
-            custom_instructions=req.custom_instructions or "",
-            max_images=max(1, min(req.max_images, HARD_CAP_SHOTS)),
-            image_provider=req.image_provider,
-            image_workflow_id=req.image_workflow_id,
-            audio_provider=req.audio_provider,
-            video_provider=req.video_provider,
-            video_workflow_id=req.video_workflow_id,
-            enable_video=req.enable_video,
-            max_videos=max(0, min(req.max_videos, HARD_CAP_SHOTS)),
-            gen_roles=req.gen_roles,
-            max_roles=max(1, min(req.max_roles, 8)),
-            progress_cb=cb,
-        )
-        task["status"] = "success" if res.get("status") == "success" else "partial"
-        task["progress"] = 100
-        task["result"] = {
-            "summary": res.get("summary", {}),
-            "project": res.get("project"),
-            "jianyin_draft": res.get("jianyin_draft"),
-            "image_errors": res.get("image_errors", []),
-            "video_errors": res.get("video_errors", []),
-            "videos_pending": res.get("videos_pending", []),
-        }
-    except Exception as e:
-        task["status"] = "failed"
-        task["error"] = str(e)[:500]
-    task["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-
-
 @router.post("/onekey/run")
 async def onekey_run(req: OneKeyRunRequest):
     text = (req.text or "").strip()
@@ -345,7 +273,6 @@ async def onekey_run(req: OneKeyRunRequest):
         "progress": 0,
         "logs": [],
         "subagents": {},
-        "engine": (req.engine or "pipeline"),
         "team_id": _team.id if _team else str(getattr(req, "team_id", "") or ""),
         "team_name": _team.name if _team else "",
         "result": None,
@@ -353,8 +280,8 @@ async def onekey_run(req: OneKeyRunRequest):
         "created_at": now,
         "updated_at": now,
     }
-    asyncio.create_task(_run_task(task_id, req))
-    return {"task_id": task_id, "status": "queued", "engine": (req.engine or "pipeline"),
+    asyncio.create_task(_run_agent_task(task_id, req))
+    return {"task_id": task_id, "status": "queued",
             "team_id": _team.id if _team else "", "team_name": _team.name if _team else ""}
 
 

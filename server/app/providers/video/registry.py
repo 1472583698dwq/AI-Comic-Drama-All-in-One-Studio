@@ -71,7 +71,9 @@ class VideoProviderRegistry:
         from app.extensions import guard
         _pid = (req.extra.get("project_id") if req.extra and isinstance(req.extra, dict) else None)
         guard.ensure_provider_enabled(getattr(prov, "id", provider_id or ""), _pid)
-        return await prov.generate(req)
+        from app.providers.gen_timer import with_timer
+        return await with_timer("video", getattr(prov, "id", "") or "unknown", prov.generate(req),
+                                detail=(req.prompt or "")[:40])
 
     async def check_health_all(self) -> Dict[str, Any]:
         results = {}

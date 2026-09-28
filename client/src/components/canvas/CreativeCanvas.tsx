@@ -1,14 +1,15 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ReactFlow, Background, Controls, MiniMap, useNodesState, useEdgesState, addEdge, Connection, Edge, Node, ReactFlowProvider, useReactFlow
+  ReactFlow, Background, Controls, ControlButton, MiniMap, useNodesState, useEdgesState, addEdge, Connection, Edge, Node, ReactFlowProvider, useReactFlow
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Search, Sparkles, Image as ImageIcon, Film, Box, Boxes, Library, Save, Download, Mic, Type, Plus, Wand2, Layers } from 'lucide-react';
+import { Search, Sparkles, Image as ImageIcon, Film, Box, Boxes, Library, Save, Download, Mic, Type, Plus, Wand2, Layers, ChevronsUp, ArrowLeftRight, MoreHorizontal, Pencil, Trash2, Keyboard, X, FolderOpen, FileText } from 'lucide-react';
 import { useProjectListStore } from '../../stores/useProjectListStore';
 import { useThemeStore } from '../../stores/useThemeStore';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { useCanvasStore } from '../../stores/useCanvasStore';
 import { apiService } from '../../services/api';
+import { API_ORIGIN, resolveMediaUrl } from '../../utils/devOrigin';
 import { confirmAsync, promptAsync, toast } from '../../stores/useDialogStore';
 import { useCanvasSync } from './hooks/useCanvasSync';
 import { executeAgentNode } from './hooks/nodeAgentExecutor';
@@ -27,6 +28,7 @@ import { CustomNode } from './nodes/CustomNode';
 import { ExtNode } from './nodes/ExtNode';
 import { syncCanvasNodeSpecs, listCanvasNodeSpecs, getCanvasNodeSpec } from './canvasNodeSpecs';
 import { FloatingAgentPromptBar } from './FloatingAgentPromptBar';
+import { NodeContextMenu, type NodeMenuState } from './NodeContextMenu';
 import { WorkflowInspectorModal } from '../workflow/WorkflowInspectorModal';
 import { getNodeSpec } from './nodeRegistry';
 import { CanvasManagerModal } from './CanvasManagerModal';
@@ -72,6 +74,7 @@ const genId = (p: string) => `${p}_${Date.now()}_${++idSeq}`;
 
 const CORE_LIBRARY = [
   { type: 'prompt', label: '剧本 / Prompt', desc: '剧本拆解与分镜策划', icon: Type, color: 'text-sky-400' },
+  { type: 'text-prompt', label: '提示词文本', desc: '纯文本资源 · 拖放/连线自动填充', icon: FileText, color: 'text-sky-400' },
   { type: 'image', label: '生图 Agent', desc: '多引擎文生图与垫图参考', icon: ImageIcon, color: 'text-violet-400' },
   { type: 'video', label: '视频 Agent', desc: '动态视频 / 首尾帧 / 参考生视频', icon: Film, color: 'text-orange-400' },
   { type: 'audio', label: '配音 Agent', desc: '多角色情感 TTS 配音', icon: Mic, color: 'text-pink-400' },
@@ -84,6 +87,75 @@ const TEMPLATES = [
   { id: 't2', label: '完整漫剧导演流', desc: '剧本 → 画面 → 视频 → 配音 → 导出', nodes: ['prompt', 'image', 'video', 'audio', 'export'] },
   { id: 't3', label: '连续镜头视频流', desc: '首帧 + 尾帧 → 连续动态视频', nodes: ['image', 'video'] },
 ];
+
+/** 工作台分块：悬浮条上的小块，点块即展开面板并定位到该小节 */
+type WorkbenchSection = 'template' | 'mine' | 'nodes' | 'assets';
+
+const WORKBENCH_TABS: Array<{ id: WorkbenchSection; label: string; icon: any }> = [
+  { id: 'template', label: '模板', icon: Wand2 },
+  { id: 'mine', label: '我的', icon: Sparkles },
+  { id: 'nodes', label: '节点', icon: Boxes },
+  { id: 'assets', label: '素材', icon: Library },
+];
+
+/** 顶部工具条「更多」菜单项样式（精简态使用） */
+const TOOLBAR_MENU_ITEM =
+  'w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-[11.5px] ' +
+  '[color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] hover:bg-surface-secondary transition-colors';
+
+/** 操作台小节标题 */
+const WorkbenchGroupTitle: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <div className="px-3 pt-3 pb-1 flex items-center gap-1.5 text-[10.5px] font-semibold tracking-wider [color:var(--color-text-muted)]">
+    {children}
+  </div>
+);
+
+/**
+ * 操作台条目（参考主流操作台样式）：图标方块 + 名称/说明两行 + 悬停出现的主操作。
+ * 整条可点击创建、可拖入画布；不用卡片盒子包裹。
+ */
+const WorkbenchRow: React.FC<{
+  icon: any;
+  iconCls?: string;
+  label: string;
+  desc?: string;
+  title?: string;
+  /** 悬停时右侧出现的主操作（默认「添加」） */
+  actionLabel?: string;
+  onClick?: () => void;
+  draggable?: boolean;
+  onDragStart?: (e: React.DragEvent) => void;
+}> = ({ icon: Icon, iconCls, label, desc, title, actionLabel = '添加', onClick, draggable, onDragStart }) => (
+  <div
+    role={onClick ? 'button' : undefined}
+    tabIndex={onClick ? 0 : undefined}
+    draggable={draggable}
+    onDragStart={onDragStart}
+    onClick={onClick}
+    onKeyDown={(e) => {
+      if (onClick && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onClick(); }
+    }}
+    title={title}
+    className="group flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-transparent hover:border-border hover:bg-surface-secondary transition-colors cursor-pointer select-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand active:cursor-grabbing"
+  >
+    <span className="w-8 h-8 rounded-lg bg-surface-secondary border border-border flex items-center justify-center shrink-0">
+      <Icon className={`w-4 h-4 ${iconCls || '[color:var(--color-text-secondary)]'}`} strokeWidth={1.7} />
+    </span>
+    <span className="min-w-0 flex-1">
+      <span className="block text-[13px] font-medium [color:var(--color-text-main)] truncate">{label}</span>
+      {desc && <span className="block text-[10.5px] [color:var(--color-text-muted)] truncate">{desc}</span>}
+    </span>
+    {onClick && (
+      <span
+        title={actionLabel}
+        aria-hidden="true"
+        className="w-6 h-6 rounded-md shrink-0 hidden group-hover:flex items-center justify-center [color:var(--color-text-muted)] group-hover:[color:var(--color-text-main)] group-hover:bg-surface-tertiary transition-colors"
+      >
+        <Plus className="w-3.5 h-3.5" strokeWidth={1.7} />
+      </span>
+    )}
+  </div>
+);
 
 const InnerCanvas: React.FC = () => {
   const { project } = useProjectStore();
@@ -136,6 +208,71 @@ const InnerCanvas: React.FC = () => {
   const [canvasId, setCanvasId] = useState<string>('default');
   const [canvasList, setCanvasList] = useState<Array<{ id: string; name: string; updated_at: string; node_count: number }>>([]);
   const [showManager, setShowManager] = useState(false);
+  // 左侧工作台：悬浮条 + 下拉面板（不再占用画布宽度）
+  // 条上分块 → 点块展开面板并直接滚到该小节；点外部 / Esc / 再点同块收起
+  const [workbenchOpen, setWorkbenchOpen] = useState(false);
+  const [workbenchSection, setWorkbenchSection] = useState<WorkbenchSection>('template');
+  const workbenchRef = useRef<HTMLDivElement>(null);
+  const workbenchSectionRefs = useRef<Record<string, HTMLElement | null>>({});
+  useEffect(() => {
+    if (!workbenchOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setWorkbenchOpen(false); };
+    const onDown = (e: MouseEvent) => {
+      // 注意：本文件从 @xyflow/react 引入了 Node（节点类型），DOM 判断要用 Element
+      const t = e.target;
+      if (t instanceof Element && !workbenchRef.current?.contains(t)) setWorkbenchOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onDown);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousedown', onDown);
+    };
+  }, [workbenchOpen]);
+  // 展开/切换分块后滚到对应小节（scroll-behavior 由容器 motion-safe:scroll-smooth 决定，
+  // prefers-reduced-motion 下自动降级为瞬时跳转）
+  useEffect(() => {
+    if (!workbenchOpen) return;
+    const el = workbenchSectionRefs.current[workbenchSection];
+    if (!el) return;
+    const t = window.setTimeout(() => el.scrollIntoView({ block: 'start' }), 20);
+    return () => window.clearTimeout(t);
+  }, [workbenchOpen, workbenchSection]);
+  // 画布顶部工具条：按自身可用宽度切「完整 / 精简」两态（低频动作在精简态收入「更多」）
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const toolbarMenuRef = useRef<HTMLDivElement>(null);
+  const [toolbarLevel, setToolbarLevel] = useState<'compact' | 'normal' | 'wide'>('normal');
+  const [toolbarMenuOpen, setToolbarMenuOpen] = useState(false);
+  useEffect(() => {
+    const el = toolbarRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const measure = () => {
+      const w = el.clientWidth;
+      setToolbarLevel(w >= 1280 ? 'wide' : w >= 1000 ? 'normal' : 'compact');
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [pid]);
+  useEffect(() => {
+    if (!toolbarMenuOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setToolbarMenuOpen(false); };
+    const onDown = (e: MouseEvent) => {
+      const t = e.target;
+      if (t instanceof Element && !toolbarMenuRef.current?.contains(t)) setToolbarMenuOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onDown);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousedown', onDown);
+    };
+  }, [toolbarMenuOpen]);
+  // 节点右键菜单（添加到会话 / 删除）
+  const [nodeMenu, setNodeMenu] = useState<NodeMenuState | null>(null);
+  // 空白画布右键菜单（对齐 LibTV：右键 → 添加节点）
+  const [paneMenu, setPaneMenu] = useState<{ x: number; y: number } | null>(null);
   const canvasIdRef = useRef<string>('default');
   useEffect(() => { canvasIdRef.current = canvasId; }, [canvasId]);
   // 切换/新建/删除清空时的单次保存抑制，避免空画布写回旧 id 复活已删画布
@@ -180,13 +317,13 @@ const InnerCanvas: React.FC = () => {
             };
             nd._polling = false;
           }
-          return { ...n, data: { ...nd, onUpdate: handleNodeUpdate, onExecute: handleNodeExecute } };
+          // selected 不还原：开合是纯 UI 态，落盘的 selected:true 重载时会复活选中 → 控制台自动弹出（P2-2）
+          return { ...n, selected: false, data: { ...nd, onUpdate: handleNodeUpdate, onExecute: handleNodeExecute } };
         });
         setNodes(withHandlers);
         if (Array.isArray(snap.edges)) setEdges(snap.edges);
-        if (withHandlers.length > 0 && !selectedNodeId) {
-          setSelectedNodeId(withHandlers[0].id);
-        }
+        // 不在加载时自动选中第一个节点：刷新后控制台自动弹出即由此而来（P2-2）；
+        // 用户点哪个节点，控制台才服务哪个节点。
       }
       clearTimeout(timer);
       setIsLoading(false);
@@ -212,7 +349,8 @@ const InnerCanvas: React.FC = () => {
     if (suppressSaveRef.current) { suppressSaveRef.current = false; return; }
     let vp: any = {};
     try { vp = getViewport(); } catch {}
-    const snap = { nodes, edges, viewport: vp, updated_at: new Date().toISOString(), version: 2 };
+    // 选中态不落盘（纯 UI 态）：否则带着 selected:true 的快照在重载时会复活选中（P2-2）
+    const snap = { nodes: nodes.map((n) => ({ ...n, selected: false })), edges, viewport: vp, updated_at: new Date().toISOString(), version: 2 };
     debouncedSave(snap, canvasIdRef.current);
     try { useCanvasStore.getState().setFromFlow(nodes as any, edges as any); } catch {}
   }, [nodes, edges]);
@@ -253,6 +391,10 @@ const InnerCanvas: React.FC = () => {
           } else if (hType === 'text') {
             const txt = patch.prompt ?? patch.text ?? patch.camera_prompt ?? srcData?.prompt ?? srcData?.text ?? srcData?.camera_prompt;
             setKey(inDef!.id, typeof txt === 'string' ? txt : undefined);
+            // 文本类节点双写：PromptNode/TextPromptNode 读 text||prompt，只写句柄键会被旧值遮蔽
+            if ((tgt.type === 'prompt' || tgt.type === 'text-prompt') && inDef!.id === 'prompt') {
+              setKey('text', typeof txt === 'string' ? txt : undefined);
+            }
           }
           // params 类键（源声明的入参）原样透传，不在此层做语义解释
           for (const [k, v] of Object.entries(patch)) {
@@ -286,7 +428,7 @@ const InnerCanvas: React.FC = () => {
         } else if (skillId === 'proposal_generation') {
           const r: any = await apiService.callMcpTool('split_novel_script', { novel_text: textToProcess, style_preset: d.style_preset || 'donghua_xianxia', aspect_ratio: d.aspect_ratio || '9:16' }).catch(async () => {
             // 降级：直接调 LLM 透传
-            const res2 = await fetch(`${(window as any).location?.port === '5173' ? 'http://127.0.0.1:8000' : ''}/api/v1/agent/chat`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ prompt: textToProcess, context: { skill: 'proposal' } })}).then(r=>r.json()).catch(()=>null);
+            const res2 = await fetch(`${API_ORIGIN}/api/v1/agent/chat`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ prompt: textToProcess, context: { skill: 'proposal' } })}).then(r=>r.json()).catch(()=>null);
             return { result: res2 };
           });
           const content = r?.result?.content || r?.result?.project || textToProcess;
@@ -317,7 +459,6 @@ const InnerCanvas: React.FC = () => {
         const d: any = { ...node.data, ...(customData || {}) };
         if (node.type === 'ext-node') delete d.definition; // 大字段不上行，引擎按 canvas_node_id 重读声明
         const projectId = (window as any).__activePid || useProjectStore.getState().project?.id || undefined;
-        const API_ORIGIN = (window as any).location?.port === '5173' ? 'http://127.0.0.1:8000' : '';
         const resp = await fetch(`${API_ORIGIN}/api/v1/canvas/node/execute`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ node: { id: nodeId, type: node.type, data: d }, project_id: projectId }) }).then(r=>r.json());
         if (resp?.result?.status === 'success') {
           const rr = resp.result;
@@ -340,11 +481,18 @@ const InnerCanvas: React.FC = () => {
     }
   }, [nodes]);
 
-  // ⚠️ 必须 memo：ReactFlow 把 onSelectionChange 放进 effect 依赖，
+  // 必须 memo：ReactFlow 把 onSelectionChange 放进 effect 依赖，
   // 传内联箭头会每次渲染重订阅→回调→setState→再渲染，直接 Maximum update depth
   const handleSelectionChange = useCallback(({ nodes: sel }: { nodes: Node[] }) => {
     setSelectedNodeId(sel.length ? sel[sel.length - 1].id : null);
   }, []);
+
+  // 关闭节点控制台：除清 store 外，同步清掉 React Flow 的节点选中态——
+  // 否则残留的 selected 会在下一次选中事件里把控制台拉回来（P2-2）
+  const closeNodeConsole = useCallback(() => {
+    setSelectedNodeId(null);
+    setNodes((nds) => nds.map((n) => (n.selected ? { ...n, selected: false } : n)));
+  }, [setSelectedNodeId, setNodes]);
 
   // 节点运行时回调：撤销/粘贴还原节点后必须重新挂上，否则卡上的按钮全哑
   const attachHandlers = useCallback(
@@ -405,7 +553,11 @@ const InnerCanvas: React.FC = () => {
           const txt = srcData.prompt || srcData.text || srcData.brief || '';
           // 文本按目标句柄键写入；无句柄信息时按目标节点声明的首个 text 输入
           const key = tgtHandle || tgtSpec?.inputs.find(h => h.type === 'text')?.id || 'prompt';
-          if (txt) patch[key] = txt;
+          if (txt) {
+            patch[key] = txt;
+            // 文本类节点双写，避免 data.text 旧值遮蔽（同级联传播口径）
+            if ((tgtNode.type === 'prompt' || tgtNode.type === 'text-prompt') && key === 'prompt') patch.text = txt;
+          }
         }
         const srcMedia = srcData.image_url || srcData.result_url || srcData.image || srcData.url || srcData.file_url;
         if (['image', 'shot-card', 'comfy-workflow', 'load-image', 'load-image-batch'].includes(srcType) && srcMedia) {
@@ -451,6 +603,7 @@ const InnerCanvas: React.FC = () => {
       data: { onUpdate: handleNodeUpdate, onExecute: handleNodeExecute, ...(extraData || {}) },
     };
     if (type === 'prompt') node.data = { ...node.data, prompt: '' };
+    if (type === 'text-prompt') node.data = { ...node.data, prompt: '', text: '' };
     if (type === 'image') node.data = { ...node.data, prompt: '' };
     if (type === 'video') node.data = { ...node.data, prompt: '', duration: 5 };
     if (type === 'audio') node.data = { ...node.data, text: '' };
@@ -904,10 +1057,23 @@ const InnerCanvas: React.FC = () => {
       if (nonce) importedAssetNonce.current = nonce;
       let abs = asset.file_url || '';
       if (abs && abs.startsWith('/')) abs = 'http://127.0.0.1:8000' + abs;
+      // 文本/提示词素材：无文件也要能落画布（此前 if(!abs) 直接吞掉）
+      const label0 = asset.visual_prompt || asset.description || asset.name || '';
+      if (asset.category === 'text') {
+        const txt = String(asset.content || asset.visual_prompt || '');
+        const curN = nodesRef.current || [];
+        const maxXN = curN.reduce((m: number, n: any) => Math.max(m, n.position?.x || 0), 0);
+        const posN = { x: curN.length ? maxXN + 320 : 120, y: 200 + (curN.length % 3) * 80 };
+        const tn = createNode('text-prompt', posN);
+        tn.data = { ...tn.data, prompt: txt, text: txt };
+        setNodes(nds => [...nds, tn]);
+        setSelectedNodeId(tn.id);
+        return;
+      }
       if (!abs) return;
       const isVideo = /\.(mp4|webm|mov)$/i.test(abs);
       const isAudio = /\.(mp3|wav|ogg|m4a|flac)$/i.test(abs);
-      const label = asset.visual_prompt || asset.description || asset.name || '';
+      const label = label0;
       const curNodes = nodesRef.current || [];
       const maxX = curNodes.reduce((m: number, n: any) => Math.max(m, n.position?.x || 0), 0);
       const pos = { x: curNodes.length ? maxX + 320 : 120, y: 200 + (curNodes.length % 3) * 80 };
@@ -938,20 +1104,73 @@ const InnerCanvas: React.FC = () => {
     return () => window.removeEventListener('canvas-import-asset', onEvent as any);
   }, []);
 
+  /** 命中检测：返回指针正下方的节点（自上而下取最上层），用于「拖到节点上直接填充」 */
+  const findNodeAt = useCallback((clientX: number, clientY: number): Node | null => {
+    const p = screenToFlowPosition({ x: clientX, y: clientY });
+    const list: any[] = (nodesRef.current as any[]) || [];
+    for (let i = list.length - 1; i >= 0; i--) {
+      const n = list[i];
+      const w = n.measured?.width || n.width || 320;
+      const h = n.measured?.height || n.height || 200;
+      const x = n.position?.x || 0;
+      const y = n.position?.y || 0;
+      if (p.x >= x && p.x <= x + w && p.y >= y && p.y <= y + h) return n as Node;
+    }
+    return null;
+  }, [screenToFlowPosition]);
+
+  /** 文本投放：写入命中节点的首个 text 输入（走 handleNodeUpdate 保留级联传播）；节点无文本输入返回 false */
+  const fillNodeWithText = useCallback((nodeId: string, txt: string): boolean => {
+    const nds: any[] = (nodesRef.current as any[]) || [];
+    const n = nds.find(x => x.id === nodeId);
+    if (!n) return false;
+    const spec = getNodeSpec(n.type || '');
+    const inDef = spec?.inputs.find(h => h.type === 'text');
+    if (!inDef) return false;
+    const patch: any = { [inDef.id]: txt };
+    if ((n.type === 'prompt' || n.type === 'text-prompt') && inDef.id === 'prompt') patch.text = txt;
+    handleNodeUpdate(nodeId, patch);
+    setSelectedNodeId(nodeId);
+    return true;
+  }, [handleNodeUpdate]);
+
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     const type = e.dataTransfer.getData('application/canvas-nodetype');
     const droppedNodeId = e.dataTransfer.getData('application/canvas-nodeid');
     const assetId = e.dataTransfer.getData('application/canvas-assetid');
-    const assetUrl = e.dataTransfer.getData('text/plain');
-    if (!type && !assetId && !assetUrl) return;
+    const assetKind = e.dataTransfer.getData('application/canvas-assetkind');
+    const dragText = e.dataTransfer.getData('application/canvas-text');
+    const plain = e.dataTransfer.getData('text/plain');
+    if (!type && !assetId && !dragText && !plain) return;
     const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+
+    // ── 文本投放（对齐 LibTV/即梦）：文本素材 或 自由文本 → 命中节点即填充，落空则新建「提示词文本」节点 ──
+    let textContent: string | null = null;
+    if (dragText) textContent = dragText;
+    else if (assetKind === 'text') {
+      const a: any = assets.find(x => x.id === assetId);
+      textContent = String(a?.content || a?.visual_prompt || '');
+    } else if (!type && !assetId && plain && !/^https?:\/\//i.test(plain.trim()) && !plain.trim().startsWith('/storage/')) {
+      textContent = plain;
+    }
+    if (textContent !== null && !type) {
+      const txt = textContent;
+      const hit = findNodeAt(e.clientX, e.clientY);
+      if (txt.trim() && hit && fillNodeWithText(hit.id, txt)) return;
+      const node = createNode('text-prompt', position);
+      node.data = { ...node.data, prompt: txt, text: txt };
+      setNodes(nds => [...nds, node]);
+      setSelectedNodeId(node.id);
+      return;
+    }
+
     if (assetId) {
       const asset = assets.find(a => a.id === assetId);
       if (!asset) return;
       const node = createNode('image', position);
       const url = asset.thumb_url || asset.file_url;
-      const abs = url?.startsWith('/') ? `http://127.0.0.1:8000${url}` : url;
+      const abs = resolveMediaUrl(url);
       node.data = { ...node.data, reference: abs || url, image_url: abs || url };
       setNodes(nds => [...nds, node]);
       setSelectedNodeId(node.id);
@@ -965,7 +1184,7 @@ const InnerCanvas: React.FC = () => {
       setNodes(nds => [...nds, node]);
       setSelectedNodeId(node.id);
     }
-  }, [screenToFlowPosition, assets]);
+  }, [screenToFlowPosition, assets, findNodeAt, fillNodeWithText]);
 
   const handleManualSave = async () => {
     if (!pid) { alert('请先在 项目看板 创建/打开项目'); return; }
@@ -1023,7 +1242,9 @@ const InnerCanvas: React.FC = () => {
   if (!pid) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-3" style={{ background: isLight ? '#E8ECF1' : '#08080B' }}>
-        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-brand to-accent-pink flex items-center justify-center text-xl shadow-lg shadow-brand/20">📁</div>
+        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-brand to-accent-pink flex items-center justify-center shadow-lg shadow-brand/20">
+          <FolderOpen className="w-5 h-5 text-white" strokeWidth={1.7} />
+        </div>
         <p className="text-sm [color:var(--color-text-main)] font-semibold">请先在「漫剧制作 → 项目看板」创建或打开项目</p>
         <p className="text-xs text-gray-400">画布按项目隔离持久化</p>
         <button onClick={() => useProjectStore.getState().setActiveTab('projects')} className="px-4 py-2 rounded-xl bg-brand text-white text-xs font-bold hover:bg-brand-light shadow-md">前往项目看板</button>
@@ -1033,192 +1254,110 @@ const InnerCanvas: React.FC = () => {
 
   const isEmpty = nodes.length === 0;
 
+  /** 右键菜单删除：节点 + 挂在它身上的连线一起删 */
+  const handleDeleteNode = (nodeId: string) => {
+    setNodes(nds => nds.filter((n: any) => n.id !== nodeId));
+    setEdges(es => es.filter((e: any) => e.source !== nodeId && e.target !== nodeId));
+    if (selectedNodeId === nodeId) setSelectedNodeId(null);
+    toast.info('节点已删除');
+  };
+
+  /** 工作台分块：点块 → 展开面板并定位到该小节；再点同一块收起 */
+  const openWorkbench = (section: WorkbenchSection) => {
+    if (workbenchOpen && workbenchSection === section) { setWorkbenchOpen(false); return; }
+    setWorkbenchSection(section);
+    setWorkbenchOpen(true);
+  };
+  const setWorkbenchSectionRef = (id: WorkbenchSection) => (el: HTMLElement | null) => {
+    workbenchSectionRefs.current[id] = el;
+  };
+  /** 自定义 / 扩展节点入口：设置 → 插件中心 */
+  const goPluginCenter = () => {
+    try { localStorage.setItem('config_pending_tab', 'plugins'); } catch { /* ignore */ }
+    useProjectStore.getState().setActiveTab('config');
+  };
+  /** 新建画布并切换（顶部工具条完整/精简两态共用） */
+  const handleCreateCanvas = async () => {
+    const n = canvasList.length + 1;
+    const cid = await createCanvas(`画布${n}`);
+    if (cid) toast.success(`已新建画布${n}并切换`);
+  };
+  /** 重命名当前画布 */
+  const handleRenameCanvas = async () => {
+    if (!pid) return;
+    const cur = canvasList.find(c => c.id === canvasIdRef.current);
+    const nv = await promptAsync({
+      title: '重命名画布',
+      message: '请输入新的画布名称：',
+      defaultValue: cur?.name || currentCanvasName,
+      placeholder: '画布名称'
+    });
+    if (!nv || !nv.trim()) return;
+    try {
+      await apiService.renameProjectCanvas(pid, canvasIdRef.current, nv.trim());
+      const r = await apiService.listProjectCanvases(pid).catch(() => null);
+      if (r) setCanvasList(r.canvases || []);
+      toast.success(`画布已更名为「${nv.trim()}」`);
+    } catch (e: any) { toast.error(e.message || '重命名失败'); }
+  };
+  /** 删除当前画布 */
+  const handleDeleteCanvas = async () => {
+    if (!pid) return;
+    if (canvasList.length <= 1) { toast.warning('至少保留一个画布'); return; }
+    const cur = canvasList.find(c => c.id === canvasIdRef.current)?.name || currentCanvasName;
+    const confirmed = await confirmAsync({
+      title: '删除画布',
+      message: `确定要删除画布「${cur}」吗？\n画布内的所有节点与编排数据将丢失且无法撤销。`,
+      isDanger: true,
+      confirmText: '确认删除',
+      cancelText: '取消'
+    });
+    if (!confirmed) return;
+    try {
+      const r: any = await apiService.deleteProjectCanvas(pid, canvasIdRef.current);
+      const list = await apiService.listProjectCanvases(pid).catch(() => null);
+      if (list) setCanvasList(list.canvases || []);
+      const next = r?.active_canvas_id || 'default';
+      suppressSaveRef.current = true;
+      setNodes([]); setEdges([]); setSelectedNodeId(null);
+      setCanvasId(next);
+      toast.success(`已删除画布「${cur}」`);
+    } catch (e: any) { toast.error(e.message || '删除失败'); }
+  };
+  /** 清空当前画布 */
+  const handleClearCanvas = async () => {
+    const ok = await confirmAsync({
+      title: '清空画布',
+      message: '确定要清空当前画布上的所有节点和连线吗？',
+      isDanger: true,
+      confirmText: '确认清空',
+      cancelText: '取消'
+    });
+    if (ok) { setNodes([]); setEdges([]); setSelectedNodeId(null); toast.info('画布已清空'); }
+  };
+  /** 横向排布：把所有节点排成一行（原顶栏按钮，现并入左下角画布控件竖条） */
+  const handleArrangeHorizontally = () => {
+    if (!nodes.length) return;
+    setNodes(nds => nds.map((n, i) => ({ ...n, position: { x: 120 + i * 400, y: 120 } })));
+  };
+
   return (
     <div className="flex-1 flex overflow-hidden" style={{ background: isLight ? '#E8ECF1' : '#08080B', cursor: 'default' }}>
-      {/* 左侧：极简工具栏 */}
-      <div className="w-[280px] bg-surface border-r border-border flex flex-col shrink-0">
-        <div className="h-12 px-4 border-b border-border flex items-center gap-2 shrink-0 bg-surface">
-          <div className="w-7 h-7 rounded-lg bg-brand/10 border border-brand/20 flex items-center justify-center"><Layers className="w-3.5 h-3.5 text-brand" /></div>
-          <span className="text-sm font-bold [color:var(--color-text-main)]">漫剧工作流</span>
-          <span className="ml-auto text-[10px] px-2 py-1 rounded-full bg-surface-secondary border border-border [color:var(--color-text-muted)] font-mono">MiniMax Agent</span>
-        </div>
-
-        <div className="p-3 space-y-4 flex-1 overflow-y-auto">
-          {/* 一键模板 */}
-          <div>
-            <div className="text-xs font-bold mb-2 [color:var(--color-text-main)]">一键模板</div>
-            <div className="space-y-2">
-              {TEMPLATES.map(t => (
-                <button key={t.id} onClick={() => addTemplate(t)} className="w-full text-left p-3 rounded-2xl border border-border bg-surface-secondary hover:border-brand/40 hover:bg-surface-tertiary hover:shadow-md transition-all">
-                  <div className="text-sm font-semibold [color:var(--color-text-main)]">{t.label}</div>
-                  <div className="text-xs [color:var(--color-text-muted)] mt-0.5">{t.desc}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Creator 模板：Agent 创造模式沉淀，可从模板新建节点链 */}
-          <div>
-            <div className="text-xs font-bold mb-2 [color:var(--color-text-main)] flex items-center gap-1.5">
-              我的模板 · Creator
-              <button onClick={refreshCreatorTemplates} title="刷新模板列表" className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-violet-500/10 border border-violet-500/30 text-violet-300 hover:bg-violet-500/20">刷新</button>
-            </div>
-            {creatorTemplates.length === 0 ? (
-              <div className="text-[11px] [color:var(--color-text-muted)] px-1">暂无。去 Agent 创造模式说“做个漫剧模板”，持久化后即出现在这里。</div>
-            ) : (
-              <div className="space-y-2">
-                {creatorTemplates.map((t: any) => (
-                  <button key={t.id} onClick={() => addCreatorTemplate(t)} title="从模板新建节点链到当前画布" className="w-full text-left p-3 rounded-2xl border border-violet-500/25 bg-violet-500/5 hover:border-violet-500/50 hover:bg-violet-500/10 hover:shadow-md transition-all">
-                    <div className="text-sm font-semibold [color:var(--color-text-main)]">{t.name || t.id}</div>
-                    <div className="text-xs [color:var(--color-text-muted)] mt-0.5">{(t.nodes || []).length} 节点 · 点击从模板新建</div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* 6 核心 Agent 节点 */}
-          <div>
-            <div className="text-xs font-bold mb-2 [color:var(--color-text-main)]">核心 Agent 节点</div>
-            <div className="grid grid-cols-2 gap-2">
-              {CORE_LIBRARY.map(n => (
-                <div
-                  key={n.type}
-                  draggable
-                  onDragStart={e => e.dataTransfer.setData('application/canvas-nodetype', n.type)}
-                  onClick={() => {
-                    const pos = { x: 120 + nodes.length * 40, y: 120 + nodes.length * 40 };
-                    const node = createNode(n.type, pos);
-                    setNodes(nds => [...nds, node]);
-                    setSelectedNodeId(node.id);
-                  }}
-                  className="flex flex-col gap-1.5 p-3 rounded-2xl bg-surface-secondary border border-border hover:border-brand/40 hover:bg-surface-tertiary hover:shadow-md cursor-grab active:cursor-grabbing transition-all"
-                >
-                  <n.icon className={`w-5 h-5 ${n.color}`} />
-                  <div>
-                    <div className="text-xs font-bold [color:var(--color-text-main)] leading-none">{n.label}</div>
-                    <div className="text-[10px] [color:var(--color-text-muted)] mt-1">{n.desc}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* 自定义代码节点（来自插件包 custom_nodes，一段代码即一节点） */}
-          <div>
-            <div className="text-xs font-bold mb-2 [color:var(--color-text-main)] flex items-center gap-1.5">
-              自定义节点
-              <button onClick={() => { try { localStorage.setItem('config_pending_tab', 'plugins'); } catch { /* ignore */ } useProjectStore.getState().setActiveTab('config'); }} title="去设置 → 插件中心安装含自定义节点的插件包"
-                className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-teal-500/10 border border-teal-500/30 text-teal-300 hover:bg-teal-500/20">插件安装</button>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              {customNodes.map((c: any) => (
-                <div
-                  key={c.id}
-                  draggable
-                  onDragStart={e => e.dataTransfer.setData('application/canvas-nodetype', 'custom')}
-                  onClick={() => {
-                    const pos = { x: 120 + nodes.length * 40, y: 120 + nodes.length * 40 };
-                    const node = createNode('custom', pos, { custom_node_id: c.id });
-                    setNodes(nds => [...nds, node]);
-                    setSelectedNodeId(node.id);
-                  }}
-                  className="flex flex-col gap-1.5 p-3 rounded-2xl bg-surface-secondary border border-border hover:border-teal-500/40 hover:bg-surface-tertiary hover:shadow-md cursor-grab active:cursor-grabbing transition-all"
-                >
-                  <Boxes className="w-5 h-5 text-teal-400" />
-                  <div>
-                    <div className="text-xs font-bold [color:var(--color-text-main)] leading-none truncate">{c.name}</div>
-                    <div className="text-[10px] [color:var(--color-text-muted)] mt-1">{c.kind}/{c.language}</div>
-                  </div>
-                </div>
-              ))}
-              {customNodes.length === 0 && (
-                <div className="col-span-2 p-3 rounded-2xl border border-dashed border-border text-[11px] [color:var(--color-text-muted)]">
-                  暂无自定义节点，去设置 → 插件中心安装含节点的插件包
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* 声明式扩展节点（来自插件包 canvas_nodes，无需前端代码） */}
-          <div>
-            <div className="text-xs font-bold mb-2 [color:var(--color-text-main)] flex items-center gap-1.5">
-              扩展节点
-              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 font-mono">canvas_nodes</span>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              {extNodes.map((s: any) => (
-                <div
-                  key={s.id}
-                  draggable
-                  onDragStart={e => {
-                    e.dataTransfer.setData('application/canvas-nodetype', 'ext-node');
-                    e.dataTransfer.setData('application/canvas-nodeid', s.id);
-                  }}
-                  onClick={() => {
-                    const pos = { x: 120 + nodes.length * 40, y: 120 + nodes.length * 40 };
-                    const node = createNode('ext-node', pos, { canvas_node_id: s.id, definition: s });
-                    setNodes(nds => [...nds, node]);
-                    setSelectedNodeId(node.id);
-                  }}
-                  className="flex flex-col gap-1.5 p-3 rounded-2xl bg-surface-secondary border border-border hover:border-cyan-500/40 hover:bg-surface-tertiary hover:shadow-md cursor-grab active:cursor-grabbing transition-all"
-                >
-                  <Wand2 className="w-5 h-5 text-cyan-400" />
-                  <div>
-                    <div className="text-xs font-bold [color:var(--color-text-main)] leading-none truncate">{s.name}</div>
-                    <div className="text-[10px] [color:var(--color-text-muted)] mt-1 truncate">{(s.inputs || []).length} 入 / {(s.outputs || []).length} 出 · {s.kind || 'utility'}</div>
-                  </div>
-                </div>
-              ))}
-              {extNodes.length === 0 && (
-                <div className="col-span-2 p-3 rounded-2xl border border-dashed border-border text-[11px] [color:var(--color-text-muted)]">
-                  暂无扩展节点：插件包声明 canvas_nodes 后在此出现
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* 素材库 */}
-          <div className="rounded-2xl border border-border bg-surface p-3">
-            <div className="text-xs font-bold [color:var(--color-text-main)] mb-2 flex items-center gap-1.5"><Library className="w-3.5 h-3.5 text-brand" /> 素材库 <span className="ml-auto text-[10px] [color:var(--color-text-muted)]">{assets.length} 个</span></div>
-            <div className="grid grid-cols-2 gap-2 max-h-[160px] overflow-y-auto pr-1 items-start">
-              {assets.map((a: any) => {
-                const url = a.thumb_url || a.file_url;
-                const abs = url?.startsWith('/') ? `http://127.0.0.1:8000${url}` : url;
-                return (
-                  <div key={a.id} draggable onDragStart={e => { e.dataTransfer.setData('application/canvas-assetid', a.id); e.dataTransfer.setData('text/plain', abs || url); }} className="group bg-surface-secondary border border-border rounded-xl overflow-hidden cursor-grab hover:border-brand/30 hover:shadow-md transition-all">
-                    {abs ? (
-                      <AutoRatioMedia src={abs} fallbackAspect="1/1" className="bg-surface-secondary" mediaClassName="group-hover:scale-[1.02] transition-transform" />
-                    ) : (
-                      <div className="aspect-square bg-surface-secondary flex items-center justify-center overflow-hidden"><ImageIcon className="w-5 h-5 text-gray-500" /></div>
-                    )}
-                    <div className="p-1.5"><div className="text-[11px] font-medium truncate [color:var(--color-text-main)]">{a.name}</div></div>
-                  </div>
-                );
-              })}
-              {assets.length === 0 && <div className="col-span-2 text-xs [color:var(--color-text-muted)] text-center py-4">暂无素材</div>}
-            </div>
-          </div>
-        </div>
-
-        <div className="p-3 border-t border-border space-y-2 bg-surface-secondary/30">
-          <button onClick={handleManualSave} disabled={saving} className="w-full py-2.5 rounded-xl bg-brand text-white text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-40 hover:bg-brand-light shadow-md shadow-brand/20 transition-colors"><Save className="w-3.5 h-3.5" />{saving ? '保存中' : '保存画布'}</button>
-          <button onClick={() => window.dispatchEvent(new CustomEvent('canvas-export-shots'))} className="w-full py-2 rounded-xl bg-surface-secondary border border-border text-xs font-bold [color:var(--color-text-main)] flex items-center justify-center gap-1.5 hover:bg-surface-tertiary transition-colors"><Download className="w-3.5 h-3.5" /> 导出为分镜工程</button>
-        </div>
-      </div>
-
       {/* 中间无限画布 */}
       <div ref={wrapperRef} className="flex-1 relative flex flex-col min-w-0" style={{ background: isLight ? '#E8ECF1' : '#08080B' }} onDrop={onDrop} onDragOver={onDragOver}>
-        <div className="h-11 px-4 border-b border-border bg-surface flex items-center gap-2 shrink-0">
-          <div className="flex items-center gap-2 text-xs">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow shadow-emerald-500/30" />
-            <span className="[color:var(--color-text-secondary)]">项目</span>
-            <span className="font-mono [color:var(--color-text-main)] font-bold">{pid.slice(0, 8)}</span>
-            <span className="[color:var(--color-text-muted)] hidden sm:inline">· 点卡片右侧 + 快速衍生 · 点击卡片在底部控制台操作</span>
+        {/* 画布顶部工具条：完整态（wide/normal）与精简态（compact，窄屏时低频操作收入「更多」） */}
+        <div ref={toolbarRef} className="h-11 px-4 border-b border-border bg-surface flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2 text-xs min-w-0">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow shadow-emerald-500/30 shrink-0" />
+            <span className="[color:var(--color-text-secondary)] shrink-0">项目</span>
+            <span className="font-mono [color:var(--color-text-main)] font-bold shrink-0">{pid.slice(0, 8)}</span>
+            {toolbarLevel === 'wide' && (
+              <span className="[color:var(--color-text-muted)] truncate">· 点卡片右侧 + 快速衍生 · 点击卡片在底部控制台操作</span>
+            )}
           </div>
           <div className="flex-1" />
-          <div className="flex items-center gap-2">
-            <select value={canvasId} onChange={e=>switchCanvas(e.target.value)} title="隶属画布：分镜视频在此画布生成" className="px-2 py-1 rounded-full bg-surface-secondary border border-border text-xs [color:var(--color-text-main)] focus:outline-none max-w-[160px]">
+          <div className="flex items-center gap-2 shrink-0">
+            <select value={canvasId} onChange={e=>switchCanvas(e.target.value)} title="隶属画布：分镜视频在此画布生成" className={`px-2 py-1 rounded-full bg-surface-secondary border border-border text-xs [color:var(--color-text-main)] focus:outline-none ${toolbarLevel === 'compact' ? 'max-w-[104px]' : 'max-w-[160px]'}`}>
               {canvasList.length === 0 && <option value={canvasId}>{currentCanvasName}</option>}
               {canvasList.map(c=> <option key={c.id} value={c.id}>{c.name}（{c.node_count}节点）</option>)}
             </select>
@@ -1232,66 +1371,336 @@ const InnerCanvas: React.FC = () => {
               onChanged={() => { if (pid) apiService.listProjectCanvases(pid).then(r => setCanvasList(r.canvases || [])).catch(() => {}); }}
             />
 
-            <button onClick={async()=>{ const n = canvasList.length + 1; const cid = await createCanvas(`画布${n}`); if (cid) toast.success(`已新建画布${n}并切换`); }} className="px-3 py-1 rounded-full bg-surface-secondary border border-border text-xs font-medium [color:var(--color-text-main)] hover:bg-surface-tertiary transition-colors">+ 新画布</button>
-            <button onClick={async()=>{
-              if (!pid) return;
-              const cur = canvasList.find(c => c.id === canvasIdRef.current);
-              const nv = await promptAsync({
-                title: '重命名画布',
-                message: '请输入新的画布名称：',
-                defaultValue: cur?.name || currentCanvasName,
-                placeholder: '画布名称'
-              });
-              if (!nv || !nv.trim()) return;
-              try {
-                await apiService.renameProjectCanvas(pid, canvasIdRef.current, nv.trim());
-                const r = await apiService.listProjectCanvases(pid).catch(() => null);
-                if (r) setCanvasList(r.canvases || []);
-                toast.success(`画布已更名为「${nv.trim()}」`);
-              } catch (e: any) { toast.error(e.message || '重命名失败'); }
-            }} className="px-3 py-1 rounded-full bg-surface-secondary border border-border text-xs font-medium [color:var(--color-text-main)] hover:bg-surface-tertiary transition-colors" title="重命名当前画布">✎</button>
-            <button onClick={async()=>{
-              if (!pid) return;
-              if (canvasList.length <= 1) { toast.warning('至少保留一个画布'); return; }
-              const cur = canvasList.find(c => c.id === canvasIdRef.current)?.name || currentCanvasName;
-              const confirmed = await confirmAsync({
-                title: '删除画布',
-                message: `确定要删除画布「${cur}」吗？\n画布内的所有节点与编排数据将丢失且无法撤销。`,
-                isDanger: true,
-                confirmText: '确认删除',
-                cancelText: '取消'
-              });
-              if (!confirmed) return;
-              try {
-                const r: any = await apiService.deleteProjectCanvas(pid, canvasIdRef.current);
-                const list = await apiService.listProjectCanvases(pid).catch(() => null);
-                if (list) setCanvasList(list.canvases || []);
-                const next = r?.active_canvas_id || 'default';
-                suppressSaveRef.current = true;
-                setNodes([]); setEdges([]); setSelectedNodeId(null);
-                setCanvasId(next);
-                toast.success(`已删除画布「${cur}」`);
-              } catch (e: any) { toast.error(e.message || '删除失败'); }
-            }} className="w-7 h-7 rounded-full bg-surface-secondary border border-border text-[color:var(--color-text-muted)] hover:text-red-400 flex items-center justify-center transition-colors" title="删除当前画布">🗑</button>
-            <span className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-secondary border border-border text-[10px] text-[color:var(--color-text-muted)] whitespace-nowrap"
-              title="Ctrl/⌘+C 复制 · Ctrl/⌘+V 粘贴 · Ctrl/⌘+Z 撤销 · Ctrl/⌘+Y 重做 · Delete 删除；Shift+拖 框选，Ctrl/⌘+点 多选">
-              ⌨️ ⌘C/V 复制粘贴 · ⌘Z/Y 撤销重做 · Del 删除
-            </span>
-            <button onClick={() => setNodes(nds => nds.map((n, i) => ({ ...n, position: { x: 120 + i * 400, y: 120 } })))} className="px-3 py-1 rounded-full bg-surface-secondary border border-border text-xs font-medium [color:var(--color-text-main)] hover:bg-surface-tertiary transition-colors">横向排布</button>
-            <button onClick={async () => { 
-              const ok = await confirmAsync({
-                title: '清空画布',
-                message: '确定要清空当前画布上的所有节点和连线吗？',
-                isDanger: true,
-                confirmText: '确认清空',
-                cancelText: '取消'
-              });
-              if (ok) { setNodes([]); setEdges([]); setSelectedNodeId(null); toast.info('画布已清空'); } 
-            }} className="w-7 h-7 rounded-full bg-surface-secondary border border-border text-[color:var(--color-text-muted)] hover:text-red-400 flex items-center justify-center transition-colors" title="清空">×</button>
+            {/* 完整态：画布级低频操作直接铺开（快捷键提示仅在很宽时出现） */}
+            {toolbarLevel !== 'compact' && (
+              <>
+                <button onClick={handleCreateCanvas} className="px-3 py-1 rounded-full bg-surface-secondary border border-border text-xs font-medium [color:var(--color-text-main)] hover:bg-surface-tertiary transition-colors">+ 新画布</button>
+                <button onClick={handleRenameCanvas} aria-label="重命名当前画布" title="重命名当前画布" className="w-7 h-7 rounded-full bg-surface-secondary border border-border [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] flex items-center justify-center transition-colors">
+                  <Pencil className="w-3.5 h-3.5" strokeWidth={1.7} />
+                </button>
+                <button onClick={handleDeleteCanvas} aria-label="删除当前画布" title="删除当前画布" className="w-7 h-7 rounded-full bg-surface-secondary border border-border [color:var(--color-text-muted)] hover:text-red-400 flex items-center justify-center transition-colors">
+                  <Trash2 className="w-3.5 h-3.5" strokeWidth={1.7} />
+                </button>
+                {toolbarLevel === 'wide' && (
+                  <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-secondary border border-border text-[10px] [color:var(--color-text-muted)] whitespace-nowrap"
+                    title="Ctrl/⌘+C 复制 · Ctrl/⌘+V 粘贴 · Ctrl/⌘+Z 撤销 · Ctrl/⌘+Y 重做 · Delete 删除；Shift+拖 框选，Ctrl/⌘+点 多选">
+                    <Keyboard className="w-3.5 h-3.5 shrink-0" strokeWidth={1.7} />
+                    ⌘C/V 复制粘贴 · ⌘Z/Y 撤销重做 · Del 删除
+                  </span>
+                )}
+              </>
+            )}
+
+            {/* 精简态：同一批操作收入「更多」，避免窄屏挤压/换行 */}
+            {toolbarLevel === 'compact' && (
+              <div className="relative" ref={toolbarMenuRef}>
+                <button
+                  onClick={() => setToolbarMenuOpen(v => !v)}
+                  aria-haspopup="menu"
+                  aria-expanded={toolbarMenuOpen}
+                  aria-label="更多画布操作"
+                  title="更多画布操作"
+                  className={`w-7 h-7 rounded-full border flex items-center justify-center transition-colors ${
+                    toolbarMenuOpen
+                      ? 'bg-brand/15 text-brand border-brand/40'
+                      : 'bg-surface-secondary border-border [color:var(--color-text-muted)] hover:[color:var(--color-text-main)]'
+                  }`}
+                >
+                  <MoreHorizontal className="w-3.5 h-3.5" strokeWidth={1.7} />
+                </button>
+                <div
+                  role="menu"
+                  aria-label="更多画布操作"
+                  aria-hidden={!toolbarMenuOpen}
+                  className={`absolute right-0 top-[calc(100%+6px)] w-[200px] p-1 rounded-[14px] bg-surface border border-border shadow-xl z-40 origin-top-right transition-all duration-[260ms] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none ${
+                    toolbarMenuOpen
+                      ? 'opacity-100 scale-100 visible pointer-events-auto'
+                      : 'opacity-0 scale-[.98] invisible pointer-events-none'
+                  }`}
+                >
+                  <button role="menuitem" className={TOOLBAR_MENU_ITEM} onClick={() => { setToolbarMenuOpen(false); handleCreateCanvas(); }}>
+                    <Plus className="w-4 h-4 shrink-0" strokeWidth={1.7} />新建画布
+                  </button>
+                  <button role="menuitem" className={TOOLBAR_MENU_ITEM} onClick={() => { setToolbarMenuOpen(false); handleRenameCanvas(); }}>
+                    <Pencil className="w-4 h-4 shrink-0" strokeWidth={1.7} />重命名画布
+                  </button>
+                  <button role="menuitem" className={`${TOOLBAR_MENU_ITEM} hover:text-red-400 hover:bg-red-500/10`} onClick={() => { setToolbarMenuOpen(false); handleDeleteCanvas(); }}>
+                    <Trash2 className="w-4 h-4 shrink-0" strokeWidth={1.7} />删除画布
+                  </button>
+                  <div className="h-px bg-border-subtle mx-1 my-1" />
+                  <div className="px-2.5 py-1 text-[10.5px] leading-relaxed [color:var(--color-text-muted)]">
+                    ⌘C/V 复制粘贴 · ⌘Z/Y 撤销重做 · Del 删除
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <button onClick={handleClearCanvas} aria-label="清空画布" title="清空画布" className="w-7 h-7 rounded-full bg-surface-secondary border border-border [color:var(--color-text-muted)] hover:text-red-400 flex items-center justify-center transition-colors">
+              <X className="w-3.5 h-3.5" strokeWidth={1.7} />
+            </button>
           </div>
         </div>
 
-        <div className="flex-1 relative">
+        {/* ── 画布操作台条（左上角，left-3 / top-[52px]）──
+              · 第一条按钮 = 唤出系统左侧栏（画布内不再单独悬浮一个图标按钮）
+              · 分块（模板 / 我的 / 节点 / 素材）：点块 → 展开操作台并直接滚到该小节 */}
+        <div ref={workbenchRef} className="absolute left-3 top-[52px] bottom-3 z-30 flex flex-col items-start gap-2 pointer-events-none">
+          {/* 悬浮条 */}
+          <div className="pointer-events-auto flex items-center gap-0.5 p-1 rounded-md bg-surface border border-border shadow-md select-none">
+            {WORKBENCH_TABS.map((t) => {
+              const on = workbenchOpen && workbenchSection === t.id;
+              const Icon = t.icon;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => openWorkbench(t.id)}
+                  aria-current={on ? 'true' : undefined}
+                  title={`${t.label}：展开画布操作台并定位到该分区`}
+                  className={`h-7 px-2 inline-flex items-center gap-1 rounded-md text-[11.5px] font-medium transition-colors ${
+                    on
+                      ? 'bg-brand/15 text-brand'
+                      : '[color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] hover:bg-surface-secondary'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5" strokeWidth={1.7} />
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* 画布操作台：高度占满画布列可用高度（宽 248px 浮层，不占画布宽度） */}
+          <div
+            role="dialog"
+            aria-label="画布操作台"
+            aria-hidden={!workbenchOpen}
+            className={`w-[248px] flex-1 min-h-0 flex flex-col rounded-[18px] bg-surface border border-border shadow-xl overflow-hidden origin-top-left transition-all duration-[260ms] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none ${
+              workbenchOpen
+                ? 'opacity-100 scale-100 visible pointer-events-auto'
+                : 'opacity-0 scale-[.98] invisible pointer-events-none'
+            }`}
+          >
+            <div className="h-9 px-2.5 flex items-center gap-2 border-b border-border shrink-0">
+              <Layers className="w-3.5 h-3.5 text-brand shrink-0" strokeWidth={1.7} />
+              <span className="text-[13px] font-semibold [color:var(--color-text-main)]">画布操作台</span>
+              <button
+                onClick={() => setWorkbenchOpen(false)}
+                aria-label="收起画布操作台"
+                title="收起画布操作台（向上折叠）"
+                className="ml-auto w-6 h-6 inline-flex items-center justify-center rounded-md [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-secondary transition-colors"
+              >
+                <ChevronsUp className="w-3.5 h-3.5" strokeWidth={1.7} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto custom-scrollbar px-1.5 py-1.5 motion-safe:scroll-smooth">
+              {/* 一键模板 */}
+              <section ref={setWorkbenchSectionRef('template')} className="scroll-mt-2">
+                <WorkbenchGroupTitle>一键模板</WorkbenchGroupTitle>
+                {TEMPLATES.map(t => (
+                  <WorkbenchRow
+                    key={t.id}
+                    icon={Wand2}
+                    iconCls="text-violet-400"
+                    label={t.label}
+                    desc={t.desc}
+                    title="点击：把该模板链路生成到当前画布"
+                    onClick={() => addTemplate(t)}
+                  />
+                ))}
+              </section>
+
+              {/* 我的模板 · Creator */}
+              <section ref={setWorkbenchSectionRef('mine')} className="scroll-mt-2">
+                <WorkbenchGroupTitle>
+                  我的模板 · Creator
+                  <button
+                    onClick={refreshCreatorTemplates}
+                    title="刷新模板列表"
+                    className="ml-auto px-1.5 py-0.5 rounded-full text-[10px] font-normal text-violet-300 bg-violet-500/10 border border-violet-500/30 hover:bg-violet-500/20 transition-colors"
+                  >刷新</button>
+                </WorkbenchGroupTitle>
+                {creatorTemplates.length === 0 ? (
+                  <div className="px-3 py-1 text-[10.5px] leading-relaxed [color:var(--color-text-muted)]">
+                    暂无。在 Agent 创造模式沉淀模板后出现在这里。
+                  </div>
+                ) : (
+                  creatorTemplates.map((t: any) => (
+                    <WorkbenchRow
+                      key={t.id}
+                      icon={Sparkles}
+                      iconCls="text-violet-400"
+                      label={t.name || t.id}
+                      desc={`${(t.nodes || []).length} 节点`}
+                      title="点击：从模板新建节点链到当前画布"
+                      onClick={() => addCreatorTemplate(t)}
+                    />
+                  ))
+                )}
+              </section>
+
+              {/* 节点：核心 Agent 节点 + 自定义 / 扩展节点 */}
+              <section ref={setWorkbenchSectionRef('nodes')} className="scroll-mt-2">
+                <WorkbenchGroupTitle>核心 Agent 节点</WorkbenchGroupTitle>
+                {CORE_LIBRARY.map(n => (
+                  <WorkbenchRow
+                    key={n.type}
+                    icon={n.icon}
+                    iconCls={n.color}
+                    label={n.label}
+                    desc={n.desc}
+                    draggable
+                    onDragStart={e => e.dataTransfer.setData('application/canvas-nodetype', n.type)}
+                    title="拖入画布，或点击直接创建"
+                    onClick={() => {
+                      const pos = { x: 120 + nodes.length * 40, y: 120 + nodes.length * 40 };
+                      const node = createNode(n.type, pos);
+                      setNodes(nds => [...nds, node]);
+                      setSelectedNodeId(node.id);
+                    }}
+                  />
+                ))}
+
+                {customNodes.map((c: any) => (
+                  <WorkbenchRow
+                    key={c.id}
+                    icon={Boxes}
+                    iconCls="text-teal-400"
+                    label={c.name}
+                    desc={`${c.kind}/${c.language}`}
+                    draggable
+                    onDragStart={e => e.dataTransfer.setData('application/canvas-nodetype', 'custom')}
+                    title="自定义节点：拖入画布，或点击直接创建"
+                    onClick={() => {
+                      const pos = { x: 120 + nodes.length * 40, y: 120 + nodes.length * 40 };
+                      const node = createNode('custom', pos, { custom_node_id: c.id });
+                      setNodes(nds => [...nds, node]);
+                      setSelectedNodeId(node.id);
+                    }}
+                  />
+                ))}
+
+                {extNodes.map((s: any) => (
+                  <WorkbenchRow
+                    key={s.id}
+                    icon={Wand2}
+                    iconCls="text-cyan-400"
+                    label={s.name}
+                    desc={`${(s.inputs || []).length}入/${(s.outputs || []).length}出`}
+                    draggable
+                    onDragStart={e => {
+                      e.dataTransfer.setData('application/canvas-nodetype', 'ext-node');
+                      e.dataTransfer.setData('application/canvas-nodeid', s.id);
+                    }}
+                    title={`扩展节点（canvas_nodes）· ${s.kind || 'utility'}：拖入画布，或点击直接创建`}
+                    onClick={() => {
+                      const pos = { x: 120 + nodes.length * 40, y: 120 + nodes.length * 40 };
+                      const node = createNode('ext-node', pos, { canvas_node_id: s.id, definition: s });
+                      setNodes(nds => [...nds, node]);
+                      setSelectedNodeId(node.id);
+                    }}
+                  />
+                ))}
+
+                {customNodes.length === 0 && extNodes.length === 0 && (
+                  <button
+                    onClick={goPluginCenter}
+                    title="去设置 → 插件中心安装插件包"
+                    className="w-full text-left px-3 py-2 rounded-lg text-[10.5px] [color:var(--color-text-muted)] hover:bg-surface-secondary transition-colors"
+                  >
+                    自定义 / 扩展节点：去设置 → 插件中心安装插件包
+                  </button>
+                )}
+              </section>
+
+              {/* 素材库 */}
+              <section ref={setWorkbenchSectionRef('assets')} className="scroll-mt-2">
+                <WorkbenchGroupTitle>
+                  素材库
+                  <span className="ml-auto font-normal">{assets.length} 个</span>
+                </WorkbenchGroupTitle>
+                <div className="grid grid-cols-3 gap-2 px-2.5 pb-1">
+                  {assets.map((a: any) => {
+                    const url = a.thumb_url || a.file_url;
+                    const abs = resolveMediaUrl(url);
+                    return (
+                      <div
+                        key={a.id}
+                        draggable
+                        onDragStart={e => {
+                          e.dataTransfer.setData('application/canvas-assetid', a.id);
+                          e.dataTransfer.setData('text/plain', abs || url || '');
+                          if (a.category === 'text') {
+                            e.dataTransfer.setData('application/canvas-assetkind', 'text');
+                            e.dataTransfer.setData('application/canvas-text', a.content || a.visual_prompt || '');
+                          }
+                        }}
+                        title={a.category === 'text' ? `拖到节点上填充提示词：${a.name}` : `拖入画布：${a.name}`}
+                        className="aspect-square rounded-md overflow-hidden border border-border bg-surface-secondary cursor-grab hover:border-brand/40 transition-colors"
+                      >
+                        {a.category === 'text' ? (
+                          <div className="w-full h-full p-1.5 flex flex-col">
+                            <div className="text-[9px] font-bold text-sky-400 flex items-center gap-0.5 mb-0.5"><Type className="w-2.5 h-2.5" />文本</div>
+                            <div className="text-[9px] text-gray-500 leading-snug overflow-hidden" style={{ display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical' }}>{(a.content || a.visual_prompt || a.name || '').slice(0, 80)}</div>
+                          </div>
+                        ) : abs ? (
+                          <AutoRatioMedia src={abs} fallbackAspect="1/1" className="w-full h-full" mediaClassName="group-hover:scale-[1.03] transition-transform" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center"><ImageIcon className="w-4 h-4 text-gray-500" /></div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                {assets.length === 0 && (
+                  <div className="px-3 py-1 text-[10.5px] [color:var(--color-text-muted)]">暂无素材，先去素材库上传</div>
+                )}
+              </section>
+            </div>
+
+            {/* 底部动作：保存 / 导出 */}
+            <div className="p-2.5 border-t border-border flex items-center gap-2 shrink-0">
+              <button
+                onClick={handleManualSave}
+                disabled={saving}
+                className="flex-1 h-8 rounded-md bg-brand text-white text-[11.5px] font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-40 hover:bg-brand-light transition-colors"
+              >
+                <Save className="w-3.5 h-3.5" strokeWidth={1.7} />{saving ? '保存中' : '保存画布'}
+              </button>
+              <button
+                onClick={() => window.dispatchEvent(new CustomEvent('canvas-export-shots'))}
+                title="导出为分镜工程"
+                className="h-8 px-2.5 rounded-md bg-surface-secondary border border-border inline-flex items-center justify-center gap-1.5 text-[11.5px] font-medium [color:var(--color-text-main)] hover:bg-surface-tertiary transition-colors"
+              >
+                <Download className="w-3.5 h-3.5" strokeWidth={1.7} />导出
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* 画布区：双击空白新建「提示词文本」节点 + 右键弹「添加节点」菜单（对齐 LibTV） */}
+        <div
+          className="flex-1 relative"
+          onDoubleClick={(e) => {
+            if (isLoading || isEmpty) return;
+            const el = e.target as Element;
+            if (!el.closest || !el.closest('.react-flow')) return;
+            if (el.closest('.react-flow__node, .react-flow__edge, .react-flow__controls, .react-flow__minimap, .react-flow__panel, .react-flow__attribution')) return;
+            const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+            const n = createNode('text-prompt', pos);
+            setNodes(nds => [...nds, n]);
+            setSelectedNodeId(n.id);
+          }}
+          onContextMenu={(e) => {
+            if (isLoading || isEmpty) return;
+            const el = e.target as Element;
+            if (!el.closest || !el.closest('.react-flow')) return;
+            if (el.closest('.react-flow__node, .react-flow__edge, .react-flow__controls, .react-flow__minimap, .react-flow__panel')) return;
+            e.preventDefault();
+            setNodeMenu(null);
+            setPaneMenu({ x: e.clientX, y: e.clientY });
+          }}
+        >
           {isLoading ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center p-8 gap-4" style={{ background: isLight ? '#E8ECF1' : '#08080B' }}>
               <div className="w-8 h-8 border-2 border-zinc-600 border-t-brand rounded-full animate-spin" />
@@ -1305,7 +1714,7 @@ const InnerCanvas: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="text-base font-bold [color:var(--color-text-main)]">从一个想法开始漫剧创作</h3>
-                  <p className="text-xs [color:var(--color-text-muted)] mt-1">选择模板一键生成连贯的 Agent 节点链，或从左侧直接拖入节点</p>
+                  <p className="text-xs [color:var(--color-text-muted)] mt-1">选择模板一键生成连贯的 Agent 节点链，或从左上角「画布操作台」拖入节点</p>
                 </div>
                 <div className="grid grid-cols-3 gap-3 pt-2">
                   {TEMPLATES.map(t => (
@@ -1333,7 +1742,13 @@ const InnerCanvas: React.FC = () => {
               isValidConnection={isValidConnection}
               nodeTypes={nodeTypes}
               onNodeClick={(_, node) => setSelectedNodeId(node.id)}
-              onPaneClick={() => setSelectedNodeId(null)}
+              onNodeContextMenu={(e, node) => {
+                e.preventDefault();
+                // 右键即选中，与主流编辑器一致：菜单操作的目标不会被误认
+                setSelectedNodeId(node.id);
+                setNodeMenu({ nodeId: node.id, x: (e as React.MouseEvent).clientX, y: (e as React.MouseEvent).clientY });
+              }}
+              onPaneClick={() => { setSelectedNodeId(null); setNodeMenu(null); setPaneMenu(null); }}
               onSelectionChange={handleSelectionChange}
               deleteKeyCode={null}  /* 删除交给 useCanvasShortcuts，统一处理节点+连线 */
               fitView
@@ -1342,13 +1757,19 @@ const InnerCanvas: React.FC = () => {
               style={{ background: isLight ? '#E8ECF1' : '#08080B', cursor: isDragging ? 'grabbing' : 'crosshair' }}
             >
               <Background color={isLight ? '#CBD5E1' : '#1E1E2A'} gap={24} size={1.2} />
-              <Controls className="!bg-surface !border-border !rounded-2xl shadow-xl ![color:var(--color-text-main)] [&_button]:!bg-surface [&_button]:!border-border [&_button]:![color:var(--color-text-main)]" />
-              <MiniMap className="!bg-surface !border-border !rounded-xl" maskColor="rgba(10,10,12,0.8)" nodeColor={(n: any) => n.type === 'image' ? '#7C3AED' : n.type === 'video' ? '#F97316' : n.type === 'audio' ? '#EC4899' : n.type === 'prompt' ? '#06B6D4' : '#3F3F50'} />
+              <Controls className="!bg-surface !border-border !rounded-2xl shadow-xl ![color:var(--color-text-main)] [&_button]:!bg-surface [&_button]:!border-border [&_button]:![color:var(--color-text-main)]">
+                {/* 横向排布：原顶栏按钮，并入左下角缩放/适应竖条 */}
+                <ControlButton onClick={handleArrangeHorizontally} title="横向排布：把所有节点排成一行" aria-label="横向排布">
+                  <ArrowLeftRight className="w-3.5 h-3.5" strokeWidth={1.7} />
+                </ControlButton>
+              </Controls>
+              <MiniMap className="!bg-surface !border-border !rounded-xl" maskColor="rgba(10,10,12,0.8)" nodeColor={(n: any) => n.type === 'image' ? '#7C3AED' : n.type === 'video' ? '#F97316' : n.type === 'audio' ? '#EC4899' : (n.type === 'prompt' || n.type === 'text-prompt') ? '#06B6D4' : '#3F3F50'} />
             </ReactFlow>
           )}
         </div>
 
-        {/* 底部全局编排控制台（节点级配置已下沉到卡内 NodeAgentBar） */}
+        {/* 底部：全局导演 Agent GO + 快速添加 + 选中生图/视频/配音节点时的节点控制台。
+            （轻量版把这里换成了右侧 CanvasAgentSidebar，本版保留原底部栏交互） */}
         {!isEmpty && (
           <FloatingAgentPromptBar
             onAddNode={(t) => {
@@ -1363,9 +1784,55 @@ const InnerCanvas: React.FC = () => {
             onExport={() => {
               window.dispatchEvent(new CustomEvent('open-export-modal'));
             }}
+            onCloseConsole={closeNodeConsole}
           />
         )}
       </div>
+
+      {/* 节点右键菜单（删除节点） */}
+      <NodeContextMenu
+        menu={nodeMenu}
+        onClose={() => setNodeMenu(null)}
+        onDelete={handleDeleteNode}
+      />
+
+      {/* 空白画布右键菜单：添加节点（文本优先，对齐 LibTV「右键 → 添加节点」） */}
+      {paneMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setPaneMenu(null)} onContextMenu={(e) => { e.preventDefault(); setPaneMenu(null); }} />
+          <div
+            className="fixed z-50 w-44 bg-surface border border-border rounded-xl shadow-2xl p-1 animate-fade-in"
+            style={{ left: Math.min(paneMenu.x, window.innerWidth - 200), top: Math.min(paneMenu.y, window.innerHeight - 240) }}
+          >
+            {[
+              { type: 'text-prompt', label: '提示词文本', desc: '纯文本资源', icon: FileText, color: 'text-sky-400' },
+              { type: 'prompt', label: '剧本 / Prompt', desc: '剧本拆解策划', icon: Type, color: 'text-sky-400' },
+              { type: 'image', label: '生图 Agent', desc: '文生图 / 垫图', icon: ImageIcon, color: 'text-violet-400' },
+              { type: 'video', label: '视频 Agent', desc: 'I2V / T2V', icon: Film, color: 'text-orange-400' },
+              { type: 'audio', label: '配音 Agent', desc: 'TTS 配音', icon: Mic, color: 'text-pink-400' },
+            ].map(it => {
+              const Icon = it.icon;
+              return (
+                <button
+                  key={it.type}
+                  onClick={() => {
+                    const pos = screenToFlowPosition({ x: paneMenu.x, y: paneMenu.y });
+                    const n = createNode(it.type, pos);
+                    setNodes(nds => [...nds, n]);
+                    setSelectedNodeId(n.id);
+                    setPaneMenu(null);
+                  }}
+                  className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left hover:bg-surface-secondary transition-colors group"
+                >
+                  <Icon className={`w-3.5 h-3.5 shrink-0 ${it.color}`} />
+                  <span className="text-xs font-medium [color:var(--color-text-main)] group-hover:[color:var(--color-text-main)]">{it.label}</span>
+                  <span className="ml-auto text-[9px] [color:var(--color-text-muted)]">{it.desc}</span>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
 
       {inspectWfId && <WorkflowInspectorModal workflowId={inspectWfId} isOpen={!!inspectWfId} onClose={() => setInspectWfId('')} onSaved={() => {}} />}
     </div>

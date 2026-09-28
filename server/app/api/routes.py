@@ -826,47 +826,63 @@ async def check_videos_health():
 @router.get("/videos/status/{task_id}")
 async def get_video_task_status(task_id: str):
     """查询异步视频生成任务状态（TaskCenter 统一口径 + 旧表兼容）"""
+    resp: Dict[str, Any] | None = None
     # TaskCenter 统一口径优先（提交即返的源都会登记在此）
     try:
         from app.providers.tasks import task_center
         rec = task_center.status(task_id)
         if rec is not None:
-            return rec.to_dict()
+            resp = rec.to_dict()
     except Exception:
         pass
     # 代码视频源任务表兜底（非代码模式已删除，仅代码源会登记任务）
-    try:
-        from app.providers.generic.code_provider import get_code_video_task
-        custom = get_code_video_task(task_id)
-        if custom is not None:
-            return custom
-    except Exception:
-        pass
+    if resp is None:
+        try:
+            from app.providers.generic.code_provider import get_code_video_task
+            custom = get_code_video_task(task_id)
+            if custom is not None:
+                resp = custom
+        except Exception:
+            pass
     # 聚合查询全部已注册视频源 (h3/seedance/kling/wan3/comfyui/旧通道)
+    if resp is None:
+        try:
+            reg = get_video_registry()
+            for pid in reg.list_ids():
+                prov = reg.get(pid)
+                if prov and hasattr(prov, "get_task_status"):
+                    try:
+                        st = prov.get_task_status(task_id)
+                        if isinstance(st, dict) and st.get("status") not in (None, "not_found"):
+                            resp = st
+                            break
+                    except Exception:
+                        continue
+                # classmethod 兜底 (按类名)
+                if resp is None:
+                    try:
+                        cls = prov.__class__ if prov else None
+                        if cls and hasattr(cls, "get_task_status"):
+                            st = cls.get_task_status(task_id)
+                            if isinstance(st, dict) and st.get("status") not in (None, "not_found"):
+                                resp = st
+                                break
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+    if resp is None:
+        from app.providers.video.minimax_video import CloudVideoProvider
+        resp = CloudVideoProvider.get_task_status(task_id)
+    # 终态计时观察点：本进程见过该任务的 submit 且此刻已终态 → 记一次「提交→拿到结果」总耗时
     try:
-        reg = get_video_registry()
-        for pid in reg.list_ids():
-            prov = reg.get(pid)
-            if prov and hasattr(prov, "get_task_status"):
-                try:
-                    st = prov.get_task_status(task_id)
-                    if isinstance(st, dict) and st.get("status") not in (None, "not_found"):
-                        return st
-                except Exception:
-                    continue
-            # classmethod 兜底 (按类名)
-            try:
-                cls = prov.__class__ if prov else None
-                if cls and hasattr(cls, "get_task_status"):
-                    st = cls.get_task_status(task_id)
-                    if isinstance(st, dict) and st.get("status") not in (None, "not_found"):
-                        return st
-            except Exception:
-                continue
+        from app.providers.gen_timer import observe_status
+        observe_status(task_id,
+                       (resp or {}).get("status"),
+                       provider=str((resp or {}).get("provider") or ""))
     except Exception:
         pass
-    from app.providers.video.minimax_video import CloudVideoProvider
-    return CloudVideoProvider.get_task_status(task_id)
+    return resp
 
 @router.post("/videos/generate")
 async def generate_video(req: VideoGenerateRequestPayload):
@@ -1048,6 +1064,7 @@ AGENT_SYSTEM_PROMPT_BODY = """你是「AI漫剧导演 Agent」，运行在 MiniM
 20. canvas_query —— 查询画布摘要与节点清单，感知当前画布状态
 21. canvas_create_node —— 创建节点。参数：type(prompt/image/video/audio/director3d/export/custom/brief/script-split/shot-card/comfy-workflow/provider-image/provider-video/provider-audio/tts/load-image/load-image-batch/load-video/load-audio/text-prompt/timeline-export), position{x,y}, params(可选内部参数；type=custom 时 params 必带 custom_node_id，即 customnode_<id> 工具去掉前缀的 id，可直接调该工具执行)
 22. canvas_update_node —— 更新节点。参数：node_id, patch(要更新的 data 字段)
+22.5 canvas_delete_node —— 删除节点（连带删除挂在它身上的连线）。参数：node_id。【高危：审批模式必弹人审确认，自动模式直跑】删前先用 canvas_query 确认真实 id，并说清会影响哪些下游
 23. canvas_connect —— 连线。参数：source, sourceHandle, target, targetHandle（类型需匹配 image/video/audio/text/provider）
 24. canvas_execute —— 执行画布 DAG。参数：target_ids(可选，仅执行选中), project_id
 
@@ -1598,6 +1615,10 @@ class ConfigUpdateRequest(BaseModel):
     SEEDANCE_MODEL: Optional[str] = Field(default="doubao-seedance-2-0-260128")
     WAN3_MODEL: Optional[str] = Field(default="wan3.0-video")
     WAN3_BASE_URL: Optional[str] = Field(default="https://dashscope.aliyuncs.com")
+    # 自定义视频通道（OpenAI 兼容 /v1/videos 协议，独立 Key）
+    OPENAI_VIDEO_API_KEY: Optional[str] = Field(default="")
+    OPENAI_VIDEO_BASE_URL: Optional[str] = Field(default="https://api.openai.com/v1")
+    OPENAI_VIDEO_MODEL: Optional[str] = Field(default="sora-2")
 
     # JianYing Draft Custom Location
     JIANYIN_DRAFT_PATH: Optional[str] = Field(default="")
@@ -1606,7 +1627,7 @@ class ConfigUpdateRequest(BaseModel):
     STUDIO_TRUSTED_MODE: Optional[str] = Field(default="0")
 
 class ConfigTestRequest(BaseModel):
-    target: str = Field(description="openai | responses_api | minimax | minimax_h3 | wan3 | seedance | kling | comfyui | siliconflow | dashscope | openai_image | elevenlabs | cosyvoice | gpt_sovits | jianyin")
+    target: str = Field(description="openai | responses_api | minimax | minimax_h3 | wan3 | seedance | kling | comfyui | siliconflow | dashscope | openai_image | openai_video | elevenlabs | cosyvoice | gpt_sovits | jianyin")
     config: Dict[str, Any] | None = None
 
 class AgentChatRequest(BaseModel):
@@ -1997,7 +2018,37 @@ async def test_config_connection(req: ConfigTestRequest):
             detail += " —— " + "；".join(notes)
         return {"target": "wan3", "ok": True, "detail": detail}
 
-    raise HTTPException(status_code=400, detail="target 不支持，支持: openai | responses_api | deepseek | qwen | minimax | minimax_h3 | seedance | kling | wan3 | comfyui | siliconflow | dashscope | elevenlabs | cosyvoice | gpt_sovits | indextts | jianyin")
+    # 生视频：自定义（OpenAI 兼容 /v1/videos）通道。Key 与文本、生图完全独立，无回退。
+    if target == "openai_video":
+        api_key = cfg.get("OPENAI_VIDEO_API_KEY") or getattr(settings, "OPENAI_VIDEO_API_KEY", "")
+        if _is_masked_placeholder(api_key):
+            api_key = getattr(settings, "OPENAI_VIDEO_API_KEY", "")
+        base = (
+            cfg.get("OPENAI_VIDEO_BASE_URL")
+            or getattr(settings, "OPENAI_VIDEO_BASE_URL", "")
+            or "https://api.openai.com/v1"
+        ).strip().rstrip("/")
+        model = cfg.get("OPENAI_VIDEO_MODEL") or getattr(settings, "OPENAI_VIDEO_MODEL", "") or "sora-2"
+        if not api_key:
+            return {"target": "openai_video", "ok": False, "detail": "OPENAI_VIDEO_API_KEY 未配置"}
+        if base.endswith("/videos"):
+            base = base[: -len("/videos")]
+        probe = base if base.endswith("/v1") else f"{base}/v1"
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                r = await client.get(
+                    f"{probe}/models",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+                if r.status_code == 401:
+                    return {"target": "openai_video", "ok": False, "detail": "自定义视频鉴权失败（401）：请检查 OPENAI_VIDEO_API_KEY"}
+                if r.status_code in (200, 404):
+                    return {"target": "openai_video", "ok": True, "detail": f"自定义视频接口连通正常（{model}）"}
+                return {"target": "openai_video", "ok": False, "detail": f"自定义视频接口返回 {r.status_code}: {r.text[:200]}"}
+        except Exception as e:
+            return {"target": "openai_video", "ok": False, "detail": f"自定义视频接口连接失败：{e}"}
+
+    raise HTTPException(status_code=400, detail="target 不支持，支持: openai | responses_api | deepseek | qwen | minimax | minimax_h3 | seedance | kling | wan3 | openai_image | openai_video | comfyui | siliconflow | dashscope | elevenlabs | cosyvoice | gpt_sovits | indextts | jianyin")
 
 @router.post("/agent/chat")
 async def http_agent_chat(req: AgentChatRequest):
@@ -2537,6 +2588,13 @@ async def agent_mode_policy():
 
 @router.get("/agent/traces")
 async def list_agent_traces(limit: int = 30):
+    """run 级审计（一次运行一个文件）。
+
+    写入方：v1 引擎（langchain_engine）、Creator 提案链、以及 v2 引擎在
+    turn 开始/工具结果/turn 结束三处的留痕（见 runtime/loop.py 的 `_trace`）。
+    返回空数组通常只说明"这段时间没跑过"，不代表引擎有问题；
+    要看逐事件全貌请用 `/agent/runs` + `/agent/runs/{id}/events`。
+    """
     from app.agent.trace import list_runs
     return {"runs": list_runs(limit=limit)}
 
@@ -2545,6 +2603,49 @@ async def list_agent_traces(limit: int = 30):
 async def get_agent_trace(run_id: str, limit: int = 500):
     from app.agent.trace import get_trace
     return {"run_id": run_id, "events": get_trace(run_id, limit=limit)}
+
+
+# ── 会话事件日志（v2 引擎的真实执行记录，append-only 事件溯源） ──────────────
+# 与 /agent/traces 的分工：traces 是"运行级审计摘要"，这里是"逐事件全貌"，
+# 也是模型记忆的来源（storage/agent_sessions/<proj>_<sess>/events.v1.jsonl）。
+@router.get("/agent/runs")
+async def list_agent_runs(limit: int = 30):
+    """列出所有会话执行日志（含 session_id / 修改时间 / 字节数），按最近修改排序。"""
+    from app.agent.runtime.store import store as _session_store
+    return {"runs": _session_store.list_sessions(limit=limit)}
+
+
+@router.get("/agent/runs/{session_id}/events")
+async def get_agent_run_events(session_id: str, limit: int = 500, offset: int = 0, type: str = "", tail: bool = True):
+    """读取某次会话的执行事件。
+
+    - `session_id` 可传磁盘目录名（`proj_xxx_sess_yyy`），也可只传前端的 `sess_yyy`，
+      由 `SessionStore.resolve` 解析；命中多个候选时响应里的 `ambiguous` > 1。
+    - `type` 按事件类型过滤（如 `tool/call`、`tool/result`、`turn/start`）。
+    - `tail=True`（默认）取最近 N 条，评估长会话时更顺手。
+    """
+    from app.agent.runtime.store import store as _session_store
+    real_id, candidates = _session_store.resolve(session_id)
+    if not real_id:
+        raise HTTPException(status_code=404, detail=f"未找到会话执行日志: {session_id}")
+    events = _session_store.read(real_id)
+    if type:
+        events = [e for e in events if str(e.get("type", "")) == type]
+    total = len(events)
+    n = max(1, min(int(limit or 500), 5000))
+    off = max(0, int(offset or 0))
+    if tail:
+        events = events[max(0, total - n - off): total - off]
+    else:
+        events = events[off: off + n]
+    return {
+        "session_id": real_id,
+        "requested": session_id,
+        "ambiguous": candidates,
+        "total": total,
+        "returned": len(events),
+        "events": events,
+    }
 
 # ============================================================
 # 系统原生文件夹选择器与资源管理器集成

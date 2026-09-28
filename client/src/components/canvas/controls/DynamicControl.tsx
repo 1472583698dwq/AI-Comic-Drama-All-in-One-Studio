@@ -76,7 +76,7 @@ export const DynamicControl: React.FC<{
         <label className="flex items-center gap-2 p-2 rounded-xl border border-dashed border-border bg-surface-secondary hover:bg-surface-tertiary hover:border-brand/40 cursor-pointer transition-colors">
           <div className="w-8 h-8 rounded bg-surface border border-border flex items-center justify-center shrink-0 overflow-hidden">
             {value ? (
-              isImage ? <img src={value} alt="" className="w-full h-full object-contain"/> :
+              isImage ? <img src={value} alt="" className="w-full h-full object-cover"/> :
               isAudio ? <span className="text-[10px] font-mono truncate px-1 [color:var(--color-text-main)]">{String(value).slice(0,12)}…</span> :
               <span className="text-[10px]">🎬</span>
             ) : (

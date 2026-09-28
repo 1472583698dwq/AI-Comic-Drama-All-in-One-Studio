@@ -4,7 +4,8 @@ import { Video, Play, Film, Settings } from 'lucide-react';
 import { apiService } from '../../../services/api';
 import { AutoRatioMedia } from '../../ui/AutoRatioMedia';
 
-const API_ORIGIN = window.location.port === '5173' ? 'http://127.0.0.1:8000' : '';
+import { API_ORIGIN } from '../../../utils/devOrigin';
+import { pollVideoTask } from '../../../utils/videoTask';
 
 export const VideoNode: React.FC<NodeProps> = ({ data, id }) => {
   const d: any = data;
@@ -41,30 +42,12 @@ export const VideoNode: React.FC<NodeProps> = ({ data, id }) => {
         provider: effectiveProvider,
       } as any);
       let url = res.video_url;
-      // 处理 AutoDL 等异步排队：video_url 为空但返回 task_id 时轮询
+      // 处理 AutoDL 等异步排队：video_url 为空但返回 task_id 时统一轮询（pollVideoTask）
       if (!url && res.task_id) {
         const taskId = res.task_id;
         // 提示排队中
         (d.onUpdate as any)?.(id, { video_url: "", _taskId: taskId, _polling: true });
-        for (let i = 0; i < 500; i++) {
-          await new Promise(r => setTimeout(r, 3000));
-          let st: any;
-          try {
-            st = await apiService.getVideoTaskStatus(taskId);
-          } catch {
-            continue; // 状态接口网络抖动：继续轮询，不误杀任务
-          }
-          const status = (st.status || st.state || "").toString().toUpperCase();
-          if (status === "SUCCESS" || status === "COMPLETED") {
-            url = st.video_url || st.videoUrl || (st.results && st.results[0]) || "";
-            if (url) break;
-            continue;
-          }
-          if (status === "FAILED" || status === "FAIL" || status === "ERROR" || status === "TIMEOUT" || status === "CANCELLED" || status === "CANCELED") {
-            throw new Error(st.error || st.msg || st.last_error || "视频任务失败");
-          }
-        }
-        if (!url) throw new Error("视频生成排队超时，请稍后在画布执行结果中查看或重试");
+        url = await pollVideoTask(taskId);
       }
       setVideoUrl(url);
       (d.onUpdate as any)?.(id, { video_url: url, video_prompt: p, mode, provider: effectiveProvider, duration, first_frame_url: firstFrame, model, _polling: false });

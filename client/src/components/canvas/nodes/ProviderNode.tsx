@@ -4,7 +4,7 @@ import { Plug, Cpu, Globe, Mic, Video, Settings, Activity, Trash2, Edit3, Plus, 
 import { apiService } from '../../../services/api';
 import { confirmAsync, toast } from '../../../stores/useDialogStore';
 
-const API_ORIGIN = window.location.port === '5173' ? 'http://127.0.0.1:8000' : '';
+import { API_ORIGIN } from '../../../utils/devOrigin';
 
 type ProviderKind = 'image' | 'video' | 'audio' | 'llm';
 
@@ -323,7 +323,7 @@ export const ProviderNode: React.FC<NodeProps> = ({ data, id, type }) => {
           <div className="flex gap-1.5">
             <button onClick={()=> setShowCreate(v=>!v)} className="flex-1 py-1.5 rounded-lg bg-brand text-white text-xs font-semibold hover:bg-brand-light shadow-sm">{showCreate?'收起':'新建Provider'}</button>
             <button onClick={()=> {
-              window.dispatchEvent(new CustomEvent('open-provider-create', {detail:{kind: nodeKind}}));
+              // 「让导演接入」只负责引导语（原 open-provider-create 事件全工程无监听者，已移除死派发）
               alert('可在右侧 Agent 输入框粘贴 API 文档，例如：\n“帮我接入这个生图 API：https://... 文档：... Key是...”\n导演将自动调用 register_custom_provider');
             }} className="px-3 py-1.5 rounded-lg bg-surface border border-border text-xs [color:var(--color-text-main)] hover:bg-surface-secondary">让导演接入</button>
           </div>

@@ -35,7 +35,7 @@ export const MotionTab: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
 
       {/* 直出模式锁定参考生视频：i2v/t2v 切卡隐藏，有无参考由生成时自动判定 r2v/t2v */}
       {caps.direct && (
-        <div className="text-[11px] font-bold text-orange-300 bg-orange-500/10 border border-orange-500/30 rounded-lg px-2.5 py-1.5">📌 参考生视频 (R2V)：上方绑定的角色 / 场景 / 道具自动作为多参考驱动</div>
+        <div className="text-[11px] font-bold text-orange-300 bg-orange-500/10 border border-orange-500/30 rounded-lg px-2.5 py-1.5">📌 参考生视频：上方绑定的角色 / 场景 / 道具会自动作为参考驱动视频</div>
       )}
       {!caps.direct && (
       <div className="grid grid-cols-3 gap-1">

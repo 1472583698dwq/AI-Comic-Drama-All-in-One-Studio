@@ -225,7 +225,7 @@ export interface SkillExecutionResult {
   modified_data?: Record<string, any>;
 }
 
-export type AssetCategory = 'character' | 'scene' | 'prop' | 'background' | 'effect' | 'ui' | 'previz' | 'other';
+export type AssetCategory = 'character' | 'scene' | 'prop' | 'background' | 'effect' | 'ui' | 'previz' | 'text' | 'other';
 export type AssetStatus = 'draft' | 'approved' | 'archived';
 
 export interface Asset {
