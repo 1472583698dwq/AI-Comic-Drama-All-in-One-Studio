@@ -1,6 +1,6 @@
 import os
 import json
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query
 
 from app.models.asset import Asset, AssetCreateRequest, AssetUpdateRequest
@@ -102,6 +102,7 @@ async def generate_asset(
     seed: Optional[int] = Form(None),
     tags: Optional[str] = Form(None),
     dynamic_inputs: Optional[str] = Form(None),
+    params: Optional[str] = Form(None, description="生成源参数 JSON（steps/resolution/cfg/model 及源自定义参数）"),
     project_id: Optional[str] = Form(None, description="归属项目"),
     scope: str = Form("project"),
 ):
@@ -130,6 +131,26 @@ async def generate_asset(
         except Exception:
             pass
 
+    # 生成源参数：已知字段进 ImageGenerateRequest，其余进 extra + dynamic_inputs（代码源经 merge_user_params 读取）
+    parsed_params: Dict[str, Any] = {}
+    if params:
+        try:
+            _pp = json.loads(params)
+            if isinstance(_pp, dict):
+                parsed_params = _pp
+        except Exception:
+            pass
+    req_kw: Dict[str, Any] = {}
+    for _k in ("resolution", "steps", "cfg", "width", "height", "fps", "duration", "model"):
+        _v = parsed_params.pop(_k, None)
+        if _v not in (None, ""):
+            req_kw[_k] = _v
+    merged_dyn = dict(parsed_dynamic_inputs or {})
+    for _k, _v in parsed_params.items():
+        if _v in (None, ""):
+            continue
+        merged_dyn.setdefault(_k, _v)
+
     effective_provider = provider
     if not effective_provider and workflow_id:
         effective_provider = "comfyui"
@@ -141,7 +162,9 @@ async def generate_asset(
         style_preset=style_preset,
         seed=seed,
         workflow_id=workflow_id or None,
-        dynamic_inputs=parsed_dynamic_inputs,
+        dynamic_inputs=merged_dyn or None,
+        extra=(parsed_params or None),
+        **req_kw,
     )
     try:
         res = await image_registry.generate(req, provider_id=effective_provider)

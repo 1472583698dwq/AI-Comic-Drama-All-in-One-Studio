@@ -40,39 +40,6 @@
           "dragging": false
         },
         {
-          "id": "image_1789738007390_20",
-          "type": "image",
-          "position": {
-            "x": 931.0703132707986,
-            "y": 85.00847590160922
-          },
-          "data": {
-            "prompt": "",
-            "provider_id": "comfyui_wf_4a19b2a2",
-            "provider": "comfyui_wf_4a19b2a2",
-            "params": {
-              "aspect_ratio": "9:16",
-              "resolution": "720p",
-              "steps": 20,
-              "cfg": 7
-            },
-            "provider_params": {
-              "aspect_ratio": "9:16",
-              "resolution": "720p",
-              "steps": 20,
-              "cfg": 7
-            },
-            "_polling": false,
-            "skill_id": "text_to_image"
-          },
-          "measured": {
-            "width": 360,
-            "height": 405
-          },
-          "selected": false,
-          "dragging": false
-        },
-        {
           "id": "video_1789738029460_21",
           "type": "video",
           "position": {
@@ -110,8 +77,8 @@
           "id": "prompt_1789982935217_1",
           "type": "prompt",
           "position": {
-            "x": 408,
-            "y": -88
+            "x": 402.7766966202233,
+            "y": -126.30422478502943
           },
           "data": {
             "prompt": ""
@@ -141,28 +108,8 @@
           "dragging": false
         }
       ],
-      "edges": [
-        {
-          "id": "e_prompt_1789737991813_19_image_1789738007390_20",
-          "source": "prompt_1789737991813_19",
-          "target": "image_1789738007390_20",
-          "type": "smoothstep",
-          "animated": true,
-          "sourceHandle": "prompt",
-          "targetHandle": "prompt"
-        },
-        {
-          "id": "e_image_1789738007390_20_video_1789738029460_21",
-          "source": "image_1789738007390_20",
-          "target": "video_1789738029460_21",
-          "type": "smoothstep",
-          "animated": true,
-          "sourceHandle": "image",
-          "targetHandle": "first_frame",
-          "selected": false
-        }
-      ],
-      "updated_at": "2026-09-28 15:47:15"
+      "edges": [],
+      "updated_at": "2026-09-28 17:04:54"
     },
     "cv_mtpeb9n6": {
       "name": "画布2",

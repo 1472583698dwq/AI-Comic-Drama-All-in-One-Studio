@@ -828,6 +828,7 @@ export const apiService = {
     name: string; prompt: string; category?: string; style_preset?: string;
     provider?: string; workflow_id?: string; negative_prompt?: string; aspect_ratio?: string;
     seed?: number; tags?: string; dynamic_inputs?: Record<string, any>;
+    params?: Record<string, any>;
     project_id?: string; scope?: string;
   }): Promise<{ asset: any; generation: any }> {
     const fd = new FormData();
@@ -842,6 +843,7 @@ export const apiService = {
     if (params.seed != null) fd.append('seed', String(params.seed));
     if (params.tags) fd.append('tags', params.tags);
     if (params.dynamic_inputs) fd.append('dynamic_inputs', JSON.stringify(params.dynamic_inputs));
+    if (params.params) fd.append('params', JSON.stringify(params.params));
     if (params.project_id) fd.append('project_id', params.project_id);
     if (params.scope) fd.append('scope', params.scope);
     const res = await fetch(`${API_BASE_URL}/assets/generate`, { method: 'POST', body: fd });
