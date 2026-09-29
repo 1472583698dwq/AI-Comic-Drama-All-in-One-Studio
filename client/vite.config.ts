@@ -9,7 +9,9 @@ export default defineConfig({
     tailwindcss(),
   ],
   server: {
+    // master 工作副本固定 5173（与 multi_ai_simpleuse 的 5174 并存）
     port: 5173,
+    strictPort: true,
   },
   build: {
     emptyOutDir: true,

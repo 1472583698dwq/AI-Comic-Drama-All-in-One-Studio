@@ -15,13 +15,9 @@
       "visual_prompt": "three views, front view, side view, back view, 1boy, black hair, handsome, determined eyes, ancient style robe, donghua_xianxia character design",
       "voice_id": "male-qn-qingse",
       "voice_name": "清冷坚毅男声",
-      "ref_audio_url": null,
-      "ref_audio_name": "",
       "emotion_preset": "neutral",
-      "avatar_url": "/storage/assets/ast_24895c5a/original.png",
-      "three_views": {
-        "front": "/storage/assets/ast_24895c5a/original.png"
-      }
+      "avatar_url": null,
+      "three_views": {}
     },
     {
       "id": "a3a03dad-3c44-4689-bb47-17693de8049d",
@@ -33,8 +29,6 @@
       "visual_prompt": "three views, front view, side view, back view, crowd of people, fearful expressions, mixed clothing, donghua_xianxia style",
       "voice_id": "crowd-fearful",
       "voice_name": "惊恐群声",
-      "ref_audio_url": null,
-      "ref_audio_name": "",
       "emotion_preset": "neutral",
       "avatar_url": null,
       "three_views": {}
@@ -53,36 +47,26 @@
           "id": "96713ae7-5218-4cde-ad08-3c4f569ca9f7",
           "shot_index": 1,
           "scene_index": 1,
-          "camera_framing": "full",
-          "camera_motion": "tilt_up",
+          "camera_framing": "bird_eye",
+          "camera_motion": "push_in",
           "action_desc": "九龙拉拽青铜古棺划破星空，从宇宙深处降临泰山峰顶，云海翻腾",
-          "speaker_id": "a3a03dad-3c44-4689-bb47-17693de8049d",
-          "speaker_name": "人群",
+          "speaker_id": null,
+          "speaker_name": null,
           "dialogue": "",
           "voiceover": "九龙拉棺，划破星空，降临在泰山之巅。",
           "emotion": "intense",
           "image_prompt": "masterpiece, donghua_xianxia (Chinese Donghua animation style, Xianxia fantasy, 8k resolution, cinematic lighting, ethereal atmosphere, volumetric clouds, highly detailed anime illustration, masterpiece), bird eye view, nine dragons pulling bronze coffin crossing starry sky descending on Mount Tai peak, clouds sea, 9:16 aspect ratio",
-          "video_prompt": "a person waving and greeting the viewer saying hello, breaking the fourth wall, friendly expression, intimate medium shot, rule of thirds, dramatic composition, leading lines, cinematic lighting, volumetric lighting, ultra detailed, 8k, masterpiece, depth of field, film grain [运镜: 鸟瞰俯冲 · 急进推镜 (Dolly In) · 35mm] [Camera: Motion: Tilt Up, Framing: 全景 (FS), Lens: 28mm]",
+          "video_prompt": "",
           "image_url": "/storage/generated/gen_1788530145_24a85451.png",
-          "video_url": "/storage/videos/vid_1789700074_8914c144.mp4",
+          "video_url": null,
           "audio_url": null,
           "duration": 5.0,
           "subtitle_text": "九龙拉棺，划破星空，降临在泰山之巅。",
-          "pose_preset": "stand",
-          "focal_length_mm": 28.0,
+          "pose_preset": null,
+          "focal_length_mm": 35.0,
           "camera_roll_deg": 0.0,
           "cast_layout": "solo",
-          "props_config": [
-            "camera",
-            "boombox"
-          ],
-          "character_ids": [
-            "a3a03dad-3c44-4689-bb47-17693de8049d"
-          ],
-          "character_weights": {
-            "a3a03dad-3c44-4689-bb47-17693de8049d": 0.8
-          },
-          "production_mode": "motion_comic"
+          "props_config": []
         },
         {
           "id": "e0412bf1-d4a6-49a6-b29e-ffe062509a7a",
@@ -91,8 +75,8 @@
           "camera_framing": "low_angle",
           "camera_motion": "tilt_up",
           "action_desc": "叶凡立于山巅仰望苍穹，衣袂随风，面容震撼，苍茫古老气息如雾袭来",
-          "speaker_id": "a3a03dad-3c44-4689-bb47-17693de8049d",
-          "speaker_name": "人群",
+          "speaker_id": null,
+          "speaker_name": null,
           "dialogue": "",
           "voiceover": "叶凡仰望苍穹，只觉得一股苍茫古老的气息扑面而来。",
           "emotion": "neutral",
@@ -107,24 +91,7 @@
           "focal_length_mm": 35.0,
           "camera_roll_deg": 0.0,
           "cast_layout": "solo",
-          "props_config": [],
-          "video_provider": "prov_d76c351f",
-          "provider_params": {
-            "video": {}
-          },
-          "character_ids": [
-            "a3a03dad-3c44-4689-bb47-17693de8049d"
-          ],
-          "character_weights": {
-            "a3a03dad-3c44-4689-bb47-17693de8049d": 0.8
-          },
-          "dynamic_inputs": {
-            "reference_image": "/storage/generated/gen_1788530350_16522592.png",
-            "reference_images": [
-              "/storage/generated/gen_1788530350_16522592.png"
-            ]
-          },
-          "production_mode": "image_to_video"
+          "props_config": []
         },
         {
           "id": "769ba419-0a10-4ccf-9606-8b09a0fef9af",
@@ -183,8 +150,8 @@
           "camera_framing": "long",
           "camera_motion": "pull_out",
           "action_desc": "青铜古棺轰然震颤，虚空裂开，一道神秘八卦符文缓缓旋转展开，光芒万丈",
-          "speaker_id": "a3a03dad-3c44-4689-bb47-17693de8049d",
-          "speaker_name": "人群",
+          "speaker_id": null,
+          "speaker_name": null,
           "dialogue": "",
           "voiceover": "突然，青铜古棺发出轰然巨响，一道神秘的八卦符文在虚空中缓缓展开……",
           "emotion": "intense",
@@ -255,8 +222,6 @@
     }
   ],
   "bgm_name": "Epic_Battle_Orchestra.mp3",
-  "bgm_url": null,
-  "bgm_volume": 0.5,
   "created_at": "2026-08-31T15:03:35.988990",
   "updated_at": "2026-08-31T15:03:35.988996",
   "engine": "minimax-llm"

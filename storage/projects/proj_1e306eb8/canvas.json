@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "active_canvas_id": "default",
+  "active_canvas_id": "cv_mtzyrq4i",
   "canvases": {
     "default": {
       "name": "默认画布",
@@ -9,155 +9,76 @@
           "id": "prompt_1789312807070_1",
           "type": "prompt",
           "position": {
-            "x": -84.41134751773046,
-            "y": -99.48936170212764
+            "x": -54.41134751773046,
+            "y": 40.51063829787236
           },
           "data": {
             "prompt": ""
           },
           "measured": {
             "width": 360,
-            "height": 253
-          },
-          "selected": false,
-          "dragging": false
-        },
-        {
-          "id": "prompt_1789737991813_19",
-          "type": "prompt",
-          "position": {
-            "x": 921.0703132707986,
-            "y": 395.00847590160924
-          },
-          "data": {
-            "prompt": ""
-          },
-          "measured": {
-            "width": 360,
-            "height": 253
-          },
-          "selected": false,
-          "dragging": false
-        },
-        {
-          "id": "image_1789738007390_20",
-          "type": "image",
-          "position": {
-            "x": 613.0703132707986,
-            "y": -268.99152409839076
-          },
-          "data": {
-            "prompt": "",
-            "provider_id": "comfyui_wf_4a19b2a2",
-            "provider": "comfyui_wf_4a19b2a2",
-            "params": {
-              "aspect_ratio": "9:16",
-              "resolution": "720p",
-              "steps": 20,
-              "cfg": 7
-            },
-            "provider_params": {
-              "aspect_ratio": "9:16",
-              "resolution": "720p",
-              "steps": 20,
-              "cfg": 7
-            },
-            "_polling": false
-          },
-          "measured": {
-            "width": 360,
-            "height": 405
-          },
-          "selected": false,
-          "dragging": false
-        },
-        {
-          "id": "video_1789738029460_21",
-          "type": "video",
-          "position": {
-            "x": 1508.0703132707986,
-            "y": 73.00847590160924
-          },
-          "data": {
-            "prompt": "",
-            "duration": 5,
-            "provider_id": "prov_6131876a",
-            "provider": "prov_6131876a",
-            "params": {
-              "resolution": "768p竖",
-              "duration": 5
-            },
-            "provider_params": {
-              "resolution": "768p竖",
-              "duration": 5
-            },
-            "_polling": false,
-            "reference_images": [
-              "/storage/assets/ast_24895c5a/original.png"
-            ]
-          },
-          "measured": {
-            "width": 360,
-            "height": 405
+            "height": 252
           },
           "selected": true,
           "dragging": false
         },
         {
-          "id": "prompt_1789982935217_1",
-          "type": "prompt",
+          "id": "image_1789312807070_2",
+          "type": "image",
           "position": {
-            "x": 94,
-            "y": -116
+            "x": 506.8368794326241,
+            "y": 62.72340425531917
           },
           "data": {
             "prompt": ""
           },
           "measured": {
             "width": 360,
-            "height": 253
+            "height": 404
           },
           "selected": false,
           "dragging": false
         },
         {
-          "id": "prompt_1789982935245_2",
-          "type": "prompt",
+          "id": "video_1789312807070_3",
+          "type": "video",
           "position": {
-            "x": 360,
-            "y": 360
+            "x": 1010.722729654234,
+            "y": 74.32982939661039
           },
           "data": {
-            "prompt": ""
+            "prompt": "",
+            "duration": 5
           },
           "measured": {
             "width": 360,
-            "height": 253
-          }
+            "height": 404
+          },
+          "selected": true,
+          "dragging": false
         }
       ],
       "edges": [
         {
-          "id": "e_prompt_1789737991813_19_image_1789738007390_20",
-          "source": "prompt_1789737991813_19",
-          "target": "image_1789738007390_20",
-          "type": "smoothstep",
-          "animated": true,
+          "id": "e_prompt_1789312807070_1_image_1789312807070_2",
+          "source": "prompt_1789312807070_1",
+          "target": "image_1789312807070_2",
           "sourceHandle": "prompt",
-          "targetHandle": "prompt"
+          "targetHandle": "prompt",
+          "type": "smoothstep",
+          "animated": true
         },
         {
-          "id": "e_image_1789738007390_20_video_1789738029460_21",
-          "source": "image_1789738007390_20",
-          "target": "video_1789738029460_21",
-          "type": "smoothstep",
-          "animated": true,
+          "id": "e_image_1789312807070_2_video_1789312807070_3",
+          "source": "image_1789312807070_2",
+          "target": "video_1789312807070_3",
           "sourceHandle": "image",
           "targetHandle": "first_frame",
-          "selected": false
+          "type": "smoothstep",
+          "animated": true
         }
       ],
-      "updated_at": "2026-09-21 21:33:49"
+      "updated_at": "2026-09-13 23:21:41"
     },
     "cv_mtpeb9n6": {
       "name": "画布2",
@@ -331,401 +252,6 @@
       ],
       "edges": [],
       "updated_at": "2026-09-13 23:24:08"
-    },
-    "cv_mu6m3r5l": {
-      "name": "分镜#4画布",
-      "nodes": [
-        {
-          "id": "prompt_1789715004577_1",
-          "type": "prompt",
-          "position": {
-            "x": 120,
-            "y": 120
-          },
-          "data": {
-            "prompt": "叶凡转身面向人群，挥臂大声呼喊，神色焦急而坚毅 [运镜: 中景 (MS) · 急进推镜 (Dolly In) · 35mm]",
-            "text": "叶凡转身面向人群，挥臂大声呼喊，神色焦急而坚毅 [运镜: 中景 (MS) · 急进推镜 (Dolly In) · 35mm]"
-          },
-          "measured": {
-            "width": 360,
-            "height": 253
-          }
-        },
-        {
-          "id": "director3d_1789715004577_2",
-          "type": "director3d",
-          "position": {
-            "x": 74,
-            "y": 452.99999999999994
-          },
-          "data": {
-            "framing": "medium",
-            "motion": "push_in",
-            "pose": "stand",
-            "focal_length_mm": 35,
-            "camera_roll_deg": 0,
-            "cast_layout": "solo",
-            "speed": "1.0x",
-            "ai_directive": ""
-          },
-          "measured": {
-            "width": 360,
-            "height": 253
-          },
-          "selected": false,
-          "dragging": false
-        },
-        {
-          "id": "video_1789715004577_3",
-          "type": "video",
-          "position": {
-            "x": 540,
-            "y": 240
-          },
-          "data": {
-            "prompt": "叶凡转身面向人群，挥臂大声呼喊，神色焦急而坚毅 [运镜: 中景 (MS) · 急进推镜 (Dolly In) · 35mm]",
-            "duration": 3,
-            "provider_id": "prov_d76c351f",
-            "camera_prompt": "[运镜: 中景 (MS) · 急进推镜 (Dolly In) · 35mm]",
-            "provider": "prov_d76c351f",
-            "params": {
-              "duration": 5,
-              "aspect_ratio": "9:16 (Portrait Widescreen)",
-              "instance_type": "default"
-            },
-            "provider_params": {
-              "duration": 5,
-              "aspect_ratio": "9:16 (Portrait Widescreen)",
-              "instance_type": "default"
-            },
-            "_polling": false
-          },
-          "measured": {
-            "width": 360,
-            "height": 405
-          },
-          "selected": true
-        }
-      ],
-      "edges": [
-        {
-          "id": "e_prompt_1789715004577_1_video_1789715004577_3_prompt_prompt",
-          "source": "prompt_1789715004577_1",
-          "target": "video_1789715004577_3",
-          "sourceHandle": "prompt",
-          "targetHandle": "prompt",
-          "type": "smoothstep",
-          "animated": true
-        },
-        {
-          "id": "e_director3d_1789715004577_2_video_1789715004577_3_camera_prompt_camera_prompt",
-          "source": "director3d_1789715004577_2",
-          "target": "video_1789715004577_3",
-          "sourceHandle": "camera_prompt",
-          "targetHandle": "camera_prompt",
-          "type": "smoothstep",
-          "animated": true
-        }
-      ],
-      "updated_at": "2026-09-18 15:03:48"
-    },
-    "cv_mu6yak8m": {
-      "name": "分镜#5画布",
-      "nodes": [
-        {
-          "id": "prompt_1789735477608_1",
-          "type": "prompt",
-          "position": {
-            "x": 120,
-            "y": 120
-          },
-          "data": {
-            "prompt": "青铜古棺轰然震颤，虚空裂开，一道神秘八卦符文缓缓旋转展开，光芒万丈",
-            "text": "青铜古棺轰然震颤，虚空裂开，一道神秘八卦符文缓缓旋转展开，光芒万丈"
-          },
-          "measured": {
-            "width": 360,
-            "height": 253
-          }
-        },
-        {
-          "id": "director3d_1789735477608_2",
-          "type": "director3d",
-          "position": {
-            "x": 120,
-            "y": 360
-          },
-          "data": {
-            "framing": "long",
-            "motion": "pull_out",
-            "pose": "stand",
-            "focal_length_mm": 35,
-            "camera_roll_deg": 0,
-            "cast_layout": "solo",
-            "speed": "1.0x",
-            "ai_directive": ""
-          },
-          "measured": {
-            "width": 360,
-            "height": 253
-          }
-        },
-        {
-          "id": "video_1789735477608_3",
-          "type": "video",
-          "position": {
-            "x": 768,
-            "y": 70
-          },
-          "data": {
-            "prompt": "青铜古棺轰然震颤，虚空裂开，一道神秘八卦符文缓缓旋转展开，光芒万丈",
-            "duration": 5,
-            "provider_id": "prov_d76c351f",
-            "camera_prompt": "",
-            "shotId": "0df38db4-a899-4d84-abe3-b05c21369a31",
-            "shotIndex": 5,
-            "first_frame": "/storage/generated/gen_1788530400_d7129475.png",
-            "speaker_name": null,
-            "provider": "prov_d76c351f",
-            "params": {
-              "duration": 5,
-              "aspect_ratio": "9:16 (Portrait Widescreen)",
-              "instance_type": "default"
-            },
-            "provider_params": {
-              "duration": 5,
-              "aspect_ratio": "9:16 (Portrait Widescreen)",
-              "instance_type": "default"
-            },
-            "_polling": false
-          },
-          "measured": {
-            "width": 360,
-            "height": 405
-          },
-          "selected": true,
-          "dragging": false
-        }
-      ],
-      "edges": [
-        {
-          "id": "e_prompt_1789735477608_1_video_1789735477608_3_prompt_prompt",
-          "source": "prompt_1789735477608_1",
-          "target": "video_1789735477608_3",
-          "sourceHandle": "prompt",
-          "targetHandle": "prompt",
-          "type": "smoothstep",
-          "animated": true
-        },
-        {
-          "id": "e_director3d_1789735477608_2_video_1789735477608_3_camera_prompt_camera_prompt",
-          "source": "director3d_1789735477608_2",
-          "target": "video_1789735477608_3",
-          "sourceHandle": "camera_prompt",
-          "targetHandle": "camera_prompt",
-          "type": "smoothstep",
-          "animated": true
-        }
-      ],
-      "updated_at": "2026-09-18 20:44:52"
-    },
-    "cv_mu6zd0s7": {
-      "name": "分镜#1画布",
-      "nodes": [
-        {
-          "id": "prompt_1789737271973_15",
-          "type": "prompt",
-          "position": {
-            "x": 120,
-            "y": 120
-          },
-          "data": {
-            "prompt": "a person waving and greeting the viewer saying hello, breaking the fourth wall, friendly expression, intimate medium shot, rule of thirds, dramatic composition, leading lines, cinematic lighting, volumetric lighting, ultra detailed, 8k, masterpiece, depth of field, film grain [运镜: 鸟瞰俯冲 · 急进推镜 (Dolly In) · 35mm]",
-            "text": "a person waving and greeting the viewer saying hello, breaking the fourth wall, friendly expression, intimate medium shot, rule of thirds, dramatic composition, leading lines, cinematic lighting, volumetric lighting, ultra detailed, 8k, masterpiece, depth of field, film grain [运镜: 鸟瞰俯冲 · 急进推镜 (Dolly In) · 35mm]"
-          },
-          "measured": {
-            "width": 360,
-            "height": 254
-          }
-        },
-        {
-          "id": "director3d_1789737271973_16",
-          "type": "director3d",
-          "position": {
-            "x": 120,
-            "y": 360
-          },
-          "data": {
-            "framing": "bird_eye",
-            "motion": "push_in",
-            "pose": "stand",
-            "focal_length_mm": 35,
-            "camera_roll_deg": 0,
-            "cast_layout": "solo",
-            "speed": "1.0x",
-            "ai_directive": ""
-          },
-          "measured": {
-            "width": 360,
-            "height": 253
-          }
-        },
-        {
-          "id": "video_1789737271973_17",
-          "type": "video",
-          "position": {
-            "x": 540,
-            "y": 240
-          },
-          "data": {
-            "prompt": "a person waving and greeting the viewer saying hello, breaking the fourth wall, friendly expression, intimate medium shot, rule of thirds, dramatic composition, leading lines, cinematic lighting, volumetric lighting, ultra detailed, 8k, masterpiece, depth of field, film grain [运镜: 鸟瞰俯冲 · 急进推镜 (Dolly In) · 35mm]",
-            "duration": 5,
-            "provider_id": "prov_6131876a",
-            "camera_prompt": "[运镜: 鸟瞰俯冲 · 急进推镜 (Dolly In) · 35mm]",
-            "shotId": "96713ae7-5218-4cde-ad08-3c4f569ca9f7",
-            "shotIndex": 1,
-            "first_frame": "/storage/generated/gen_1788530145_24a85451.png",
-            "speaker_name": null,
-            "provider": "prov_6131876a",
-            "params": {
-              "resolution": "768p竖",
-              "duration": 5
-            },
-            "provider_params": {
-              "resolution": "768p竖",
-              "duration": 5
-            },
-            "_polling": false,
-            "reference_images": []
-          },
-          "measured": {
-            "width": 360,
-            "height": 405
-          },
-          "selected": true
-        }
-      ],
-      "edges": [
-        {
-          "id": "e_prompt_1789737271973_15_video_1789737271973_17_prompt_prompt",
-          "source": "prompt_1789737271973_15",
-          "target": "video_1789737271973_17",
-          "sourceHandle": "prompt",
-          "targetHandle": "prompt",
-          "type": "smoothstep",
-          "animated": true
-        },
-        {
-          "id": "e_director3d_1789737271973_16_video_1789737271973_17_camera_prompt_camera_prompt",
-          "source": "director3d_1789737271973_16",
-          "target": "video_1789737271973_17",
-          "sourceHandle": "camera_prompt",
-          "targetHandle": "camera_prompt",
-          "type": "smoothstep",
-          "animated": true
-        }
-      ],
-      "updated_at": "2026-09-18 21:15:06"
-    },
-    "cv_mu70014y": {
-      "name": "分镜#5画布",
-      "nodes": [
-        {
-          "id": "prompt_1789738345526_24",
-          "type": "prompt",
-          "position": {
-            "x": -32.99284902521816,
-            "y": 40.24840848685436
-          },
-          "data": {
-            "prompt": "青铜古棺轰然震颤，虚空裂开，一道神秘八卦符文缓缓旋转展开，光芒万丈",
-            "text": "青铜古棺轰然震颤，虚空裂开，一道神秘八卦符文缓缓旋转展开，光芒万丈"
-          },
-          "measured": {
-            "width": 360,
-            "height": 341
-          },
-          "selected": true,
-          "dragging": false
-        },
-        {
-          "id": "director3d_1789738345526_25",
-          "type": "director3d",
-          "position": {
-            "x": 33.73807448578128,
-            "y": 456.02742651582844
-          },
-          "data": {
-            "framing": "long",
-            "motion": "pull_out",
-            "pose": "stand",
-            "focal_length_mm": 35,
-            "camera_roll_deg": 0,
-            "cast_layout": "solo",
-            "speed": "1.0x",
-            "ai_directive": ""
-          },
-          "measured": {
-            "width": 360,
-            "height": 253
-          },
-          "selected": false,
-          "dragging": false
-        },
-        {
-          "id": "video_1789738345526_26",
-          "type": "video",
-          "position": {
-            "x": 540,
-            "y": 240
-          },
-          "data": {
-            "prompt": "青铜古棺轰然震颤，虚空裂开，一道神秘八卦符文缓缓旋转展开，光芒万丈",
-            "duration": 5,
-            "camera_prompt": "",
-            "shotId": "0df38db4-a899-4d84-abe3-b05c21369a31",
-            "shotIndex": 5,
-            "first_frame": "/storage/generated/gen_1788530400_d7129475.png",
-            "reference_images": [
-              "/storage/assets/ast_24895c5a/original.png"
-            ],
-            "character_ids": [
-              "4e23545b-2201-4ed8-b661-106d4ff492ae",
-              "a3a03dad-3c44-4689-bb47-17693de8049d"
-            ],
-            "character_weights": {
-              "4e23545b-2201-4ed8-b661-106d4ff492ae": 0.8,
-              "a3a03dad-3c44-4689-bb47-17693de8049d": 0.8
-            },
-            "speaker_name": "人群"
-          },
-          "measured": {
-            "width": 360,
-            "height": 405
-          }
-        }
-      ],
-      "edges": [
-        {
-          "id": "e_prompt_1789738345526_24_video_1789738345526_26_prompt_prompt",
-          "source": "prompt_1789738345526_24",
-          "target": "video_1789738345526_26",
-          "sourceHandle": "prompt",
-          "targetHandle": "prompt",
-          "type": "smoothstep",
-          "animated": true
-        },
-        {
-          "id": "e_director3d_1789738345526_25_video_1789738345526_26_camera_prompt_camera_prompt",
-          "source": "director3d_1789738345526_25",
-          "target": "video_1789738345526_26",
-          "sourceHandle": "camera_prompt",
-          "targetHandle": "camera_prompt",
-          "type": "smoothstep",
-          "animated": true
-        }
-      ],
-      "updated_at": "2026-09-18 21:32:38"
     }
   }
 }
