@@ -4,6 +4,7 @@
  * 4 大真实数据源：画布产出资源 + 角色库立绘 + 项目素材库 + 本地上传
  */
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   X,
   Search,
@@ -242,8 +243,10 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={onClose}>
+  return createPortal(
+    // Portal 到 body：操作台/底部栏外壳带 translate 变换，fixed 会被它当成包含块并遭 overflow 裁剪
+    // （表现为选择器被塞进底栏、画布内容出现在插槽组件下面）；z-[70] 保证盖在参数弹窗(z-[60])之上。
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={onClose}>
       <div className="w-full max-w-4xl max-h-[85vh] bg-surface border border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden text-white" onClick={(e) => e.stopPropagation()}>
         {/* 顶部标题栏 */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-white/[0.02]">
@@ -609,6 +612,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

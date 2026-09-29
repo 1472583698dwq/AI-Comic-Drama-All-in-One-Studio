@@ -51,6 +51,8 @@ export interface ToolStep {
   startedAt?: number;
   /** 耗时（ms，tool_result 回填） */
   elapsedMs?: number;
+  /** 工具执行中的阶段进度（tool_progress 事件透出，如「正在调用 LLM 生成源代码…」） */
+  note?: string;
 }
 
 export interface AgentTodoItem {

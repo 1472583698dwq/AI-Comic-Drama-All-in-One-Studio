@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 import time
@@ -18,6 +19,8 @@ from typing import Any, Dict, List, Optional
 
 from app.agent.tools.registry import tool_timeout, PLAN_READONLY_TOOLS
 from app.agent.runtime import events as E
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -541,10 +544,20 @@ class ToolPipeline:
 
         # ⑤ 执行（带 per-tool 超时）
         timeout = tool_timeout(name)
+
+        def _on_tool_progress(msg: str) -> None:
+            """工具阶段进度（如 register_custom_provider 的 LLM 生成中）→ SSE tool_progress 透出到前端。"""
+            try:
+                asyncio.create_task(self.emit({
+                    "event": "tool_progress", "call_id": call_id, "tool": name, "text": str(msg)[:200],
+                }))
+            except Exception:
+                pass
+
         try:
             from app.mcp.server import mcp_registry
             res = await asyncio.wait_for(
-                mcp_registry.execute_tool(name, args, project_context=project_context),
+                mcp_registry.execute_tool(name, args, project_context=project_context, on_progress=_on_tool_progress),
                 timeout=timeout,
             )
             status = getattr(res, "status", "error")
@@ -554,8 +567,10 @@ class ToolPipeline:
             raise
         except asyncio.TimeoutError:
             status, result, error = "error", None, f"工具 {name} 执行超时（{timeout}s）"
+            logger.error("工具超时 %s (%ds) session=%s", name, timeout, self.session_id)
         except Exception as e:
             status, result, error = "error", None, str(e)
+            logger.exception("工具执行异常 %s session=%s", name, self.session_id)
 
         # ④ 裁剪 / 溢写
         meta: Dict[str, Any] = {}

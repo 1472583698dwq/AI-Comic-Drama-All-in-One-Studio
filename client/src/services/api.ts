@@ -997,10 +997,42 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
-  async importProvider(payload: { kind: string; name?: string; doc_text?: string; doc_url?: string; curl?: string; openapi_url?: string; api_key?: string; definition?: any; language?: string; code?: string }): Promise<any> {
+  async importProvider(payload: { kind: string; name?: string; doc_text?: string; doc_url?: string; curl?: string; openapi_url?: string; api_key?: string; definition?: any; language?: string; code?: string; trusted?: boolean; async_task?: boolean }): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/providers/import`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
+  },
+  /** 文档导入任务进度查询（async_task=true 导入后轮询；含 stage/stage_label/log/provider/error） */
+  async getProviderImportTask(taskId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/providers/import/tasks/${encodeURIComponent(taskId)}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  // 日志（调试）：尾读 / 文件清单 / 下载 / 前端上报 / 运行期级别
+  async getLogTail(opts?: { lines?: number; level?: string; q?: string }): Promise<{ lines: string[]; count: number; path: string; level: number }> {
+    const qs = new URLSearchParams();
+    if (opts?.lines) qs.set('lines', String(opts.lines));
+    if (opts?.level) qs.set('level', opts.level);
+    if (opts?.q) qs.set('q', opts.q);
+    const res = await fetch(`${API_BASE_URL}/system/logs/tail?${qs.toString()}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async getLogFiles(): Promise<{ files: any[]; total: number; main: string; level: number }> {
+    const res = await fetch(`${API_BASE_URL}/system/logs/files`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async setLogLevel(level: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/system/logs/level`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ level }) });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  /** 下载主日志文件（返回 blob，调用方自行触发保存） */
+  async downloadLogBlob(): Promise<Blob> {
+    const res = await fetch(`${API_BASE_URL}/system/logs/download`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.blob();
   },
   async setProviderApiKey(providerId: string, api_key: string): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/providers/${encodeURIComponent(providerId)}/api-key`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ api_key }) });

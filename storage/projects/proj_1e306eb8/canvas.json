@@ -26,8 +26,8 @@
           "id": "prompt_1789737991813_19",
           "type": "prompt",
           "position": {
-            "x": 1643.0703132707986,
-            "y": 503.00847590160924
+            "x": 971.0703132707988,
+            "y": 137.0084759016093
           },
           "data": {
             "prompt": ""
@@ -43,39 +43,73 @@
           "id": "video_1789738029460_21",
           "type": "video",
           "position": {
-            "x": 1508.0703132707986,
-            "y": 73.00847590160924
+            "x": 1460.0703132707986,
+            "y": -0.4915240983906983
           },
           "data": {
-            "prompt": "",
-            "duration": 5,
-            "provider_id": "prov_76053ff7",
-            "provider": "prov_76053ff7",
+            "prompt": "A bright morning outside a cozy suburban house, an Asian girl in casual daily clothes opens the front door and steps out onto the porch, warm sunlight and soft lens flare, cinematic shallow depth of field, realistic textures, natural color grading. 女孩推开家门走到门口，镜头从室内缓慢向外推移跟拍；门口有三只小狗欢快地摇着尾巴围上来，女孩蹲下身温柔抚摸它们的脑袋，狗狗开心地眯起眼睛、尾巴摇得更快，摄影机绕到侧面低角度捕捉人与狗的亲密互动，最后缓缓拉远收尾。",
+            "duration": 10,
+            "provider_id": "prov_6daaa960",
+            "provider": "prov_6daaa960",
             "params": {
-              "workflow_id": "2103527148329140225",
-              "duration": 5,
-              "instance_type": "default",
-              "prompt_field_name": "text",
-              "image_field_name": "image",
-              "use_personal_queue": false,
-              "add_metadata": false
+              "aspect_ratio": "9:16 (Portrait Widescreen)",
+              "instance_type": "default"
             },
             "provider_params": {
-              "workflow_id": "2103527148329140225",
-              "duration": 5,
-              "instance_type": "default",
-              "prompt_field_name": "text",
-              "image_field_name": "image",
-              "use_personal_queue": false,
-              "add_metadata": false
+              "aspect_ratio": "9:16 (Portrait Widescreen)",
+              "instance_type": "default"
             },
             "_polling": false,
-            "reference_images": [],
-            "skill_id": "text_to_video"
+            "reference_images": [
+              "/storage/assets/ast_24895c5a/original.png"
+            ],
+            "skill_id": "text_to_video",
+            "idea": "这个女孩从家里出来然后在门口遇到了几只狗他抚摸狗脑袋狗狗很高兴",
+            "text": "这个女孩从家里出来然后在门口遇到了几只狗他抚摸狗脑袋狗狗很高兴",
+            "agent_state": {
+              "status": "completed",
+              "tool": "provider_prov_6daaa960",
+              "provider_id": "prov_6daaa960",
+              "reasoning": "",
+              "elapsed_ms": 178305,
+              "updated_at": "2026-09-29T05:22:40.652Z"
+            },
+            "_last_agent_plan": {
+              "skill_id": "text_to_video",
+              "provider_id": "prov_6daaa960",
+              "model": "",
+              "prompt": "A bright morning outside a cozy suburban house, an Asian girl in casual daily clothes opens the front door and steps out onto the porch, warm sunlight and soft lens flare, cinematic shallow depth of field, realistic textures, natural color grading. 女孩推开家门走到门口，镜头从室内缓慢向外推移跟拍；门口有三只小狗欢快地摇着尾巴围上来，女孩蹲下身温柔抚摸它们的脑袋，狗狗开心地眯起眼睛、尾巴摇得更快，摄影机绕到侧面低角度捕捉人与狗的亲密互动，最后缓缓拉远收尾。",
+              "params": {
+                "aspect_ratio": "9:16 (Portrait Widescreen)",
+                "instance_type": "default"
+              },
+              "reason": "用户指定文生视频且仅有一个源，故选用 prov_6daaa960；含1项参考图由系统自动注入 reference_images 槽位，params 仅填 basic 的画幅（默认 9:16）与建议项实例类型，提示词按该源要求英文写画面、中文写运动运镜。",
+              "plan_source": "llm",
+              "reasoning": "",
+              "planned_by": "llm",
+              "_node_id": "video_1789738029460_21",
+              "params_source": "user_override",
+              "final_args": {
+                "prompt": "A bright morning outside a cozy suburban house, an Asian girl in casual daily clothes opens the front door and steps out onto the porch, warm sunlight and soft lens flare, cinematic shallow depth of field, realistic textures, natural color grading. 女孩推开家门走到门口，镜头从室内缓慢向外推移跟拍；门口有三只小狗欢快地摇着尾巴围上来，女孩蹲下身温柔抚摸它们的脑袋，狗狗开心地眯起眼睛、尾巴摇得更快，摄影机绕到侧面低角度捕捉人与狗的亲密互动，最后缓缓拉远收尾。",
+                "text": "A bright morning outside a cozy suburban house, an Asian girl in casual daily clothes opens the front door and steps out onto the porch, warm sunlight and soft lens flare, cinematic shallow depth of field, realistic textures, natural color grading. 女孩推开家门走到门口，镜头从室内缓慢向外推移跟拍；门口有三只小狗欢快地摇着尾巴围上来，女孩蹲下身温柔抚摸它们的脑袋，狗狗开心地眯起眼睛、尾巴摇得更快，摄影机绕到侧面低角度捕捉人与狗的亲密互动，最后缓缓拉远收尾。",
+                "_node_id": "video_1789738029460_21",
+                "reference_images": [
+                  "/storage/assets/ast_24895c5a/original.png"
+                ],
+                "aspect_ratio": "9:16 (Portrait Widescreen)",
+                "instance_type": "default",
+                "mode": "r2v"
+              }
+            },
+            "polished_prompt": "A bright morning outside a cozy suburban house, an Asian girl in casual daily clothes opens the front door and steps out onto the porch, warm sunlight and soft lens flare, cinematic shallow depth of field, realistic textures, natural color grading. 女孩推开家门走到门口，镜头从室内缓慢向外推移跟拍；门口有三只小狗欢快地摇着尾巴围上来，女孩蹲下身温柔抚摸它们的脑袋，狗狗开心地眯起眼睛、尾巴摇得更快，摄影机绕到侧面低角度捕捉人与狗的亲密互动，最后缓缓拉远收尾。",
+            "resolution": "768p竖",
+            "instance_type": "default",
+            "video_url": "/storage/videos/vid_1790659359_6cb7c00a.mp4",
+            "aspect_ratio": "9:16 (Portrait Widescreen)"
           },
           "measured": {
             "width": 360,
-            "height": 405
+            "height": 504
           },
           "selected": false,
           "dragging": false
@@ -118,22 +152,37 @@
           "id": "video_1790603332008_1",
           "type": "video",
           "position": {
-            "x": 971.5133885290772,
-            "y": 560.1861171574999
+            "x": 439.9898704726422,
+            "y": 563.6488110862064
           },
           "data": {
             "prompt": "",
-            "duration": 5
+            "duration": 5,
+            "provider_id": "prov_6daaa960",
+            "provider": "prov_6daaa960",
+            "params": {
+              "aspect_ratio": "9:16 (Portrait Widescreen)",
+              "instance_type": "default"
+            },
+            "provider_params": {
+              "aspect_ratio": "9:16 (Portrait Widescreen)",
+              "instance_type": "default"
+            },
+            "_polling": false,
+            "reference_images": [
+              "/storage/assets/ast_24895c5a/original.png"
+            ]
           },
           "measured": {
             "width": 360,
             "height": 405
           },
-          "selected": false
+          "selected": false,
+          "dragging": false
         }
       ],
       "edges": [],
-      "updated_at": "2026-09-29 08:14:56"
+      "updated_at": "2026-09-29 13:40:19"
     },
     "cv_mtpeb9n6": {
       "name": "画布2",

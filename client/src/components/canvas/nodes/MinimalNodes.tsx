@@ -387,11 +387,20 @@ export const VideoGenNode: React.FC<NodeProps> = ({ id, data, selected }) => {
   const st: any = d.agent_state;
   const aspectStyle = getNodeAspectStyle(d);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [mediaError, setMediaError] = useState('');
   const videoRef = useRef<HTMLVideoElement>(null);
   const togglePlay = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!videoRef.current) return;
-    if (isPlaying) { videoRef.current.pause(); setIsPlaying(false); } else { videoRef.current.play(); setIsPlaying(true); }
+    const el = videoRef.current;
+    if (!el) return;
+    if (el.paused) {
+      const p = el.play();
+      if (p && typeof p.catch === 'function') {
+        p.catch((err: any) => setMediaError(`播放失败：${String(err?.message || err).slice(0, 120)}`));
+      }
+    } else {
+      el.pause();
+    }
   };
   return (
     <AgentShell
@@ -419,7 +428,16 @@ export const VideoGenNode: React.FC<NodeProps> = ({ id, data, selected }) => {
           maxHeight={420}
           videoRef={videoRef}
           className="rounded-2xl bg-surface-secondary border border-white/10 group"
-          videoProps={{ loop: true, playsInline: true, preload: 'metadata', onEnded: () => setIsPlaying(false) }}
+          mediaClassName="nodrag"
+          videoProps={{
+            controls: true,
+            playsInline: true,
+            preload: 'metadata',
+            onPlay: () => setIsPlaying(true),
+            onPause: () => setIsPlaying(false),
+            onEnded: () => setIsPlaying(false),
+            onError: () => setMediaError('视频无法加载/播放（多为 H.265 等浏览器不支持的编码或文件损坏，可下载后用外部播放器打开）'),
+          }}
         >
           <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-surface/85 text-[9px] font-mono text-orange-300 border border-orange-500/30">{d.skill_id || 'video'} · {d.provider || 'auto'}</div>
           {st?.status === 'running' && (
@@ -428,7 +446,22 @@ export const VideoGenNode: React.FC<NodeProps> = ({ id, data, selected }) => {
               <span className="text-[11px] text-orange-200">Agent 生成中（异步排队）…</span>
             </div>
           )}
-          <button onClick={togglePlay} className="absolute w-12 h-12 rounded-full bg-surface/85 backdrop-blur-md border border-white/20 text-white flex items-center justify-center group-hover:scale-110 transition-transform shadow-xl">
+          {mediaError && (
+            <div
+              className="absolute inset-x-2 bottom-8 rounded-lg bg-red-500/20 border border-red-500/40 text-[9px] leading-relaxed text-red-200 px-2 py-1 nodrag select-text"
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              ⚠ {mediaError}
+            </div>
+          )}
+          {/* 播放按钮必须显式居中：absolute 无 inset 会落在撑满的 video 之后被 overflow 裁掉（无法点击） */}
+          <button
+            type="button"
+            onClick={togglePlay}
+            onMouseDown={(e) => e.stopPropagation()}
+            className={`nodrag absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-surface/85 backdrop-blur-md border border-white/20 text-white flex items-center justify-center group-hover:scale-110 transition-all shadow-xl ${isPlaying ? 'opacity-0 group-hover:opacity-100' : ''}`}
+          >
             {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-0.5" />}
           </button>
         </AutoRatioMedia>

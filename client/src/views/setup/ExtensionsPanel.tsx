@@ -284,11 +284,11 @@ export const ExtensionsPanel: React.FC = () => {
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
           <EntryCard icon={Plug} iconCls="text-brand-light" title="新建自定义生成源"
-            desc="写一段 Python / JavaScript 协程接任意厂商 API，自己做签名、轮询、重试"
-            onClick={() => window.dispatchEvent(new CustomEvent('open-provider-manager'))} />
+            desc="贴 API 文档自动写代码接入，或手写 Python / JavaScript 协程、导入 ComfyUI 工作流"
+            onClick={() => window.dispatchEvent(new CustomEvent('open-provider-create', { detail: { tab: 'doc' } }))} />
           <EntryCard icon={Workflow} iconCls="text-emerald-400" title="导入 ComfyUI 工作流"
             desc="导入后自动解析出可填槽位，这个工作流本身就变成一个独立生成源"
-            onClick={() => window.dispatchEvent(new CustomEvent('open-workflow-inspector'))} />
+            onClick={() => window.dispatchEvent(new CustomEvent('open-workflow-import'))} />
           <EntryCard icon={Sparkles} iconCls="text-amber-400" title="技能工坊"
             desc="导入 / 删除 / 试跑技能，看版本 diff"
             onClick={() => window.dispatchEvent(new CustomEvent('open-skill-studio'))} />

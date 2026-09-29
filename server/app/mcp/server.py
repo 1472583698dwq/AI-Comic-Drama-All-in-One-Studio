@@ -7,7 +7,7 @@ MCP 统一工具中枢 - 动态可扩展版
 """
 import asyncio
 import time
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Callable
 
 from app.models.schemas import MCPToolDefinition, MCPToolCallResponse, Project
 from app.pipelines.script_agent import script_agent
@@ -1402,7 +1402,8 @@ class MCPServerRegistry:
     def get_all_tools(self) -> List[MCPToolDefinition]:
         return list(self.tools.values())
 
-    async def execute_tool(self, tool_name: str, arguments: Dict[str, Any], project_context: Any = None) -> MCPToolCallResponse:
+    async def execute_tool(self, tool_name: str, arguments: Dict[str, Any], project_context: Any = None,
+                           on_progress: Optional[Callable[[str], None]] = None) -> MCPToolCallResponse:
         start_time = time.time()
         if tool_name not in self.tools:
             return MCPToolCallResponse(tool_name=tool_name, status="error", result=None, error=f"MCP Tool '{tool_name}' not found", execution_time_ms=0)
@@ -1806,7 +1807,15 @@ class MCPServerRegistry:
                               "compile_check": _created["compile_check"],
                               **({"hint": "代码未通过沙箱编译体检，请根据 compile_check.error 修正后重新提交"} if not _created["compile_check"].get("ok") else {})}
                 else:
-                    # 分支3：据文档 LLM 生成代码
+                    # 分支3：据文档 LLM 生成代码（on_progress 透出阶段，Agent 工具步骤可见）
+                    def _prog(msg: str) -> None:
+                        if on_progress:
+                            try:
+                                on_progress(msg)
+                            except Exception:
+                                pass
+
+                    _prog("正在获取 API 文档…")
                     full_doc = doc_text
                     if curl:
                         full_doc += f"\n\nCURL:\n{curl}"
@@ -1831,8 +1840,9 @@ class MCPServerRegistry:
                     if not full_doc or len(full_doc.strip()) < 10:
                         raise ValueError("请提供 code，或 doc_text / doc_url / curl / openapi_url 以便生成代码")
                     from app.api.provider_routes import llm_generate_code as _lgc, create_code_source as _ccs
-                    code_text = await _lgc(kind, language, full_doc, name or "")
-                    # 统一创建入口：代码清洗/schema 规整/超时/保存注册/Key/沙箱体检 一条龙
+                    code_text = await _lgc(kind, language, full_doc, name or "", on_stage=_prog)
+                    # 统一创建入口（代码去 markdown / schema 规整 / 超时 / 保存注册 / Key / 沙箱体检 一条龙）
+                    _prog("正在注册生成源…")
                     _created = _ccs(
                         name=name or f"自定义{kind}源", kind=kind, code=code_text, language=language,
                         description=f"由导演从文档自动生成（{language}）",

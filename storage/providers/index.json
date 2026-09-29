@@ -2532,9 +2532,9 @@
     "code": ""
   },
   {
-    "id": "prov_76053ff7",
-    "name": "RunningHub 视频工作流 2103527148329140225",
-    "display_name": "RunningHub 视频工作流 2103527148329140225",
+    "id": "prov_6daaa960",
+    "name": "RunningHub 双音轨参考生视频",
+    "display_name": "RunningHub 双音轨参考生视频",
     "kind": "video",
     "provider_type": "code",
     "supports_workflow": false,
@@ -2549,27 +2549,25 @@
     "params_schema": {
       "type": "object",
       "properties": {
-        "workflow_id": {
+        "aspect_ratio": {
           "type": "string",
-          "title": "工作流ID",
-          "default": "2103527148329140225",
-          "description": "RunningHub 工作流 ID（/run/workflow/ 后的数字）",
+          "title": "画幅",
+          "enum": [
+            "1:1 (Square)",
+            "2:3 (Portrait Photo)",
+            "3:2 (Photo)",
+            "3:4 (Portrait Standard)",
+            "4:3 (Standard)",
+            "9:16 (Portrait Widescreen)",
+            "16:9 (Widescreen)",
+            "21:9 (Ultrawide)"
+          ],
+          "default": "9:16 (Portrait Widescreen)",
+          "description": "输出画幅（节点115）",
           "x-category": "layout",
           "x-visibility": "basic",
           "x-agent": "auto",
           "x-priority": 10
-        },
-        "duration": {
-          "type": "integer",
-          "title": "时长(秒)",
-          "default": 5,
-          "minimum": 3,
-          "maximum": 15,
-          "description": "视频时长（需工作流存在对应节点时经 node_info_list 注入）",
-          "x-category": "motion",
-          "x-visibility": "basic",
-          "x-agent": "suggest",
-          "x-priority": 20
         },
         "instance_type": {
           "type": "string",
@@ -2585,73 +2583,6 @@
           "x-visibility": "advanced",
           "x-agent": "suggest",
           "x-priority": 30
-        },
-        "node_info_list": {
-          "type": "string",
-          "title": "节点参数映射JSON",
-          "description": "nodeInfoList JSON 数组，逐节点覆盖工作流参数",
-          "x-category": "advanced",
-          "x-visibility": "advanced",
-          "x-agent": "manual",
-          "x-priority": 40
-        },
-        "prompt_node_id": {
-          "type": "string",
-          "title": "Prompt节点ID",
-          "description": "把 prompt 注入到该工作流节点 ID",
-          "x-category": "advanced",
-          "x-visibility": "advanced",
-          "x-agent": "manual",
-          "x-priority": 41
-        },
-        "prompt_field_name": {
-          "type": "string",
-          "title": "Prompt字段名",
-          "default": "text",
-          "description": "prompt 节点上的文本字段名",
-          "x-category": "advanced",
-          "x-visibility": "advanced",
-          "x-agent": "manual",
-          "x-priority": 42
-        },
-        "image_node_ids": {
-          "type": "string",
-          "title": "图像节点ID",
-          "description": "逗号分隔，顺序=首帧、参考图…（如 6,7）",
-          "x-category": "advanced",
-          "x-visibility": "advanced",
-          "x-agent": "manual",
-          "x-priority": 43
-        },
-        "image_field_name": {
-          "type": "string",
-          "title": "图像字段名",
-          "default": "image",
-          "description": "图像节点输入字段名",
-          "x-category": "advanced",
-          "x-visibility": "advanced",
-          "x-agent": "manual",
-          "x-priority": 44
-        },
-        "use_personal_queue": {
-          "type": "boolean",
-          "title": "个人独占队列",
-          "default": false,
-          "description": "usePersonalQueue，排队更久但不与他人争抢",
-          "x-category": "advanced",
-          "x-visibility": "advanced",
-          "x-agent": "suggest",
-          "x-priority": 50
-        },
-        "add_metadata": {
-          "type": "boolean",
-          "title": "写入元数据",
-          "default": false,
-          "description": "输出中添加工作流元数据",
-          "x-category": "advanced",
-          "x-visibility": "advanced",
-          "x-agent": "suggest",
-          "x-priority": 51
         }
       }
     },
@@ -2661,14 +2592,14 @@
       "properties": {
         "prompt": {
           "type": "string",
-          "description": "运动/分镜提示词（需配置 prompt_node_id 才会注入节点）",
+          "description": "分镜/结构化提示词（写入节点150）",
           "x-handle": "text",
           "x-role": "prompt"
         },
         "first_frame": {
           "type": "string",
           "format": "uri",
-          "description": "首帧图（需配置 image_node_ids 第一位）",
+          "description": "主体参考图 Picture1（节点141）",
           "x-handle": "image",
           "x-slot": "first_frame"
         },
@@ -2678,13 +2609,35 @@
             "type": "string",
             "format": "uri"
           },
-          "description": "参考图 URL 或 data URI（需配置 image_node_ids 后续位）",
+          "maxItems": 3,
+          "minItems": 0,
+          "description": "补充参考图：第1、2张→节点142/143；第3张→节点161/165/166（共享）",
           "x-handle": "image",
-          "x-slot": "reference_images",
-          "maxItems": 8,
-          "minItems": 0
+          "x-slot": "reference_images"
+        },
+        "reference_audios": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          },
+          "maxItems": 2,
+          "minItems": 0,
+          "description": "音色参考音频 [0]=drive_audio(144)、[1]=ref_audio_0(160)",
+          "x-handle": "audio",
+          "x-slot": "reference_audios"
+        },
+        "reference_video": {
+          "type": "string",
+          "format": "uri",
+          "description": "参考视频（节点164，可选）",
+          "x-handle": "video",
+          "x-slot": "reference_video"
         }
-      }
+      },
+      "required": [
+        "prompt"
+      ]
     },
     "output_schema": {
       "type": "object",
@@ -2717,7 +2670,7 @@
       "type": "bearer",
       "header_name": "Authorization",
       "query_name": "api_key",
-      "key_env": "CUSTOM_PROVIDER_prov_76053ff7",
+      "key_env": "CUSTOM_PROVIDER_prov_6daaa960",
       "prefix": "Bearer ",
       "has_key": true
     },
@@ -2728,13 +2681,13 @@
       "test_payload": null
     },
     "doc_url": null,
-    "created_at": "2026-09-29T08:09:33.981019",
-    "updated_at": "2026-09-29T08:09:33.981332",
+    "created_at": "2026-09-29T13:17:17.622890",
+    "updated_at": "2026-09-29T13:17:17.623262",
     "language": "python",
     "code_entry": "generate",
     "code_timeout": 1200,
     "trusted": false,
     "has_code": true,
-    "code": "import httpx\nimport base64\nimport json\n\nAPI_BASE = \"https://www.runninghub.ai/openapi/v2\"\nQUERY_URL = API_BASE + \"/query\"\nUPLOAD_URL = API_BASE + \"/media/upload/binary\"\nDEFAULT_WORKFLOW_ID = \"2103527148329140225\"\nNON_TERMINAL = (\"CREATE\", \"QUEUED\", \"RUNNING\", \"PENDING\", \"SUBMITTED\")\nVIDEO_TYPES = (\"mp4\", \"webm\", \"mov\", \"mkv\", \"avi\")\n\n\ndef _pick(ctx, dyn, key, default=None):\n    v = ctx.get(key)\n    if v is None or (isinstance(v, str) and not v.strip()):\n        v = dyn.get(key) if dyn else None\n    if v is None or (isinstance(v, str) and not v.strip()):\n        return default\n    return v\n\n\ndef _to_bool(v, default=False):\n    if v is None:\n        return default\n    if isinstance(v, bool):\n        return v\n    return str(v).strip().lower() in (\"1\", \"true\", \"yes\", \"on\")\n\n\ndef _pick_url(results):\n    \"\"\"视频源：优先视频文件输出，兜底首项 URL\"\"\"\n    fallback = None\n    for item in results:\n        if not isinstance(item, dict):\n            continue\n        url = str(item.get(\"url\") or \"\").strip()\n        if not url:\n            continue\n        ot = str(item.get(\"outputType\") or \"\").lower()\n        if not fallback:\n            fallback = url\n        if ot in VIDEO_TYPES or \".mp4\" in url.lower() or \".webm\" in url.lower():\n            return url\n    return fallback\n\n\nasync def _upload(client, api_key, value, idx):\n    \"\"\"参考图三态归一：RunningHub 文件名透传 / data URI 解码上传 / http(s) 取字节上传\"\"\"\n    v = str(value or \"\").strip()\n    if not v or v == \"None\":\n        return None\n    if not (v.startswith(\"data:\") or v.startswith(\"http\")):\n        return v\n    if v.startswith(\"data:\"):\n        raw = base64.b64decode(v.split(\",\", 1)[1])\n        fname = f\"image{idx}.png\"\n        ctype = \"image/png\"\n    else:\n        resp = await client.get(v, timeout=120)\n        if resp.status_code >= 400:\n            raise RuntimeError(f\"参考图{idx}下载失败({resp.status_code}): {v[:120]}\")\n        raw = resp.content\n        ctype = resp.headers.get(\"content-type\", \"image/png\").split(\";\")[0] or \"image/png\"\n        ext = ctype.split(\"/\")[-1].replace(\"jpeg\", \"jpg\")\n        fname = f\"image{idx}.{ext}\"\n    # 上传只能 Bearer 头：带 Content-Type: application/json 会破坏 multipart 边界\n    r = await client.post(\n        UPLOAD_URL,\n        headers={\"Authorization\": f\"Bearer {api_key}\"},\n        files={\"file\": (fname, raw, ctype)},\n        timeout=300,\n    )\n    j = r.json() if r.content else {}\n    if not isinstance(j, dict) or j.get(\"code\") != 0:\n        raise RuntimeError(f\"参考图{idx}上传失败: {(j.get('message') if isinstance(j, dict) else '') or str(j)[:300]}\")\n    d = j.get(\"data\") or {}\n    return d.get(\"download_url\") or d.get(\"fileName\")\n\n\nasync def generate(ctx, api):\n    dyn = ctx.get(\"dynamic_inputs\") or {}\n    api_key = str(ctx.get(\"api_key\") or \"\").strip()\n    if not api_key and isinstance(api, dict) and callable(api.get(\"get_api_key\")):\n        api_key = str(api.get(\"get_api_key\")() or \"\").strip()\n    if not api_key:\n        raise RuntimeError(\"缺少 RunningHub API Key（请在生成源配置里填入 Key 后重试）\")\n    headers = {\"Authorization\": f\"Bearer {api_key}\", \"Content-Type\": \"application/json\"}\n\n    task_id = str(ctx.get(\"task_id\") or dyn.get(\"task_id\") or \"\").strip()\n    prompt = str(ctx.get(\"prompt\") or dyn.get(\"prompt\") or \"\").strip()\n\n    async with httpx.AsyncClient(timeout=600) as client:\n        # —— 查询分支：单次秒回，绝不 sleep 轮询 ——\n        if task_id and not prompt:\n            q = await client.post(QUERY_URL, headers=headers, json={\"taskId\": task_id})\n            if q.status_code >= 400:\n                raise RuntimeError(f\"查询失败({q.status_code}): {q.text[:300]}\")\n            qj = q.json() or {}\n            status = str(qj.get(\"status\") or \"\").upper()\n            if status in NON_TERMINAL:\n                return {\"video_url\": None, \"task_id\": task_id, \"status\": status or \"RUNNING\"}\n            if status == \"SUCCESS\":\n                url = _pick_url(qj.get(\"results\") or [])\n                if not url:\n                    raise RuntimeError(f\"任务成功但无结果URL: {str(qj)[:300]}\")\n                return {\"video_url\": url}\n            err = str(qj.get(\"errorMessage\") or \"\") or str(qj.get(\"errorCode\") or \"\")\n            raise RuntimeError(f\"任务失败({status or 'FAILED'}): {err[:300]}\")\n\n        # —— 提交分支 ——\n        workflow_id = str(_pick(ctx, dyn, \"workflow_id\", DEFAULT_WORKFLOW_ID)).strip() or DEFAULT_WORKFLOW_ID\n        if not workflow_id.isdigit():\n            raise ValueError(f\"workflow_id 需为纯数字 ID，当前: {workflow_id[:64]}\")\n        instance_type = str(_pick(ctx, dyn, \"instance_type\", \"default\")).strip() or \"default\"\n        if instance_type not in (\"default\", \"plus\", \"ultra\"):\n            instance_type = \"default\"\n\n        # nodeInfoList：显式 JSON 映射为基础\n        node_list = []\n        raw_nl = str(_pick(ctx, dyn, \"node_info_list\", \"\") or \"\").strip()\n        if raw_nl:\n            try:\n                parsed = json.loads(raw_nl)\n            except Exception:\n                raise ValueError('node_info_list 需为合法 JSON 数组，如 [{\"nodeId\":\"28\",\"fieldName\":\"text\",\"fieldValue\":\"hi\"}]')\n            if not isinstance(parsed, list):\n                raise ValueError(\"node_info_list 需为 JSON 数组（list）\")\n            node_list = [n for n in parsed if isinstance(n, dict)]\n\n        # prompt 注入\n        prompt_node_id = str(_pick(ctx, dyn, \"prompt_node_id\", \"\") or \"\").strip()\n        if prompt and prompt_node_id:\n            pfield = str(_pick(ctx, dyn, \"prompt_field_name\", \"text\") or \"text\").strip() or \"text\"\n            node_list = [n for n in node_list\n                         if not (str(n.get(\"nodeId\")) == prompt_node_id and str(n.get(\"fieldName\")) == pfield)]\n            node_list.append({\"nodeId\": prompt_node_id, \"fieldName\": pfield,\n                              \"fieldValue\": prompt, \"description\": \"prompt\"})\n        elif prompt and not prompt_node_id and not node_list:\n            raise ValueError(\"已传入 prompt 但未配置节点映射：请设置 prompt_node_id（prompt 写入的工作流节点 ID）与 prompt_field_name\")\n\n        # 首帧 + 参考图注入（按 image_node_ids 顺序对应 first_frame → reference_images）\n        refs = []\n        ff = dyn.get(\"first_frame\") or ctx.get(\"first_frame\")\n        if ff and str(ff).strip():\n            refs.append(ff)\n        more = dyn.get(\"reference_images\") or ctx.get(\"reference_images\") or []\n        if isinstance(more, str):\n            more = [more]\n        refs.extend([r for r in more if str(r or \"\").strip()])\n        if refs:\n            img_ids_raw = str(_pick(ctx, dyn, \"image_node_ids\", \"\") or \"\").strip()\n            if not img_ids_raw:\n                raise ValueError(\"已挂首帧/参考图但未配置 image_node_ids（逗号分隔的图像节点 ID，顺序=首帧、参考图…）\")\n            img_ids = [s.strip() for s in img_ids_raw.split(\",\") if s.strip()]\n            if len(refs) > len(img_ids):\n                raise ValueError(f\"输入图 {len(refs)} 张多于 image_node_ids 节点数 {len(img_ids)}，请补全节点 ID\")\n            ifield = str(_pick(ctx, dyn, \"image_field_name\", \"image\") or \"image\").strip() or \"image\"\n            for i, (val, nid) in enumerate(zip(refs, img_ids)):\n                uploaded = await _upload(client, api_key, val, i)\n                if uploaded:\n                    node_list.append({\"nodeId\": nid, \"fieldName\": ifield,\n                                      \"fieldValue\": uploaded, \"description\": f\"image{i + 1}\"})\n\n        body = {\n            \"addMetadata\": _to_bool(_pick(ctx, dyn, \"add_metadata\", False), False),\n            \"nodeInfoList\": node_list,\n            \"instanceType\": instance_type,\n            \"usePersonalQueue\": \"true\" if _to_bool(_pick(ctx, dyn, \"use_personal_queue\", False), False) else \"false\",\n        }\n        run_url = f\"{API_BASE}/run/workflow/{workflow_id}\"\n        r = await client.post(run_url, headers=headers, json=body)\n        if r.status_code >= 400:\n            raise RuntimeError(f\"提交失败({r.status_code}): {r.text[:300]}\")\n        rj = r.json() or {}\n        new_id = str(rj.get(\"taskId\") or \"\").strip()\n        status = str(rj.get(\"status\") or \"SUBMITTED\").upper()\n        if not new_id:\n            raise RuntimeError(f\"未返回 taskId: {str(rj)[:300]}\")\n        if status in (\"FAILED\", \"CANCEL\", \"CANCELLED\"):\n            raise RuntimeError(f\"任务失败({status}): {str(rj.get('errorMessage') or rj.get('errorCode') or '')[:300]}\")\n        return {\"video_url\": None, \"task_id\": new_id, \"status\": status}\n# PARAMS_SCHEMA: {\"type\":\"object\",\"properties\":{\"workflow_id\":{\"type\":\"string\",\"title\":\"工作流ID\",\"default\":\"2103527148329140225\",\"description\":\"RunningHub 工作流 ID（/run/workflow/ 后的数字）\",\"x-category\":\"layout\",\"x-visibility\":\"basic\",\"x-agent\":\"auto\",\"x-priority\":10},\"duration\":{\"type\":\"integer\",\"title\":\"时长(秒)\",\"default\":5,\"minimum\":3,\"maximum\":15,\"description\":\"视频时长（需工作流存在对应节点时经 node_info_list 注入）\",\"x-category\":\"motion\",\"x-visibility\":\"basic\",\"x-agent\":\"suggest\",\"x-priority\":20},\"instance_type\":{\"type\":\"string\",\"title\":\"实例类型\",\"enum\":[\"default\",\"plus\",\"ultra\"],\"default\":\"default\",\"description\":\"运行实例显存 24G/48G/84G\",\"x-category\":\"advanced\",\"x-visibility\":\"advanced\",\"x-agent\":\"suggest\",\"x-priority\":30},\"node_info_list\":{\"type\":\"string\",\"title\":\"节点参数映射JSON\",\"description\":\"nodeInfoList JSON 数组，逐节点覆盖工作流参数\",\"x-category\":\"advanced\",\"x-visibility\":\"advanced\",\"x-agent\":\"manual\",\"x-priority\":40},\"prompt_node_id\":{\"type\":\"string\",\"title\":\"Prompt节点ID\",\"description\":\"把 prompt 注入到该工作流节点 ID\",\"x-category\":\"advanced\",\"x-visibility\":\"advanced\",\"x-agent\":\"manual\",\"x-priority\":41},\"prompt_field_name\":{\"type\":\"string\",\"title\":\"Prompt字段名\",\"default\":\"text\",\"description\":\"prompt 节点上的文本字段名\",\"x-category\":\"advanced\",\"x-visibility\":\"advanced\",\"x-agent\":\"manual\",\"x-priority\":42},\"image_node_ids\":{\"type\":\"string\",\"title\":\"图像节点ID\",\"description\":\"逗号分隔，顺序=首帧、参考图…（如 6,7）\",\"x-category\":\"advanced\",\"x-visibility\":\"advanced\",\"x-agent\":\"manual\",\"x-priority\":43},\"image_field_name\":{\"type\":\"string\",\"title\":\"图像字段名\",\"default\":\"image\",\"description\":\"图像节点输入字段名\",\"x-category\":\"advanced\",\"x-visibility\":\"advanced\",\"x-agent\":\"manual\",\"x-priority\":44},\"use_personal_queue\":{\"type\":\"boolean\",\"title\":\"个人独占队列\",\"default\":false,\"description\":\"usePersonalQueue，排队更久但不与他人争抢\",\"x-category\":\"advanced\",\"x-visibility\":\"advanced\",\"x-agent\":\"suggest\",\"x-priority\":50},\"add_metadata\":{\"type\":\"boolean\",\"title\":\"写入元数据\",\"default\":false,\"description\":\"输出中添加工作流元数据\",\"x-category\":\"advanced\",\"x-visibility\":\"advanced\",\"x-agent\":\"suggest\",\"x-priority\":51}}}"
+    "code": "import httpx\nimport base64\n\nAPI_BASE = \"https://www.runninghub.ai/openapi/v2\"\nRUN_URL = API_BASE + \"/run/ai-app/2086022574387339266\"\nQUERY_URL = API_BASE + \"/query\"\nUPLOAD_URL = API_BASE + \"/media/upload/binary\"\nASPECT_OPTIONS = [\n    \"1:1 (Square)\", \"2:3 (Portrait Photo)\", \"3:2 (Photo)\", \"3:4 (Portrait Standard)\",\n    \"4:3 (Standard)\", \"9:16 (Portrait Widescreen)\", \"16:9 (Widescreen)\", \"21:9 (Ultrawide)\",\n]\n_EXT_BY_MIME = {\"jpeg\": \"jpg\", \"mpeg\": \"mp3\", \"x-m4a\": \"m4a\", \"quicktime\": \"mov\", \"x-wav\": \"wav\"}\n_MIME_BY_EXT = {\n    \"png\": \"image/png\", \"jpg\": \"image/jpeg\", \"jpeg\": \"image/jpeg\", \"webp\": \"image/webp\",\n    \"mp3\": \"audio/mpeg\", \"wav\": \"audio/wav\", \"m4a\": \"audio/mp4\",\n    \"mp4\": \"video/mp4\", \"webm\": \"video/webm\", \"mov\": \"video/quicktime\",\n}\n_KNOWN_EXTS = (\"png\", \"jpg\", \"jpeg\", \"webp\", \"mp3\", \"wav\", \"m4a\", \"mp4\", \"webm\", \"mov\")\n\n\ndef _is_remote(v):\n    return v.startswith(\"data:\") or v.startswith(\"http://\") or v.startswith(\"https://\")\n\n\ndef _ext_of(v, default_ext):\n    if v.startswith(\"data:\"):\n        mime = v[5:].split(\";\", 1)[0].split(\"/\")[-1].lower()\n        return _EXT_BY_MIME.get(mime, mime or default_ext)\n    path = v.split(\"?\", 1)[0].lower()\n    for e in _KNOWN_EXTS:\n        if path.endswith(\".\" + e):\n            return e\n    return default_ext\n\n\nasync def _upload(client, api_key, value, idx, kind, default_ext):\n    \"\"\"媒体值 → RunningHub 文件名：data: URI / 公网URL 先上传后回填；已是文件名则原样透传。\"\"\"\n    v = str(value or \"\").strip()\n    if not v or v == \"None\":\n        return None\n    if not _is_remote(v):\n        return v\n    if v.startswith(\"data:\"):\n        try:\n            raw = base64.b64decode(v.split(\",\", 1)[1])\n        except Exception as e:\n            raise RuntimeError(f\"{kind}{idx} base64 解码失败: {e}\")\n    else:\n        gr = await client.get(v, timeout=120)\n        gr.raise_for_status()\n        raw = gr.content\n    if not raw:\n        raise RuntimeError(f\"{kind}{idx}内容为空\")\n    ext = _ext_of(v, default_ext)\n    mime = _MIME_BY_EXT.get(ext, \"application/octet-stream\")\n    # 上传只能带 Bearer 头：附带 Content-Type: application/json 会破坏 multipart 边界\n    up = await client.post(\n        UPLOAD_URL, headers={\"Authorization\": f\"Bearer {api_key}\"},\n        files={\"file\": (f\"{kind}{idx}.{ext}\", raw, mime)}, timeout=300,\n    )\n    up.raise_for_status()\n    uj = up.json()\n    if uj.get(\"code\") != 0:\n        raise RuntimeError(f\"{kind}{idx}上传失败: {uj.get('message') or str(uj)[:300]}\")\n    d = uj.get(\"data\") or {}\n    dl = d.get(\"download_url\") or d.get(\"fileName\")\n    if not dl:\n        raise RuntimeError(f\"{kind}{idx}上传未返回文件名: {str(uj)[:300]}\")\n    return dl\n\n\nasync def generate(ctx, api):\n    dyn = ctx.get(\"dynamic_inputs\") or {}\n    api_key = ctx.get(\"api_key\")\n    if not api_key and isinstance(api, dict) and callable(api.get(\"get_api_key\")):\n        api_key = api[\"get_api_key\"]()\n    api_key = str(api_key or \"\").strip()\n    if not api_key:\n        raise RuntimeError(\"缺少 RunningHub API Key（请在生成源里配置 Key 后重试）\")\n\n    headers = {\"Authorization\": f\"Bearer {api_key}\", \"Content-Type\": \"application/json\"}\n    task_id = str(ctx.get(\"task_id\") or dyn.get(\"task_id\") or \"\").strip()\n    prompt = str(ctx.get(\"prompt\") or \"\").strip()\n\n    async with httpx.AsyncClient(timeout=600) as client:\n        # ── 查询分支：有 task_id 且无 prompt，单次查询秒回，绝不 sleep ──\n        if task_id and not prompt:\n            q = await client.post(QUERY_URL, headers=headers, json={\"taskId\": task_id})\n            q.raise_for_status()\n            qj = q.json() or {}\n            status = str(qj.get(\"status\") or \"\").upper()\n            if status in (\"CREATE\", \"QUEUED\", \"RUNNING\", \"PENDING\"):\n                return {\"video_url\": None, \"task_id\": task_id, \"status\": status}\n            if status == \"SUCCESS\":\n                results = qj.get(\"results\") or []\n                for item in results:  # 多保存节点会混出图片，视频优先挑 mp4/webm/mov\n                    if isinstance(item, dict):\n                        url = str(item.get(\"url\") or \"\")\n                        ot = str(item.get(\"outputType\") or \"\").lower()\n                        if url and (ot in (\"mp4\", \"webm\", \"mov\") or ot == \"\" or \"mp4\" in url.lower()):\n                            return {\"video_url\": url}\n                for item in results:\n                    if isinstance(item, dict) and item.get(\"url\"):\n                        return {\"video_url\": item[\"url\"]}\n                    if isinstance(item, str) and item:\n                        return {\"video_url\": item}\n                raise RuntimeError(f\"任务成功但无结果URL: {str(qj)[:300]}\")\n            if status == \"CANCEL\":  # CANCEL 需映射成框架终态词 CANCELLED\n                status = \"CANCELLED\"\n            raise RuntimeError(f\"任务失败({status or 'UNKNOWN'}): {qj.get('errorMessage') or str(qj)[:300]}\")\n\n        # ── 提交分支：上传媒体 → 组装 nodeInfoList → 立即返回 task_id ──\n        if not prompt:\n            raise ValueError(\"缺少 prompt\")\n\n        first = ctx.get(\"first_frame_url\") or ctx.get(\"first_frame\") or dyn.get(\"first_frame\")\n        refs = ctx.get(\"reference_images\") or dyn.get(\"reference_images\") or []\n        if isinstance(refs, str):\n            refs = [refs]\n        refs = [str(r) for r in refs if r][:3]\n        auds = ctx.get(\"reference_audios\") or dyn.get(\"reference_audios\") or []\n        if isinstance(auds, str):\n            auds = [auds]\n        auds = [str(a) for a in auds if a][:2]\n        ref_video = ctx.get(\"reference_video_url\") or ctx.get(\"reference_video\") or dyn.get(\"reference_video\")\n\n        aspect = str(ctx.get(\"aspect_ratio\") or dyn.get(\"aspect_ratio\") or \"9:16 (Portrait Widescreen)\")\n        if aspect not in ASPECT_OPTIONS:\n            aspect = \"9:16 (Portrait Widescreen)\"\n        instance_type = str(ctx.get(\"instance_type\") or dyn.get(\"instance_type\") or \"default\")\n        if instance_type not in (\"default\", \"plus\", \"ultra\"):\n            instance_type = \"default\"\n\n        img1 = await _upload(client, api_key, first, 1, \"image\", \"png\") if first else None\n        img2 = await _upload(client, api_key, refs[0], 2, \"image\", \"png\") if len(refs) > 0 else None\n        img3 = await _upload(client, api_key, refs[1], 3, \"image\", \"png\") if len(refs) > 1 else None\n        img_shared = await _upload(client, api_key, refs[2], 4, \"image\", \"png\") if len(refs) > 2 else None\n        aud1 = await _upload(client, api_key, auds[0], 1, \"audio\", \"mp3\") if len(auds) > 0 else None\n        aud2 = await _upload(client, api_key, auds[1], 2, \"audio\", \"mp3\") if len(auds) > 1 else None\n        vid = await _upload(client, api_key, ref_video, 1, \"video\", \"mp4\") if ref_video else None\n\n        node_info_list = [\n            {\"nodeId\": \"150\", \"fieldName\": \"value\", \"fieldValue\": prompt, \"description\": \"结构化提示词\"},\n            {\"nodeId\": \"115\", \"fieldName\": \"aspect_ratio\", \"fieldValue\": aspect, \"description\": \"画幅\"},\n            {\"nodeId\": \"144\", \"fieldName\": \"audio\", \"fieldValue\": aud1 or \"None\", \"description\": \"drive_audio 音色参考\"},\n            {\"nodeId\": \"160\", \"fieldName\": \"audio\", \"fieldValue\": aud2 or \"None\", \"description\": \"ref_audio_0 音色参考\"},\n        ]\n        for nid, val, desc in ((\"141\", img1, \"Picture1 主体参考\"), (\"142\", img2, \"参考图1\"), (\"143\", img3, \"参考图2\")):\n            if val:  # 未提供时不下发，保留应用内保存的默认值\n                node_info_list.append({\"nodeId\": nid, \"fieldName\": \"image\", \"fieldValue\": val, \"description\": desc})\n        if img_shared:  # 示例中 161/165/166 为同一张共享参考图\n            for nid in (\"161\", \"165\", \"166\"):\n                node_info_list.append({\"nodeId\": nid, \"fieldName\": \"image\", \"fieldValue\": img_shared, \"description\": \"共享参考图\"})\n        if vid:\n            node_info_list.append({\"nodeId\": \"164\", \"fieldName\": \"video\", \"fieldValue\": vid, \"description\": \"参考视频\"})\n\n        payload = {\"nodeInfoList\": node_info_list, \"instanceType\": instance_type, \"usePersonalQueue\": \"false\"}\n        r = await client.post(RUN_URL, headers=headers, json=payload)\n        r.raise_for_status()\n        rj = r.json() or {}\n        new_id = str(rj.get(\"taskId\") or ((rj.get(\"data\") or {}).get(\"taskId\") if isinstance(rj.get(\"data\"), dict) else \"\") or \"\").strip()\n        if not new_id:\n            raise RuntimeError(f\"提交未返回 taskId: {str(rj)[:300]}\")\n        return {\"video_url\": None, \"task_id\": new_id, \"status\": \"SUBMITTED\"}\n\n# PARAMS_SCHEMA: {\"type\":\"object\",\"properties\":{\"aspect_ratio\":{\"type\":\"string\",\"title\":\"画幅\",\"enum\":[\"1:1 (Square)\",\"2:3 (Portrait Photo)\",\"3:2 (Photo)\",\"3:4 (Portrait Standard)\",\"4:3 (Standard)\",\"9:16 (Portrait Widescreen)\",\"16:9 (Widescreen)\",\"21:9 (Ultrawide)\"],\"default\":\"9:16 (Portrait Widescreen)\",\"description\":\"输出画幅（节点115）\",\"x-category\":\"layout\",\"x-visibility\":\"basic\",\"x-agent\":\"auto\",\"x-priority\":10},\"instance_type\":{\"type\":\"string\",\"title\":\"实例类型\",\"enum\":[\"default\",\"plus\",\"ultra\"],\"default\":\"default\",\"description\":\"运行实例显存 24G/48G/84G\",\"x-category\":\"advanced\",\"x-visibility\":\"advanced\",\"x-agent\":\"suggest\",\"x-priority\":30}}}"
   }
 ]

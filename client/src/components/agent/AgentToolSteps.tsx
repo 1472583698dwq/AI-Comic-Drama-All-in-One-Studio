@@ -183,7 +183,7 @@ const ToolStepRow: React.FC<{
           <span className="text-[10px] text-gray-500 font-mono shrink-0">{fmtElapsed(s.elapsedMs)}</span>
         )}
         {s.status === 'executing' && !approvalAid && (
-          <span className="text-[10px] text-amber-300 shrink-0 animate-pulse">执行中…</span>
+          <span className="text-[10px] text-amber-300 shrink-0 animate-pulse truncate max-w-[220px]" title={s.note || '执行中…'}>{s.note || '执行中…'}</span>
         )}
         {approvalAid && (
           <span className="text-[10px] font-bold text-amber-300 shrink-0">待确认</span>

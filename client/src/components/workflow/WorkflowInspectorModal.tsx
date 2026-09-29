@@ -121,7 +121,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
         setExposedInputs((res.data.exposed_inputs || []).map((e: any) => (e.type === 'select' ? { ...e, type: 'combo' } : e)));
       }
     } catch (e: any) {
-      alert(`解析工作流失败: ${e.message || e}`);
+      toast.error(`解析工作流失败: ${e.message || e}`);
     } finally {
       setLoading(false);
     }
@@ -141,9 +141,10 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
       const n = (res?.data?.app_contract?.inputs || []).length;
       await loadData();
       onSaved?.();
-      alert(n ? `已读取 App 契约：${n} 个声明输入` : '来源文件里没有 extra.linearData，请先在 ComfyUI 的 App Builder 中勾选输入并保存');
+      if (n) toast.success(`已读取 App 契约：${n} 个声明输入`);
+      else toast.info('来源文件里没有 extra.linearData，请先在 ComfyUI 的 App Builder 中勾选输入并保存');
     } catch (e: any) {
-      alert(`读取 App 契约失败: ${e?.message || e}`);
+      toast.error(`读取 App 契约失败: ${e?.message || e}`);
     } finally {
       setRefreshingContract(false);
     }
@@ -308,7 +309,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
     }
 
     if (detected.length === 0) {
-      alert('未检测到可自动暴露的图片上传或独立文本节点');
+      toast.info('未检测到可自动暴露的图片上传或独立文本节点');
       return;
     }
 
@@ -317,13 +318,13 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
     const filteredNew = detected.filter(x => !existingKeys.has(`${x.node_id}_${x.param_name}`));
     if (filteredNew.length === 0) {
       setActiveTab('exposed');
-      alert('检测到的可暴露项均已在当前列表中，无需重复添加');
+      toast.info('检测到的可暴露项均已在当前列表中，无需重复添加');
       return;
     }
     setExposedInputs(prev => [...prev, ...filteredNew]);
 
     setActiveTab('exposed');
-    alert(`⚡ 成功自动识别并添加了 ${filteredNew.length} 个外部表单输入插槽！`);
+    toast.success(`⚡ 成功自动识别并添加了 ${filteredNew.length} 个外部表单输入插槽！`);
   };
 
   const handleSave = async () => {
@@ -337,14 +338,14 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
       });
       const newId = res?.meta?.id || res?.id || workflowId;
       if (newId !== workflowId) {
-        alert(`🎉 已自动导入为内部工作流 ${newId} 并保存！原外部工作流配置已覆盖。`);
+        toast.success(`🎉 已自动导入为内部工作流 ${newId} 并保存！原外部工作流配置已覆盖。`);
       } else {
-        alert('🎉 工作流参数、槽位映射与外部表单暴露项已成功保存并覆盖！');
+        toast.success('🎉 工作流参数、槽位映射与外部表单暴露项已成功保存并覆盖！');
       }
       onSaved?.(newId as any);
       onClose();
     } catch (e: any) {
-      alert(`保存失败: ${e.message || e}`);
+      toast.error(`保存失败: ${e.message || e}`);
     } finally {
       setSaving(false);
     }
@@ -417,7 +418,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
+    <div className="fixed inset-0 z-[75] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
       <div className="bg-surface border border-white/10 rounded-2xl w-full max-w-5xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
         
         {/* Modal Header */}

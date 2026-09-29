@@ -7,6 +7,7 @@ import { apiService } from '../../services/api';
 import { toast } from '../../stores/useDialogStore';
 import { API_ORIGIN } from '../../utils/devOrigin';
 import { resetContextTips } from '../../utils/guideFlags';
+import { LogViewer } from './LogViewer';
 
 /** 只能改 .env 的 Agent / 任务中心参数：界面里改不了，但至少别再是黑盒 */
 const ENV_ONLY: Array<{ key: string; def: string; desc: string }> = [
@@ -266,6 +267,9 @@ export const SystemPanel: React.FC<Props> = ({ cfg, draft, setDraft, envFile, js
           </div>
         </div>
       </section>
+
+      {/* 日志（调试）：实时尾部 / 级别切换 / 下载 / 前端错误回传 */}
+      <LogViewer />
     </div>
   );
 };

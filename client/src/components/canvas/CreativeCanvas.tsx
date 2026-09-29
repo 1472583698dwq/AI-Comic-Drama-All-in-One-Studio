@@ -29,7 +29,6 @@ import { ExtNode } from './nodes/ExtNode';
 import { syncCanvasNodeSpecs, listCanvasNodeSpecs, getCanvasNodeSpec } from './canvasNodeSpecs';
 import { FloatingAgentPromptBar } from './FloatingAgentPromptBar';
 import { NodeContextMenu, type NodeMenuState } from './NodeContextMenu';
-import { WorkflowInspectorModal } from '../workflow/WorkflowInspectorModal';
 import { getNodeSpec } from './nodeRegistry';
 import { CanvasManagerModal } from './CanvasManagerModal';
 import { buildShotReferenceInputs } from '../storyboard/shotReference';
@@ -199,7 +198,6 @@ const InnerCanvas: React.FC = () => {
     return () => window.removeEventListener('canvasnode-list-refresh', h as any);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pid]);
-  const [inspectWfId, setInspectWfId] = useState('');
   const [saving, setSaving] = useState(false);
   const [executingNodeIds, setExecutingNodeIds] = useState<Set<string>>(new Set());
   const isGenerating = executingNodeIds.size > 0;
@@ -283,11 +281,7 @@ const InnerCanvas: React.FC = () => {
   const canvasRef = useRef<string>('default');
   const [isDragging, setIsDragging] = useState(false);
 
-  useEffect(() => {
-    const h = (e: any) => setInspectWfId(e.detail?.workflowId || '');
-    window.addEventListener('open-workflow-inspector', h as any);
-    return () => window.removeEventListener('open-workflow-inspector', h as any);
-  }, []);
+  // open-workflow-inspector 已由 App 全局接管（任何页面可开槽位配置），此处不再监听避免双开
 
   // 加载画布（项目/画布切换时重载）
   useEffect(() => {
@@ -1834,7 +1828,6 @@ const InnerCanvas: React.FC = () => {
         </>
       )}
 
-      {inspectWfId && <WorkflowInspectorModal workflowId={inspectWfId} isOpen={!!inspectWfId} onClose={() => setInspectWfId('')} onSaved={() => {}} />}
     </div>
   );
 };
