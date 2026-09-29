@@ -82,202 +82,6 @@
     "code": "async def generate(ctx, api):\n    return {\"image_url\": \"https://example.com/test.png\"}\n"
   },
   {
-    "id": "comfyui_wf_3d96b356",
-    "name": "ComfyUI 四试图生成",
-    "display_name": "ComfyUI·四试图生成",
-    "kind": "image",
-    "provider_type": "comfyui",
-    "supports_workflow": true,
-    "description": "从 D:\\网盘\\ComfyUI-aki-v2\\ComfyUI\\user\\default\\workflows\\四试图生成.json 导入",
-    "icon": "Workflow",
-    "scope": "global",
-    "project_id": null,
-    "builtin": false,
-    "enabled": true,
-    "models": [
-      "krea2_turbo_fp8_scaled.safetensors"
-    ],
-    "default_model": "krea2_turbo_fp8_scaled.safetensors",
-    "params_schema": {
-      "type": "object",
-      "properties": {}
-    },
-    "default_params": {},
-    "input_schema": {
-      "type": "object",
-      "properties": {
-        "prompt": {
-          "type": "string",
-          "description": "画面提示词",
-          "x-handle": "text",
-          "x-role": "prompt"
-        },
-        "reference_images": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "format": "uri"
-          },
-          "description": "参考图/垫图",
-          "x-handle": "image",
-          "x-slot": "reference_images"
-        }
-      },
-      "required": [
-        "prompt"
-      ]
-    },
-    "output_schema": {
-      "type": "object",
-      "properties": {
-        "image_url": {
-          "type": "string",
-          "format": "uri",
-          "x-handle": "image"
-        }
-      },
-      "required": [
-        "image_url"
-      ]
-    },
-    "workflow_id": "wf_3d96b356",
-    "workflow_hash": "718e98a4",
-    "workflow_exposed": [],
-    "schema_version": 3,
-    "capabilities": [],
-    "transport": {
-      "method": "POST",
-      "url": "",
-      "headers": {},
-      "query": {},
-      "timeout": 1200
-    },
-    "headers": {},
-    "custom_headers": {},
-    "auth": {
-      "type": "none",
-      "header_name": "Authorization",
-      "query_name": "api_key",
-      "key_env": null,
-      "prefix": "Bearer ",
-      "has_key": false
-    },
-    "health_check": {
-      "url": null,
-      "method": "GET",
-      "expect_status": 200,
-      "test_payload": null
-    },
-    "doc_url": null,
-    "created_at": "2026-09-16T10:33:01.204708",
-    "updated_at": "2026-09-16T10:33:01.204939",
-    "language": "python",
-    "code_entry": "generate",
-    "code_timeout": 1200,
-    "trusted": false,
-    "legacy_json_mode": false,
-    "has_code": false,
-    "code": ""
-  },
-  {
-    "id": "comfyui_wf_4a19b2a2",
-    "name": "ComfyUI image_krea2_turbo_t2i",
-    "display_name": "ComfyUI·image_krea2_turbo_t2i",
-    "kind": "image",
-    "provider_type": "comfyui",
-    "supports_workflow": true,
-    "description": "从 D:\\网盘\\ComfyUI-aki-v2\\ComfyUI\\user\\default\\workflows\\image_krea2_turbo_t2i.json 导入",
-    "icon": "Workflow",
-    "scope": "global",
-    "project_id": null,
-    "builtin": false,
-    "enabled": true,
-    "models": [
-      "krea2_turbo_fp8_scaled.safetensors"
-    ],
-    "default_model": "krea2_turbo_fp8_scaled.safetensors",
-    "params_schema": {
-      "type": "object",
-      "properties": {}
-    },
-    "default_params": {},
-    "input_schema": {
-      "type": "object",
-      "properties": {
-        "prompt": {
-          "type": "string",
-          "description": "画面提示词",
-          "x-handle": "text",
-          "x-role": "prompt"
-        },
-        "reference_images": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "format": "uri"
-          },
-          "description": "参考图/垫图",
-          "x-handle": "image",
-          "x-slot": "reference_images"
-        }
-      },
-      "required": [
-        "prompt"
-      ]
-    },
-    "output_schema": {
-      "type": "object",
-      "properties": {
-        "image_url": {
-          "type": "string",
-          "format": "uri",
-          "x-handle": "image"
-        }
-      },
-      "required": [
-        "image_url"
-      ]
-    },
-    "workflow_id": "wf_4a19b2a2",
-    "workflow_hash": "55ead74f",
-    "workflow_exposed": [],
-    "schema_version": 3,
-    "capabilities": [],
-    "transport": {
-      "method": "POST",
-      "url": "",
-      "headers": {},
-      "query": {},
-      "timeout": 1200
-    },
-    "headers": {},
-    "custom_headers": {},
-    "auth": {
-      "type": "none",
-      "header_name": "Authorization",
-      "query_name": "api_key",
-      "key_env": null,
-      "prefix": "Bearer ",
-      "has_key": false
-    },
-    "health_check": {
-      "url": null,
-      "method": "GET",
-      "expect_status": 200,
-      "test_payload": null
-    },
-    "doc_url": null,
-    "created_at": "2026-09-16T10:33:01.209899",
-    "updated_at": "2026-09-16T10:33:01.210117",
-    "language": "python",
-    "code_entry": "generate",
-    "code_timeout": 1200,
-    "trusted": false,
-    "legacy_json_mode": false,
-    "has_code": false,
-    "code": ""
-  },
-  {
     "id": "prov_ecf35ae4",
     "name": "RunningHub 视频 (AI App)",
     "display_name": "RunningHub 视频 (AI App)",
@@ -1007,5 +811,1930 @@
     "trusted": false,
     "has_code": true,
     "code": "import httpx\nimport base64\n\nAPI_BASE = \"https://www.runninghub.cn/openapi/v2\"\nRUN_URL = API_BASE + \"/run/ai-app/2097935043799896065\"\nQUERY_URL = API_BASE + \"/query\"\nUPLOAD_URL = API_BASE + \"/media/upload/binary\"\nASPECT_OPTIONS = [\n    \"1:1 (Square)\", \"2:3 (Portrait Photo)\", \"3:2 (Photo)\", \"3:4 (Portrait Standard)\",\n    \"4:3 (Standard)\", \"9:16 (Portrait Widescreen)\", \"16:9 (Widescreen)\", \"21:9 (Ultrawide)\",\n]\n\n\nasync def _upload_ref(client, api_key, value, idx):\n    \"\"\"参考图值 → RunningHub 文件名：data: URI/公网URL 先传后填；已是文件名则原样返回。\"\"\"\n    v = str(value or \"\").strip()\n    if not v or v == \"None\":\n        return None\n    if not (v.startswith(\"data:\") or v.startswith(\"http://\") or v.startswith(\"https://\")):\n        return v\n    if v.startswith(\"data:\"):\n        try:\n            raw = base64.b64decode(v.split(\",\", 1)[1])\n        except Exception as e:\n            raise RuntimeError(f\"参考图{idx} base64 解码失败: {e}\")\n    else:\n        gr = await client.get(v, timeout=120)\n        gr.raise_for_status()\n        raw = gr.content\n    if not raw:\n        raise RuntimeError(f\"参考图{idx}内容为空\")\n    # 上传只能用 Bearer 头：带上 Content-Type: application/json 会破坏 multipart 边界\n    up = await client.post(\n        UPLOAD_URL, headers={\"Authorization\": f\"Bearer {api_key}\"},\n        files={\"file\": (f\"image{idx}.png\", raw, \"image/png\")}, timeout=300,\n    )\n    up.raise_for_status()\n    uj = up.json()\n    if uj.get(\"code\") != 0:\n        raise RuntimeError(f\"参考图{idx}上传失败: {uj.get('message') or str(uj)[:300]}\")\n    data = uj.get(\"data\") or {}\n    dl = data.get(\"download_url\") or data.get(\"fileName\")\n    if not dl:\n        raise RuntimeError(f\"参考图{idx}上传未返回文件名: {str(uj)[:300]}\")\n    return dl\n\n\nasync def generate(ctx, api):\n    dyn = ctx.get(\"dynamic_inputs\") or {}\n    api_key = ctx.get(\"api_key\")\n    if not api_key and isinstance(api, dict) and callable(api.get(\"get_api_key\")):\n        api_key = api[\"get_api_key\"]()\n    api_key = str(api_key or \"\").strip()\n    if not api_key:\n        raise RuntimeError(\"缺少 RunningHub API Key（请在生成源里配置 Key 后重试）\")\n\n    headers = {\"Authorization\": f\"Bearer {api_key}\", \"Content-Type\": \"application/json\"}\n    task_id = str(ctx.get(\"task_id\") or dyn.get(\"task_id\") or \"\").strip()\n    prompt = str(ctx.get(\"prompt\") or \"\").strip()\n\n    async with httpx.AsyncClient(timeout=600) as client:\n        # ── 查询分支：有 task_id 且无 prompt，单次查询，绝不阻塞 ──\n        if task_id and not prompt:\n            q = await client.post(QUERY_URL, headers=headers, json={\"taskId\": task_id})\n            q.raise_for_status()\n            qj = q.json()\n            status = str(qj.get(\"status\") or \"\").upper()\n            if status in (\"QUEUED\", \"RUNNING\", \"PENDING\"):\n                return {\"video_url\": None, \"task_id\": task_id, \"status\": status}\n            if status == \"SUCCESS\":\n                results = qj.get(\"results\") or []\n                for item in results:\n                    if isinstance(item, dict):\n                        url = str(item.get(\"url\") or \"\")\n                        ot = str(item.get(\"outputType\") or \"\").lower()\n                        if url and (ot in (\"mp4\", \"webm\", \"mov\") or ot == \"\" or \"mp4\" in url.lower()):\n                            return {\"video_url\": url}\n                for item in results:\n                    if isinstance(item, dict) and item.get(\"url\"):\n                        return {\"video_url\": item[\"url\"]}\n                    if isinstance(item, str) and item:\n                        return {\"video_url\": item}\n                raise RuntimeError(f\"任务成功但无结果URL: {str(qj)[:300]}\")\n            raise RuntimeError(f\"任务失败({status or 'UNKNOWN'}): {qj.get('errorMessage') or str(qj)[:300]}\")\n\n        # ── 提交分支：上传参考图 → 组装 nodeInfoList → 立即返回 task_id ──\n        first = ctx.get(\"first_frame_url\") or ctx.get(\"first_frame\") or dyn.get(\"first_frame\")\n        refs = ctx.get(\"reference_images\") or dyn.get(\"reference_images\") or []\n        if isinstance(refs, str):\n            refs = [refs]\n\n        values, seen = [], set()\n        for v in [first] + list(refs):\n            if not v:\n                continue\n            s = str(v)\n            if s in seen:\n                continue\n            seen.add(s)\n            values.append(s)\n        values = values[:9]\n        if not values:\n            raise RuntimeError(\"至少需要一张参考图（first_frame 或 reference_images）\")\n\n        rh_files = []\n        for i, v in enumerate(values):\n            rh_files.append(await _upload_ref(client, api_key, v, i + 1))\n\n        try:\n            duration = int(ctx.get(\"duration\") or dyn.get(\"duration\") or 5)\n        except Exception:\n            duration = 5\n        duration = max(3, min(15, duration))\n        aspect = ctx.get(\"aspect_ratio\") or dyn.get(\"aspect_ratio\") or \"9:16 (Portrait Widescreen)\"\n        if aspect not in ASPECT_OPTIONS:\n            aspect = \"9:16 (Portrait Widescreen)\"\n        instance_type = ctx.get(\"instance_type\") or dyn.get(\"instance_type\") or \"default\"\n\n        node_info_list = [\n            {\"nodeId\": \"64\", \"fieldName\": \"index\", \"fieldValue\": \"0\", \"description\": \"文武戏设置1\"},\n            {\"nodeId\": \"69\", \"fieldName\": \"index\", \"fieldValue\": \"0\", \"description\": \"文武戏设置2\"},\n            {\"nodeId\": \"27\", \"fieldName\": \"value\", \"fieldValue\": str(duration), \"description\": \"时长（秒）\"},\n            {\"nodeId\": \"28\", \"fieldName\": \"prompt\", \"fieldValue\": prompt, \"description\": \"提示词\"},\n            {\"nodeId\": \"29\", \"fieldName\": \"aspect_ratio\", \"fieldValue\": aspect, \"description\": \"分辨率\"},\n        ]\n        for i, nid in enumerate([\"6\", \"35\", \"36\", \"37\", \"38\", \"39\", \"40\", \"41\", \"42\"]):\n            node_info_list.append({\n                \"nodeId\": nid,\n                \"fieldName\": \"image\",\n                \"fieldValue\": rh_files[i] if i < len(rh_files) else \"None\",\n                \"description\": f\"image{i + 1}\",\n            })\n\n        payload = {\"nodeInfoList\": node_info_list, \"instanceType\": instance_type, \"usePersonalQueue\": \"false\"}\n        r = await client.post(RUN_URL, headers=headers, json=payload)\n        r.raise_for_status()\n        rj = r.json()\n        new_id = str(rj.get(\"taskId\") or \"\").strip()\n        if not new_id:\n            raise RuntimeError(f\"提交未返回 taskId: {str(rj)[:300]}\")\n        return {\"video_url\": None, \"task_id\": new_id, \"status\": \"SUBMITTED\"}\n\n# PARAMS_SCHEMA: {\"type\":\"object\",\"properties\":{\"duration\":{\"type\":\"integer\",\"title\":\"时长(秒)\",\"minimum\":3,\"maximum\":15,\"default\":5,\"description\":\"视频时长\",\"x-category\":\"motion\",\"x-visibility\":\"basic\",\"x-agent\":\"auto\",\"x-priority\":20},\"aspect_ratio\":{\"type\":\"string\",\"title\":\"比例\",\"enum\":[\"1:1 (Square)\",\"2:3 (Portrait Photo)\",\"3:2 (Photo)\",\"3:4 (Portrait Standard)\",\"4:3 (Standard)\",\"9:16 (Portrait Widescreen)\",\"16:9 (Widescreen)\",\"21:9 (Ultrawide)\"],\"default\":\"9:16 (Portrait Widescreen)\",\"description\":\"视频宽高比\",\"x-category\":\"layout\",\"x-visibility\":\"basic\",\"x-agent\":\"auto\",\"x-priority\":10},\"instance_type\":{\"type\":\"string\",\"title\":\"实例类型\",\"enum\":[\"default\",\"plus\",\"ultra\"],\"default\":\"default\",\"description\":\"运行实例类型\",\"x-category\":\"advanced\",\"x-visibility\":\"advanced\",\"x-agent\":\"suggest\",\"x-priority\":30}}}\n"
+  },
+  {
+    "id": "comfyui_wf_f9993f70",
+    "name": "ComfyUI image_qwen_image_2_1_文生图",
+    "display_name": "ComfyUI·image_qwen_image_2_1_文生图",
+    "kind": "image",
+    "provider_type": "comfyui",
+    "supports_workflow": true,
+    "description": "从 D:\\网盘\\ComfyUI-aki-v2\\ComfyUI\\user\\default\\workflows\\image_qwen_image_2_1_文生图.json 导入",
+    "icon": "Workflow",
+    "scope": "global",
+    "project_id": null,
+    "builtin": false,
+    "enabled": true,
+    "models": [
+      "qwen_image_2.1_int8_convrot.safetensors"
+    ],
+    "default_model": "qwen_image_2.1_int8_convrot.safetensors",
+    "params_schema": {
+      "type": "object",
+      "properties": {
+        "combo_13_aspect_ratio": {
+          "type": "string",
+          "title": "aspect_ratio (Resolution Selector)",
+          "description": "对应节点 #13 (ResolutionSelector) 的 aspect_ratio 参数",
+          "x-control": "select",
+          "enum": [
+            "1:1 (Square)",
+            "2:3 (Portrait Photo)",
+            "3:2 (Photo)",
+            "3:4 (Portrait Standard)",
+            "4:3 (Standard)",
+            "9:16 (Portrait Widescreen)",
+            "16:9 (Widescreen)",
+            "21:9 (Ultrawide)"
+          ],
+          "default": "2:3 (Portrait Photo)",
+          "x-category": "layout",
+          "x-visibility": "basic",
+          "x-agent": "auto",
+          "x-priority": 10,
+          "x-std-key": "aspect_ratio"
+        },
+        "num_13_multiple": {
+          "type": "integer",
+          "title": "multiple (Resolution Selector)",
+          "description": "对应节点 #13 (ResolutionSelector) 的 multiple 参数",
+          "default": 8,
+          "minimum": 1,
+          "maximum": 64,
+          "step": 1,
+          "x-category": "advanced",
+          "x-visibility": "hidden",
+          "x-agent": "suggest",
+          "x-priority": 500
+        },
+        "num_13_megapixels": {
+          "type": "integer",
+          "title": "megapixels (Resolution Selector)",
+          "description": "对应节点 #13 (ResolutionSelector) 的 megapixels 参数",
+          "default": 1,
+          "minimum": 0.5,
+          "maximum": 4,
+          "step": 0.5,
+          "x-category": "advanced",
+          "x-visibility": "hidden",
+          "x-agent": "suggest",
+          "x-priority": 500
+        }
+      }
+    },
+    "default_params": {},
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "description": "参考垫图 (Text Encode Qwen Image 2.1)",
+          "x-handle": "text",
+          "x-role": "prompt",
+          "title": "参考垫图 (Text Encode Qwen Image 2.1)",
+          "x-comfy-id": "exp_459:452_prompt"
+        },
+        "reference_images": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          },
+          "description": "参考图/垫图",
+          "x-handle": "image",
+          "x-slot": "reference_images",
+          "x-aggregate": true
+        },
+        "exp_459:452_negative_prompt": {
+          "type": "string",
+          "format": "uri",
+          "title": "参考垫图 (Text Encode Qwen Image 2.1)",
+          "description": "参考垫图 (Text Encode Qwen Image 2.1)",
+          "x-handle": "image",
+          "x-slot": "exp_459:452_negative_prompt",
+          "x-role": "reference_images",
+          "x-comfy-id": "exp_459:452_negative_prompt",
+          "x-comfy-param": "negative_prompt",
+          "x-comfy-node": "459:452"
+        }
+      },
+      "required": [
+        "prompt"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "image_url": {
+          "type": "string",
+          "format": "uri",
+          "x-handle": "image"
+        }
+      },
+      "required": [
+        "image_url"
+      ]
+    },
+    "workflow_id": "wf_f9993f70",
+    "workflow_hash": "fb316718",
+    "workflow_exposed": [
+      {
+        "id": "combo_13_aspect_ratio",
+        "node_id": "13",
+        "param_name": "aspect_ratio",
+        "label": "aspect_ratio (Resolution Selector)",
+        "type": "combo",
+        "required": false,
+        "default_value": "2:3 (Portrait Photo)",
+        "description": "对应节点 #13 (ResolutionSelector) 的 aspect_ratio 参数",
+        "options": [
+          "1:1 (Square)",
+          "2:3 (Portrait Photo)",
+          "3:2 (Photo)",
+          "3:4 (Portrait Standard)",
+          "4:3 (Standard)",
+          "9:16 (Portrait Widescreen)",
+          "16:9 (Widescreen)",
+          "21:9 (Ultrawide)"
+        ],
+        "choices": [
+          "1:1 (Square)",
+          "2:3 (Portrait Photo)",
+          "3:2 (Photo)",
+          "3:4 (Portrait Standard)",
+          "4:3 (Standard)",
+          "9:16 (Portrait Widescreen)",
+          "16:9 (Widescreen)",
+          "21:9 (Ultrawide)"
+        ]
+      },
+      {
+        "id": "num_13_multiple",
+        "node_id": "13",
+        "param_name": "multiple",
+        "label": "multiple (Resolution Selector)",
+        "type": "number",
+        "required": false,
+        "default_value": 8,
+        "description": "对应节点 #13 (ResolutionSelector) 的 multiple 参数",
+        "min": 1,
+        "max": 64,
+        "step": 1
+      },
+      {
+        "id": "num_13_megapixels",
+        "node_id": "13",
+        "param_name": "megapixels",
+        "label": "megapixels (Resolution Selector)",
+        "type": "number",
+        "required": false,
+        "default_value": 1,
+        "description": "对应节点 #13 (ResolutionSelector) 的 megapixels 参数",
+        "min": 0.5,
+        "max": 4,
+        "step": 0.5
+      },
+      {
+        "id": "exp_459:452_prompt",
+        "node_id": "459:452",
+        "param_name": "prompt",
+        "label": "参考垫图 (Text Encode Qwen Image 2.1)",
+        "type": "text",
+        "required": false,
+        "default_value": "",
+        "description": "对应节点 #459:452 (TextEncodeQwenImage21) 的 prompt 参数"
+      },
+      {
+        "id": "exp_459:452_negative_prompt",
+        "node_id": "459:452",
+        "param_name": "negative_prompt",
+        "label": "参考垫图 (Text Encode Qwen Image 2.1)",
+        "type": "image",
+        "required": false,
+        "default_value": "",
+        "description": "对应节点 #459:452 (TextEncodeQwenImage21) 的 negative_prompt 参数"
+      }
+    ],
+    "schema_version": 4,
+    "capabilities": [],
+    "transport": {
+      "method": "POST",
+      "url": "",
+      "headers": {},
+      "query": {},
+      "timeout": 1200
+    },
+    "headers": {},
+    "custom_headers": {},
+    "auth": {
+      "type": "none",
+      "header_name": "Authorization",
+      "query_name": "api_key",
+      "key_env": null,
+      "prefix": "Bearer ",
+      "has_key": false
+    },
+    "health_check": {
+      "url": null,
+      "method": "GET",
+      "expect_status": 200,
+      "test_payload": null
+    },
+    "doc_url": null,
+    "created_at": "2026-09-29T07:41:47.413593",
+    "updated_at": "2026-09-29T07:41:47.413952",
+    "language": "python",
+    "code_entry": "generate",
+    "code_timeout": 1200,
+    "trusted": false,
+    "has_code": false,
+    "code": ""
+  },
+  {
+    "id": "comfyui_wf_3d96b356",
+    "name": "ComfyUI 四试图生成",
+    "display_name": "ComfyUI·四试图生成",
+    "kind": "image",
+    "provider_type": "comfyui",
+    "supports_workflow": true,
+    "description": "从 D:\\网盘\\ComfyUI-aki-v2\\ComfyUI\\user\\default\\workflows\\四试图生成.json 导入",
+    "icon": "Workflow",
+    "scope": "global",
+    "project_id": null,
+    "builtin": false,
+    "enabled": true,
+    "models": [
+      "krea2_turbo_fp8_scaled.safetensors"
+    ],
+    "default_model": "krea2_turbo_fp8_scaled.safetensors",
+    "params_schema": {
+      "type": "object",
+      "properties": {
+        "exp_4_width": {
+          "type": "integer",
+          "title": "参考垫图 (EmptySD3LatentImage)",
+          "description": "对应节点 #4 (EmptySD3LatentImage) 的 width 参数",
+          "default": 1536,
+          "x-category": "layout",
+          "x-visibility": "basic",
+          "x-agent": "auto",
+          "x-priority": 21,
+          "x-std-key": "width"
+        },
+        "exp_4_batch_size": {
+          "type": "integer",
+          "title": "参考垫图 (EmptySD3LatentImage)",
+          "description": "对应节点 #4 (EmptySD3LatentImage) 的 batch_size 参数",
+          "default": 1,
+          "x-category": "advanced",
+          "x-visibility": "hidden",
+          "x-agent": "suggest",
+          "x-priority": 500
+        },
+        "exp_4_height": {
+          "type": "integer",
+          "title": "参考垫图 (EmptySD3LatentImage)",
+          "description": "对应节点 #4 (EmptySD3LatentImage) 的 height 参数",
+          "default": 1024,
+          "x-category": "layout",
+          "x-visibility": "basic",
+          "x-agent": "auto",
+          "x-priority": 22,
+          "x-std-key": "height"
+        }
+      }
+    },
+    "default_params": {},
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "description": "提示词/触发词 (Krea2 Edit (grounded encode))",
+          "x-handle": "text",
+          "x-role": "prompt",
+          "title": "提示词/触发词 (Krea2 Edit (grounded encode))",
+          "x-comfy-id": "exp_14_prompt"
+        },
+        "reference_images": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          },
+          "description": "参考图/垫图",
+          "x-handle": "image",
+          "x-slot": "reference_images",
+          "x-aggregate": true
+        },
+        "img_5": {
+          "type": "string",
+          "format": "uri",
+          "title": "参考垫图 (Body Reference)",
+          "description": "参考垫图 (Body Reference)",
+          "x-handle": "image",
+          "x-slot": "img_5",
+          "x-role": "reference_images",
+          "x-comfy-id": "img_5",
+          "x-comfy-param": "image",
+          "x-comfy-node": "5"
+        }
+      },
+      "required": [
+        "prompt"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "image_url": {
+          "type": "string",
+          "format": "uri",
+          "x-handle": "image"
+        }
+      },
+      "required": [
+        "image_url"
+      ]
+    },
+    "workflow_id": "wf_3d96b356",
+    "workflow_hash": "718e98a4",
+    "workflow_exposed": [
+      {
+        "id": "exp_4_width",
+        "node_id": "4",
+        "param_name": "width",
+        "label": "参考垫图 (EmptySD3LatentImage)",
+        "type": "number",
+        "required": false,
+        "default_value": 1536,
+        "description": "对应节点 #4 (EmptySD3LatentImage) 的 width 参数"
+      },
+      {
+        "id": "exp_4_batch_size",
+        "node_id": "4",
+        "param_name": "batch_size",
+        "label": "参考垫图 (EmptySD3LatentImage)",
+        "type": "number",
+        "required": false,
+        "default_value": 1,
+        "description": "对应节点 #4 (EmptySD3LatentImage) 的 batch_size 参数"
+      },
+      {
+        "id": "exp_4_height",
+        "node_id": "4",
+        "param_name": "height",
+        "label": "参考垫图 (EmptySD3LatentImage)",
+        "type": "number",
+        "required": false,
+        "default_value": 1024,
+        "description": "对应节点 #4 (EmptySD3LatentImage) 的 height 参数"
+      },
+      {
+        "id": "img_5",
+        "node_id": "5",
+        "param_name": "image",
+        "label": "参考垫图 (Body Reference)",
+        "type": "image",
+        "required": false,
+        "default_value": "jimeng-2025.png",
+        "description": "对应节点 #5 (LoadImage) 的 image 参数"
+      },
+      {
+        "id": "exp_14_prompt",
+        "node_id": "14",
+        "param_name": "prompt",
+        "label": "提示词/触发词 (Krea2 Edit (grounded encode))",
+        "type": "text",
+        "required": false,
+        "default_value": "Convert the character in the image to a Character Sheet showing a face close-up, front full body, side full body and back full body views",
+        "description": "对应节点 #14 (Krea2EditGroundedEncode) 的 prompt 参数"
+      }
+    ],
+    "schema_version": 4,
+    "capabilities": [],
+    "transport": {
+      "method": "POST",
+      "url": "",
+      "headers": {},
+      "query": {},
+      "timeout": 1200
+    },
+    "headers": {},
+    "custom_headers": {},
+    "auth": {
+      "type": "none",
+      "header_name": "Authorization",
+      "query_name": "api_key",
+      "key_env": null,
+      "prefix": "Bearer ",
+      "has_key": false
+    },
+    "health_check": {
+      "url": null,
+      "method": "GET",
+      "expect_status": 200,
+      "test_payload": null
+    },
+    "doc_url": null,
+    "created_at": "2026-09-29T07:41:47.419911",
+    "updated_at": "2026-09-29T07:41:47.420074",
+    "language": "python",
+    "code_entry": "generate",
+    "code_timeout": 1200,
+    "trusted": false,
+    "has_code": false,
+    "code": ""
+  },
+  {
+    "id": "comfyui_wf_4a19b2a2",
+    "name": "ComfyUI image_krea2_turbo_t2i",
+    "display_name": "ComfyUI·image_krea2_turbo_t2i",
+    "kind": "image",
+    "provider_type": "comfyui",
+    "supports_workflow": true,
+    "description": "从 D:\\网盘\\ComfyUI-aki-v2\\ComfyUI\\user\\default\\workflows\\image_krea2_turbo_t2i.json 导入",
+    "icon": "Workflow",
+    "scope": "global",
+    "project_id": null,
+    "builtin": false,
+    "enabled": true,
+    "models": [
+      "krea2_turbo_fp8_scaled.safetensors"
+    ],
+    "default_model": "krea2_turbo_fp8_scaled.safetensors",
+    "params_schema": {
+      "type": "object",
+      "properties": {
+        "exp_29_filename_prefix": {
+          "type": "string",
+          "title": "filename_prefix (Save Image)",
+          "description": "Save Image 的 filename_prefix 参数",
+          "x-control": "input",
+          "default": "Krea2_turbo",
+          "x-category": "advanced",
+          "x-visibility": "hidden",
+          "x-agent": "manual",
+          "x-priority": 200,
+          "x-std-key": "filename_prefix"
+        },
+        "combo_49_aspect_ratio": {
+          "type": "string",
+          "title": "画面比例 (Resolution Selector)",
+          "description": "画面比例 下拉",
+          "x-control": "select",
+          "enum": [
+            "1:1 (Square)",
+            "2:3 (Portrait Photo)",
+            "3:2 (Photo)",
+            "3:4 (Portrait Standard)",
+            "4:3 (Standard)",
+            "9:16 (Portrait Widescreen)",
+            "16:9 (Widescreen)",
+            "21:9 (Ultrawide)"
+          ],
+          "default": "1:1 (Square)",
+          "x-category": "layout",
+          "x-visibility": "basic",
+          "x-agent": "auto",
+          "x-priority": 10,
+          "x-std-key": "aspect_ratio"
+        },
+        "num_49_megapixels": {
+          "type": "number",
+          "title": "百万像素 (Resolution Selector)",
+          "description": "百万像素 0.5-4",
+          "default": 1.0,
+          "minimum": 0.5,
+          "maximum": 4,
+          "step": 0.5,
+          "x-category": "advanced",
+          "x-visibility": "hidden",
+          "x-agent": "suggest",
+          "x-priority": 500
+        },
+        "num_49_multiple": {
+          "type": "integer",
+          "title": "倍数对齐 (Resolution Selector)",
+          "description": "分辨率倍数对齐",
+          "default": 8,
+          "minimum": 1,
+          "maximum": 64,
+          "step": 1,
+          "x-category": "advanced",
+          "x-visibility": "hidden",
+          "x-agent": "suggest",
+          "x-priority": 500
+        },
+        "num_30:5_batch_size": {
+          "type": "integer",
+          "title": "batch_size (Empty Latent Image)",
+          "description": "batch_size (Empty Latent Image)",
+          "default": 1,
+          "minimum": 1,
+          "maximum": 4,
+          "step": 1,
+          "x-category": "advanced",
+          "x-visibility": "hidden",
+          "x-agent": "suggest",
+          "x-priority": 500
+        },
+        "num_30:3_steps": {
+          "type": "integer",
+          "title": "采样步数 (KSampler)",
+          "description": "采样步数 4-60",
+          "default": 8,
+          "minimum": 4,
+          "maximum": 60,
+          "step": 1,
+          "x-category": "quality",
+          "x-visibility": "advanced",
+          "x-agent": "suggest",
+          "x-priority": 40,
+          "x-std-key": "steps"
+        },
+        "num_30:3_cfg": {
+          "type": "number",
+          "title": "CFG (KSampler)",
+          "description": "CFG 1-15",
+          "default": 1.0,
+          "minimum": 1,
+          "maximum": 15,
+          "step": 0.5,
+          "x-category": "quality",
+          "x-visibility": "advanced",
+          "x-agent": "suggest",
+          "x-priority": 41,
+          "x-std-key": "cfg"
+        },
+        "combo_30:3_sampler_name": {
+          "type": "string",
+          "title": "采样器 (KSampler)",
+          "description": "采样器",
+          "x-control": "select",
+          "enum": [
+            "euler",
+            "euler_cfg_pp",
+            "euler_ancestral",
+            "euler_ancestral_cfg_pp",
+            "heun",
+            "heunpp2",
+            "exp_heun_2_x0",
+            "exp_heun_2_x0_sde",
+            "dpm_2",
+            "dpm_2_ancestral",
+            "lms",
+            "dpm_fast",
+            "dpm_adaptive",
+            "dpmpp_2s_ancestral",
+            "dpmpp_2s_ancestral_cfg_pp",
+            "dpmpp_sde",
+            "dpmpp_sde_gpu",
+            "dpmpp_2m",
+            "dpmpp_2m_cfg_pp",
+            "dpmpp_2m_sde",
+            "dpmpp_2m_sde_gpu",
+            "dpmpp_2m_sde_heun",
+            "dpmpp_2m_sde_heun_gpu",
+            "dpmpp_3m_sde",
+            "dpmpp_3m_sde_gpu",
+            "ddpm",
+            "lcm",
+            "ipndm",
+            "ipndm_v",
+            "deis",
+            "cfgpp_ud10_ab",
+            "res_multistep",
+            "res_multistep_cfg_pp",
+            "res_multistep_ancestral",
+            "res_multistep_ancestral_cfg_pp",
+            "gradient_estimation",
+            "gradient_estimation_cfg_pp",
+            "er_sde",
+            "seeds_2",
+            "seeds_3",
+            "sa_solver",
+            "sa_solver_pece",
+            "ddim",
+            "uni_pc",
+            "uni_pc_bh2"
+          ],
+          "default": "euler",
+          "x-category": "quality",
+          "x-visibility": "advanced",
+          "x-agent": "suggest",
+          "x-priority": 44,
+          "x-std-key": "sampler_name"
+        },
+        "combo_30:3_scheduler": {
+          "type": "string",
+          "title": "调度器 (KSampler)",
+          "description": "调度器",
+          "x-control": "select",
+          "enum": [
+            "simple",
+            "sgm_uniform",
+            "karras",
+            "exponential",
+            "ddim_uniform",
+            "beta",
+            "normal",
+            "linear_quadratic",
+            "kl_optimal"
+          ],
+          "default": "simple",
+          "x-category": "quality",
+          "x-visibility": "advanced",
+          "x-agent": "suggest",
+          "x-priority": 45,
+          "x-std-key": "scheduler"
+        },
+        "num_30:3_denoise": {
+          "type": "number",
+          "title": "去噪 (KSampler)",
+          "description": "去噪 0-1",
+          "default": 1.0,
+          "minimum": 0,
+          "maximum": 1,
+          "step": 0.05,
+          "x-category": "quality",
+          "x-visibility": "advanced",
+          "x-agent": "suggest",
+          "x-priority": 43,
+          "x-std-key": "denoise"
+        },
+        "combo_30:10_unet_name": {
+          "type": "string",
+          "title": "底模 (Load Diffusion Model)",
+          "description": "底模/UNet，下拉选择",
+          "x-control": "select",
+          "enum": [
+            "MiniMax_H3_FL2VA_pruned_nvfp4.safetensors",
+            "MiniMax_H3_Ref2VA_pruned_nvfp4.safetensors",
+            "krea2GPTGrandPUSSYTruth_krea2GPT.safetensors",
+            "krea2_turbo_fp8_scaled.safetensors",
+            "krea2_turbo_nvfp4.safetensors",
+            "minimax_h3_fl2va_pruned_fp8_scaled.safetensors",
+            "minimax_h3_ref2va_pruned_fp8_scaled.safetensors",
+            "qwen_image_2.1_bf16.safetensors",
+            "qwen_image_2.1_int8_convrot.safetensors",
+            "风格化.safetensors"
+          ],
+          "default": "krea2_turbo_fp8_scaled.safetensors",
+          "x-category": "quality",
+          "x-visibility": "basic",
+          "x-agent": "manual",
+          "x-priority": 4,
+          "x-std-key": "unet_name"
+        },
+        "exp_30:11_clip_name": {
+          "type": "string",
+          "title": "clip_name (Load CLIP)",
+          "description": "Load CLIP 的 clip_name 参数",
+          "x-control": "select",
+          "enum": [
+            "Huihui-Qwen3-VL-4B-Instruct-abliterated-fp8_scaled.safetensors",
+            "clip_l.safetensors",
+            "gemma4_e4b_it_fp8_scaled.safetensors",
+            "qwen3-vl-4b-heretic_nvfp4.safetensors",
+            "qwen3.5_9b_qwen_image_2.1_pe_t2i.int8_convrot.safetensors",
+            "qwen3vl_32b_heretic_minimax_h3_nvfp4.safetensors",
+            "qwen3vl_4b_fp8_scaled.safetensors",
+            "qwen3vl_8b_int8_convrot.safetensors",
+            "qwen_3_4b.safetensors",
+            "text_encoders\\ltx-2.3-22b-dev_embeddings_connectors.safetensors"
+          ],
+          "default": "qwen3vl_4b_fp8_scaled.safetensors",
+          "x-category": "quality",
+          "x-visibility": "advanced",
+          "x-agent": "manual",
+          "x-priority": 46,
+          "x-std-key": "clip_name"
+        },
+        "exp_30:11_type": {
+          "type": "string",
+          "title": "type (Load CLIP)",
+          "description": "Load CLIP 的 type 参数",
+          "x-control": "select",
+          "enum": [
+            "stable_diffusion",
+            "stable_cascade",
+            "sd3",
+            "stable_audio",
+            "mochi",
+            "ltxv",
+            "pixart",
+            "cosmos",
+            "lumina2",
+            "wan",
+            "hidream",
+            "chroma",
+            "ace",
+            "omnigen2",
+            "qwen_image",
+            "hunyuan_image",
+            "flux2",
+            "ovis",
+            "longcat_image",
+            "cogvideox",
+            "lens",
+            "pixeldit",
+            "ideogram4",
+            "boogu",
+            "krea2",
+            "joyimage",
+            "mage",
+            "minimax",
+            "yue2"
+          ],
+          "default": "krea2",
+          "x-category": "advanced",
+          "x-visibility": "hidden",
+          "x-agent": "suggest",
+          "x-priority": 500
+        },
+        "exp_30:11_device": {
+          "type": "string",
+          "title": "device (Load CLIP)",
+          "description": "Load CLIP 的 device 参数",
+          "x-control": "select",
+          "enum": [
+            "default",
+            "cpu"
+          ],
+          "default": "default",
+          "x-category": "advanced",
+          "x-visibility": "hidden",
+          "x-agent": "suggest",
+          "x-priority": 500
+        },
+        "combo_30:12_vae_name": {
+          "type": "string",
+          "title": "VAE模型 (Load VAE)",
+          "description": "VAE模型，下拉选择而非手填",
+          "x-control": "select",
+          "enum": [
+            ".cache\\huggingface\\download\\vae\\Wan2.1_VAE.pth",
+            ".cache\\huggingface\\download\\vae\\minimax_h3_audio_vae_fp32.safetensors",
+            ".cache\\huggingface\\download\\vae\\minimax_h3_video_vae_fp16.safetensors",
+            ".cache\\huggingface\\download\\vae\\qwen_image_2.1_vae_bf16.safetensors",
+            "ae.safetensors",
+            "qwen_image_vae.safetensors",
+            "vae\\ltx-2.3-22b-dev_audio_vae.safetensors",
+            "wan_2.1_vae.safetensors",
+            "pixel_space",
+            "vae\\ltx-2.3-22b-dev_video_vae.safetensors"
+          ],
+          "default": "qwen_image_vae.safetensors",
+          "x-category": "quality",
+          "x-visibility": "basic",
+          "x-agent": "manual",
+          "x-priority": 5,
+          "x-std-key": "vae_name"
+        },
+        "combo_30:15_lora_name": {
+          "type": "string",
+          "title": "LoRA模型 (Load LoRA)",
+          "description": "LoRA模型，下拉选择",
+          "x-control": "select",
+          "enum": [
+            "Krea2-四视图QuadView_krea2_v1.safetensors",
+            "Yoneyama_Mai_Krea2.safetensors",
+            "krea2_darkbrush.safetensors",
+            "krea2_style_reference.safetensors",
+            "minimax_h3_fl2v_turbo_4step_v0.1 (1).safetensors",
+            "minimax_h3_fl2v_turbo_4step_v0.1.safetensors",
+            "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors",
+            "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+            "minimax_h3_ref2v_turbo_4step_v0.1_bf16.safetensors"
+          ],
+          "default": "krea2_darkbrush.safetensors",
+          "x-category": "quality",
+          "x-visibility": "basic",
+          "x-agent": "manual",
+          "x-priority": 6,
+          "x-std-key": "lora_name"
+        },
+        "num_30:15_strength_model": {
+          "type": "number",
+          "title": "LoRA强度-模型 (Load LoRA)",
+          "description": "0-2",
+          "default": 0.8,
+          "minimum": 0,
+          "maximum": 2,
+          "step": 0.05,
+          "x-category": "advanced",
+          "x-visibility": "hidden",
+          "x-agent": "suggest",
+          "x-priority": 500
+        },
+        "exp_30:16_max_length": {
+          "type": "integer",
+          "title": "max_length (Generate Text)",
+          "description": "Generate Text 的 max_length 参数",
+          "default": 512,
+          "x-category": "advanced",
+          "x-visibility": "hidden",
+          "x-agent": "suggest",
+          "x-priority": 500
+        },
+        "exp_30:16_sampling_mode": {
+          "type": "string",
+          "title": "sampling_mode (Generate Text)",
+          "description": "Generate Text 的 sampling_mode 参数",
+          "x-control": "select",
+          "enum": [
+            "on"
+          ],
+          "default": "on",
+          "x-category": "advanced",
+          "x-visibility": "hidden",
+          "x-agent": "suggest",
+          "x-priority": 500
+        },
+        "exp_30:16_thinking": {
+          "type": "boolean",
+          "title": "thinking (Generate Text)",
+          "description": "Generate Text 的 thinking 参数",
+          "default": true,
+          "x-control": "toggle",
+          "x-category": "advanced",
+          "x-visibility": "hidden",
+          "x-agent": "suggest",
+          "x-priority": 500
+        },
+        "exp_30:16_use_default_template": {
+          "type": "boolean",
+          "title": "use_default_template (Generate Text)",
+          "description": "Generate Text 的 use_default_template 参数",
+          "default": true,
+          "x-control": "toggle",
+          "x-category": "advanced",
+          "x-visibility": "hidden",
+          "x-agent": "suggest",
+          "x-priority": 500
+        },
+        "exp_30:16_sampling_mode.temperature": {
+          "type": "number",
+          "title": "sampling_mode.temperature (Generate Text)",
+          "description": "Generate Text 的 sampling_mode.temperature 参数",
+          "default": 0.7,
+          "x-category": "advanced",
+          "x-visibility": "hidden",
+          "x-agent": "suggest",
+          "x-priority": 500
+        },
+        "exp_30:16_sampling_mode.top_k": {
+          "type": "integer",
+          "title": "sampling_mode.top_k (Generate Text)",
+          "description": "Generate Text 的 sampling_mode.top_k 参数",
+          "default": 64,
+          "x-category": "advanced",
+          "x-visibility": "hidden",
+          "x-agent": "suggest",
+          "x-priority": 500
+        },
+        "exp_30:16_sampling_mode.top_p": {
+          "type": "number",
+          "title": "sampling_mode.top_p (Generate Text)",
+          "description": "Generate Text 的 sampling_mode.top_p 参数",
+          "default": 0.95,
+          "x-category": "advanced",
+          "x-visibility": "hidden",
+          "x-agent": "suggest",
+          "x-priority": 500
+        },
+        "exp_30:16_sampling_mode.min_p": {
+          "type": "number",
+          "title": "sampling_mode.min_p (Generate Text)",
+          "description": "Generate Text 的 sampling_mode.min_p 参数",
+          "default": 0.05,
+          "x-category": "advanced",
+          "x-visibility": "hidden",
+          "x-agent": "suggest",
+          "x-priority": 500
+        },
+        "exp_30:16_sampling_mode.repetition_penalty": {
+          "type": "number",
+          "title": "sampling_mode.repetition_penalty (Generate Text)",
+          "description": "Generate Text 的 sampling_mode.repetition_penalty 参数",
+          "default": 1.05,
+          "x-category": "advanced",
+          "x-visibility": "hidden",
+          "x-agent": "suggest",
+          "x-priority": 500
+        },
+        "exp_30:16_sampling_mode.seed": {
+          "type": "integer",
+          "title": "sampling_mode.seed (Generate Text)",
+          "description": "Generate Text 的 sampling_mode.seed 参数",
+          "default": 0,
+          "x-category": "quality",
+          "x-visibility": "advanced",
+          "x-agent": "manual",
+          "x-priority": 99,
+          "x-std-key": "seed"
+        },
+        "exp_30:16_sampling_mode.presence_penalty": {
+          "type": "integer",
+          "title": "sampling_mode.presence_penalty (Generate Text)",
+          "description": "Generate Text 的 sampling_mode.presence_penalty 参数",
+          "default": 0,
+          "x-category": "advanced",
+          "x-visibility": "hidden",
+          "x-agent": "suggest",
+          "x-priority": 500
+        },
+        "txt_30:18": {
+          "type": "string",
+          "title": "风格/触发词 (Text String (System Prompt))",
+          "description": "可在此输入额外的角色 LoRA 触发词或局部描述",
+          "x-control": "input",
+          "default": "You are an expert prompt engineer for text-to-image models. Your task is to expand the user's prompt into a highly effective image-generation prompt.\n\nThink step by step about the request before writing the answer:\n- What is the subject and mood?\n- What visual styles, mediums, and lighting options would fit? Consider two or three alternatives and pick the one that best serves the caption.\n- What composition, framing, and grounded details will help the text-to-image model?\n\nThen output a single expanded prompt paragraph.\n\nFollow these rules strictly:\n1. **Faithfulness First:** Preserve all original subjects, actions, colors, and spatial relationships. Do not add new objects, props, characters, or animals unless the user clearly implies them.\n2. **Practical T2I Structure:** Write a prompt that a text-to-image model can parse cleanly. Group subjects with their own attributes and actions. Use grounded phrasing for poses, interactions, and spatial layout.\n3. **Style Planning Stays Internal:** Use your internal reasoning to choose style, medium, framing, and lighting. Do not emit planning tags or wrappers in the visible answer body.\n4. **Text Rendering:** If the user requests visible text, quotes, labels, or typography, specify the exact text clearly and wrap requested words in quotes.\n5. **Avoid Over-Specification:** Do not invent highly specific clothing, colors, materials, or scene details unless the input supports them.\n6. **Structure:** Write one cohesive paragraph after the thinking block. No bullets, JSON, or markdown.\n7. **Respect Existing Detail:** If the user's prompt is already detailed, lightly polish and finalize rather than heavily expanding — preserve their phrasing and direction.\n8. **Respect the Human Form:** Treat depictions of people with dignity. Assume clothing covers genitals and intimate anatomy.\n9. **Preserve User Medium:** When the user explicitly requests a medium (e.g. \"photo of\", \"photograph of\", \"illustration of\", \"painting of\", \"sketch of\", \"3D render of\"), honor it. Do not pivot to a different medium to avoid difficulty — match the user's stated intent.\n\nUser's Input:\n\n",
+          "x-category": "advanced",
+          "x-visibility": "advanced",
+          "x-agent": "suggest",
+          "x-priority": 70
+        },
+        "exp_30:23_value": {
+          "type": "boolean",
+          "title": "value (Boolean (Enable LoRA?))",
+          "description": "Boolean (Enable LoRA?) 的 value 参数",
+          "default": false,
+          "x-control": "toggle",
+          "x-category": "advanced",
+          "x-visibility": "hidden",
+          "x-agent": "suggest",
+          "x-priority": 500
+        },
+        "exp_30:24_value": {
+          "type": "boolean",
+          "title": "value (Boolean (Refine Prompt?))",
+          "description": "Boolean (Refine Prompt?) 的 value 参数",
+          "default": true,
+          "x-control": "toggle",
+          "x-category": "advanced",
+          "x-visibility": "hidden",
+          "x-agent": "suggest",
+          "x-priority": 500
+        },
+        "txt_30:27_string_b": {
+          "type": "string",
+          "title": "文本段 string_b (Concatenate Text (LoRA Trigger Word))",
+          "description": "工作流中 Concatenate Text (LoRA Trigger Word) 节点的 string_b 文本，可用于覆盖原始提示词",
+          "x-control": "input",
+          "default": "muted minimalist sketch style",
+          "x-category": "advanced",
+          "x-visibility": "advanced",
+          "x-agent": "suggest",
+          "x-priority": 70
+        }
+      }
+    },
+    "default_params": {},
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "description": "风格/触发词 (Text String (User Prompt))",
+          "x-handle": "text",
+          "x-role": "prompt",
+          "title": "风格/触发词 (Text String (User Prompt))",
+          "x-comfy-id": "txt_30:19"
+        },
+        "reference_images": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          },
+          "description": "参考图/垫图",
+          "x-handle": "image",
+          "x-slot": "reference_images"
+        }
+      },
+      "required": [
+        "prompt"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "image_url": {
+          "type": "string",
+          "format": "uri",
+          "x-handle": "image"
+        }
+      },
+      "required": [
+        "image_url"
+      ]
+    },
+    "workflow_id": "wf_4a19b2a2",
+    "workflow_hash": "55ead74f",
+    "workflow_exposed": [
+      {
+        "id": "exp_29_filename_prefix",
+        "node_id": "29",
+        "param_name": "filename_prefix",
+        "label": "filename_prefix (Save Image)",
+        "type": "text",
+        "required": false,
+        "default_value": "Krea2_turbo",
+        "description": "Save Image 的 filename_prefix 参数"
+      },
+      {
+        "id": "combo_49_aspect_ratio",
+        "node_id": "49",
+        "param_name": "aspect_ratio",
+        "label": "画面比例 (Resolution Selector)",
+        "type": "combo",
+        "required": false,
+        "default_value": "1:1 (Square)",
+        "description": "画面比例 下拉",
+        "options": [
+          "1:1 (Square)",
+          "2:3 (Portrait Photo)",
+          "3:2 (Photo)",
+          "3:4 (Portrait Standard)",
+          "4:3 (Standard)",
+          "9:16 (Portrait Widescreen)",
+          "16:9 (Widescreen)",
+          "21:9 (Ultrawide)"
+        ],
+        "choices": [
+          "1:1 (Square)",
+          "2:3 (Portrait Photo)",
+          "3:2 (Photo)",
+          "3:4 (Portrait Standard)",
+          "4:3 (Standard)",
+          "9:16 (Portrait Widescreen)",
+          "16:9 (Widescreen)",
+          "21:9 (Ultrawide)"
+        ]
+      },
+      {
+        "id": "num_49_megapixels",
+        "node_id": "49",
+        "param_name": "megapixels",
+        "label": "百万像素 (Resolution Selector)",
+        "type": "number",
+        "required": false,
+        "default_value": 1.0,
+        "description": "百万像素 0.5-4",
+        "min": 0.5,
+        "max": 4,
+        "step": 0.5
+      },
+      {
+        "id": "num_49_multiple",
+        "node_id": "49",
+        "param_name": "multiple",
+        "label": "倍数对齐 (Resolution Selector)",
+        "type": "number",
+        "required": false,
+        "default_value": 8,
+        "description": "分辨率倍数对齐",
+        "min": 1,
+        "max": 64,
+        "step": 1
+      },
+      {
+        "id": "num_30:5_batch_size",
+        "node_id": "30:5",
+        "param_name": "batch_size",
+        "label": "batch_size (Empty Latent Image)",
+        "type": "number",
+        "required": false,
+        "default_value": 1,
+        "description": "",
+        "min": 1,
+        "max": 4,
+        "step": 1
+      },
+      {
+        "id": "num_30:3_steps",
+        "node_id": "30:3",
+        "param_name": "steps",
+        "label": "采样步数 (KSampler)",
+        "type": "number",
+        "required": false,
+        "default_value": 8,
+        "description": "采样步数 4-60",
+        "min": 4,
+        "max": 60,
+        "step": 1
+      },
+      {
+        "id": "num_30:3_cfg",
+        "node_id": "30:3",
+        "param_name": "cfg",
+        "label": "CFG (KSampler)",
+        "type": "number",
+        "required": false,
+        "default_value": 1.0,
+        "description": "CFG 1-15",
+        "min": 1,
+        "max": 15,
+        "step": 0.5
+      },
+      {
+        "id": "combo_30:3_sampler_name",
+        "node_id": "30:3",
+        "param_name": "sampler_name",
+        "label": "采样器 (KSampler)",
+        "type": "combo",
+        "required": false,
+        "default_value": "euler",
+        "description": "采样器",
+        "options": [
+          "euler",
+          "euler_cfg_pp",
+          "euler_ancestral",
+          "euler_ancestral_cfg_pp",
+          "heun",
+          "heunpp2",
+          "exp_heun_2_x0",
+          "exp_heun_2_x0_sde",
+          "dpm_2",
+          "dpm_2_ancestral",
+          "lms",
+          "dpm_fast",
+          "dpm_adaptive",
+          "dpmpp_2s_ancestral",
+          "dpmpp_2s_ancestral_cfg_pp",
+          "dpmpp_sde",
+          "dpmpp_sde_gpu",
+          "dpmpp_2m",
+          "dpmpp_2m_cfg_pp",
+          "dpmpp_2m_sde",
+          "dpmpp_2m_sde_gpu",
+          "dpmpp_2m_sde_heun",
+          "dpmpp_2m_sde_heun_gpu",
+          "dpmpp_3m_sde",
+          "dpmpp_3m_sde_gpu",
+          "ddpm",
+          "lcm",
+          "ipndm",
+          "ipndm_v",
+          "deis",
+          "cfgpp_ud10_ab",
+          "res_multistep",
+          "res_multistep_cfg_pp",
+          "res_multistep_ancestral",
+          "res_multistep_ancestral_cfg_pp",
+          "gradient_estimation",
+          "gradient_estimation_cfg_pp",
+          "er_sde",
+          "seeds_2",
+          "seeds_3",
+          "sa_solver",
+          "sa_solver_pece",
+          "ddim",
+          "uni_pc",
+          "uni_pc_bh2"
+        ],
+        "choices": [
+          "euler",
+          "euler_cfg_pp",
+          "euler_ancestral",
+          "euler_ancestral_cfg_pp",
+          "heun",
+          "heunpp2",
+          "exp_heun_2_x0",
+          "exp_heun_2_x0_sde",
+          "dpm_2",
+          "dpm_2_ancestral",
+          "lms",
+          "dpm_fast",
+          "dpm_adaptive",
+          "dpmpp_2s_ancestral",
+          "dpmpp_2s_ancestral_cfg_pp",
+          "dpmpp_sde",
+          "dpmpp_sde_gpu",
+          "dpmpp_2m",
+          "dpmpp_2m_cfg_pp",
+          "dpmpp_2m_sde",
+          "dpmpp_2m_sde_gpu",
+          "dpmpp_2m_sde_heun",
+          "dpmpp_2m_sde_heun_gpu",
+          "dpmpp_3m_sde",
+          "dpmpp_3m_sde_gpu",
+          "ddpm",
+          "lcm",
+          "ipndm",
+          "ipndm_v",
+          "deis",
+          "cfgpp_ud10_ab",
+          "res_multistep",
+          "res_multistep_cfg_pp",
+          "res_multistep_ancestral",
+          "res_multistep_ancestral_cfg_pp",
+          "gradient_estimation",
+          "gradient_estimation_cfg_pp",
+          "er_sde",
+          "seeds_2",
+          "seeds_3",
+          "sa_solver",
+          "sa_solver_pece",
+          "ddim",
+          "uni_pc",
+          "uni_pc_bh2"
+        ]
+      },
+      {
+        "id": "combo_30:3_scheduler",
+        "node_id": "30:3",
+        "param_name": "scheduler",
+        "label": "调度器 (KSampler)",
+        "type": "combo",
+        "required": false,
+        "default_value": "simple",
+        "description": "调度器",
+        "options": [
+          "simple",
+          "sgm_uniform",
+          "karras",
+          "exponential",
+          "ddim_uniform",
+          "beta",
+          "normal",
+          "linear_quadratic",
+          "kl_optimal"
+        ],
+        "choices": [
+          "simple",
+          "sgm_uniform",
+          "karras",
+          "exponential",
+          "ddim_uniform",
+          "beta",
+          "normal",
+          "linear_quadratic",
+          "kl_optimal"
+        ]
+      },
+      {
+        "id": "num_30:3_denoise",
+        "node_id": "30:3",
+        "param_name": "denoise",
+        "label": "去噪 (KSampler)",
+        "type": "number",
+        "required": false,
+        "default_value": 1.0,
+        "description": "去噪 0-1",
+        "min": 0,
+        "max": 1,
+        "step": 0.05
+      },
+      {
+        "id": "combo_30:10_unet_name",
+        "node_id": "30:10",
+        "param_name": "unet_name",
+        "label": "底模 (Load Diffusion Model)",
+        "type": "combo",
+        "required": false,
+        "default_value": "krea2_turbo_fp8_scaled.safetensors",
+        "description": "底模/UNet，下拉选择",
+        "options": [
+          "MiniMax_H3_FL2VA_pruned_nvfp4.safetensors",
+          "MiniMax_H3_Ref2VA_pruned_nvfp4.safetensors",
+          "krea2GPTGrandPUSSYTruth_krea2GPT.safetensors",
+          "krea2_turbo_fp8_scaled.safetensors",
+          "krea2_turbo_nvfp4.safetensors",
+          "minimax_h3_fl2va_pruned_fp8_scaled.safetensors",
+          "minimax_h3_ref2va_pruned_fp8_scaled.safetensors",
+          "qwen_image_2.1_bf16.safetensors",
+          "qwen_image_2.1_int8_convrot.safetensors",
+          "风格化.safetensors"
+        ],
+        "choices": [
+          "MiniMax_H3_FL2VA_pruned_nvfp4.safetensors",
+          "MiniMax_H3_Ref2VA_pruned_nvfp4.safetensors",
+          "krea2GPTGrandPUSSYTruth_krea2GPT.safetensors",
+          "krea2_turbo_fp8_scaled.safetensors",
+          "krea2_turbo_nvfp4.safetensors",
+          "minimax_h3_fl2va_pruned_fp8_scaled.safetensors",
+          "minimax_h3_ref2va_pruned_fp8_scaled.safetensors",
+          "qwen_image_2.1_bf16.safetensors",
+          "qwen_image_2.1_int8_convrot.safetensors",
+          "风格化.safetensors"
+        ]
+      },
+      {
+        "id": "exp_30:11_clip_name",
+        "node_id": "30:11",
+        "param_name": "clip_name",
+        "label": "clip_name (Load CLIP)",
+        "type": "combo",
+        "required": false,
+        "default_value": "qwen3vl_4b_fp8_scaled.safetensors",
+        "description": "Load CLIP 的 clip_name 参数",
+        "options": [
+          "Huihui-Qwen3-VL-4B-Instruct-abliterated-fp8_scaled.safetensors",
+          "clip_l.safetensors",
+          "gemma4_e4b_it_fp8_scaled.safetensors",
+          "qwen3-vl-4b-heretic_nvfp4.safetensors",
+          "qwen3.5_9b_qwen_image_2.1_pe_t2i.int8_convrot.safetensors",
+          "qwen3vl_32b_heretic_minimax_h3_nvfp4.safetensors",
+          "qwen3vl_4b_fp8_scaled.safetensors",
+          "qwen3vl_8b_int8_convrot.safetensors",
+          "qwen_3_4b.safetensors",
+          "text_encoders\\ltx-2.3-22b-dev_embeddings_connectors.safetensors"
+        ],
+        "choices": [
+          "Huihui-Qwen3-VL-4B-Instruct-abliterated-fp8_scaled.safetensors",
+          "clip_l.safetensors",
+          "gemma4_e4b_it_fp8_scaled.safetensors",
+          "qwen3-vl-4b-heretic_nvfp4.safetensors",
+          "qwen3.5_9b_qwen_image_2.1_pe_t2i.int8_convrot.safetensors",
+          "qwen3vl_32b_heretic_minimax_h3_nvfp4.safetensors",
+          "qwen3vl_4b_fp8_scaled.safetensors",
+          "qwen3vl_8b_int8_convrot.safetensors",
+          "qwen_3_4b.safetensors",
+          "text_encoders\\ltx-2.3-22b-dev_embeddings_connectors.safetensors"
+        ]
+      },
+      {
+        "id": "exp_30:11_type",
+        "node_id": "30:11",
+        "param_name": "type",
+        "label": "type (Load CLIP)",
+        "type": "combo",
+        "required": false,
+        "default_value": "krea2",
+        "description": "Load CLIP 的 type 参数",
+        "options": [
+          "stable_diffusion",
+          "stable_cascade",
+          "sd3",
+          "stable_audio",
+          "mochi",
+          "ltxv",
+          "pixart",
+          "cosmos",
+          "lumina2",
+          "wan",
+          "hidream",
+          "chroma",
+          "ace",
+          "omnigen2",
+          "qwen_image",
+          "hunyuan_image",
+          "flux2",
+          "ovis",
+          "longcat_image",
+          "cogvideox",
+          "lens",
+          "pixeldit",
+          "ideogram4",
+          "boogu",
+          "krea2",
+          "joyimage",
+          "mage",
+          "minimax",
+          "yue2"
+        ],
+        "choices": [
+          "stable_diffusion",
+          "stable_cascade",
+          "sd3",
+          "stable_audio",
+          "mochi",
+          "ltxv",
+          "pixart",
+          "cosmos",
+          "lumina2",
+          "wan",
+          "hidream",
+          "chroma",
+          "ace",
+          "omnigen2",
+          "qwen_image",
+          "hunyuan_image",
+          "flux2",
+          "ovis",
+          "longcat_image",
+          "cogvideox",
+          "lens",
+          "pixeldit",
+          "ideogram4",
+          "boogu",
+          "krea2",
+          "joyimage",
+          "mage",
+          "minimax",
+          "yue2"
+        ]
+      },
+      {
+        "id": "exp_30:11_device",
+        "node_id": "30:11",
+        "param_name": "device",
+        "label": "device (Load CLIP)",
+        "type": "combo",
+        "required": false,
+        "default_value": "default",
+        "description": "Load CLIP 的 device 参数",
+        "options": [
+          "default",
+          "cpu"
+        ],
+        "choices": [
+          "default",
+          "cpu"
+        ]
+      },
+      {
+        "id": "combo_30:12_vae_name",
+        "node_id": "30:12",
+        "param_name": "vae_name",
+        "label": "VAE模型 (Load VAE)",
+        "type": "combo",
+        "required": false,
+        "default_value": "qwen_image_vae.safetensors",
+        "description": "VAE模型，下拉选择而非手填",
+        "options": [
+          ".cache\\huggingface\\download\\vae\\Wan2.1_VAE.pth",
+          ".cache\\huggingface\\download\\vae\\minimax_h3_audio_vae_fp32.safetensors",
+          ".cache\\huggingface\\download\\vae\\minimax_h3_video_vae_fp16.safetensors",
+          ".cache\\huggingface\\download\\vae\\qwen_image_2.1_vae_bf16.safetensors",
+          "ae.safetensors",
+          "qwen_image_vae.safetensors",
+          "vae\\ltx-2.3-22b-dev_audio_vae.safetensors",
+          "wan_2.1_vae.safetensors",
+          "pixel_space",
+          "vae\\ltx-2.3-22b-dev_video_vae.safetensors"
+        ],
+        "choices": [
+          ".cache\\huggingface\\download\\vae\\Wan2.1_VAE.pth",
+          ".cache\\huggingface\\download\\vae\\minimax_h3_audio_vae_fp32.safetensors",
+          ".cache\\huggingface\\download\\vae\\minimax_h3_video_vae_fp16.safetensors",
+          ".cache\\huggingface\\download\\vae\\qwen_image_2.1_vae_bf16.safetensors",
+          "ae.safetensors",
+          "qwen_image_vae.safetensors",
+          "vae\\ltx-2.3-22b-dev_audio_vae.safetensors",
+          "wan_2.1_vae.safetensors",
+          "pixel_space",
+          "vae\\ltx-2.3-22b-dev_video_vae.safetensors"
+        ]
+      },
+      {
+        "id": "combo_30:15_lora_name",
+        "node_id": "30:15",
+        "param_name": "lora_name",
+        "label": "LoRA模型 (Load LoRA)",
+        "type": "combo",
+        "required": false,
+        "default_value": "krea2_darkbrush.safetensors",
+        "description": "LoRA模型，下拉选择",
+        "options": [
+          "Krea2-四视图QuadView_krea2_v1.safetensors",
+          "Yoneyama_Mai_Krea2.safetensors",
+          "krea2_darkbrush.safetensors",
+          "krea2_style_reference.safetensors",
+          "minimax_h3_fl2v_turbo_4step_v0.1 (1).safetensors",
+          "minimax_h3_fl2v_turbo_4step_v0.1.safetensors",
+          "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors",
+          "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+          "minimax_h3_ref2v_turbo_4step_v0.1_bf16.safetensors"
+        ],
+        "choices": [
+          "Krea2-四视图QuadView_krea2_v1.safetensors",
+          "Yoneyama_Mai_Krea2.safetensors",
+          "krea2_darkbrush.safetensors",
+          "krea2_style_reference.safetensors",
+          "minimax_h3_fl2v_turbo_4step_v0.1 (1).safetensors",
+          "minimax_h3_fl2v_turbo_4step_v0.1.safetensors",
+          "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors",
+          "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+          "minimax_h3_ref2v_turbo_4step_v0.1_bf16.safetensors"
+        ]
+      },
+      {
+        "id": "num_30:15_strength_model",
+        "node_id": "30:15",
+        "param_name": "strength_model",
+        "label": "LoRA强度-模型 (Load LoRA)",
+        "type": "number",
+        "required": false,
+        "default_value": 0.8,
+        "description": "0-2",
+        "min": 0,
+        "max": 2,
+        "step": 0.05
+      },
+      {
+        "id": "exp_30:16_max_length",
+        "node_id": "30:16",
+        "param_name": "max_length",
+        "label": "max_length (Generate Text)",
+        "type": "number",
+        "required": false,
+        "default_value": 512,
+        "description": "Generate Text 的 max_length 参数"
+      },
+      {
+        "id": "exp_30:16_sampling_mode",
+        "node_id": "30:16",
+        "param_name": "sampling_mode",
+        "label": "sampling_mode (Generate Text)",
+        "type": "combo",
+        "required": false,
+        "default_value": "on",
+        "description": "Generate Text 的 sampling_mode 参数",
+        "options": [
+          "on",
+          "{'key': 'on', 'inputs': {'required': {'temperature': ['FLOAT', {'default': 0.7, 'min': 0.01, 'max': 2.0, 'step': 1e-06}], 'top_k': ['INT', {'default': 64, 'min': 0, 'max': 1000}], 'top_p': ['FLOAT', {'default': 0.95, 'min': 0.0, 'max': 1.0, 'step': 0.01}], 'min_p': ['FLOAT', {'default': 0.05, 'min': 0.0, 'max': 1.0, 'step': 0.01}], 'repetition_penalty': ['FLOAT', {'default': 1.05, 'min': 0.0, 'max': 5.0, 'step': 0.01}], 'seed': ['INT', {'default': 0, 'min': 0, 'max': 18446744073709551615}]}, 'optional': {'presence_penalty': ['FLOAT', {'default': 0.0, 'min': 0.0, 'max': 5.0, 'step': 0.01}]}}}",
+          "{'key': 'off', 'inputs': {'required': {}}}"
+        ],
+        "choices": [
+          "on",
+          "{'key': 'on', 'inputs': {'required': {'temperature': ['FLOAT', {'default': 0.7, 'min': 0.01, 'max': 2.0, 'step': 1e-06}], 'top_k': ['INT', {'default': 64, 'min': 0, 'max': 1000}], 'top_p': ['FLOAT', {'default': 0.95, 'min': 0.0, 'max': 1.0, 'step': 0.01}], 'min_p': ['FLOAT', {'default': 0.05, 'min': 0.0, 'max': 1.0, 'step': 0.01}], 'repetition_penalty': ['FLOAT', {'default': 1.05, 'min': 0.0, 'max': 5.0, 'step': 0.01}], 'seed': ['INT', {'default': 0, 'min': 0, 'max': 18446744073709551615}]}, 'optional': {'presence_penalty': ['FLOAT', {'default': 0.0, 'min': 0.0, 'max': 5.0, 'step': 0.01}]}}}",
+          "{'key': 'off', 'inputs': {'required': {}}}"
+        ]
+      },
+      {
+        "id": "exp_30:16_thinking",
+        "node_id": "30:16",
+        "param_name": "thinking",
+        "label": "thinking (Generate Text)",
+        "type": "boolean",
+        "required": false,
+        "default_value": true,
+        "description": "Generate Text 的 thinking 参数"
+      },
+      {
+        "id": "exp_30:16_use_default_template",
+        "node_id": "30:16",
+        "param_name": "use_default_template",
+        "label": "use_default_template (Generate Text)",
+        "type": "boolean",
+        "required": false,
+        "default_value": true,
+        "description": "Generate Text 的 use_default_template 参数"
+      },
+      {
+        "id": "exp_30:16_sampling_mode.temperature",
+        "node_id": "30:16",
+        "param_name": "sampling_mode.temperature",
+        "label": "sampling_mode.temperature (Generate Text)",
+        "type": "number",
+        "required": false,
+        "default_value": 0.7,
+        "description": "Generate Text 的 sampling_mode.temperature 参数"
+      },
+      {
+        "id": "exp_30:16_sampling_mode.top_k",
+        "node_id": "30:16",
+        "param_name": "sampling_mode.top_k",
+        "label": "sampling_mode.top_k (Generate Text)",
+        "type": "number",
+        "required": false,
+        "default_value": 64,
+        "description": "Generate Text 的 sampling_mode.top_k 参数"
+      },
+      {
+        "id": "exp_30:16_sampling_mode.top_p",
+        "node_id": "30:16",
+        "param_name": "sampling_mode.top_p",
+        "label": "sampling_mode.top_p (Generate Text)",
+        "type": "number",
+        "required": false,
+        "default_value": 0.95,
+        "description": "Generate Text 的 sampling_mode.top_p 参数"
+      },
+      {
+        "id": "exp_30:16_sampling_mode.min_p",
+        "node_id": "30:16",
+        "param_name": "sampling_mode.min_p",
+        "label": "sampling_mode.min_p (Generate Text)",
+        "type": "number",
+        "required": false,
+        "default_value": 0.05,
+        "description": "Generate Text 的 sampling_mode.min_p 参数"
+      },
+      {
+        "id": "exp_30:16_sampling_mode.repetition_penalty",
+        "node_id": "30:16",
+        "param_name": "sampling_mode.repetition_penalty",
+        "label": "sampling_mode.repetition_penalty (Generate Text)",
+        "type": "number",
+        "required": false,
+        "default_value": 1.05,
+        "description": "Generate Text 的 sampling_mode.repetition_penalty 参数"
+      },
+      {
+        "id": "exp_30:16_sampling_mode.seed",
+        "node_id": "30:16",
+        "param_name": "sampling_mode.seed",
+        "label": "sampling_mode.seed (Generate Text)",
+        "type": "number",
+        "required": false,
+        "default_value": 0,
+        "description": "Generate Text 的 sampling_mode.seed 参数"
+      },
+      {
+        "id": "exp_30:16_sampling_mode.presence_penalty",
+        "node_id": "30:16",
+        "param_name": "sampling_mode.presence_penalty",
+        "label": "sampling_mode.presence_penalty (Generate Text)",
+        "type": "number",
+        "required": false,
+        "default_value": 0,
+        "description": "Generate Text 的 sampling_mode.presence_penalty 参数"
+      },
+      {
+        "id": "txt_30:18",
+        "node_id": "30:18",
+        "param_name": "value",
+        "label": "风格/触发词 (Text String (System Prompt))",
+        "type": "text",
+        "required": false,
+        "default_value": "You are an expert prompt engineer for text-to-image models. Your task is to expand the user's prompt into a highly effective image-generation prompt.\n\nThink step by step about the request before writing the answer:\n- What is the subject and mood?\n- What visual styles, mediums, and lighting options would fit? Consider two or three alternatives and pick the one that best serves the caption.\n- What composition, framing, and grounded details will help the text-to-image model?\n\nThen output a single expanded prompt paragraph.\n\nFollow these rules strictly:\n1. **Faithfulness First:** Preserve all original subjects, actions, colors, and spatial relationships. Do not add new objects, props, characters, or animals unless the user clearly implies them.\n2. **Practical T2I Structure:** Write a prompt that a text-to-image model can parse cleanly. Group subjects with their own attributes and actions. Use grounded phrasing for poses, interactions, and spatial layout.\n3. **Style Planning Stays Internal:** Use your internal reasoning to choose style, medium, framing, and lighting. Do not emit planning tags or wrappers in the visible answer body.\n4. **Text Rendering:** If the user requests visible text, quotes, labels, or typography, specify the exact text clearly and wrap requested words in quotes.\n5. **Avoid Over-Specification:** Do not invent highly specific clothing, colors, materials, or scene details unless the input supports them.\n6. **Structure:** Write one cohesive paragraph after the thinking block. No bullets, JSON, or markdown.\n7. **Respect Existing Detail:** If the user's prompt is already detailed, lightly polish and finalize rather than heavily expanding — preserve their phrasing and direction.\n8. **Respect the Human Form:** Treat depictions of people with dignity. Assume clothing covers genitals and intimate anatomy.\n9. **Preserve User Medium:** When the user explicitly requests a medium (e.g. \"photo of\", \"photograph of\", \"illustration of\", \"painting of\", \"sketch of\", \"3D render of\"), honor it. Do not pivot to a different medium to avoid difficulty — match the user's stated intent.\n\nUser's Input:\n\n",
+        "description": "可在此输入额外的角色 LoRA 触发词或局部描述"
+      },
+      {
+        "id": "txt_30:19",
+        "node_id": "30:19",
+        "param_name": "value",
+        "label": "风格/触发词 (Text String (User Prompt))",
+        "type": "text",
+        "required": false,
+        "default_value": "A high-resolution, surreal digital illustration showing a human hand holding a martini glass. The image is overlaid with whimsical, expressive ink-style doodles, including a cartoon figure inside the glass, a drawn citrus wedge on the rim, and various abstract sketches and faces surrounding the glass against a clean, white background. The style seamlessly blends a realistic, lit photograph with loose, hand-drawn marker artistry, creating a playful and artistic juxtaposition.",
+        "description": "可在此输入额外的角色 LoRA 触发词或局部描述"
+      },
+      {
+        "id": "exp_30:23_value",
+        "node_id": "30:23",
+        "param_name": "value",
+        "label": "value (Boolean (Enable LoRA?))",
+        "type": "boolean",
+        "required": false,
+        "default_value": false,
+        "description": "Boolean (Enable LoRA?) 的 value 参数"
+      },
+      {
+        "id": "exp_30:24_value",
+        "node_id": "30:24",
+        "param_name": "value",
+        "label": "value (Boolean (Refine Prompt?))",
+        "type": "boolean",
+        "required": false,
+        "default_value": true,
+        "description": "Boolean (Refine Prompt?) 的 value 参数"
+      },
+      {
+        "id": "txt_30:27_string_b",
+        "node_id": "30:27",
+        "param_name": "string_b",
+        "label": "文本段 string_b (Concatenate Text (LoRA Trigger Word))",
+        "type": "text",
+        "required": false,
+        "default_value": "muted minimalist sketch style",
+        "description": "工作流中 Concatenate Text (LoRA Trigger Word) 节点的 string_b 文本，可用于覆盖原始提示词"
+      }
+    ],
+    "schema_version": 4,
+    "capabilities": [],
+    "transport": {
+      "method": "POST",
+      "url": "",
+      "headers": {},
+      "query": {},
+      "timeout": 1200
+    },
+    "headers": {},
+    "custom_headers": {},
+    "auth": {
+      "type": "none",
+      "header_name": "Authorization",
+      "query_name": "api_key",
+      "key_env": null,
+      "prefix": "Bearer ",
+      "has_key": false
+    },
+    "health_check": {
+      "url": null,
+      "method": "GET",
+      "expect_status": 200,
+      "test_payload": null
+    },
+    "doc_url": null,
+    "created_at": "2026-09-29T07:41:47.426469",
+    "updated_at": "2026-09-29T07:41:47.426648",
+    "language": "python",
+    "code_entry": "generate",
+    "code_timeout": 1200,
+    "trusted": false,
+    "has_code": false,
+    "code": ""
+  },
+  {
+    "id": "prov_76053ff7",
+    "name": "RunningHub 视频工作流 2103527148329140225",
+    "display_name": "RunningHub 视频工作流 2103527148329140225",
+    "kind": "video",
+    "provider_type": "code",
+    "supports_workflow": false,
+    "description": "由导演直接提供代码（python）",
+    "icon": "Zap",
+    "scope": "global",
+    "project_id": null,
+    "builtin": false,
+    "enabled": true,
+    "models": [],
+    "default_model": null,
+    "params_schema": {
+      "type": "object",
+      "properties": {
+        "workflow_id": {
+          "type": "string",
+          "title": "工作流ID",
+          "default": "2103527148329140225",
+          "description": "RunningHub 工作流 ID（/run/workflow/ 后的数字）",
+          "x-category": "layout",
+          "x-visibility": "basic",
+          "x-agent": "auto",
+          "x-priority": 10
+        },
+        "duration": {
+          "type": "integer",
+          "title": "时长(秒)",
+          "default": 5,
+          "minimum": 3,
+          "maximum": 15,
+          "description": "视频时长（需工作流存在对应节点时经 node_info_list 注入）",
+          "x-category": "motion",
+          "x-visibility": "basic",
+          "x-agent": "suggest",
+          "x-priority": 20
+        },
+        "instance_type": {
+          "type": "string",
+          "title": "实例类型",
+          "enum": [
+            "default",
+            "plus",
+            "ultra"
+          ],
+          "default": "default",
+          "description": "运行实例显存 24G/48G/84G",
+          "x-category": "advanced",
+          "x-visibility": "advanced",
+          "x-agent": "suggest",
+          "x-priority": 30
+        },
+        "node_info_list": {
+          "type": "string",
+          "title": "节点参数映射JSON",
+          "description": "nodeInfoList JSON 数组，逐节点覆盖工作流参数",
+          "x-category": "advanced",
+          "x-visibility": "advanced",
+          "x-agent": "manual",
+          "x-priority": 40
+        },
+        "prompt_node_id": {
+          "type": "string",
+          "title": "Prompt节点ID",
+          "description": "把 prompt 注入到该工作流节点 ID",
+          "x-category": "advanced",
+          "x-visibility": "advanced",
+          "x-agent": "manual",
+          "x-priority": 41
+        },
+        "prompt_field_name": {
+          "type": "string",
+          "title": "Prompt字段名",
+          "default": "text",
+          "description": "prompt 节点上的文本字段名",
+          "x-category": "advanced",
+          "x-visibility": "advanced",
+          "x-agent": "manual",
+          "x-priority": 42
+        },
+        "image_node_ids": {
+          "type": "string",
+          "title": "图像节点ID",
+          "description": "逗号分隔，顺序=首帧、参考图…（如 6,7）",
+          "x-category": "advanced",
+          "x-visibility": "advanced",
+          "x-agent": "manual",
+          "x-priority": 43
+        },
+        "image_field_name": {
+          "type": "string",
+          "title": "图像字段名",
+          "default": "image",
+          "description": "图像节点输入字段名",
+          "x-category": "advanced",
+          "x-visibility": "advanced",
+          "x-agent": "manual",
+          "x-priority": 44
+        },
+        "use_personal_queue": {
+          "type": "boolean",
+          "title": "个人独占队列",
+          "default": false,
+          "description": "usePersonalQueue，排队更久但不与他人争抢",
+          "x-category": "advanced",
+          "x-visibility": "advanced",
+          "x-agent": "suggest",
+          "x-priority": 50
+        },
+        "add_metadata": {
+          "type": "boolean",
+          "title": "写入元数据",
+          "default": false,
+          "description": "输出中添加工作流元数据",
+          "x-category": "advanced",
+          "x-visibility": "advanced",
+          "x-agent": "suggest",
+          "x-priority": 51
+        }
+      }
+    },
+    "default_params": {},
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "description": "运动/分镜提示词（需配置 prompt_node_id 才会注入节点）",
+          "x-handle": "text",
+          "x-role": "prompt"
+        },
+        "first_frame": {
+          "type": "string",
+          "format": "uri",
+          "description": "首帧图（需配置 image_node_ids 第一位）",
+          "x-handle": "image",
+          "x-slot": "first_frame"
+        },
+        "reference_images": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          },
+          "description": "参考图 URL 或 data URI（需配置 image_node_ids 后续位）",
+          "x-handle": "image",
+          "x-slot": "reference_images",
+          "maxItems": 8,
+          "minItems": 0
+        }
+      }
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "video_url": {
+          "type": "string",
+          "format": "uri",
+          "x-handle": "video"
+        }
+      },
+      "required": [
+        "video_url"
+      ]
+    },
+    "workflow_id": null,
+    "workflow_hash": null,
+    "workflow_exposed": null,
+    "schema_version": null,
+    "capabilities": [],
+    "transport": {
+      "method": "POST",
+      "url": "",
+      "headers": {},
+      "query": {},
+      "timeout": 1200
+    },
+    "headers": {},
+    "custom_headers": {},
+    "auth": {
+      "type": "bearer",
+      "header_name": "Authorization",
+      "query_name": "api_key",
+      "key_env": "CUSTOM_PROVIDER_prov_76053ff7",
+      "prefix": "Bearer ",
+      "has_key": true
+    },
+    "health_check": {
+      "url": null,
+      "method": "GET",
+      "expect_status": 200,
+      "test_payload": null
+    },
+    "doc_url": null,
+    "created_at": "2026-09-29T08:09:33.981019",
+    "updated_at": "2026-09-29T08:09:33.981332",
+    "language": "python",
+    "code_entry": "generate",
+    "code_timeout": 1200,
+    "trusted": false,
+    "has_code": true,
+    "code": "import httpx\nimport base64\nimport json\n\nAPI_BASE = \"https://www.runninghub.ai/openapi/v2\"\nQUERY_URL = API_BASE + \"/query\"\nUPLOAD_URL = API_BASE + \"/media/upload/binary\"\nDEFAULT_WORKFLOW_ID = \"2103527148329140225\"\nNON_TERMINAL = (\"CREATE\", \"QUEUED\", \"RUNNING\", \"PENDING\", \"SUBMITTED\")\nVIDEO_TYPES = (\"mp4\", \"webm\", \"mov\", \"mkv\", \"avi\")\n\n\ndef _pick(ctx, dyn, key, default=None):\n    v = ctx.get(key)\n    if v is None or (isinstance(v, str) and not v.strip()):\n        v = dyn.get(key) if dyn else None\n    if v is None or (isinstance(v, str) and not v.strip()):\n        return default\n    return v\n\n\ndef _to_bool(v, default=False):\n    if v is None:\n        return default\n    if isinstance(v, bool):\n        return v\n    return str(v).strip().lower() in (\"1\", \"true\", \"yes\", \"on\")\n\n\ndef _pick_url(results):\n    \"\"\"视频源：优先视频文件输出，兜底首项 URL\"\"\"\n    fallback = None\n    for item in results:\n        if not isinstance(item, dict):\n            continue\n        url = str(item.get(\"url\") or \"\").strip()\n        if not url:\n            continue\n        ot = str(item.get(\"outputType\") or \"\").lower()\n        if not fallback:\n            fallback = url\n        if ot in VIDEO_TYPES or \".mp4\" in url.lower() or \".webm\" in url.lower():\n            return url\n    return fallback\n\n\nasync def _upload(client, api_key, value, idx):\n    \"\"\"参考图三态归一：RunningHub 文件名透传 / data URI 解码上传 / http(s) 取字节上传\"\"\"\n    v = str(value or \"\").strip()\n    if not v or v == \"None\":\n        return None\n    if not (v.startswith(\"data:\") or v.startswith(\"http\")):\n        return v\n    if v.startswith(\"data:\"):\n        raw = base64.b64decode(v.split(\",\", 1)[1])\n        fname = f\"image{idx}.png\"\n        ctype = \"image/png\"\n    else:\n        resp = await client.get(v, timeout=120)\n        if resp.status_code >= 400:\n            raise RuntimeError(f\"参考图{idx}下载失败({resp.status_code}): {v[:120]}\")\n        raw = resp.content\n        ctype = resp.headers.get(\"content-type\", \"image/png\").split(\";\")[0] or \"image/png\"\n        ext = ctype.split(\"/\")[-1].replace(\"jpeg\", \"jpg\")\n        fname = f\"image{idx}.{ext}\"\n    # 上传只能 Bearer 头：带 Content-Type: application/json 会破坏 multipart 边界\n    r = await client.post(\n        UPLOAD_URL,\n        headers={\"Authorization\": f\"Bearer {api_key}\"},\n        files={\"file\": (fname, raw, ctype)},\n        timeout=300,\n    )\n    j = r.json() if r.content else {}\n    if not isinstance(j, dict) or j.get(\"code\") != 0:\n        raise RuntimeError(f\"参考图{idx}上传失败: {(j.get('message') if isinstance(j, dict) else '') or str(j)[:300]}\")\n    d = j.get(\"data\") or {}\n    return d.get(\"download_url\") or d.get(\"fileName\")\n\n\nasync def generate(ctx, api):\n    dyn = ctx.get(\"dynamic_inputs\") or {}\n    api_key = str(ctx.get(\"api_key\") or \"\").strip()\n    if not api_key and isinstance(api, dict) and callable(api.get(\"get_api_key\")):\n        api_key = str(api.get(\"get_api_key\")() or \"\").strip()\n    if not api_key:\n        raise RuntimeError(\"缺少 RunningHub API Key（请在生成源配置里填入 Key 后重试）\")\n    headers = {\"Authorization\": f\"Bearer {api_key}\", \"Content-Type\": \"application/json\"}\n\n    task_id = str(ctx.get(\"task_id\") or dyn.get(\"task_id\") or \"\").strip()\n    prompt = str(ctx.get(\"prompt\") or dyn.get(\"prompt\") or \"\").strip()\n\n    async with httpx.AsyncClient(timeout=600) as client:\n        # —— 查询分支：单次秒回，绝不 sleep 轮询 ——\n        if task_id and not prompt:\n            q = await client.post(QUERY_URL, headers=headers, json={\"taskId\": task_id})\n            if q.status_code >= 400:\n                raise RuntimeError(f\"查询失败({q.status_code}): {q.text[:300]}\")\n            qj = q.json() or {}\n            status = str(qj.get(\"status\") or \"\").upper()\n            if status in NON_TERMINAL:\n                return {\"video_url\": None, \"task_id\": task_id, \"status\": status or \"RUNNING\"}\n            if status == \"SUCCESS\":\n                url = _pick_url(qj.get(\"results\") or [])\n                if not url:\n                    raise RuntimeError(f\"任务成功但无结果URL: {str(qj)[:300]}\")\n                return {\"video_url\": url}\n            err = str(qj.get(\"errorMessage\") or \"\") or str(qj.get(\"errorCode\") or \"\")\n            raise RuntimeError(f\"任务失败({status or 'FAILED'}): {err[:300]}\")\n\n        # —— 提交分支 ——\n        workflow_id = str(_pick(ctx, dyn, \"workflow_id\", DEFAULT_WORKFLOW_ID)).strip() or DEFAULT_WORKFLOW_ID\n        if not workflow_id.isdigit():\n            raise ValueError(f\"workflow_id 需为纯数字 ID，当前: {workflow_id[:64]}\")\n        instance_type = str(_pick(ctx, dyn, \"instance_type\", \"default\")).strip() or \"default\"\n        if instance_type not in (\"default\", \"plus\", \"ultra\"):\n            instance_type = \"default\"\n\n        # nodeInfoList：显式 JSON 映射为基础\n        node_list = []\n        raw_nl = str(_pick(ctx, dyn, \"node_info_list\", \"\") or \"\").strip()\n        if raw_nl:\n            try:\n                parsed = json.loads(raw_nl)\n            except Exception:\n                raise ValueError('node_info_list 需为合法 JSON 数组，如 [{\"nodeId\":\"28\",\"fieldName\":\"text\",\"fieldValue\":\"hi\"}]')\n            if not isinstance(parsed, list):\n                raise ValueError(\"node_info_list 需为 JSON 数组（list）\")\n            node_list = [n for n in parsed if isinstance(n, dict)]\n\n        # prompt 注入\n        prompt_node_id = str(_pick(ctx, dyn, \"prompt_node_id\", \"\") or \"\").strip()\n        if prompt and prompt_node_id:\n            pfield = str(_pick(ctx, dyn, \"prompt_field_name\", \"text\") or \"text\").strip() or \"text\"\n            node_list = [n for n in node_list\n                         if not (str(n.get(\"nodeId\")) == prompt_node_id and str(n.get(\"fieldName\")) == pfield)]\n            node_list.append({\"nodeId\": prompt_node_id, \"fieldName\": pfield,\n                              \"fieldValue\": prompt, \"description\": \"prompt\"})\n        elif prompt and not prompt_node_id and not node_list:\n            raise ValueError(\"已传入 prompt 但未配置节点映射：请设置 prompt_node_id（prompt 写入的工作流节点 ID）与 prompt_field_name\")\n\n        # 首帧 + 参考图注入（按 image_node_ids 顺序对应 first_frame → reference_images）\n        refs = []\n        ff = dyn.get(\"first_frame\") or ctx.get(\"first_frame\")\n        if ff and str(ff).strip():\n            refs.append(ff)\n        more = dyn.get(\"reference_images\") or ctx.get(\"reference_images\") or []\n        if isinstance(more, str):\n            more = [more]\n        refs.extend([r for r in more if str(r or \"\").strip()])\n        if refs:\n            img_ids_raw = str(_pick(ctx, dyn, \"image_node_ids\", \"\") or \"\").strip()\n            if not img_ids_raw:\n                raise ValueError(\"已挂首帧/参考图但未配置 image_node_ids（逗号分隔的图像节点 ID，顺序=首帧、参考图…）\")\n            img_ids = [s.strip() for s in img_ids_raw.split(\",\") if s.strip()]\n            if len(refs) > len(img_ids):\n                raise ValueError(f\"输入图 {len(refs)} 张多于 image_node_ids 节点数 {len(img_ids)}，请补全节点 ID\")\n            ifield = str(_pick(ctx, dyn, \"image_field_name\", \"image\") or \"image\").strip() or \"image\"\n            for i, (val, nid) in enumerate(zip(refs, img_ids)):\n                uploaded = await _upload(client, api_key, val, i)\n                if uploaded:\n                    node_list.append({\"nodeId\": nid, \"fieldName\": ifield,\n                                      \"fieldValue\": uploaded, \"description\": f\"image{i + 1}\"})\n\n        body = {\n            \"addMetadata\": _to_bool(_pick(ctx, dyn, \"add_metadata\", False), False),\n            \"nodeInfoList\": node_list,\n            \"instanceType\": instance_type,\n            \"usePersonalQueue\": \"true\" if _to_bool(_pick(ctx, dyn, \"use_personal_queue\", False), False) else \"false\",\n        }\n        run_url = f\"{API_BASE}/run/workflow/{workflow_id}\"\n        r = await client.post(run_url, headers=headers, json=body)\n        if r.status_code >= 400:\n            raise RuntimeError(f\"提交失败({r.status_code}): {r.text[:300]}\")\n        rj = r.json() or {}\n        new_id = str(rj.get(\"taskId\") or \"\").strip()\n        status = str(rj.get(\"status\") or \"SUBMITTED\").upper()\n        if not new_id:\n            raise RuntimeError(f\"未返回 taskId: {str(rj)[:300]}\")\n        if status in (\"FAILED\", \"CANCEL\", \"CANCELLED\"):\n            raise RuntimeError(f\"任务失败({status}): {str(rj.get('errorMessage') or rj.get('errorCode') or '')[:300]}\")\n        return {\"video_url\": None, \"task_id\": new_id, \"status\": status}\n# PARAMS_SCHEMA: {\"type\":\"object\",\"properties\":{\"workflow_id\":{\"type\":\"string\",\"title\":\"工作流ID\",\"default\":\"2103527148329140225\",\"description\":\"RunningHub 工作流 ID（/run/workflow/ 后的数字）\",\"x-category\":\"layout\",\"x-visibility\":\"basic\",\"x-agent\":\"auto\",\"x-priority\":10},\"duration\":{\"type\":\"integer\",\"title\":\"时长(秒)\",\"default\":5,\"minimum\":3,\"maximum\":15,\"description\":\"视频时长（需工作流存在对应节点时经 node_info_list 注入）\",\"x-category\":\"motion\",\"x-visibility\":\"basic\",\"x-agent\":\"suggest\",\"x-priority\":20},\"instance_type\":{\"type\":\"string\",\"title\":\"实例类型\",\"enum\":[\"default\",\"plus\",\"ultra\"],\"default\":\"default\",\"description\":\"运行实例显存 24G/48G/84G\",\"x-category\":\"advanced\",\"x-visibility\":\"advanced\",\"x-agent\":\"suggest\",\"x-priority\":30},\"node_info_list\":{\"type\":\"string\",\"title\":\"节点参数映射JSON\",\"description\":\"nodeInfoList JSON 数组，逐节点覆盖工作流参数\",\"x-category\":\"advanced\",\"x-visibility\":\"advanced\",\"x-agent\":\"manual\",\"x-priority\":40},\"prompt_node_id\":{\"type\":\"string\",\"title\":\"Prompt节点ID\",\"description\":\"把 prompt 注入到该工作流节点 ID\",\"x-category\":\"advanced\",\"x-visibility\":\"advanced\",\"x-agent\":\"manual\",\"x-priority\":41},\"prompt_field_name\":{\"type\":\"string\",\"title\":\"Prompt字段名\",\"default\":\"text\",\"description\":\"prompt 节点上的文本字段名\",\"x-category\":\"advanced\",\"x-visibility\":\"advanced\",\"x-agent\":\"manual\",\"x-priority\":42},\"image_node_ids\":{\"type\":\"string\",\"title\":\"图像节点ID\",\"description\":\"逗号分隔，顺序=首帧、参考图…（如 6,7）\",\"x-category\":\"advanced\",\"x-visibility\":\"advanced\",\"x-agent\":\"manual\",\"x-priority\":43},\"image_field_name\":{\"type\":\"string\",\"title\":\"图像字段名\",\"default\":\"image\",\"description\":\"图像节点输入字段名\",\"x-category\":\"advanced\",\"x-visibility\":\"advanced\",\"x-agent\":\"manual\",\"x-priority\":44},\"use_personal_queue\":{\"type\":\"boolean\",\"title\":\"个人独占队列\",\"default\":false,\"description\":\"usePersonalQueue，排队更久但不与他人争抢\",\"x-category\":\"advanced\",\"x-visibility\":\"advanced\",\"x-agent\":\"suggest\",\"x-priority\":50},\"add_metadata\":{\"type\":\"boolean\",\"title\":\"写入元数据\",\"default\":false,\"description\":\"输出中添加工作流元数据\",\"x-category\":\"advanced\",\"x-visibility\":\"advanced\",\"x-agent\":\"suggest\",\"x-priority\":51}}}"
   }
 ]

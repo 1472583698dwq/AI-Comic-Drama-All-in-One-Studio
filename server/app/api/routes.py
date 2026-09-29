@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+import time
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
@@ -366,12 +367,45 @@ async def generate_speech(req: TTSGenerateRequest):
 # 图片生成（动态Provider + 工作流）
 # ============================================================
 
+# 图片源健康探测短缓存：弹窗/面板每次打开都要列表，串行网络探测会叠加成几十秒；
+# 并行 + 单源 2.5s 上限 + 20s TTL 缓存，健康点的新鲜度对 UI 足够，列表不再被探测阻塞。
+_IMAGE_HEALTH_CACHE: Dict[str, Any] = {"ts": 0.0, "data": {}}
+
+
+async def _image_health_cached(reg, ttl: float = 20.0, per_probe: float = 2.5) -> Dict[str, Any]:
+    now = time.time()
+    cached = _IMAGE_HEALTH_CACHE.get("data") or {}
+    if cached and (now - float(_IMAGE_HEALTH_CACHE.get("ts") or 0.0)) < ttl:
+        return cached
+
+    async def _probe(pid: str, prov):
+        try:
+            ok = await asyncio.wait_for(prov.check_health(), timeout=per_probe)
+        except Exception:
+            ok = False
+        try:
+            configured = bool(prov.is_configured())
+        except Exception:
+            configured = False
+        return pid, {"ok": bool(ok), "configured": configured}
+
+    jobs = []
+    for pid in reg.list_ids():
+        prov = reg.get(pid)
+        if prov is not None:
+            jobs.append(_probe(pid, prov))
+    results = dict(await asyncio.gather(*jobs)) if jobs else {}
+    _IMAGE_HEALTH_CACHE["ts"] = now
+    _IMAGE_HEALTH_CACHE["data"] = results
+    return results
+
+
 @router.get("/images/providers")
-async def list_image_providers(production_only: bool = False):
-    """列出所有图片Providers及健康状态"""
+async def list_image_providers(production_only: bool = False, with_health: bool = True):
+    """列出所有图片Providers及健康状态（with_health=false 用于只需列表的场景，零网络探测）"""
     reg = get_image_registry()
     providers = reg.list_providers()
-    health = await reg.check_health_all()
+    health = (await _image_health_cached(reg)) if with_health else {}
     from app.providers import verification
     for p in providers:
         p["health"] = health.get(p["id"], {})

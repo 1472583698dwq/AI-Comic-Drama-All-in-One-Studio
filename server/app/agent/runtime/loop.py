@@ -355,6 +355,8 @@ class AgentLoop:
             tools = self._tool_schemas()
             step_index = 0
             bad_args_streak = 0
+            trunc_streak = 0
+            overflow_compacts = 0
             while True:
                 if step_index >= safety_cap:
                     reason = "max-steps"
@@ -391,9 +393,30 @@ class AgentLoop:
                         "finish_reason": reply.finish_reason,
                     })
                     if truncated:
-                        reason = "max-tokens"
+                        trunc_streak += 1
+                        # 长思考/长参数吃满输出上限（reasoning 也计入 completion_tokens）时
+                        # finish_reason=length：截断的工具调用一律丢弃（JSON 不可信），
+                        # 但不因此结束回合——明确要求"停止展开思考、参数从简、立刻给出可解析调用"后继续下一步，
+                        # 让同一回合内仍能产出执行指令；连续多次截断才终止，避免死循环。
                         if reply.tool_calls:
-                            await self._emit({"event": "error", "message": "模型输出达到长度上限，工具调用被截断已丢弃；请精简参数或拆分任务后重试。"})
+                            await self._emit({"event": "error", "message": "模型输出达到长度上限，工具调用被截断已丢弃；正在要求模型精简参数后重试…"})
+                        if trunc_streak <= 2:
+                            await self._emit({"event": "agent_thinking", "message": f"输出达到长度上限被截断（第 {trunc_streak} 次），正压缩思考继续执行…"})
+                            self.session.append(E.USER_MESSAGE, {
+                                "text": (
+                                    "[系统] 你上一条回复在思考/输出中途因输出长度上限被截断，"
+                                    "其中不完整的工具调用已全部丢弃，尚未产出可执行指令。"
+                                    "请立刻直接行动：不要复述思考、不要解释，优先输出下一步工具调用；"
+                                    "参数务必从简且一次给出完整合法 JSON（长文档/长文本拆成多次调用分步提交）。"
+                                ),
+                                "source": "system", "form": "notice",
+                            })
+                            continue
+                        reason = "max-tokens"
+                        final_text = ("模型输出连续达到长度上限，未能产出完整执行指令；"
+                                      "请到「设置 → 系统」调大「单次回复最大 token」（AGENT_MAX_TOKENS），"
+                                      "或把任务拆小后重试。")
+                        await self._emit({"event": "error", "message": final_text})
                         break
                     if tool_calls:
                         # 参数被截断/非法（多为输出超长）：绝不执行，也绝不把非法 JSON 回传上游，
@@ -428,11 +451,17 @@ class AgentLoop:
                     reason = "aborted"
                     raise
                 except LLMConfigError as e:
+                    if await self._recover_context_overflow(e, overflow_compacts):
+                        overflow_compacts += 1
+                        continue
                     reason = "error"
                     self.session.append(E.ASSISTANT_ATTEMPT, {"error": str(e)[:500], "terminal": True})
                     await self._emit({"event": "error", "message": str(e)})
                     break
                 except Exception as e:
+                    if await self._recover_context_overflow(e, overflow_compacts):
+                        overflow_compacts += 1
+                        continue
                     reason = "error"
                     self.session.append(E.ASSISTANT_ATTEMPT, {"error": str(e)[:500], "terminal": True})
                     await self._emit({"event": "error", "message": f"模型调用失败: {e}"})
@@ -543,10 +572,27 @@ class AgentLoop:
             ]
         return schemas
 
+    async def _recover_context_overflow(self, err: Exception, used: int) -> bool:
+        """上游报"上下文超限"时的应急恢复：强制压缩历史后由调用方重试本步（每回合最多 2 次）。
+
+        默认窗口 800k、压缩阈值 80%（约 64 万 token 才压缩），常规会话不会触发压缩；
+        仅当模型真实窗口小于阈值、上游明确拒绝时才走这里兜底——既不"压得太狠"，
+        也不至于把长会话直接打死。
+        """
+        try:
+            from app.agent.runtime.compaction import is_context_overflow_error, maybe_compact
+            if used >= 2 or not is_context_overflow_error(err):
+                return False
+            await maybe_compact(self.session, emit=self._emit, force=True)
+            await self._emit({"event": "agent_thinking", "message": "模型上下文超限，已压缩历史后重试本步…"})
+            return True
+        except Exception:
+            return False
+
     async def _call_model(self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]]) -> AssistantReply:
         retries = _env_int("AGENT_LLM_RETRIES", 2)
-        timeout = float(_env_int("AGENT_LLM_TIMEOUT", 300))
-        max_tokens = _env_int("AGENT_MAX_TOKENS", 8192)
+        timeout = float(_env_int("AGENT_LLM_TIMEOUT", 600))
+        max_tokens = _env_int("AGENT_MAX_TOKENS", 32768)
         last_err: Optional[Exception] = None
 
         for attempt in range(1, retries + 2):

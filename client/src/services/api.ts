@@ -124,8 +124,10 @@ export const apiService = {
     return await res.json();
   },
 
-  async listImageProviders(): Promise<any> {
-    const res = await fetch(`${API_BASE_URL}/images/providers`);
+  async listImageProviders(opts?: { withHealth?: boolean }): Promise<any> {
+    // 默认带健康点（并行+短缓存，后端已提速）；生成弹窗等只看列表的场景传 withHealth:false 零探测秒开
+    const q = opts?.withHealth === false ? '?with_health=false' : '';
+    const res = await fetch(`${API_BASE_URL}/images/providers${q}`);
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },

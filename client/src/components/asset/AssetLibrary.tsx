@@ -5,7 +5,6 @@ import { useProjectStore } from '../../stores/useProjectStore';
 import { useProjectListStore } from '../../stores/useProjectListStore';
 import { apiService } from '../../services/api';
 import { AssetCategory } from '../../types';
-import { WorkflowInspectorModal } from '../workflow/WorkflowInspectorModal';
 import { AutoRatioMedia } from '../ui/AutoRatioMedia';
 import { confirmAsync, toast } from '../../stores/useDialogStore';
 import { useEscapeClose } from '../../hooks/useEscapeClose';
@@ -45,25 +44,24 @@ export const AssetLibrary: React.FC = () => {
   const [dragOver, setDragOver] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
 
-  const [genForm, setGenForm] = useState({ name: '', prompt: '', negative_prompt: '', category: 'character' as AssetCategory, provider: 'comfyui', workflow_id: '', aspect_ratio: '1:1', seed: '', tags: '' });
-  // 生成源系统：所选源的完整定义（params_schema/workflow_id/provider_type）+ 用户改动过的源参数 + 通用参考图
+  const [genForm, setGenForm] = useState({ name: '', prompt: '', negative_prompt: '', category: 'character' as AssetCategory, provider: '', aspect_ratio: '1:1', seed: '', tags: '' });
+  // 生成源系统：所选源的完整定义（params_schema/provider_type）+ 用户改动过的源参数 + 通用参考图
   const [provDetail, setProvDetail] = useState<any>(null);
   const [genParams, setGenParams] = useState<Record<string, any>>({});
   const [showAdvParams, setShowAdvParams] = useState(false);
   const [refImage, setRefImage] = useState('');
+  // 派生源参数：工作流分析清单（inspect exposed_inputs，含 图片/文本/数值/下拉 全类型）
+  const [wfInputs, setWfInputs] = useState<any[]>([]);
   /** 打开生成弹窗：事件驱动重置本会话的源参数/高级参数/参考图（避免在 effect 里同步 setState） */
   const openGenerate = () => {
     setGenParams({});
     setShowAdvParams(false);
     setRefImage('');
+    setWfInputs([]);
     setShowGenerate(true);
   };
   const [generating, setGenerating] = useState(false);
   const [providers, setProviders] = useState<any[]>([]);
-  const [workflows, setWorkflows] = useState<any[]>([]);
-  const [inspectWfId, setInspectWfId] = useState('');
-  const [workflowExposedInputs, setWorkflowExposedInputs] = useState<any[]>([]);
-  const [dynamicInputs, setDynamicInputs] = useState<Record<string, any>>({});
 
   const [showEdit, setShowEdit] = useState(false);
   useEscapeClose(showEdit, () => setShowEdit(false));
@@ -80,33 +78,23 @@ export const AssetLibrary: React.FC = () => {
 
   useEffect(() => {
     if (showGenerate) {
-      // 全量加载所有图片生成源（内置 API / 自定义代码源 / ComfyUI 及其派生源）
-      apiService.listImageProviders().then(d => setProviders(d.providers || d || [])).catch(() => {});
-      apiService.listWorkflows('all').then(d => {
-        const wfs = d.workflows || d || [];
-        setWorkflows(wfs);
-        apiService.getConfig().then(cfg => {
-          const defaultWf = cfg?.COMFYUI_DEFAULT_IMAGE_WORKFLOW || '';
-          const targetWf = (defaultWf && wfs.some((w: any) => w.id === defaultWf)) ? defaultWf : (wfs.length > 0 ? wfs[0].id : '');
-          if (targetWf && !genForm.workflow_id) {
-            setGenForm(prev => ({
-              ...prev,
-              workflow_id: targetWf,
-              provider: 'comfyui',
-            }));
-            loadWorkflowInputs(targetWf);
-          }
-        }).catch(() => {
-          if (wfs.length > 0 && !genForm.workflow_id) {
-            setGenForm(prev => ({ ...prev, workflow_id: wfs[0].id, provider: 'comfyui' }));
-            loadWorkflowInputs(wfs[0].id);
-          }
+      // 只走生成源系统：全量加载图片源（内置 API / 自定义代码源 / 派生源），裸 comfyui 工作流壳不进本界面
+      // withHealth:false —— 弹窗只消费列表/生产可用标记，跳过后端健康探测，秒开
+      apiService.listImageProviders({ withHealth: false }).then(d => {
+        const list = d.providers || d || [];
+        setProviders(list);
+        // 自动选中首个可用源
+        setGenForm(prev => {
+          if (prev.provider && prev.provider !== 'comfyui' && list.some((p: any) => p.id === prev.provider)) return prev;
+          const first = list.find((p: any) => p.production_ready !== false && p.id !== 'comfyui')
+            || list.find((p: any) => p.production_ready !== false);
+          return first ? { ...prev, provider: first.id } : prev;
         });
       }).catch(() => {});
     }
   }, [showGenerate]);
 
-  // 生成源切换 → 拉取完整定义（含真实 params_schema / 绑定的 workflow_id）
+  // 生成源切换 → 拉取完整定义（含真实 params_schema）
   useEffect(() => {
     if (!showGenerate || !genForm.provider) return;
     let dead = false;
@@ -118,31 +106,23 @@ export const AssetLibrary: React.FC = () => {
   // 只认属于当前所选源的详情（异步在途/弹窗重开时的旧值一律忽略，避免串源显示）
   const liveDetail = provDetail && provDetail.id === genForm.provider ? provDetail : null;
 
-  const loadWorkflowInputs = (wfId: string) => {
-    if (!wfId) {
-      setWorkflowExposedInputs([]);
-      setDynamicInputs({});
-      return;
-    }
-    apiService.inspectWorkflow(wfId).then(res => {
-      const exposed = res?.data?.exposed_inputs || res?.exposed_inputs || [];
-      setWorkflowExposedInputs(exposed);
-      const defaults: Record<string, any> = {};
-      exposed.forEach((exp: any) => {
-        if (exp.default_value !== undefined && exp.default_value !== '') {
-          defaults[exp.id || exp.node_id] = exp.default_value;
-        }
-      });
-      setDynamicInputs(prev => ({ ...defaults, ...prev }));
-    }).catch(() => {
-      setWorkflowExposedInputs([]);
-      setDynamicInputs({});
-    });
-  };
-
+  // 派生源参数清单：inspect 工作流得到的分析暴露项（含图片/文本/数值/下拉全类型，即旧弹窗「专属输入项」口径）
   useEffect(() => {
-    loadWorkflowInputs(genForm.workflow_id);
-  }, [genForm.workflow_id]);
+    if (!showGenerate) return;
+    const wfId = (liveDetail && liveDetail.provider_type === 'comfyui') ? liveDetail.workflow_id : '';
+    if (!wfId) return;
+    let dead = false;
+    apiService.inspectWorkflow(wfId)
+      .then((r: any) => {
+        if (dead) return;
+        const d = r?.data || r || {};
+        // 优先用户白名单 exposed_inputs；为空时用工作流真实输入 detected_inputs（源未配置白名单时的展示口径）
+        const list = (d.exposed_inputs && d.exposed_inputs.length) ? d.exposed_inputs : (d.detected_inputs || []);
+        setWfInputs(Array.isArray(list) ? list : []);
+      })
+      .catch(() => { if (!dead) setWfInputs([]); });
+    return () => { dead = true; };
+  }, [showGenerate, liveDetail]);
 
   const refreshStats = () => apiService.getAssetStats().then(setStats).catch(()=>{});
 
@@ -216,16 +196,37 @@ export const AssetLibrary: React.FC = () => {
     } catch (e: any) { alert(e.message || '导入失败'); } finally { setImporting(false); }
   };
 
-  // ── 生成源系统派生值（内置 API / 自定义代码源 / ComfyUI 工作流 统一口径）──
-  const selProv: any = providers.find((p: any) => p.id === genForm.provider) || null;
-  const provProps: Record<string, any> = liveDetail?.params_schema?.properties || selProv?.params_schema?.properties || {};
+  // ── 生成源系统派生值：一切参数按所选源的真实声明显示，源没有的字段一律不出现 ──
+  const genProviders: any[] = providers.filter((p: any) => p.id !== 'comfyui');
+  const selProv: any = genProviders.find((p: any) => p.id === genForm.provider) || null;
+  const caps: any = liveDetail || selProv || {};
+  // 工作流派生源：params_schema 会被后端注入通用默认（480p/720p 等假参数），一律改用
+  // workflow_exposed（用户白名单 = 该源真实启用的参数；空 = 此源只吃提示词，无任何参数）
+  const isWfSrc = liveDetail ? liveDetail.provider_type === 'comfyui' : caps.supports_workflow === true;
+  const exposed: any[] = isWfSrc ? (liveDetail?.workflow_exposed || []) : [];
+  const provProps: Record<string, any> = isWfSrc
+    ? {}
+    : (liveDetail?.params_schema?.properties || selProv?.params_schema?.properties || {});
+  // 比例 / 种子 / 负提示词：仅当源真实声明（派生源一律不显示——真实参数全部走 exposed）
+  const hasAspect = !isWfSrc && !!(provProps.aspect_ratio || caps.supports_aspect_ratio);
+  const hasSeed = !isWfSrc && !!(provProps.seed || caps.supports_seed);
+  const hasNegative = !isWfSrc && !!(provProps.negative_prompt || caps.supports_negative_prompt);
   // 比例枚举：源真实 schema 优先（出网护栏按 enum 校验），其次 capabilities，最后通用档
-  const aspectEnum: string[] = provProps.aspect_ratio?.enum || selProv?.supports_aspect_ratio || ['1:1', '9:16', '16:9', '3:4', '4:3'];
-  const isWorkflowPick = genForm.provider === 'comfyui';  // 仅内置 ComfyUI 需要选工作流；派生源已绑定 workflow_id
+  const aspectEnum: string[] = provProps.aspect_ratio?.enum || caps.supports_aspect_ratio || ['1:1', '9:16', '16:9', '3:4', '4:3'];
+  // 参考图/垫图（通用单图位）：仅代码源与内置源按 input_schema 图槽显示；
+  // 派生源的图片是「多个节点图片槽」，在参数区按 exposed 逐槽渲染（见 wfParamEntries），不走通用位
+  const inputProps: Record<string, any> = isWfSrc
+    ? {}
+    : (liveDetail?.input_schema?.properties || selProv?.input_schema?.properties || {});
+  const hasRefImage = !isWfSrc && Object.entries(inputProps).some(([k, d]: [string, any]) =>
+    d?.['x-handle'] === 'image' || (((d?.format === 'uri') || d?.items?.format === 'uri') && !/audio|video/i.test(String(d?.['x-handle'] || k))));
   const provLabel = liveDetail?.display_name || liveDetail?.name || selProv?.display_name || selProv?.name || genForm.provider || '未选择';
-  // 专属渲染区跳过的键（比例/种子/负提示词/提示词/参考图/工作流已有专属 UI）
+  // 派生源参数 = 工作流分析清单（inspect 全类型：图片/文本/数值/下拉；空时回退白名单暴露项）
+  const wfParamEntries: any[] = (wfInputs.length ? wfInputs : exposed)
+    .filter((e: any) => e && ['image', 'number', 'combo', 'text', 'boolean'].includes(String(e.type)));
+  // 其余源参数 = params_schema（比例/种子/负提示词/提示词/参考图等已有专属 UI 的键跳过）
   const SKIP_PARAM_KEYS = new Set(['aspect_ratio', 'seed', 'negative_prompt', 'prompt', 'text', 'workflow_id', 'reference_images', 'task_id', 'style_preset']);
-  const paramEntries = (Object.entries(provProps) as Array<[string, any]>)
+  const paramEntries = isWfSrc ? [] : (Object.entries(provProps) as Array<[string, any]>)
     .filter(([k, def]) => !SKIP_PARAM_KEYS.has(k) && ['string', 'integer', 'number', 'boolean'].includes(String(def?.type)))
     .sort((a, b) => ((a[1]?.['x-priority'] ?? 999) - (b[1]?.['x-priority'] ?? 999)));
   const isVis = (def: any, want: 'basic' | 'advanced') => {
@@ -237,32 +238,31 @@ export const AssetLibrary: React.FC = () => {
   const advParamEntries = paramEntries.filter(([, def]) => isVis(def, 'advanced'));
 
   const handleGenerate = async () => {
-    if (!genForm.name.trim() || !genForm.prompt.trim()) { alert('请填写名称与提示词'); return; }
+    if (!genForm.name.trim() || (!isWfSrc && !genForm.prompt.trim())) { alert(isWfSrc ? '请填写素材名称' : '请填写名称与提示词'); return; }
     const provider = genForm.provider || '';
     if (!provider) { alert('请选择生成源'); return; }
-    if (isWorkflowPick && !genForm.workflow_id) { alert('请选择一个 ComfyUI 工作流'); return; }
     setGenerating(true);
     try {
+      // 通用参考图 → dynamic_inputs.reference_images（仅源声明了图槽才发送；代码源 ctx.reference_images）
       let dyn: Record<string, any> | undefined;
-      // ComfyUI 工作流模式：提示词自动映射到工作流主文本槽位
-      if (isWorkflowPick) {
-        let mapped: Record<string, any> = Object.keys(dynamicInputs).length > 0 ? { ...dynamicInputs } : {};
-        const promptText = genForm.prompt.trim();
-        const candidates = workflowExposedInputs.filter((exp: any) => exp.type === 'text');
-        if (candidates.length > 0) {
-          const mainExp = candidates.find((e: any) => /user|用户|主.*提示|文本段.*string_b/i.test(e.label + e.param_name)) || candidates.find((e: any) => e.param_name === 'string_b' || e.param_name === 'value') || candidates[0];
-          if (mainExp) {
-            const key = mainExp.id || mainExp.node_id;
-            const curVal = mapped[key];
-            if (!curVal || (typeof curVal === 'string' && curVal.trim() === '') || curVal === mainExp.default_value) {
-              mapped[key] = promptText;
-            }
+      if (hasRefImage && refImage) dyn = { reference_images: [refImage] };
+      // 派生源：提示词自动映射工作流主文本槽（用户已显式填写的槽位不覆盖）
+      if (isWfSrc) {
+        const texts = wfParamEntries.filter((e: any) => e.type === 'text');
+        let main: any = null;
+        if (texts.length > 0) {
+          main = texts.find((e: any) => /user|用户|主.*提示|文本段.*string_b/i.test(`${e.label || ''}${e.param_name || ''}`))
+            || texts.find((e: any) => ['prompt', 'value', 'text', 'string'].includes(String(e.param_name || '').toLowerCase()) || String(e.param_name || '').startsWith('string_'))
+            || texts[0];
+        }
+        if (main) {
+          const mk = String(main.id || main.node_id || '');
+          const cur = genParams[mk];
+          if (mk && (!cur || (typeof cur === 'string' && cur.trim() === '') || cur === main.default_value)) {
+            dyn = { ...(dyn || {}), [mk]: genForm.prompt.trim() };
           }
         }
-        if (Object.keys(mapped).length) dyn = mapped;
       }
-      // 通用参考图 → dynamic_inputs.reference_images（代码源 ctx.reference_images / 派生源 img 槽位映射）
-      if (refImage) dyn = { ...(dyn || {}), reference_images: [refImage] };
       // 源参数：只发送用户显式改过的（空值剔除，不发默认值，避免与源真实 API 不符）
       const params: Record<string, any> = { ...genParams };
       for (const k of Object.keys(params)) if (params[k] === '' || params[k] == null) delete params[k];
@@ -274,19 +274,18 @@ export const AssetLibrary: React.FC = () => {
         prompt: genForm.prompt.trim(),
         category: genForm.category,
         provider,
-        workflow_id: isWorkflowPick ? genForm.workflow_id : undefined,
-        negative_prompt: genForm.negative_prompt.trim() || undefined,
-        aspect_ratio: aspectEnum.includes(genForm.aspect_ratio) ? genForm.aspect_ratio : (aspectEnum[0] || '1:1'),
-        seed: genForm.seed !== '' && !Number.isNaN(Number(genForm.seed)) ? Number(genForm.seed) : undefined,
+        negative_prompt: hasNegative && genForm.negative_prompt.trim() ? genForm.negative_prompt.trim() : undefined,
+        aspect_ratio: hasAspect ? (aspectEnum.includes(genForm.aspect_ratio) ? genForm.aspect_ratio : (aspectEnum[0] || '1:1')) : undefined,
+        seed: hasSeed && genForm.seed !== '' && !Number.isNaN(Number(genForm.seed)) ? Number(genForm.seed) : undefined,
         params: Object.keys(params).length ? params : undefined,
         tags: genForm.tags || undefined,
-        dynamic_inputs: dyn && Object.keys(dyn).length ? dyn : undefined,
+        dynamic_inputs: dyn,
         project_id: (effScope === 'project' && activePid) ? activePid : undefined,
         scope: effScope,
       } as any);
       setShowGenerate(false);
-      setGenForm({ name: '', prompt: '', negative_prompt: '', category: 'character', provider: 'comfyui', workflow_id: '', aspect_ratio: '1:1', seed: '', tags: '' });
-      setDynamicInputs({});
+      // 保留所选生成源，清空内容类字段
+      setGenForm(prev => ({ ...prev, name: '', prompt: '', negative_prompt: '', category: 'character', aspect_ratio: '1:1', seed: '', tags: '' }));
       setGenParams({});
       setRefImage('');
       if (res?.asset) { selectAsset(res.asset.id); setDetailAsset(res.asset); }
@@ -911,7 +910,7 @@ export const AssetLibrary: React.FC = () => {
               <h3 className="text-sm font-bold text-white flex items-center space-x-2"><Wand2 className="w-4 h-4 text-violet-400" /><span>AI 生成素材</span><span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-300 border border-violet-500/20">入库</span></h3>
               <button onClick={()=>setShowGenerate(false)} className="text-gray-400 hover:text-white"><X className="w-4 h-4" /></button>
             </div>
-            <p className="text-[11px] text-gray-500 -mt-2">支持全部图片生成源：内置 API / 自定义代码源 / ComfyUI 工作流，所选源的可用参数会自动展开。</p>
+            <p className="text-[11px] text-gray-500 -mt-2">完全走生成源系统：内置 API / 自定义代码源 / 派生源，参数按所选源的真实 API 自动展开，不再选择工作流。</p>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-gray-300">名称 *</label>
@@ -924,16 +923,21 @@ export const AssetLibrary: React.FC = () => {
                 </select>
               </div>
             </div>
+            {!isWfSrc && (
             <div>
               <label className="text-xs text-gray-300">提示词 Prompt *</label>
               <textarea value={genForm.prompt} onChange={e=>setGenForm({...genForm, prompt:e.target.value})} rows={3} placeholder="英文提示词，如：ancient temple in snow mountain, cinematic lighting, ultra detailed" className="mt-1 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs font-mono text-white" />
             </div>
+            )}
+            {isWfSrc && (
+            <p className="text-[11px] text-gray-500 bg-surface-secondary/40 border border-border rounded-xl px-3 py-2">本生成源的提示词直接填在下方「生成源参数」的文本槽中（按工作流真实入口映射，无需额外提示词框）。</p>
+            )}
 
             {/* 生成源选择：全部图片源（内置 / 代码源 / ComfyUI） */}
             <div>
               <div className="flex items-center justify-between">
                 <label className="text-xs text-gray-300">生成源 *</label>
-                <span className="text-[10px] text-gray-500">{providers.filter((p:any)=>p.production_ready!==false).length}/{providers.length || '—'} 可用</span>
+                <span className="text-[10px] text-gray-500">{genProviders.filter((p:any)=>p.production_ready!==false).length}/{genProviders.length || '—'} 可用</span>
               </div>
               <select
                 value={genForm.provider}
@@ -943,11 +947,12 @@ export const AssetLibrary: React.FC = () => {
                   // 切源即重置源参数与高级参数显隐（事件驱动，不进 effect）
                   setGenParams({});
                   setShowAdvParams(false);
+                  setWfInputs([]);
                 }}
                 className="mt-1 w-full bg-surface-secondary border border-brand/40 rounded-xl px-3 py-2 text-xs text-white focus:border-brand"
               >
                 <option value="">— 请选择生成源 —</option>
-                {providers.map((p: any) => (
+                {genProviders.map((p: any) => (
                   <option key={p.id} value={p.id} disabled={p.production_ready === false}>
                     {(p.display_name || p.name || p.id)}
                     {p.provider_type === 'code' ? ' · 代码源' : p.provider_type === 'comfyui' ? ' · ComfyUI' : ' · 内置'}
@@ -955,178 +960,34 @@ export const AssetLibrary: React.FC = () => {
                   </option>
                 ))}
               </select>
-              {!isWorkflowPick && liveDetail?.workflow_id && (
-                <div className="text-[10px] text-gray-500 mt-1">已绑定工作流：{liveDetail.workflow_id}</div>
-              )}
-              {isWorkflowPick && (
-                <div className="text-[10px] text-gray-500 mt-1">工作流模式：请选择下方工作流；其余源按其真实 API 参数生成</div>
-              )}
             </div>
-            {isWorkflowPick && (
-            <div>
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-semibold text-white">工作流（ComfyUI） *</label>
-                  {genForm.workflow_id && (
-                    <button
-                      type="button"
-                      onClick={() => setInspectWfId(genForm.workflow_id)}
-                      className="text-[10px] text-accent-blue hover:text-blue-400 hover:underline flex items-center gap-0.5"
-                    >
-                      <span>⚙️ 参数配置与诊断</span>
-                    </button>
-                  )}
-                </div>
-                <select
-                  value={genForm.workflow_id}
-                  onChange={e => {
-                    const wfId = e.target.value;
-                    setGenForm(prev => ({
-                      ...prev,
-                      workflow_id: wfId,
-                    }));
-                  }}
-                  className="mt-1 w-full bg-surface-secondary border border-brand/40 rounded-xl px-3 py-2 text-xs text-white focus:border-brand"
-                >
-                  <option value="">— 请选择工作流（必填）—</option>
-                  {workflows.map((w: any) => <option key={w.id} value={w.id}>{w.name || w.id} {w.source==='external'?'·外部':''}</option>)}
-                </select>
-              </div>
-            )}
 
-            {/* Dynamic Exposed Inputs Section */}
-            {isWorkflowPick && workflowExposedInputs.length > 0 && (
-              <div className="bg-surface-secondary/70 border border-brand/30 rounded-xl p-3.5 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-brand-light flex items-center gap-1.5">
-                    <span>⭐️ 该工作流专属输入项 ({workflowExposedInputs.length})</span>
-                  </span>
-                  <span className="text-[10px] text-gray-400">已自适应匹配工作流内部节点</span>
-                </div>
-
-                <div className="space-y-3">
-                  {workflowExposedInputs.map((exp: any) => {
-                    const key = exp.id || exp.node_id;
-                    const val = dynamicInputs[key];
-                    return (
-                      <div key={key} className="space-y-1 text-xs">
-                        <div className="flex items-center justify-between">
-                          <label className="text-gray-300 font-medium flex items-center gap-1">
-                            <span>{exp.label || exp.param_name}</span>
-                            {exp.required && <span className="text-red-400">*</span>}
-                          </label>
-                          <span className="text-[10px] text-gray-500 font-mono">
-                            #{exp.node_id} · {exp.type === 'image' ? '垫图' : exp.type === 'text' ? '文本' : exp.type}
-                          </span>
-                        </div>
-
-                        {exp.type === 'image' ? (
-                          <div className="flex items-center gap-3">
-                            {val ? (
-                              <AutoRatioMedia
-                                src={resolveUrl(val) || ''}
-                                alt="Preview"
-                                fallbackAspect="1/1"
-                                maxHeight={56}
-                                className="rounded-lg border border-brand group shrink-0 bg-surface-secondary"
-                              >
-                                <button
-                                  type="button"
-                                  onClick={() => setDynamicInputs(p => ({ ...p, [key]: '' }))}
-                                  className="absolute inset-0 bg-surface/85 opacity-0 group-hover:opacity-100 text-white flex items-center justify-center text-[10px] transition"
-                                >
-                                  ✕ 移除
-                                </button>
-                              </AutoRatioMedia>
-                            ) : null}
-
-                            <div className="flex-1 flex items-center gap-2">
-                              <label className="flex-1 border border-dashed border-border hover:border-brand rounded-lg p-2.5 text-center cursor-pointer bg-surface/50 text-[11px] text-gray-300 hover:text-white transition flex items-center justify-center gap-1.5">
-                                <input
-                                  type="file"
-                                  accept="image/*"
-                                  className="hidden"
-                                  onChange={e => {
-                                    const f = e.target.files?.[0];
-                                    if (f) {
-                                      const reader = new FileReader();
-                                      reader.onload = () => {
-                                        setDynamicInputs(p => ({ ...p, [key]: reader.result }));
-                                      };
-                                      reader.readAsDataURL(f);
-                                    }
-                                  }}
-                                />
-                                <Upload className="w-3.5 h-3.5 text-brand" />
-                                <span>{val ? '更换垫图 / 参考图' : '📁 上传垫图 / 角色参考图'}</span>
-                              </label>
-
-                              {assets.length > 0 && (
-                                <select
-                                  onChange={e => {
-                                    if (e.target.value) {
-                                      setDynamicInputs(p => ({ ...p, [key]: e.target.value }));
-                                    }
-                                  }}
-                                  className="bg-surface border border-border rounded-lg px-2 py-2 text-[11px] text-gray-400 focus:outline-none focus:border-brand"
-                                >
-                                  <option value="">从素材库选...</option>
-                                  {assets.map((a: any) => (
-                                    <option key={a.id} value={a.file_url || a.thumb_url}>
-                                      {a.name}
-                                    </option>
-                                  ))}
-                                </select>
-                              )}
-                            </div>
-                          </div>
-                        ) : exp.type === 'number' ? (
-                          <input
-                            type="number"
-                            value={val ?? ''}
-                            onChange={e =>
-                              setDynamicInputs(p => ({ ...p, [key]: parseFloat(e.target.value) }))
-                            }
-                            placeholder={exp.description || '输入数值'}
-                            className="w-full bg-surface border border-border rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-brand font-mono"
-                          />
-                        ) : (
-                          <textarea
-                            rows={2}
-                            value={val ?? ''}
-                            onChange={e =>
-                              setDynamicInputs(p => ({ ...p, [key]: e.target.value }))
-                            }
-                            placeholder={exp.description || `输入 ${exp.label}`}
-                            className="w-full bg-surface border border-border rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-brand font-sans resize-none"
-                          />
-                        )}
-                        {exp.description && (
-                          <p className="text-[10px] text-gray-500">{exp.description}</p>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* 通用参数：比例 / 种子 / 负提示词 / 参考图（对所有生成源生效） */}
+            {/* 通用参数：仅显示所选源真实声明的字段（派生源不显示——其参数全部在下方按暴露白名单渲染） */}
+            {(hasAspect || hasSeed || hasNegative) && (
             <div className="grid grid-cols-3 gap-3">
+              {hasAspect && (
               <div>
                 <label className="text-xs text-gray-300">比例</label>
                 <select value={aspectEnum.includes(genForm.aspect_ratio) ? genForm.aspect_ratio : (aspectEnum[0] || '1:1')} onChange={e=>setGenForm({...genForm, aspect_ratio:e.target.value})} className="mt-1 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white">
                   {aspectEnum.map(v => <option key={v} value={v}>{v}</option>)}
                 </select>
               </div>
+              )}
+              {hasSeed && (
               <div>
                 <label className="text-xs text-gray-300">种子（可选）</label>
                 <input type="number" value={genForm.seed} onChange={e=>setGenForm({...genForm, seed:e.target.value})} placeholder="留空随机" className="mt-1 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white font-mono" />
               </div>
+              )}
+              {hasNegative && (
               <div>
                 <label className="text-xs text-gray-300">负提示词（可选）</label>
                 <input value={genForm.negative_prompt} onChange={e=>setGenForm({...genForm, negative_prompt:e.target.value})} placeholder="不想要的元素" className="mt-1 w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white" />
               </div>
+              )}
             </div>
+            )}
+            {hasRefImage && (
             <div>
               <label className="text-xs text-gray-300">参考图 / 垫图（可选）</label>
               <div className="mt-1 flex items-center gap-2">
@@ -1139,19 +1000,103 @@ export const AssetLibrary: React.FC = () => {
               </div>
               {refImage && <img src={refImage} alt="参考图" className="mt-1.5 h-14 rounded-lg border border-border object-cover" />}
             </div>
+            )}
 
-            {/* 生成源专属参数：按所选源的 params_schema 动态渲染（仅发送用户显式改过的值） */}
-            {paramEntries.length > 0 && (
+            {/* 生成源专属参数：派生源按工作流分析清单渲染（含图片/文本/数值/下拉全类型），其余源按 params_schema */}
+            {(isWfSrc ? wfParamEntries.length : paramEntries.length) > 0 && (
               <div className="bg-surface-secondary/60 border border-border rounded-xl p-3 space-y-2.5">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-gray-200">生成源参数 · {provLabel}</span>
-                  {advParamEntries.length > 0 && (
+                  {isWfSrc ? (
+                    <span className="text-[10px] text-gray-400">源声明 {wfParamEntries.length} 项</span>
+                  ) : advParamEntries.length > 0 && (
                     <button type="button" onClick={()=>setShowAdvParams(v=>!v)} className="text-[10px] text-gray-400 hover:text-white">
                       {showAdvParams ? '收起高级参数' : `高级参数 (${advParamEntries.length})`}
                     </button>
                   )}
                 </div>
-                {[...basicParamEntries, ...(showAdvParams ? advParamEntries : [])].map(([key, def]) => {
+                {isWfSrc ? (
+                <div className="grid grid-cols-2 gap-x-3 gap-y-2.5">
+                  {wfParamEntries.map((exp: any) => {
+                    const key = String(exp.id || exp.node_id || '');
+                    const title = exp.label || exp.param_name || key;
+                    const val = genParams[key] ?? '';
+                    const clear = () => setGenParams(prev => { const n = { ...prev }; delete n[key]; return n; });
+                    const setVal = (v: any) => setGenParams(prev => ({ ...prev, [key]: v }));
+                    const rowCls = 'flex items-center justify-between gap-2';
+                    const lblCls = 'text-[11px] text-gray-300 shrink-0 max-w-[45%] truncate';
+                    const titleAttr = `源节点 #${exp.node_id} · ${exp.param_name || ''}`;
+                    if (exp.type === 'image') {
+                      const libOpts = (assets || []).filter((a: any) => a.file_url && a.category !== 'text');
+                      const src = String(val || '');
+                      const preview = src.startsWith('/') ? resolveUrl(src) : src;
+                      return (
+                        <div key={key} className="col-span-2 space-y-1" title={titleAttr}>
+                          <div className="flex items-center justify-between">
+                            <label className="text-[11px] text-gray-300 truncate" style={{ maxWidth: '70%' }}>{title}</label>
+                            <span className="text-[10px] text-gray-500">图片槽</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {val ? (
+                              <div className="relative shrink-0">
+                                <img src={preview} alt="" className="h-12 rounded-lg border border-border object-cover" />
+                                <button type="button" onClick={clear} className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-surface border border-border text-gray-400 hover:text-white text-[9px] leading-none" title="移除">×</button>
+                              </div>
+                            ) : null}
+                            <label className="flex-1 border border-dashed border-border hover:border-brand rounded-lg p-1.5 text-center cursor-pointer bg-surface/50 text-[11px] text-gray-300 hover:text-white transition flex items-center justify-center gap-1.5">
+                              <input type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (!f) return; const r = new FileReader(); r.onload = () => setVal(String(r.result || '')); r.readAsDataURL(f); e.target.value = ''; }} />
+                              <Upload className="w-3.5 h-3.5 text-brand" />
+                              <span>{val ? '更换' : '上传图片'}</span>
+                            </label>
+                            <select onChange={e => { if (e.target.value) setVal(e.target.value); e.target.value = ''; }} className="bg-surface border border-border rounded-lg px-2 py-1.5 text-[11px] text-gray-400 focus:outline-none focus:border-brand max-w-[120px]">
+                              <option value="">素材库选…</option>
+                              {libOpts.map((a: any) => <option key={a.id} value={a.file_url || a.thumb_url}>{a.name}</option>)}
+                            </select>
+                          </div>
+                        </div>
+                      );
+                    }
+                    if (exp.type === 'number') {
+                      return (
+                        <div key={key} className={rowCls} title={titleAttr}>
+                          <label className={lblCls}>{title}</label>
+                          <input type="number" value={val === '' ? '' : val} onChange={e => { const v = e.target.value; if (v === '') clear(); else setVal(Number(v)); }} placeholder={exp.default_value != null ? String(exp.default_value) : '默认'} className="flex-1 max-w-[110px] bg-surface border border-border rounded-lg px-2 py-1.5 text-[11px] text-white font-mono focus:outline-none focus:border-brand" />
+                        </div>
+                      );
+                    }
+                    if (exp.type === 'combo' && Array.isArray(exp.options) && exp.options.length > 0) {
+                      return (
+                        <div key={key} className={rowCls} title={titleAttr}>
+                          <label className={lblCls}>{title}</label>
+                          <select value={String(val)} onChange={e => { const v = e.target.value; if (v === '') clear(); else setVal(v); }} className="flex-1 max-w-[150px] bg-surface border border-border rounded-lg px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-brand">
+                            <option value="">默认{exp.default_value != null && exp.default_value !== '' ? `（${exp.default_value}）` : ''}</option>
+                            {exp.options.map((o: any) => <option key={String(o)} value={String(o)}>{String(o)}</option>)}
+                          </select>
+                        </div>
+                      );
+                    }
+                    if (exp.type === 'boolean') {
+                      return (
+                        <div key={key} className={rowCls} title={titleAttr}>
+                          <label className={lblCls}>{title}</label>
+                          <select value={val === '' ? '' : String(val)} onChange={e => { const v = e.target.value; if (v === '') clear(); else setVal(v === 'true'); }} className="flex-1 max-w-[150px] bg-surface border border-border rounded-lg px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-brand">
+                            <option value="">默认{exp.default_value != null && exp.default_value !== '' ? `（${exp.default_value}）` : ''}</option>
+                            <option value="true">是</option>
+                            <option value="false">否</option>
+                          </select>
+                        </div>
+                      );
+                    }
+                    // text（及无 options 的 combo 兜底）→ 文本输入；留空时提交阶段自动把提示词填进主文本槽
+                    return (
+                      <div key={key} className="col-span-2 space-y-1" title={titleAttr}>
+                        <label className="text-[11px] text-gray-300 truncate block">{title}</label>
+                        <textarea rows={2} value={val === '' ? '' : String(val)} onChange={e => { const v = e.target.value; if (v === '') clear(); else setVal(v); }} placeholder={exp.default_value != null && exp.default_value !== '' ? String(exp.default_value) : (exp.description || `输入 ${title}`)} className="w-full bg-surface border border-border rounded-lg px-2 py-1.5 text-[11px] text-white resize-none focus:outline-none focus:border-brand" />
+                      </div>
+                    );
+                  })}
+                </div>
+                ) : [...basicParamEntries, ...(showAdvParams ? advParamEntries : [])].map(([key, def]) => {
                   const title = def?.title || def?.description || key;
                   const typ = def?.type;
                   const val = genParams[key] ?? '';
@@ -1219,34 +1164,13 @@ export const AssetLibrary: React.FC = () => {
               <button onClick={()=>setShowGenerate(false)} className="px-4 py-2 rounded-xl bg-surface-secondary border border-border text-xs text-white">取消</button>
               <button
                 onClick={handleGenerate}
-                disabled={generating || !genForm.provider || (isWorkflowPick && !genForm.workflow_id)}
+                disabled={generating || !genForm.provider}
                 className="px-5 py-2 rounded-xl bg-gradient-to-r from-violet-600 to-brand text-white text-xs font-bold disabled:opacity-40 flex items-center space-x-1.5"
-                title={!genForm.provider ? '请先选择生成源' : (isWorkflowPick && !genForm.workflow_id) ? '请先选择工作流' : `用「${provLabel}」生成并入库`}
+                title={!genForm.provider ? '请先选择生成源' : `用「${provLabel}」生成并入库`}
               >{generating? <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span>生成中…</span></> : <><Sparkles className="w-3.5 h-3.5" /><span>生成并入库</span></>}</button>
             </div>
           </div>
         </div>
-      )}
-
-      {inspectWfId && (
-        <WorkflowInspectorModal
-          workflowId={inspectWfId}
-          isOpen={!!inspectWfId}
-          onClose={() => setInspectWfId('')}
-          onSaved={() => {
-            apiService.listWorkflows('all').then(d => setWorkflows(d.workflows || d || [])).catch(() => {});
-            loadWorkflowInputs(inspectWfId);
-          }}
-          onDeleted={(deletedId) => {
-            setWorkflows(prev => prev.filter((w: any) => w.id !== deletedId));
-            if (genForm.workflow_id === deletedId) {
-              setGenForm(prev => ({ ...prev, workflow_id: '' }));
-              setWorkflowExposedInputs([]);
-              setDynamicInputs({});
-            }
-            apiService.listWorkflows('all').then(d => setWorkflows(d.workflows || d || [])).catch(() => {});
-          }}
-        />
       )}
     </div>
   );

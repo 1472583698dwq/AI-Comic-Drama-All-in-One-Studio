@@ -21,6 +21,25 @@ _SUMMARY_SYSTEM = (
     "失败原因与未完成事项、下一步待办。不要编造。只输出摘要正文。"
 )
 
+# 上游"上下文超限"类错误特征：命中则强制压缩历史后重试本步（与配额/限流错误区分开）
+_CONTEXT_OVERFLOW_PHRASES = (
+    "context length", "context_length", "maximum context", "max context",
+    "context limit", "too many tokens", "tokens in the messages", "prompt is too long",
+    "input is too long", "reduce the length", "maximum number of tokens",
+    "上下文长度", "上下文超限", "输入过长", "长度超限",
+)
+
+
+def is_context_overflow_error(err: Any) -> bool:
+    """判断异常是否为"上下文超限"（强制压缩后重试的触发条件）。"""
+    s = f"{type(err).__name__}: {err}".lower()
+    if any(p in s for p in _CONTEXT_OVERFLOW_PHRASES):
+        return True
+    # 兜底：必须同时提到 context/上下文 且带超限语义，避免把配额/限流误判为超限
+    if ("context" in s or "上下文" in s):
+        return any(w in s for w in ("exceed", "too long", "limit", "length", "超", "过长"))
+    return False
+
 
 def _shadow_info(session) -> tuple[Set[int], Dict[int, str]]:
     shadowed: Set[int] = set()
@@ -137,10 +156,11 @@ def _transcript_of(session, surface: List[Dict[str, Any]], cut: int, limit_chars
     return text[:limit_chars]
 
 
-async def maybe_compact(session, emit=None) -> Optional[Dict[str, Any]]:
-    """压力超阈值时摘要旧历史；失败不阻塞主流程（返回 None）。"""
+async def maybe_compact(session, emit=None, force: bool = False) -> Optional[Dict[str, Any]]:
+    """压力超阈值时摘要旧历史；force=True 时跳过阈值检查（上游报上下文超限后的应急压缩）。
+    失败不阻塞主流程（返回 None）。"""
     try:
-        if not should_compact(session):
+        if not force and not should_compact(session):
             return None
         window = context_window()
         try:

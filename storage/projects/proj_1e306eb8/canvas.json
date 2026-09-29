@@ -49,22 +49,29 @@
           "data": {
             "prompt": "",
             "duration": 5,
-            "provider_id": "prov_d76c351f",
-            "provider": "prov_d76c351f",
+            "provider_id": "prov_76053ff7",
+            "provider": "prov_76053ff7",
             "params": {
+              "workflow_id": "2103527148329140225",
               "duration": 5,
-              "aspect_ratio": "9:16 (Portrait Widescreen)",
-              "instance_type": "default"
+              "instance_type": "default",
+              "prompt_field_name": "text",
+              "image_field_name": "image",
+              "use_personal_queue": false,
+              "add_metadata": false
             },
             "provider_params": {
+              "workflow_id": "2103527148329140225",
               "duration": 5,
-              "aspect_ratio": "9:16 (Portrait Widescreen)",
-              "instance_type": "default"
+              "instance_type": "default",
+              "prompt_field_name": "text",
+              "image_field_name": "image",
+              "use_personal_queue": false,
+              "add_metadata": false
             },
             "_polling": false,
-            "reference_images": [
-              "/storage/assets/ast_24895c5a/original.png"
-            ]
+            "reference_images": [],
+            "skill_id": "text_to_video"
           },
           "measured": {
             "width": 360,
@@ -106,10 +113,27 @@
           },
           "selected": false,
           "dragging": false
+        },
+        {
+          "id": "video_1790603332008_1",
+          "type": "video",
+          "position": {
+            "x": 971.5133885290772,
+            "y": 560.1861171574999
+          },
+          "data": {
+            "prompt": "",
+            "duration": 5
+          },
+          "measured": {
+            "width": 360,
+            "height": 405
+          },
+          "selected": false
         }
       ],
       "edges": [],
-      "updated_at": "2026-09-28 17:04:54"
+      "updated_at": "2026-09-29 08:14:56"
     },
     "cv_mtpeb9n6": {
       "name": "画布2",
