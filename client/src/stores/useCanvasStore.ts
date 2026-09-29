@@ -18,11 +18,21 @@ interface CanvasStore {
   selectedNodeId: string | null;
   activeSkillId: string | null;
   canvasAssets: CanvasAssetItem[];
+  /**
+   * 已「加入会话」的节点 id —— 用户右键节点显式加入，表示"接下来这轮我要让 Agent
+   * 针对它做操作"。发送消息时会把这些节点的完整定义随上下文交给 LLM，
+   * 让它知道「这个节点」到底指谁（否则模型只能靠画布摘要猜）。
+   */
+  agentFocusNodeIds: string[];
   setFromFlow: (nodes: any[], edges: any[]) => void;
   setSelectedNodeId: (id: string | null) => void;
   setActiveSkillId: (skillId: string | null) => void;
   updateNodeData: (id: string, patch: Record<string, any>) => void;
   getSummary: () => string;
+  addAgentFocusNode: (id: string) => void;
+  removeAgentFocusNode: (id: string) => void;
+  toggleAgentFocusNode: (id: string) => void;
+  clearAgentFocusNodes: () => void;
 }
 
 function extractAssetsFromNodes(nodes: any[]): CanvasAssetItem[] {
@@ -89,10 +99,15 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   selectedNodeId: null,
   activeSkillId: null,
   canvasAssets: [],
+  agentFocusNodeIds: [],
   setFromFlow: (nodes, edges) => {
     const summary = buildSummary(nodes, edges);
     const canvasAssets = extractAssetsFromNodes(nodes);
-    set({ nodes, edges, summary, canvasAssets });
+    // 节点集合被整体替换（切画布/重载）时，顺手剔除已不存在的关注 id，
+    // 避免关注列表里留着指向幽灵节点的悬空项。
+    const alive = new Set(nodes.map((n) => n.id));
+    const keptFocus = get().agentFocusNodeIds.filter((id) => alive.has(id));
+    set({ nodes, edges, summary, canvasAssets, agentFocusNodeIds: keptFocus });
   },
   setSelectedNodeId: (id) => set({ selectedNodeId: id }),
   setActiveSkillId: (skillId) => set({ activeSkillId: skillId }),
@@ -107,4 +122,18 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     }
   },
   getSummary: () => get().summary,
+  addAgentFocusNode: (id) => {
+    if (!id) return;
+    const cur = get().agentFocusNodeIds;
+    if (cur.includes(id)) return;
+    set({ agentFocusNodeIds: [...cur, id] });
+  },
+  removeAgentFocusNode: (id) => {
+    set({ agentFocusNodeIds: get().agentFocusNodeIds.filter((x) => x !== id) });
+  },
+  toggleAgentFocusNode: (id) => {
+    const cur = get().agentFocusNodeIds;
+    set({ agentFocusNodeIds: cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id] });
+  },
+  clearAgentFocusNodes: () => set({ agentFocusNodeIds: [] }),
 }));

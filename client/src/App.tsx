@@ -218,8 +218,10 @@ export function App() {
         </main>
       </div>
 
-      {/* 3. Floating Multi-Modal Director Agent (仅当存在有效项目时启用) */}
-      {project && <AgentChatDrawer />}
+      {/* 3. 悬浮导演 Agent（仅当存在有效项目、且不在画布页时启用）
+          画布页有专属的右侧 Agent 侧栏（CanvasAgentSidebar），两者共用同一份页面版会话；
+          此处加 activeTab 闸门，避免画布上同时出现两个功能重复的导演 Agent 入口。 */}
+      {project && activeTab !== 'canvas' && <AgentChatDrawer />}
 
       {/* 3.1 Global AI Polish (covers all textareas) */}
       <GlobalAiPolish />

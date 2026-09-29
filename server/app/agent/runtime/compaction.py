@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 from app.agent.runtime import events as E
@@ -39,6 +40,49 @@ def is_context_overflow_error(err: Any) -> bool:
     if ("context" in s or "上下文" in s):
         return any(w in s for w in ("exceed", "too long", "limit", "length", "超", "过长"))
     return False
+
+
+def spill_long_user_text(session_id: str, seq: int, text: str) -> Optional[str]:
+    """超长用户文本落盘，返回文件路径（模型可用 fs_read 分页读全文）。
+
+    与工具结果 spill 同一目录（storage/agent_spills/<session>/），只落一次；
+    日志里仍保留全文事件（保真），这里只是给模型的"分页窗口 + 定位符"。
+    """
+    if not text:
+        return None
+    import re as _re
+    try:
+        from app.core.config import settings
+        base = Path(settings.STORAGE_DIR) / "agent_spills" / _re.sub(r"[^A-Za-z0-9_.\-]", "_", session_id or "default")
+    except Exception:
+        base = Path("storage") / "agent_spills" / "default"
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+        p = base / f"user_{int(seq)}_text.md"
+        if not p.exists():
+            p.write_text(text, encoding="utf-8")
+        return str(p)
+    except Exception:
+        return None
+
+
+def maybe_fold_user_text(session_id: str, seq: int, text: str) -> str:
+    """超长用户文本（复制粘贴的长文）在模型历史里折成 头+尾+定位符。
+
+    阈值 AGENT_USER_TEXT_MAX（默认 6000 字符）；低于阈值原样返回。
+    """
+    try:
+        limit = int(os.environ.get("AGENT_USER_TEXT_MAX") or 6000)
+    except Exception:
+        limit = 6000
+    if limit <= 0 or len(text) <= limit:
+        return text
+    path = spill_long_user_text(session_id, seq, text)
+    head = max(200, min(limit // 2, 1500))
+    tail = max(150, min(limit // 3, 1000))
+    locator = f"\n\n……（已折叠 {len(text)} 字符；全文见 {path}，用 fs_read 分页读取）……\n\n" if path \
+        else f"\n\n……（已折叠 {len(text)} 字符；全文过长且未能落盘）……\n\n"
+    return text[:head] + locator + text[-tail:]
 
 
 def _shadow_info(session) -> tuple[Set[int], Dict[int, str]]:

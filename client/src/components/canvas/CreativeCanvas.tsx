@@ -28,6 +28,7 @@ import { CustomNode } from './nodes/CustomNode';
 import { ExtNode } from './nodes/ExtNode';
 import { syncCanvasNodeSpecs, listCanvasNodeSpecs, getCanvasNodeSpec } from './canvasNodeSpecs';
 import { FloatingAgentPromptBar } from './FloatingAgentPromptBar';
+import { CanvasAgentSidebar } from './CanvasAgentSidebar';
 import { NodeContextMenu, type NodeMenuState } from './NodeContextMenu';
 import { getNodeSpec } from './nodeRegistry';
 import { CanvasManagerModal } from './CanvasManagerModal';
@@ -1763,7 +1764,8 @@ const InnerCanvas: React.FC = () => {
         </div>
 
         {/* 底部：全局导演 Agent GO + 快速添加 + 选中生图/视频/配音节点时的节点控制台。
-            （轻量版把这里换成了右侧 CanvasAgentSidebar，本版保留原底部栏交互） */}
+            全局编排入口同时存在于右侧 CanvasAgentSidebar（有会话的一等入口），
+            底部栏保留原快捷键与节点控制台交互。 */}
         {!isEmpty && (
           <FloatingAgentPromptBar
             onAddNode={(t) => {
@@ -1783,7 +1785,10 @@ const InnerCanvas: React.FC = () => {
         )}
       </div>
 
-      {/* 节点右键菜单（删除节点） */}
+      {/* 右侧：导演 Agent 侧栏（可收起）—— 有会话的一等入口，与 AI 导演页共用会话 */}
+      <CanvasAgentSidebar />
+
+      {/* 节点右键菜单（添加到会话 / 删除节点） */}
       <NodeContextMenu
         menu={nodeMenu}
         onClose={() => setNodeMenu(null)}

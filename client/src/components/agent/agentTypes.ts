@@ -93,6 +93,18 @@ export interface AgentErrorCard {
   next: string;
 }
 
+/** 用户消息的多模态附件（图/视频/音频）—— ref 指向 /storage 或 http(s) */
+export interface AgentAttachment {
+  id: string;
+  kind: 'image' | 'video' | 'audio';
+  name: string;
+  ref: string;
+  size?: number;
+  mime?: string;
+  source?: 'upload' | 'asset' | 'canvas' | 'paste';
+  meta?: Record<string, string>;
+}
+
 export interface ChatMsg {
   id: string;
   sender: 'user' | 'agent';
@@ -114,6 +126,10 @@ export interface ChatMsg {
   errors?: AgentErrorCard[];
   /** 待办清单（todo_write 事件实时更新） */
   todo?: AgentTodoItem[];
+  /** 用户消息携带的多模态附件 */
+  attachments?: AgentAttachment[];
+  /** 该消息由长文本粘贴产生 → 消息列表默认折叠（可展开全文） */
+  pastedBulk?: boolean;
 }
 
 export interface AgentSession {

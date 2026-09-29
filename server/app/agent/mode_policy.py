@@ -39,6 +39,7 @@ PLAN_READONLY_TOOLS = frozenset({
     "creator_inspect_runtime",
     "list_custom_nodes",
     "todo_write",
+    "view_media",
     "job_list", "job_status",
     "task_status",
     "subagent_list", "subagent_status",
@@ -52,7 +53,7 @@ TOOL_RISK: Dict[str, str] = {
     "list_image_providers": "low", "list_voice_providers": "low", "list_video_providers": "low",
     "list_voices": "low", "list_comfyui_workflows": "low", "list_custom_providers": "low",
     "get_provider_code": "low", "canvas_query": "low", "canvas_query_assets": "low",
-    "fs_read": "low", "read_skill": "low",
+    "fs_read": "low", "read_skill": "low", "view_media": "low",
     "director_3d_stage_plan": "low", "split_novel_script": "medium",
     # 生成
     "generate_image": "medium", "comfyui_render_node": "medium",

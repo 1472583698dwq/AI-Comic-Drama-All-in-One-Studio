@@ -9,14 +9,16 @@ import { create } from 'zustand';
 import { apiService } from '../../services/api';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { useCanvasStore } from '../../stores/useCanvasStore';
+import { getNodeSpec } from '../canvas/nodeRegistry';
 import { toast } from '../../stores/useDialogStore';
 import { agentSocket } from './agentSocket';
+import { clearAgentDraft, useAgentDraftStore } from './agentDraftStore';
 import { collectFromExecutedTools, dispatchSideEffects, reduceAgentEvent } from './agentEventReducer';
 import {
   behaviorOfRunMode, composeRunMode, executionOfRunMode,
 } from './agentTypes';
 import type {
-  AgentEvent, AgentMode, AgentSession, ApprovalInfo, BehaviorMode, ChatMsg, ExecutionMode, RunMode, SubAgentInfo, WsStatus,
+  AgentAttachment, AgentEvent, AgentMode, AgentSession, ApprovalInfo, BehaviorMode, ChatMsg, ExecutionMode, RunMode, SubAgentInfo, WsStatus,
 } from './agentTypes';
 
 export type AgentScope = 'page' | 'float';
@@ -56,6 +58,50 @@ function autoTitle(sess: AgentSession, messages: ChatMsg[]): string {
   return firstUser ? firstUser.text.slice(0, 20).replace(/[\r\n]+/g, ' ') : cur || '新会话';
 }
 
+/**
+ * 把「已加入会话」的节点整理成给 LLM 看的紧凑定义。
+ *
+ * 只给必要字段：模型要能据此定位「这个节点」（id/类型/名称/生成源/参数/已有产出），
+ * 并知道它在流程图里的上下游关系 —— 不需要整份 data（里面有 URL 长串与运行时态）。
+ */
+function buildAgentFocusNodes(): any[] {
+  try {
+    const cs = useCanvasStore.getState();
+    const ids = cs.agentFocusNodeIds || [];
+    if (!ids.length) return [];
+    const byId = new Map((cs.nodes || []).map((n: any) => [n.id, n]));
+    return ids
+      .map((id) => byId.get(id))
+      .filter(Boolean)
+      .map((n: any) => {
+        const d: any = n.data || {};
+        const spec = getNodeSpec(String(n.type || ''));
+        const produced = [
+          d.image_url ? '图像' : '',
+          d.video_url ? '视频' : '',
+          d.audio_url ? '音频' : '',
+        ].filter(Boolean).join('/');
+        return {
+          id: n.id,
+          type: n.type,
+          label: spec?.label || n.type,
+          summary: (d.prompt || d.text || d.brief || d.ai_directive || '').slice(0, 160),
+          provider_id: d.provider_id || d.provider || '',
+          params: d.params || d.provider_params || undefined,
+          produced: produced || undefined,
+          image_url: d.image_url || undefined,
+          video_url: d.video_url || undefined,
+          audio_url: d.audio_url || undefined,
+          agent_state: d.agent_state?.status || undefined,
+          upstream: (cs.edges || []).filter((e: any) => e.target === n.id).map((e: any) => e.source),
+          downstream: (cs.edges || []).filter((e: any) => e.source === n.id).map((e: any) => e.target),
+        };
+      });
+  } catch {
+    return [];
+  }
+}
+
 function buildContext(): Record<string, any> {
   const ps = useProjectStore.getState();
   const project = ps.project;
@@ -88,6 +134,9 @@ function buildContext(): Record<string, any> {
       : null,
     platform: 'desktop',
     canvas_summary,
+    // 用户显式「加入会话」的画布节点：让模型知道指令里的「这个节点」指谁，
+    // 并带上已有产出 URL（多模态时后端会把它作为图像附件交给模型）
+    agent_focus_nodes: buildAgentFocusNodes(),
     workspace: ps.workspace,
   };
 }
@@ -123,9 +172,9 @@ interface AgentStoreState {
   createSession(): void;
   selectSession(id: string): void;
   deleteSession(id: string): Promise<void>;
-  send(raw: string): Promise<void>;
+  send(raw: string, attachments?: AgentAttachment[]): Promise<void>;
   /** 运行中插话（steer）：把新指令投进当前轮，不打断已产出 */
-  steer(raw: string): Promise<void>;
+  steer(raw: string, attachments?: AgentAttachment[]): Promise<void>;
   /** Plan Mode 产出计划后：批准并进入执行（注入 approved_plan） */
   executePlan(msgId: string): Promise<void>;
   abort(): void;
@@ -236,7 +285,7 @@ export function createAgentStore(scope: AgentScope) {
       execution: executionOfRunMode(token),
     });
 
-    const dispatchRun = async (msgId: string, text: string, ctx: Record<string, any>, mode: AgentMode, runMode: RunMode) => {
+    const dispatchRun = async (msgId: string, text: string, ctx: Record<string, any>, mode: AgentMode, runMode: RunMode, attachments?: AgentAttachment[]) => {
       agentSocket.ensure();
       const sent = agentSocket.send({
         action: 'agent_prompt',
@@ -245,6 +294,7 @@ export function createAgentStore(scope: AgentScope) {
         session_id: sessionKey(),
         mode,
         run_mode: runMode,
+        attachments: attachments || [],
       });
       if (sent) return;
 
@@ -257,7 +307,7 @@ export function createAgentStore(scope: AgentScope) {
           ctx,
           sessionKey(),
           (event, data) => get().applyAgentEvent({ ...(data || {}), event: event || data?.event }),
-          { signal: ctrl.signal, mode, runMode } as any
+          { signal: ctrl.signal, mode, runMode, attachments } as any
         );
         // 流结束仍未收到终态：兜底收尾，避免转圈
         if (get().streamingMsgId === msgId) {
@@ -273,7 +323,7 @@ export function createAgentStore(scope: AgentScope) {
         }
         // 非流式兜底
         try {
-          const res = await apiService.agentChat(text, ctx, sessionKey(), mode, runMode);
+          const res = await apiService.agentChat(text, ctx, sessionKey(), mode, runMode, attachments);
           const { steps, artifacts, errors } = collectFromExecutedTools(res?.executed_tools || []);
           patchMsg(msgId, (m) => ({
             ...m,
@@ -342,9 +392,12 @@ export function createAgentStore(scope: AgentScope) {
       bindProject(projectId) {
         if (!projectId) {
           set({ projectId: null, sessions: [], activeSessionId: '', messages: [], isRunning: false, streamingMsgId: null, approvals: {} });
+          clearAgentDraft();
           return;
         }
+        // 幂等早退：切 tab 会重复调用，这里必须原样返回，否则会把草稿一起清掉
         if (get().projectId === projectId && get().sessions.length > 0) return;
+        clearAgentDraft();
         if (get().projectId !== projectId && get().isRunning) get().abort();
         set({
           projectId,
@@ -434,6 +487,7 @@ export function createAgentStore(scope: AgentScope) {
           isRunning: false,
         });
         persistNow();
+        clearAgentDraft();   // 草稿属于当前对话，换会话即清空
         toast.success('已新建独立会话');
       },
 
@@ -457,6 +511,7 @@ export function createAgentStore(scope: AgentScope) {
         });
         persistNow();
         pushRunMode(token);
+        clearAgentDraft();   // 草稿属于当前对话，换会话即清空
       },
 
       async deleteSession(id) {
@@ -493,16 +548,28 @@ export function createAgentStore(scope: AgentScope) {
           set({ sessions: remaining });
         }
         persistNow();
+        if (activeSessionId === id || remaining.length === 0) clearAgentDraft();   // 当前对话被切走 → 草稿跟着换
         toast.success('会话已删除');
       },
 
-      async send(raw) {
+      async send(raw, attachments) {
         const text = (raw || '').trim();
+        const atts = (attachments || []).filter((a) => a && a.ref);
         const st = get();
-        if (!text || st.isRunning || !st.projectId || !st.activeSessionId) return;
+        if ((!text && atts.length === 0) || st.isRunning || !st.projectId || !st.activeSessionId) return;
         const isPlanMode = st.behavior === 'plan';
         const ctx: Record<string, any> = { ...buildContext(), run_mode: st.runMode, plan_mode: isPlanMode };
-        const userMsg: ChatMsg = { id: uid('u'), sender: 'user', text, time: nowTime() };
+        // 长文本粘贴标记：随消息落账，消息列表据此折叠展示（此标记只对当前这条生效）
+        let pastedBulk = false;
+        try {
+          pastedBulk = useAgentDraftStore.getState().pastedBulk;
+          if (pastedBulk) useAgentDraftStore.getState().markPastedBulk(false);
+        } catch { /* ignore */ }
+        const userMsg: ChatMsg = {
+          id: uid('u'), sender: 'user', text, time: nowTime(),
+          ...(atts.length ? { attachments: atts } : {}),
+          ...(pastedBulk || text.length > 2000 ? { pastedBulk: true } : {}),
+        };
         const agentMsg: ChatMsg = {
           id: uid('m'),
           sender: 'agent',
@@ -515,25 +582,32 @@ export function createAgentStore(scope: AgentScope) {
         };
         commitMessages((prev) => [...prev, userMsg, agentMsg]);
         set({ isRunning: true, streamingMsgId: agentMsg.id, approvals: {}, subagents: {} });
+        // 「添加到会话」是给**这一条消息**指定目标：上面的 buildContext 已经把节点定义
+        // 随上下文带出去了，消息发出即消费掉 —— 否则下一轮还挂着上次的焦点会误指向。
+        try { useCanvasStore.getState().clearAgentFocusNodes(); } catch { /* ignore */ }
 
         // 模式即约束（代码门控，非提示词），两维正交：
         // - 行为 plan：只绑定只读工具（绑定层）+ 执行口二次拒绝写工具，产出计划后由用户批准执行；
         // - 行为 create：缺能力先提案，能力变更类默认人审（自动执行时不再等待点击）；
         // - 执行 auto：全部工具自动执行、不弹确认；approve：medium 以上先审后干。
-        await dispatchRun(agentMsg.id, text, ctx, st.mode, st.runMode);
+        await dispatchRun(agentMsg.id, text, ctx, st.mode, st.runMode, atts);
       },
 
-      async steer(raw) {
+      async steer(raw, attachments) {
         const text = (raw || '').trim();
+        const atts = (attachments || []).filter((a) => a && a.ref);
         const st = get();
-        if (!text || !st.isRunning || !st.projectId || !st.activeSessionId) return;
+        if ((!text && atts.length === 0) || !st.isRunning || !st.projectId || !st.activeSessionId) return;
         try {
-          await apiService.agentSteer(sessionKey(), text);
+          await apiService.agentSteer(sessionKey(), text, atts);
         } catch (e: any) {
           toast.error(`插话失败: ${e?.message || '未知错误'}`);
           return;
         }
-        commitMessages((prev) => [...prev, { id: uid('u'), sender: 'user', text, time: nowTime() }]);
+        commitMessages((prev) => [...prev, {
+          id: uid('u'), sender: 'user', text, time: nowTime(),
+          ...(atts.length ? { attachments: atts } : {}),
+        }]);
       },
 
       async executePlan(msgId) {

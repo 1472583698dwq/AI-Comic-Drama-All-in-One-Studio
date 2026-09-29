@@ -84,6 +84,8 @@ class AgentLoop:
         except Exception:
             self.goal = None
         self._last_turn_reason = ""
+        # 已回投过的媒体引用（会话级去重：同一张图不重复作为附件塞给模型）
+        self._seen_media_refs: set = set()
         _profile_steps = int(getattr(agent_profile, "max_steps", 0) or 0)
         self._max_steps = int(max_steps or _profile_steps or _env_int("AGENT_MAX_ITERATIONS", 200))
         # 后台任务（P5）：长耗时工具调用异步化，完成后注入通知
@@ -126,7 +128,8 @@ class AgentLoop:
 
     # ── 输入 ─────────────────────────────────────────────
     async def prompt(self, text: str, context: Optional[Dict[str, Any]] = None,
-                     mode: Optional[str] = None, run_mode: Optional[str] = None) -> None:
+                     mode: Optional[str] = None, run_mode: Optional[str] = None,
+                     attachments: Optional[List[Dict[str, Any]]] = None) -> None:
         # 免模型命令：/plan /goal /status /compact /cancel /help
         try:
             from app.agent.runtime.commands import execute_command
@@ -154,7 +157,7 @@ class AgentLoop:
             except Exception:
                 plan_text = str(approved)
             text = f"{text}\n\n【用户已批准的执行计划（请严格按步骤执行；偏离需说明理由）】\n{plan_text[:6000]}"
-        self.inbox.followup(text, source="user")
+        self.inbox.followup(text, source="user", meta={"attachments": attachments} if attachments else None)
 
     def set_run_mode(self, run_mode: str) -> None:
         try:
@@ -220,8 +223,8 @@ class AgentLoop:
         self.goal = None
         save_goal(self.session, None)
 
-    async def steer(self, text: str) -> None:
-        self.inbox.steer(text, source="user")
+    async def steer(self, text: str, attachments: Optional[List[Dict[str, Any]]] = None) -> None:
+        self.inbox.steer(text, source="user", meta={"attachments": attachments} if attachments else None)
 
     def is_running(self) -> bool:
         return self._driver is not None and not self._driver.done()
@@ -244,7 +247,6 @@ class AgentLoop:
             self._close_turn("aborted", cause)
         await self._emit({"event": "agent_response", "message": "⏹️ 已暂停",
                           "suggested_actions": [], "executed_tools": []})
-
     async def wait_idle(self, timeout: Optional[float] = None) -> None:
         task = self._driver
         if task and not task.done():
@@ -352,6 +354,25 @@ class AgentLoop:
             if context_block:
                 # 运行时上下文是模型可见输入：以 user 消息形式落账，附在本轮输入之后
                 self.session.append(E.USER_MESSAGE, {"text": context_block, "source": "system", "form": "context"})
+            # 画布「加入会话」节点的已有产出：自动作为媒体附件注入（图片始终；视频/音频按开关）
+            try:
+                from app.agent.runtime.attachments import attachments_from_focus_nodes
+                _focus_atts = [
+                    a for a in attachments_from_focus_nodes(self.context)
+                    if a.get("ref") and a["ref"] not in self._seen_media_refs
+                ]
+                if _focus_atts:
+                    for a in _focus_atts:
+                        self._seen_media_refs.add(a["ref"])
+                    self.session.append(E.USER_MESSAGE, {
+                        "text": "【会话关注节点（画布已加入会话）的已有产出（自动附带）】",
+                        "source": "canvas-focus", "form": "notice",
+                        "meta": {"attachments": _focus_atts},
+                    })
+                    await self._emit({"event": "media_attached", "tool_name": "canvas_focus",
+                                      "items": [{k: a.get(k) for k in ("kind", "name", "ref")} for a in _focus_atts]})
+            except Exception:
+                pass
             tools = self._tool_schemas()
             step_index = 0
             bad_args_streak = 0
@@ -558,6 +579,26 @@ class AgentLoop:
             })
             if outcome.additional_context:
                 self.inbox.inject(outcome.additional_context, source="plugin", form="notice")
+            # 多模态回投：工具产物（图/视频/音频）作为附件注入，让模型下一步"看到"结果
+            if outcome.status == "success":
+                try:
+                    atts = list((outcome.meta or {}).get("media_attachments") or [])
+                    if not atts:
+                        from app.agent.runtime.attachments import attachments_from_tool_result
+                        atts = attachments_from_tool_result(tc.name, outcome.result)
+                    atts = [a for a in atts if a.get("ref") and a["ref"] not in self._seen_media_refs]
+                    if atts:
+                        for a in atts:
+                            self._seen_media_refs.add(a["ref"])
+                        self.session.append(E.USER_MESSAGE, {
+                            "text": f"【工具 {tc.name} 的媒体产物（自动附带）】",
+                            "source": "tool-media", "form": "notice",
+                            "meta": {"attachments": atts},
+                        })
+                        await self._emit({"event": "media_attached", "tool_name": tc.name,
+                                          "items": [{k: a.get(k) for k in ("kind", "name", "ref")} for a in atts]})
+                except Exception:
+                    pass
 
     # ── 模型调用（流式 + 重试）────────────────────────────
     def _tool_schemas(self) -> List[Dict[str, Any]]:

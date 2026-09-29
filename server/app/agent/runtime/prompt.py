@@ -4,6 +4,7 @@
 替代旧 routes.py 里的巨型硬编码提示词（26 个工具逐条手写说明与工具 schema 重复）。
 工具能力说明只保留策略性内容；具体参数由绑定的 tool schema 提供给模型。
 """
+import json
 from typing import Any, Callable, Dict, List, Optional
 
 from app.agent.tools.registry import tool_view
@@ -33,6 +34,7 @@ TOOL_STRATEGY = """## 典型指令路由
 - 直写生成源/插件/技能 → 先 read_skill(name) 取完整 SOP（技能库索引已在下方给出，正文必须读了再动手）
 - 读源码/长文件 → get_provider_code(offset/limit) / fs_read(offset/limit)，可通读完整文件
 - 查健康/排障 → list_* / get_provider_code 先只读排查再修复
+- 看画面/看视频/改图前先看 → view_media(node_id/asset_id/url)：把画布产物或素材作为多模态附件加载，直接看到内容后再动手（任务产物也会自动回投给你）
 - 一键成片/整集批量 → 先拆解剧本，再按角色定妆→生图→视频→配音→导出推进
 - 不确定可用哪种源/音色/工作流/素材时，先调用对应 list_* 查询再决策
 - 生成前的参数确认：先查 get_provider_code 看 input_schema，避免把参考图挂给纯文本源"""
@@ -172,4 +174,50 @@ def build_context_block(context: Optional[Dict[str, Any]]) -> str:
     cs = context.get("canvas_summary")
     if cs:
         parts.append(f"【画布状态】{str(cs)[:800]}")
+    parts.extend(focus_nodes_section(context))
     return "\n\n".join(parts)[:16000]
+
+
+def focus_nodes_section(context: Dict[str, Any]) -> List[str]:
+    """用户在前端右键「加入会话」的画布节点。
+
+    画布摘要只给每个节点一行标题，模型无法据此确定用户说的「这个节点」是谁；
+    这里补上被显式关注的节点的定义（类型/内容/生成源/参数/产出/上下游），
+    并明确标注"指令未指明时默认针对它们"，与「当前激活镜头」同一套语义。
+    """
+    raw = context.get("agent_focus_nodes")
+    if not raw:
+        return []
+    items = raw if isinstance(raw, list) else [raw]
+    lines: List[str] = []
+    for n in items[:8]:
+        if isinstance(n, str):
+            lines.append(f"- {n}")
+            continue
+        if not isinstance(n, dict):
+            continue
+        bits = [f"节点 {n.get('id')}（{n.get('label') or n.get('type') or '未知类型'}）"]
+        if n.get("summary"):
+            bits.append(f"内容:「{str(n['summary'])[:120]}」")
+        if n.get("provider_id"):
+            bits.append(f"生成源:{n['provider_id']}")
+        if n.get("params"):
+            try:
+                bits.append("参数:" + json.dumps(n["params"], ensure_ascii=False)[:200])
+            except Exception:
+                pass
+        if n.get("produced"):
+            bits.append(f"已有产出:{n['produced']}")
+        if n.get("agent_state"):
+            bits.append(f"执行态:{n['agent_state']}")
+        if n.get("upstream"):
+            bits.append("上游:" + ",".join(str(x) for x in list(n["upstream"])[:6]))
+        if n.get("downstream"):
+            bits.append("下游:" + ",".join(str(x) for x in list(n["downstream"])[:6]))
+        lines.append("- " + "；".join(bits))
+    if not lines:
+        return []
+    return [
+        "【会话关注节点（用户已加入会话；指令里说「这个节点 / 它」默认指它们）】\n"
+        + "\n".join(lines)
+    ]

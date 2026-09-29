@@ -1404,11 +1404,18 @@ async def websocket_agent_endpoint(websocket: WebSocket):
             if AGENT_V2:
                 try:
                     await _v2_attach(session_id)
+                    _atts_ws = []
+                    try:
+                        from app.agent.runtime.attachments import sanitize_attachments as _san_att
+                        _atts_ws = _san_att(data.get("attachments"))
+                    except Exception:
+                        _atts_ws = []
                     await agent_manager.prompt(
                         session_id, prompt_text,
                         context=context if isinstance(context, dict) else {},
                         mode=_wmode, run_mode=_rm,
                         interactive=True, sink=None,
+                        attachments=_atts_ws,
                     )
                 except Exception as e:
                     try:
@@ -1671,6 +1678,7 @@ class AgentChatRequest(BaseModel):
     stream: bool = Field(default=False, description="是否流式返回")
     mode: str = Field(default="execute", description="Agent模式：chat问答（不调工具）| execute执行（ReAct调工具生成）")
     run_mode: str = Field(default="approve", description="运行模式：approve审批 / auto自动 / create创造")
+    attachments: List[Dict[str, Any]] = Field(default_factory=list, description="多模态附件引用（图/视频/音频），ref 指向 /storage 或 http(s)")
 
 def _is_masked_placeholder(v: str) -> bool:
     return "****" in v
@@ -2117,9 +2125,16 @@ async def http_agent_chat(req: AgentChatRequest):
                 done.set()
 
         try:
+            _atts_http = []
+            try:
+                from app.agent.runtime.attachments import sanitize_attachments as _san_att2
+                _atts_http = _san_att2(getattr(req, "attachments", None))
+            except Exception:
+                _atts_http = []
             await agent_manager.prompt(
                 session_id, prompt_text, context=dict(req.context or {}),
                 mode=_mode, run_mode=_rm_v2, interactive=False, sink=_sink,
+                attachments=_atts_http,
             )
             try:
                 await asyncio.wait_for(done.wait(), timeout=float(os.environ.get("AGENT_HTTP_TIMEOUT") or 900))
@@ -2258,9 +2273,16 @@ async def http_agent_chat_stream(req: AgentChatRequest):
                 await queue.put(ev)
 
             try:
+                _atts_sse = []
+                try:
+                    from app.agent.runtime.attachments import sanitize_attachments as _san_att3
+                    _atts_sse = _san_att3(getattr(req, "attachments", None))
+                except Exception:
+                    _atts_sse = []
                 await agent_manager.prompt(
                     session_id, prompt_text, context=dict(req.context or {}),
                     mode=_smode, run_mode=_rmode_sse, interactive=False, sink=_sink,
+                    attachments=_atts_sse,
                 )
             except Exception as e:
                 yield f"data: {json.dumps({'event': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
@@ -2444,7 +2466,13 @@ async def agent_session_steer(session_id: str, req: AgentChatRequest):
     """运行中插话：进入当前轮的下一步（v2）。"""
     if not AGENT_V2:
         raise HTTPException(status_code=400, detail="仅 v2 内核支持 steer")
-    ok = await agent_manager.steer(session_id, req.prompt or "")
+    _atts_steer = []
+    try:
+        from app.agent.runtime.attachments import sanitize_attachments as _san_att4
+        _atts_steer = _san_att4(getattr(req, "attachments", None))
+    except Exception:
+        _atts_steer = []
+    ok = await agent_manager.steer(session_id, req.prompt or "", attachments=_atts_steer)
     return {"status": "accepted" if ok else "no_session", "session_id": session_id}
 
 
@@ -2465,6 +2493,26 @@ async def agent_session_set_run_mode(session_id: str, req: AgentRunModeRequest):
         return {"run_mode": rm, "applied": False, "note": "v1 内核按每条消息透传 run_mode"}
     applied = await agent_manager.set_run_mode(session_id, rm)
     return {"run_mode": rm, "applied": applied is not None}
+
+
+@router.post("/agent/upload")
+async def agent_upload_attachment(file: UploadFile = File(...), session_id: str = Form("")):
+    """Agent 输入框附件上传：存 `storage/agent_uploads/` 并返回可引用 URL。
+
+    附件**不进入素材库**（素材库有独立的归档/分类语义）；返回的 ref 直接随
+    `agent_prompt.attachments` 回传，由 runtime 决定内联为图片 part 还是文本说明。
+    """
+    try:
+        data = await file.read()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"读取文件失败: {e}")
+    try:
+        from app.agent.runtime.attachments import save_upload
+        return save_upload(file.filename or "attachment", file.content_type or "", data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"附件保存失败: {e}")
 
 
 @router.get("/agent/session/{session_id}/snapshot")

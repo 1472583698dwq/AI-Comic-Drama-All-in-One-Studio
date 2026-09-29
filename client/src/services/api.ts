@@ -467,20 +467,20 @@ export const apiService = {
   },
 
   // 8. 导演 Agent (LangChain 多轮+流式，双模式：chat问答/execute执行)
-  async agentChat(prompt: string, context?: any, sessionId?: string, mode?: string, runMode?: string): Promise<any> {
+  async agentChat(prompt: string, context?: any, sessionId?: string, mode?: string, runMode?: string, attachments?: any[]): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/agent/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, context: context || {}, session_id: sessionId || undefined, mode: mode || 'execute', run_mode: runMode || 'approve' }),
+      body: JSON.stringify({ prompt, context: context || {}, session_id: sessionId || undefined, mode: mode || 'execute', run_mode: runMode || 'approve', attachments: attachments || [] }),
     });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
-  async agentChatStream(prompt: string, context?: any, sessionId?: string, onEvent?: (event: string, data: any)=>void, opts?: { signal?: AbortSignal; mode?: string; runMode?: string }): Promise<any> {
+  async agentChatStream(prompt: string, context?: any, sessionId?: string, onEvent?: (event: string, data: any)=>void, opts?: { signal?: AbortSignal; mode?: string; runMode?: string; attachments?: any[] }): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/agent/chat/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, context: context || {}, session_id: sessionId || undefined, mode: opts?.mode || 'execute', run_mode: opts?.runMode || 'approve' }),
+      body: JSON.stringify({ prompt, context: context || {}, session_id: sessionId || undefined, mode: opts?.mode || 'execute', run_mode: opts?.runMode || 'approve', attachments: opts?.attachments || [] }),
       signal: opts?.signal,
     });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
@@ -526,11 +526,19 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
-  async agentSteer(sessionId: string, prompt: string): Promise<any> {
+  async agentSteer(sessionId: string, prompt: string, attachments?: any[]): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/agent/session/${encodeURIComponent(sessionId)}/steer`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, context: {} }),
+      body: JSON.stringify({ prompt, context: {}, attachments: attachments || [] }),
     });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  /** 附件上传：存 storage/agent_uploads（不进素材库），返回 {kind,name,ref,size,mime} */
+  async uploadAgentAttachment(file: File): Promise<{ kind: string; name: string; ref: string; size: number; mime: string }> {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`${API_BASE_URL}/agent/upload`, { method: 'POST', body: form });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },

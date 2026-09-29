@@ -2,14 +2,13 @@
 /**
  * 画布节点右键菜单。
  *
- * 菜单头（类型 / #id / 摘要）明确操作对象 + 「删除节点」（连带删掉挂在它身上的连线）。
+ * 菜单头（类型 / #id / 摘要）明确操作对象 + 「添加到会话 / 移出会话」（Agent 上下文聚焦）
+ * + 「删除节点」（连带删掉挂在它身上的连线）。
  * 关闭时机：点菜单外、Esc、画布滚动、右键到别处（外部会换 menu 状态）。
  * 位置按视口夹紧，避免贴边被切掉。
- *
- * （轻量版另有「添加到会话 / 移出会话」动作，依赖 agent_focus_nodes 链路，本版未引入。）
  */
 import React, { useEffect, useRef } from 'react';
-import { Trash2, Box } from 'lucide-react';
+import { MessagesSquare, Trash2, Box } from 'lucide-react';
 import { useCanvasStore } from '../../stores/useCanvasStore';
 import { getNodeSpec } from './nodeRegistry';
 
@@ -31,6 +30,8 @@ const EDGE = 8;
 
 export const NodeContextMenu: React.FC<Props> = ({ menu, onClose, onDelete }) => {
   const nodes = useCanvasStore((s) => s.nodes);
+  const agentFocusNodeIds = useCanvasStore((s) => s.agentFocusNodeIds);
+  const toggleAgentFocusNode = useCanvasStore((s) => s.toggleAgentFocusNode);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -57,6 +58,7 @@ export const NodeContextMenu: React.FC<Props> = ({ menu, onClose, onDelete }) =>
   // 节点在右键后、渲染前被删掉（例如快捷键）→ 直接不渲染
   if (!node) return null;
 
+  const inSession = agentFocusNodeIds.includes(menu.nodeId);
   const spec = getNodeSpec(String(node.type || ''));
   const label = spec?.label || node.type || '节点';
   const title = String((node.data as any)?.prompt || (node.data as any)?.text || (node.data as any)?.brief || '').slice(0, 24);
@@ -79,6 +81,16 @@ export const NodeContextMenu: React.FC<Props> = ({ menu, onClose, onDelete }) =>
         </div>
         {title && <div className="text-[10px] [color:var(--color-text-muted)] truncate mt-0.5">{title}</div>}
       </div>
+
+      <button
+        onClick={() => { toggleAgentFocusNode(menu.nodeId); onClose(); }}
+        className="w-full px-2.5 py-2 rounded-xl text-left text-xs [color:var(--color-text-main)] hover:bg-white/10 flex items-center gap-2 transition-colors"
+        title="加入会话后，AI 导演里说「这个节点」就会默认指向它"
+      >
+        <MessagesSquare className={`w-3.5 h-3.5 shrink-0 ${inSession ? 'text-emerald-400' : 'text-emerald-400/70'}`} />
+        <span className="flex-1">{inSession ? '移出会话' : '添加到会话'}</span>
+        {inSession && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 font-bold">已加入</span>}
+      </button>
 
       <button
         onClick={() => { onDelete(menu.nodeId); onClose(); }}
