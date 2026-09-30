@@ -182,7 +182,7 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
   const closeEdit = ()=> { if (directEdit) { onClose(); } else { setEditing(null); } };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-md p-4 animate-fade-in">
       <div className={directEdit ? 'contents' : 'w-full max-w-6xl h-[85vh] bg-surface rounded-2xl border border-border flex flex-col overflow-hidden shadow-2xl'}>
         {!directEdit && (<>
         {/* Header */}

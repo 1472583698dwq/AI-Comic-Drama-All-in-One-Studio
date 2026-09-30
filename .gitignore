@@ -91,6 +91,8 @@ storage/agent_spills/
 storage/tasks/
 storage/setup.json
 storage/config_store.json
+# 功能级开关（L2）的运行时状态：与 config_store.json 同类，本机自持、不入库
+storage/features.json
 
 # ===== Temp =====
 tmp/
@@ -100,3 +102,10 @@ temp_test_output.wav
 # 云端同步的本地账本（纯运行时状态，跟着机器走）
 storage/.sync/
 storage/gen_timings*.jsonl
+
+# ===== 本地设计/原型/技能资产（不入库）=====
+# .codebuddy/ 是 IDE 侧的项目数据目录（不是临时缓存，不要删；只是不进版本库）
+.codebuddy/
+prototypes/
+design/
+.skill/

@@ -3,9 +3,10 @@ import json
 import asyncio
 import time
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from fastapi.concurrency import run_in_threadpool
+from app.core import features
 from app.models.schemas import (
     Project, ScriptParseRequest, TTSGenerateRequest,
     ImageGenerateRequest, Character3ViewsRequest, PipelineRunRequest,
@@ -2495,7 +2496,7 @@ async def agent_session_set_run_mode(session_id: str, req: AgentRunModeRequest):
     return {"run_mode": rm, "applied": applied is not None}
 
 
-@router.post("/agent/upload")
+@router.post("/agent/upload", dependencies=[Depends(features.require("agent_multimodal"))])
 async def agent_upload_attachment(file: UploadFile = File(...), session_id: str = Form("")):
     """Agent 输入框附件上传：存 `storage/agent_uploads/` 并返回可引用 URL。
 

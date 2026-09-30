@@ -4,7 +4,7 @@
  */
 import React, { useState } from 'react';
 import {
-  Bot, User, Sparkles, ChevronDown, Check, Copy, Pencil, X,
+  Bot, Sparkles, ChevronDown, Check, Copy, Pencil, X,
   Image as ImageIcon, Film, Music,
 } from 'lucide-react';
 import { MarkdownText } from './MarkdownText';
@@ -115,34 +115,38 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
         return (
           <div key={m.id} className={`flex ${m.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div
-              className={`${compact ? 'max-w-[92%] p-3' : 'max-w-[85%] p-4'} rounded-2xl leading-relaxed text-xs relative group/msg ${
+              className={`${compact ? 'max-w-[92%] p-3 rounded-2xl' : `max-w-[85%] p-4 rounded-3xl ${m.sender === 'user' ? 'rounded-br-lg' : 'rounded-bl-lg'}`} leading-relaxed text-xs relative group/msg ${
                 m.sender === 'user'
-                  ? 'bg-brand text-white rounded-br-none'
-                  : 'bg-surface-secondary border border-border text-gray-100 rounded-bl-none'
+                  ? 'bg-brand text-white shadow-lg shadow-brand/20'
+                  : 'bg-surface-secondary/60 [color:var(--color-text-main)]'
               }`}
             >
-              {!compact && (
+              {/* 身份标只给 Agent 侧：用户消息靠位置（右）+ 实色气泡已经足够区分。
+                  用户侧连"只放时间"的一行也去掉 —— 那一行没有身份信息、只剩一个靠右的
+                  小字，视觉上就是气泡顶部一条空行（用户反馈）。 */}
+              {!compact && m.sender === 'agent' && (
                 <div className="flex items-center gap-1.5 mb-1.5 text-[10px] text-gray-500">
-                  {m.sender === 'user' ? <User className="w-3 h-3" /> : <Bot className="w-3 h-3 text-brand-light" />}
-                  <span>{m.sender === 'user' ? '你' : 'Agent'}</span>
+                  <Bot className="w-3 h-3 text-brand-light" />
+                  <span>Agent</span>
                   {m.mode && (
                     <span className={`px-1.5 py-px rounded font-bold ${m.mode === 'execute' ? 'bg-brand/20 text-brand-light' : 'bg-accent-green/20 text-accent-green'}`}>
                       {m.mode === 'execute' ? '执行' : '问答'}
                     </span>
                   )}
-                  <span className="ml-auto flex items-center gap-1">
-                    {m.sender === 'user' && !isRunning && (
-                      <button
-                        onClick={(e) => startEdit(e, m.id, m.text)}
-                        className="p-1 rounded hover:bg-white/10 text-gray-500 hover:text-white"
-                        title="编辑并重新发送"
-                      >
-                        <Pencil className="w-3 h-3" />
-                      </button>
-                    )}
-                    <span>{m.time}</span>
-                  </span>
+                  <span className="ml-auto">{m.time}</span>
                 </div>
+              )}
+
+              {/* 用户侧不占身份行后（见上），编辑入口改为气泡内悬浮按钮：既保留上游「编辑重发」能力，
+                  又不会像原来那样在用户气泡顶部多出一条只有时间的空行。 */}
+              {!compact && m.sender === 'user' && !isRunning && (
+                <button
+                  onClick={(e) => startEdit(e, m.id, m.text)}
+                  className="absolute top-1.5 right-1.5 p-1 rounded-md opacity-0 group-hover/msg:opacity-100 transition-opacity bg-black/25 hover:bg-black/40 text-white/80 hover:text-white"
+                  title="编辑并重新发送"
+                >
+                  <Pencil className="w-3 h-3" />
+                </button>
               )}
 
               {compact && m.text && (

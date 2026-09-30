@@ -11,6 +11,7 @@ import { useProjectStore } from '../../stores/useProjectStore';
 import { autoBindShotCharacters } from '../storyboard/shotReference';
 import { ProviderPicker } from '../ui/ProviderPicker';
 import { useEscapeClose } from '../../hooks/useEscapeClose';
+import { usePageStore } from '../../stores/usePageStore';
 import { AgentSwarmPanel } from '../agent/AgentSwarmPanel';
 import { loadRoleMetas } from '../agent/swarmMeta';
 import type { SubAgentInfo } from '../agent/agentTypes';
@@ -39,6 +40,18 @@ export const OneKeyRunModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
+
+  // 一键成片的硬依赖：后端 /onekey 整族挂在「分镜台(studio)」页守卫下
+  // （server/app/api/onekey_routes.py 的 pages.require("studio")）——该页关闭时调用必 404。
+  // 页开关尚未加载完时不提示，避免误报。其余依赖都不阻塞：导演组(agent_teams) 关闭只是拿不到
+  // 自定义名单（下面 listAgentTeams 已 catch 回落内置默认阵容）。
+  const pagesLoaded = usePageStore((s) => s.loaded);
+  const studioEnabled = usePageStore((s) => s.values?.studio === true);
+  const studioBlocked = pagesLoaded && !studioEnabled;
+  const goEnableStudio = () => {
+    onClose();
+    useProjectStore.getState().setActiveTab('config');
+  };
 
   useEffect(() => {
     if (!taskId) return;
@@ -199,6 +212,16 @@ export const OneKeyRunModal: React.FC<Props> = ({ isOpen, onClose }) => {
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-4 custom-scrollbar">
+          {studioBlocked && (
+            <div className="px-3 py-2.5 rounded-xl bg-red-500/15 border border-red-500/30 text-xs text-red-200 flex items-start gap-2">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <span className="leading-relaxed">
+                一键成片依赖<b>「分镜台」</b>页 —— 该页当前已关闭，后端 <code className="font-mono">/onekey</code> 接口整族会返回 404。
+                请先开启「分镜台」再运行（其余依赖都不阻塞：导演组未开时自动回落内置默认阵容）。
+                <button onClick={goEnableStudio} className="ml-2 px-2 py-0.5 rounded-md bg-red-500/25 border border-red-500/40 text-red-100 font-bold hover:bg-red-500/40">去设置开启</button>
+              </span>
+            </div>
+          )}
           {!taskId && (
             <>
               <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="成片标题（可选）" className="w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand" />
@@ -306,7 +329,7 @@ export const OneKeyRunModal: React.FC<Props> = ({ isOpen, onClose }) => {
           {!taskId
             ? (<>
               <button onClick={onClose} className="px-4 py-2 rounded-xl bg-surface-secondary border border-border text-xs text-white">取消</button>
-              <button onClick={handleRun} className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-brand text-white text-xs font-bold flex items-center gap-1.5"><Clapperboard className="w-3.5 h-3.5" /> 开始一键成片</button>
+              <button onClick={handleRun} disabled={studioBlocked} title={studioBlocked ? '需先开启「分镜台」页（设置 → 功能开关）' : undefined} className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-brand text-white text-xs font-bold flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"><Clapperboard className="w-3.5 h-3.5" /> 开始一键成片</button>
             </>)
             : (<>
               <button onClick={onClose} className="px-4 py-2 rounded-xl bg-surface-secondary border border-border text-xs text-white">{done ? '稍后查看' : '后台运行并关闭'}</button>

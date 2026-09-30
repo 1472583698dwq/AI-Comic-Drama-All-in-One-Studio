@@ -8,6 +8,9 @@
   退化为「文本 + URL」描述，不报错、不中断。
 - 超限/缺失的引用显式降级为文本说明（模型知道"这里有东西但没给到"），
   绝不静默丢弃。
+- 功能开关 ``agent_multimodal``（设置 → 功能开关，出厂关闭）关闭时，
+  三个收集入口一律返回空列表 —— 多模态能力整体降级为「纯文本导演」：
+  用户正文照常进模型，只是不带图/视频（不是报错、不是静默丢正文）。
 """
 from __future__ import annotations
 
@@ -17,6 +20,19 @@ import os
 import time
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
+
+#: 归本模块管的功能开关 id（多模态附件与看图）
+FEATURE_ID = "agent_multimodal"
+
+
+def feature_on() -> bool:
+    """多模态附件能力是否开启（未知/读盘失败 → False，即降级为无附件）。"""
+    try:
+        from app.core import features
+        return features.is_enabled(FEATURE_ID)
+    except Exception:
+        return False
+
 
 ALLOWED_KINDS = ("image", "video", "audio")
 MAX_ATTACHMENTS = 8
@@ -107,7 +123,12 @@ def _ref_scheme_ok(ref: str) -> bool:
 
 
 def sanitize_attachments(raw: Any) -> List[Dict[str, Any]]:
-    """把前端传来的附件列表归一化；非法项直接丢弃（调用方可另做提示）。"""
+    """把前端传来的附件列表归一化；非法项直接丢弃（调用方可另做提示）。
+
+    功能开关关闭 → 返回 ``[]``（附件入口不生效；消息正文仍照常送达模型）。
+    """
+    if not feature_on():
+        return []
     if not isinstance(raw, list):
         return []
     out: List[Dict[str, Any]] = []
@@ -234,7 +255,10 @@ def attachments_from_focus_nodes(context: Optional[Dict[str, Any]], limit: int =
 
     图片始终收集（无视觉时 build_user_content 会降级为文本说明）；
     视频/音频仅在对应 AGENT_MM_* 开关打开时收集，避免每轮噪音。
+    功能开关 ``agent_multimodal`` 关闭 → 返回 ``[]``（不自动回投画面）。
     """
+    if not feature_on():
+        return []
     try:
         if (os.environ.get("AGENT_FOCUS_MEDIA") or "1").strip().lower() in ("0", "off", "false"):
             return []
@@ -272,7 +296,12 @@ MEDIA_TOOL_NAMES = {"canvas_execute", "canvas_dispatch_skill", "task_wait", "vie
 
 
 def attachments_from_tool_result(name: str, result: Any, limit: int = 2) -> List[Dict[str, Any]]:
-    """工具成功结果里的媒体产物 → 自动附件（改图后让模型看一眼再决定下一步）。"""
+    """工具成功结果里的媒体产物 → 自动附件（改图后让模型看一眼再决定下一步）。
+
+    功能开关 ``agent_multimodal`` 关闭 → 返回 ``[]``（产物不再自动回投）。
+    """
+    if not feature_on():
+        return []
     try:
         if (os.environ.get("AGENT_TOOL_MEDIA") or "1").strip().lower() in ("0", "off", "false"):
             return []

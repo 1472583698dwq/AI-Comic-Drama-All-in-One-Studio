@@ -10,6 +10,9 @@ export default defineConfig({
   ],
   server: {
     // master 工作副本固定 5173（与 multi_ai_simpleuse 的 5174 并存）
+    // 端口必须留在 51xx 段：`src/utils/devOrigin.ts` 用 /^51\d\d$/ 判定「是否 dev 前端」，
+    // 不在该段时 /storage、/assets 等相对产物 URL 不会回源到后端，预览/缩略图全 404。
+    // 本机 5173 空闲；被占时 strictPort 会明确报错而不是悄悄漂移，届时再改端口即可。
     port: 5173,
     strictPort: true,
   },

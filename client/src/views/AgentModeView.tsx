@@ -1,11 +1,14 @@
 /**
  * Agent 独立模式页 — 薄壳：会话侧栏 + 统一消息流 + 统一运行时 store
  * 运行时（会话/流式/计划/审批）全部收敛到 agentStore，与悬浮抽屉共用同一会话。
+ *
+ * 界面取旧线本地设计：外层留白 + 三块圆角卡片（会话栏 / 对话主区 / 说明侧栏），
+ * 输入框以「悬浮层」浮在消息流之上；能力面保持上游 —— 多模态附件、运行中 steer 插话、
+ * 行内审批与「始终允许」、子代理集群、待办清单、自动执行（YOLO）提示，两边并存不丢。
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Bot, Sparkles, ShieldAlert, Film, Trash2, PanelLeftClose, PanelLeft,
-  ArrowDown, ListTodo, Zap,
+  Bot, Sparkles, ShieldAlert, Film, Trash2, PanelLeft, ArrowDown, ListTodo, Zap, Send, BookOpen,
 } from 'lucide-react';
 import { useProjectStore } from '../stores/useProjectStore';
 import { useAgentStore, QUICK_ASK, QUICK_DO, QUICK_CREATE, QUICK_PLAN } from '../components/agent/agentStore';
@@ -17,12 +20,36 @@ import { loadRoleMetas } from '../components/agent/swarmMeta';
 import { SessionSidebar } from '../components/agent/SessionSidebar';
 import type { BehaviorMode, ExecutionMode } from '../components/agent/agentTypes';
 
+/**
+ * 右栏是「说明 + 快速指令台」：说明部分把两个维度摊开成对照表并高亮当前项，
+ * 比只显示当前那一句更容易横向比较；下半区补「使用指引」填掉原先的大片空白。
+ */
+const BEHAVIOR_GUIDE: Array<{ value: BehaviorMode; label: string; desc: string }> = [
+  { value: 'standard', label: '标准', desc: '常规工具集，按风险分级放行，日常生成与检索走这条。' },
+  { value: 'create', label: '创造', desc: '缺能力先提案：Start 试跑 → 持久化 / 丢弃，默认不写生产。' },
+  { value: 'plan', label: '计划', desc: '只读侦察，不生成也不执行；先产出完整计划，批准后才动手。' },
+];
+
+const EXECUTION_GUIDE: Array<{ value: ExecutionMode; label: string; desc: string }> = [
+  { value: 'approve', label: '审批', desc: '删源 / 写文件 / 跑命令等变异动作先审后干，120s 无人应答自动拒绝。' },
+  { value: 'auto', label: '自动', desc: '全部工具自动执行、不再逐项确认，可随时暂停。' },
+];
+
+const USAGE_GUIDE: Array<{ step: string; desc: string }> = [
+  { step: '开始', desc: '左栏「新建会话」开一段干净上下文；会话按项目隔离持久化，随时可切回。' },
+  { step: '提问', desc: '执行模式下直接说要什么（镜头 / 素材 / 配音），由 Agent 决定调哪些工具。' },
+  { step: '指令台', desc: '下方按当前行为模式给示例指令，点一下即发出，也可先改两句再发。' },
+  { step: '计划', desc: '计划模式先产出完整计划，点「按此计划执行」才会真正动手，也可继续输入改计划。' },
+  { step: '敏感操作', desc: '删源 / 写文件 / 跑命令会弹窗确认；120s 无人应答或通道断开即自动拒绝。' },
+  { step: '暂停与翻看', desc: '运行中按 Enter 暂停，已完成结果照常保留；向上翻历史不会被拽走，点 ↓ 一键到底。' },
+];
+
 export const AgentModeView: React.FC = () => {
   const { project, activeShotId } = useProjectStore();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [proposalBusy, setProposalBusy] = useState<Record<string, string>>({});
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
+  // 消息流容器：输入框改为悬浮层后不再占据独立区域，贴底/回到底部都由它自己算
+  const scrollRef = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
 
   const {
@@ -44,23 +71,29 @@ export const AgentModeView: React.FC = () => {
     loadRoleMetas();
   }, []);
 
-  // 自动跟随：用户上滑查看历史时停止自动滚，并给出"回到最新"胶囊（IDE 式）
-  const onListScroll = () => {
-    const el = listRef.current;
-    if (!el) return;
-    setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 120);
-  };
-  const scrollToBottom = () => {
-    setAtBottom(true);
-    requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }));
-  };
+  // 只有用户本来就贴着底部时才跟随新消息；一旦向上翻看，就不把他拽回来（改用「回到底部」按钮）
   useEffect(() => {
-    if (atBottom) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (!atBottom) return;
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [messages, isRunning, atBottom]);
+
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 48);
+  };
+
+  const scrollToBottom = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  };
 
   const shots = project?.scenes.flatMap((s) => s.shots) || [];
   const activeShot = shots.find((s) => s.id === activeShotId);
   const pendingList = useMemo(() => Object.entries(approvals).filter(([, v]) => v.decided === undefined), [approvals]);
+  // 运行模式两维：行为（能干什么）决定提示词与工具门控，执行（要不要逐项人审）决定是否弹确认
   const quickCommands = mode === 'chat' ? QUICK_ASK : behavior === 'plan' ? QUICK_PLAN : behavior === 'create' ? QUICK_CREATE : QUICK_DO;
   const activeSessionTitle = sessions.find((s) => s.id === activeSessionId)?.title || 'Agent 独立模式';
   const latestTodo = useMemo(() => {
@@ -110,8 +143,15 @@ export const AgentModeView: React.FC = () => {
   }
 
   return (
-    <div className="flex-1 flex overflow-hidden">
-      {isSidebarOpen && (
+    <div className="flex-1 flex overflow-hidden p-2">
+      {/* 左：会话栏 —— 宽度过渡（而非条件渲染）才有展开收起的“一体感”，
+          外层容器吃掉溢出，内层整宽跟随；圆角裁切让三块区域各自成卡片。
+          间距用 margin 而非 gap：收起后不残留空档 */}
+      <div
+        className={`shrink-0 overflow-hidden rounded-2xl transition-[width,opacity,margin-right] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+          isSidebarOpen ? 'w-64 lg:w-72 opacity-100 mr-2' : 'w-0 opacity-0 mr-0'
+        }`}
+      >
         <SessionSidebar
           sessions={sessions}
           activeSessionId={activeSessionId}
@@ -120,11 +160,12 @@ export const AgentModeView: React.FC = () => {
           onCreate={createSession}
           onSelect={selectSession}
           onDelete={deleteSession}
+          onCollapse={() => setIsSidebarOpen(false)}
         />
-      )}
+      </div>
 
-      {/* 中间：对话主区 */}
-      <div className="flex-1 flex flex-col min-w-0 relative">
+      {/* 中间：对话主区（圆角描边卡片，与会话栏形成明确分隔） */}
+      <div className="flex-1 flex flex-col min-w-0 rounded-2xl border border-border overflow-hidden">
         {execution === 'auto' && (
           <div className="px-4 py-1.5 bg-red-500/10 border-b border-red-500/30 flex items-center gap-2 text-[11px] text-red-300 shrink-0">
             <Zap className="w-3.5 h-3.5 shrink-0" />
@@ -133,14 +174,17 @@ export const AgentModeView: React.FC = () => {
             </span>
           </div>
         )}
-        <div className="px-5 py-3 border-b border-border bg-surface-secondary/60 flex items-center gap-3 shrink-0">
-          <button
-            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="p-1.5 rounded-lg border border-border hover:border-brand/40 bg-surface text-gray-400 hover:text-white transition-all shrink-0"
-            title={isSidebarOpen ? '收起会话列表' : '展开会话列表'}
-          >
-            {isSidebarOpen ? <PanelLeftClose className="w-4 h-4" /> : <PanelLeft className="w-4 h-4 text-brand" />}
-          </button>
+        <div className="px-5 py-3 flex items-center gap-3 shrink-0">
+          {/* 收起入口已移入会话栏标题行；这里只在收起后提供「展开」恢复入口 */}
+          {!isSidebarOpen && (
+            <button
+              onClick={() => setIsSidebarOpen(true)}
+              className="p-1.5 rounded-lg border border-border hover:border-brand/40 bg-surface text-gray-400 hover:text-white transition-all shrink-0"
+              title="展开会话列表"
+            >
+              <PanelLeft className="w-4 h-4 text-brand" />
+            </button>
+          )}
           <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-brand to-accent-green flex items-center justify-center text-white shadow-md shrink-0">
             <Bot className="w-5 h-5" />
           </div>
@@ -155,26 +199,24 @@ export const AgentModeView: React.FC = () => {
               {isRunning && ' · 运行中'}
             </div>
           </div>
-            <div className="ml-auto flex items-center gap-2">
-              {pendingList.length > 0 && (
-                <button
-                  onClick={scrollToBottom}
-                  className="px-2.5 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-300 text-xs font-bold flex items-center gap-1 animate-pulse"
-                  title="有工具待确认，点击定位到行内审批卡"
-                >
-                  <ShieldAlert className="w-3.5 h-3.5" />{pendingList.length} 待确认
-                </button>
-              )}
-            <div className="flex items-center rounded-xl bg-surface border border-border p-1" title="行为模式（能干什么）：标准=常规能力 / 创造=缺能力先造 / 计划=只读规划不执行">
-              <span className="px-1.5 text-[10px] text-gray-500 select-none">行为</span>
-              <button onClick={() => setBehavior('standard')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${behavior === 'standard' ? 'bg-gray-500/25 text-white' : 'text-gray-500 hover:text-white'}`}>标准</button>
+          <div className="ml-auto flex items-center gap-2">
+            {pendingList.length > 0 && (
+              <button
+                onClick={scrollToBottom}
+                className="px-2.5 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-300 text-xs font-bold flex items-center gap-1 animate-pulse"
+                title="有工具待确认，点击定位到行内审批卡"
+              >
+                <ShieldAlert className="w-3.5 h-3.5" />{pendingList.length} 待确认
+              </button>
+            )}
+            <div className="flex items-center rounded-xl bg-surface border border-border p-1" title="行为：能干什么 —— 标准 / 创造（缺能力先造） / 计划（只读侦察）">
+              <button onClick={() => setBehavior('standard')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${behavior === 'standard' ? 'bg-brand/20 text-brand-light' : 'text-gray-500 hover:text-white'}`}>标准</button>
               <button onClick={() => setBehavior('create')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${behavior === 'create' ? 'bg-violet-500/20 text-violet-300' : 'text-gray-500 hover:text-white'}`}>创造</button>
               <button onClick={() => setBehavior('plan')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${behavior === 'plan' ? 'bg-sky-500/20 text-sky-300' : 'text-gray-500 hover:text-white'}`}>计划</button>
             </div>
-            <div className="flex items-center rounded-xl bg-surface border border-border p-1" title="执行方式（要不要逐项确认）：审批=变异动作先确认 / 自动=全部自动执行不弹确认">
-              <span className="px-1.5 text-[10px] text-gray-500 select-none">执行</span>
+            <div className="flex items-center rounded-xl bg-surface border border-border p-1" title="执行：要不要逐项人审 —— 审批=先审后干 / 自动=全部自动执行（含删源/写文件/跑命令）">
               <button onClick={() => setExecution('approve')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${execution === 'approve' ? 'bg-amber-500/20 text-amber-300' : 'text-gray-500 hover:text-white'}`}>审批</button>
-              <button onClick={() => setExecution('auto')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${execution === 'auto' ? 'bg-brand/20 text-brand-light' : 'text-gray-500 hover:text-white'}`}>自动</button>
+              <button onClick={() => setExecution('auto')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${execution === 'auto' ? 'bg-red-500/20 text-red-300' : 'text-gray-500 hover:text-white'}`}>自动</button>
             </div>
             <div className="flex items-center rounded-xl bg-surface border border-border p-1">
               <button onClick={() => setMode('chat')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${mode === 'chat' ? 'bg-accent-green/20 text-accent-green' : 'text-gray-500 hover:text-white'}`}>问答</button>
@@ -185,76 +227,121 @@ export const AgentModeView: React.FC = () => {
 
         <AgentSwarmPanel subagents={subagents} />
 
-        <div ref={listRef} onScroll={onListScroll} className="flex-1 overflow-y-auto p-5 space-y-4 custom-scrollbar">
-          <AgentMessageList
-            messages={messages}
-            isRunning={isRunning}
-            activeShotIndex={activeShot?.shot_index}
-            onSendSuggestion={(t) => void send(t)}
-            onExecutePlan={(id) => void executePlan(id)}
-            onProposalAction={handleProposalAction}
-            proposalBusy={proposalBusy}
-            onApplyArtifact={applyArtifact}
-            approvals={approvals}
-            autoAllowTools={autoAllowTools}
-            onApprove={handleApprove}
-          />
-          <div ref={bottomRef} />
+        {/* 消息流与输入框同处一个相对容器：输入框绝对定位浮在消息流之上，
+            滚动时内容从输入框底下穿过，不再有一条通栏的输入框占位 */}
+        <div className="flex-1 relative min-h-0">
+          <div ref={scrollRef} onScroll={handleScroll} className="absolute inset-0 overflow-y-auto custom-scrollbar">
+            <div className="max-w-4xl mx-auto px-6 pt-5 pb-44 space-y-4">
+              <AgentMessageList
+                messages={messages}
+                isRunning={isRunning}
+                activeShotIndex={activeShot?.shot_index}
+                onSendSuggestion={(t) => void send(t)}
+                onExecutePlan={(id) => void executePlan(id)}
+                onProposalAction={handleProposalAction}
+                proposalBusy={proposalBusy}
+                onApplyArtifact={applyArtifact}
+                approvals={approvals}
+                autoAllowTools={autoAllowTools}
+                onApprove={handleApprove}
+              />
+            </div>
+          </div>
+
+          {/* 悬浮输入层：渐变蒙版只负责视觉过渡，pointer-events 交给内部，避免挡住消息操作 */}
+          <div className="absolute inset-x-0 bottom-0 px-5 pb-4 pt-12 bg-gradient-to-t from-background via-background/85 to-transparent pointer-events-none">
+            <div className="max-w-4xl mx-auto relative">
+              {!atBottom && (
+                <button
+                  onClick={scrollToBottom}
+                  title="回到底部"
+                  className="pointer-events-auto absolute -top-11 left-1/2 -translate-x-1/2 w-9 h-9 rounded-full border border-border/60 bg-surface/90 backdrop-blur-xl text-gray-400 hover:text-white shadow-lg shadow-black/30 flex items-center justify-center transition-colors"
+                >
+                  <ArrowDown className="w-4 h-4" />
+                </button>
+              )}
+              <div className="pointer-events-auto">
+                <AgentComposer
+                  floating
+                  mode={mode}
+                  behavior={behavior}
+                  execution={execution}
+                  isRunning={isRunning}
+                  wsStatus={wsStatus}
+                  onSend={(t, atts) => void send(t, atts)}
+                  onAbort={abort}
+                  onSteer={(t, atts) => void steer(t, atts)}
+                  onCycleMode={() => setMode(mode === 'execute' ? 'chat' : 'execute')}
+                  onCycleBehavior={() => {
+                    const order: BehaviorMode[] = ['standard', 'create', 'plan'];
+                    setBehavior(order[(order.indexOf(behavior) + 1) % order.length]);
+                  }}
+                  onCycleExecution={() => setExecution(execution === 'auto' ? 'approve' : 'auto')}
+                />
+              </div>
+            </div>
+          </div>
         </div>
-
-        {!atBottom && (
-          <button
-            onClick={scrollToBottom}
-            className="absolute bottom-24 left-1/2 -translate-x-1/2 z-10 px-3 py-1.5 rounded-full bg-brand text-white text-[11px] font-bold shadow-lg flex items-center gap-1 hover:opacity-90"
-          >
-            <ArrowDown className="w-3.5 h-3.5" />回到最新
-          </button>
-        )}
-
-        <AgentComposer
-          mode={mode}
-          behavior={behavior}
-          execution={execution}
-          isRunning={isRunning}
-          wsStatus={wsStatus}
-          onSend={(t, atts) => void send(t, atts)}
-          onAbort={abort}
-          onSteer={(t, atts) => void steer(t, atts)}
-          onCycleMode={() => setMode(mode === 'execute' ? 'chat' : 'execute')}
-          onCycleBehavior={() => {
-            const order: BehaviorMode[] = ['standard', 'create', 'plan'];
-            setBehavior(order[(order.indexOf(behavior) + 1) % order.length]);
-          }}
-          onCycleExecution={() => setExecution(execution === 'auto' ? 'approve' : 'auto')}
-        />
       </div>
 
       {/* 右：模式与上下文侧栏 */}
-      <div className="w-72 border-l border-border bg-surface-secondary/40 p-4 space-y-4 overflow-y-auto custom-scrollbar shrink-0 hidden md:block">
+      <div className="w-72 ml-2 rounded-2xl bg-surface-secondary/70 p-4 space-y-4 overflow-y-auto custom-scrollbar shrink-0 hidden md:block">
         <div className="rounded-2xl border border-border bg-surface p-3 space-y-2">
           <div className="text-xs font-bold text-white flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-brand-light" />模式说明</div>
           <div className={`text-[11px] leading-4 p-2 rounded-xl ${mode === 'chat' ? 'bg-accent-green/10 text-accent-green' : 'bg-brand/10 text-brand-light'}`}>
-            {mode === 'chat' ? '问答：纯 LLM 讲解，不进工具循环，零副作用不烧生成费用。' : '执行：ReAct 循环调全部工具；删源/写文件/跑命令会弹窗确认，120s 超时自动拒绝。'}
+            {mode === 'chat'
+              ? '问答：纯 LLM 讲解，不进工具循环，零副作用不烧生成费用。'
+              : execution === 'auto'
+                ? '执行：ReAct 循环调全部工具；自动执行下不再逐项确认（可随时暂停）。'
+                : '执行：ReAct 循环调全部工具；删源/写文件/跑命令会弹窗确认，120s 超时自动拒绝。'}
           </div>
-          <div className="text-[11px] leading-4 p-2 rounded-xl bg-surface-secondary border border-border text-gray-300 space-y-1">
-            <div>
-              <span className="text-gray-500">行为：</span>
-              {behavior === 'standard' && '标准 —— 常规工具集，按风险分级放行。'}
-              {behavior === 'create' && '创造 —— 缺能力先提案，Start 试跑→持久化/丢弃，默认不写生产。'}
-              {behavior === 'plan' && '计划 —— 只读侦察（不生成不执行），产出完整计划，批准后才执行。'}
-            </div>
-            <div>
-              <span className="text-gray-500">执行：</span>
-              {execution === 'approve' && '审批 —— 变异动作先审后干（默认）。'}
-              {execution === 'auto' && '自动（YOLO）—— 全部工具自动执行，不再逐项弹确认（含删源/写文件/命令）；随时可暂停。'}
-            </div>
-            {behavior === 'plan' && execution === 'auto' && (
-              <div className="text-sky-300/80">计划只读，执行方式仅决定「批准计划后」的跑法。</div>
-            )}
+          <div className="rounded-xl bg-surface-secondary border border-border p-2 space-y-1">
+            <div className="text-[10px] font-bold text-gray-400 px-0.5">行为 · 能干什么</div>
+            {BEHAVIOR_GUIDE.map((b) => (
+              <div
+                key={b.value}
+                className={`text-[11px] leading-4 rounded-lg px-2 py-1 transition-colors ${
+                  behavior === b.value ? 'bg-brand/15 text-white' : 'text-gray-400'
+                }`}
+              >
+                <span className="font-semibold">{b.label}</span>
+                <span className="opacity-60"> — </span>
+                {b.desc}
+              </div>
+            ))}
+          </div>
+          <div className="rounded-xl bg-surface-secondary border border-border p-2 space-y-1">
+            <div className="text-[10px] font-bold text-gray-400 px-0.5">执行 · 要不要逐项人审</div>
+            {EXECUTION_GUIDE.map((e) => (
+              <div
+                key={e.value}
+                className={`text-[11px] leading-4 rounded-lg px-2 py-1 transition-colors ${
+                  execution === e.value ? 'bg-amber-500/15 text-white' : 'text-gray-400'
+                }`}
+              >
+                <span className="font-semibold">{e.label}</span>
+                <span className="opacity-60"> — </span>
+                {e.desc}
+              </div>
+            ))}
           </div>
           <div className="flex gap-2">
-            <button onClick={() => void clearAll()} className="flex-1 py-1.5 rounded-lg bg-surface-secondary border border-border text-[11px] text-gray-300 hover:text-white flex items-center justify-center gap-1"><Trash2 className="w-3 h-3" />清空记忆</button>
-            <button onClick={abort} className="flex-1 py-1.5 rounded-lg bg-surface-secondary border border-border text-[11px] text-gray-300 hover:text-white">暂停</button>
+            {/* hover 工具类带 `!`：index.css 的 .bg-surface-secondary / .border-border 是
+                `!important` 的，不带 important 的 hover 会被它整段压掉（这就是"鼠标放上去没反应"的根因） */}
+            <button
+              onClick={() => void clearAll()}
+              className="flex-1 py-1.5 rounded-lg bg-surface-secondary border border-border text-[11px] text-gray-300 hover:bg-surface-tertiary! hover:border-border-active! hover:text-white active:scale-95 transition-all flex items-center justify-center gap-1"
+            >
+              <Trash2 className="w-3 h-3" />清空记忆
+            </button>
+            <button
+              onClick={abort}
+              disabled={!isRunning}
+              title={isRunning ? '暂停当前任务（Enter 同效）' : '当前没有正在运行的任务'}
+              className="flex-1 py-1.5 rounded-lg bg-surface-secondary border border-border text-[11px] text-gray-300 hover:bg-surface-tertiary! hover:border-border-active! hover:text-white active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-surface-secondary! disabled:hover:text-gray-300"
+            >
+              暂停
+            </button>
           </div>
         </div>
 
@@ -265,20 +352,59 @@ export const AgentModeView: React.FC = () => {
           </div>
         )}
 
+        {pendingList.length > 0 && (
+          <div className="rounded-2xl border border-amber-500/40 bg-amber-500/5 p-3 space-y-2">
+            <div className="text-xs font-bold text-amber-300 flex items-center gap-1.5"><ShieldAlert className="w-3.5 h-3.5" />待确认 {pendingList.length}</div>
+            {pendingList.map(([aid, v]) => (
+              <div key={aid} className="rounded-xl bg-surface-secondary border border-amber-500/20 p-2">
+                <div className="text-[11px] font-mono text-white truncate">{v.tool_name}</div>
+                <div className="text-[10px] font-mono text-gray-500 break-all max-h-20 overflow-y-auto custom-scrollbar">{JSON.stringify(v.args).slice(0, 400)}</div>
+                <div className="flex gap-1.5 mt-1.5">
+                  <button onClick={() => handleApprove(aid, true, false)} className="flex-1 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-black text-[11px] font-bold active:scale-95 transition-all">允许</button>
+                  <button onClick={() => handleApprove(aid, false, false)} className="flex-1 py-1 rounded-lg bg-surface-secondary border border-border text-[11px] text-gray-300 hover:bg-surface-tertiary! hover:border-border-active! hover:text-white active:scale-95 transition-all">拒绝</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="rounded-2xl border border-border bg-surface p-3 space-y-2">
           <div className="text-xs font-bold text-white flex items-center gap-1.5"><Film className="w-3.5 h-3.5 text-accent-orange" />当前上下文</div>
           <div className="text-[11px] text-gray-400 leading-5">
             <div>项目：{project?.title || '未选择'}</div>
             <div>镜头：{activeShot ? `#${activeShot.shot_index} ${activeShot.action_desc?.slice(0, 20) || ''}` : '无'}</div>
             <div>通道：{wsStatus === 'open' ? 'WS 在线（可确认敏感操作）' : 'HTTP（敏感操作自动拒绝）'}</div>
+            <div>会话：{messages.length} 条消息 · {isRunning ? '运行中' : '空闲'}</div>
           </div>
         </div>
 
         <div className="rounded-2xl border border-border bg-surface p-3 space-y-2">
           <div className="text-xs font-bold text-white">快捷指令{behavior === 'create' ? ' · 创造' : behavior === 'plan' ? ' · 计划' : ''}</div>
+          <div className="text-[10px] text-gray-500 leading-4">按当前行为模式给示例，点一下即发出（想改再改就手动输入）。</div>
           {quickCommands.map((q) => (
-            <button key={q} onClick={() => void send(q)} className="w-full text-left px-2.5 py-1.5 rounded-lg bg-surface-secondary border border-border text-[11px] text-gray-300 hover:border-brand hover:text-white">{q}</button>
+            <button
+              key={q}
+              onClick={() => void send(q)}
+              className="group w-full text-left px-2.5 py-1.5 rounded-lg bg-surface-secondary border border-border text-[11px] text-gray-300 hover:bg-brand/10! hover:border-brand/60! hover:text-white active:scale-[0.98] transition-all flex items-start gap-1.5"
+            >
+              <span className="w-3 shrink-0 pt-0.5">
+                <Send className="w-3 h-3 opacity-40 group-hover:opacity-100 transition-opacity" />
+              </span>
+              <span>{q}</span>
+            </button>
           ))}
+        </div>
+
+        <div className="rounded-2xl border border-border bg-surface p-3 space-y-2">
+          <div className="text-xs font-bold text-white flex items-center gap-1.5"><BookOpen className="w-3.5 h-3.5 text-brand-cyan" />使用指引</div>
+          <div className="space-y-1.5">
+            {USAGE_GUIDE.map((g, i) => (
+              <div key={g.step} className="flex gap-2 text-[11px] leading-4">
+                <span className="mt-0.5 w-4 h-4 shrink-0 rounded-full bg-surface-secondary border border-border text-[9px] font-bold text-brand-cyan flex items-center justify-center">{i + 1}</span>
+                <span className="text-gray-400"><span className="text-white font-semibold">{g.step}</span> — {g.desc}</span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>

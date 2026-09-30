@@ -153,6 +153,15 @@ async def _extension_project_scope(request, call_next):
             except Exception:
                 pass
 
+# 功能页（page）默认停用集播种：首次运行把默认关的页面写入扩展覆盖层（幂等，失败不阻断启动）
+try:
+    from app.core import pages as _pages
+    _page_seed = _pages.seed_defaults()
+    if _page_seed.get("seeded"):
+        print(f"[Main] Page defaults seeded (disabled={_page_seed.get('disabled')})")
+except Exception as e:
+    print(f"[Main] Page defaults seed failed: {e}")
+
 # Mount API routes
 app.include_router(router, prefix=settings.API_V1_STR)
 # 资产库路由
@@ -204,6 +213,20 @@ try:
     print("[Main] Extension routes mounted at /api/v1/extensions")
 except Exception as e:
     print(f"[Main] Extension routes mount failed: {e}")
+# 功能页运行时开关路由（清单 + 启停状态）
+try:
+    from app.api.page_routes import router as page_router
+    app.include_router(page_router, prefix=settings.API_V1_STR)
+    print("[Main] Page routes mounted at /api/v1/pages")
+except Exception as e:
+    print(f"[Main] Page routes mount failed: {e}")
+# 功能级（feature）运行时开关路由（清单 + 批量写；页面关不掉的进阶能力，出厂全关）
+try:
+    from app.api.feature_routes import router as feature_router
+    app.include_router(feature_router, prefix=settings.API_V1_STR)
+    print("[Main] Feature routes mounted at /api/v1/features")
+except Exception as e:
+    print(f"[Main] Feature routes mount failed: {e}")
 # 插件系统路由（P1：providers/skills/workflows/mcp_tools 四类扩展点）
 try:
     from app.api.plugin_routes import router as plugin_router
@@ -225,6 +248,13 @@ try:
     print("[Main] CanvasNode routes mounted at /api/v1/canvas-nodes")
 except Exception as e:
     print(f"[Main] CanvasNode routes mount failed: {e}")
+# 画布时间线节点路由（引擎自检 / 合片 MP4 长任务 / 降级剪映草稿；画布页关闭时整族 404）
+try:
+    from app.api.timeline_routes import router as timeline_router
+    app.include_router(timeline_router, prefix=settings.API_V1_STR)
+    print("[Main] Timeline routes mounted at /api/v1/timeline")
+except Exception as e:
+    print(f"[Main] Timeline routes mount failed: {e}")
 # 前端扩展点路由：主题包 / 导出器 / 导演包
 # 三个模块导出的都是 `router`（与其余路由模块一致），此前按 theme_router/exporter_router/
 # director_pack_router 取会 AttributeError，被 except 吞掉 → 三个扩展点静默未挂载

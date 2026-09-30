@@ -74,6 +74,14 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     outputs: [],
     isCore: true,
   },
+  // 时间线（合视频·轻剪辑）：入边是素材，出边为空（产物直接落 exports/ 供下载）。
+  // 与下方兼容老节点 'timeline-export'（剪映导出）语义不同，勿混用。
+  'timeline': {
+    type:'timeline', label:'时间线', desc:'多段合片·轻剪辑', color:'text-brand',
+    inputs: [H('video','视频','video'), H('audio','音频','audio')],
+    outputs: [],
+    isCore: true,
+  },
   // ====== 兼容老类型（用于旧画布自动迁移，不在工具栏展示） ======
   'brief': {
     type:'brief', label:'灵感简报', desc:'兼容', color:'text-amber-400',

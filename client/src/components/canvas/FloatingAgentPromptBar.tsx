@@ -1,7 +1,15 @@
 // -*- coding: utf-8 -*-
 /**
- * 双态底部控制台 — 无选中=全局导演 Agent GO；选中生图/视频/配音节点=该节点的 Agent 控制台
- * 设计：每个节点是"用户需求→Agent(选skill/选源/润色/组参/调API)→结果"；用户只说人话
+ * 【已废弃 · 保留作参考实现，全仓零引用】上游旧的画布底部常驻控制台（双态）。
+ *
+ * 弃用原因：与画布右侧「导演 Agent」侧栏（`CanvasAgentSidebar`，画布上唯一的 Agent 入口）
+ * 功能重叠 —— 两者全局态都是"一句话让 Agent 编排画布"，而侧栏有会话
+ * （消息流 / 审批 / 插话 / 关注节点），本文件的全局态只是一次性 `agentChat` + 一行回显，是其子集。
+ * 本文件剩下的"节点态"（选中 image/video/audio → `NodeAgentConsole`）已由
+ * `CreativeCanvas.tsx` 内联的 `NodeControlBar` 承接（本地设计：底部只服务选中的生成节点，无常驻全局浮层）。
+ *
+ * 原设计说明：双态底部控制台 — 无选中=全局导演 Agent GO；选中生图/视频/配音节点=该节点的 Agent 控制台；
+ * 每个节点是"用户需求→Agent(选skill/选源/润色/组参/调API)→结果"；用户只说人话。
  */
 import React, { useState } from 'react';
 import {

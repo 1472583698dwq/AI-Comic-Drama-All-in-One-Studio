@@ -1,5 +1,32 @@
 import { Project, StoryboardShot, MCPToolDefinition } from '../types';
 import { API_BASE_URL } from '../utils/devOrigin';
+import type { TimelineClip } from '../types/timeline';
+// 类型专用导入（不产生运行期依赖）：/config/test 的目标名单以设置面板的 TestTarget 为唯一口径
+import type { TestTarget } from '../views/setup/capabilityCatalog';
+
+/** 时间线引擎自检结果（ffmpeg 合片 + 剪映草稿降级两个出口） */
+export interface TimelineEngineStatus {
+  ffmpeg: boolean;
+  ffprobe: boolean;
+  jianyin: boolean;
+  available: boolean;
+  ffmpeg_hint: string;
+  draft_hint: string;
+}
+
+/** 时间线合片任务（内存任务表，前端轮询 polling） */
+export interface TimelineTask {
+  task_id: string;
+  status: 'running' | 'success' | 'error';
+  stage: string;
+  progress: number;
+  output_url?: string;
+  output_path?: string;
+  duration?: number;
+  size_bytes?: number;
+  warnings?: string[];
+  error?: string;
+}
 
 function extractErrorMessage(res: Response, body: any): string {
   if (body?.detail) {
@@ -426,6 +453,52 @@ export const apiService = {
     return await res.json();
   },
 
+  // 6.2 画布时间线节点：合视频（ffmpeg）与降级剪映草稿
+  // 引擎自检：一次拿到 ffmpeg 合片与剪映草稿两个出口的就绪态与安装指引
+  async timelineEngine(): Promise<TimelineEngineStatus> {
+    const res = await fetch(`${API_BASE_URL}/timeline/engine`);
+    if (!res.ok) {
+      return { ffmpeg: false, ffprobe: false, jianyin: false, available: false, ffmpeg_hint: `引擎自检请求失败（HTTP ${res.status}）`, draft_hint: '' };
+    }
+    return await res.json();
+  },
+  // 提交合片任务：校验同步完成（非法片段当场 400），通过后返回 task_id 供轮询
+  async mergeTimeline(payload: {
+    clips: TimelineClip[];
+    project_id?: string;
+    title?: string;
+    output_name?: string;
+    aspect_ratio?: string;
+  }): Promise<{ status: string; task_id: string; clips: number; duration: number; stage: string }> {
+    const res = await fetch(`${API_BASE_URL}/timeline/merge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async getTimelineTask(taskId: string): Promise<TimelineTask> {
+    const res = await fetch(`${API_BASE_URL}/timeline/tasks/${encodeURIComponent(taskId)}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  // 降级出口：不打 MP4，导出剪映/CapCut 官方草稿工程
+  async exportTimelineDraft(payload: {
+    clips: TimelineClip[];
+    project_id?: string;
+    title?: string;
+    aspect_ratio?: string;
+  }): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/timeline/draft`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+
   // 7. 系统配置
   async getConfig(): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/config`);
@@ -454,7 +527,10 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
-  async testConfig(    target: 'openai' | 'responses_api' | 'deepseek' | 'qwen' | 'minimax' | 'minimax_h3' | 'seedance' | 'kling' | 'wan3' | 'comfyui' | 'siliconflow' | 'dashscope' | 'elevenlabs' | 'cosyvoice' | 'gptsovits' | 'jianyin' | 'openai_compat',
+  async testConfig(
+    // 与后端 /config/test 及设置面板的 TestTarget 同源（旧口径拼作 gptsovits、缺
+    // openai_image/openai_video/indextts/openlist，被调用处的 as any 掩盖了）
+    target: TestTarget,
     config?: Record<string, string>
   ): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/config/test`, {
@@ -1047,6 +1123,20 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
+  /** 代码源的生效配置：Key 来源（配置存储/代码内联/未配置）+ 代码里写死的常量 */
+  async getProviderEffectiveConfig(providerId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/providers/${encodeURIComponent(providerId)}/effective-config`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  /** 把代码里的内联 Key 迁到配置存储；rewrite_code=true 时同时改写代码改走 ctx */
+  async migrateProviderInlineKey(providerId: string, rewrite_code = true): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/providers/${encodeURIComponent(providerId)}/migrate-inline-key`, {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ rewrite_code }),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
   // 插件系统 P0
   async listPlugins(): Promise<{ plugins: any[]; total: number }> {
     const res = await fetch(`${API_BASE_URL}/plugins`);
@@ -1212,5 +1302,37 @@ export const apiService = {
     const res = await fetch(`${API_BASE_URL}/agent-teams/${encodeURIComponent(id)}`, { method: 'DELETE' });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
+  },
+  // ── 功能页（page）运行时开关 ──
+  /** 页面清单 + 当前值：{ pages: [...], values: {id: bool}, groups: [...], file } */
+  async getPages(): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/pages`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  /** 页面级启用 / 停用（config 为系统页，后端拒绝停用并返回 400） */
+  async setPageEnabled(pageId: string, enabled: boolean): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/extensions/page:${encodeURIComponent(pageId)}/${enabled ? 'enable' : 'disable'}`, {
+      method: 'POST',
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json().catch(() => ({}));
+  },
+  // ── 非页面级「功能开关」（L2 能力级开关） ──
+  /** 功能清单 + 当前值：{ features: [{ id, label, description, default, enabled }], values: {id: bool}, file } */
+  async getFeatures(): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/features`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  /** 批量写入功能开关，返回与 GET 同形状的最新全量状态 */
+  async saveFeatures(values: Record<string, boolean>): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/features`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values }),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json().catch(() => ({}));
   },
 };

@@ -45,7 +45,7 @@ const AgentShell: React.FC<{
   children: React.ReactNode;
   handles?: React.ReactNode;
 }> = ({ id, selected, icon: Icon, label, providerBadge, topActions, children, handles }) => {
-  const { setSelectedNodeId } = useCanvasStore();
+  const { setSelectedNodeId, agentFocusNodeIds } = useCanvasStore();
   const [showAddMenu, setShowAddMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -101,8 +101,18 @@ const AgentShell: React.FC<{
             {providerBadge}
           </span>
         )}
-        <span className="ml-auto text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/5 text-white/40 border border-white/10">
-          #{id.slice(-4)}
+        <span className="ml-auto flex items-center gap-1.5 shrink-0">
+          {agentFocusNodeIds.includes(id) && (
+            <span
+              className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 font-bold"
+              title="已加入会话：Agent 会把「这个节点」默认理解为它"
+            >
+              会话
+            </span>
+          )}
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/5 text-white/40 border border-white/10">
+            #{id.slice(-4)}
+          </span>
         </span>
       </div>
 

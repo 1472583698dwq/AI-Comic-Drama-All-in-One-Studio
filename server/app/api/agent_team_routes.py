@@ -7,7 +7,7 @@
 """
 from typing import Any, Dict
 
-from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 from app.agent_teams.manager import (
     agent_team_manager,
@@ -16,8 +16,11 @@ from app.agent_teams.manager import (
     validate_team_members,
 )
 from app.agent_teams.models import AgentProfileSpec, AgentTeamSpec, MANIFEST_TEMPLATES
+from app.core import features
 
-router = APIRouter()
+# 路由级守卫：导演组（agent_teams）功能关闭时整族 404（运行期开关，路由始终挂载）。
+# 本 router 同时承载 /agent-profiles* 与 /agent-teams*：两者都是导演组能力的入口，同一个开关。
+router = APIRouter(dependencies=[Depends(features.require("agent_teams"))])
 
 
 # ── 角色画像 ─────────────────────────────────────────────

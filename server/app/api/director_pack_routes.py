@@ -2,12 +2,14 @@
 """导演包 HTTP API — 列表 / 声明模板 / 保存 / 删除 / 详情。"""
 from typing import Any, Dict
 
-from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
+from app.core import pages
 from app.director_packs.manager import director_pack_manager, list_effective_packs
 from app.director_packs.models import DirectorPackSpec, MANIFEST_TEMPLATE
 
-router = APIRouter()
+# 路由级守卫：3D 片场（director3d）关闭时整族 404（运行期开关，路由始终挂载）
+router = APIRouter(dependencies=[Depends(pages.require("director3d"))])
 
 
 @router.get("/director-packs")

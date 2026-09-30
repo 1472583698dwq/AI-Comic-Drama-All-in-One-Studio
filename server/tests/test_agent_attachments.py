@@ -20,6 +20,8 @@ from app.agent.runtime import events as E  # noqa: E402
 from app.agent.runtime.session import Session  # noqa: E402
 from app.agent.runtime.store import SessionStore  # noqa: E402
 from app.agent.runtime import attachments as A  # noqa: E402
+from app.core import features as features_mod  # noqa: E402
+from app.core.config import settings as app_settings  # noqa: E402
 
 _LOOP = None
 
@@ -34,6 +36,24 @@ def run(coro):
 
 
 class AttachmentBase(unittest.TestCase):
+    """多模态附件现由功能级开关 ``agent_multimodal`` 把门（出厂关闭）。
+
+    本文件测的是「开启后」的既有行为，故类级把开关打开；storage 同时指到临时
+    目录，开关文件与上传落盘都不会碰到真实 storage/。
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls._orig_storage = app_settings.STORAGE_DIR
+        cls._storage_tmp = tempfile.mkdtemp(prefix="agent_att_storage_")
+        app_settings.STORAGE_DIR = cls._storage_tmp
+        features_mod.set_values({"agent_multimodal": True})
+
+    @classmethod
+    def tearDownClass(cls):
+        app_settings.STORAGE_DIR = cls._orig_storage
+        shutil.rmtree(cls._storage_tmp, ignore_errors=True)
+
     def setUp(self):
         self._tmp = tempfile.mkdtemp(prefix="agent_att_")
         self.store = SessionStore(Path(self._tmp))

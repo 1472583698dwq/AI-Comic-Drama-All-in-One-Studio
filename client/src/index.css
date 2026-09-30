@@ -115,6 +115,7 @@
 .react-flow__node-load-audio,
 .react-flow__node-text-prompt,
 .react-flow__node-comfy-workflow,
+.react-flow__node-timeline,
 .react-flow__node-timeline-export {
   background: transparent !important;
   background-color: transparent !important;
@@ -215,6 +216,18 @@ input, textarea, select {
 }
 input::placeholder, textarea::placeholder {
   color: var(--color-text-muted);
+}
+
+/* Tailwind v4 起 preflight 不再给按钮补 `cursor: pointer`（v3 有），
+   于是全站按钮 hover 都没有"可点"的手型反馈。这里补回该默认行为；
+   放进 base 层是为了让 `cursor-grab` 这类工具类（拖拽把手）仍能覆盖它。 */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  summary,
+  label[for] {
+    cursor: pointer;
+  }
 }
 
 /* ============ 浅色主题可读性修复 ============

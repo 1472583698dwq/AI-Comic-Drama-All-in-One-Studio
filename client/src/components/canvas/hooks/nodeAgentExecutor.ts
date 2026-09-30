@@ -121,7 +121,8 @@ export async function executeAgentNode(opts: ExecuteAgentNodeOpts): Promise<Reco
   if (!node) throw new Error('节点不存在');
   const d: any = { ...(node.data || {}), ...(override || {}) };
   const prompt = (d.prompt ?? d.text ?? '').toString().trim();
-  if (!prompt && node.type !== 'director3d' && node.type !== 'export') throw new Error('提示词为空');
+  // export/timeline 是聚合型节点，本来就没有提示词，不能按「提示词为空」拦下
+  if (!prompt && node.type !== 'director3d' && node.type !== 'export' && node.type !== 'timeline') throw new Error('提示词为空');
   const providerId: string = d.provider_id || d.provider || '';
   const toolName = providerId ? `provider_${providerId}` : '';
 
