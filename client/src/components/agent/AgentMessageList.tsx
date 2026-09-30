@@ -125,7 +125,7 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
                   用户侧连"只放时间"的一行也去掉 —— 那一行没有身份信息、只剩一个靠右的
                   小字，视觉上就是气泡顶部一条空行（用户反馈）。 */}
               {!compact && m.sender === 'agent' && (
-                <div className="flex items-center gap-1.5 mb-1.5 text-[10px] text-gray-500">
+                <div className="flex items-center gap-1.5 mb-1.5 text-[10px] [color:var(--color-text-main)]">
                   <Bot className="w-3 h-3 text-brand-light" />
                   <span>Agent</span>
                   {m.mode && (
@@ -179,13 +179,13 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
                       <Sparkles className={`w-3.5 h-3.5 text-brand ${m.isThinkingStreaming ? 'animate-spin' : ''}`} />
                       <span>{m.isThinkingStreaming ? '思考推演中…' : '思考过程'}</span>
                     </span>
-                    <span className="flex items-center gap-1 text-[10px] text-gray-400 font-normal">
+                    <span className="flex items-center gap-1 text-[10px] [color:var(--color-text-main)] font-normal">
                       <span>{thinkingOpen ? '收起' : '展开'}</span>
                       <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${thinkingOpen ? 'rotate-180' : ''}`} />
                     </span>
                   </button>
                   {thinkingOpen && (
-                    <div className="px-3 py-2 border-t border-brand/15 text-[11px] leading-relaxed text-gray-300 font-mono whitespace-pre-wrap max-h-60 overflow-y-auto custom-scrollbar select-text bg-white/55 dark:bg-white/[.06]">
+                    <div className="px-3 py-2 border-t border-brand/15 text-[11px] leading-relaxed [color:var(--color-text-main)] font-mono whitespace-pre-wrap max-h-60 overflow-y-auto custom-scrollbar select-text bg-white/55 dark:bg-white/[.06]">
                       {m.thinking || (m.isThinkingStreaming ? '正在感知导演意图与分析分镜机位…' : '')}
                       {m.isThinkingStreaming && <span className="inline-block w-1.5 h-3.5 bg-brand ml-1 animate-pulse align-middle" />}
                     </div>
@@ -211,12 +211,12 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
                     onChange={(e) => setEditText(e.target.value)}
                     rows={Math.min(8, Math.max(2, editText.split('\n').length))}
                     autoFocus
-                    className="w-full bg-white/60 dark:bg-white/[.05] border border-brand/50 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none resize-none"
+                    className="w-full bg-white/60 dark:bg-white/[.05] border border-brand/50 rounded-lg px-2 py-1.5 text-xs [color:var(--color-text-main)] focus:outline-none resize-none"
                   />
                   <div className="flex gap-1.5 justify-end">
                     <button
                       onClick={() => setEditingId(null)}
-                      className="px-2.5 py-1 rounded-lg border border-white/20 text-[11px] text-gray-200 flex items-center gap-1"
+                      className="px-2.5 py-1 rounded-lg border border-white/20 text-[11px] [color:var(--color-text-main)] flex items-center gap-1"
                     >
                       <X className="w-3 h-3" />取消
                     </button>
@@ -275,7 +275,7 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
                     >
                       按此计划执行
                     </button>
-                    <span className="text-[10px] text-gray-500">或继续输入，让 Agent 修订计划</span>
+                    <span className="text-[10px] [color:var(--color-text-main)]">或继续输入，让 Agent 修订计划</span>
                   </div>
                 )
               )}
@@ -322,7 +322,7 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
                     <button
                       key={s}
                       onClick={() => onSendSuggestion(s)}
-                      className="px-2 py-1 rounded-full bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 text-[10px] text-gray-300 hover:border-brand hover:text-white"
+                      className="px-2 py-1 rounded-full bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 text-[10px] [color:var(--color-text-main)] hover:border-brand"
                     >
                       {s}
                     </button>

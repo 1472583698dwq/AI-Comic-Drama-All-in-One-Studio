@@ -58,26 +58,25 @@ export interface AgentComposerProps {
 
 /** 计划预设（独立开关，置顶显示）：只读出方案，同意后按所选权限执行 */
 const AGENT_PLAN_PRESET = {
-  key: 'plan', label: '计划', accent: 'text-sky-300',
+  key: 'plan', label: '计划',
   hint: '只读侦察先出完整方案，同意后按所选权限执行；不生成不花钱',
 };
 
 /** 权限三选一（与计划不冲突）：映射到现有 run_mode token，后端零改动 */
-const AGENT_PERMISSION_PRESETS: Array<{ key: RunMode; label: string; hint: string; accent: string }> = [
-  { key: 'approve', label: '变更前确认', hint: '正常干活；删源/写文件/跑命令等危险操作逐个问你', accent: 'text-amber-300' },
-  { key: 'auto', label: '完全访问', hint: '全部工具自动执行、不再逐项确认（含删源/写文件/跑命令），可随时暂停', accent: 'text-red-300' },
-  { key: 'create', label: '造能力', hint: '缺能力先提案：试跑验证后由你决定转正/丢弃，默认不写生产', accent: 'text-violet-300' },
+const AGENT_PERMISSION_PRESETS: Array<{ key: RunMode; label: string; hint: string }> = [
+  { key: 'approve', label: '变更前确认', hint: '正常干活；删源/写文件/跑命令等危险操作逐个问你' },
+  { key: 'auto', label: '完全访问', hint: '全部工具自动执行、不再逐项确认（含删源/写文件/跑命令），可随时暂停' },
+  { key: 'create', label: '造能力', hint: '缺能力先提案：试跑验证后由你决定转正/丢弃，默认不写生产' },
 ];
 
 /** 菜单条目：标签 + 一句描述，选中打勾 */
 const ModeMenuItem: React.FC<{
   label: string;
   hint?: string;
-  accent?: string;
   checked?: boolean;
   title?: string;
   onClick: () => void;
-}> = ({ label, hint, accent, checked, title, onClick }) => (
+}> = ({ label, hint, checked, title, onClick }) => (
   <button
     type="button"
     onClick={onClick}
@@ -87,8 +86,8 @@ const ModeMenuItem: React.FC<{
     }`}
   >
     <span className="flex-1 min-w-0">
-      <span className={`block text-[11px] font-semibold ${accent || '[color:var(--color-text-main)]'}`}>{label}</span>
-      {hint && <span className="block text-[9px] leading-3 [color:var(--color-text-muted)] mt-0.5">{hint}</span>}
+      <span className="block text-[11px] font-semibold [color:var(--color-text-main)]">{label}</span>
+      {hint && <span className="block text-[9px] leading-3 [color:var(--color-text-main)] mt-0.5">{hint}</span>}
     </span>
     {checked && <Check className="w-3 h-3 text-brand shrink-0 mt-0.5" />}
   </button>
@@ -134,15 +133,14 @@ const ModeMenuPill: React.FC<{
         title="工作模式：计划（先出方案）+ 权限（变更前确认 / 完全访问 / 造能力）"
         className="flex items-center gap-1 px-2 py-1 rounded-lg bg-surface border border-border hover:border-brand/50 text-[10px] font-semibold [color:var(--color-text-main)] transition-colors disabled:opacity-40"
       >
-        <span className={current.accent}>{current.label}</span>
-        <ChevronUp className={`w-2.5 h-2.5 [color:var(--color-text-muted)] transition-transform ${open ? '' : 'rotate-180'}`} />
+        <span className="[color:var(--color-text-main)]">{current.label}</span>
+        <ChevronUp className={`w-2.5 h-2.5 [color:var(--color-text-main)] transition-transform ${open ? '' : 'rotate-180'}`} />
       </button>
       {open && (
         <div className="absolute bottom-full mb-1.5 left-0 z-50 w-[280px] bg-surface border border-border rounded-xl shadow-2xl shadow-black/40 p-1 animate-fade-in">
           <ModeMenuItem
             label={AGENT_PLAN_PRESET.label}
             hint={AGENT_PLAN_PRESET.hint}
-            accent={AGENT_PLAN_PRESET.accent}
             checked={planOn}
             onClick={() => { onSelectPlan(); setOpen(false); }}
           />
@@ -153,13 +151,12 @@ const ModeMenuPill: React.FC<{
               key={p.key}
               label={p.label}
               hint={p.hint}
-              accent={p.accent}
               checked={!planOn && p.key === permission}
               onClick={() => { onSelectPermission(p.key); setOpen(false); }}
             />
           ))}
           {planOn && (
-            <div className="px-2 pt-1.5 pb-1 text-[9px] leading-3 [color:var(--color-text-muted)]">
+            <div className="px-2 pt-1.5 pb-1 text-[9px] leading-3 [color:var(--color-text-main)]">
               计划进行中：切换权限不会退出计划，同意计划后按所选权限执行
             </div>
           )}
@@ -323,7 +320,7 @@ export const AgentComposer: React.FC<AgentComposerProps> = ({
               );
             })}
             {pasting && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 text-[10px] [color:var(--color-text-muted)]">
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 text-[10px] [color:var(--color-text-main)]">
                 <Loader2 className="w-2.5 h-2.5 animate-spin" />粘贴上传中…
               </span>
             )}
@@ -344,7 +341,7 @@ export const AgentComposer: React.FC<AgentComposerProps> = ({
           }}
           placeholder={placeholder}
           rows={compact ? (hasMenu ? 3 : 1) : 2}
-          className={`w-full bg-transparent px-3.5 pt-3 pb-1 text-xs text-white placeholder-gray-500 focus:outline-none resize-none custom-scrollbar ${
+          className={`w-full bg-transparent px-3.5 pt-3 pb-1 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-main)] opacity-100 focus:outline-none resize-none custom-scrollbar ${
             compact ? 'max-h-40 min-h-[32px]' : 'max-h-40'
           }`}
         />
@@ -360,7 +357,7 @@ export const AgentComposer: React.FC<AgentComposerProps> = ({
               className={`w-7 h-7 rounded-lg border flex items-center justify-center transition-colors ${
                 pickerOpen || attachments.length
                   ? 'bg-brand/15 border-brand/40 text-brand'
-                  : 'bg-white/60 dark:bg-white/[.05] border-white/70 dark:border-white/12 [color:var(--color-text-muted)] hover:border-brand/50 hover:[color:var(--color-text-main)]'
+                  : 'bg-white/60 dark:bg-white/[.05] border-white/70 dark:border-white/12 [color:var(--color-text-main)] hover:border-brand/50'
               }`}
             >
               <Paperclip className="w-3.5 h-3.5" />
@@ -390,7 +387,7 @@ export const AgentComposer: React.FC<AgentComposerProps> = ({
             />
           )}
 
-          <span className={`flex-1 min-w-0 text-[9px] [color:var(--color-text-muted)] truncate ${hasMenu ? '' : 'pl-1'}`}>
+          <span className={`flex-1 min-w-0 text-[9px] [color:var(--color-text-main)] truncate ${hasMenu ? '' : 'pl-1'}`}>
             {isRunning
               ? (onSteer ? '运行中 · Enter 插话（不打断已产出）' : '运行中 · Enter 暂停')
               : 'Enter 发送 · Shift+Enter 换行'}

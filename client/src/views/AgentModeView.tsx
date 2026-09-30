@@ -118,8 +118,8 @@ export const AgentModeView: React.FC = () => {
     return (
       <div className="flex-1 flex flex-col items-center justify-center bg-background p-8 text-center space-y-4">
         <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-brand to-accent-pink flex items-center justify-center text-3xl shadow-xl shadow-brand/20">🎬</div>
-        <h2 className="text-lg font-bold text-white">请先创建或打开一个项目</h2>
-        <p className="text-xs text-gray-400 max-w-md">Agent 模式使用项目级会话隔离，请先在项目看板创建或选择项目后再使用。</p>
+        <h2 className="text-lg font-bold [color:var(--color-text-main)]">请先创建或打开一个项目</h2>
+        <p className="text-xs [color:var(--color-text-main)] max-w-md">Agent 模式使用项目级会话隔离，请先在项目看板创建或选择项目后再使用。</p>
         <button
           onClick={() => useProjectStore.getState().setActiveTab('projects')}
           className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-brand to-brand-blue text-white text-xs font-semibold hover:opacity-90 shadow-lg shadow-brand/20 transition-all"
@@ -167,7 +167,7 @@ export const AgentModeView: React.FC = () => {
           {!isSidebarOpen && (
             <button
               onClick={() => setIsSidebarOpen(true)}
-              className="p-1.5 rounded-lg border border-white/70 dark:border-white/12 hover:border-brand/40 bg-white/60 dark:bg-white/[.05] text-gray-400 hover:text-white transition-all shrink-0"
+              className="p-1.5 rounded-lg border border-white/70 dark:border-white/12 hover:border-brand/40 bg-white/60 dark:bg-white/[.05] [color:var(--color-text-main)] transition-all shrink-0"
               title="展开会话列表"
             >
               <PanelLeft className="w-4 h-4 text-brand" />
@@ -178,10 +178,10 @@ export const AgentModeView: React.FC = () => {
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-bold text-white truncate max-w-[200px] sm:max-w-[280px]">{activeSessionTitle}</span>
+              <span className="text-sm font-bold [color:var(--color-text-main)] truncate max-w-[200px] sm:max-w-[280px]">{activeSessionTitle}</span>
               <span className={`w-1.5 h-1.5 rounded-full ${wsStatus === 'open' ? 'bg-accent-green' : 'bg-amber-400'}`} title={wsStatus === 'open' ? 'WS 在线' : 'HTTP 通道（自动重连中）'} />
             </div>
-            <div className="text-[10px] text-gray-500 truncate">
+            <div className="text-[10px] [color:var(--color-text-main)] truncate">
               {project.title || '当前项目'} · {shots.length}镜 · 会话: {activeSessionId.slice(0, 12) || '就绪'}
               {isRunning && runningSteps.total > 0 && ` · 步骤 ${runningSteps.done}/${runningSteps.total}`}
               {isRunning && ' · 运行中'}
@@ -230,7 +230,7 @@ export const AgentModeView: React.FC = () => {
                 <button
                   onClick={scrollToBottom}
                   title="回到底部"
-                  className="pointer-events-auto absolute -top-11 left-1/2 -translate-x-1/2 w-9 h-9 rounded-full border border-white/55 dark:border-white/10 bg-white/80 dark:bg-black/55 backdrop-blur-xl text-gray-400 hover:text-white shadow-lg shadow-black/30 flex items-center justify-center transition-colors"
+                  className="pointer-events-auto absolute -top-11 left-1/2 -translate-x-1/2 w-9 h-9 rounded-full border border-white/55 dark:border-white/10 bg-white/80 dark:bg-black/55 backdrop-blur-xl [color:var(--color-text-main)] shadow-lg shadow-black/30 flex items-center justify-center transition-colors"
                 >
                   <ArrowDown className="w-4 h-4" />
                 </button>
@@ -258,7 +258,7 @@ export const AgentModeView: React.FC = () => {
       <div className="w-72 ml-2 rounded-2xl bg-white/60 dark:bg-white/[.05] p-4 space-y-4 overflow-y-auto custom-scrollbar shrink-0 hidden md:block">
         {latestTodo && latestTodo.length > 0 && (
           <div className="rounded-2xl border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] p-3">
-            <div className="text-xs font-bold text-white flex items-center gap-1.5 mb-1"><ListTodo className="w-3.5 h-3.5 text-sky-300" />待办清单</div>
+            <div className="text-xs font-bold [color:var(--color-text-main)] flex items-center gap-1.5 mb-1"><ListTodo className="w-3.5 h-3.5 text-sky-300" />待办清单</div>
             <AgentTodoPanel todo={latestTodo} />
           </div>
         )}
@@ -268,11 +268,11 @@ export const AgentModeView: React.FC = () => {
             <div className="text-xs font-bold text-amber-300 flex items-center gap-1.5"><ShieldAlert className="w-3.5 h-3.5" />待确认 {pendingList.length}</div>
             {pendingList.map(([aid, v]) => (
               <div key={aid} className="rounded-xl bg-white/55 dark:bg-white/[.06] border border-amber-500/20 p-2">
-                <div className="text-[11px] font-mono text-white truncate">{v.tool_name}</div>
-                <div className="text-[10px] font-mono text-gray-500 break-all max-h-20 overflow-y-auto custom-scrollbar">{JSON.stringify(v.args).slice(0, 400)}</div>
+                <div className="text-[11px] font-mono [color:var(--color-text-main)] truncate">{v.tool_name}</div>
+                <div className="text-[10px] font-mono [color:var(--color-text-main)] break-all max-h-20 overflow-y-auto custom-scrollbar">{JSON.stringify(v.args).slice(0, 400)}</div>
                 <div className="flex gap-1.5 mt-1.5">
                   <button onClick={() => handleApprove(aid, true, false)} className="flex-1 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-black text-[11px] font-bold active:scale-95 transition-all">允许</button>
-                  <button onClick={() => handleApprove(aid, false, false)} className="flex-1 py-1 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:bg-white/65 dark:bg-white/[.09]! hover:border-white/80 dark:border-white/20! hover:text-white active:scale-95 transition-all">拒绝</button>
+                  <button onClick={() => handleApprove(aid, false, false)} className="flex-1 py-1 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11px] [color:var(--color-text-main)] hover:bg-white/65 dark:bg-white/[.09]! hover:border-white/80 dark:border-white/20! active:scale-95 transition-all">拒绝</button>
                 </div>
               </div>
             ))}
@@ -280,8 +280,8 @@ export const AgentModeView: React.FC = () => {
         )}
 
         <div className="rounded-2xl border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] p-3 space-y-2">
-          <div className="text-xs font-bold text-white flex items-center gap-1.5"><Film className="w-3.5 h-3.5 text-accent-orange" />当前上下文</div>
-          <div className="text-[11px] text-gray-400 leading-5">
+          <div className="text-xs font-bold [color:var(--color-text-main)] flex items-center gap-1.5"><Film className="w-3.5 h-3.5 text-accent-orange" />当前上下文</div>
+          <div className="text-[11px] [color:var(--color-text-main)] leading-5">
             <div>项目：{project?.title || '未选择'}</div>
             <div>镜头：{activeShot ? `#${activeShot.shot_index} ${activeShot.action_desc?.slice(0, 20) || ''}` : '无'}</div>
             <div>通道：{wsStatus === 'open' ? 'WS 在线（可确认敏感操作）' : 'HTTP（敏感操作自动拒绝）'}</div>
@@ -290,20 +290,20 @@ export const AgentModeView: React.FC = () => {
           <button
             onClick={() => void clearAll()}
             title="清空本会话的全部消息记忆（不影响项目文件）"
-            className="w-full py-1.5 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:bg-white/65 dark:bg-white/[.09]! hover:border-white/80 dark:border-white/20! hover:text-white active:scale-95 transition-all flex items-center justify-center gap-1"
+            className="w-full py-1.5 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11px] [color:var(--color-text-main)] hover:bg-white/65 dark:bg-white/[.09]! hover:border-white/80 dark:border-white/20! active:scale-95 transition-all flex items-center justify-center gap-1"
           >
             <Trash2 className="w-3 h-3" />清空记忆
           </button>
         </div>
 
         <div className="rounded-2xl border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] p-3 space-y-2">
-          <div className="text-xs font-bold text-white">快捷指令{behavior === 'create' ? ' · 创造' : behavior === 'plan' ? ' · 计划' : ''}</div>
-          <div className="text-[10px] text-gray-500 leading-4">按当前行为模式给示例，点一下即发出（想改再改就手动输入）。</div>
+          <div className="text-xs font-bold [color:var(--color-text-main)]">快捷指令{behavior === 'create' ? ' · 创造' : behavior === 'plan' ? ' · 计划' : ''}</div>
+          <div className="text-[10px] [color:var(--color-text-main)] leading-4">按当前行为模式给示例，点一下即发出（想改再改就手动输入）。</div>
           {quickCommands.map((q) => (
             <button
               key={q}
               onClick={() => void send(q)}
-              className="group w-full text-left px-2.5 py-1.5 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:bg-brand/10! hover:border-brand/60! hover:text-white active:scale-[0.98] transition-all flex items-start gap-1.5"
+              className="group w-full text-left px-2.5 py-1.5 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11px] [color:var(--color-text-main)] hover:bg-brand/10! hover:border-brand/60! active:scale-[0.98] transition-all flex items-start gap-1.5"
             >
               <span className="w-3 shrink-0 pt-0.5">
                 <Send className="w-3 h-3 opacity-40 group-hover:opacity-100 transition-opacity" />
@@ -314,12 +314,12 @@ export const AgentModeView: React.FC = () => {
         </div>
 
         <div className="rounded-2xl border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] p-3 space-y-2">
-          <div className="text-xs font-bold text-white flex items-center gap-1.5"><BookOpen className="w-3.5 h-3.5 text-brand-cyan" />使用指引</div>
+          <div className="text-xs font-bold [color:var(--color-text-main)] flex items-center gap-1.5"><BookOpen className="w-3.5 h-3.5 text-brand-cyan" />使用指引</div>
           <div className="space-y-1.5">
             {USAGE_GUIDE.map((g, i) => (
               <div key={g.step} className="flex gap-2 text-[11px] leading-4">
-                <span className="mt-0.5 w-4 h-4 shrink-0 rounded-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[9px] font-bold text-brand-cyan flex items-center justify-center">{i + 1}</span>
-                <span className="text-gray-400"><span className="text-white font-semibold">{g.step}</span> — {g.desc}</span>
+                <span className="mt-0.5 w-4 h-4 shrink-0 rounded-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[9px] font-bold [color:var(--color-text-main)] flex items-center justify-center">{i + 1}</span>
+                <span className="[color:var(--color-text-main)]"><span className="[color:var(--color-text-main)] font-semibold">{g.step}</span> — {g.desc}</span>
               </div>
             ))}
           </div>
