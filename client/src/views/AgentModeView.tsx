@@ -2,35 +2,21 @@
  * Agent 独立模式页 — 薄壳：会话侧栏 + 统一消息流 + 统一运行时 store
  * 运行时（会话/流式/计划/审批）全部收敛到 agentStore，与悬浮抽屉共用同一会话。
  *
- * 界面取旧线本地设计：外层留白 + 三块圆角卡片（会话栏 / 对话主区 / 说明侧栏），
+ * 界面为两块圆角卡片（会话栏 / 对话主区），右栏已删除：模式选择在输入框左下角菜单，
  * 输入框以「悬浮层」浮在消息流之上；能力面保持上游 —— 多模态附件、运行中 steer 插话、
- * 行内审批与「始终允许」、子代理集群、待办清单、自动执行（YOLO）提示，两边并存不丢。
+ * 行内审批与「始终允许」、子代理集群、自动执行警示齐备；清空记忆在页头图标按钮。
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Bot, ShieldAlert, Film, Trash2, PanelLeft, ArrowDown, ListTodo, Zap, Send, BookOpen,
+  Bot, ShieldAlert, Trash2, PanelLeft, ArrowDown, Zap,
 } from 'lucide-react';
 import { useProjectStore } from '../stores/useProjectStore';
-import { useAgentStore, QUICK_ASK, QUICK_DO, QUICK_CREATE, QUICK_PLAN } from '../components/agent/agentStore';
+import { useAgentStore } from '../components/agent/agentStore';
 import { AgentMessageList } from '../components/agent/AgentMessageList';
 import { AgentComposer } from '../components/agent/AgentComposer';
-import { AgentTodoPanel } from '../components/agent/AgentToolSteps';
 import { AgentSwarmPanel } from '../components/agent/AgentSwarmPanel';
 import { loadRoleMetas } from '../components/agent/swarmMeta';
 import { SessionSidebar } from '../components/agent/SessionSidebar';
-
-/**
- * 右栏是「说明 + 快速指令台」：使用指引 + 快捷指令 + 当前上下文。
- * 模式说明已收敛进输入框左下角的模式菜单（AgentComposer 的 ModeMenuPill：计划 + 权限三选一）。
- */
-const USAGE_GUIDE: Array<{ step: string; desc: string }> = [
-  { step: '开始', desc: '左栏「新建会话」开一段干净上下文；会话按项目隔离持久化，随时可切回。' },
-  { step: '提问', desc: '执行模式下直接说要什么（镜头 / 素材 / 配音），由 Agent 决定调哪些工具。' },
-  { step: '指令台', desc: '下方按当前行为模式给示例指令，点一下即发出，也可先改两句再发。' },
-  { step: '计划', desc: '计划模式先产出完整计划，点「按此计划执行」才会真正动手，也可继续输入改计划。' },
-  { step: '敏感操作', desc: '删源 / 写文件 / 跑命令会弹窗确认；120s 无人应答或通道断开即自动拒绝。' },
-  { step: '暂停与翻看', desc: '运行中按 Enter 暂停，已完成结果照常保留；向上翻历史不会被拽走，点 ↓ 一键到底。' },
-];
 
 export const AgentModeView: React.FC = () => {
   const { project, activeShotId } = useProjectStore();
@@ -43,7 +29,7 @@ export const AgentModeView: React.FC = () => {
   const {
     sessions, activeSessionId, loadingSessions,
     messages, isRunning, wsStatus, approvals, subagents, autoAllowTools,
-    mode, behavior, runMode, permission,
+    runMode, permission,
     bindProject, setRunMode, setPermission, setAutoAllow,
     createSession, selectSession, deleteSession,
     send, steer, executePlan, abort, approve, clearAll, proposalAction, applyArtifact,
@@ -81,16 +67,7 @@ export const AgentModeView: React.FC = () => {
   const shots = project?.scenes.flatMap((s) => s.shots) || [];
   const activeShot = shots.find((s) => s.id === activeShotId);
   const pendingList = useMemo(() => Object.entries(approvals).filter(([, v]) => v.decided === undefined), [approvals]);
-  // 运行模式两维：行为（能干什么）决定提示词与工具门控，执行（要不要逐项人审）决定是否弹确认
-  const quickCommands = mode === 'chat' ? QUICK_ASK : behavior === 'plan' ? QUICK_PLAN : behavior === 'create' ? QUICK_CREATE : QUICK_DO;
   const activeSessionTitle = sessions.find((s) => s.id === activeSessionId)?.title || 'Agent 独立模式';
-  const latestTodo = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const t = messages[i].todo;
-      if (t && t.length > 0) return t;
-    }
-    return null;
-  }, [messages]);
   const runningSteps = useMemo(() => {
     const cur = [...messages].reverse().find((m) => m.steps && m.steps.length > 0);
     const steps = cur?.steps || [];
@@ -188,6 +165,13 @@ export const AgentModeView: React.FC = () => {
             </div>
           </div>
           <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={() => void clearAll()}
+              title="清空本会话的全部消息记忆（不影响项目文件）"
+              className="p-2 rounded-lg border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] [color:var(--color-text-main)] hover:border-red-400/50 hover:text-red-300 active:scale-95 transition-all shrink-0"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
             {pendingList.length > 0 && (
               <button
                 onClick={scrollToBottom}
@@ -254,77 +238,6 @@ export const AgentModeView: React.FC = () => {
         </div>
       </div>
 
-      {/* 右：上下文与快捷操作侧栏（模式说明已收敛进输入框左下角的预设菜单） */}
-      <div className="w-72 ml-2 rounded-2xl bg-white/60 dark:bg-white/[.05] p-4 space-y-4 overflow-y-auto custom-scrollbar shrink-0 hidden md:block">
-        {latestTodo && latestTodo.length > 0 && (
-          <div className="rounded-2xl border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] p-3">
-            <div className="text-xs font-bold [color:var(--color-text-main)] flex items-center gap-1.5 mb-1"><ListTodo className="w-3.5 h-3.5 text-sky-300" />待办清单</div>
-            <AgentTodoPanel todo={latestTodo} />
-          </div>
-        )}
-
-        {pendingList.length > 0 && (
-          <div className="rounded-2xl border border-amber-500/40 bg-amber-500/5 p-3 space-y-2">
-            <div className="text-xs font-bold text-amber-300 flex items-center gap-1.5"><ShieldAlert className="w-3.5 h-3.5" />待确认 {pendingList.length}</div>
-            {pendingList.map(([aid, v]) => (
-              <div key={aid} className="rounded-xl bg-white/55 dark:bg-white/[.06] border border-amber-500/20 p-2">
-                <div className="text-[11px] font-mono [color:var(--color-text-main)] truncate">{v.tool_name}</div>
-                <div className="text-[10px] font-mono [color:var(--color-text-main)] break-all max-h-20 overflow-y-auto custom-scrollbar">{JSON.stringify(v.args).slice(0, 400)}</div>
-                <div className="flex gap-1.5 mt-1.5">
-                  <button onClick={() => handleApprove(aid, true, false)} className="flex-1 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-black text-[11px] font-bold active:scale-95 transition-all">允许</button>
-                  <button onClick={() => handleApprove(aid, false, false)} className="flex-1 py-1 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11px] [color:var(--color-text-main)] hover:bg-white/65 dark:bg-white/[.09]! hover:border-white/80 dark:border-white/20! active:scale-95 transition-all">拒绝</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div className="rounded-2xl border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] p-3 space-y-2">
-          <div className="text-xs font-bold [color:var(--color-text-main)] flex items-center gap-1.5"><Film className="w-3.5 h-3.5 text-accent-orange" />当前上下文</div>
-          <div className="text-[11px] [color:var(--color-text-main)] leading-5">
-            <div>项目：{project?.title || '未选择'}</div>
-            <div>镜头：{activeShot ? `#${activeShot.shot_index} ${activeShot.action_desc?.slice(0, 20) || ''}` : '无'}</div>
-            <div>通道：{wsStatus === 'open' ? 'WS 在线（可确认敏感操作）' : 'HTTP（敏感操作自动拒绝）'}</div>
-            <div>会话：{messages.length} 条消息 · {isRunning ? '运行中' : '空闲'}</div>
-          </div>
-          <button
-            onClick={() => void clearAll()}
-            title="清空本会话的全部消息记忆（不影响项目文件）"
-            className="w-full py-1.5 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11px] [color:var(--color-text-main)] hover:bg-white/65 dark:bg-white/[.09]! hover:border-white/80 dark:border-white/20! active:scale-95 transition-all flex items-center justify-center gap-1"
-          >
-            <Trash2 className="w-3 h-3" />清空记忆
-          </button>
-        </div>
-
-        <div className="rounded-2xl border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] p-3 space-y-2">
-          <div className="text-xs font-bold [color:var(--color-text-main)]">快捷指令{behavior === 'create' ? ' · 创造' : behavior === 'plan' ? ' · 计划' : ''}</div>
-          <div className="text-[10px] [color:var(--color-text-main)] leading-4">按当前行为模式给示例，点一下即发出（想改再改就手动输入）。</div>
-          {quickCommands.map((q) => (
-            <button
-              key={q}
-              onClick={() => void send(q)}
-              className="group w-full text-left px-2.5 py-1.5 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11px] [color:var(--color-text-main)] hover:bg-brand/10! hover:border-brand/60! active:scale-[0.98] transition-all flex items-start gap-1.5"
-            >
-              <span className="w-3 shrink-0 pt-0.5">
-                <Send className="w-3 h-3 opacity-40 group-hover:opacity-100 transition-opacity" />
-              </span>
-              <span>{q}</span>
-            </button>
-          ))}
-        </div>
-
-        <div className="rounded-2xl border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] p-3 space-y-2">
-          <div className="text-xs font-bold [color:var(--color-text-main)] flex items-center gap-1.5"><BookOpen className="w-3.5 h-3.5 text-brand-cyan" />使用指引</div>
-          <div className="space-y-1.5">
-            {USAGE_GUIDE.map((g, i) => (
-              <div key={g.step} className="flex gap-2 text-[11px] leading-4">
-                <span className="mt-0.5 w-4 h-4 shrink-0 rounded-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[9px] font-bold [color:var(--color-text-main)] flex items-center justify-center">{i + 1}</span>
-                <span className="[color:var(--color-text-main)]"><span className="[color:var(--color-text-main)] font-semibold">{g.step}</span> — {g.desc}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
     </div>
   );
 };
