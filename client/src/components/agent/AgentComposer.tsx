@@ -137,7 +137,7 @@ const ModeMenuPill: React.FC<{
         <ChevronUp className={`w-2.5 h-2.5 [color:var(--color-text-main)] transition-transform ${open ? '' : 'rotate-180'}`} />
       </button>
       {open && (
-        <div className="absolute bottom-full mb-1.5 left-0 z-50 w-[280px] bg-surface border border-border rounded-xl shadow-2xl shadow-black/40 p-1 animate-fade-in">
+        <div className="absolute bottom-full mb-1.5 left-0 z-50 w-[280px] bg-surface border border-border rounded-xl p-1 animate-fade-in">
           <ModeMenuItem
             label={AGENT_PLAN_PRESET.label}
             hint={AGENT_PLAN_PRESET.hint}

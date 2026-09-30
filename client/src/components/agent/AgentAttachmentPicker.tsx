@@ -151,7 +151,7 @@ export const AgentAttachmentPicker: React.FC<AgentAttachmentPickerProps> = ({ se
   return (
     <div
       ref={rootRef}
-      className="absolute bottom-full mb-1.5 left-0 z-50 w-[320px] max-h-[340px] flex flex-col bg-surface border border-border rounded-2xl shadow-2xl shadow-black/40 overflow-hidden animate-fade-in"
+      className="absolute bottom-full mb-1.5 left-0 z-50 w-[320px] max-h-[340px] flex flex-col bg-surface border border-border rounded-2xl overflow-hidden animate-fade-in"
     >
       {/* 来源切换 */}
       <div className="flex items-center gap-1 p-1.5 border-b border-border bg-surface-secondary shrink-0">
