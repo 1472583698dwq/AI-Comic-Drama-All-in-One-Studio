@@ -20,7 +20,7 @@ interface Props {
   onClose?: () => void;
 }
 
-const FIELD = 'w-full bg-transparent border border-border rounded-md px-1.5 py-1 font-mono text-[11px] [color:var(--color-text-main)] focus:outline-none focus:border-brand';
+const FIELD = 'w-full bg-transparent border border-white/70 dark:border-white/12 rounded-md px-1.5 py-1 font-mono text-[11px] [color:var(--color-text-main)] focus:outline-none focus:border-brand';
 const LABEL = 'text-[10px] [color:var(--color-text-muted)]';
 
 /**
@@ -72,19 +72,19 @@ export const TimelineClipInspector: React.FC<Props> = ({ clip, clips, total, onC
     <div
       className={
         embedded
-          ? 'w-[340px] rounded-2xl border border-border overflow-hidden flex flex-col'
-          : 'w-[196px] shrink-0 my-3 mr-3 rounded-2xl border border-border overflow-hidden flex flex-col'
+          ? 'w-[340px] rounded-2xl border border-white/70 dark:border-white/12 overflow-hidden flex flex-col'
+          : 'w-[196px] shrink-0 my-3 mr-3 rounded-2xl border border-white/70 dark:border-white/12 overflow-hidden flex flex-col'
       }
       style={{ background: 'var(--color-surface)' }}
     >
-      <div className="h-9 px-3 flex items-center border-b border-border text-[11px] font-semibold [color:var(--color-text-secondary)]">
+      <div className="h-9 px-3 flex items-center border-b border-white/70 dark:border-white/12 text-[11px] font-semibold [color:var(--color-text-secondary)]">
         属性
         {onClose && (
           <button
             onClick={onClose}
             aria-label="关闭属性弹窗"
             title="关闭"
-            className="ml-auto w-6 h-6 rounded-md flex items-center justify-center [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-secondary transition-colors"
+            className="ml-auto w-6 h-6 rounded-md flex items-center justify-center [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06] transition-colors"
           >
             <X className="w-3.5 h-3.5" strokeWidth={1.8} />
           </button>
@@ -111,7 +111,7 @@ export const TimelineClipInspector: React.FC<Props> = ({ clip, clips, total, onC
               <span className={LABEL}>片段</span>
               <div className="text-[11px] [color:var(--color-text-main)] break-all">{clip.name}</div>
               <div className="flex items-center gap-1.5 text-[10px] [color:var(--color-text-muted)]">
-                <span className="px-1.5 py-0.5 rounded bg-surface-secondary border border-border">{clip.kind === 'audio' ? '音频' : '视频'}</span>
+                <span className="px-1.5 py-0.5 rounded bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12">{clip.kind === 'audio' ? '音频' : '视频'}</span>
                 <span className="font-mono">源 {formatTimecode(clip.duration)}</span>
               </div>
             </div>
@@ -143,7 +143,7 @@ export const TimelineClipInspector: React.FC<Props> = ({ clip, clips, total, onC
 
             <button
               onClick={() => patchClip({ in: 0, out: clip.duration || clip.out })}
-              className="w-full h-7 rounded-md border border-border text-[10.5px] [color:var(--color-text-secondary)] hover:text-brand hover:border-brand/50 flex items-center justify-center gap-1 transition-colors"
+              className="w-full h-7 rounded-md border border-white/70 dark:border-white/12 text-[10.5px] [color:var(--color-text-secondary)] hover:text-brand hover:border-brand/50 flex items-center justify-center gap-1 transition-colors"
             >
               <RotateCcw className="w-3 h-3" strokeWidth={1.8} />
               重置为整段

@@ -125,13 +125,13 @@ const ToolPill: React.FC<{
         onClick={() => setOpen((v) => !v)}
         disabled={disabled}
         title={title}
-        className="flex items-center gap-1 px-2 py-1 rounded-lg bg-surface border border-border hover:border-brand/50 hover:bg-surface-secondary text-[10px] font-semibold [color:var(--color-text-main)] transition-colors disabled:opacity-40"
+        className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 hover:border-brand/50 hover:bg-white/55 dark:bg-white/[.06] text-[10px] font-semibold [color:var(--color-text-main)] transition-colors disabled:opacity-40"
       >
         <span className={accent}>{current?.label || label}</span>
         <ChevronUp className={`w-2.5 h-2.5 [color:var(--color-text-muted)] transition-transform ${open ? '' : 'rotate-180'}`} />
       </button>
       {open && (
-        <div className="absolute bottom-full mb-1.5 left-0 z-50 min-w-[132px] bg-surface border border-border rounded-xl shadow-2xl shadow-black/40 p-1 animate-fade-in">
+        <div className="absolute bottom-full mb-1.5 left-0 z-50 min-w-[132px] bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-xl shadow-2xl shadow-black/40 p-1 animate-fade-in">
           {options.map((o) => (
             <button
               key={o.value}
@@ -273,7 +273,7 @@ export const AgentComposer: React.FC<AgentComposerProps> = ({
   const showPills = !!compact && (!!onModeChange || !!onRunModeChange);
 
   return (
-    <div className={compact || floating ? '' : 'p-4 border-t border-border bg-surface shrink-0'}>
+    <div className={compact || floating ? '' : 'p-4 border-t border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] shrink-0'}>
       {/* IDE 式循环切换（页面页头用；compact 下拉模式下不重复渲染） */}
       {showCycles && !showPills && (
         <div className={`flex items-center gap-1.5 mb-1.5 ${compact ? '' : 'max-w-4xl mx-auto'}`}>
@@ -315,8 +315,8 @@ export const AgentComposer: React.FC<AgentComposerProps> = ({
       <div
         className={`transition-colors focus-within:border-brand/60 ${
           floating
-            ? 'rounded-[26px] border border-border/60 bg-surface/90 backdrop-blur-xl shadow-2xl shadow-black/30'
-            : 'rounded-2xl border border-border bg-surface-secondary/60'
+            ? 'rounded-[26px] border border-white/55 dark:border-white/10 bg-white/80 dark:bg-black/55 backdrop-blur-xl shadow-2xl shadow-black/30'
+            : 'rounded-2xl border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.05]'
         } ${compact ? '' : 'max-w-4xl mx-auto'}`}
       >
         {/* 顶部：上下文 chip（由调用方决定语义，如画布「已加入会话」的节点） */}
@@ -350,7 +350,7 @@ export const AgentComposer: React.FC<AgentComposerProps> = ({
               );
             })}
             {pasting && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg bg-surface border border-border text-[10px] [color:var(--color-text-muted)]">
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 text-[10px] [color:var(--color-text-muted)]">
                 <Loader2 className="w-2.5 h-2.5 animate-spin" />粘贴上传中…
               </span>
             )}
@@ -387,7 +387,7 @@ export const AgentComposer: React.FC<AgentComposerProps> = ({
               className={`w-7 h-7 rounded-lg border flex items-center justify-center transition-colors ${
                 pickerOpen || attachments.length
                   ? 'bg-brand/15 border-brand/40 text-brand'
-                  : 'bg-surface border-border [color:var(--color-text-muted)] hover:border-brand/50 hover:[color:var(--color-text-main)]'
+                  : 'bg-white/60 dark:bg-white/[.05] border-white/70 dark:border-white/12 [color:var(--color-text-muted)] hover:border-brand/50 hover:[color:var(--color-text-main)]'
               }`}
             >
               <Paperclip className="w-3.5 h-3.5" />

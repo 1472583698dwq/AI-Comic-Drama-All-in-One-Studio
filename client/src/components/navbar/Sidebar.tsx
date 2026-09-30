@@ -131,7 +131,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
       if (item.accent === 'amber') return 'bg-amber-500/15 text-white ring-1 ring-amber-500/40';
       return 'bg-brand/15 text-white ring-1 ring-brand/40';
     }
-    return 'text-gray-400 hover:text-white hover:bg-surface-secondary';
+    return 'text-gray-400 hover:text-white hover:bg-white/70 dark:hover:bg-white/[.09]';
   };
 
   const iconColor = (item: NavItem, active: boolean) => {
@@ -142,7 +142,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
 
   return (
     <aside
-      className={`relative shrink-0 h-full bg-surface flex flex-col z-20 overflow-hidden transition-[width] duration-[260ms] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none ${
+      className={`relative shrink-0 h-full bg-white/60 dark:bg-white/[.04] backdrop-blur-2xl flex flex-col z-20 overflow-hidden transition-[width] duration-[260ms] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none ${
         !railVisible ? 'w-0' : effectiveCollapsed ? 'w-[60px]' : 'w-[218px]'
       }`}
     >
@@ -151,7 +151,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
       <div
         inert={!railVisible}
         aria-hidden={!railVisible}
-        className={`h-full flex flex-col border-r border-border ${effectiveCollapsed ? 'w-[60px]' : 'w-[218px]'}`}
+        className={`h-full flex flex-col border-r border-white/60 dark:border-white/10 ${effectiveCollapsed ? 'w-[60px]' : 'w-[218px]'}`}
       >
         {/* 主导航区 */}
         <nav className="flex-1 overflow-y-auto custom-scrollbar py-3 space-y-3">
@@ -184,7 +184,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
                       {!effectiveCollapsed && <span className="truncate flex-1 text-left">{item.label}</span>}
                       {!effectiveCollapsed && !locked && typeof item.count === 'number' && item.count > 0 && (
                         <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-mono font-bold ${
-                          active ? 'bg-brand text-white' : 'bg-surface-tertiary text-gray-400'
+                          active ? 'bg-brand text-white' : 'bg-white/65 dark:bg-white/[.09] text-gray-400'
                         }`}>{item.count}</span>
                       )}
                       {!effectiveCollapsed && item.pulse && !locked && (
@@ -202,7 +202,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
         </nav>
 
         {/* 底部工具区：设置永远可见 */}
-        <div className="p-2 border-t border-border space-y-0.5 bg-surface/95">
+        <div className="p-2 border-t border-white/60 dark:border-white/10 space-y-0.5 bg-white/70 dark:bg-black/45 backdrop-blur-xl">
           <UtilButton
             icon={Plug}
             label="生成源"
@@ -227,7 +227,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
             } ${
               activeTab === 'config'
                 ? 'bg-brand text-white shadow-sm shadow-brand/25'
-                : 'text-gray-400 hover:text-white hover:bg-surface-secondary'
+                : 'text-gray-400 hover:text-white hover:bg-white/70 dark:hover:bg-white/[.09]'
             }`}
           >
             <Settings className={`w-4 h-4 shrink-0 ${activeTab === 'config' ? 'text-white' : 'text-gray-400'}`} />
@@ -238,7 +238,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
           <button
             onClick={() => (isCanvas ? setCanvasRailOpen(false) : setCollapsed((v) => !v))}
             title={isCanvas ? '收起侧栏' : effectiveCollapsed ? '展开侧栏' : '收起侧栏'}
-            className={`w-full flex items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-[11px] text-gray-500 hover:text-gray-300 hover:bg-surface-secondary transition-all ${
+            className={`w-full flex items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-[11px] text-gray-500 hover:text-gray-300 hover:bg-white/70 dark:hover:bg-white/[.09] transition-all ${
               effectiveCollapsed ? 'justify-center px-0' : ''
             }`}
           >
@@ -262,7 +262,7 @@ const UtilButton: React.FC<{
   <button
     onClick={onClick}
     title={label}
-    className={`relative w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-xs font-medium text-gray-400 hover:text-white hover:bg-surface-secondary transition-all ${
+    className={`relative w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-xs font-medium text-gray-400 hover:text-white hover:bg-white/70 dark:hover:bg-white/[.09] transition-all ${
       collapsed ? 'justify-center px-0' : ''
     }`}
   >

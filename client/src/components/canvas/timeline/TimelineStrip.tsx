@@ -479,7 +479,7 @@ export const TimelineStrip: React.FC<TimelineStripProps> = ({
 
         {/* 片段条 */}
         <div
-          className={`relative ${blockHeight} rounded-xl border border-border overflow-hidden`}
+          className={`relative ${blockHeight} rounded-xl border border-white/70 dark:border-white/12 overflow-hidden`}
           style={{ background: 'var(--color-surface-secondary)' }}
           onPointerDown={() => onSelect(null)}
         >
@@ -489,7 +489,7 @@ export const TimelineStrip: React.FC<TimelineStripProps> = ({
                 e.stopPropagation();
                 onAdd();
               }}
-              className="absolute inset-1.5 rounded-lg border border-dashed border-border flex items-center justify-center gap-1.5 text-[11px] [color:var(--color-text-muted)] hover:border-brand/60 hover:text-brand hover:bg-brand/5 transition-colors"
+              className="absolute inset-1.5 rounded-lg border border-dashed border-white/70 dark:border-white/12 flex items-center justify-center gap-1.5 text-[11px] [color:var(--color-text-muted)] hover:border-brand/60 hover:text-brand hover:bg-brand/5 transition-colors"
             >
               <Plus className="w-3.5 h-3.5" strokeWidth={1.8} />
               添加视频 / 音频素材
@@ -527,7 +527,7 @@ export const TimelineStrip: React.FC<TimelineStripProps> = ({
                     : `${clip.name} · ${formatTimecode(clip.in)} → ${formatTimecode(clip.out)}（拖两端裁剪，拖中间换序）`
                 }
                 className={`group absolute top-1 bottom-1 rounded-lg overflow-hidden border touch-none transition-[box-shadow,border-color] duration-150 ${
-                  isSelected ? 'border-brand ring-1 ring-brand/60 shadow-lg shadow-brand/25' : 'border-border hover:border-brand/50'
+                  isSelected ? 'border-brand ring-1 ring-brand/60 shadow-lg shadow-brand/25' : 'border-white/70 dark:border-white/12 hover:border-brand/50'
                 } ${isDragged ? 'opacity-50' : 'cursor-grab active:cursor-grabbing'}`}
                 style={{ left, width, zIndex: isDragged ? 5 : isSelected ? 4 : 2 }}
               >
@@ -633,7 +633,7 @@ export const TimelineStrip: React.FC<TimelineStripProps> = ({
               onPointerDown={(e) => e.stopPropagation()}
               aria-label="添加素材"
               title="添加素材（画布产出 / 素材库 / 本地文件）"
-              className="absolute top-1.5 bottom-1.5 rounded-lg border border-dashed border-border flex items-center justify-center [color:var(--color-text-muted)] hover:border-brand/60 hover:text-brand hover:bg-brand/5 transition-colors z-[3]"
+              className="absolute top-1.5 bottom-1.5 rounded-lg border border-dashed border-white/70 dark:border-white/12 flex items-center justify-center [color:var(--color-text-muted)] hover:border-brand/60 hover:text-brand hover:bg-brand/5 transition-colors z-[3]"
               style={{ left: layoutTotal * pxPerSecond + 10, width: 40 }}
             >
               <Plus className="w-4 h-4" strokeWidth={1.8} />

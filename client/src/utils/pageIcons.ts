@@ -1,5 +1,6 @@
 import {
   Home, FolderKanban, Layers, Compass, Video, Library, Users, Bot, Sparkles, Settings, Boxes, Film,
+  Clapperboard,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -36,6 +37,9 @@ const BY_KEY: Record<string, LucideIcon> = {
   library: Library,
   agent: Bot,
   bot: Bot,
+  onekey: Clapperboard,
+  onekeystudio: Clapperboard,
+  clapperboard: Clapperboard,
   canvas: Sparkles,
   creativecanvas: Sparkles,
   sparkles: Sparkles,

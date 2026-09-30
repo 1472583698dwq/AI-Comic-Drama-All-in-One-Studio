@@ -22,7 +22,7 @@ export const ContextTipCard: React.FC<Props> = ({ storageKey, title, desc }) => 
   };
 
   return (
-    <div className="absolute top-16 right-3 z-30 w-[290px] rounded-2xl bg-surface/95 backdrop-blur border border-brand/30 shadow-2xl shadow-brand/10 overflow-hidden">
+    <div className="absolute top-16 right-3 z-30 w-[290px] rounded-2xl bg-white/85 dark:bg-[#101014]/90 backdrop-blur border border-brand/30 shadow-2xl shadow-brand/10 overflow-hidden">
       <div className="px-3.5 py-2.5 flex items-start gap-2.5">
         <div className="w-7 h-7 rounded-lg bg-brand/15 border border-brand/30 flex items-center justify-center shrink-0 mt-0.5">
           <Lightbulb className="w-3.5 h-3.5 text-brand-light" />

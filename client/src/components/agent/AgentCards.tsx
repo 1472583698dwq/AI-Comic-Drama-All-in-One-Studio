@@ -30,8 +30,8 @@ export const ArtifactCard: React.FC<{
         {applied && <span className="ml-1 px-1.5 py-px rounded bg-emerald-500/20 text-[10px]">已应用{shotLabel || ''}</span>}
       </div>
       <div className="px-2.5 pb-2">
-        {kind === 'image' && <img src={full} alt={label} className="w-full rounded-lg border border-white/10 max-h-56 object-contain bg-surface-secondary" loading="lazy" />}
-        {kind === 'video' && <video src={full} controls className="w-full rounded-lg border border-white/10 max-h-56 bg-surface-secondary" />}
+        {kind === 'image' && <img src={full} alt={label} className="w-full rounded-lg border border-white/10 max-h-56 object-contain bg-white/55 dark:bg-white/[.06]" loading="lazy" />}
+        {kind === 'video' && <video src={full} controls className="w-full rounded-lg border border-white/10 max-h-56 bg-white/55 dark:bg-white/[.06]" />}
         {kind === 'audio' && <audio src={full} controls className="w-full h-8" />}
         <div className="flex gap-1.5 mt-1.5">
           {onApply && !applied && (
@@ -39,10 +39,10 @@ export const ArtifactCard: React.FC<{
               <Wand2 className="w-3 h-3" />应用到{shotLabel || '本镜'}
             </button>
           )}
-          <button onClick={doCopy} className="px-2 py-1 rounded-lg border border-border text-[11px] text-gray-300 flex items-center gap-1">
+          <button onClick={doCopy} className="px-2 py-1 rounded-lg border border-white/70 dark:border-white/12 text-[11px] text-gray-300 flex items-center gap-1">
             {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}复制
           </button>
-          <a href={full} target="_blank" rel="noreferrer" className="px-2 py-1 rounded-lg border border-border text-[11px] text-gray-300 flex items-center gap-1">
+          <a href={full} target="_blank" rel="noreferrer" className="px-2 py-1 rounded-lg border border-white/70 dark:border-white/12 text-[11px] text-gray-300 flex items-center gap-1">
             <ExternalLink className="w-3 h-3" />打开
           </a>
         </div>
@@ -112,7 +112,7 @@ export const CapabilityProposalCard: React.FC<{
             {busy === 'rollback' ? '…' : '回滚'}
           </button>
         ) : (
-          <button onClick={() => onFinalize('discard')} disabled={!!busy} className="px-2.5 py-1.5 rounded-lg border border-border text-[11px] text-gray-400 disabled:opacity-50 flex items-center gap-1">
+          <button onClick={() => onFinalize('discard')} disabled={!!busy} className="px-2.5 py-1.5 rounded-lg border border-white/70 dark:border-white/12 text-[11px] text-gray-400 disabled:opacity-50 flex items-center gap-1">
             <Trash2 className="w-3 h-3" />{busy === 'discard' ? '…' : '丢弃'}
           </button>
         )}

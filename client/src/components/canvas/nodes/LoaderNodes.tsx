@@ -20,17 +20,17 @@ export const LoadImageNode: React.FC<NodeProps> = ({ data, id })=>{
     }catch(e:any){ alert(e.message); }
   };
   return (
-    <div className="w-[260px] bg-surface border border-border rounded-2xl shadow-xl overflow-hidden">
-      <div className="px-3 py-2.5 bg-surface border-b border-border flex items-center gap-1.5">
-        <div className="w-6 h-6 rounded-lg bg-surface-secondary border border-border flex items-center justify-center"><ImageIcon className="w-3.5 h-3.5 text-violet-500"/></div>
+    <div className="w-[260px] bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-2xl shadow-xl overflow-hidden">
+      <div className="px-3 py-2.5 bg-white/60 dark:bg-white/[.05] border-b border-white/70 dark:border-white/12 flex items-center gap-1.5">
+        <div className="w-6 h-6 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 flex items-center justify-center"><ImageIcon className="w-3.5 h-3.5 text-violet-500"/></div>
         <span className="text-xs font-bold [color:var(--color-text-main)]">加载图像</span>
-        <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full bg-surface-secondary [color:var(--color-text-muted)] border border-border font-mono">image</span>
+        <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full bg-white/55 dark:bg-white/[.06] [color:var(--color-text-muted)] border border-white/70 dark:border-white/12 font-mono">image</span>
       </div>
       <Handle type="target" position={Position.Left} id="asset" className="!bg-transparent !w-2 !h-2" style={{visibility:'hidden'}}/>
       <Handle type="source" position={Position.Right} id="image" className="!bg-violet-500 !w-3 !h-3 !border-2 !border-surface" style={{top:'50%'}}/>
       <div className="p-3 space-y-2">
         {url ? (
-          <AutoRatioMedia src={getUrl(url)} fallbackAspect="4/3" maxHeight={220} className="rounded-xl border border-border bg-surface-secondary group">
+          <AutoRatioMedia src={getUrl(url)} fallbackAspect="4/3" maxHeight={220} className="rounded-xl border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06] group">
             <button onClick={()=> set('')} className="absolute top-1.5 right-1.5 p-1 rounded-lg bg-red-500/80 text-white hover:bg-red-600 transition-colors shadow-sm"><Trash2 className="w-3 h-3"/></button>
           </AutoRatioMedia>
         ) : (
@@ -46,7 +46,7 @@ export const LoadImageNode: React.FC<NodeProps> = ({ data, id })=>{
           if(u) set(u);
           else if(assetId) set(u);
         }}>
-          <input value={url} onChange={e=> set(e.target.value)} placeholder="或粘贴 /storage/... 或 http URL" className="flex-1 bg-surface-secondary border border-border rounded-lg px-2.5 py-1.5 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] font-mono focus:outline-none focus:border-brand"/>
+          <input value={url} onChange={e=> set(e.target.value)} placeholder="或粘贴 /storage/... 或 http URL" className="flex-1 bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-lg px-2.5 py-1.5 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] font-mono focus:outline-none focus:border-brand"/>
         </div>
         <div className="text-[10px] [color:var(--color-text-muted)] text-center">输出 image → 可连 视频 / 分镜卡 / Comfy</div>
       </div>
@@ -61,23 +61,23 @@ export const LoadImageBatchNode: React.FC<NodeProps> = ({ data, id })=>{
   const addUrl = (u:string)=> { if(!u) return; sync([...urls, u]); };
   const removeAt = (i:number)=> sync(urls.filter((_,idx)=> idx!==i));
   return (
-    <div className="w-[300px] bg-surface border border-border rounded-2xl shadow-xl overflow-hidden">
-      <div className="px-3 py-2.5 bg-surface border-b border-border flex items-center gap-1.5">
-        <div className="w-6 h-6 rounded-lg bg-surface-secondary border border-border flex items-center justify-center"><ImageIcon className="w-3.5 h-3.5 text-violet-500"/></div>
+    <div className="w-[300px] bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-2xl shadow-xl overflow-hidden">
+      <div className="px-3 py-2.5 bg-white/60 dark:bg-white/[.05] border-b border-white/70 dark:border-white/12 flex items-center gap-1.5">
+        <div className="w-6 h-6 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 flex items-center justify-center"><ImageIcon className="w-3.5 h-3.5 text-violet-500"/></div>
         <span className="text-xs font-bold [color:var(--color-text-main)]">批量加载图像</span>
-        <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full bg-surface-secondary [color:var(--color-text-muted)] border border-border font-mono">{urls.length} 张</span>
+        <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full bg-white/55 dark:bg-white/[.06] [color:var(--color-text-muted)] border border-white/70 dark:border-white/12 font-mono">{urls.length} 张</span>
       </div>
       <Handle type="source" position={Position.Right} id="images" className="!bg-violet-500 !w-3 !h-3 !border-2 !border-surface" />
       <div className="p-3 space-y-2">
         <div className="grid grid-cols-3 gap-1.5 min-h-[80px] items-start">
           {urls.map((u,i)=>(
-            <AutoRatioMedia key={i} src={getUrl(u)} fallbackAspect="1/1" className="rounded-lg border border-border bg-surface-secondary group">
+            <AutoRatioMedia key={i} src={getUrl(u)} fallbackAspect="1/1" className="rounded-lg border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06] group">
               <button onClick={()=> removeAt(i)} className="absolute top-0.5 right-0.5 p-0.5 rounded bg-red-500 text-white opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 className="w-3 h-3"/></button>
             </AutoRatioMedia>
           ))}
-          {urls.length===0 && <div className="col-span-3 text-[11px] [color:var(--color-text-muted)] text-center py-6 border border-dashed border-border rounded-xl">拖入素材或上传多张</div>}
+          {urls.length===0 && <div className="col-span-3 text-[11px] [color:var(--color-text-muted)] text-center py-6 border border-dashed border-white/70 dark:border-white/12 rounded-xl">拖入素材或上传多张</div>}
         </div>
-        <label className="flex items-center justify-center gap-1 py-1.5 rounded-xl bg-surface-secondary border border-border text-xs [color:var(--color-text-main)] font-medium cursor-pointer hover:bg-surface-tertiary transition-colors">
+        <label className="flex items-center justify-center gap-1 py-1.5 rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-xs [color:var(--color-text-main)] font-medium cursor-pointer hover:bg-white/65 dark:bg-white/[.09] transition-colors">
           <Upload className="w-3 h-3 text-brand"/> 批量上传<input type="file" accept="image/*" multiple className="hidden" onChange={async e=>{
             const files = Array.from(e.target.files||[]);
             for(const f of files){
@@ -85,7 +85,7 @@ export const LoadImageBatchNode: React.FC<NodeProps> = ({ data, id })=>{
             }
           }}/>
         </label>
-        <input placeholder="粘贴 URL 回车添加" className="w-full bg-surface-secondary border border-border rounded-lg px-2.5 py-1.5 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] font-mono focus:outline-none focus:border-brand" onKeyDown={e=>{
+        <input placeholder="粘贴 URL 回车添加" className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-lg px-2.5 py-1.5 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] font-mono focus:outline-none focus:border-brand" onKeyDown={e=>{
           if(e.key==='Enter'){ const v=(e.target as HTMLInputElement).value.trim(); if(v){ addUrl(v); (e.target as HTMLInputElement).value=''; } }
         }}/>
       </div>
@@ -98,15 +98,15 @@ export const LoadVideoNode: React.FC<NodeProps> = ({ data, id })=>{
   const [url,setUrl]=useState(d.video||d.url||'');
   const sync=(v:string)=>{ setUrl(v); (d.onUpdate as any)?.(id,{video:v, url:v}); };
   return (
-    <div className="w-[260px] bg-surface border border-border rounded-2xl shadow-xl overflow-hidden">
-      <div className="px-3 py-2.5 bg-surface border-b border-border flex items-center gap-1.5">
-        <div className="w-6 h-6 rounded-lg bg-surface-secondary border border-border flex items-center justify-center"><Video className="w-3.5 h-3.5 text-orange-500"/></div>
+    <div className="w-[260px] bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-2xl shadow-xl overflow-hidden">
+      <div className="px-3 py-2.5 bg-white/60 dark:bg-white/[.05] border-b border-white/70 dark:border-white/12 flex items-center gap-1.5">
+        <div className="w-6 h-6 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 flex items-center justify-center"><Video className="w-3.5 h-3.5 text-orange-500"/></div>
         <span className="text-xs font-bold [color:var(--color-text-main)]">加载视频</span>
       </div>
       <Handle type="source" position={Position.Right} id="video" className="!bg-orange-500 !w-3 !h-3 !border-2 !border-surface"/>
       <div className="p-3 space-y-2">
-        {url ? <AutoRatioMedia kind="video" src={getUrl(url)} fallbackAspect="16/9" maxHeight={220} className="rounded-xl bg-surface-secondary border border-border" videoProps={{ controls: true }} /> : <div className="h-20 flex items-center justify-center text-xs [color:var(--color-text-muted)] border border-dashed border-border rounded-xl">暂无视频</div>}
-        <input value={url} onChange={e=> sync(e.target.value)} placeholder="/storage/... 或 http" className="w-full bg-surface-secondary border border-border rounded-lg px-2.5 py-1.5 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] font-mono focus:outline-none focus:border-brand"/>
+        {url ? <AutoRatioMedia kind="video" src={getUrl(url)} fallbackAspect="16/9" maxHeight={220} className="rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12" videoProps={{ controls: true }} /> : <div className="h-20 flex items-center justify-center text-xs [color:var(--color-text-muted)] border border-dashed border-white/70 dark:border-white/12 rounded-xl">暂无视频</div>}
+        <input value={url} onChange={e=> sync(e.target.value)} placeholder="/storage/... 或 http" className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-lg px-2.5 py-1.5 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] font-mono focus:outline-none focus:border-brand"/>
       </div>
     </div>
   );
@@ -117,15 +117,15 @@ export const LoadAudioNode: React.FC<NodeProps> = ({ data, id })=>{
   const [url,setUrl]=useState(d.audio||d.url||'');
   const sync=(v:string)=>{ setUrl(v); (d.onUpdate as any)?.(id,{audio:v, url:v}); };
   return (
-    <div className="w-[260px] bg-surface border border-border rounded-2xl shadow-xl overflow-hidden">
-      <div className="px-3 py-2.5 bg-surface border-b border-border flex items-center gap-1.5">
-        <div className="w-6 h-6 rounded-lg bg-surface-secondary border border-border flex items-center justify-center"><Music className="w-3.5 h-3.5 text-pink-500"/></div>
+    <div className="w-[260px] bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-2xl shadow-xl overflow-hidden">
+      <div className="px-3 py-2.5 bg-white/60 dark:bg-white/[.05] border-b border-white/70 dark:border-white/12 flex items-center gap-1.5">
+        <div className="w-6 h-6 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 flex items-center justify-center"><Music className="w-3.5 h-3.5 text-pink-500"/></div>
         <span className="text-xs font-bold [color:var(--color-text-main)]">加载音频</span>
       </div>
       <Handle type="source" position={Position.Right} id="audio" className="!bg-pink-500 !w-3 !h-3 !border-2 !border-surface"/>
       <div className="p-3 space-y-2">
-        {url ? <audio src={getUrl(url)} controls className="w-full"/> : <div className="h-12 flex items-center justify-center text-xs [color:var(--color-text-muted)] border border-dashed border-border rounded-xl">暂无音频</div>}
-        <input value={url} onChange={e=> sync(e.target.value)} placeholder="/storage/... 或 http" className="w-full bg-surface-secondary border border-border rounded-lg px-2.5 py-1.5 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] font-mono focus:outline-none focus:border-brand"/>
+        {url ? <audio src={getUrl(url)} controls className="w-full"/> : <div className="h-12 flex items-center justify-center text-xs [color:var(--color-text-muted)] border border-dashed border-white/70 dark:border-white/12 rounded-xl">暂无音频</div>}
+        <input value={url} onChange={e=> sync(e.target.value)} placeholder="/storage/... 或 http" className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-lg px-2.5 py-1.5 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] font-mono focus:outline-none focus:border-brand"/>
       </div>
     </div>
   );
@@ -144,16 +144,16 @@ export const TextPromptNode: React.FC<NodeProps> = ({ data, id })=>{
   }, [external]); // eslint-disable-line react-hooks/exhaustive-deps
   const sync=(v:string)=>{ setPrompt(v); lastLocal.current = v; (d.onUpdate as any)?.(id,{prompt:v, text:v}); };
   return (
-    <div className="w-[300px] bg-surface border border-border rounded-2xl shadow-xl overflow-hidden">
-      <div className="px-3 py-2.5 bg-surface border-b border-border flex items-center gap-1.5">
-        <div className="w-6 h-6 rounded-lg bg-surface-secondary border border-border flex items-center justify-center"><Type className="w-3.5 h-3.5 text-sky-500"/></div>
+    <div className="w-[300px] bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-2xl shadow-xl overflow-hidden">
+      <div className="px-3 py-2.5 bg-white/60 dark:bg-white/[.05] border-b border-white/70 dark:border-white/12 flex items-center gap-1.5">
+        <div className="w-6 h-6 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 flex items-center justify-center"><Type className="w-3.5 h-3.5 text-sky-500"/></div>
         <span className="text-xs font-bold [color:var(--color-text-main)]">文本提示词</span>
       </div>
       <Handle type="target" position={Position.Left} id="prompt" className="!bg-sky-500 !w-3 !h-3 !border-2 !border-surface"/>
       <Handle type="source" position={Position.Right} id="prompt" className="!bg-sky-500 !w-3 !h-3 !border-2 !border-surface"/>
       <Handle type="source" position={Position.Bottom} id="text" className="!bg-sky-500 !w-3 !h-3 !border-2 !border-surface"/>
       <div className="p-3">
-        <textarea value={prompt} onChange={e=> sync(e.target.value)} rows={3} placeholder="输入提示词，可连到 分镜卡/视频/生图 的 prompt 输入" className="w-full bg-surface-secondary border border-border rounded-xl p-2.5 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] resize-none focus:outline-none focus:border-brand"/>
+        <textarea value={prompt} onChange={e=> sync(e.target.value)} rows={3} placeholder="输入提示词，可连到 分镜卡/视频/生图 的 prompt 输入" className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl p-2.5 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] resize-none focus:outline-none focus:border-brand"/>
         <div className="text-[10px] [color:var(--color-text-muted)] mt-1.5">输出 text → 可连任意 prompt 输入</div>
       </div>
     </div>

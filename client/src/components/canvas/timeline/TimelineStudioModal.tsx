@@ -120,7 +120,7 @@ export const TimelineStudioModal: React.FC<Props> = ({ open, onClose, clips, onC
       }}
     >
       {/* 顶部栏 */}
-      <div className="h-12 px-4 flex items-center gap-3 border-b border-border shrink-0" style={{ background: 'var(--color-surface)' }}>
+      <div className="h-12 px-4 flex items-center gap-3 border-b border-white/70 dark:border-white/12 shrink-0" style={{ background: 'var(--color-surface)' }}>
         <Film className="w-4 h-4 text-brand" strokeWidth={1.8} />
         <span className="text-[13.5px] font-semibold [color:var(--color-text-main)]">{title}</span>
         <span className="font-mono text-[10.5px] [color:var(--color-text-muted)]">
@@ -145,7 +145,7 @@ export const TimelineStudioModal: React.FC<Props> = ({ open, onClose, clips, onC
               <ChevronDown className="w-3 h-3" strokeWidth={2} />
             </button>
             {menuOpen && (
-              <div role="menu" className="absolute right-0 top-[calc(100%+6px)] w-[220px] p-1 rounded-xl border border-border shadow-2xl z-10" style={{ background: 'var(--color-surface)' }}>
+              <div role="menu" className="absolute right-0 top-[calc(100%+6px)] w-[220px] p-1 rounded-xl border border-white/70 dark:border-white/12 shadow-2xl z-10" style={{ background: 'var(--color-surface)' }}>
                 <button
                   role="menuitem"
                   disabled={!ffmpegReady || busy}
@@ -154,7 +154,7 @@ export const TimelineStudioModal: React.FC<Props> = ({ open, onClose, clips, onC
                     exporter.exportMp4();
                   }}
                   title={ffmpegReady ? '服务端 ffmpeg 合成为一条 MP4' : exporter.engine?.ffmpeg_hint || 'ffmpeg 未就绪'}
-                  className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-[11.5px] [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] hover:bg-surface-secondary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-[11.5px] [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
                   <Download className="w-3.5 h-3.5" strokeWidth={1.8} />
                   导出为 MP4
@@ -167,7 +167,7 @@ export const TimelineStudioModal: React.FC<Props> = ({ open, onClose, clips, onC
                     setMenuOpen(false);
                     exporter.exportDraft();
                   }}
-                  className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-[11.5px] [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] hover:bg-surface-secondary disabled:opacity-40 transition-colors"
+                  className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-[11.5px] [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06] disabled:opacity-40 transition-colors"
                 >
                   <Film className="w-3.5 h-3.5" strokeWidth={1.8} />
                   导出到剪映草稿
@@ -179,7 +179,7 @@ export const TimelineStudioModal: React.FC<Props> = ({ open, onClose, clips, onC
             onClick={onClose}
             aria-label="关闭时间线编辑器"
             title="关闭（Esc）"
-            className="w-7 h-7 rounded-lg border border-border flex items-center justify-center [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] transition-colors"
+            className="w-7 h-7 rounded-lg border border-white/70 dark:border-white/12 flex items-center justify-center [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] transition-colors"
           >
             <X className="w-3.5 h-3.5" strokeWidth={1.8} />
           </button>
@@ -188,7 +188,7 @@ export const TimelineStudioModal: React.FC<Props> = ({ open, onClose, clips, onC
 
       {/* 导出状态条：只在有进度/结果/错误时出现 */}
       {(busy || exporter.mp4.error || exporter.mp4.status === 'success' || exporter.draft.status !== 'idle') && (
-        <div className="px-4 py-2 border-b border-border flex items-center gap-2 text-[11px] shrink-0" style={{ background: 'var(--color-surface-secondary)' }}>
+        <div className="px-4 py-2 border-b border-white/70 dark:border-white/12 flex items-center gap-2 text-[11px] shrink-0" style={{ background: 'var(--color-surface-secondary)' }}>
           {busy && (
             <>
               <Loader2 className="w-3.5 h-3.5 animate-spin text-brand" />
@@ -218,7 +218,7 @@ export const TimelineStudioModal: React.FC<Props> = ({ open, onClose, clips, onC
               <button onClick={exporter.downloadResult} className="ml-auto shrink-0 h-6 px-2 rounded-md border border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/15 transition-colors">
                 下载成片
               </button>
-              <button onClick={exporter.openResultFolder} className="shrink-0 h-6 px-2 rounded-md border border-border [color:var(--color-text-secondary)] hover:text-brand hover:border-brand/50 transition-colors">
+              <button onClick={exporter.openResultFolder} className="shrink-0 h-6 px-2 rounded-md border border-white/70 dark:border-white/12 [color:var(--color-text-secondary)] hover:text-brand hover:border-brand/50 transition-colors">
                 打开目录
               </button>
             </>
@@ -240,7 +240,7 @@ export const TimelineStudioModal: React.FC<Props> = ({ open, onClose, clips, onC
 
       {/* 素材提示（跳过非视频/音频、导入结果等一次性反馈） */}
       {notice && (
-        <div className="px-4 py-1.5 border-b border-border flex items-center gap-2 text-[10.5px] text-amber-300 shrink-0" style={{ background: 'var(--color-surface-secondary)' }}>
+        <div className="px-4 py-1.5 border-b border-white/70 dark:border-white/12 flex items-center gap-2 text-[10.5px] text-amber-300 shrink-0" style={{ background: 'var(--color-surface-secondary)' }}>
           <AlertTriangle className="w-3 h-3 shrink-0" />
           <span className="break-all">{notice}</span>
           <button onClick={() => setNotice(null)} aria-label="关闭提示" className="ml-auto [color:var(--color-text-muted)] hover:[color:var(--color-text-main)]">
@@ -262,7 +262,7 @@ export const TimelineStudioModal: React.FC<Props> = ({ open, onClose, clips, onC
         />
         <div className="flex-1 min-w-0 flex flex-col px-3 py-3">
           {/* 预览大屏：独立圆角面板（对齐参考图，素材/属性面板同为浮动圆角卡片） */}
-          <div className="flex-1 min-h-0 rounded-2xl overflow-hidden border border-border">
+          <div className="flex-1 min-h-0 rounded-2xl overflow-hidden border border-white/70 dark:border-white/12">
             <TimelinePreview
               clip={activeClip}
               localTime={localTime}
@@ -285,18 +285,18 @@ export const TimelineStudioModal: React.FC<Props> = ({ open, onClose, clips, onC
 
       {/* 底部区：工具条 + 多轨时间线（浮动圆角面板，轨道头与静音已内置在 TimelineStrip 左侧） */}
       <div
-        className="mx-3 mb-3 h-[206px] shrink-0 rounded-2xl border border-border overflow-hidden flex flex-col"
+        className="mx-3 mb-3 h-[206px] shrink-0 rounded-2xl border border-white/70 dark:border-white/12 overflow-hidden flex flex-col"
         style={{ background: 'var(--color-surface)' }}
       >
         {/* 时间线工具条（参考图：左为片段操作，右为输出动作） */}
-        <div className="h-9 px-3 flex items-center gap-1 border-b border-border shrink-0">
+        <div className="h-9 px-3 flex items-center gap-1 border-b border-white/70 dark:border-white/12 shrink-0">
           <button
             onClick={() => setTrimMode((v) => !v)}
             aria-pressed={trimMode}
             aria-label="裁剪模式"
             title="裁剪：打开后片段的左右把手常显，拖两端改入出点"
             className={`w-6 h-6 rounded-md flex items-center justify-center transition-colors ${
-              trimMode ? 'bg-brand/15 text-brand' : '[color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-secondary'
+              trimMode ? 'bg-brand/15 text-brand' : '[color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06]'
             }`}
           >
             <Scissors className="w-3.5 h-3.5" strokeWidth={1.7} />
@@ -367,7 +367,7 @@ export const TimelineStudioModal: React.FC<Props> = ({ open, onClose, clips, onC
           />
           <div
             role="menu"
-            className="fixed z-[89] min-w-[128px] p-1 rounded-xl border border-border shadow-2xl"
+            className="fixed z-[89] min-w-[128px] p-1 rounded-xl border border-white/70 dark:border-white/12 shadow-2xl"
             style={{
               left: Math.min(ctxMenu.x, window.innerWidth - 148),
               top: Math.min(ctxMenu.y, window.innerHeight - 64),
@@ -380,7 +380,7 @@ export const TimelineStudioModal: React.FC<Props> = ({ open, onClose, clips, onC
                 setPropsClipId(ctxMenu.clip.id);
                 setCtxMenu(null);
               }}
-              className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-[11.5px] [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] hover:bg-surface-secondary transition-colors"
+              className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-[11.5px] [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06] transition-colors"
             >
               <SlidersHorizontal className="w-3.5 h-3.5" strokeWidth={1.8} />
               属性

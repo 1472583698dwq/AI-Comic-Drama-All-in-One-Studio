@@ -18,7 +18,7 @@ interface Props {
 }
 
 const dropCls =
-  'flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border bg-surface-secondary/50 hover:border-brand/50 transition-colors cursor-pointer';
+  'flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-white/70 dark:border-white/12 bg-white/50 dark:bg-white/[.04] hover:border-brand/50 transition-colors cursor-pointer';
 
 export const WorkflowImportModal: React.FC<Props> = ({ isOpen, onClose, onImported }) => {
   const [tab, setTab] = useState<'file' | 'json' | 'external'>('file');
@@ -97,11 +97,11 @@ export const WorkflowImportModal: React.FC<Props> = ({ isOpen, onClose, onImport
       <div
         role="dialog"
         aria-label="导入 ComfyUI 工作流"
-        className="w-full max-w-2xl max-h-[85vh] bg-surface rounded-2xl border border-border flex flex-col overflow-hidden shadow-2xl"
+        className="w-full max-w-2xl max-h-[85vh] bg-white/60 dark:bg-white/[.05] rounded-2xl border border-white/70 dark:border-white/12 flex flex-col overflow-hidden shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="h-12 px-5 border-b border-border flex items-center justify-between shrink-0">
+        <div className="h-12 px-5 border-b border-white/70 dark:border-white/12 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
             <div className="p-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/25 text-emerald-400"><FileJson className="w-4 h-4" /></div>
             <div>
@@ -109,7 +109,7 @@ export const WorkflowImportModal: React.FC<Props> = ({ isOpen, onClose, onImport
               <div className="text-[10.5px] [color:var(--color-text-muted)]">导入后配置槽位映射，保存即自动生成一个独立生成源</div>
             </div>
           </div>
-          <button onClick={onClose} aria-label="关闭" className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-secondary">
+          <button onClick={onClose} aria-label="关闭" className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06]">
             <X className="w-4.5 h-4.5" />
           </button>
         </div>
@@ -121,7 +121,7 @@ export const WorkflowImportModal: React.FC<Props> = ({ isOpen, onClose, onImport
               key={k}
               onClick={() => setTab(k)}
               className={`px-3 py-1.5 rounded-full text-[11.5px] font-medium border transition-colors ${
-                tab === k ? 'bg-brand/15 text-brand border-brand/40' : 'bg-surface-secondary border-border [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)]'
+                tab === k ? 'bg-brand/15 text-brand border-brand/40' : 'bg-white/55 dark:bg-white/[.06] border-white/70 dark:border-white/12 [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)]'
               }`}
             >{label}</button>
           ))}
@@ -160,13 +160,13 @@ export const WorkflowImportModal: React.FC<Props> = ({ isOpen, onClose, onImport
               <input
                 value={jsonName} onChange={(e) => setJsonName(e.target.value)}
                 placeholder="名称（可选，如 我的换脸工作流）"
-                className="w-full bg-surface-secondary border border-border rounded-lg px-3 py-2 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand"
+                className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-lg px-3 py-2 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand"
               />
               <textarea
                 value={jsonText} onChange={(e) => setJsonText(e.target.value)}
                 placeholder='粘贴 ComfyUI 工作流 JSON（API Format）… 例如 {"3": {"class_type": "KSampler", ...}}'
                 rows={10}
-                className="w-full bg-surface-secondary border border-border rounded-xl p-3 text-[11px] font-mono [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand resize-none"
+                className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl p-3 text-[11px] font-mono [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand resize-none"
               />
               <div className="flex justify-end">
                 <button
@@ -210,7 +210,7 @@ export const WorkflowImportModal: React.FC<Props> = ({ isOpen, onClose, onImport
               )}
               <div className="space-y-1.5 max-h-64 overflow-y-auto custom-scrollbar">
                 {extList.map((wf) => (
-                  <div key={wf.id} className="flex items-center gap-2 p-2 rounded-lg bg-surface-secondary border border-border">
+                  <div key={wf.id} className="flex items-center gap-2 p-2 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12">
                     <FolderOpen className="w-3.5 h-3.5 text-sky-400 shrink-0" />
                     <div className="min-w-0 flex-1">
                       <div className="text-[11.5px] [color:var(--color-text-main)] truncate">{wf.name || wf.id}</div>
@@ -231,10 +231,10 @@ export const WorkflowImportModal: React.FC<Props> = ({ isOpen, onClose, onImport
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-3 border-t border-border flex items-center gap-2 shrink-0">
+        <div className="px-5 py-3 border-t border-white/70 dark:border-white/12 flex items-center gap-2 shrink-0">
           <Check className="w-3.5 h-3.5 text-emerald-400" />
           <span className="text-[10.5px] [color:var(--color-text-muted)]">导入后会自动打开槽位映射配置；保存后该工作流即成为一个独立生成源，画布/素材库/分镜台都能选。</span>
-          <button onClick={onClose} className="ml-auto px-3.5 py-1.5 rounded-lg bg-surface-secondary border border-border text-xs [color:var(--color-text-main)]">关闭</button>
+          <button onClick={onClose} className="ml-auto px-3.5 py-1.5 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-xs [color:var(--color-text-main)]">关闭</button>
         </div>
       </div>
     </div>

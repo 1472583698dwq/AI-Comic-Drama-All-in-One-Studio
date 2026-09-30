@@ -419,7 +419,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
 
   return (
     <div className="fixed inset-0 z-[75] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
-      <div className="bg-surface border border-white/10 rounded-2xl w-full max-w-5xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+      <div className="bg-white/60 dark:bg-white/[.05] border border-white/10 rounded-2xl w-full max-w-5xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
         
         {/* Modal Header */}
         <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between bg-white/[0.02]">
@@ -509,7 +509,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
               {validationResult.errors && validationResult.errors.length > 0 && (
                 <div className="mt-1.5 space-y-1">
                   {validationResult.errors.map((err: any, idx: number) => (
-                    <div key={idx} className="bg-surface-secondary p-2 rounded border border-rose-500/20">
+                    <div key={idx} className="bg-white/55 dark:bg-white/[.06] p-2 rounded border border-rose-500/20">
                       <div className="font-medium text-rose-200">
                         {err.node_id ? `节点 #${err.node_id} (${err.class_type}): ` : ''}{err.message}
                       </div>
@@ -577,7 +577,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
               <select
                 value={filterCategory}
                 onChange={e => setFilterCategory(e.target.value)}
-                className="bg-surface-secondary border border-white/10 rounded-lg px-2.5 py-1 text-xs text-gray-300 focus:outline-none focus:border-accent-blue"
+                className="bg-white/55 dark:bg-white/[.06] border border-white/10 rounded-lg px-2.5 py-1 text-xs text-gray-300 focus:outline-none focus:border-accent-blue"
               >
                 {Object.entries(categoryNames).map(([key, label]) => (
                   <option key={key} value={key}>{label}</option>
@@ -589,7 +589,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 placeholder="搜索节点或参数..."
-                className="bg-surface-secondary border border-white/10 rounded-lg px-2.5 py-1 text-xs text-gray-300 placeholder-gray-500 focus:outline-none focus:border-accent-blue w-44"
+                className="bg-white/55 dark:bg-white/[.06] border border-white/10 rounded-lg px-2.5 py-1 text-xs text-gray-300 placeholder-gray-500 focus:outline-none focus:border-accent-blue w-44"
               />
             </div>
           )}
@@ -654,7 +654,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                     className={`flex items-center gap-1 px-3 py-1.5 rounded-xl transition ${
                       currentSubgraphId === null
                         ? 'bg-brand/20 text-brand-light font-bold border border-brand/40 shadow-sm'
-                        : 'text-gray-400 hover:text-white bg-surface-secondary border border-border'
+                        : 'text-gray-400 hover:text-white bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12'
                     }`}
                   >
                     <span>🏠 主图节点列表 (Root Graph)</span>
@@ -677,7 +677,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                   <button
                     type="button"
                     onClick={() => setCurrentSubgraphId(null)}
-                    className="text-xs font-semibold text-gray-200 hover:text-white flex items-center gap-1.5 bg-surface-tertiary hover:bg-surface-hover px-3 py-1.5 rounded-xl border border-border transition shadow-sm"
+                    className="text-xs font-semibold text-gray-200 hover:text-white flex items-center gap-1.5 bg-white/65 dark:bg-white/[.09] hover:bg-white/60 dark:bg-white/[.08] px-3 py-1.5 rounded-xl border border-white/70 dark:border-white/12 transition shadow-sm"
                   >
                     <span>⬅️ 返回主图层级</span>
                   </button>
@@ -739,7 +739,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                               <div
                                 key={`${p.node_id}_${p.param_name}`}
                                 onClick={(e) => e.stopPropagation()}
-                                className="p-2.5 rounded-xl bg-surface-secondary border border-purple-500/30 text-xs space-y-1.5"
+                                className="p-2.5 rounded-xl bg-white/55 dark:bg-white/[.06] border border-purple-500/30 text-xs space-y-1.5"
                               >
                                 <div className="flex items-center justify-between">
                                   <span className="font-semibold text-gray-200">{p.param_name}</span>
@@ -751,7 +751,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                                     <select
                                       value={String(currentVal ?? '')}
                                       onChange={(e) => handleParamChange(p.node_id, p.param_name, e.target.value)}
-                                      className="flex-1 bg-surface border border-white/15 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-accent-blue"
+                                      className="flex-1 bg-white/60 dark:bg-white/[.05] border border-white/15 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-accent-blue"
                                     >
                                       <option value="">-- 请选择 --</option>
                                       {(p.choices as string[]).map((c: string) => (
@@ -767,7 +767,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                                       value={currentVal ?? ''}
                                       onChange={(e) => handleParamChange(p.node_id, p.param_name, e.target.value)}
                                       placeholder="参数值..."
-                                      className="flex-1 bg-surface-secondary border border-border rounded-lg px-2 py-1 text-xs text-white"
+                                      className="flex-1 bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-lg px-2 py-1 text-xs text-white"
                                     />
                                   )}
                                   {matchingNode && (
@@ -804,7 +804,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                   return (
                     <div
                       key={node.node_id}
-                      className="bg-surface-secondary border border-white/10 rounded-xl p-4 transition hover:border-white/20"
+                      className="bg-white/55 dark:bg-white/[.06] border border-white/10 rounded-xl p-4 transition hover:border-white/20"
                     >
                       {/* Node Header */}
                       <div className="flex items-center justify-between border-b border-white/5 pb-2.5 mb-3">
@@ -843,10 +843,10 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                               key={param.name}
                               className={`p-2.5 rounded-lg border text-xs transition ${
                                 param.is_linked
-                                  ? 'bg-surface-secondary border-white/5 opacity-75'
+                                  ? 'bg-white/55 dark:bg-white/[.06] border-white/5 opacity-75'
                                   : exposed
                                   ? 'bg-amber-950/20 border-amber-500/30'
-                                  : 'bg-surface-secondary border-white/10 hover:border-white/20'
+                                  : 'bg-white/55 dark:bg-white/[.06] border-white/10 hover:border-white/20'
                               }`}
                             >
                               <div className="flex items-center justify-between mb-1.5">
@@ -883,7 +883,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                                   该参数由上游节点插槽实时输出提供
                                 </div>
                               ) : param.type === 'IMAGE' || param.type === 'AUDIO' || param.type === 'VIDEO' || param.name.toLowerCase().includes('image') || param.name.toLowerCase().includes('audio') || param.name.toLowerCase().includes('video') || param.name.toLowerCase().includes('frame') ? (
-                                <label className="flex items-center gap-2 p-2 rounded-lg border border-dashed border-white/20 bg-surface-secondary hover:bg-surface-secondary cursor-pointer">
+                                <label className="flex items-center gap-2 p-2 rounded-lg border border-dashed border-white/20 bg-white/55 dark:bg-white/[.06] hover:bg-white/55 dark:bg-white/[.06] cursor-pointer">
                                   <span className="text-xs">{param.type==='AUDIO' ? '🎵' : param.type==='VIDEO' ? '🎬' : '🖼️'}</span>
                                   <span className="text-xs text-gray-300 truncate flex-1">{currentValue ? `已选择${param.type==='AUDIO'?'音频':param.type==='VIDEO'?'视频':'图片'} · 点击更换` : `点击上传${param.type==='AUDIO'?'音频':param.type==='VIDEO'?'视频':'图片'} · 弹出文件系统`}</span>
                                   <input type="file" accept={param.type==='AUDIO' ? 'audio/*' : param.type==='VIDEO' ? 'video/*' : 'image/*'} className="hidden" onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; const r=new FileReader(); r.onload=()=> handleParamChange(node.node_id, param.name, r.result as string); r.readAsDataURL(f); }} />
@@ -894,7 +894,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                                   onChange={e =>
                                     handleParamChange(node.node_id, param.name, e.target.value)
                                   }
-                                  className="w-full bg-surface border border-white/15 rounded-md px-2 py-1 text-xs text-white focus:outline-none focus:border-accent-blue"
+                                  className="w-full bg-white/60 dark:bg-white/[.05] border border-white/15 rounded-md px-2 py-1 text-xs text-white focus:outline-none focus:border-accent-blue"
                                 >
                                   <option value="">-- 请选择模型 / 预设 --</option>
                                   {param.choices.map((c: string) => (
@@ -911,7 +911,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                                     onChange={e =>
                                       handleParamChange(node.node_id, param.name, e.target.checked)
                                     }
-                                    className="w-4 h-4 rounded text-accent-blue bg-surface border-white/20 focus:ring-0"
+                                    className="w-4 h-4 rounded text-accent-blue bg-white/60 dark:bg-white/[.05] border-white/20 focus:ring-0"
                                   />
                                   <span className="text-gray-300">
                                     {currentValue ? '已启用 (True)' : '已禁用 (False)'}
@@ -931,7 +931,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                                         : parseInt(e.target.value, 10)
                                     )
                                   }
-                                  className="w-full bg-surface border border-white/15 rounded-md px-2 py-1 text-xs text-white focus:outline-none focus:border-accent-blue font-mono"
+                                  className="w-full bg-white/60 dark:bg-white/[.05] border border-white/15 rounded-md px-2 py-1 text-xs text-white focus:outline-none focus:border-accent-blue font-mono"
                                 />
                               ) : typeof currentValue === 'string' && currentValue.length > 60 ? (
                                 <textarea
@@ -940,7 +940,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                                   onChange={e =>
                                     handleParamChange(node.node_id, param.name, e.target.value)
                                   }
-                                  className="w-full bg-surface border border-white/15 rounded-md px-2 py-1 text-xs text-white focus:outline-none focus:border-accent-blue font-sans resize-none"
+                                  className="w-full bg-white/60 dark:bg-white/[.05] border border-white/15 rounded-md px-2 py-1 text-xs text-white focus:outline-none focus:border-accent-blue font-sans resize-none"
                                 />
                               ) : (
                                 <input
@@ -949,7 +949,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                                   onChange={e =>
                                     handleParamChange(node.node_id, param.name, e.target.value)
                                   }
-                                  className="w-full bg-surface border border-white/15 rounded-md px-2 py-1 text-xs text-white focus:outline-none focus:border-accent-blue font-mono"
+                                  className="w-full bg-white/60 dark:bg-white/[.05] border border-white/15 rounded-md px-2 py-1 text-xs text-white focus:outline-none focus:border-accent-blue font-mono"
                                 />
                               )}
                             </div>
@@ -973,7 +973,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
               </div>
 
               {exposedInputs.length === 0 ? (
-                <div className="py-16 text-center text-gray-500 space-y-3 bg-surface-secondary border border-white/10 rounded-xl p-6">
+                <div className="py-16 text-center text-gray-500 space-y-3 bg-white/55 dark:bg-white/[.06] border border-white/10 rounded-xl p-6">
                   <div className="text-2xl">🧩</div>
                   <div className="text-sm font-semibold text-gray-300">当前未暴露任何输入项（默认状态）</div>
                   <p className="text-xs text-gray-500 max-w-md mx-auto">
@@ -993,7 +993,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                   {exposedInputs.map((exp, idx) => (
                     <div
                       key={exp.id || idx}
-                      className="bg-surface-secondary border border-white/10 rounded-xl p-4 transition hover:border-amber-500/30 space-y-3"
+                      className="bg-white/55 dark:bg-white/[.06] border border-white/10 rounded-xl p-4 transition hover:border-amber-500/30 space-y-3"
                     >
                       <div className="flex items-center justify-between border-b border-white/5 pb-2.5">
                         <div className="flex items-center gap-2 flex-wrap">
@@ -1031,7 +1031,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                               );
                             }}
                             placeholder="如：主角脸型LoRA（仅改显示名，不影响注入）"
-                            className="mt-1 w-full bg-surface border border-violet-500/30 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-violet-400"
+                            className="mt-1 w-full bg-white/60 dark:bg-white/[.05] border border-violet-500/30 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-violet-400"
                           />
                         </div>
 
@@ -1047,7 +1047,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                               );
                             }}
                             placeholder="如：主角参考垫图 / 风格触发词"
-                            className="mt-1 w-full bg-surface border border-white/15 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                            className="mt-1 w-full bg-white/60 dark:bg-white/[.05] border border-white/15 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500"
                           />
                         </div>
 
@@ -1061,7 +1061,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                                 prev.map((item, i) => (i === idx ? { ...item, type: val } : item))
                               );
                             }}
-                            className="mt-1 w-full bg-surface border border-white/15 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                            className="mt-1 w-full bg-white/60 dark:bg-white/[.05] border border-white/15 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500"
                           >
                             <option value="image">🖼️ 图片上传器 (Image Uploader)</option>
                             <option value="audio">🎵 音频上传器 (Audio Uploader)</option>
@@ -1086,7 +1086,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                             );
                           }}
                           placeholder="如：请上传人物正脸立绘"
-                          className="mt-1 w-full bg-surface border border-white/15 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                          className="mt-1 w-full bg-white/60 dark:bg-white/[.05] border border-white/15 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500"
                         />
                       </div>
 
@@ -1105,7 +1105,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                               );
                             }}
                             placeholder={'如：\n1:1 (Square)\n9:16 (Portrait)\n16:9 (Landscape)'}
-                            className="mt-1 w-full bg-surface border border-white/15 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-amber-500 resize-none"
+                            className="mt-1 w-full bg-white/60 dark:bg-white/[.05] border border-white/15 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-amber-500 resize-none"
                           />
                         </div>
                       )}
@@ -1120,7 +1120,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                 💡 <b>槽位映射说明</b>：系统在生成分镜或素材时，会自动将小说拆解出的正向提示词、随机种子、长宽分辨率等动态参数注入到所映射的节点中。
               </div>
 
-              <div className="space-y-3 bg-surface-secondary border border-white/10 rounded-xl p-5">
+              <div className="space-y-3 bg-white/55 dark:bg-white/[.06] border border-white/10 rounded-xl p-5">
                 {[
                   { key: 'prompt_node', label: '正向提示词节点 (Prompt Node)', hint: '通常为 CLIPTextEncode / TextString' },
                   { key: 'negative_node', label: '负向提示词节点 (Negative Node)', hint: '通常为负向 CLIPTextEncode' },
@@ -1137,7 +1137,7 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
                     <select
                       value={mapping[slot.key] || ''}
                       onChange={e => setMapping(prev => ({ ...prev, [slot.key]: e.target.value }))}
-                      className="bg-surface border border-white/15 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-accent-blue"
+                      className="bg-white/60 dark:bg-white/[.05] border border-white/15 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-accent-blue"
                     >
                       <option value="">-- 未指定 / 自动推导 --</option>
                       {(data?.nodes || []).map(n => (
@@ -1151,8 +1151,8 @@ export const WorkflowInspectorModal: React.FC<Props> = ({ workflowId, isOpen, on
               </div>
             </div>
           ) : (
-            <div className="bg-surface-secondary border border-white/10 rounded-xl p-4">
-              <pre className="text-[11px] font-mono text-gray-300 overflow-x-auto p-2 bg-surface-secondary rounded-lg max-h-[60vh]">
+            <div className="bg-white/55 dark:bg-white/[.06] border border-white/10 rounded-xl p-4">
+              <pre className="text-[11px] font-mono text-gray-300 overflow-x-auto p-2 bg-white/55 dark:bg-white/[.06] rounded-lg max-h-[60vh]">
                 {JSON.stringify(data, null, 2)}
               </pre>
             </div>
