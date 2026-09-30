@@ -895,6 +895,455 @@
     "code": ""
   },
   {
+    "id": "prov_6daaa960",
+    "name": "RunningHub 双音轨参考生视频",
+    "display_name": "RunningHub 双音轨参考生视频",
+    "kind": "video",
+    "provider_type": "code",
+    "supports_workflow": false,
+    "description": "由导演直接提供代码（python）",
+    "icon": "Zap",
+    "scope": "global",
+    "project_id": null,
+    "builtin": false,
+    "enabled": true,
+    "models": [],
+    "default_model": null,
+    "params_schema": {
+      "type": "object",
+      "properties": {
+        "aspect_ratio": {
+          "type": "string",
+          "title": "画幅",
+          "enum": [
+            "1:1 (Square)",
+            "2:3 (Portrait Photo)",
+            "3:2 (Photo)",
+            "3:4 (Portrait Standard)",
+            "4:3 (Standard)",
+            "9:16 (Portrait Widescreen)",
+            "16:9 (Widescreen)",
+            "21:9 (Ultrawide)"
+          ],
+          "default": "9:16 (Portrait Widescreen)",
+          "description": "输出画幅（节点115）",
+          "x-category": "layout",
+          "x-visibility": "basic",
+          "x-agent": "auto",
+          "x-priority": 10
+        },
+        "instance_type": {
+          "type": "string",
+          "title": "实例类型",
+          "enum": [
+            "default",
+            "plus",
+            "ultra"
+          ],
+          "default": "default",
+          "description": "运行实例显存 24G/48G/84G",
+          "x-category": "advanced",
+          "x-visibility": "advanced",
+          "x-agent": "suggest",
+          "x-priority": 30
+        }
+      }
+    },
+    "default_params": {},
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "description": "分镜/结构化提示词（写入节点150）",
+          "x-handle": "text",
+          "x-role": "prompt"
+        },
+        "first_frame": {
+          "type": "string",
+          "format": "uri",
+          "description": "主体参考图 Picture1（节点141）",
+          "x-handle": "image",
+          "x-slot": "first_frame"
+        },
+        "reference_images": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          },
+          "maxItems": 3,
+          "minItems": 0,
+          "description": "补充参考图：第1、2张→节点142/143；第3张→节点161/165/166（共享）",
+          "x-handle": "image",
+          "x-slot": "reference_images"
+        },
+        "reference_audios": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          },
+          "maxItems": 2,
+          "minItems": 0,
+          "description": "音色参考音频 [0]=drive_audio(144)、[1]=ref_audio_0(160)",
+          "x-handle": "audio",
+          "x-slot": "reference_audios"
+        },
+        "reference_video": {
+          "type": "string",
+          "format": "uri",
+          "description": "参考视频（节点164，可选）",
+          "x-handle": "video",
+          "x-slot": "reference_video"
+        }
+      },
+      "required": [
+        "prompt"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "video_url": {
+          "type": "string",
+          "format": "uri",
+          "x-handle": "video"
+        }
+      },
+      "required": [
+        "video_url"
+      ]
+    },
+    "workflow_id": null,
+    "workflow_hash": null,
+    "workflow_exposed": null,
+    "schema_version": null,
+    "capabilities": [],
+    "transport": {
+      "method": "POST",
+      "url": "",
+      "headers": {},
+      "query": {},
+      "timeout": 1200
+    },
+    "headers": {},
+    "custom_headers": {},
+    "auth": {
+      "type": "bearer",
+      "header_name": "Authorization",
+      "query_name": "api_key",
+      "key_env": "CUSTOM_PROVIDER_prov_6daaa960",
+      "prefix": "Bearer ",
+      "has_key": true
+    },
+    "health_check": {
+      "url": null,
+      "method": "GET",
+      "expect_status": 200,
+      "test_payload": null
+    },
+    "doc_url": null,
+    "created_at": "2026-09-29T13:17:17.622890",
+    "updated_at": "2026-09-29T13:17:17.623262",
+    "language": "python",
+    "code_entry": "generate",
+    "code_timeout": 1200,
+    "trusted": false,
+    "has_code": true,
+    "code": "import httpx\nimport base64\n\nAPI_BASE = \"https://www.runninghub.ai/openapi/v2\"\nRUN_URL = API_BASE + \"/run/ai-app/2086022574387339266\"\nQUERY_URL = API_BASE + \"/query\"\nUPLOAD_URL = API_BASE + \"/media/upload/binary\"\nASPECT_OPTIONS = [\n    \"1:1 (Square)\", \"2:3 (Portrait Photo)\", \"3:2 (Photo)\", \"3:4 (Portrait Standard)\",\n    \"4:3 (Standard)\", \"9:16 (Portrait Widescreen)\", \"16:9 (Widescreen)\", \"21:9 (Ultrawide)\",\n]\n_EXT_BY_MIME = {\"jpeg\": \"jpg\", \"mpeg\": \"mp3\", \"x-m4a\": \"m4a\", \"quicktime\": \"mov\", \"x-wav\": \"wav\"}\n_MIME_BY_EXT = {\n    \"png\": \"image/png\", \"jpg\": \"image/jpeg\", \"jpeg\": \"image/jpeg\", \"webp\": \"image/webp\",\n    \"mp3\": \"audio/mpeg\", \"wav\": \"audio/wav\", \"m4a\": \"audio/mp4\",\n    \"mp4\": \"video/mp4\", \"webm\": \"video/webm\", \"mov\": \"video/quicktime\",\n}\n_KNOWN_EXTS = (\"png\", \"jpg\", \"jpeg\", \"webp\", \"mp3\", \"wav\", \"m4a\", \"mp4\", \"webm\", \"mov\")\n\n\ndef _is_remote(v):\n    return v.startswith(\"data:\") or v.startswith(\"http://\") or v.startswith(\"https://\")\n\n\ndef _ext_of(v, default_ext):\n    if v.startswith(\"data:\"):\n        mime = v[5:].split(\";\", 1)[0].split(\"/\")[-1].lower()\n        return _EXT_BY_MIME.get(mime, mime or default_ext)\n    path = v.split(\"?\", 1)[0].lower()\n    for e in _KNOWN_EXTS:\n        if path.endswith(\".\" + e):\n            return e\n    return default_ext\n\n\nasync def _upload(client, api_key, value, idx, kind, default_ext):\n    \"\"\"媒体值 → RunningHub 文件名：data: URI / 公网URL 先上传后回填；已是文件名则原样透传。\"\"\"\n    v = str(value or \"\").strip()\n    if not v or v == \"None\":\n        return None\n    if not _is_remote(v):\n        return v\n    if v.startswith(\"data:\"):\n        try:\n            raw = base64.b64decode(v.split(\",\", 1)[1])\n        except Exception as e:\n            raise RuntimeError(f\"{kind}{idx} base64 解码失败: {e}\")\n    else:\n        gr = await client.get(v, timeout=120)\n        gr.raise_for_status()\n        raw = gr.content\n    if not raw:\n        raise RuntimeError(f\"{kind}{idx}内容为空\")\n    ext = _ext_of(v, default_ext)\n    mime = _MIME_BY_EXT.get(ext, \"application/octet-stream\")\n    # 上传只能带 Bearer 头：附带 Content-Type: application/json 会破坏 multipart 边界\n    up = await client.post(\n        UPLOAD_URL, headers={\"Authorization\": f\"Bearer {api_key}\"},\n        files={\"file\": (f\"{kind}{idx}.{ext}\", raw, mime)}, timeout=300,\n    )\n    up.raise_for_status()\n    uj = up.json()\n    if uj.get(\"code\") != 0:\n        raise RuntimeError(f\"{kind}{idx}上传失败: {uj.get('message') or str(uj)[:300]}\")\n    d = uj.get(\"data\") or {}\n    dl = d.get(\"download_url\") or d.get(\"fileName\")\n    if not dl:\n        raise RuntimeError(f\"{kind}{idx}上传未返回文件名: {str(uj)[:300]}\")\n    return dl\n\n\nasync def generate(ctx, api):\n    dyn = ctx.get(\"dynamic_inputs\") or {}\n    api_key = ctx.get(\"api_key\")\n    if not api_key and isinstance(api, dict) and callable(api.get(\"get_api_key\")):\n        api_key = api[\"get_api_key\"]()\n    api_key = str(api_key or \"\").strip()\n    if not api_key:\n        raise RuntimeError(\"缺少 RunningHub API Key（请在生成源里配置 Key 后重试）\")\n\n    headers = {\"Authorization\": f\"Bearer {api_key}\", \"Content-Type\": \"application/json\"}\n    task_id = str(ctx.get(\"task_id\") or dyn.get(\"task_id\") or \"\").strip()\n    prompt = str(ctx.get(\"prompt\") or \"\").strip()\n\n    async with httpx.AsyncClient(timeout=600) as client:\n        # ── 查询分支：有 task_id 且无 prompt，单次查询秒回，绝不 sleep ──\n        if task_id and not prompt:\n            q = await client.post(QUERY_URL, headers=headers, json={\"taskId\": task_id})\n            q.raise_for_status()\n            qj = q.json() or {}\n            status = str(qj.get(\"status\") or \"\").upper()\n            if status in (\"CREATE\", \"QUEUED\", \"RUNNING\", \"PENDING\"):\n                return {\"video_url\": None, \"task_id\": task_id, \"status\": status}\n            if status == \"SUCCESS\":\n                results = qj.get(\"results\") or []\n                for item in results:  # 多保存节点会混出图片，视频优先挑 mp4/webm/mov\n                    if isinstance(item, dict):\n                        url = str(item.get(\"url\") or \"\")\n                        ot = str(item.get(\"outputType\") or \"\").lower()\n                        if url and (ot in (\"mp4\", \"webm\", \"mov\") or ot == \"\" or \"mp4\" in url.lower()):\n                            return {\"video_url\": url}\n                for item in results:\n                    if isinstance(item, dict) and item.get(\"url\"):\n                        return {\"video_url\": item[\"url\"]}\n                    if isinstance(item, str) and item:\n                        return {\"video_url\": item}\n                raise RuntimeError(f\"任务成功但无结果URL: {str(qj)[:300]}\")\n            if status == \"CANCEL\":  # CANCEL 需映射成框架终态词 CANCELLED\n                status = \"CANCELLED\"\n            raise RuntimeError(f\"任务失败({status or 'UNKNOWN'}): {qj.get('errorMessage') or str(qj)[:300]}\")\n\n        # ── 提交分支：上传媒体 → 组装 nodeInfoList → 立即返回 task_id ──\n        if not prompt:\n            raise ValueError(\"缺少 prompt\")\n\n        first = ctx.get(\"first_frame_url\") or ctx.get(\"first_frame\") or dyn.get(\"first_frame\")\n        refs = ctx.get(\"reference_images\") or dyn.get(\"reference_images\") or []\n        if isinstance(refs, str):\n            refs = [refs]\n        refs = [str(r) for r in refs if r][:3]\n        auds = ctx.get(\"reference_audios\") or dyn.get(\"reference_audios\") or []\n        if isinstance(auds, str):\n            auds = [auds]\n        auds = [str(a) for a in auds if a][:2]\n        ref_video = ctx.get(\"reference_video_url\") or ctx.get(\"reference_video\") or dyn.get(\"reference_video\")\n\n        aspect = str(ctx.get(\"aspect_ratio\") or dyn.get(\"aspect_ratio\") or \"9:16 (Portrait Widescreen)\")\n        if aspect not in ASPECT_OPTIONS:\n            aspect = \"9:16 (Portrait Widescreen)\"\n        instance_type = str(ctx.get(\"instance_type\") or dyn.get(\"instance_type\") or \"default\")\n        if instance_type not in (\"default\", \"plus\", \"ultra\"):\n            instance_type = \"default\"\n\n        img1 = await _upload(client, api_key, first, 1, \"image\", \"png\") if first else None\n        img2 = await _upload(client, api_key, refs[0], 2, \"image\", \"png\") if len(refs) > 0 else None\n        img3 = await _upload(client, api_key, refs[1], 3, \"image\", \"png\") if len(refs) > 1 else None\n        img_shared = await _upload(client, api_key, refs[2], 4, \"image\", \"png\") if len(refs) > 2 else None\n        aud1 = await _upload(client, api_key, auds[0], 1, \"audio\", \"mp3\") if len(auds) > 0 else None\n        aud2 = await _upload(client, api_key, auds[1], 2, \"audio\", \"mp3\") if len(auds) > 1 else None\n        vid = await _upload(client, api_key, ref_video, 1, \"video\", \"mp4\") if ref_video else None\n\n        node_info_list = [\n            {\"nodeId\": \"150\", \"fieldName\": \"value\", \"fieldValue\": prompt, \"description\": \"结构化提示词\"},\n            {\"nodeId\": \"115\", \"fieldName\": \"aspect_ratio\", \"fieldValue\": aspect, \"description\": \"画幅\"},\n            {\"nodeId\": \"144\", \"fieldName\": \"audio\", \"fieldValue\": aud1 or \"None\", \"description\": \"drive_audio 音色参考\"},\n            {\"nodeId\": \"160\", \"fieldName\": \"audio\", \"fieldValue\": aud2 or \"None\", \"description\": \"ref_audio_0 音色参考\"},\n        ]\n        for nid, val, desc in ((\"141\", img1, \"Picture1 主体参考\"), (\"142\", img2, \"参考图1\"), (\"143\", img3, \"参考图2\")):\n            if val:  # 未提供时不下发，保留应用内保存的默认值\n                node_info_list.append({\"nodeId\": nid, \"fieldName\": \"image\", \"fieldValue\": val, \"description\": desc})\n        if img_shared:  # 示例中 161/165/166 为同一张共享参考图\n            for nid in (\"161\", \"165\", \"166\"):\n                node_info_list.append({\"nodeId\": nid, \"fieldName\": \"image\", \"fieldValue\": img_shared, \"description\": \"共享参考图\"})\n        if vid:\n            node_info_list.append({\"nodeId\": \"164\", \"fieldName\": \"video\", \"fieldValue\": vid, \"description\": \"参考视频\"})\n\n        payload = {\"nodeInfoList\": node_info_list, \"instanceType\": instance_type, \"usePersonalQueue\": \"false\"}\n        r = await client.post(RUN_URL, headers=headers, json=payload)\n        r.raise_for_status()\n        rj = r.json() or {}\n        new_id = str(rj.get(\"taskId\") or ((rj.get(\"data\") or {}).get(\"taskId\") if isinstance(rj.get(\"data\"), dict) else \"\") or \"\").strip()\n        if not new_id:\n            raise RuntimeError(f\"提交未返回 taskId: {str(rj)[:300]}\")\n        return {\"video_url\": None, \"task_id\": new_id, \"status\": \"SUBMITTED\"}\n\n# PARAMS_SCHEMA: {\"type\":\"object\",\"properties\":{\"aspect_ratio\":{\"type\":\"string\",\"title\":\"画幅\",\"enum\":[\"1:1 (Square)\",\"2:3 (Portrait Photo)\",\"3:2 (Photo)\",\"3:4 (Portrait Standard)\",\"4:3 (Standard)\",\"9:16 (Portrait Widescreen)\",\"16:9 (Widescreen)\",\"21:9 (Ultrawide)\"],\"default\":\"9:16 (Portrait Widescreen)\",\"description\":\"输出画幅（节点115）\",\"x-category\":\"layout\",\"x-visibility\":\"basic\",\"x-agent\":\"auto\",\"x-priority\":10},\"instance_type\":{\"type\":\"string\",\"title\":\"实例类型\",\"enum\":[\"default\",\"plus\",\"ultra\"],\"default\":\"default\",\"description\":\"运行实例显存 24G/48G/84G\",\"x-category\":\"advanced\",\"x-visibility\":\"advanced\",\"x-agent\":\"suggest\",\"x-priority\":30}}}"
+  },
+  {
+    "id": "prov_6131876a",
+    "name": "AutoDL H3 图音生视频 v2 (15s)",
+    "display_name": "AutoDL H3 图音生视频 v2 (15s)",
+    "kind": "video",
+    "provider_type": "code",
+    "supports_workflow": false,
+    "description": "AutoDL H3 工作流 minimax_h3_image_audio_to_video_v2_15s：图+音生视频，支持最多9张参考图、3条参考音频，时长1-15秒，480p/768p 竖横。",
+    "icon": "Zap",
+    "scope": "global",
+    "project_id": null,
+    "builtin": false,
+    "enabled": true,
+    "models": [],
+    "default_model": null,
+    "params_schema": {
+      "type": "object",
+      "properties": {
+        "resolution": {
+          "type": "string",
+          "title": "分辨率",
+          "enum": [
+            "480p竖",
+            "768p竖",
+            "480p横",
+            "768p横"
+          ],
+          "default": "768p竖",
+          "description": "分辨率（竖=9:16 横=16:9）",
+          "x-category": "layout",
+          "x-visibility": "basic",
+          "x-agent": "auto",
+          "x-priority": 20
+        },
+        "duration": {
+          "type": "integer",
+          "title": "时长",
+          "default": 5,
+          "minimum": 3,
+          "maximum": 15,
+          "description": "时长秒",
+          "x-category": "motion",
+          "x-visibility": "basic",
+          "x-agent": "auto",
+          "x-priority": 30
+        },
+        "seed": {
+          "type": "integer",
+          "title": "随机种子",
+          "description": "随机种子，留空随机",
+          "x-category": "quality",
+          "x-visibility": "advanced",
+          "x-agent": "manual",
+          "x-priority": 99
+        }
+      }
+    },
+    "default_params": {},
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "description": "运动描述",
+          "x-handle": "text",
+          "x-role": "prompt"
+        },
+        "first_frame": {
+          "type": "string",
+          "format": "uri",
+          "description": "首帧",
+          "x-handle": "image",
+          "x-slot": "first_frame"
+        },
+        "last_frame": {
+          "type": "string",
+          "format": "uri",
+          "description": "尾帧",
+          "x-handle": "image",
+          "x-slot": "last_frame"
+        },
+        "reference_images": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          },
+          "description": "参考集，最多9张",
+          "x-handle": "image",
+          "maxItems": 9,
+          "minItems": 0,
+          "x-slot": "reference_images"
+        },
+        "reference_audios": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          },
+          "description": "参考音频，最多3条",
+          "x-handle": "audio",
+          "maxItems": 3,
+          "minItems": 0,
+          "x-slot": "reference_audios"
+        }
+      },
+      "required": [
+        "prompt"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "video_url": {
+          "type": "string",
+          "format": "uri",
+          "x-handle": "video"
+        }
+      },
+      "required": [
+        "video_url"
+      ]
+    },
+    "workflow_id": null,
+    "workflow_hash": null,
+    "workflow_exposed": null,
+    "schema_version": null,
+    "capabilities": [],
+    "transport": {
+      "method": "POST",
+      "url": "",
+      "headers": {},
+      "query": {},
+      "timeout": 60
+    },
+    "headers": {},
+    "custom_headers": {},
+    "auth": {
+      "type": "bearer",
+      "header_name": "Authorization",
+      "query_name": "api_key",
+      "key_env": "CUSTOM_PROVIDER_prov_6131876a",
+      "prefix": "Bearer ",
+      "has_key": true
+    },
+    "health_check": {
+      "url": null,
+      "method": "GET",
+      "expect_status": 200,
+      "test_payload": null
+    },
+    "doc_url": null,
+    "created_at": "2026-09-02T14:25:07.379152",
+    "updated_at": "2026-09-30T09:56:30.214030",
+    "language": "python",
+    "code_entry": "generate",
+    "code_timeout": 600,
+    "trusted": false,
+    "has_code": true,
+    "code": "import asyncio\nimport httpx\n\nasync def generate(ctx, api):\n    AUTODL_BASE = \"https://autodl.art/api/v1\"\n    WORKFLOW_ID = \"minimax_h3_image_audio_to_video_v2_15s\"\n    AUTODL_API_KEY = \"3jfV2WXEzzGkSW1gcuZwAtTAMbDhruqwgphMu9mXQ5EIKapd\"\n\n    headers = {\n        \"Authorization\": f\"Bearer {AUTODL_API_KEY}\",\n        \"Content-Type\": \"application/json\",\n    }\n\n    dyn = ctx.get(\"dynamic_inputs\") or {}\n    prompt = (ctx.get(\"prompt\") or \"\").strip()\n    task_id = (ctx.get(\"task_id\") or dyn.get(\"task_id\") or \"\").strip()\n\n    # 查询模式：有 task_id 且无 prompt → 单次 GET（秒回，绝不阻塞）。\n    # 由框架后台轮询（_poll_code_video_task）或调用方携带 task_id 复用，勿在此 sleep 循环。\n    if task_id and not prompt:\n        async with httpx.AsyncClient(timeout=15) as client:\n            r = await client.get(f\"{AUTODL_BASE}/comfyui/comfyui_workflow/result/{task_id}\", headers=headers)\n            r.raise_for_status()\n            data = (r.json() or {}).get(\"data\", {}) or {}\n            status = str(data.get(\"status\") or \"\").upper()\n            results = data.get(\"results\") or []\n            url = None\n            for item in results:\n                if isinstance(item, dict) and item.get(\"type\") == \"video\" and item.get(\"url\"):\n                    url = item[\"url\"]\n                    break\n            if not url and results:\n                first = results[0]\n                url = first.get(\"url\") if isinstance(first, dict) else (first if isinstance(first, str) else None)\n            if url:\n                return {\"video_url\": url, \"status\": data.get(\"status\"), \"task_id\": task_id}\n            if status in (\"FAILED\", \"ERROR\", \"FAIL\", \"CANCELLED\"):\n                raise RuntimeError(f\"AutoDL 任务失败 task_id={task_id}: {str(data)[:300]}\")\n            return {\"video_url\": None, \"status\": data.get(\"status\") or \"QUEUED\", \"task_id\": task_id}\n\n    if not prompt:\n        raise ValueError(\"缺少 prompt\")\n\n    # 组装 body（严格对齐官方能跑通的示例；时长钳位 1-15 防参数非法）\n    try:\n        duration = int(ctx.get(\"duration\") or 5)\n    except (ValueError, TypeError):\n        duration = 5\n    duration = max(1, min(15, duration))\n\n    # 分辨率归一化：上游（onekey/Agent）可能传 480p/720p/1080p 或带方向后缀，\n    # AutoDL 该工作流只接受 480p竖 / 768p竖 / 480p横 / 768p横\n    _RES_MAP = {\n        \"480p\": \"480p竖\", \"720p\": \"768p竖\", \"768p\": \"768p竖\", \"1080p\": \"768p竖\",\n        \"480p竖\": \"480p竖\", \"480p横\": \"480p横\",\n        \"768p竖\": \"768p竖\", \"768p横\": \"768p横\",\n        \"720p竖\": \"768p竖\", \"720p横\": \"768p横\",\n        \"1080p竖\": \"768p竖\", \"1080p横\": \"768p横\",\n        \"9:16\": \"768p竖\", \"16:9\": \"768p横\",\n    }\n    _res_raw = str(ctx.get(\"resolution\") or dyn.get(\"resolution\") or \"768p竖\").strip()\n    body = {\n        \"prompt\": prompt,\n        \"duration\": duration,\n        \"resolution\": _RES_MAP.get(_res_raw, \"768p竖\"),\n    }\n    seed = ctx.get(\"seed\")\n    if seed is not None:\n        try:\n            s = int(seed)\n            if s > 0:\n                body[\"seed\"] = s\n        except (ValueError, TypeError):\n            pass\n\n    # 首帧/参考图/尾帧 → ref_image_0..8（保序去重；仅公网 http(s)，本地 /storage 路径 AutoDL 不认则跳过）\n    ordered_images = []\n    for key in (\"first_frame\", \"first_frame_url\"):\n        v = ctx.get(key) or dyn.get(key)\n        if isinstance(v, str) and v.startswith((\"http://\", \"https://\", \"data:\")):\n            ordered_images.append(v)\n            break\n    for url in (ctx.get(\"reference_images\") or dyn.get(\"reference_images\") or []):\n        if isinstance(url, str) and url.startswith((\"http://\", \"https://\", \"data:\")):\n            ordered_images.append(url)\n    for key in (\"last_frame\", \"last_frame_url\"):\n        v = ctx.get(key) or dyn.get(key)\n        if isinstance(v, str) and v.startswith((\"http://\", \"https://\", \"data:\")):\n            ordered_images.append(v)\n            break\n    seen = set()\n    uniq_images = []\n    for u in ordered_images:\n        if u not in seen:\n            seen.add(u)\n            uniq_images.append(u)\n    for i, url in enumerate(uniq_images[:9]):\n        body[f\"ref_image_{i}\"] = url\n\n    # 参考音频 → ref_audio_0..2（兼容 reference_audios / ref_audio / 单字符串三种形态）\n    audios = []\n    for key in (\"reference_audios\", \"ref_audio\", \"reference_audio\"):\n        v = ctx.get(key) if ctx.get(key) is not None else dyn.get(key)\n        if isinstance(v, str) and v:\n            audios.append(v)\n        elif isinstance(v, list):\n            audios.extend(v)\n    n = 0\n    seen_a = set()\n    for url in audios:\n        if isinstance(url, str) and url.startswith((\"http://\", \"https://\", \"data:\")) and url not in seen_a:\n            seen_a.add(url)\n            body[f\"ref_audio_{n}\"] = url\n            n += 1\n        if n >= 3:\n            break\n\n    # 提交即返 task_id（绝不在此轮询等终态：外层 Agent 40s 即超时；框架后台轮询接管）\n    async with httpx.AsyncClient(timeout=20) as client:\n        r = await client.post(f\"{AUTODL_BASE}/comfyui/comfyui_workflow/{WORKFLOW_ID}\", json=body, headers=headers)\n        r.raise_for_status()\n        resp = r.json() or {}\n        if resp.get(\"code\") not in (None, \"Success\", \"success\"):\n            raise RuntimeError(f\"AutoDL 提交失败: {str(resp)[:400]}\")\n        new_task_id = (resp.get(\"data\") or {}).get(\"task_id\")\n        if not new_task_id:\n            raise RuntimeError(f\"AutoDL 未返回 task_id: {str(resp)[:400]}\")\n        return {\"video_url\": None, \"task_id\": new_task_id, \"status\": \"SUBMITTED\"}\n"
+  },
+  {
+    "id": "prov_ba1b3011",
+    "name": "AutoDL 任务状态查询(只读)",
+    "display_name": "AutoDL 任务状态查询(只读)",
+    "kind": "video",
+    "provider_type": "code",
+    "supports_workflow": false,
+    "description": "由导演直接提供代码（python）",
+    "icon": "Zap",
+    "scope": "global",
+    "project_id": null,
+    "builtin": false,
+    "enabled": true,
+    "models": [],
+    "default_model": null,
+    "params_schema": {
+      "type": "object",
+      "properties": {
+        "task_id": {
+          "type": "string",
+          "title": "AutoDL任务ID",
+          "description": "AutoDL result 接口的 task_id",
+          "x-category": "quality",
+          "x-visibility": "basic",
+          "x-agent": "auto",
+          "x-priority": 10
+        }
+      },
+      "required": [
+        "task_id"
+      ]
+    },
+    "default_params": {},
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "description": "运动描述",
+          "x-handle": "text",
+          "x-role": "prompt"
+        },
+        "first_frame": {
+          "type": "string",
+          "format": "uri",
+          "description": "首帧（定格开头画面）",
+          "x-handle": "image",
+          "x-slot": "first_frame"
+        },
+        "reference_images": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          },
+          "description": "参考集，最多9张",
+          "x-handle": "image",
+          "x-slot": "reference_images",
+          "maxItems": 9,
+          "minItems": 0
+        },
+        "reference_audios": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          },
+          "description": "参考音频，最多3条",
+          "x-handle": "audio",
+          "x-slot": "ref_audio",
+          "maxItems": 3,
+          "minItems": 0
+        }
+      },
+      "required": [
+        "prompt"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "video_url": {
+          "type": "string",
+          "format": "uri",
+          "x-handle": "video"
+        }
+      },
+      "required": [
+        "video_url"
+      ]
+    },
+    "workflow_id": null,
+    "workflow_hash": null,
+    "workflow_exposed": null,
+    "schema_version": null,
+    "capabilities": [],
+    "transport": {
+      "method": "POST",
+      "url": "",
+      "headers": {},
+      "query": {},
+      "timeout": 1200
+    },
+    "headers": {},
+    "custom_headers": {},
+    "auth": {
+      "type": "none",
+      "header_name": "Authorization",
+      "query_name": "api_key",
+      "key_env": null,
+      "prefix": "Bearer ",
+      "has_key": false
+    },
+    "health_check": {
+      "url": null,
+      "method": "GET",
+      "expect_status": 200,
+      "test_payload": null
+    },
+    "doc_url": null,
+    "created_at": "2026-09-30T10:15:39.031253",
+    "updated_at": "2026-09-30T10:19:47.653916",
+    "language": "python",
+    "code_entry": "generate",
+    "code_timeout": 1200,
+    "trusted": false,
+    "has_code": true,
+    "code": "import httpx\n\nasync def generate(ctx, api):\n    BASE = \"https://autodl.art/api/v1\"\n    API_KEY = \"3jfV2WXEzzGkSW1gcuZwAtTAMbDhruqwgphMu9mXQ5EIKapd\"\n    task_id = str(ctx.get(\"task_id\") or ctx.get(\"prompt\") or \"\").strip()\n    if not task_id:\n        raise RuntimeError(\"缺少 task_id\")\n    headers = {\"Authorization\": API_KEY, \"Content-Type\": \"application/json\"}\n    async with httpx.AsyncClient(timeout=20) as client:\n        r = await client.get(f\"{BASE}/comfyui/comfyui_workflow/result/{task_id}\", headers=headers)\n        r.raise_for_status()\n        data = (r.json() or {}).get(\"data\", {}) or {}\n    status = str(data.get(\"status\") or \"\").upper()\n    url = \"\"\n    for item in (data.get(\"results\") or []):\n        if isinstance(item, dict) and item.get(\"type\") == \"video\" and item.get(\"url\"):\n            url = item[\"url\"]\n            break\n    # 紧凑回传：状态 + 视频直链\n    raise RuntimeError(f\"QUERY::{task_id}::{status}::{url}\")\n"
+  },
+  {
     "id": "comfyui_wf_3d96b356",
     "name": "ComfyUI 四试图生成",
     "display_name": "ComfyUI·四试图生成",
@@ -1081,8 +1530,8 @@
       "test_payload": null
     },
     "doc_url": null,
-    "created_at": "2026-09-29T07:41:47.419911",
-    "updated_at": "2026-09-29T07:41:47.420074",
+    "created_at": "2026-09-30T15:42:23.073594",
+    "updated_at": "2026-09-30T15:42:23.073926",
     "language": "python",
     "code_entry": "generate",
     "code_timeout": 1200,
@@ -2366,462 +2815,13 @@
       "test_payload": null
     },
     "doc_url": null,
-    "created_at": "2026-09-29T07:41:47.426469",
-    "updated_at": "2026-09-29T07:41:47.426648",
+    "created_at": "2026-09-30T15:42:23.079665",
+    "updated_at": "2026-09-30T15:42:23.079837",
     "language": "python",
     "code_entry": "generate",
     "code_timeout": 1200,
     "trusted": false,
     "has_code": false,
     "code": ""
-  },
-  {
-    "id": "prov_6daaa960",
-    "name": "RunningHub 双音轨参考生视频",
-    "display_name": "RunningHub 双音轨参考生视频",
-    "kind": "video",
-    "provider_type": "code",
-    "supports_workflow": false,
-    "description": "由导演直接提供代码（python）",
-    "icon": "Zap",
-    "scope": "global",
-    "project_id": null,
-    "builtin": false,
-    "enabled": true,
-    "models": [],
-    "default_model": null,
-    "params_schema": {
-      "type": "object",
-      "properties": {
-        "aspect_ratio": {
-          "type": "string",
-          "title": "画幅",
-          "enum": [
-            "1:1 (Square)",
-            "2:3 (Portrait Photo)",
-            "3:2 (Photo)",
-            "3:4 (Portrait Standard)",
-            "4:3 (Standard)",
-            "9:16 (Portrait Widescreen)",
-            "16:9 (Widescreen)",
-            "21:9 (Ultrawide)"
-          ],
-          "default": "9:16 (Portrait Widescreen)",
-          "description": "输出画幅（节点115）",
-          "x-category": "layout",
-          "x-visibility": "basic",
-          "x-agent": "auto",
-          "x-priority": 10
-        },
-        "instance_type": {
-          "type": "string",
-          "title": "实例类型",
-          "enum": [
-            "default",
-            "plus",
-            "ultra"
-          ],
-          "default": "default",
-          "description": "运行实例显存 24G/48G/84G",
-          "x-category": "advanced",
-          "x-visibility": "advanced",
-          "x-agent": "suggest",
-          "x-priority": 30
-        }
-      }
-    },
-    "default_params": {},
-    "input_schema": {
-      "type": "object",
-      "properties": {
-        "prompt": {
-          "type": "string",
-          "description": "分镜/结构化提示词（写入节点150）",
-          "x-handle": "text",
-          "x-role": "prompt"
-        },
-        "first_frame": {
-          "type": "string",
-          "format": "uri",
-          "description": "主体参考图 Picture1（节点141）",
-          "x-handle": "image",
-          "x-slot": "first_frame"
-        },
-        "reference_images": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "format": "uri"
-          },
-          "maxItems": 3,
-          "minItems": 0,
-          "description": "补充参考图：第1、2张→节点142/143；第3张→节点161/165/166（共享）",
-          "x-handle": "image",
-          "x-slot": "reference_images"
-        },
-        "reference_audios": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "format": "uri"
-          },
-          "maxItems": 2,
-          "minItems": 0,
-          "description": "音色参考音频 [0]=drive_audio(144)、[1]=ref_audio_0(160)",
-          "x-handle": "audio",
-          "x-slot": "reference_audios"
-        },
-        "reference_video": {
-          "type": "string",
-          "format": "uri",
-          "description": "参考视频（节点164，可选）",
-          "x-handle": "video",
-          "x-slot": "reference_video"
-        }
-      },
-      "required": [
-        "prompt"
-      ]
-    },
-    "output_schema": {
-      "type": "object",
-      "properties": {
-        "video_url": {
-          "type": "string",
-          "format": "uri",
-          "x-handle": "video"
-        }
-      },
-      "required": [
-        "video_url"
-      ]
-    },
-    "workflow_id": null,
-    "workflow_hash": null,
-    "workflow_exposed": null,
-    "schema_version": null,
-    "capabilities": [],
-    "transport": {
-      "method": "POST",
-      "url": "",
-      "headers": {},
-      "query": {},
-      "timeout": 1200
-    },
-    "headers": {},
-    "custom_headers": {},
-    "auth": {
-      "type": "bearer",
-      "header_name": "Authorization",
-      "query_name": "api_key",
-      "key_env": "CUSTOM_PROVIDER_prov_6daaa960",
-      "prefix": "Bearer ",
-      "has_key": true
-    },
-    "health_check": {
-      "url": null,
-      "method": "GET",
-      "expect_status": 200,
-      "test_payload": null
-    },
-    "doc_url": null,
-    "created_at": "2026-09-29T13:17:17.622890",
-    "updated_at": "2026-09-29T13:17:17.623262",
-    "language": "python",
-    "code_entry": "generate",
-    "code_timeout": 1200,
-    "trusted": false,
-    "has_code": true,
-    "code": "import httpx\nimport base64\n\nAPI_BASE = \"https://www.runninghub.ai/openapi/v2\"\nRUN_URL = API_BASE + \"/run/ai-app/2086022574387339266\"\nQUERY_URL = API_BASE + \"/query\"\nUPLOAD_URL = API_BASE + \"/media/upload/binary\"\nASPECT_OPTIONS = [\n    \"1:1 (Square)\", \"2:3 (Portrait Photo)\", \"3:2 (Photo)\", \"3:4 (Portrait Standard)\",\n    \"4:3 (Standard)\", \"9:16 (Portrait Widescreen)\", \"16:9 (Widescreen)\", \"21:9 (Ultrawide)\",\n]\n_EXT_BY_MIME = {\"jpeg\": \"jpg\", \"mpeg\": \"mp3\", \"x-m4a\": \"m4a\", \"quicktime\": \"mov\", \"x-wav\": \"wav\"}\n_MIME_BY_EXT = {\n    \"png\": \"image/png\", \"jpg\": \"image/jpeg\", \"jpeg\": \"image/jpeg\", \"webp\": \"image/webp\",\n    \"mp3\": \"audio/mpeg\", \"wav\": \"audio/wav\", \"m4a\": \"audio/mp4\",\n    \"mp4\": \"video/mp4\", \"webm\": \"video/webm\", \"mov\": \"video/quicktime\",\n}\n_KNOWN_EXTS = (\"png\", \"jpg\", \"jpeg\", \"webp\", \"mp3\", \"wav\", \"m4a\", \"mp4\", \"webm\", \"mov\")\n\n\ndef _is_remote(v):\n    return v.startswith(\"data:\") or v.startswith(\"http://\") or v.startswith(\"https://\")\n\n\ndef _ext_of(v, default_ext):\n    if v.startswith(\"data:\"):\n        mime = v[5:].split(\";\", 1)[0].split(\"/\")[-1].lower()\n        return _EXT_BY_MIME.get(mime, mime or default_ext)\n    path = v.split(\"?\", 1)[0].lower()\n    for e in _KNOWN_EXTS:\n        if path.endswith(\".\" + e):\n            return e\n    return default_ext\n\n\nasync def _upload(client, api_key, value, idx, kind, default_ext):\n    \"\"\"媒体值 → RunningHub 文件名：data: URI / 公网URL 先上传后回填；已是文件名则原样透传。\"\"\"\n    v = str(value or \"\").strip()\n    if not v or v == \"None\":\n        return None\n    if not _is_remote(v):\n        return v\n    if v.startswith(\"data:\"):\n        try:\n            raw = base64.b64decode(v.split(\",\", 1)[1])\n        except Exception as e:\n            raise RuntimeError(f\"{kind}{idx} base64 解码失败: {e}\")\n    else:\n        gr = await client.get(v, timeout=120)\n        gr.raise_for_status()\n        raw = gr.content\n    if not raw:\n        raise RuntimeError(f\"{kind}{idx}内容为空\")\n    ext = _ext_of(v, default_ext)\n    mime = _MIME_BY_EXT.get(ext, \"application/octet-stream\")\n    # 上传只能带 Bearer 头：附带 Content-Type: application/json 会破坏 multipart 边界\n    up = await client.post(\n        UPLOAD_URL, headers={\"Authorization\": f\"Bearer {api_key}\"},\n        files={\"file\": (f\"{kind}{idx}.{ext}\", raw, mime)}, timeout=300,\n    )\n    up.raise_for_status()\n    uj = up.json()\n    if uj.get(\"code\") != 0:\n        raise RuntimeError(f\"{kind}{idx}上传失败: {uj.get('message') or str(uj)[:300]}\")\n    d = uj.get(\"data\") or {}\n    dl = d.get(\"download_url\") or d.get(\"fileName\")\n    if not dl:\n        raise RuntimeError(f\"{kind}{idx}上传未返回文件名: {str(uj)[:300]}\")\n    return dl\n\n\nasync def generate(ctx, api):\n    dyn = ctx.get(\"dynamic_inputs\") or {}\n    api_key = ctx.get(\"api_key\")\n    if not api_key and isinstance(api, dict) and callable(api.get(\"get_api_key\")):\n        api_key = api[\"get_api_key\"]()\n    api_key = str(api_key or \"\").strip()\n    if not api_key:\n        raise RuntimeError(\"缺少 RunningHub API Key（请在生成源里配置 Key 后重试）\")\n\n    headers = {\"Authorization\": f\"Bearer {api_key}\", \"Content-Type\": \"application/json\"}\n    task_id = str(ctx.get(\"task_id\") or dyn.get(\"task_id\") or \"\").strip()\n    prompt = str(ctx.get(\"prompt\") or \"\").strip()\n\n    async with httpx.AsyncClient(timeout=600) as client:\n        # ── 查询分支：有 task_id 且无 prompt，单次查询秒回，绝不 sleep ──\n        if task_id and not prompt:\n            q = await client.post(QUERY_URL, headers=headers, json={\"taskId\": task_id})\n            q.raise_for_status()\n            qj = q.json() or {}\n            status = str(qj.get(\"status\") or \"\").upper()\n            if status in (\"CREATE\", \"QUEUED\", \"RUNNING\", \"PENDING\"):\n                return {\"video_url\": None, \"task_id\": task_id, \"status\": status}\n            if status == \"SUCCESS\":\n                results = qj.get(\"results\") or []\n                for item in results:  # 多保存节点会混出图片，视频优先挑 mp4/webm/mov\n                    if isinstance(item, dict):\n                        url = str(item.get(\"url\") or \"\")\n                        ot = str(item.get(\"outputType\") or \"\").lower()\n                        if url and (ot in (\"mp4\", \"webm\", \"mov\") or ot == \"\" or \"mp4\" in url.lower()):\n                            return {\"video_url\": url}\n                for item in results:\n                    if isinstance(item, dict) and item.get(\"url\"):\n                        return {\"video_url\": item[\"url\"]}\n                    if isinstance(item, str) and item:\n                        return {\"video_url\": item}\n                raise RuntimeError(f\"任务成功但无结果URL: {str(qj)[:300]}\")\n            if status == \"CANCEL\":  # CANCEL 需映射成框架终态词 CANCELLED\n                status = \"CANCELLED\"\n            raise RuntimeError(f\"任务失败({status or 'UNKNOWN'}): {qj.get('errorMessage') or str(qj)[:300]}\")\n\n        # ── 提交分支：上传媒体 → 组装 nodeInfoList → 立即返回 task_id ──\n        if not prompt:\n            raise ValueError(\"缺少 prompt\")\n\n        first = ctx.get(\"first_frame_url\") or ctx.get(\"first_frame\") or dyn.get(\"first_frame\")\n        refs = ctx.get(\"reference_images\") or dyn.get(\"reference_images\") or []\n        if isinstance(refs, str):\n            refs = [refs]\n        refs = [str(r) for r in refs if r][:3]\n        auds = ctx.get(\"reference_audios\") or dyn.get(\"reference_audios\") or []\n        if isinstance(auds, str):\n            auds = [auds]\n        auds = [str(a) for a in auds if a][:2]\n        ref_video = ctx.get(\"reference_video_url\") or ctx.get(\"reference_video\") or dyn.get(\"reference_video\")\n\n        aspect = str(ctx.get(\"aspect_ratio\") or dyn.get(\"aspect_ratio\") or \"9:16 (Portrait Widescreen)\")\n        if aspect not in ASPECT_OPTIONS:\n            aspect = \"9:16 (Portrait Widescreen)\"\n        instance_type = str(ctx.get(\"instance_type\") or dyn.get(\"instance_type\") or \"default\")\n        if instance_type not in (\"default\", \"plus\", \"ultra\"):\n            instance_type = \"default\"\n\n        img1 = await _upload(client, api_key, first, 1, \"image\", \"png\") if first else None\n        img2 = await _upload(client, api_key, refs[0], 2, \"image\", \"png\") if len(refs) > 0 else None\n        img3 = await _upload(client, api_key, refs[1], 3, \"image\", \"png\") if len(refs) > 1 else None\n        img_shared = await _upload(client, api_key, refs[2], 4, \"image\", \"png\") if len(refs) > 2 else None\n        aud1 = await _upload(client, api_key, auds[0], 1, \"audio\", \"mp3\") if len(auds) > 0 else None\n        aud2 = await _upload(client, api_key, auds[1], 2, \"audio\", \"mp3\") if len(auds) > 1 else None\n        vid = await _upload(client, api_key, ref_video, 1, \"video\", \"mp4\") if ref_video else None\n\n        node_info_list = [\n            {\"nodeId\": \"150\", \"fieldName\": \"value\", \"fieldValue\": prompt, \"description\": \"结构化提示词\"},\n            {\"nodeId\": \"115\", \"fieldName\": \"aspect_ratio\", \"fieldValue\": aspect, \"description\": \"画幅\"},\n            {\"nodeId\": \"144\", \"fieldName\": \"audio\", \"fieldValue\": aud1 or \"None\", \"description\": \"drive_audio 音色参考\"},\n            {\"nodeId\": \"160\", \"fieldName\": \"audio\", \"fieldValue\": aud2 or \"None\", \"description\": \"ref_audio_0 音色参考\"},\n        ]\n        for nid, val, desc in ((\"141\", img1, \"Picture1 主体参考\"), (\"142\", img2, \"参考图1\"), (\"143\", img3, \"参考图2\")):\n            if val:  # 未提供时不下发，保留应用内保存的默认值\n                node_info_list.append({\"nodeId\": nid, \"fieldName\": \"image\", \"fieldValue\": val, \"description\": desc})\n        if img_shared:  # 示例中 161/165/166 为同一张共享参考图\n            for nid in (\"161\", \"165\", \"166\"):\n                node_info_list.append({\"nodeId\": nid, \"fieldName\": \"image\", \"fieldValue\": img_shared, \"description\": \"共享参考图\"})\n        if vid:\n            node_info_list.append({\"nodeId\": \"164\", \"fieldName\": \"video\", \"fieldValue\": vid, \"description\": \"参考视频\"})\n\n        payload = {\"nodeInfoList\": node_info_list, \"instanceType\": instance_type, \"usePersonalQueue\": \"false\"}\n        r = await client.post(RUN_URL, headers=headers, json=payload)\n        r.raise_for_status()\n        rj = r.json() or {}\n        new_id = str(rj.get(\"taskId\") or ((rj.get(\"data\") or {}).get(\"taskId\") if isinstance(rj.get(\"data\"), dict) else \"\") or \"\").strip()\n        if not new_id:\n            raise RuntimeError(f\"提交未返回 taskId: {str(rj)[:300]}\")\n        return {\"video_url\": None, \"task_id\": new_id, \"status\": \"SUBMITTED\"}\n\n# PARAMS_SCHEMA: {\"type\":\"object\",\"properties\":{\"aspect_ratio\":{\"type\":\"string\",\"title\":\"画幅\",\"enum\":[\"1:1 (Square)\",\"2:3 (Portrait Photo)\",\"3:2 (Photo)\",\"3:4 (Portrait Standard)\",\"4:3 (Standard)\",\"9:16 (Portrait Widescreen)\",\"16:9 (Widescreen)\",\"21:9 (Ultrawide)\"],\"default\":\"9:16 (Portrait Widescreen)\",\"description\":\"输出画幅（节点115）\",\"x-category\":\"layout\",\"x-visibility\":\"basic\",\"x-agent\":\"auto\",\"x-priority\":10},\"instance_type\":{\"type\":\"string\",\"title\":\"实例类型\",\"enum\":[\"default\",\"plus\",\"ultra\"],\"default\":\"default\",\"description\":\"运行实例显存 24G/48G/84G\",\"x-category\":\"advanced\",\"x-visibility\":\"advanced\",\"x-agent\":\"suggest\",\"x-priority\":30}}}"
-  },
-  {
-    "id": "prov_6131876a",
-    "name": "AutoDL H3 图音生视频 v2 (15s)",
-    "display_name": "AutoDL H3 图音生视频 v2 (15s)",
-    "kind": "video",
-    "provider_type": "code",
-    "supports_workflow": false,
-    "description": "AutoDL H3 工作流 minimax_h3_image_audio_to_video_v2_15s：图+音生视频，支持最多9张参考图、3条参考音频，时长1-15秒，480p/768p 竖横。",
-    "icon": "Zap",
-    "scope": "global",
-    "project_id": null,
-    "builtin": false,
-    "enabled": true,
-    "models": [],
-    "default_model": null,
-    "params_schema": {
-      "type": "object",
-      "properties": {
-        "resolution": {
-          "type": "string",
-          "title": "分辨率",
-          "enum": [
-            "480p竖",
-            "768p竖",
-            "480p横",
-            "768p横"
-          ],
-          "default": "768p竖",
-          "description": "分辨率（竖=9:16 横=16:9）",
-          "x-category": "layout",
-          "x-visibility": "basic",
-          "x-agent": "auto",
-          "x-priority": 20
-        },
-        "duration": {
-          "type": "integer",
-          "title": "时长",
-          "default": 5,
-          "minimum": 3,
-          "maximum": 15,
-          "description": "时长秒",
-          "x-category": "motion",
-          "x-visibility": "basic",
-          "x-agent": "auto",
-          "x-priority": 30
-        },
-        "seed": {
-          "type": "integer",
-          "title": "随机种子",
-          "description": "随机种子，留空随机",
-          "x-category": "quality",
-          "x-visibility": "advanced",
-          "x-agent": "manual",
-          "x-priority": 99
-        }
-      }
-    },
-    "default_params": {},
-    "input_schema": {
-      "type": "object",
-      "properties": {
-        "prompt": {
-          "type": "string",
-          "description": "运动描述",
-          "x-handle": "text",
-          "x-role": "prompt"
-        },
-        "first_frame": {
-          "type": "string",
-          "format": "uri",
-          "description": "首帧",
-          "x-handle": "image",
-          "x-slot": "first_frame"
-        },
-        "last_frame": {
-          "type": "string",
-          "format": "uri",
-          "description": "尾帧",
-          "x-handle": "image",
-          "x-slot": "last_frame"
-        },
-        "reference_images": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "format": "uri"
-          },
-          "description": "参考集，最多9张",
-          "x-handle": "image",
-          "maxItems": 9,
-          "minItems": 0,
-          "x-slot": "reference_images"
-        },
-        "reference_audios": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "format": "uri"
-          },
-          "description": "参考音频，最多3条",
-          "x-handle": "audio",
-          "maxItems": 3,
-          "minItems": 0,
-          "x-slot": "reference_audios"
-        }
-      },
-      "required": [
-        "prompt"
-      ]
-    },
-    "output_schema": {
-      "type": "object",
-      "properties": {
-        "video_url": {
-          "type": "string",
-          "format": "uri",
-          "x-handle": "video"
-        }
-      },
-      "required": [
-        "video_url"
-      ]
-    },
-    "workflow_id": null,
-    "workflow_hash": null,
-    "workflow_exposed": null,
-    "schema_version": null,
-    "capabilities": [],
-    "transport": {
-      "method": "POST",
-      "url": "",
-      "headers": {},
-      "query": {},
-      "timeout": 60
-    },
-    "headers": {},
-    "custom_headers": {},
-    "auth": {
-      "type": "bearer",
-      "header_name": "Authorization",
-      "query_name": "api_key",
-      "key_env": "CUSTOM_PROVIDER_prov_6131876a",
-      "prefix": "Bearer ",
-      "has_key": true
-    },
-    "health_check": {
-      "url": null,
-      "method": "GET",
-      "expect_status": 200,
-      "test_payload": null
-    },
-    "doc_url": null,
-    "created_at": "2026-09-02T14:25:07.379152",
-    "updated_at": "2026-09-30T09:56:30.214030",
-    "language": "python",
-    "code_entry": "generate",
-    "code_timeout": 600,
-    "trusted": false,
-    "has_code": true,
-    "code": "import asyncio\nimport httpx\n\nasync def generate(ctx, api):\n    AUTODL_BASE = \"https://autodl.art/api/v1\"\n    WORKFLOW_ID = \"minimax_h3_image_audio_to_video_v2_15s\"\n    AUTODL_API_KEY = \"3jfV2WXEzzGkSW1gcuZwAtTAMbDhruqwgphMu9mXQ5EIKapd\"\n\n    headers = {\n        \"Authorization\": f\"Bearer {AUTODL_API_KEY}\",\n        \"Content-Type\": \"application/json\",\n    }\n\n    dyn = ctx.get(\"dynamic_inputs\") or {}\n    prompt = (ctx.get(\"prompt\") or \"\").strip()\n    task_id = (ctx.get(\"task_id\") or dyn.get(\"task_id\") or \"\").strip()\n\n    # 查询模式：有 task_id 且无 prompt → 单次 GET（秒回，绝不阻塞）。\n    # 由框架后台轮询（_poll_code_video_task）或调用方携带 task_id 复用，勿在此 sleep 循环。\n    if task_id and not prompt:\n        async with httpx.AsyncClient(timeout=15) as client:\n            r = await client.get(f\"{AUTODL_BASE}/comfyui/comfyui_workflow/result/{task_id}\", headers=headers)\n            r.raise_for_status()\n            data = (r.json() or {}).get(\"data\", {}) or {}\n            status = str(data.get(\"status\") or \"\").upper()\n            results = data.get(\"results\") or []\n            url = None\n            for item in results:\n                if isinstance(item, dict) and item.get(\"type\") == \"video\" and item.get(\"url\"):\n                    url = item[\"url\"]\n                    break\n            if not url and results:\n                first = results[0]\n                url = first.get(\"url\") if isinstance(first, dict) else (first if isinstance(first, str) else None)\n            if url:\n                return {\"video_url\": url, \"status\": data.get(\"status\"), \"task_id\": task_id}\n            if status in (\"FAILED\", \"ERROR\", \"FAIL\", \"CANCELLED\"):\n                raise RuntimeError(f\"AutoDL 任务失败 task_id={task_id}: {str(data)[:300]}\")\n            return {\"video_url\": None, \"status\": data.get(\"status\") or \"QUEUED\", \"task_id\": task_id}\n\n    if not prompt:\n        raise ValueError(\"缺少 prompt\")\n\n    # 组装 body（严格对齐官方能跑通的示例；时长钳位 1-15 防参数非法）\n    try:\n        duration = int(ctx.get(\"duration\") or 5)\n    except (ValueError, TypeError):\n        duration = 5\n    duration = max(1, min(15, duration))\n\n    # 分辨率归一化：上游（onekey/Agent）可能传 480p/720p/1080p 或带方向后缀，\n    # AutoDL 该工作流只接受 480p竖 / 768p竖 / 480p横 / 768p横\n    _RES_MAP = {\n        \"480p\": \"480p竖\", \"720p\": \"768p竖\", \"768p\": \"768p竖\", \"1080p\": \"768p竖\",\n        \"480p竖\": \"480p竖\", \"480p横\": \"480p横\",\n        \"768p竖\": \"768p竖\", \"768p横\": \"768p横\",\n        \"720p竖\": \"768p竖\", \"720p横\": \"768p横\",\n        \"1080p竖\": \"768p竖\", \"1080p横\": \"768p横\",\n        \"9:16\": \"768p竖\", \"16:9\": \"768p横\",\n    }\n    _res_raw = str(ctx.get(\"resolution\") or dyn.get(\"resolution\") or \"768p竖\").strip()\n    body = {\n        \"prompt\": prompt,\n        \"duration\": duration,\n        \"resolution\": _RES_MAP.get(_res_raw, \"768p竖\"),\n    }\n    seed = ctx.get(\"seed\")\n    if seed is not None:\n        try:\n            s = int(seed)\n            if s > 0:\n                body[\"seed\"] = s\n        except (ValueError, TypeError):\n            pass\n\n    # 首帧/参考图/尾帧 → ref_image_0..8（保序去重；仅公网 http(s)，本地 /storage 路径 AutoDL 不认则跳过）\n    ordered_images = []\n    for key in (\"first_frame\", \"first_frame_url\"):\n        v = ctx.get(key) or dyn.get(key)\n        if isinstance(v, str) and v.startswith((\"http://\", \"https://\", \"data:\")):\n            ordered_images.append(v)\n            break\n    for url in (ctx.get(\"reference_images\") or dyn.get(\"reference_images\") or []):\n        if isinstance(url, str) and url.startswith((\"http://\", \"https://\", \"data:\")):\n            ordered_images.append(url)\n    for key in (\"last_frame\", \"last_frame_url\"):\n        v = ctx.get(key) or dyn.get(key)\n        if isinstance(v, str) and v.startswith((\"http://\", \"https://\", \"data:\")):\n            ordered_images.append(v)\n            break\n    seen = set()\n    uniq_images = []\n    for u in ordered_images:\n        if u not in seen:\n            seen.add(u)\n            uniq_images.append(u)\n    for i, url in enumerate(uniq_images[:9]):\n        body[f\"ref_image_{i}\"] = url\n\n    # 参考音频 → ref_audio_0..2（兼容 reference_audios / ref_audio / 单字符串三种形态）\n    audios = []\n    for key in (\"reference_audios\", \"ref_audio\", \"reference_audio\"):\n        v = ctx.get(key) if ctx.get(key) is not None else dyn.get(key)\n        if isinstance(v, str) and v:\n            audios.append(v)\n        elif isinstance(v, list):\n            audios.extend(v)\n    n = 0\n    seen_a = set()\n    for url in audios:\n        if isinstance(url, str) and url.startswith((\"http://\", \"https://\", \"data:\")) and url not in seen_a:\n            seen_a.add(url)\n            body[f\"ref_audio_{n}\"] = url\n            n += 1\n        if n >= 3:\n            break\n\n    # 提交即返 task_id（绝不在此轮询等终态：外层 Agent 40s 即超时；框架后台轮询接管）\n    async with httpx.AsyncClient(timeout=20) as client:\n        r = await client.post(f\"{AUTODL_BASE}/comfyui/comfyui_workflow/{WORKFLOW_ID}\", json=body, headers=headers)\n        r.raise_for_status()\n        resp = r.json() or {}\n        if resp.get(\"code\") not in (None, \"Success\", \"success\"):\n            raise RuntimeError(f\"AutoDL 提交失败: {str(resp)[:400]}\")\n        new_task_id = (resp.get(\"data\") or {}).get(\"task_id\")\n        if not new_task_id:\n            raise RuntimeError(f\"AutoDL 未返回 task_id: {str(resp)[:400]}\")\n        return {\"video_url\": None, \"task_id\": new_task_id, \"status\": \"SUBMITTED\"}\n"
-  },
-  {
-    "id": "prov_ba1b3011",
-    "name": "AutoDL 任务状态查询(只读)",
-    "display_name": "AutoDL 任务状态查询(只读)",
-    "kind": "video",
-    "provider_type": "code",
-    "supports_workflow": false,
-    "description": "由导演直接提供代码（python）",
-    "icon": "Zap",
-    "scope": "global",
-    "project_id": null,
-    "builtin": false,
-    "enabled": true,
-    "models": [],
-    "default_model": null,
-    "params_schema": {
-      "type": "object",
-      "properties": {
-        "task_id": {
-          "type": "string",
-          "title": "AutoDL任务ID",
-          "description": "AutoDL result 接口的 task_id",
-          "x-category": "quality",
-          "x-visibility": "basic",
-          "x-agent": "auto",
-          "x-priority": 10
-        }
-      },
-      "required": [
-        "task_id"
-      ]
-    },
-    "default_params": {},
-    "input_schema": {
-      "type": "object",
-      "properties": {
-        "prompt": {
-          "type": "string",
-          "description": "运动描述",
-          "x-handle": "text",
-          "x-role": "prompt"
-        },
-        "first_frame": {
-          "type": "string",
-          "format": "uri",
-          "description": "首帧（定格开头画面）",
-          "x-handle": "image",
-          "x-slot": "first_frame"
-        },
-        "reference_images": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "format": "uri"
-          },
-          "description": "参考集，最多9张",
-          "x-handle": "image",
-          "x-slot": "reference_images",
-          "maxItems": 9,
-          "minItems": 0
-        },
-        "reference_audios": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "format": "uri"
-          },
-          "description": "参考音频，最多3条",
-          "x-handle": "audio",
-          "x-slot": "ref_audio",
-          "maxItems": 3,
-          "minItems": 0
-        }
-      },
-      "required": [
-        "prompt"
-      ]
-    },
-    "output_schema": {
-      "type": "object",
-      "properties": {
-        "video_url": {
-          "type": "string",
-          "format": "uri",
-          "x-handle": "video"
-        }
-      },
-      "required": [
-        "video_url"
-      ]
-    },
-    "workflow_id": null,
-    "workflow_hash": null,
-    "workflow_exposed": null,
-    "schema_version": null,
-    "capabilities": [],
-    "transport": {
-      "method": "POST",
-      "url": "",
-      "headers": {},
-      "query": {},
-      "timeout": 1200
-    },
-    "headers": {},
-    "custom_headers": {},
-    "auth": {
-      "type": "none",
-      "header_name": "Authorization",
-      "query_name": "api_key",
-      "key_env": null,
-      "prefix": "Bearer ",
-      "has_key": false
-    },
-    "health_check": {
-      "url": null,
-      "method": "GET",
-      "expect_status": 200,
-      "test_payload": null
-    },
-    "doc_url": null,
-    "created_at": "2026-09-30T10:15:39.031253",
-    "updated_at": "2026-09-30T10:19:47.653916",
-    "language": "python",
-    "code_entry": "generate",
-    "code_timeout": 1200,
-    "trusted": false,
-    "has_code": true,
-    "code": "import httpx\n\nasync def generate(ctx, api):\n    BASE = \"https://autodl.art/api/v1\"\n    API_KEY = \"3jfV2WXEzzGkSW1gcuZwAtTAMbDhruqwgphMu9mXQ5EIKapd\"\n    task_id = str(ctx.get(\"task_id\") or ctx.get(\"prompt\") or \"\").strip()\n    if not task_id:\n        raise RuntimeError(\"缺少 task_id\")\n    headers = {\"Authorization\": API_KEY, \"Content-Type\": \"application/json\"}\n    async with httpx.AsyncClient(timeout=20) as client:\n        r = await client.get(f\"{BASE}/comfyui/comfyui_workflow/result/{task_id}\", headers=headers)\n        r.raise_for_status()\n        data = (r.json() or {}).get(\"data\", {}) or {}\n    status = str(data.get(\"status\") or \"\").upper()\n    url = \"\"\n    for item in (data.get(\"results\") or []):\n        if isinstance(item, dict) and item.get(\"type\") == \"video\" and item.get(\"url\"):\n            url = item[\"url\"]\n            break\n    # 紧凑回传：状态 + 视频直链\n    raise RuntimeError(f\"QUERY::{task_id}::{status}::{url}\")\n"
   }
 ]

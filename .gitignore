@@ -42,6 +42,8 @@ storage/*.png
 storage/__pycache__/
 storage/videos/*
 !storage/videos/.gitkeep
+storage/frames/*
+!storage/frames/.gitkeep
 storage/agent_traces/*
 !storage/agent_traces/.gitkeep
 storage/agent_proposals/*
