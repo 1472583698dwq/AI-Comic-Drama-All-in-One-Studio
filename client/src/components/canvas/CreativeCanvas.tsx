@@ -28,10 +28,9 @@ import { TimelineNode } from './nodes/TimelineNode';
 import { CustomNode } from './nodes/CustomNode';
 import { ExtNode } from './nodes/ExtNode';
 import { syncCanvasNodeSpecs, listCanvasNodeSpecs, getCanvasNodeSpec } from './canvasNodeSpecs';
-import { NodeControlBar } from './NodeControlBar';
 import { CanvasAgentSidebar } from './CanvasAgentSidebar';
+import { NodeAgentConsole } from './NodeAgentConsole';
 import { NodeContextMenu, type NodeMenuState } from './NodeContextMenu';
-import { WorkflowInspectorModal } from '../workflow/WorkflowInspectorModal';
 import { getNodeSpec } from './nodeRegistry';
 import { CanvasManagerModal } from './CanvasManagerModal';
 import { buildShotReferenceInputs } from '../storyboard/shotReference';
@@ -39,6 +38,7 @@ import { collectResources, planBinding } from '../storyboard/referenceBinder';
 import { extractSlotsFromProvider } from './providerSkills';
 import { writeBackToShot } from './shotWriteBack';
 import { useCanvasShortcuts } from './hooks/useCanvasShortcuts';
+import { useEscapeClose } from '../../hooks/useEscapeClose';
 
 const nodeTypes: any = {
   // 6 核心 Agent 节点
@@ -160,6 +160,72 @@ const WorkbenchRow: React.FC<{
   </div>
 );
 
+/**
+ * 底部「节点操作台」—— 只服务当前选中的生成节点（本地版观感：画布底部无常驻浮层）。
+ *
+ * ⚠ 适配说明：本地版这里 import 的是 `./NodeControlBar`，但新基线已删除该文件
+ * （上游用 `FloatingAgentPromptBar` 取代：常驻「全局导演 Agent GO + 快速添加」）。
+ * 本轮要求「只改点名的文件」，故把本地版 NodeControlBar 的实现**内联**在本文件，
+ * 逐行保持本地版的类名/文案/尺寸（682px 实色卡片、左上角节点身份标识、无说明栏、无快速添加条）。
+ * 若后续允许新增文件，应把它还原成 `client/src/components/canvas/NodeControlBar.tsx`。
+ */
+const AGENT_NODE_TYPES = ['image', 'video', 'audio'];
+
+/** 左上角身份标识：当前操作台正在控制哪一类节点 */
+const NODE_BAR_KIND_META: Record<string, { label: string; Icon: any; iconCls: string }> = {
+  image: { label: '分镜生图 Agent', Icon: ImageIcon, iconCls: 'text-violet-400' },
+  video: { label: '动态导演视频 Agent', Icon: Film, iconCls: 'text-orange-400' },
+  audio: { label: '配音 / 声音 Agent', Icon: Mic, iconCls: 'text-pink-400' },
+};
+
+const NodeControlBar: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
+  const selectedNodeId = useCanvasStore((s) => s.selectedNodeId);
+  const nodes = useCanvasStore((s) => s.nodes);
+  const setSelectedNodeId = useCanvasStore((s) => s.setSelectedNodeId);
+
+  const selectedNode = nodes.find((n) => n.id === selectedNodeId);
+  const isAgentNode = !!selectedNode && AGENT_NODE_TYPES.includes(selectedNode.type || '');
+  const close = React.useCallback(() => {
+    if (onClose) onClose();
+    else setSelectedNodeId(null);
+  }, [onClose, setSelectedNodeId]);
+  // Esc 关闭：与全站弹窗同一套栈管理（LIFO，不会一次关穿多层）
+  useEscapeClose(true, close);
+  if (!isAgentNode) return null;
+
+  const kind = selectedNode!.type as 'image' | 'video' | 'audio';
+  const meta = NODE_BAR_KIND_META[kind] || NODE_BAR_KIND_META.image;
+  const KindIcon = meta.Icon;
+
+  return (
+    // 宽度：内层输入框 656px + 左右 p-3(24) + 描边 2 = 682；高度由框内文本区 6 行决定 ≈ 175
+    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-40 w-[92vw] max-w-[682px] flex flex-col items-center gap-2 pointer-events-auto">
+      {/* 不用 overflow-hidden：生成源「上拉选择栏」需要越出卡片上沿浮在画布上 */}
+      <div className="w-full bg-surface border border-border rounded-[14px] shadow-xl">
+        {/* 左上角只标识当前节点；原「节点 Agent 控制台 · 只说人话…」说明栏整条删除 */}
+        <div className="h-9 px-3 flex items-center gap-2 border-b border-border">
+          <span className="w-7 h-7 rounded-md bg-surface-secondary border border-border flex items-center justify-center shrink-0">
+            <KindIcon className={`w-3.5 h-3.5 ${meta.iconCls}`} strokeWidth={1.7} />
+          </span>
+          <span className="text-[13px] font-semibold [color:var(--color-text-main)] truncate">{meta.label}</span>
+          <span className="font-mono text-[10.5px] [color:var(--color-text-muted)] shrink-0">#{selectedNode!.id.slice(-4).trim()}</span>
+          <button
+            onClick={close}
+            aria-label="收起节点操作台"
+            title="收起（也可点画布空白 / Esc）"
+            className="ml-auto w-6 h-6 rounded-md flex items-center justify-center [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-secondary transition-colors"
+          >
+            <X className="w-3.5 h-3.5" strokeWidth={1.7} />
+          </button>
+        </div>
+        <div className="p-3">
+          <NodeAgentConsole nodeId={selectedNode!.id} kind={kind} />
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const InnerCanvas: React.FC = () => {
   const { project, canvasRailOpen, setCanvasRailOpen } = useProjectStore();
   const { activeProjectId } = useProjectListStore();
@@ -202,7 +268,6 @@ const InnerCanvas: React.FC = () => {
     return () => window.removeEventListener('canvasnode-list-refresh', h as any);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pid]);
-  const [inspectWfId, setInspectWfId] = useState('');
   const [saving, setSaving] = useState(false);
   const [executingNodeIds, setExecutingNodeIds] = useState<Set<string>>(new Set());
   const isGenerating = executingNodeIds.size > 0;
@@ -284,11 +349,9 @@ const InnerCanvas: React.FC = () => {
   const canvasRef = useRef<string>('default');
   const [isDragging, setIsDragging] = useState(false);
 
-  useEffect(() => {
-    const h = (e: any) => setInspectWfId(e.detail?.workflowId || '');
-    window.addEventListener('open-workflow-inspector', h as any);
-    return () => window.removeEventListener('open-workflow-inspector', h as any);
-  }, []);
+  // open-workflow-inspector 已由 App 全局接管（任何页面可开槽位配置）：
+  // 本地版画布内还留着一份监听 + 自渲染弹窗，新基线 App 也渲染全局弹窗 →
+  // 同一次事件会弹出两个 WorkflowInspectorModal。此处按新基线收敛，只保留 App 那份。
 
   // 加载画布（项目/画布切换时重载）
   useEffect(() => {
@@ -1708,7 +1771,6 @@ const InnerCanvas: React.FC = () => {
         onDelete={handleDeleteNode}
       />
 
-      {inspectWfId && <WorkflowInspectorModal workflowId={inspectWfId} isOpen={!!inspectWfId} onClose={() => setInspectWfId('')} onSaved={() => {}} />}
     </div>
   );
 };

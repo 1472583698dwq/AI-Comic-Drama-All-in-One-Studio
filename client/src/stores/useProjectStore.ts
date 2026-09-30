@@ -19,6 +19,12 @@ interface ProjectState {
   isLoading: boolean;
   loadingMessage: string;
   apiError: string | null;
+  /**
+   * 画布态：系统左侧栏（图标轨）是否被唤出。
+   * 画布页默认整条隐藏侧栏，唤出按钮在画布左上角「画布操作台」条的第一个按钮上
+   * （加回本地版行为，见 CreativeCanvas / Sidebar）。
+   */
+  canvasRailOpen: boolean;
 
   loadActiveProject: (projectId?: string) => Promise<void>;
   /**
@@ -32,6 +38,8 @@ interface ProjectState {
   setProject: (project: Project) => void;
   setActiveShotId: (shotId: string | null) => void;
   setActiveTab: (tab: ActiveTab) => void;
+  /** 画布态唤出/收起系统左侧栏（图标轨） */
+  setCanvasRailOpen: (open: boolean) => void;
   setWorkspace: (w: 'production'|'creative') => void;
   setPlatformMode: (mode: 'desktop' | 'mobile') => void;
   setIsPlaying: (isPlaying: boolean) => void;
@@ -107,6 +115,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   isLoading: false,
   loadingMessage: '',
   apiError: null,
+  canvasRailOpen: false,
 
   loadActiveProject: async (projectId?: string) => {
     const pid = projectId || get().activeProjectId || localStorage.getItem('activeProjectId');
@@ -213,6 +222,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       set({ activeTab: tab });
     }
   },
+  setCanvasRailOpen: (open) => set({ canvasRailOpen: !!open }),
   setWorkspace: (workspace) => {
     if (!get().project) return;
     localStorage.setItem('app_workspace', workspace);
