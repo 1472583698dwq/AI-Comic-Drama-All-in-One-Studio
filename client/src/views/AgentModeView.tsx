@@ -8,7 +8,7 @@
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Bot, Sparkles, ShieldAlert, Film, Trash2, PanelLeft, ArrowDown, ListTodo, Zap, Send, BookOpen,
+  Bot, ShieldAlert, Film, Trash2, PanelLeft, ArrowDown, ListTodo, Zap, Send, BookOpen,
 } from 'lucide-react';
 import { useProjectStore } from '../stores/useProjectStore';
 import { useAgentStore, QUICK_ASK, QUICK_DO, QUICK_CREATE, QUICK_PLAN } from '../components/agent/agentStore';
@@ -18,23 +18,11 @@ import { AgentTodoPanel } from '../components/agent/AgentToolSteps';
 import { AgentSwarmPanel } from '../components/agent/AgentSwarmPanel';
 import { loadRoleMetas } from '../components/agent/swarmMeta';
 import { SessionSidebar } from '../components/agent/SessionSidebar';
-import type { BehaviorMode, ExecutionMode } from '../components/agent/agentTypes';
 
 /**
- * 右栏是「说明 + 快速指令台」：说明部分把两个维度摊开成对照表并高亮当前项，
- * 比只显示当前那一句更容易横向比较；下半区补「使用指引」填掉原先的大片空白。
+ * 右栏是「说明 + 快速指令台」：使用指引 + 快捷指令 + 当前上下文。
+ * 模式说明已收敛进输入框左下角的预设菜单（AgentComposer 的 AGENT_MODE_PRESETS）。
  */
-const BEHAVIOR_GUIDE: Array<{ value: BehaviorMode; label: string; desc: string }> = [
-  { value: 'standard', label: '标准', desc: '常规工具集，按风险分级放行，日常生成与检索走这条。' },
-  { value: 'create', label: '创造', desc: '缺能力先提案：Start 试跑 → 持久化 / 丢弃，默认不写生产。' },
-  { value: 'plan', label: '计划', desc: '只读侦察，不生成也不执行；先产出完整计划，批准后才动手。' },
-];
-
-const EXECUTION_GUIDE: Array<{ value: ExecutionMode; label: string; desc: string }> = [
-  { value: 'approve', label: '审批', desc: '删源 / 写文件 / 跑命令等变异动作先审后干，120s 无人应答自动拒绝。' },
-  { value: 'auto', label: '自动', desc: '全部工具自动执行、不再逐项确认，可随时暂停。' },
-];
-
 const USAGE_GUIDE: Array<{ step: string; desc: string }> = [
   { step: '开始', desc: '左栏「新建会话」开一段干净上下文；会话按项目隔离持久化，随时可切回。' },
   { step: '提问', desc: '执行模式下直接说要什么（镜头 / 素材 / 配音），由 Agent 决定调哪些工具。' },
@@ -55,8 +43,8 @@ export const AgentModeView: React.FC = () => {
   const {
     sessions, activeSessionId, loadingSessions,
     messages, isRunning, wsStatus, approvals, subagents, autoAllowTools,
-    mode, behavior, execution,
-    bindProject, setMode, setBehavior, setExecution, setAutoAllow,
+    mode, behavior, runMode,
+    bindProject, setMode, setRunMode, setAutoAllow,
     createSession, selectSession, deleteSession,
     send, steer, executePlan, abort, approve, clearAll, proposalAction, applyArtifact,
   } = useAgentStore();
@@ -166,11 +154,11 @@ export const AgentModeView: React.FC = () => {
 
       {/* 中间：对话主区（圆角描边卡片，与会话栏形成明确分隔） */}
       <div className="flex-1 flex flex-col min-w-0 rounded-2xl border border-white/70 dark:border-white/12 overflow-hidden">
-        {execution === 'auto' && (
+        {runMode.endsWith('auto') && (
           <div className="px-4 py-1.5 bg-red-500/10 border-b border-red-500/30 flex items-center gap-2 text-[11px] text-red-300 shrink-0">
             <Zap className="w-3.5 h-3.5 shrink-0" />
             <span className="truncate">
-              <b>自动执行（YOLO）</b>：全部工具自动执行、删源/写文件/跑命令不再逐项确认。可随时用「暂停」中止。
+              <b>完全访问</b>：全部工具自动执行、删源/写文件/跑命令不再逐项确认。可随时用「暂停」中止。
             </span>
           </div>
         )}
@@ -209,19 +197,6 @@ export const AgentModeView: React.FC = () => {
                 <ShieldAlert className="w-3.5 h-3.5" />{pendingList.length} 待确认
               </button>
             )}
-            <div className="flex items-center rounded-xl bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 p-1" title="行为：能干什么 —— 标准 / 创造（缺能力先造） / 计划（只读侦察）">
-              <button onClick={() => setBehavior('standard')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${behavior === 'standard' ? 'bg-brand/20 text-brand-light' : 'text-gray-500 hover:text-white'}`}>标准</button>
-              <button onClick={() => setBehavior('create')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${behavior === 'create' ? 'bg-violet-500/20 text-violet-300' : 'text-gray-500 hover:text-white'}`}>创造</button>
-              <button onClick={() => setBehavior('plan')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${behavior === 'plan' ? 'bg-sky-500/20 text-sky-300' : 'text-gray-500 hover:text-white'}`}>计划</button>
-            </div>
-            <div className="flex items-center rounded-xl bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 p-1" title="执行：要不要逐项人审 —— 审批=先审后干 / 自动=全部自动执行（含删源/写文件/跑命令）">
-              <button onClick={() => setExecution('approve')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${execution === 'approve' ? 'bg-amber-500/20 text-amber-300' : 'text-gray-500 hover:text-white'}`}>审批</button>
-              <button onClick={() => setExecution('auto')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${execution === 'auto' ? 'bg-red-500/20 text-red-300' : 'text-gray-500 hover:text-white'}`}>自动</button>
-            </div>
-            <div className="flex items-center rounded-xl bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 p-1">
-              <button onClick={() => setMode('chat')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${mode === 'chat' ? 'bg-accent-green/20 text-accent-green' : 'text-gray-500 hover:text-white'}`}>问答</button>
-              <button onClick={() => setMode('execute')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${mode === 'execute' ? 'bg-brand/20 text-brand-light' : 'text-gray-500 hover:text-white'}`}>执行</button>
-            </div>
           </div>
         </div>
 
@@ -264,19 +239,14 @@ export const AgentModeView: React.FC = () => {
                 <AgentComposer
                   floating
                   mode={mode}
-                  behavior={behavior}
-                  execution={execution}
+                  runMode={runMode}
                   isRunning={isRunning}
                   wsStatus={wsStatus}
                   onSend={(t, atts) => void send(t, atts)}
                   onAbort={abort}
                   onSteer={(t, atts) => void steer(t, atts)}
-                  onCycleMode={() => setMode(mode === 'execute' ? 'chat' : 'execute')}
-                  onCycleBehavior={() => {
-                    const order: BehaviorMode[] = ['standard', 'create', 'plan'];
-                    setBehavior(order[(order.indexOf(behavior) + 1) % order.length]);
-                  }}
-                  onCycleExecution={() => setExecution(execution === 'auto' ? 'approve' : 'auto')}
+                  onModeChange={setMode}
+                  onRunModeChange={setRunMode}
                 />
               </div>
             </div>
@@ -284,67 +254,8 @@ export const AgentModeView: React.FC = () => {
         </div>
       </div>
 
-      {/* 右：模式与上下文侧栏 */}
+      {/* 右：上下文与快捷操作侧栏（模式说明已收敛进输入框左下角的预设菜单） */}
       <div className="w-72 ml-2 rounded-2xl bg-white/60 dark:bg-white/[.05] p-4 space-y-4 overflow-y-auto custom-scrollbar shrink-0 hidden md:block">
-        <div className="rounded-2xl border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] p-3 space-y-2">
-          <div className="text-xs font-bold text-white flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-brand-light" />模式说明</div>
-          <div className={`text-[11px] leading-4 p-2 rounded-xl ${mode === 'chat' ? 'bg-accent-green/10 text-accent-green' : 'bg-brand/10 text-brand-light'}`}>
-            {mode === 'chat'
-              ? '问答：纯 LLM 讲解，不进工具循环，零副作用不烧生成费用。'
-              : execution === 'auto'
-                ? '执行：ReAct 循环调全部工具；自动执行下不再逐项确认（可随时暂停）。'
-                : '执行：ReAct 循环调全部工具；删源/写文件/跑命令会弹窗确认，120s 超时自动拒绝。'}
-          </div>
-          <div className="rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 p-2 space-y-1">
-            <div className="text-[10px] font-bold text-gray-400 px-0.5">行为 · 能干什么</div>
-            {BEHAVIOR_GUIDE.map((b) => (
-              <div
-                key={b.value}
-                className={`text-[11px] leading-4 rounded-lg px-2 py-1 transition-colors ${
-                  behavior === b.value ? 'bg-brand/15 text-white' : 'text-gray-400'
-                }`}
-              >
-                <span className="font-semibold">{b.label}</span>
-                <span className="opacity-60"> — </span>
-                {b.desc}
-              </div>
-            ))}
-          </div>
-          <div className="rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 p-2 space-y-1">
-            <div className="text-[10px] font-bold text-gray-400 px-0.5">执行 · 要不要逐项人审</div>
-            {EXECUTION_GUIDE.map((e) => (
-              <div
-                key={e.value}
-                className={`text-[11px] leading-4 rounded-lg px-2 py-1 transition-colors ${
-                  execution === e.value ? 'bg-amber-500/15 text-white' : 'text-gray-400'
-                }`}
-              >
-                <span className="font-semibold">{e.label}</span>
-                <span className="opacity-60"> — </span>
-                {e.desc}
-              </div>
-            ))}
-          </div>
-          <div className="flex gap-2">
-            {/* hover 工具类带 `!`：index.css 的 .bg-white/55 dark:bg-white/[.06] / .border-white/70 dark:border-white/12 是
-                `!important` 的，不带 important 的 hover 会被它整段压掉（这就是"鼠标放上去没反应"的根因） */}
-            <button
-              onClick={() => void clearAll()}
-              className="flex-1 py-1.5 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:bg-white/65 dark:bg-white/[.09]! hover:border-white/80 dark:border-white/20! hover:text-white active:scale-95 transition-all flex items-center justify-center gap-1"
-            >
-              <Trash2 className="w-3 h-3" />清空记忆
-            </button>
-            <button
-              onClick={abort}
-              disabled={!isRunning}
-              title={isRunning ? '暂停当前任务（Enter 同效）' : '当前没有正在运行的任务'}
-              className="flex-1 py-1.5 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:bg-white/65 dark:bg-white/[.09]! hover:border-white/80 dark:border-white/20! hover:text-white active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white/55 dark:bg-white/[.06]! disabled:hover:text-gray-300"
-            >
-              暂停
-            </button>
-          </div>
-        </div>
-
         {latestTodo && latestTodo.length > 0 && (
           <div className="rounded-2xl border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] p-3">
             <div className="text-xs font-bold text-white flex items-center gap-1.5 mb-1"><ListTodo className="w-3.5 h-3.5 text-sky-300" />待办清单</div>
@@ -376,6 +287,13 @@ export const AgentModeView: React.FC = () => {
             <div>通道：{wsStatus === 'open' ? 'WS 在线（可确认敏感操作）' : 'HTTP（敏感操作自动拒绝）'}</div>
             <div>会话：{messages.length} 条消息 · {isRunning ? '运行中' : '空闲'}</div>
           </div>
+          <button
+            onClick={() => void clearAll()}
+            title="清空本会话的全部消息记忆（不影响项目文件）"
+            className="w-full py-1.5 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:bg-white/65 dark:bg-white/[.09]! hover:border-white/80 dark:border-white/20! hover:text-white active:scale-95 transition-all flex items-center justify-center gap-1"
+          >
+            <Trash2 className="w-3 h-3" />清空记忆
+          </button>
         </div>
 
         <div className="rounded-2xl border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] p-3 space-y-2">

@@ -2,11 +2,11 @@
  * Agent 输入区 — 页面 / 悬浮抽屉 / 画布侧栏共用。
  *
  * 形态：一整块圆角输入框 —— 上方是「上下文 chip 槽（headerSlot）+ 附件 tray + 多行输入」，
- * 下方是一条工具条（附件 + 模式 / 行为 / 执行切换 + 发送/暂停）。
+ * 下方是一条工具条（附件 + 模式预设菜单 + 发送/暂停）。
  *
- * 四处刻意的分工：
- * - 全屏「AI 导演」页的头部已有循环切换器，走 `onCycle*`（IDE 式：点一下循环）；
- *   抽屉与画布侧栏没有切换入口，走 `onModeChange/onRunModeChange`（下拉药丸，压一次改一项）。
+ * 几处刻意的分工：
+ * - 模式选择收敛为输入框左下角的**单个预设菜单**（ZCode 式）：一个菜单项 = 一组完整行为，
+ *   映射到现有 run_mode token（后端零改动）。三处入口（页面 / 抽屉 / 画布侧栏）共用同一份预设。
  * - 输入框顶部留 `headerSlot` 插槽（画布侧栏用来放「已加入会话」的节点 chip）。
  *   组件本身不读画布状态 —— 那会把通用 Agent 组件绑死在画布上。
  * - 草稿与待发附件存独立 `agentDraftStore`（不是组件内 state）：切换工作区 tab 会卸载组件，
@@ -23,28 +23,19 @@ import { AgentAttachmentPicker, kindOfUrl } from './AgentAttachmentPicker';
 import { apiService } from '../../services/api';
 import { API_ORIGIN } from '../../utils/devOrigin';
 import { toast } from '../../stores/useDialogStore';
-import { behaviorOfRunMode, composeRunMode, executionOfRunMode } from './agentTypes';
-import type { AgentAttachment, AgentMode, BehaviorMode, ExecutionMode, RunMode, WsStatus } from './agentTypes';
+import type { AgentAttachment, AgentMode, RunMode, WsStatus } from './agentTypes';
 
 export interface AgentComposerProps {
   mode: AgentMode;
-  /** 组合 token（画布侧栏/抽屉用两个下拉时传）；不传则用 behavior/execution 两个维度 */
+  /** 组合 token（run_mode）：决定预设菜单当前选中项 */
   runMode?: RunMode;
-  /** 行为维度：标准/创造/计划（页面页头切换器回传） */
-  behavior?: BehaviorMode;
-  /** 执行维度：审批/自动（页面页头切换器回传） */
-  execution?: ExecutionMode;
   isRunning: boolean;
   wsStatus: WsStatus;
   onSend: (text: string, attachments?: AgentAttachment[]) => void;
   onAbort: () => void;
   /** 运行中插话（steer）：不填则运行中回车/按钮=暂停 */
   onSteer?: (text: string, attachments?: AgentAttachment[]) => void;
-  /** 输入框内两个维度各自循环切换（IDE 式；不填则不显示） */
-  onCycleMode?: () => void;
-  onCycleBehavior?: () => void;
-  onCycleExecution?: () => void;
-  /** 紧凑态下拉切换（抽屉/侧栏用；不传则不渲染，如全屏页） */
+  /** 模式预设菜单回调（三处入口都传；问答走 onModeChange，其余走 onRunModeChange） */
   onModeChange?: (m: AgentMode) => void;
   onRunModeChange?: (r: RunMode) => void;
   compact?: boolean;
@@ -63,31 +54,24 @@ export interface AgentComposerProps {
   headerSlot?: React.ReactNode;
 }
 
-const BEHAVIOR_META: Record<BehaviorMode, { label: string; cls: string }> = {
-  standard: { label: '标准', cls: 'bg-gray-500/15 text-gray-300 border-gray-500/30' },
-  create: { label: '创造', cls: 'bg-violet-500/15 text-violet-300 border-violet-500/30' },
-  plan: { label: '计划', cls: 'bg-sky-500/15 text-sky-300 border-sky-500/30' },
-};
-
-const EXECUTION_META: Record<ExecutionMode, { label: string; cls: string }> = {
-  approve: { label: '审批', cls: 'bg-amber-500/15 text-amber-300 border-amber-500/30' },
-  auto: { label: '自动', cls: 'bg-brand/15 text-brand-light border-brand/40' },
-};
-
-const MODE_OPTIONS: Array<{ value: AgentMode; label: string; hint: string }> = [
-  { value: 'chat', label: '问答', hint: '只讲解不动手，零副作用' },
-  { value: 'execute', label: '执行', hint: 'ReAct 循环调工具生成' },
-];
-
-const BEHAVIOR_OPTIONS: Array<{ value: BehaviorMode; label: string; hint: string }> = [
-  { value: 'standard', label: '标准', hint: '常规工具集，按风险分级放行' },
-  { value: 'create', label: '创造', hint: '缺能力先提案再造，能力变更类需人审' },
-  { value: 'plan', label: '计划', hint: '只读侦察，产出计划待批准' },
-];
-
-const EXECUTION_OPTIONS: Array<{ value: ExecutionMode; label: string; hint: string }> = [
-  { value: 'approve', label: '审批', hint: '变异动作先审后干（默认）' },
-  { value: 'auto', label: '自动', hint: '全部工具自动执行、不再逐项确认（含删源/写文件/跑命令），可随时暂停' },
+/**
+ * 模式预设（ZCode 式）：一个菜单项 = 一组完整行为。
+ * runMode=null 表示「纯问答」—— 只切 mode，不动 run_mode（切回执行时原样恢复）。
+ * 映射口径：变更前确认=approve（原「标准+审批」）、完全访问=auto（原「标准+自动」）、
+ * 计划=plan、造能力=create（原「创造」）。
+ */
+export const AGENT_MODE_PRESETS: Array<{
+  key: string;
+  label: string;
+  hint: string;
+  accent: string;
+  runMode: RunMode | null;
+}> = [
+  { key: 'approve', label: '变更前确认', hint: '正常干活；删源/写文件/跑命令等危险操作逐个问你', accent: 'text-amber-300', runMode: 'approve' },
+  { key: 'plan', label: '计划', hint: '只读侦察先出完整方案，批准后才执行；不生成不花钱', accent: 'text-sky-300', runMode: 'plan' },
+  { key: 'auto', label: '完全访问', hint: '全部工具自动执行、不再逐项确认（含删源/写文件/跑命令），可随时暂停', accent: 'text-red-300', runMode: 'auto' },
+  { key: 'create', label: '造能力', hint: '缺能力先提案：试跑验证后由你决定转正/丢弃，默认不写生产', accent: 'text-violet-300', runMode: 'create' },
+  { key: 'chat', label: '纯问答', hint: '只讲解不动手，不调工具、零副作用', accent: 'text-accent-green', runMode: null },
 ];
 
 /** 工具条上的下拉药丸（菜单向上弹，因为输入框常在屏幕底部） */
@@ -131,17 +115,24 @@ const ToolPill: React.FC<{
         <ChevronUp className={`w-2.5 h-2.5 [color:var(--color-text-muted)] transition-transform ${open ? '' : 'rotate-180'}`} />
       </button>
       {open && (
-        <div className="absolute bottom-full mb-1.5 left-0 z-50 min-w-[132px] bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-xl shadow-2xl shadow-black/40 p-1 animate-fade-in">
+        <div className="absolute bottom-full mb-1.5 left-0 z-50 min-w-[236px] max-w-[300px] bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-xl shadow-2xl shadow-black/40 p-1 animate-fade-in">
           {options.map((o) => (
             <button
               key={o.value}
               type="button"
               onClick={() => { onChange(o.value); setOpen(false); }}
               title={o.hint}
-              className="w-full px-2 py-1.5 rounded-lg text-left text-[11px] [color:var(--color-text-main)] hover:bg-brand/10 flex items-center gap-1.5"
+              className={`w-full px-2 py-1.5 rounded-lg text-left hover:bg-brand/10 flex items-start gap-1.5 ${
+                o.value === value ? 'bg-brand/10' : ''
+              }`}
             >
-              <span className="flex-1 truncate">{o.label}</span>
-              {o.value === value && <Check className="w-3 h-3 text-brand shrink-0" />}
+              <span className="flex-1 min-w-0">
+                <span className="block text-[11px] font-semibold [color:var(--color-text-main)]">{o.label}</span>
+                {o.hint && (
+                  <span className="block text-[9px] leading-3 [color:var(--color-text-muted)] mt-0.5">{o.hint}</span>
+                )}
+              </span>
+              {o.value === value && <Check className="w-3 h-3 text-brand shrink-0 mt-0.5" />}
             </button>
           ))}
         </div>
@@ -160,16 +151,11 @@ const resolveMediaUrl = (u?: string) => (!u ? '' : (u.startsWith('/') ? API_ORIG
 export const AgentComposer: React.FC<AgentComposerProps> = ({
   mode,
   runMode,
-  behavior: behaviorProp,
-  execution: executionProp,
   isRunning,
   wsStatus,
   onSend,
   onAbort,
   onSteer,
-  onCycleMode,
-  onCycleBehavior,
-  onCycleExecution,
   onModeChange,
   onRunModeChange,
   compact,
@@ -253,65 +239,43 @@ export const AgentComposer: React.FC<AgentComposerProps> = ({
     if (errors.length) toast.error(errors[0]);
   };
 
-  // 两维派生：组合 token 优先（侧栏/抽屉），否则用页面页头回传的两个维度
-  const behavior = runMode != null ? behaviorOfRunMode(runMode) : (behaviorProp || 'standard');
-  const execution = runMode != null ? executionOfRunMode(runMode) : (executionProp || 'approve');
+  // 预设派生：mode='chat' 即「纯问答」；执行态按 runMode token 归到对应预设
+  const activePresetKey = (() => {
+    if (mode === 'chat') return 'chat';
+    if (runMode === 'plan' || runMode === 'plan_auto') return 'plan';
+    if (runMode === 'create' || runMode === 'create_auto') return 'create';
+    if (runMode === 'auto') return 'auto';
+    return 'approve';
+  })();
+  const activePreset = AGENT_MODE_PRESETS.find((p) => p.key === activePresetKey) || AGENT_MODE_PRESETS[0];
+
+  const handlePresetChange = (key: string) => {
+    const p = AGENT_MODE_PRESETS.find((x) => x.key === key);
+    if (!p) return;
+    if (p.runMode == null) {
+      onModeChange?.('chat');
+    } else {
+      onModeChange?.('execute');
+      onRunModeChange?.(p.runMode);
+    }
+  };
 
   const placeholder = isRunning && onSteer
     ? '运行中：输入补充指令后回车插话（进入下一轮，不打断已产出）'
-    : behavior === 'plan'
-      ? (compact ? '计划模式 · 只读侦察出计划' : '计划模式：只读侦察并产出完整计划，如“分析当前项目给出制作计划”')
-      : mode === 'chat'
-        ? (compact ? '问答模式 · 只讲解不生成' : '问答模式：只讲解不生成，如“首尾帧和参考图有什么区别？”')
-        : execution === 'auto'
-          ? (compact ? '吩咐 AI 导演做点什么…（自动执行）' : '执行模式（自动）：全部工具自动执行不弹确认，如“把画布现有节点全量执行一遍”')
-          : (compact ? '吩咐 AI 导演做点什么…' : '执行模式（审批）：变异动作先确认，如“为当前镜头规划特写推镜并配音”');
+    : activePresetKey === 'chat'
+      ? (compact ? '纯问答 · 只讲解不生成' : '问答模式：只讲解不生成，如“首尾帧和参考图有什么区别？”')
+      : activePresetKey === 'plan'
+        ? (compact ? '计划模式 · 只读侦察出计划' : '计划模式：只读侦察并产出完整计划，如“分析当前项目给出制作计划”')
+        : activePresetKey === 'auto'
+          ? (compact ? '吩咐 AI 导演做点什么…（完全访问）' : '完全访问：全部工具自动执行不弹确认，如“把画布现有节点全量执行一遍”')
+          : activePresetKey === 'create'
+            ? (compact ? '吩咐 AI 导演做点什么…（造能力）' : '造能力：缺什么能力直接说，如“做一个竖屏封面生成节点”')
+            : (compact ? '吩咐 AI 导演做点什么…' : '变更前确认：危险操作会先问你，如“为当前镜头规划特写推镜并配音”');
 
-  const bm = BEHAVIOR_META[behavior] || BEHAVIOR_META.standard;
-  const em = EXECUTION_META[execution] || EXECUTION_META.approve;
-  const showCycles = !!(onCycleMode || onCycleBehavior || onCycleExecution);
-  const showPills = !!compact && (!!onModeChange || !!onRunModeChange);
+  const hasMenu = !!(onModeChange && onRunModeChange && runMode != null);
 
   return (
     <div className={compact || floating ? '' : 'p-4 border-t border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] shrink-0'}>
-      {/* IDE 式循环切换（页面页头用；compact 下拉模式下不重复渲染） */}
-      {showCycles && !showPills && (
-        <div className={`flex items-center gap-1.5 mb-1.5 ${compact ? '' : 'max-w-4xl mx-auto'}`}>
-          {onCycleMode && (
-            <button
-              onClick={onCycleMode}
-              title="点击循环切换 问答 ⇄ 执行"
-              className={`px-2 py-0.5 rounded-full border text-[10px] font-bold transition-all ${
-                mode === 'execute'
-                  ? 'bg-brand/15 text-brand-light border-brand/40'
-                  : 'bg-accent-green/15 text-accent-green border-accent-green/30'
-              }`}
-            >
-              {mode === 'execute' ? '⚡ 执行' : '💬 问答'}
-            </button>
-          )}
-          {onCycleBehavior && (
-            <button
-              onClick={onCycleBehavior}
-              title="行为模式：标准（常规能力）→ 创造（缺能力先造）→ 计划（只读规划不执行）"
-              className={`px-2 py-0.5 rounded-full border text-[10px] font-bold transition-all ${bm.cls}`}
-            >
-              行为·{bm.label} ▾
-            </button>
-          )}
-          {onCycleExecution && (
-            <button
-              onClick={onCycleExecution}
-              title="执行方式：审批（变异动作先确认）⇄ 自动（全部自动执行不弹确认）"
-              className={`px-2 py-0.5 rounded-full border text-[10px] font-bold transition-all ${em.cls}`}
-            >
-              执行·{em.label} ▾
-            </button>
-          )}
-          {isRunning && <span className="text-[10px] text-amber-300 animate-pulse">● 运行中</span>}
-        </div>
-      )}
-
       <div
         className={`transition-colors focus-within:border-brand/60 ${
           floating
@@ -370,7 +334,7 @@ export const AgentComposer: React.FC<AgentComposerProps> = ({
             }
           }}
           placeholder={placeholder}
-          rows={compact ? (showPills ? 3 : 1) : 2}
+          rows={compact ? (hasMenu ? 3 : 1) : 2}
           className={`w-full bg-transparent px-3.5 pt-3 pb-1 text-xs text-white placeholder-gray-500 focus:outline-none resize-none custom-scrollbar ${
             compact ? 'max-h-40 min-h-[32px]' : 'max-h-40'
           }`}
@@ -406,48 +370,20 @@ export const AgentComposer: React.FC<AgentComposerProps> = ({
             )}
           </div>
 
-          {showPills && (
-            <>
-              {onModeChange && (
-                <ToolPill
-                  label="模式"
-                  title="问答=只讲解不生成 / 执行=直接调工具"
-                  options={MODE_OPTIONS}
-                  value={mode}
-                  onChange={onModeChange}
-                  accent={mode === 'chat' ? 'text-accent-green' : 'text-brand-light'}
-                  disabled={isRunning}
-                />
-              )}
-              {onRunModeChange && runMode != null && (
-                <>
-                  <ToolPill
-                    label="行为"
-                    title="能干什么：标准 / 创造（缺能力先造） / 计划（只读侦察）"
-                    options={BEHAVIOR_OPTIONS}
-                    value={behavior}
-                    onChange={(b: BehaviorMode) => onRunModeChange(composeRunMode(b, execution))}
-                    accent={
-                      behavior === 'plan' ? 'text-sky-300'
-                        : behavior === 'create' ? 'text-violet-300' : 'text-brand-light'
-                    }
-                    disabled={isRunning}
-                  />
-                  <ToolPill
-                    label="执行"
-                    title="要不要逐项人审：审批=先审后干 / 自动=全部自动执行（含删源/写文件/跑命令）"
-                    options={EXECUTION_OPTIONS}
-                    value={execution}
-                    onChange={(e: ExecutionMode) => onRunModeChange(composeRunMode(behavior, e))}
-                    accent={execution === 'auto' ? 'text-red-300' : 'text-amber-300'}
-                    disabled={isRunning}
-                  />
-                </>
-              )}
-            </>
+          {/* 模式预设菜单（ZCode 式）：一个胶囊 = 一组完整行为，向上弹菜单 */}
+          {hasMenu && (
+            <ToolPill
+              label="模式"
+              title="工作模式：变更前确认 / 计划 / 完全访问 / 造能力 / 纯问答"
+              options={AGENT_MODE_PRESETS.map((p) => ({ value: p.key, label: p.label, hint: p.hint }))}
+              value={activePresetKey}
+              onChange={handlePresetChange}
+              accent={activePreset.accent}
+              disabled={isRunning}
+            />
           )}
 
-          <span className={`flex-1 min-w-0 text-[9px] [color:var(--color-text-muted)] truncate ${showPills ? '' : 'pl-1'}`}>
+          <span className={`flex-1 min-w-0 text-[9px] [color:var(--color-text-muted)] truncate ${hasMenu ? '' : 'pl-1'}`}>
             {isRunning
               ? (onSteer ? '运行中 · Enter 插话（不打断已产出）' : '运行中 · Enter 暂停')
               : 'Enter 发送 · Shift+Enter 换行'}
