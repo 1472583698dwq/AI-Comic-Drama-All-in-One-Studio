@@ -30,7 +30,9 @@ from app.media.timeline_merge import (
 )
 
 # 路由级守卫：创意画布（canvas）关闭时整族 404（运行期开关，路由始终挂载）
-router = APIRouter(dependencies=[Depends(pages.require("canvas"))])
+# 守卫：这套合片接口被两处共用 —— 画布上的「时间线」节点（属创意画布页）与「多轨剪辑」页。
+# 两者功能相似但互不依赖，故取「任一开启即放行」（require_any），不被单侧开关挟持。
+router = APIRouter(dependencies=[Depends(pages.require_any(["canvas", "timeline"]))])
 
 # 内存任务表：合片产物是转瞬即逝的中间文件，跨重启无续跑价值，故不落盘。
 _TASKS: Dict[str, Dict[str, Any]] = {}

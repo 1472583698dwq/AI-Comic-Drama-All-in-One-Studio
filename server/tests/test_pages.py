@@ -232,16 +232,21 @@ class TestRouteGuardOwnership(_TempStorage):
 
 class TestToggleNoResidue(_TempStorage):
     def test_toggle_roundtrip_three_times(self):
+        """studio 出厂默认关闭：开→关往返 3 次后必须回到初始（关闭）且停用集无悬空引用。"""
         pages.seed_defaults()
         baseline = pages.enabled_ids()
+        self.assertNotIn("studio", baseline)
         for _ in range(3):
-            extension_registry.set_enabled("page:studio", False)
-            self.assertFalse(pages.is_enabled("studio"))
             extension_registry.set_enabled("page:studio", True)
             self.assertTrue(pages.is_enabled("studio"))
+            extension_registry.set_enabled("page:studio", False)
+            self.assertFalse(pages.is_enabled("studio"))
         self.assertEqual(pages.enabled_ids(), baseline)
-        # 停用集里不留悬空引用
-        self.assertNotIn(pages.page_ext_id("studio"), state.disabled_ids(""))
+        # 停用集与有效集严格互补：不留悬空引用，也不多出未定义的项
+        self.assertEqual(
+            sorted(i for i in state.disabled_ids("") if i.startswith("page:")),
+            sorted(f"page:{d['id']}" for d in pages.PAGE_DEFS if not pages.is_enabled(d["id"])),
+        )
 
     def test_canvas_toggle_roundtrip(self):
         pages.seed_defaults()
@@ -250,6 +255,36 @@ class TestToggleNoResidue(_TempStorage):
             extension_registry.set_enabled("page:canvas", False)
             extension_registry.set_enabled("page:canvas", True)
         self.assertEqual(pages.enabled_ids(), baseline)
+
+
+class TestRequireAny(_TempStorage):
+    """多页共用能力族（/api/v1/timeline 被画布时间线节点与多轨剪辑页共用）：任一开启即放行。"""
+
+    def _guard(self):
+        from app.api import timeline_routes
+        deps = [d.dependency for d in timeline_routes.router.dependencies]
+        self.assertTrue(deps, "timeline_routes 未挂页面守卫")
+        return deps[0]
+
+    def test_timeline_route_uses_require_any(self):
+        from fastapi import HTTPException
+        pages.seed_defaults()
+        guard = self._guard()
+        # 出厂态：canvas 开、timeline 关 → 放行
+        self.assertTrue(pages.is_enabled("canvas"))
+        self.assertFalse(pages.is_enabled("timeline"))
+        guard()
+        # 只关 canvas：timeline 仍关 → 404
+        extension_registry.set_enabled("page:canvas", False)
+        with self.assertRaises(HTTPException) as ctx:
+            guard()
+        self.assertEqual(ctx.exception.status_code, 404)
+        # 打开 timeline → 放行（不被 canvas 开关挟持）
+        extension_registry.set_enabled("page:timeline", True)
+        guard()
+        # 两侧都开也放行
+        extension_registry.set_enabled("page:canvas", True)
+        guard()
 
 
 class TestExtensionRegistryIntegration(_TempStorage):

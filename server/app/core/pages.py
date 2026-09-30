@@ -15,7 +15,7 @@
 
 ``is_enabled`` 对未知 id 一律返回 False（不兜底放行）。
 """
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Sequence
 
 from fastapi import HTTPException
 
@@ -172,5 +172,25 @@ def require(pid: str) -> Callable[[], None]:
                 status_code=404,
                 detail=f"{_label(pid)} 已关闭（设置 → 功能开关）",
             )
+
+    return _guard
+
+
+def require_any(pids: Sequence[str]) -> Callable[[], None]:
+    """任一页开启即放行；全部关闭 → 404。
+
+    用于**被多个页面共用的能力族**：典型是 `/api/v1/timeline` —— 画布上的时间线节点
+    （属「创意画布」页）与「多轨剪辑」页功能相似但互不依赖，任一侧在用都不该被另一侧关掉。
+    """
+    ids = [str(p) for p in pids]
+
+    def _guard() -> None:
+        if any(is_enabled(pid) for pid in ids):
+            return
+        names = " / ".join(_label(pid) for pid in ids)
+        raise HTTPException(
+            status_code=404,
+            detail=f"{names} 均已关闭（设置 → 功能开关）",
+        )
 
     return _guard
