@@ -4,7 +4,7 @@ import { apiService } from '../services/api';
 import { resolveTab } from './usePageStore';
 
 /** 页签 id 与后端功能页 id（page）一一对应；'home' 为跨项目首页 */
-export type ActiveTab = 'home' | 'projects' | 'studio' | 'director3d' | 'timeline' | 'characters' | 'assets' | 'mcp' | 'config' | 'canvas' | 'agent';
+export type ActiveTab = 'home' | 'projects' | 'studio' | 'director3d' | 'timeline' | 'characters' | 'assets' | 'mcp' | 'config' | 'canvas' | 'agent' | 'onekey';
 
 interface ProjectState {
   project: Project | null;

@@ -4,12 +4,13 @@
 绝不降级为假数据或硬编码角色。
 """
 import json
+import os
 import uuid
 import re
 from typing import Dict, Any, List
 
 from app.models.schemas import Project, Scene, StoryboardShot, Character
-from app.pipelines.llm_service import llm_service
+from app.pipelines.llm_service import llm_service, LLMServiceError
 
 STYLE_PROMPTS = {
     "donghua_xianxia": "Chinese Donghua animation style, Xianxia fantasy, 8k resolution, cinematic lighting, ethereal atmosphere, volumetric clouds, highly detailed anime illustration, masterpiece",
@@ -59,8 +60,11 @@ class ScriptParserAgent:
    - 角色动作描述 (action_desc)
    - 对白 (dialogue) 或 旁白 (voiceover)
    - 情绪标记 (emotion: neutral, intense, sorrow, excited, fearful, whispering)
-   - 画面生图英文 Prompt (image_prompt: 包含画风、场景、光影、人物特征，英文)
+   - 画面生图英文 Prompt (image_prompt: 包含画风、场景、光影、人物特征，英文；**必须体现该镜所在场景的空间/光线/道具，并与场景参考保持一致**)
    - 镜头推荐时长秒数 (duration: 2.5 ~ 6.0)
+2.1 每个场景（scenes[]）必须额外给出**场景资产定义**（用于生成无人的场景参考图，保证全片空间一致）：
+   - image_prompt: 该场景的空镜英文 Prompt（只画环境：地点/时间/天气/光线/氛围/标志性陈设与道具，**不要出现人物**）
+   - props: 该场景的关键道具清单（2~5 个短词，如 ["旧木凳","搪瓷杯"]），镜头与场景参考图都需包含这些道具
 3. 画风设定：{style_preset} ({STYLE_PROMPTS.get(style_preset, '')})
 4. 画幅比例：{aspect_ratio}
 
@@ -90,6 +94,8 @@ class ScriptParserAgent:
       "location": "泰山之巅 / 虚空大殿",
       "time_of_day": "dusk",
       "atmosphere": "epic",
+      "image_prompt": "masterpiece, empty ancient hall interior at dusk, cold moonlight through lattice windows, floating dust, wooden altar with bronze incense burner, no people, cinematic lighting...",
+      "props": ["青铜香炉", "旧木案"],
       "shots": [
         {{
           "shot_index": 1,
@@ -109,7 +115,29 @@ class ScriptParserAgent:
   ]
 }}
 """
-        data = await llm_service.chat_json(system_prompt=system_prompt, user_prompt=user_prompt, temperature=0.3)
+        # 拆解 JSON 很大（角色+场景+每镜多字段 prompt），max_tokens 要给足；
+        # 若源端拒绝大值（HTTP 400 提到 tokens），自动降档重试。总时限防网关挂起。
+        preferred = int(os.environ.get("ONEKEY_SPLIT_MAX_TOKENS") or 32768)
+        timeout_s = float(os.environ.get("ONEKEY_SPLIT_TIMEOUT_S") or 300)
+        data: Dict[str, Any] = {}
+        last_err: Exception | None = None
+        for mt in (preferred, 16384, 8192):
+            try:
+                data = await llm_service.chat_json(
+                    system_prompt=system_prompt, user_prompt=user_prompt,
+                    temperature=0.3, max_tokens=mt, timeout=timeout_s,
+                )
+                break
+            except LLMServiceError as e:
+                last_err = e
+                msg = str(e)
+                if ("max_tokens" in msg or "max_completion_tokens" in msg
+                        or "HTTP 400" in msg):
+                    continue
+                raise
+        else:
+            if last_err is not None:
+                raise last_err
 
         if not data.get("scenes"):
             raise ValueError(f"LLM 拆解结果中无分镜数据: {str(data)[:200]}")
@@ -163,6 +191,8 @@ class ScriptParserAgent:
                 location=s.get("location", ""),
                 time_of_day=s.get("time_of_day", "day"),
                 atmosphere=s.get("atmosphere", "epic"),
+                image_prompt=s.get("image_prompt", ""),
+                props=[str(x)[:40] for x in (s.get("props") or []) if str(x).strip()][:6],
                 shots=shots
             ))
 

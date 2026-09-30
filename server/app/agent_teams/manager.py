@@ -140,6 +140,31 @@ class AgentTeamManager:
 agent_team_manager = AgentTeamManager()
 
 
+# ── 内置默认导演组（简化流程：资产复用 + 多参考 + 风格锁定，不写死步骤）──
+# 设计原则（对齐用户口径）：
+# - 不再写固定编排脚本（playbook 为空）——流程由总导演 Agent 自主决定；
+# - 成员只保留必要专家；角色资产已存在则直接复用，缺失才补；
+# - 全片风格一致性交给 onekey_style_lock（大模型生成统一风格规范，自动附加到生图/生视频）。
+BUILTIN_TEAMS: Dict[str, AgentTeamSpec] = {
+    "studio-default": AgentTeamSpec(
+        id="studio-default",
+        name="默认简化剧组",
+        description="资产复用优先：已有角色三视图/形象直接用作多参考，缺失才补；全片风格锁定；产物自动验收（角色/场景/视频抽检，不合格重做）；流程由总导演自主编排。",
+        icon="Zap",
+        color="amber",
+        members=["screenwriter", "scene_designer", "character_designer", "video_operator", "voice_operator", "editor", "qa_reviewer"],
+        playbook="",
+        qa_gate=True,
+        enabled=True,
+    ),
+}
+
+
+def builtin_teams() -> List[AgentTeamSpec]:
+    """内置导演组（不可删除；与 storage/agent_teams 同名文件则以文件为准）。"""
+    return list(BUILTIN_TEAMS.values())
+
+
 def _disabled_ids(project_id: str = "") -> set:
     try:
         from app.extensions import state
@@ -166,10 +191,21 @@ def list_effective_profiles(project_id: str = "", include_disabled: bool = False
 
 def list_effective_teams(project_id: str = "", include_disabled: bool = False) -> List[AgentTeamSpec]:
     specs = agent_team_manager.list_teams()
+    file_ids = {s.id for s in specs}
+    # 内置导演组在前（文件同名即覆盖内置），停用状态对两者都生效
+    merged = [s for s in builtin_teams() if s.id not in file_ids] + specs
     if include_disabled:
-        return specs
+        return merged
     ids = _disabled_ids(project_id)
-    return [s for s in specs if not _is_disabled("agent_team", s.id, ids)]
+    return [s for s in merged if not _is_disabled("agent_team", s.id, ids)]
+
+
+def get_effective_team(tid: str) -> Optional[AgentTeamSpec]:
+    """取导演组：文件优先，其次内置（供 onekey 默认组解析）。"""
+    t = agent_team_manager.get_team(tid)
+    if t is not None:
+        return t
+    return BUILTIN_TEAMS.get(str(tid or ""))
 
 
 def known_role_ids() -> List[str]:

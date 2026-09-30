@@ -700,46 +700,12 @@ export const apiService = {
     return await res.json();
   },
 
-  // 9. 全链路编排
-  async pipelineFullRun(params: {
-    text: string; style_preset?: string; aspect_ratio?: string; custom_instructions?: string; max_images?: number;
-    image_provider?: string; image_workflow_id?: string; audio_provider?: string;
-    video_provider?: string; video_workflow_id?: string; enable_video?: boolean; max_videos?: number;
-    gen_roles?: boolean; max_roles?: number;
-  }): Promise<any> {
-    const res = await fetch(`${API_BASE_URL}/pipeline/full-run`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text: params.text,
-        style_preset: params.style_preset || 'donghua_xianxia',
-        aspect_ratio: params.aspect_ratio || '9:16',
-        custom_instructions: params.custom_instructions || '',
-        max_images: params.max_images ?? 12,
-        image_provider: params.image_provider,
-        image_workflow_id: params.image_workflow_id,
-        audio_provider: params.audio_provider,
-        video_provider: params.video_provider,
-        video_workflow_id: params.video_workflow_id,
-        enable_video: params.enable_video ?? true,
-        max_videos: params.max_videos ?? 6,
-        gen_roles: params.gen_roles ?? true,
-        max_roles: params.max_roles ?? 4,
-      }),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      throw new Error(extractErrorMessage(res, body));
-    }
-    return await res.json();
-  },
-
   // 9.1 一键成片 Agent（异步任务 + 轮询；总导演 + 子代理集群，可传 team_id 选择导演组）
   async onekeyRun(params: {
     title?: string; text: string; style_preset?: string; aspect_ratio?: string; custom_instructions?: string;
     max_images?: number; image_provider?: string; image_workflow_id?: string; audio_provider?: string;
     video_provider?: string; video_workflow_id?: string; enable_video?: boolean; max_videos?: number;
-    gen_roles?: boolean; max_roles?: number; team_id?: string;
+    gen_roles?: boolean; max_roles?: number; team_id?: string; keyframe_mode?: boolean; prompt_skill?: string;
   }): Promise<{ task_id: string; status: string; team_id?: string; team_name?: string }> {
     const res = await fetch(`${API_BASE_URL}/onekey/run`, {
       method: 'POST',
@@ -761,6 +727,8 @@ export const apiService = {
         gen_roles: params.gen_roles ?? true,
         max_roles: params.max_roles ?? 4,
         team_id: params.team_id || '',
+        keyframe_mode: params.keyframe_mode ?? false,
+        prompt_skill: params.prompt_skill || '',
       }),
     });
     if (!res.ok) {
@@ -771,6 +739,15 @@ export const apiService = {
   },
   async onekeyStatus(taskId: string): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/onekey/tasks/${encodeURIComponent(taskId)}`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(extractErrorMessage(res, body));
+    }
+    return await res.json();
+  },
+  /** 一键成片任务列表（历史任务：恢复查看/重开） */
+  async onekeyList(limit = 20): Promise<{ tasks: any[] }> {
+    const res = await fetch(`${API_BASE_URL}/onekey/tasks?limit=${encodeURIComponent(String(limit))}`);
     if (!res.ok) {
       const body = await res.json().catch(() => null);
       throw new Error(extractErrorMessage(res, body));

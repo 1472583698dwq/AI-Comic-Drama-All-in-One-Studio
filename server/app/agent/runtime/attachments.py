@@ -315,15 +315,129 @@ def attachments_from_tool_result(name: str, result: Any, limit: int = 2) -> List
     img = result.get("image_url") or result.get("result_url")
     if isinstance(img, str) and img.strip():
         out.append(_entry(img.strip(), "image", f"{name} · 画面", "tool"))
-    if kind_enabled("video"):
-        vid = result.get("video_url")
-        if isinstance(vid, str) and vid.strip():
-            out.append(_entry(vid.strip(), "video", f"{name} · 视频", "tool"))
+    vid = result.get("video_url")
+    if isinstance(vid, str) and vid.strip():
+        vid = vid.strip()
+        if kind_enabled("video"):
+            out.append(_entry(vid, "video", f"{name} · 视频", "tool"))
+        elif vision_enabled():
+            # 模型看不了视频原片 → 抽帧作为图片回投，保证"生成后能看到结果再决定下一步"
+            try:
+                frames = extract_video_frames(vid, count=2)
+            except Exception:
+                frames = []
+            for i, fr in enumerate(frames[:2]):
+                out.append(_entry(fr, "image", f"{name} · 抽帧{i + 1}", "tool",
+                                  {"from_video": vid[:300]}))
     if kind_enabled("audio"):
         aud = result.get("audio_url")
         if isinstance(aud, str) and aud.strip():
             out.append(_entry(aud.strip(), "audio", f"{name} · 音频", "tool"))
     return out[: max(1, int(limit))]
+
+
+# ── 视频抽帧（模型看不了视频 → 抽成图片"看片"）──────────────
+FRAMES_ROOT = "frames"
+
+
+def _ffmpeg_exe() -> Optional[str]:
+    import shutil
+    exe = shutil.which("ffmpeg")
+    if exe:
+        return exe
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return None
+
+
+def _probe_duration_s(path: str) -> float:
+    try:
+        from pymediainfo import MediaInfo
+        info = MediaInfo.parse(path)
+        durs = [float(t.duration) for t in info.tracks if getattr(t, "duration", None)]
+        return (max(durs) / 1000.0) if durs else 0.0
+    except Exception:
+        return 0.0
+
+
+def extract_video_frames(ref: str, count: int = 3) -> List[str]:
+    """视频抽帧为图片（供模型查看视频内容）：返回 /storage/frames/*.jpg；不可用返回 []。
+
+    - 本地/HTTP 均可（本地优先）；ffmpeg 取系统 PATH，缺失时回退 imageio_ffmpeg 内置二进制；
+    - 未知时长走 fps 采样；已知时长按 10%/50%/90% 均匀取样；结果按源 ref 缓存。
+    """
+    import hashlib
+    import subprocess
+
+    src = str(ref or "").strip()
+    if not src:
+        return []
+    from app.providers.media_refs import local_path_for_ref
+    local = local_path_for_ref(src)
+    if local and not os.path.isfile(local):
+        local = None
+    input_arg = local or (src if src.startswith(("http://", "https://")) else "")
+    if not input_arg:
+        return []
+    exe = _ffmpeg_exe()
+    if not exe:
+        return []
+    count = max(1, min(int(count or 3), 5))
+    root = os.path.join(_storage_root(), FRAMES_ROOT)
+    os.makedirs(root, exist_ok=True)
+    key = hashlib.sha1(src.encode("utf-8", "ignore")).hexdigest()[:16]
+    outs = [os.path.join(root, f"{key}_{i + 1}.jpg") for i in range(count)]
+    if all(os.path.isfile(p) and os.path.getsize(p) > 0 for p in outs):
+        return [f"/storage/{FRAMES_ROOT}/{os.path.basename(p)}" for p in outs]
+    dur = _probe_duration_s(local) if local else 0.0
+    try:
+        if dur > 0.5:
+            for i, outp in enumerate(outs):
+                if os.path.isfile(outp) and os.path.getsize(outp) > 0:
+                    continue
+                ts = max(0.0, min(dur - 0.05, dur * (0.1 + 0.8 * (i / max(1, count - 1)))))
+                subprocess.run([exe, "-y", "-ss", f"{ts:.2f}", "-i", input_arg,
+                                "-frames:v", "1", "-q:v", "3", outp],
+                               capture_output=True, timeout=60)
+        else:
+            subprocess.run([exe, "-y", "-i", input_arg, "-vf", "fps=1/2",
+                            "-frames:v", str(count), "-q:v", "3",
+                            os.path.join(root, f"{key}_%02d.jpg")],
+                           capture_output=True, timeout=90)
+    except Exception:
+        pass
+    return [f"/storage/{FRAMES_ROOT}/{os.path.basename(p)}" for p in outs
+            if os.path.isfile(p) and os.path.getsize(p) > 0]
+
+
+def expand_video_frames(attachments: List[Dict[str, Any]], per_video: int = 3,
+                        max_total: int = 6) -> List[Dict[str, Any]]:
+    """把附件里的视频替换为「抽帧图片」附件（图片模型可看；失败则保留原视频项/文本行）。"""
+    out: List[Dict[str, Any]] = []
+    frames_added = 0
+    for a in attachments or []:
+        if not isinstance(a, dict):
+            continue
+        ref = str(a.get("ref") or "")
+        is_video = str(a.get("kind") or "") == "video" or _guess_kind(ref, str(a.get("kind") or "")) == "video"
+        if is_video and frames_added < max_total:
+            try:
+                frames = extract_video_frames(ref, count=per_video)
+            except Exception:
+                frames = []
+            if frames:
+                name = str(a.get("name") or "视频")
+                for i, fr in enumerate(frames[:per_video]):
+                    if frames_added >= max_total:
+                        break
+                    out.append(_entry(fr, "image", f"{name} · 抽帧{i + 1}", "frames",
+                                      {"from_video": ref[:300]}))
+                    frames_added += 1
+                continue
+        out.append(a)
+    return out
 
 
 # ── 上传落盘（附件专用目录，不进入素材库）────────────────────

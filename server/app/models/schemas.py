@@ -60,6 +60,11 @@ class Scene(BaseModel):
     location: str
     time_of_day: str = "day" # day, night, dusk, dawn
     atmosphere: str = "mysterious" # epic, tense, peaceful, eerie
+    # 场景资产（空镜参考图）：LLM 拆解产出，onekey_scene_image 生成后写回 ref_image_url，
+    # 分镜生图/生视频时作为场景参考连同角色多视图一起装配
+    image_prompt: str = ""
+    props: List[str] = Field(default_factory=list)
+    ref_image_url: Optional[str] = None
     shots: List[StoryboardShot] = Field(default_factory=list)
 
 class Project(BaseModel):

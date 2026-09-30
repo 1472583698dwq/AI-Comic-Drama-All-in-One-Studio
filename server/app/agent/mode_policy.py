@@ -44,6 +44,9 @@ PLAN_READONLY_TOOLS = frozenset({
     "task_status",
     "subagent_list", "subagent_status",
     "onekey_summary",
+    "onekey_review",
+    "onekey_style_lock",
+    "onekey_scene_image",
 })
 
 # 工具风险分级：low 查询/规划 / medium 单镜生成 / high 批量·覆盖·花钱 / catastrophic 删源·越界写·危险命令
@@ -75,9 +78,9 @@ TOOL_RISK: Dict[str, str] = {
     # 子代理集群 / 一键成片原子工具
     "subagent_run": "medium", "subagent_list": "low", "subagent_status": "low",
     "subagent_cancel": "medium", "subagent_steer": "low",
-    "onekey_split": "medium", "onekey_role_image": "medium", "onekey_shot_image": "medium",
+    "onekey_split": "medium", "onekey_style_lock": "low", "onekey_scene_image": "medium", "onekey_role_image": "medium", "onekey_shot_image": "medium",
     "onekey_shot_video": "high", "onekey_shot_voice": "medium", "onekey_export": "medium",
-    "onekey_summary": "low",
+    "onekey_summary": "low", "onekey_review": "low",
 }
 
 CATASTROPHIC_TOOLS = {"delete_custom_provider"}

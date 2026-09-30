@@ -33,7 +33,7 @@ PAGE_DEFS: List[Dict[str, Any]] = [
     },
     {
         "id": "projects", "label": "项目看板", "icon": "FolderKanban", "group": "工作区",
-        "order": 20, "default": False, "locked": False, "host": "projects",
+        "order": 20, "default": True, "locked": False, "host": "projects",
         "description": "项目看板：管理全部工程与制作进度",
     },
     {
@@ -48,19 +48,25 @@ PAGE_DEFS: List[Dict[str, Any]] = [
     },
     {
         "id": "studio", "label": "分镜台", "icon": "Layers", "group": "漫剧工坊",
-        "order": 50, "default": False, "locked": False, "host": "studio",
+        "order": 50, "default": True, "locked": False, "host": "studio",
         "description": "分镜台：逐镜脚本、分镜槽与一键成片",
         "api_families": ["/storyboard/slots", "/onekey"],
     },
     {
+        "id": "onekey", "label": "成片工作室", "icon": "Clapperboard", "group": "漫剧工坊",
+        "order": 55, "default": True, "locked": False, "host": "onekey",
+        "description": "成片工作室：一键成片（总导演 Agent 自主编排 + 子代理集群 + 产物验收）",
+        "api_families": ["/onekey"],
+    },
+    {
         "id": "director3d", "label": "3D 片场", "icon": "Compass", "group": "漫剧工坊",
-        "order": 60, "default": False, "locked": False, "host": "director3d",
+        "order": 60, "default": True, "locked": False, "host": "director3d",
         "description": "3D 片场：导演包场景、道具与运镜预演",
         "api_families": ["/director-packs"],
     },
     {
         "id": "timeline", "label": "多轨剪辑", "icon": "Video", "group": "漫剧工坊",
-        "order": 70, "default": False, "locked": False, "host": "timeline",
+        "order": 70, "default": True, "locked": False, "host": "timeline",
         "description": "多轨剪辑：时间线剪辑与成片导出",
     },
     {

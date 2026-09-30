@@ -240,6 +240,55 @@ class TestViewMediaTool(AttachmentBase):
         self.assertEqual(out.status, "success")
 
 
+class TestVideoFrames(AttachmentBase):
+    """视频检查能力：模型看不了视频原片 → 抽帧成图片（工具产物回投 + view_media 展开）。"""
+
+    def _make_video(self):
+        import subprocess
+        exe = A._ffmpeg_exe()
+        if not exe:
+            self.skipTest("无 ffmpeg（系统 PATH 与 imageio_ffmpeg 均不可用）")
+        vid = os.path.join(self._tmp, "v.mp4")
+        r = subprocess.run([exe, "-y", "-loop", "1", "-i", self.png, "-t", "1.2",
+                            "-vf", "scale=64:64", "-pix_fmt", "yuv420p", vid],
+                           capture_output=True, timeout=90)
+        if r.returncode != 0 or not os.path.isfile(vid):
+            self.skipTest(f"ffmpeg 造视频失败: {r.stderr[-200:]!r}")
+        return vid
+
+    def test_extract_video_frames_real(self):
+        vid = self._make_video()
+        frames = A.extract_video_frames(vid, count=3)
+        self.assertTrue(frames, "应至少抽到 1 帧")
+        self.assertTrue(all(u.startswith("/storage/frames/") for u in frames))
+        for u in frames:
+            p = os.path.join(self._tmp, "frames", os.path.basename(u))
+            self.assertTrue(os.path.isfile(p) and os.path.getsize(p) > 0)
+        # 二次调用走缓存
+        self.assertEqual(A.extract_video_frames(vid, count=3), frames)
+
+    def test_expand_video_frames_replaces_video(self):
+        orig = A.extract_video_frames
+        A.extract_video_frames = lambda ref, count=3: ["/storage/frames/x_1.jpg", "/storage/frames/x_2.jpg"]
+        try:
+            out = A.expand_video_frames([{"kind": "video", "ref": "https://x.test/v.mp4", "name": "成片"}])
+        finally:
+            A.extract_video_frames = orig
+        self.assertEqual([a["kind"] for a in out], ["image", "image"])
+        self.assertTrue(all(a["meta"]["from_video"].endswith("v.mp4") for a in out))
+
+    def test_tool_result_video_attaches_frames_when_vision(self):
+        os.environ["AGENT_MM_IMAGE"] = "1"
+        orig = A.extract_video_frames
+        A.extract_video_frames = lambda ref, count=2: ["/storage/frames/t_1.jpg"]
+        try:
+            out = A.attachments_from_tool_result("onekey_shot_video", {"video_url": "/storage/videos/a.mp4"})
+        finally:
+            A.extract_video_frames = orig
+        self.assertEqual([a["kind"] for a in out], ["image"])
+        self.assertEqual(out[0]["meta"]["from_video"], "/storage/videos/a.mp4")
+
+
 class TestLongTextFold(AttachmentBase):
     def setUp(self):
         super().setUp()

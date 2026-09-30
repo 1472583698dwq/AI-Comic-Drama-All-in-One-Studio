@@ -1,6 +1,6 @@
 /**
  * 子代理集群共享元数据 — 角色标签/图标/配色 + 耗时格式化。
- * AgentSwarmPanel（会话内花名册）与 OneKeyRunModal（一键成片集群视图）共用，避免两处漂移。
+ * AgentSwarmPanel（会话内花名册）与成片工作室（OneKeyStudioView 的集群视图）共用，避免两处漂移。
  *
  * 动态角色：外部导演组扩展（storage/agent_profiles + 插件贡献）的 icon/color 由后端下发，
  * 通过 loadRoleMetas() 注册；图标名不在白名单时回退 Bot，配色不在白名单时回退紫色。

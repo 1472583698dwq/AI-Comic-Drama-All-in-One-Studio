@@ -71,6 +71,14 @@ def engine_status() -> Dict[str, Any]:
         jianyin_error = jy.get("error")
     except Exception as e:  # 剪映引擎 import 失败不应影响合片自检
         jianyin_error = f"{type(e).__name__}: {e}"
+    # 降级出口提示：ffmpeg 缺失时指向「导出剪映草稿」（这才是提示的用武之地）；
+    # 剪映引擎未就绪时也给出可读原因，避免前端拿到空串不知道下一步。
+    if not ffmpeg:
+        draft_hint = _DRAFT_HINT if jianyin else f"{_DRAFT_HINT}（剪映引擎未就绪：{jianyin_error or 'pyJianYingDraft 不可用'}）"
+    elif not jianyin:
+        draft_hint = f"剪映草稿引擎未就绪：{jianyin_error or 'pyJianYingDraft 不可用'}（设置 → 能力自检）"
+    else:
+        draft_hint = ""
     return {
         "ffmpeg": ffmpeg,
         "ffprobe": ffprobe,
@@ -78,7 +86,7 @@ def engine_status() -> Dict[str, Any]:
         "jianyin_error": jianyin_error,
         "available": ffmpeg,
         "ffmpeg_hint": "" if ffmpeg else _FFMPEG_HINT,
-        "draft_hint": "" if jianyin else _DRAFT_HINT,
+        "draft_hint": draft_hint,
     }
 
 

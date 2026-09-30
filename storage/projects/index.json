@@ -1,24 +1,5 @@
 [
   {
-    "id": "proj_67b93195",
-    "title": "AutoDL系统测试",
-    "cover_url": null,
-    "style_preset": "donghua_xianxia",
-    "aspect_ratio": "9:16",
-    "status": "draft",
-    "created_at": "2026-09-24T15:26:09.971608",
-    "updated_at": "2026-09-30T11:53:55.373704",
-    "last_opened_at": "2026-09-30T11:53:55.032320",
-    "stats": {
-      "shots": 6,
-      "duration": 21.0,
-      "characters": 0
-    },
-    "source": "blank",
-    "description": "",
-    "engine": null
-  },
-  {
     "id": "proj_1e306eb8",
     "title": "测试",
     "cover_url": null,
@@ -26,8 +7,8 @@
     "aspect_ratio": "9:16",
     "status": "draft",
     "created_at": "2026-08-26T16:04:53.230702",
-    "updated_at": "2026-09-29T23:47:44.564313",
-    "last_opened_at": "2026-09-29T23:47:41.283829",
+    "updated_at": "2026-09-30T09:21:13.853986",
+    "last_opened_at": "2026-09-30T09:21:13.542710",
     "stats": {
       "shots": 7,
       "duration": 27.0,
@@ -38,75 +19,18 @@
     "engine": null
   },
   {
-    "id": "proj_8f110548",
-    "title": "日漫热血项目",
-    "cover_url": null,
-    "style_preset": "japanese_anime",
-    "aspect_ratio": "9:16",
-    "status": "draft",
-    "created_at": "2026-09-29T15:18:01.895319",
-    "updated_at": "2026-09-29T15:41:19.664137",
-    "last_opened_at": "2026-09-29T15:41:19.236883",
-    "stats": {
-      "shots": 0,
-      "duration": 0,
-      "characters": 0
-    },
-    "source": "blank",
-    "description": "",
-    "engine": null
-  },
-  {
-    "id": "proj_a5fce847",
-    "title": "测试项目Alpha",
+    "id": "proj_67b93195",
+    "title": "AutoDL系统测试",
     "cover_url": null,
     "style_preset": "donghua_xianxia",
     "aspect_ratio": "9:16",
     "status": "draft",
-    "created_at": "2026-09-10T11:27:24.489350",
-    "updated_at": "2026-09-29T15:27:25.438430",
-    "last_opened_at": "2026-09-29T15:27:25.077286",
+    "created_at": "2026-09-24T15:26:09.971608",
+    "updated_at": "2026-09-28T23:05:04.121174",
+    "last_opened_at": "2026-09-28T23:05:03.738634",
     "stats": {
-      "shots": 0,
-      "duration": 0,
-      "characters": 0
-    },
-    "source": "blank",
-    "description": "",
-    "engine": null
-  },
-  {
-    "id": "proj_338535d7",
-    "title": "测试项目Beta",
-    "cover_url": null,
-    "style_preset": "modern_shishang",
-    "aspect_ratio": "16:9",
-    "status": "draft",
-    "created_at": "2026-09-10T11:27:48.372868",
-    "updated_at": "2026-09-29T15:20:44.396590",
-    "last_opened_at": "2026-09-29T15:20:44.102669",
-    "stats": {
-      "shots": 0,
-      "duration": 0,
-      "characters": 0
-    },
-    "source": "blank",
-    "description": "",
-    "engine": null
-  },
-  {
-    "id": "proj_bc8d2bfb",
-    "title": "111",
-    "cover_url": null,
-    "style_preset": "dark_comic",
-    "aspect_ratio": "9:16",
-    "status": "draft",
-    "created_at": "2026-09-20T09:54:49.041765",
-    "updated_at": "2026-09-29T15:20:31.586404",
-    "last_opened_at": "2026-09-29T15:20:31.296180",
-    "stats": {
-      "shots": 0,
-      "duration": 0,
+      "shots": 6,
+      "duration": 21.0,
       "characters": 0
     },
     "source": "blank",
@@ -133,6 +57,25 @@
     "engine": null
   },
   {
+    "id": "proj_bc8d2bfb",
+    "title": "111",
+    "cover_url": null,
+    "style_preset": "dark_comic",
+    "aspect_ratio": "9:16",
+    "status": "draft",
+    "created_at": "2026-09-20T09:54:49.041765",
+    "updated_at": "2026-09-24T14:55:55.588554",
+    "last_opened_at": "2026-09-24T14:55:55.315620",
+    "stats": {
+      "shots": 0,
+      "duration": 0,
+      "characters": 0
+    },
+    "source": "blank",
+    "description": "",
+    "engine": null
+  },
+  {
     "id": "proj_0be82585",
     "title": "你哦好",
     "cover_url": null,
@@ -145,6 +88,25 @@
     "stats": {
       "shots": 1,
       "duration": 3.5,
+      "characters": 0
+    },
+    "source": "blank",
+    "description": "",
+    "engine": null
+  },
+  {
+    "id": "proj_a5fce847",
+    "title": "测试项目Alpha",
+    "cover_url": null,
+    "style_preset": "donghua_xianxia",
+    "aspect_ratio": "9:16",
+    "status": "draft",
+    "created_at": "2026-09-10T11:27:24.489350",
+    "updated_at": "2026-09-16T15:30:43.743149",
+    "last_opened_at": "2026-09-16T15:30:42.160664",
+    "stats": {
+      "shots": 0,
+      "duration": 0,
       "characters": 0
     },
     "source": "blank",
@@ -171,6 +133,25 @@
     "engine": null
   },
   {
+    "id": "proj_338535d7",
+    "title": "测试项目Beta",
+    "cover_url": null,
+    "style_preset": "modern_shishang",
+    "aspect_ratio": "16:9",
+    "status": "draft",
+    "created_at": "2026-09-10T11:27:48.372868",
+    "updated_at": "2026-09-10T11:27:48.372873",
+    "last_opened_at": "2026-09-10T11:27:48.372874",
+    "stats": {
+      "shots": 0,
+      "duration": 0,
+      "characters": 0
+    },
+    "source": "blank",
+    "description": "",
+    "engine": null
+  },
+  {
     "id": "proj_a61db2c7",
     "title": "测试项目Beta",
     "cover_url": null,
@@ -184,6 +165,25 @@
       "shots": 0,
       "duration": 0,
       "characters": 0
+    },
+    "source": "blank",
+    "description": "",
+    "engine": null
+  },
+  {
+    "id": "proj_e8cd6682",
+    "title": "测试",
+    "cover_url": null,
+    "style_preset": "donghua_xianxia",
+    "aspect_ratio": "9:16",
+    "status": "draft",
+    "created_at": "2026-09-30T09:58:28.840676",
+    "updated_at": "2026-09-30T13:44:03.091863",
+    "last_opened_at": "2026-09-30T13:44:02.816713",
+    "stats": {
+      "shots": 46,
+      "duration": 193.0,
+      "characters": 4
     },
     "source": "blank",
     "description": "",

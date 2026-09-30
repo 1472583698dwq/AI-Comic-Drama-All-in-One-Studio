@@ -20,7 +20,7 @@ interface NavItem {
   label: string;
   icon: LucideIcon;
   count?: number;
-  accent?: 'pink' | 'purple';
+  accent?: 'pink' | 'purple' | 'amber';
   pulse?: boolean;
 }
 
@@ -94,6 +94,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
       const decorate: Partial<NavItem> =
         p.id === 'assets' ? { accent: 'pink' }
         : p.id === 'canvas' ? { accent: 'purple' }
+        : p.id === 'onekey' ? { accent: 'amber' }
         : p.id === 'agent' ? { pulse: true }
         : p.id === 'studio' ? { count: shotsCount }
         : p.id === 'characters' ? { count: charactersCount }
@@ -127,6 +128,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
     if (active) {
       if (item.accent === 'pink') return 'bg-accent-pink/15 text-white ring-1 ring-accent-pink/40';
       if (item.accent === 'purple') return 'bg-brand/20 text-white ring-1 ring-brand/40';
+      if (item.accent === 'amber') return 'bg-amber-500/15 text-white ring-1 ring-amber-500/40';
       return 'bg-brand/15 text-white ring-1 ring-brand/40';
     }
     return 'text-gray-400 hover:text-white hover:bg-surface-secondary';

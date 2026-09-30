@@ -28,9 +28,11 @@ from app.core.config import settings  # noqa: E402
 from app.extensions import state  # noqa: E402
 from app.extensions.registry import extension_registry  # noqa: E402
 
-# 契约冻结的默认启用集
-DEFAULT_ON = {"home", "assets", "characters", "agent", "canvas", "config"}
-DEFAULT_OFF = {"projects", "studio", "director3d", "timeline"}
+# 契约默认集：默认全开（用户口径：原有功能页不能因播种被关掉）；locked 的 config 也不可关。
+# 关闭仍可运行：设置 → 功能开关 逐页 toggle（覆盖层写 storage/extensions/state.json）
+DEFAULT_ON = {"home", "projects", "assets", "characters", "studio", "onekey",
+              "director3d", "timeline", "agent", "canvas", "config"}
+DEFAULT_OFF: set = set()
 
 
 class _TempStorage(unittest.TestCase):
@@ -121,6 +123,7 @@ class TestRequire(_TempStorage):
     def test_require_404_when_disabled_then_pass_after_enable(self):
         from fastapi import HTTPException
         pages.seed_defaults()
+        extension_registry.set_enabled("page:studio", False)  # 默认全开：先关掉验证
         with self.assertRaises(HTTPException) as ctx:
             pages.require("studio")()
         self.assertEqual(ctx.exception.status_code, 404)
@@ -183,19 +186,29 @@ class TestRouteGuardOwnership(_TempStorage):
     def test_studio_family_guarded_by_studio(self):
         from fastapi import HTTPException
         pages.seed_defaults()
-        deps = [self._dep(m) for m in ("app.api.storyboard_slot_routes",
-                                       "app.api.onekey_routes")]
-        for dep in deps:
+        # 默认全开：先关掉两侧验证守卫
+        extension_registry.set_enabled("page:onekey", False)
+        extension_registry.set_enabled("page:studio", False)
+        slot_dep = self._dep("app.api.storyboard_slot_routes")
+        onekey_dep = self._dep("app.api.onekey_routes")
+        for dep in (slot_dep, onekey_dep):
             with self.assertRaises(HTTPException) as ctx:
                 dep()
             self.assertEqual(ctx.exception.status_code, 404)
+        # 成片工作室族认「分镜台 或 成片工作室」任一（require_any）：只开 onekey 也放行
+        extension_registry.set_enabled("page:onekey", True)
+        onekey_dep()
+        with self.assertRaises(HTTPException):
+            slot_dep()
+        # 分镜台开启 → 分镜台族放行
         extension_registry.set_enabled("page:studio", True)
-        for dep in deps:
-            dep()  # 开启后放行
+        slot_dep()
+        onekey_dep()
 
     def test_director3d_family_guarded_by_director3d(self):
         from fastapi import HTTPException
         pages.seed_defaults()
+        extension_registry.set_enabled("page:director3d", False)  # 默认全开：先关掉验证
         dep = self._dep("app.api.director_pack_routes")
         with self.assertRaises(HTTPException) as ctx:
             dep()
@@ -224,6 +237,7 @@ class TestRouteGuardOwnership(_TempStorage):
         """防挂错开关：只开 studio 时，director3d 族仍必须 404。"""
         from fastapi import HTTPException
         pages.seed_defaults()
+        extension_registry.set_enabled("page:director3d", False)  # 默认全开：先关掉
         extension_registry.set_enabled("page:studio", True)
         self._dep("app.api.storyboard_slot_routes")()
         with self.assertRaises(HTTPException):
@@ -232,15 +246,15 @@ class TestRouteGuardOwnership(_TempStorage):
 
 class TestToggleNoResidue(_TempStorage):
     def test_toggle_roundtrip_three_times(self):
-        """studio 出厂默认关闭：开→关往返 3 次后必须回到初始（关闭）且停用集无悬空引用。"""
+        """开→关往返 3 次后必须回到初始态，且停用集无悬空引用（默认集已全开）。"""
         pages.seed_defaults()
         baseline = pages.enabled_ids()
-        self.assertNotIn("studio", baseline)
+        self.assertIn("studio", baseline)
         for _ in range(3):
-            extension_registry.set_enabled("page:studio", True)
-            self.assertTrue(pages.is_enabled("studio"))
             extension_registry.set_enabled("page:studio", False)
             self.assertFalse(pages.is_enabled("studio"))
+            extension_registry.set_enabled("page:studio", True)
+            self.assertTrue(pages.is_enabled("studio"))
         self.assertEqual(pages.enabled_ids(), baseline)
         # 停用集与有效集严格互补：不留悬空引用，也不多出未定义的项
         self.assertEqual(
@@ -269,8 +283,9 @@ class TestRequireAny(_TempStorage):
     def test_timeline_route_uses_require_any(self):
         from fastapi import HTTPException
         pages.seed_defaults()
+        extension_registry.set_enabled("page:timeline", False)  # 默认全开：先关掉 timeline
         guard = self._guard()
-        # 出厂态：canvas 开、timeline 关 → 放行
+        # 出厂态改后：canvas 开、timeline 关 → 放行
         self.assertTrue(pages.is_enabled("canvas"))
         self.assertFalse(pages.is_enabled("timeline"))
         guard()
@@ -289,7 +304,7 @@ class TestRequireAny(_TempStorage):
 
 class TestExtensionRegistryIntegration(_TempStorage):
     def test_pages_listed_with_default_state(self):
-        # 不显式播种：首次列表即应完成播种，且默认关的页为 disabled
+        # 不显式播种：首次列表即应完成播种；默认集全开 → studio 为 builtin（可开关）
         items = extension_registry.list(kind="page")
         self.assertEqual(len(items), len(pages.PAGE_DEFS))
         by_id = {e.id: e for e in items}
@@ -298,7 +313,7 @@ class TestExtensionRegistryIntegration(_TempStorage):
         self.assertEqual(by_id[pages.page_ext_id("studio")].local_id, "studio")
         self.assertEqual(by_id[pages.page_ext_id("studio")].publisher, "builtin")
         self.assertEqual(by_id[pages.page_ext_id("studio")].source, "builtin")
-        self.assertEqual(by_id[pages.page_ext_id("studio")].status, "disabled")
+        self.assertEqual(by_id[pages.page_ext_id("studio")].status, "builtin")
         self.assertEqual(by_id[pages.page_ext_id("home")].status, "builtin")
         self.assertTrue(self._disk_state().get("pages_seeded"))
         self.assertEqual(extension_registry.counts().get("page"), len(pages.PAGE_DEFS))
