@@ -55,7 +55,7 @@ export const AgentSwarmPanel: React.FC<{
   let rendered = 0;
 
   return (
-    <div className={`${compact ? 'mx-2 mt-1.5' : 'mx-4 mt-2'} rounded-xl border border-border bg-surface-secondary/40 overflow-hidden shrink-0`}>
+    <div className={`${compact ? 'mx-2 mt-1.5' : 'mx-4 mt-2'} rounded-xl border border-white/70 dark:border-white/12 bg-white/40 dark:bg-white/[.03] overflow-hidden shrink-0`}>
       <button
         onClick={() => setCollapsed((v) => !v)}
         className={`w-full px-3 ${compact ? 'py-1' : 'py-1.5'} flex items-center gap-2 text-[10px] font-bold text-gray-300 hover:bg-white/5`}

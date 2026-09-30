@@ -62,12 +62,13 @@ interface PageState {
  */
 const FALLBACK_PAGES: PageItem[] = [
   { id: 'home', label: '首页', icon: 'home', group: '工作区', order: 10, enabled: true, host: 'home' },
-  { id: 'projects', label: '项目看板', icon: 'folder-kanban', group: '工作区', order: 20, enabled: false, host: 'projects' },
+  { id: 'projects', label: '项目看板', icon: 'folder-kanban', group: '工作区', order: 20, enabled: true, host: 'projects' },
   { id: 'assets', label: '素材库', icon: 'library', group: '工作区', order: 30, enabled: true, host: 'assets' },
   { id: 'characters', label: '角色设定', icon: 'users', group: '工作区', order: 40, enabled: true, host: 'characters' },
-  { id: 'studio', label: '分镜台', icon: 'layers', group: '漫剧工坊', order: 50, enabled: false, host: 'studio' },
-  { id: 'director3d', label: '3D 片场', icon: 'compass', group: '漫剧工坊', order: 60, enabled: false, host: 'director3d' },
-  { id: 'timeline', label: '多轨剪辑', icon: 'video', group: '漫剧工坊', order: 70, enabled: false, host: 'timeline' },
+  { id: 'studio', label: '分镜台', icon: 'layers', group: '漫剧工坊', order: 50, enabled: true, host: 'studio' },
+  { id: 'onekey', label: '成片工作室', icon: 'clapperboard', group: '漫剧工坊', order: 55, enabled: true, host: 'onekey' },
+  { id: 'director3d', label: '3D 片场', icon: 'compass', group: '漫剧工坊', order: 60, enabled: true, host: 'director3d' },
+  { id: 'timeline', label: '多轨剪辑', icon: 'video', group: '漫剧工坊', order: 70, enabled: true, host: 'timeline' },
   { id: 'agent', label: 'AI 导演', icon: 'bot', group: '创意工坊', order: 80, enabled: true, host: 'agent' },
   { id: 'canvas', label: '创意画布', icon: 'sparkles', group: '创意工坊', order: 90, enabled: true, host: 'canvas' },
   { id: 'config', label: '设置', icon: 'settings', group: '系统', order: 999, enabled: true, host: 'config', locked: true },

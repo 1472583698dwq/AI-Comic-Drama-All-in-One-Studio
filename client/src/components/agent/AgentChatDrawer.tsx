@@ -215,7 +215,7 @@ export const AgentChatDrawer: React.FC = () => {
           className={`group flex items-center space-x-2 px-3.5 py-2.5 rounded-full backdrop-blur-xl border transition-all shadow-xl cursor-grab active:cursor-grabbing ${
             isOpen
               ? 'bg-brand text-white border-brand-glow shadow-brand/40 ring-2 ring-brand/50'
-              : 'bg-surface/90 hover:bg-surface border-border hover:border-brand/60 text-white shadow-black/40 hover:scale-105'
+              : 'bg-white/80 dark:bg-black/55 hover:bg-white/70 dark:hover:bg-white/[.09] border-white/70 dark:border-white/12 hover:border-brand/60 text-white shadow-black/40 hover:scale-105'
           }`}
           title="点击展开/收起导演 Agent，按住可任意拖拽位置"
         >
@@ -243,11 +243,11 @@ export const AgentChatDrawer: React.FC = () => {
             height: isExpanded ? '680px' : '530px',
             zIndex: 55,
           }}
-          className="rounded-3xl border border-border bg-surface/95 backdrop-blur-2xl shadow-2xl flex flex-col overflow-hidden animate-fade-in"
+          className="rounded-3xl border border-white/70 dark:border-white/12 bg-white/85 dark:bg-[#101014]/90 backdrop-blur-2xl shadow-2xl flex flex-col overflow-hidden animate-fade-in"
         >
           <div
             onMouseDown={onHeaderMouseDown}
-            className="h-12 px-4 border-b border-border flex items-center justify-between bg-surface-secondary/80 shrink-0 cursor-grab active:cursor-grabbing select-none"
+            className="h-12 px-4 border-b border-white/70 dark:border-white/12 flex items-center justify-between bg-white/65 dark:bg-white/[.05] shrink-0 cursor-grab active:cursor-grabbing select-none"
             title="按住拖拽窗口位置"
           >
             <div className="flex items-center space-x-2.5">
@@ -270,21 +270,21 @@ export const AgentChatDrawer: React.FC = () => {
             <div className="flex items-center space-x-1">
               <button
                 onClick={() => void clearAll()}
-                className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-tertiary transition-all"
+                className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/65 dark:bg-white/[.09] transition-all"
                 title="重置会话记忆"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
               </button>
               <button
                 onClick={() => setIsExpanded(!isExpanded)}
-                className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-tertiary transition-all"
+                className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/65 dark:bg-white/[.09] transition-all"
                 title={isExpanded ? '还原默认尺寸' : '放大窗口'}
               >
                 {isExpanded ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
               </button>
               <button
                 onClick={() => setIsOpen(false)}
-                className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-tertiary transition-all"
+                className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/65 dark:bg-white/[.09] transition-all"
                 title="收起悬浮窗"
               >
                 <X className="w-4 h-4" />
@@ -333,13 +333,13 @@ export const AgentChatDrawer: React.FC = () => {
                 <div key={aid} className="flex items-center gap-1.5">
                   <span className="text-[10px] font-mono text-white truncate flex-1">{v.tool_name}</span>
                   <button onClick={() => approve(aid, true)} className="px-2 py-0.5 rounded-md bg-amber-500 text-black text-[10px] font-bold">允许</button>
-                  <button onClick={() => approve(aid, false)} className="px-2 py-0.5 rounded-md border border-border text-[10px] text-gray-300">拒绝</button>
+                  <button onClick={() => approve(aid, false)} className="px-2 py-0.5 rounded-md border border-white/70 dark:border-white/12 text-[10px] text-gray-300">拒绝</button>
                 </div>
               ))}
             </div>
           )}
 
-          <div className="p-3 border-t border-border bg-surface shrink-0">
+          <div className="p-3 border-t border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] shrink-0">
             <AgentComposer
               compact
               mode={mode}

@@ -418,6 +418,11 @@ class ToolPipeline:
                                           "meta": {"asset_id": str(aid)}})
                 except Exception:
                     continue
+            try:
+                from app.agent.runtime.attachments import expand_video_frames, sanitize_attachments
+                collected = await asyncio.to_thread(expand_video_frames, collected)
+            except Exception:
+                from app.agent.runtime.attachments import sanitize_attachments
             atts = sanitize_attachments(collected)
             if not atts:
                 msg = "view_media 未找到可用媒体（检查 node_id/asset_id/url；画布节点需已产出图/视频/音频）"
@@ -479,17 +484,19 @@ class ToolPipeline:
             except Exception:
                 to = None
             from app.agent.runtime.subagent import subagent_pool
+            ctx_arg = args.get("context") if isinstance(args.get("context"), dict) else None
             if isinstance(batch, list) and batch:
                 result = await subagent_pool.spawn_batch(
-                    parent, agent, batch, background=background, max_steps=ms, timeout_s=to)
+                    parent, agent, batch, background=background, context=ctx_arg,
+                    max_steps=ms, timeout_s=to)
             else:
                 task = str(args.get("task") or "").strip()
                 if not task:
                     msg = "subagent_run 需要 task（或 batch 数组）"
                     return ToolOutcome(call_id, name, "error", error=msg, model_content=json.dumps({"error": msg}, ensure_ascii=False))
                 result = await subagent_pool.spawn(
-                    parent, agent, task, background=background, max_steps=ms, timeout_s=to,
-                    auto_bg_ok=auto_bg_ok)
+                    parent, agent, task, context=ctx_arg, background=background,
+                    max_steps=ms, timeout_s=to, auto_bg_ok=auto_bg_ok)
             if result.get("status") in ("error",):
                 return ToolOutcome(call_id, name, "error", error=str(result.get("error") or "子代理失败"),
                                    result=result, model_content=json.dumps(result, ensure_ascii=False)[:4000])

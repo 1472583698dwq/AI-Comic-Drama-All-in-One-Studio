@@ -48,6 +48,8 @@ const lazyView = (loader: () => Promise<any>) =>
   );
 
 const CreativeCanvas = lazyView(()=> import('./components/canvas/CreativeCanvas').then(m=> ({default: m.CreativeCanvas})));
+/** 成片工作室：一键成片的独立页面（Agent 自主编排；替代原弹窗） */
+const OneKeyStudioView = lazyView(()=> import('./views/OneKeyStudioView').then(m=> ({default: m.OneKeyStudioView})));
 import { useProjectStore } from './stores/useProjectStore';
 import { useMcpStore } from './stores/useMcpStore';
 
@@ -62,6 +64,7 @@ const PAGE_HOSTS: Record<string, React.ComponentType<any>> = {
   agent: AgentModeView,
   assets: AssetLibrary,
   characters: CharacterStudio,
+  onekey: OneKeyStudioView,
   studio: ShotInspector,
   timeline: ShotInspector,
   director3d: Director3DStage,
@@ -247,6 +250,15 @@ export function App() {
     if (host === 'agent') return <ErrorBoundary name="Agent模式页"><Host /></ErrorBoundary>;
     if (host === 'config') return <ErrorBoundary name="设置中心"><Host /></ErrorBoundary>;
     if (host === 'home') return <ErrorBoundary name="首页"><Host /></ErrorBoundary>;
+    if (host === 'onekey') {
+      return (
+        <ErrorBoundary name="成片工作室">
+          <Suspense fallback={<div className="flex-1 flex items-center justify-center text-xs text-gray-500">成片工作室加载中…</div>}>
+            <Host />
+          </Suspense>
+        </ErrorBoundary>
+      );
+    }
     return <Host />;
   };
 
@@ -285,7 +297,7 @@ export function App() {
         <main className="flex-1 flex flex-col overflow-hidden relative min-w-0">
           {/* 兜底边界：任何视图运行时崩溃都显示可读错误 + 重试，而不是黑屏/白屏 */}
           <ErrorBoundary name="当前页面">
-          {!pagesLoaded || restoring ? (
+{!pagesLoaded || restoring ? (
             // 加载占位：功能页开关到手前不渲染任何页，避免闪出「已关闭」的页
             <div className="flex-1 flex items-center justify-center gap-2 text-xs text-gray-500">
               <Loader2 className="w-3.5 h-3.5 animate-spin" />

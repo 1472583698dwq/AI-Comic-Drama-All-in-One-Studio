@@ -70,7 +70,7 @@ export const NodeContextMenu: React.FC<Props> = ({ menu, onClose, onDelete }) =>
     <div
       ref={ref}
       style={{ position: 'fixed', top, left, width: MENU_W, zIndex: 9998 }}
-      className="bg-surface-secondary border border-white/15 rounded-2xl p-1.5 shadow-2xl shadow-black/50 flex flex-col gap-0.5 backdrop-blur-md animate-in fade-in zoom-in-95 duration-100"
+      className="bg-white/55 dark:bg-white/[.06] border border-white/15 rounded-2xl p-1.5 shadow-2xl shadow-black/50 flex flex-col gap-0.5 backdrop-blur-md animate-in fade-in zoom-in-95 duration-100"
     >
       {/* 菜单头：明确操作对象，避免"右键的到底是哪个" */}
       <div className="px-2.5 py-1.5 border-b border-white/10 mb-1">

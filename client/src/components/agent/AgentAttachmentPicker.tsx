@@ -131,10 +131,10 @@ export const AgentAttachmentPicker: React.FC<AgentAttachmentPickerProps> = ({ se
         onClick={() => !picked && addFromUrl(url, name, kind, source, extra)}
         title={picked ? '已添加' : '添加到会话'}
         className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left transition-colors ${
-          picked ? 'bg-emerald-500/10 border border-emerald-500/30' : 'hover:bg-surface-tertiary border border-transparent'
+          picked ? 'bg-emerald-500/10 border border-emerald-500/30' : 'hover:bg-white/65 dark:bg-white/[.09] border border-transparent'
         }`}
       >
-        <span className="w-9 h-9 rounded-md overflow-hidden bg-surface border border-border shrink-0 flex items-center justify-center">
+        <span className="w-9 h-9 rounded-md overflow-hidden bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 shrink-0 flex items-center justify-center">
           {kind === 'image'
             ? <img src={resolveUrl(url)} alt="" className="w-full h-full object-cover" loading="lazy" />
             : <Icon className="w-4 h-4 [color:var(--color-text-muted)]" />}
@@ -151,10 +151,10 @@ export const AgentAttachmentPicker: React.FC<AgentAttachmentPickerProps> = ({ se
   return (
     <div
       ref={rootRef}
-      className="absolute bottom-full mb-1.5 right-0 z-50 w-[320px] max-h-[340px] flex flex-col bg-surface border border-border rounded-2xl shadow-2xl shadow-black/40 overflow-hidden animate-fade-in"
+      className="absolute bottom-full mb-1.5 right-0 z-50 w-[320px] max-h-[340px] flex flex-col bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-2xl shadow-2xl shadow-black/40 overflow-hidden animate-fade-in"
     >
       {/* 来源切换 */}
-      <div className="flex items-center gap-1 p-1.5 border-b border-border bg-surface-secondary/60 shrink-0">
+      <div className="flex items-center gap-1 p-1.5 border-b border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.05] shrink-0">
         {([
           { id: 'upload', label: '上传', icon: Upload },
           { id: 'canvas', label: '画布', icon: LayoutGrid },
@@ -168,7 +168,7 @@ export const AgentAttachmentPicker: React.FC<AgentAttachmentPickerProps> = ({ se
               type="button"
               onClick={() => setTab(t.id)}
               className={`flex-1 h-7 rounded-lg text-[10.5px] font-semibold inline-flex items-center justify-center gap-1 transition-colors ${
-                on ? 'bg-brand/15 text-brand' : '[color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-tertiary'
+                on ? 'bg-brand/15 text-brand' : '[color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/65 dark:bg-white/[.09]'
               }`}
             >
               <Icon className="w-3 h-3" />{t.label}
@@ -192,7 +192,7 @@ export const AgentAttachmentPicker: React.FC<AgentAttachmentPickerProps> = ({ se
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={uploading}
-              className="w-full h-20 rounded-xl border border-dashed border-border hover:border-brand/50 hover:bg-brand/5 flex flex-col items-center justify-center gap-1.5 text-[11px] [color:var(--color-text-muted)] transition-colors disabled:opacity-50"
+              className="w-full h-20 rounded-xl border border-dashed border-white/70 dark:border-white/12 hover:border-brand/50 hover:bg-brand/5 flex flex-col items-center justify-center gap-1.5 text-[11px] [color:var(--color-text-muted)] transition-colors disabled:opacity-50"
             >
               {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
               <span>{uploading ? '正在上传…' : '选择本地图片 / 视频 / 音频（≤8MB）'}</span>

@@ -35,7 +35,7 @@ TOOL_STRATEGY = """## 典型指令路由
 - 读源码/长文件 → get_provider_code(offset/limit) / fs_read(offset/limit)，可通读完整文件
 - 查健康/排障 → list_* / get_provider_code 先只读排查再修复
 - 看画面/看视频/改图前先看 → view_media(node_id/asset_id/url)：把画布产物或素材作为多模态附件加载，直接看到内容后再动手（任务产物也会自动回投给你）
-- 一键成片/整集批量 → 先拆解剧本，再按角色定妆→生图→视频→配音→导出推进
+- 一键成片/整集批量 → 先 onekey_split 拆解；资产优先复用（已有角色三视图直接用）、onekey_style_lock 锁全片风格、onekey_* 原子工具按你的编排推进（失败不阻塞）
 - 不确定可用哪种源/音色/工作流/素材时，先调用对应 list_* 查询再决策
 - 生成前的参数确认：先查 get_provider_code 看 input_schema，避免把参考图挂给纯文本源"""
 

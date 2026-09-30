@@ -134,9 +134,9 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
-      <div className="bg-surface border border-border rounded-2xl w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden shadow-2xl animate-fade-in">
+      <div className="bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-2xl w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden shadow-2xl animate-fade-in">
         {/* Header */}
-        <div className="p-4 border-b border-border flex items-center justify-between bg-surface-secondary/60 shrink-0">
+        <div className="p-4 border-b border-white/70 dark:border-white/12 flex items-center justify-between bg-white/55 dark:bg-white/[.05] shrink-0">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-xl bg-brand/10 border border-brand/20 flex items-center justify-center">
               <Library className="w-4 h-4 text-brand" />
@@ -167,7 +167,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
 
             <button
               onClick={onClose}
-              className="w-8 h-8 rounded-full bg-surface-secondary hover:bg-surface-tertiary flex items-center justify-center text-gray-400 hover:text-white transition-all text-sm ml-1"
+              className="w-8 h-8 rounded-full bg-white/55 dark:bg-white/[.06] hover:bg-white/65 dark:bg-white/[.09] flex items-center justify-center text-gray-400 hover:text-white transition-all text-sm ml-1"
             >
               ✕
             </button>
@@ -175,7 +175,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
         </div>
 
         {/* Filter Toolbar */}
-        <div className="p-3 border-b border-border bg-surface-secondary/30 flex flex-wrap items-center justify-between gap-3 shrink-0">
+        <div className="p-3 border-b border-white/70 dark:border-white/12 bg-white/35 dark:bg-white/[.03] flex flex-wrap items-center justify-between gap-3 shrink-0">
           {/* Category Tabs */}
           <div className="flex items-center gap-1 overflow-x-auto custom-scrollbar pb-0.5">
             {CATEGORY_TABS.map((t) => {
@@ -188,7 +188,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
                     isSelected
                       ? 'bg-brand text-white shadow-sm'
-                      : 'bg-surface-secondary border border-border text-gray-400 hover:text-white hover:border-brand/40'
+                      : 'bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-gray-400 hover:text-white hover:border-brand/40'
                   }`}
                 >
                   <Icon className="w-3.5 h-3.5" />
@@ -203,7 +203,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
             <select
               value={scope}
               onChange={e => setScope(e.target.value as any)}
-              className="bg-surface-secondary border border-border rounded-xl px-2.5 py-1 text-xs text-gray-300 focus:outline-none"
+              className="bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-2.5 py-1 text-xs text-gray-300 focus:outline-none"
             >
               <option value="all">全部范围</option>
               <option value="project">仅当前项目</option>
@@ -217,7 +217,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 placeholder="搜索素材名 / 标签..."
-                className="w-44 bg-surface-secondary border border-border rounded-xl pl-8 pr-3 py-1 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand"
+                className="w-44 bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl pl-8 pr-3 py-1 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand"
               />
             </div>
           </div>
@@ -250,15 +250,15 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
                       });
                       onClose();
                     }}
-                    className="group rounded-2xl overflow-hidden border border-border bg-surface-secondary/70 cursor-pointer hover:border-brand hover:ring-2 hover:ring-brand/40 transition-all flex flex-col relative shadow-sm"
+                    className="group rounded-2xl overflow-hidden border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] cursor-pointer hover:border-brand hover:ring-2 hover:ring-brand/40 transition-all flex flex-col relative shadow-sm"
                   >
                     {isAudioUrl(img) ? (
-                      <div className="aspect-[3/4] bg-surface-secondary overflow-hidden relative">
+                      <div className="aspect-[3/4] bg-white/55 dark:bg-white/[.06] overflow-hidden relative">
                         <div className="w-full h-full flex flex-col items-center justify-center gap-2 bg-gradient-to-br from-surface-secondary to-surface-tertiary">
                           <Music className="w-10 h-10 text-brand-light/70" />
                           <span className="text-[10px] text-gray-400 font-mono px-2 truncate max-w-full">{String(img).split('/').pop()}</span>
                         </div>
-                        <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-surface/85 text-[9px] text-gray-200 border border-white/10 font-mono">
+                        <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-white/75 dark:bg-black/50 text-[9px] text-gray-200 border border-white/10 font-mono">
                           {catLabel}
                         </span>
                         <div className="absolute inset-0 bg-brand/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
@@ -272,10 +272,10 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
                         src={resolveUrl(img)}
                         alt={asset.name}
                         fallbackAspect="3/4"
-                        className="bg-surface-secondary"
+                        className="bg-white/55 dark:bg-white/[.06]"
                         mediaClassName="group-hover:scale-105 transition-transform duration-300"
                       >
-                        <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-surface/85 text-[9px] text-gray-200 border border-white/10 font-mono">
+                        <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-white/75 dark:bg-black/50 text-[9px] text-gray-200 border border-white/10 font-mono">
                           {catLabel}
                         </span>
                         {asset.scope === 'global' && (

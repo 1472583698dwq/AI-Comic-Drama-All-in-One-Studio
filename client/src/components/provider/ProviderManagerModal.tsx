@@ -183,39 +183,39 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-md p-4 animate-fade-in">
-      <div className={directEdit ? 'contents' : 'w-full max-w-6xl h-[85vh] bg-surface rounded-2xl border border-border flex flex-col overflow-hidden shadow-2xl'}>
+      <div className={directEdit ? 'contents' : 'w-full max-w-6xl h-[85vh] bg-white/60 dark:bg-white/[.05] rounded-2xl border border-white/70 dark:border-white/12 flex flex-col overflow-hidden shadow-2xl'}>
         {!directEdit && (<>
         {/* Header */}
-        <div className="h-14 px-6 border-b border-border flex items-center justify-between bg-surface-secondary/50 shrink-0">
+        <div className="h-14 px-6 border-b border-white/70 dark:border-white/12 flex items-center justify-between bg-white/50 dark:bg-white/[.04] shrink-0">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-xl bg-brand/20 border border-brand/30 text-brand"><Plug className="w-5 h-5" /></div>
             <div>
-              <h2 className="text-sm font-bold text-white flex items-center gap-2">自定义生成源管理 <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">{customCount} 自定义</span> <span className="text-[10px] px-2 py-0.5 rounded-full bg-surface border border-border text-gray-400">{providers.length} 总计</span></h2>
+              <h2 className="text-sm font-bold text-white flex items-center gap-2">自定义生成源管理 <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">{customCount} 自定义</span> <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 text-gray-400">{providers.length} 总计</span></h2>
               <p className="text-[11px] text-gray-400">增删改查 · 与设置/画布/分镜全域同源 · 导演通过 kind 自动分类</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => window.dispatchEvent(new CustomEvent('open-provider-create', { detail: { tab: 'doc' } }))}
-              className="px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1 bg-surface-secondary border-border text-white hover:border-brand"
+              className="px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1 bg-white/55 dark:bg-white/[.06] border-white/70 dark:border-white/12 text-white hover:border-brand"
             ><FileText className="w-3.5 h-3.5"/> 从文档导入</button>
             <button
               onClick={() => window.dispatchEvent(new CustomEvent('open-provider-create', { detail: { tab: 'code' } }))}
               className="px-3 py-1.5 rounded-xl bg-brand text-white text-xs font-bold flex items-center gap-1"
             ><Plus className="w-3.5 h-3.5"/> 新建</button>
-            <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-surface-tertiary"><X className="w-5 h-5"/></button>
+            <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/65 dark:bg-white/[.09]"><X className="w-5 h-5"/></button>
           </div>
         </div>
 
         {/* Filters */}
-        <div className="px-6 py-3 border-b border-border flex items-center gap-2 shrink-0">
-          <div className="flex items-center gap-1 p-1 rounded-full bg-surface-secondary border border-border">
+        <div className="px-6 py-3 border-b border-white/70 dark:border-white/12 flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1 p-1 rounded-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12">
             {(['all','image','video','audio'] as const).map(k=> (
               <button key={k} onClick={()=> { setFilter(k); setCapFilter('all'); }} className={`px-3 py-1 rounded-full text-xs font-medium ${filter===k?'bg-brand text-white shadow-sm':'text-gray-400 hover:text-white'}`}>{k==='all'?'全部':k==='image'?'生图':k==='video'?'视频':'语音'}</button>
             ))}
           </div>
-          <input value={q} onChange={e=> setQ(e.target.value)} placeholder="搜索 名称/ID…" className="flex-1 max-w-xs bg-surface-secondary border border-border rounded-full px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand"/>
-          <select value={capFilter} onChange={e=> setCapFilter(e.target.value)} className="bg-surface-secondary border border-border rounded-full px-3 py-1.5 text-xs text-white focus:outline-none focus:border-brand" title="按能力细分筛选">
+          <input value={q} onChange={e=> setQ(e.target.value)} placeholder="搜索 名称/ID…" className="flex-1 max-w-xs bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-full px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand"/>
+          <select value={capFilter} onChange={e=> setCapFilter(e.target.value)} className="bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-full px-3 py-1.5 text-xs text-white focus:outline-none focus:border-brand" title="按能力细分筛选">
             <option value="all">全部能力</option>
             {capOptions.map(o=> <option key={o.id} value={o.id}>{o.label}</option>)}
           </select>
@@ -229,30 +229,30 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
               const Icon = kindIcon[p.kind] || Plug;
               const color = kindColor[p.kind] || 'text-brand';
               return (
-                <div key={p.id} className={`p-4 rounded-xl border flex flex-col gap-2 ${p.builtin?'bg-surface-secondary/40 border-border':'bg-surface border-brand/20 shadow-sm'}`}>
+                <div key={p.id} className={`p-4 rounded-xl border flex flex-col gap-2 ${p.builtin?'bg-white/40 dark:bg-white/[.03] border-white/70 dark:border-white/12':'bg-white/60 dark:bg-white/[.05] border-brand/20 shadow-sm'}`}>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 min-w-0">
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center border bg-surface-secondary ${p.builtin?'border-border':'border-brand/20'}`}><Icon className={`w-4 h-4 ${color}`} /></div>
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center border bg-white/55 dark:bg-white/[.06] ${p.builtin?'border-white/70 dark:border-white/12':'border-brand/20'}`}><Icon className={`w-4 h-4 ${color}`} /></div>
                       <div className="min-w-0">
                         <div className="text-xs font-bold text-white truncate">{p.display_name || p.name || p.id}</div>
                         <div className="text-[10px] font-mono text-gray-500 truncate">{p.id} · {p.kind} {p.provider_type?`·${p.provider_type}`:''}</div>
                       </div>
                     </div>
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full border ${p.builtin?'bg-surface border-border text-gray-400':'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'}`}>{p.builtin?'内置':'自定义'}</span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full border ${p.builtin?'bg-white/60 dark:bg-white/[.05] border-white/70 dark:border-white/12 text-gray-400':'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'}`}>{p.builtin?'内置':'自定义'}</span>
                   </div>
                   {p.description && <div className="text-[11px] text-gray-400 line-clamp-2">{p.description}</div>}
                   <div className="flex flex-wrap items-center gap-1">
                     {getCapabilities(p).map(c=> (
-                      <span key={c} title={c} className={`text-[10px] px-1.5 py-0.5 rounded border ${Array.isArray(p.capabilities) && p.capabilities.length ? 'bg-brand/10 border-brand/30 text-brand-light' : 'bg-surface-secondary border-border text-gray-500'}`}>{(CAPABILITIES_BY_KIND[p.kind] || []).find(o=>o.id===c)?.label || c}</span>
+                      <span key={c} title={c} className={`text-[10px] px-1.5 py-0.5 rounded border ${Array.isArray(p.capabilities) && p.capabilities.length ? 'bg-brand/10 border-brand/30 text-brand-light' : 'bg-white/55 dark:bg-white/[.06] border-white/70 dark:border-white/12 text-gray-500'}`}>{(CAPABILITIES_BY_KIND[p.kind] || []).find(o=>o.id===c)?.label || c}</span>
                     ))}
                   </div>
                   <div className="text-[10px] font-mono text-gray-500 truncate" title={p.transport?.url}>URL: {p.transport?.url || '—'}</div>
                   <div className="flex items-center gap-1.5 text-[10px] text-gray-500">
-                    <span>模型:</span><span className="px-1.5 py-0.5 rounded bg-surface-secondary text-gray-300 truncate max-w-[140px]">{p.default_model || p.models?.[0] || '—'}</span>
-                    <span className="ml-auto flex items-center gap-1">{p.health?.ok ? <span className="w-2 h-2 rounded-full bg-emerald-500"/> : p.health?.ok===false ? <span className="w-2 h-2 rounded-full bg-amber-500"/> : null}{p.builtin?'':<span className="px-1 py-0.5 rounded bg-surface-secondary">{p.params_schema ? Object.keys(p.params_schema.properties||{}).length+' 参数' : '无参'}</span>}</span>
+                    <span>模型:</span><span className="px-1.5 py-0.5 rounded bg-white/55 dark:bg-white/[.06] text-gray-300 truncate max-w-[140px]">{p.default_model || p.models?.[0] || '—'}</span>
+                    <span className="ml-auto flex items-center gap-1">{p.health?.ok ? <span className="w-2 h-2 rounded-full bg-emerald-500"/> : p.health?.ok===false ? <span className="w-2 h-2 rounded-full bg-amber-500"/> : null}{p.builtin?'':<span className="px-1 py-0.5 rounded bg-white/55 dark:bg-white/[.06]">{p.params_schema ? Object.keys(p.params_schema.properties||{}).length+' 参数' : '无参'}</span>}</span>
                   </div>
                   <div className="flex items-center gap-1.5 pt-1">
-                    <button onClick={()=> handleTest(p.id)} className="flex-1 py-1.5 rounded-lg bg-surface-secondary border border-border text-xs text-white hover:border-brand flex items-center justify-center gap-1"><Activity className="w-3 h-3"/> 测试</button>
+                    <button onClick={()=> handleTest(p.id)} className="flex-1 py-1.5 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-xs text-white hover:border-brand flex items-center justify-center gap-1"><Activity className="w-3 h-3"/> 测试</button>
                     <button onClick={()=> openEdit(p)} className="flex-1 py-1.5 rounded-lg bg-brand/10 border border-brand/20 text-brand-light text-xs flex items-center justify-center gap-1"><Edit3 className="w-3 h-3"/> {p.builtin?'查看':'编辑'}</button>
                     {!p.builtin && <button onClick={()=> handleDelete(p.id)} className="px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs flex items-center gap-1"><Trash2 className="w-3 h-3"/> 删除</button>}
                   </div>
@@ -267,11 +267,11 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
 
         {/* Edit Drawer */}
         {editing && (
-          <div className="absolute inset-0 bg-surface/85 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="w-full max-w-2xl max-h-[85vh] bg-surface rounded-2xl border border-border flex flex-col overflow-hidden">
-              <div className="h-12 px-4 border-b border-border flex items-center justify-between shrink-0">
+          <div className="absolute inset-0 bg-white/75 dark:bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="w-full max-w-2xl max-h-[85vh] bg-white/60 dark:bg-white/[.05] rounded-2xl border border-white/70 dark:border-white/12 flex flex-col overflow-hidden">
+              <div className="h-12 px-4 border-b border-white/70 dark:border-white/12 flex items-center justify-between shrink-0">
                 <span className="text-sm font-bold text-white">{editing.builtin?'查看':'编辑'} {editing.id}</span>
-                <button onClick={closeEdit} className="p-1 rounded hover:bg-surface-tertiary"><X className="w-4 h-4 text-gray-400"/></button>
+                <button onClick={closeEdit} className="p-1 rounded hover:bg-white/65 dark:bg-white/[.09]"><X className="w-4 h-4 text-gray-400"/></button>
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar text-xs">
                 {/* 代码型一键修正 */}
@@ -292,7 +292,7 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
                         type="password" value={editApiKey} autoComplete="off"
                         onChange={e=> setEditApiKey(e.target.value)}
                         placeholder="留空则不改动已保存的 Key"
-                        className="flex-1 bg-surface-secondary border border-border rounded-lg px-3 py-2 text-xs text-white placeholder-gray-500 font-mono"
+                        className="flex-1 bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-lg px-3 py-2 text-xs text-white placeholder-gray-500 font-mono"
                       />
                       <button
                         onClick={async ()=>{
@@ -306,7 +306,7 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
                             window.dispatchEvent(new Event('provider-list-refresh'));
                           } catch(e:any){ toast.error(e?.message || '清除失败'); }
                         }}
-                        className="px-2.5 py-2 rounded-lg bg-surface border border-border text-[11px] text-gray-400 hover:text-white shrink-0"
+                        className="px-2.5 py-2 rounded-lg bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 text-[11px] text-gray-400 hover:text-white shrink-0"
                       >清除</button>
                     </div>
                     <div className="text-[10.5px] text-gray-500">代码里用 <code className="font-mono">api.get("api_key")</code> 取，不用写死在代码中</div>
@@ -332,9 +332,9 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
                     <div key={f.k} className="space-y-1">
                       <span className="text-[11px] font-semibold text-gray-300">{f.label} <span className="text-[10px] text-gray-500">{f.k}</span></span>
                       {f.type==='textarea' ? (
-                        <textarea value={display} onChange={e=> setEditing({...editing, [f.k]: e.target.value})} rows={2} className="w-full bg-surface-secondary border border-border rounded-lg p-2 font-mono text-xs text-white focus:outline-none focus:border-brand" disabled={editing.builtin}/>
+                        <textarea value={display} onChange={e=> setEditing({...editing, [f.k]: e.target.value})} rows={2} className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-lg p-2 font-mono text-xs text-white focus:outline-none focus:border-brand" disabled={editing.builtin}/>
                       ) : f.type==='code' ? (
-                        <textarea value={display} onChange={e=> setEditing({...editing, [f.k]: e.target.value})} rows={10} className="w-full bg-surface-secondary border border-border rounded-lg p-2 font-mono text-[11px] text-white focus:outline-none focus:border-brand" disabled={editing.builtin} placeholder="async def generate(ctx, api): ... # 末尾可追加 # PARAMS_SCHEMA: {...}"/>
+                        <textarea value={display} onChange={e=> setEditing({...editing, [f.k]: e.target.value})} rows={10} className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-lg p-2 font-mono text-[11px] text-white focus:outline-none focus:border-brand" disabled={editing.builtin} placeholder="async def generate(ctx, api): ... # 末尾可追加 # PARAMS_SCHEMA: {...}"/>
                       ) : f.type==='custom_headers' ? (
                         <CustomHeadersEditor
                           headers={editing.headers || editing.custom_headers || {}}
@@ -342,20 +342,20 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
                           disabled={editing.builtin}
                         />
                       ) : f.type==='json' ? (
-                        <textarea value={display} onChange={e=> setEditing({...editing, [f.k]: e.target.value})} rows={4} className="w-full bg-surface-secondary border border-border rounded-lg p-2 font-mono text-[11px] text-white focus:outline-none focus:border-brand" disabled={editing.builtin}/>
+                        <textarea value={display} onChange={e=> setEditing({...editing, [f.k]: e.target.value})} rows={4} className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-lg p-2 font-mono text-[11px] text-white focus:outline-none focus:border-brand" disabled={editing.builtin}/>
                       ) : f.type==='select' ? (
-                        <select value={val||''} onChange={e=> setEditing({...editing, [f.k]: e.target.value})} className="w-full bg-surface-secondary border border-border rounded-lg px-2 py-1.5 text-xs text-white" disabled={editing.builtin}>
+                        <select value={val||''} onChange={e=> setEditing({...editing, [f.k]: e.target.value})} className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-lg px-2 py-1.5 text-xs text-white" disabled={editing.builtin}>
                           {f.opts?.map((o:string)=> <option key={o} value={o}>{o}</option>
                           )}
                         </select>
                       ) : f.type==='caps' ? (
-                        <div className="flex flex-wrap gap-1.5 p-2 rounded-lg bg-surface-secondary border border-border">
+                        <div className="flex flex-wrap gap-1.5 p-2 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12">
                           {!(CAPABILITIES_BY_KIND[editing.kind] || []).length && <span className="text-[11px] text-gray-500">该类型暂无能力选项</span>}
                           {(CAPABILITIES_BY_KIND[editing.kind] || []).map(o=> {
                             const cur: string[] = Array.isArray(editing.capabilities) ? editing.capabilities : [];
                             const on = cur.includes(o.id);
                             return (
-                              <button key={o.id} disabled={editing.builtin} title={o.desc} onClick={()=> setEditing({...editing, capabilities: on ? cur.filter(c=>c!==o.id) : [...cur, o.id]})} className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition-all ${on ? 'bg-brand/20 border-brand text-white' : 'bg-surface-secondary border-border text-gray-400 hover:text-white'}`}>{o.label}</button>
+                              <button key={o.id} disabled={editing.builtin} title={o.desc} onClick={()=> setEditing({...editing, capabilities: on ? cur.filter(c=>c!==o.id) : [...cur, o.id]})} className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition-all ${on ? 'bg-brand/20 border-brand text-white' : 'bg-white/55 dark:bg-white/[.06] border-white/70 dark:border-white/12 text-gray-400 hover:text-white'}`}>{o.label}</button>
                             );
                           })}
                           {!editing.builtin && Array.isArray(editing.capabilities) && editing.capabilities.length > 0 && <button onClick={()=> setEditing({...editing, capabilities: []})} className="px-2 py-1 text-[11px] text-gray-500 hover:text-white underline">清空（改自动推断）</button>}
@@ -364,15 +364,15 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
                         <input value={f.k==='models' && Array.isArray(val) ? val.join(',') : display} onChange={e=> {
                           if (f.k==='models') setEditing({...editing, [f.k]: e.target.value.split(',').map((s:string)=>s.trim()).filter(Boolean)});
                           else setEditing({...editing, [f.k]: e.target.value});
-                        }} className="w-full bg-surface-secondary border border-border rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-brand" disabled={editing.builtin}/>
+                        }} className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-brand" disabled={editing.builtin}/>
                       )}
                     </div>
                   );
                 })}
                 <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-200">内置源只读；自定义源可直接改 JSON 后保存。kind 决定全局分类（设置/画布/分镜），由导演通过 MCP kind 参数自动填。</div>
               </div>
-              <div className="p-3 border-t border-border flex justify-end gap-2 shrink-0">
-                <button onClick={closeEdit} className="px-4 py-1.5 rounded-lg bg-surface-secondary border border-border text-xs text-white">取消</button>
+              <div className="p-3 border-t border-white/70 dark:border-white/12 flex justify-end gap-2 shrink-0">
+                <button onClick={closeEdit} className="px-4 py-1.5 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-xs text-white">取消</button>
                 {!editing.builtin && <button onClick={handleSaveEdit} className="px-4 py-1.5 rounded-lg bg-brand text-white text-xs font-bold flex items-center gap-1"><Save className="w-3.5 h-3.5"/> 保存</button>}
               </div>
             </div>

@@ -207,9 +207,27 @@ class TestManager(TeamStorageBase):
         state.set_disabled("agent_profile:palette_girl", True)
         state.set_disabled("agent_team:test_team", True)
         self.assertEqual(list_effective_profiles(), [])
+        # 内置默认导演组始终存在（可被停用过滤）；文件团队停用后仅剩内置组
+        teams = list_effective_teams()
+        self.assertEqual([t.id for t in teams], ["studio-default"])
+        state.set_disabled("agent_team:studio-default", True)
         self.assertEqual(list_effective_teams(), [])
         # include_disabled 仍可见
         self.assertEqual(len(list_effective_profiles(include_disabled=True)), 1)
+        self.assertEqual(len(list_effective_teams(include_disabled=True)), 2)
+
+    def test_builtin_default_team_resolvable_and_overridable(self):
+        from app.agent_teams.manager import BUILTIN_TEAMS, get_effective_team, list_effective_teams
+        spec = get_effective_team("studio-default")
+        self.assertIsNotNone(spec)
+        self.assertEqual(spec.playbook, "")  # 简化流程：不写死编排脚本
+        self.assertIn("video_operator", spec.members)
+        self.assertNotIn("storyboard_artist", spec.members)  # 默认流程不生成分镜画面
+        # 文件同名 → 覆盖内置
+        agent_team_manager.save_team(AgentTeamSpec.model_validate(_team_payload(id="studio-default", members=["screenwriter"])))
+        overridden = get_effective_team("studio-default")
+        self.assertEqual(overridden.members, ["screenwriter"])
+        self.assertTrue(BUILTIN_TEAMS["studio-default"].members)
 
 
 class TestRuntimeMerge(TeamStorageBase):
@@ -283,6 +301,18 @@ class TestOneKeyTeamPrompt(TeamStorageBase):
         self.assertIn("ok_def", prompt)
         self.assertIn("subagent_run", prompt)
         self.assertNotIn("只能委派以下成员", prompt)
+
+    def test_prompt_skill_injection(self):
+        from app.api.onekey_routes import OneKeyRunRequest, _director_prompt
+        req = OneKeyRunRequest(text="x" * 30, title="技能片", prompt_skill="minimax-h3-prompt")
+        prompt = _director_prompt("ok_skill", req, None)
+        self.assertIn("minimax-h3-prompt", prompt)
+        self.assertIn("read_skill", prompt)
+        self.assertIn("prompt_override", prompt)
+        # 不指定时给推荐技能提示（兜底）
+        req2 = OneKeyRunRequest(text="x" * 30, title="自动片")
+        prompt2 = _director_prompt("ok_auto", req2, None)
+        self.assertIn("prompt-basics", prompt2)
 
     def test_disabled_team_resolves_none(self):
         from app.api.onekey_routes import _resolve_team

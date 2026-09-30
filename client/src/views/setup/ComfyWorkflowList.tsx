@@ -45,8 +45,8 @@ export const ComfyWorkflowList: React.FC<Props> = ({ defaultImage, defaultVideo,
   };
 
   return (
-    <div className="mt-3.5 rounded-xl border border-border bg-surface-secondary/40 overflow-hidden">
-      <div className="px-3.5 py-2 border-b border-border/70 flex items-center gap-2">
+    <div className="mt-3.5 rounded-xl border border-white/70 dark:border-white/12 bg-white/40 dark:bg-white/[.03] overflow-hidden">
+      <div className="px-3.5 py-2 border-b border-white/60 dark:border-white/12 flex items-center gap-2">
         <span className="text-[11.5px] font-bold [color:var(--color-text-main)]">工作流</span>
         <span className="text-[10.5px] text-gray-500">{list.length} 个 · 每个都是一个生成源</span>
         <button
@@ -77,7 +77,7 @@ export const ComfyWorkflowList: React.FC<Props> = ({ defaultImage, defaultVideo,
                     <span className="text-[11.5px] text-[color:var(--color-text-main)] truncate">{wf.name || wf.id}</span>
                     <span className={`text-[9px] px-1.5 py-0.5 rounded border ${
                       wf.source === 'internal'
-                        ? 'border-border bg-surface-tertiary text-gray-400'
+                        ? 'border-white/70 dark:border-white/12 bg-white/65 dark:bg-white/[.09] text-gray-400'
                         : 'border-sky-500/40 bg-sky-500/10 text-sky-300'}`}>
                       {wf.source === 'internal' ? '已导入' : '外部直读'}
                     </span>
@@ -89,16 +89,16 @@ export const ComfyWorkflowList: React.FC<Props> = ({ defaultImage, defaultVideo,
                 <div className="flex items-center gap-1">
                   <button onClick={() => onSetDefault('COMFYUI_DEFAULT_IMAGE_WORKFLOW', isImg ? '' : wf.id)}
                     className={`px-2 py-0.5 rounded-lg border text-[10.5px] flex items-center gap-1 ${
-                      isImg ? 'border-amber-500/40 bg-amber-500/10 text-amber-300' : 'border-border bg-surface text-gray-400 hover:text-white'}`}>
+                      isImg ? 'border-amber-500/40 bg-amber-500/10 text-amber-300' : 'border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] text-gray-400 hover:text-white'}`}>
                     <ImageIcon className="w-2.5 h-2.5" />{isImg ? '取消默认' : '设默认生图'}
                   </button>
                   <button onClick={() => onSetDefault('COMFYUI_DEFAULT_VIDEO_WORKFLOW', isVid ? '' : wf.id)}
                     className={`px-2 py-0.5 rounded-lg border text-[10.5px] flex items-center gap-1 ${
-                      isVid ? 'border-violet-500/40 bg-violet-500/10 text-violet-300' : 'border-border bg-surface text-gray-400 hover:text-white'}`}>
+                      isVid ? 'border-violet-500/40 bg-violet-500/10 text-violet-300' : 'border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] text-gray-400 hover:text-white'}`}>
                     <Video className="w-2.5 h-2.5" />{isVid ? '取消默认' : '设默认视频'}
                   </button>
                   <button onClick={() => setInspectId(wf.id)} title="查看/编辑槽位参数"
-                    className="px-2 py-0.5 rounded-lg border border-border bg-surface text-[10.5px] text-gray-300 hover:text-white flex items-center gap-1">
+                    className="px-2 py-0.5 rounded-lg border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] text-[10.5px] text-gray-300 hover:text-white flex items-center gap-1">
                     <Sliders className="w-2.5 h-2.5" />参数
                   </button>
                   {wf.source === 'internal' && (

@@ -88,7 +88,7 @@ export const TimelineStudioAssets: React.FC<Props> = ({
       className={`px-2 py-0.5 rounded-full text-[10px] border transition-colors ${
         filter === id
           ? 'border-brand/60 bg-brand/15 text-brand'
-          : 'border-border [color:var(--color-text-muted)] hover:[color:var(--color-text-secondary)]'
+          : 'border-white/70 dark:border-white/12 [color:var(--color-text-muted)] hover:[color:var(--color-text-secondary)]'
       }`}
     >
       {label}
@@ -97,7 +97,7 @@ export const TimelineStudioAssets: React.FC<Props> = ({
 
   return (
     <div
-      className={`w-[236px] shrink-0 my-3 ml-3 rounded-2xl border border-border overflow-hidden flex flex-col transition-colors ${dragging ? 'bg-brand/8' : ''}`}
+      className={`w-[236px] shrink-0 my-3 ml-3 rounded-2xl border border-white/70 dark:border-white/12 overflow-hidden flex flex-col transition-colors ${dragging ? 'bg-brand/8' : ''}`}
       style={{ background: 'var(--color-surface)' }}
       onDragOver={(e) => {
         e.preventDefault();
@@ -126,7 +126,7 @@ export const TimelineStudioAssets: React.FC<Props> = ({
         <button
           onClick={onBrowse}
           title="从画布产出 / 角色库 / 项目素材库 / 本地上传中挑选"
-          className="ml-auto h-6 px-1.5 rounded-md border border-border text-[10.5px] [color:var(--color-text-secondary)] hover:text-brand hover:border-brand/50 flex items-center gap-0.5 transition-colors"
+          className="ml-auto h-6 px-1.5 rounded-md border border-white/70 dark:border-white/12 text-[10.5px] [color:var(--color-text-secondary)] hover:text-brand hover:border-brand/50 flex items-center gap-0.5 transition-colors"
         >
           <Plus className="w-3 h-3" strokeWidth={2} />
           导入
@@ -147,7 +147,7 @@ export const TimelineStudioAssets: React.FC<Props> = ({
         {tab === 'imported' && (
           <div className="space-y-1">
             {clips.length === 0 && (
-              <div className="mt-6 rounded-xl border border-dashed border-border p-4 text-center text-[10.5px] leading-relaxed [color:var(--color-text-muted)]">
+              <div className="mt-6 rounded-xl border border-dashed border-white/70 dark:border-white/12 p-4 text-center text-[10.5px] leading-relaxed [color:var(--color-text-muted)]">
                 将文件拖拽至此处添加
                 <br />
                 或点右上「导入」
@@ -160,7 +160,7 @@ export const TimelineStudioAssets: React.FC<Props> = ({
                   key={c.id}
                   onClick={() => onSelect(c.id)}
                   className={`w-full flex items-center gap-2 p-1.5 rounded-lg border text-left transition-colors ${
-                    selectedId === c.id ? 'border-brand/60 bg-brand/10' : 'border-border hover:border-brand/40'
+                    selectedId === c.id ? 'border-brand/60 bg-brand/10' : 'border-white/70 dark:border-white/12 hover:border-brand/40'
                   }`}
                 >
                   <span className="w-12 h-8 rounded-md overflow-hidden shrink-0 flex items-center justify-center" style={{ background: 'var(--color-surface-tertiary)' }}>
@@ -187,7 +187,7 @@ export const TimelineStudioAssets: React.FC<Props> = ({
               </div>
             )}
             {!loading && !assets.filter((a) => matchFilter(a.file_url || '')).length && (
-              <div className="mt-6 rounded-xl border border-dashed border-border p-4 text-center text-[10.5px] leading-relaxed [color:var(--color-text-muted)]">
+              <div className="mt-6 rounded-xl border border-dashed border-white/70 dark:border-white/12 p-4 text-center text-[10.5px] leading-relaxed [color:var(--color-text-muted)]">
                 素材库里还没有可用的视频 / 音频
                 <br />
                 将文件拖拽至此处添加
@@ -204,7 +204,7 @@ export const TimelineStudioAssets: React.FC<Props> = ({
                       key={a.id}
                       onClick={() => onAddUrls([url])}
                       title={`${a.name} · 点击加入时间线`}
-                      className="w-full flex items-center gap-2 p-1.5 rounded-lg border border-border hover:border-brand/50 text-left transition-colors"
+                      className="w-full flex items-center gap-2 p-1.5 rounded-lg border border-white/70 dark:border-white/12 hover:border-brand/50 text-left transition-colors"
                     >
                       <span className="w-12 h-8 rounded-md overflow-hidden shrink-0 flex items-center justify-center" style={{ background: 'var(--color-surface-tertiary)' }}>
                         {isAudio ? (

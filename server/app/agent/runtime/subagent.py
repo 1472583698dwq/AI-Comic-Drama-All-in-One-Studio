@@ -63,6 +63,9 @@ def _depth_of(loop) -> int:
         return 0
 
 
+_EMPTY_RESULT = "（子代理未产出文本结果）"
+
+
 def _session_id_of(loop) -> str:
     try:
         return str(getattr(getattr(loop, "session", None), "id", "") or "")
@@ -125,7 +128,7 @@ class SubAgentPool:
     def _timeout(self, override: Optional[float]) -> float:
         if override:
             return float(override)
-        return float(_env_int("AGENT_SUBAGENT_TIMEOUT", 600))
+        return float(_env_int("AGENT_SUBAGENT_TIMEOUT", 1200))
 
     def _semaphore(self, parent) -> asyncio.Semaphore:
         key = _session_id_of(parent) or "default"
@@ -382,28 +385,55 @@ class SubAgentPool:
             pass
 
     async def _batch_summary(self, parent, batch_id: str, handles: List[SubAgentHandle]) -> Dict[str, Any]:
+        def _empty(h) -> bool:
+            return h.status == "success" and str(h.result or "").strip() in ("", _EMPTY_RESULT)
+
         total = len(handles)
         success = sum(1 for h in handles if h.status == "success")
         failed = total - success
+        no_output = sum(1 for h in handles if _empty(h))
         critical_ms = max((h.elapsed_ms for h in handles), default=0)
         peak = self._peak.pop(batch_id, 0)
         items = []
         for i, h in enumerate(handles):
             items.append({
                 "index": i, "subagent_id": h.id, "status": h.status,
+                "no_output": True if _empty(h) else None,
                 "result": (h.result[:1500] if h.status == "success" else None),
                 "error": h.error or None,
             })
         metrics = {"batch_id": batch_id, "agent": handles[0].agent if handles else "",
-                   "total": total, "success": success, "failed": failed,
+                   "total": total, "success": success, "failed": failed, "no_output": no_output,
                    "critical_steps_ms": critical_ms, "parallel_width": peak}
         await self._notify_parent(parent, E.SUBAGENT_METRICS, metrics)
         return {"batch_id": batch_id, "status": "success" if failed == 0 else "partial",
-                "total": total, "success": success, "failed": failed,
+                "total": total, "success": success, "failed": failed, "no_output": no_output,
+                "note": ("有子项未产出结果（no_output=true），勿当作成功，需核对产物" if no_output else None),
                 "critical_steps_ms": critical_ms, "parallel_width": peak,
                 "items": items}
 
     # ── 执行 ─────────────────────────────────────────────
+    _CTX_SKIP_KEYS = {"subagent_depth", "parent_session", "project_title", "agent",
+                      "subagent_id", "project", "agent_focus_nodes", "canvas_summary"}
+
+    @classmethod
+    def _child_prompt(cls, profile, task: str, ctx: Optional[Dict[str, Any]]) -> str:
+        """子代理首条提示词：任务文本 + 显式上下文（draft_id 等键值对，保证子代理"看得到"）。"""
+        text = f"你是子代理（角色：{profile.name}）。独立完成以下子任务并只输出最终结果：\n{task}"
+        pairs = []
+        for k, v in (ctx or {}).items():
+            if k in cls._CTX_SKIP_KEYS or v is None:
+                continue
+            if isinstance(v, (str, int, float, bool)):
+                s = str(v).strip()
+                if s:
+                    pairs.append(f"- {k}: {s[:300]}")
+            if len(pairs) >= 12:
+                break
+        if pairs:
+            text += "\n\n任务上下文（调用工具时直接使用，不要自行猜测）：\n" + "\n".join(pairs)
+        return text
+
     async def _guarded_run(self, parent, h: SubAgentHandle, profile: AgentProfile,
                            context: Optional[Dict[str, Any]],
                            max_steps: Optional[int], timeout_s: Optional[float]) -> None:
@@ -465,7 +495,7 @@ class SubAgentPool:
             )
             h.loop = child
             self._attach_progress_bridge(parent, h, child)
-            await child.prompt(f"你是子代理（角色：{profile.name}）。独立完成以下子任务并只输出最终结果：\n{h.task}")
+            await child.prompt(self._child_prompt(profile, h.task, ctx))
             await child.wait_idle(timeout=to)
             if child.is_running():
                 try:
@@ -477,9 +507,9 @@ class SubAgentPool:
             else:
                 h.status = "success"
                 try:
-                    h.result = child.session.last_assistant_text() or "（子代理未产出文本结果）"
+                    h.result = child.session.last_assistant_text() or _EMPTY_RESULT
                 except Exception:
-                    h.result = ""
+                    h.result = _EMPTY_RESULT
         except asyncio.CancelledError:
             h.status = "cancelled"
             h.error = "已取消"
@@ -521,15 +551,22 @@ class SubAgentPool:
                 etype = ev.get("event")
                 if etype not in ("tool_calling", "tool_result"):
                     return
+                is_result = etype == "tool_result"
                 now = time.time()
-                if now - last["ts"] < 0.8:
+                # 调用阶段节流 0.8s；结果阶段全量透传（轨迹要完整）
+                if not is_result and now - last["ts"] < 0.8:
                     return
                 last["ts"] = now
+                detail = ""
+                if is_result and str(ev.get("status") or "") != "success":
+                    detail = str(ev.get("error") or "")[:160]
                 emit = getattr(parent, "_emit", None)
                 if callable(emit):
                     r = emit({"event": "subagent_progress", "subagent_id": h.id,
                               "agent": h.agent, "tool_name": ev.get("tool_name") or "",
-                              "status": ev.get("status") or etype})
+                              "phase": "result" if is_result else "calling",
+                              "status": (str(ev.get("status") or "") if is_result else ""),
+                              "detail": detail})
                     if asyncio.iscoroutine(r):
                         asyncio.get_running_loop().create_task(r)
                 if h.batch_id:

@@ -9,7 +9,7 @@ from fastapi.concurrency import run_in_threadpool
 from app.core import features
 from app.models.schemas import (
     Project, ScriptParseRequest, TTSGenerateRequest,
-    ImageGenerateRequest, Character3ViewsRequest, PipelineRunRequest,
+    ImageGenerateRequest, Character3ViewsRequest,
     VideoGenerateRequestPayload,
     MCPToolDefinition, MCPToolCallRequest, MCPToolCallResponse
 )
@@ -17,7 +17,6 @@ from app.pipelines.script_agent import script_agent
 from app.pipelines.llm_service import llm_service, LLMServiceError
 from app.pipelines.jianyin_exporter import jianyin_exporter, DraftExportError, engine_status as jianyin_engine_status
 from app.pipelines.consistency_engine import consistency_engine
-from app.pipelines.unified_orchestrator import unified_orchestrator
 from app.mcp.server import mcp_registry
 from app.skills.engine import skill_engine, SkillDefinition, SkillExecutionResult
 from app.core.config import settings, read_env_file, write_env_file, MANAGED_KEYS, get_primary_env_file, JSON_CONFIG_FILE, _is_secret_key
@@ -1019,36 +1018,6 @@ async def export_jianyin_draft(project: Project):
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"剪映草稿导出失败: {type(e).__name__}: {e}")
-
-# ============================================================
-# 全链路编排（LLM 拆解 → 生图 → 配音 → 导出）
-# ============================================================
-
-@router.post("/pipeline/full-run")
-async def pipeline_full_run(req: PipelineRunRequest):
-    """全链路真实编排：小说 → 拆解 → 角色资产 → 批量生图 → 图生视频 → TTS → 剪映草稿"""
-    try:
-        return await unified_orchestrator.execute_full_pipeline(
-            novel_text=req.text,
-            style_preset=req.style_preset,
-            aspect_ratio=req.aspect_ratio,
-            custom_instructions=req.custom_instructions or "",
-            max_images=req.max_images,
-            image_provider=getattr(req, "image_provider", None),
-            image_workflow_id=getattr(req, "image_workflow_id", None),
-            audio_provider=getattr(req, "audio_provider", None),
-            video_provider=getattr(req, "video_provider", None),
-            video_workflow_id=getattr(req, "video_workflow_id", None),
-            enable_video=getattr(req, "enable_video", True),
-            max_videos=getattr(req, "max_videos", 6),
-            gen_roles=getattr(req, "gen_roles", True),
-            max_roles=getattr(req, "max_roles", 4),
-        )
-    except LLMServiceError as e:
-        raise HTTPException(status_code=503, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"全链路执行失败: {e}")
-
 # ============================================================
 # 导演 Agent 实时通道（真 LLM 决策，暴露全部生成能力）
 # ============================================================

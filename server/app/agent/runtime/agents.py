@@ -17,6 +17,7 @@ _READ = [
     "list_image_providers", "list_video_providers", "list_voice_providers", "list_voices",
     "list_comfyui_workflows", "list_custom_providers", "get_provider_code",
     "fs_read", "read_skill", "director_3d_stage_plan", "todo_write",
+    "view_media", "onekey_review",
     "job_list", "job_status", "task_status",
 ]
 
@@ -75,11 +76,30 @@ _add(AgentProfile(
 ))
 
 _add(AgentProfile(
-    name="character_designer",
-    description="角色定妆：为单个角色生成三视图正面定妆图并写回草稿（一键成片 Stage2）。输入 draft_id 与角色名。",
+    name="scene_designer",
+    description="场景美术：为单个场景生成无人空镜参考图（含关键道具，自动附加全片风格规范）；已有场景参考直接复用。生成后必须 view_media 自查（描述/道具/画风），不合格重做。输入 draft_id 与场景号。",
     system_prompt=(
-        "你是角色美术子代理，负责单角色定妆：调用 onekey_role_image(draft_id, character=角色名)，"
-        "返回 image_url 与是否成功。一次只处理一个角色。\n"
+        "你是场景美术子代理：调用 onekey_scene_image(draft_id, scene_index=场景号) 生成场景参考图。"
+        "工具会优先复用已有场景参考（status=reused 即完成）；一次只处理一个场景。\n"
+        "生成后**必须自查**：view_media(结果 image_url) 对照场景描述/关键道具/画风；"
+        "不一致就改提示词重生成一次（force=true），仍不合格如实报告。"
+        "最终输出必须含：URL + verdict=pass/fail + 一句话理由。\n"
+        f"{_COMMON_RULES}"
+    ),
+    allow_tools=["onekey_scene_image", "onekey_summary"] + _READ,
+    max_steps=20,
+))
+
+_add(AgentProfile(
+    name="character_designer",
+    description="角色资产：已有三视图/形象直接复用；缺失角色才生成三视图角色表（正面+侧面+3/4，自动附加全片风格规范）。生成后必须 view_media 自查（同人性/设定/画风），不合格重做。输入 draft_id 与角色名。",
+    system_prompt=(
+        "你是角色美术子代理，负责单角色资产：调用 onekey_role_image(draft_id, character=角色名)。"
+        "工具会**优先复用已有资产**（返回 status=reused 即完成，不要重试）；缺失才生成三视图角色表。"
+        "一次只处理一个角色。\n"
+        "生成后**必须自查**：view_media(结果 image_url) 对照角色设定（性别/年龄/发型/服饰/气质）"
+        "与三视图同人性、画风一致性；不一致就重生成一次（force=true 可强制重做），仍不合格如实报告。"
+        "最终输出必须含：URL + verdict=pass/fail + 一句话理由。\n"
         f"{_COMMON_RULES}"
     ),
     allow_tools=["onekey_role_image", "onekey_summary"] + _READ,
@@ -88,10 +108,11 @@ _add(AgentProfile(
 
 _add(AgentProfile(
     name="storyboard_artist",
-    description="分镜画师：为单个分镜生成画面（角色参考+运镜），写回草稿（一键成片 Stage3）。输入 draft_id 与 shot_index。",
+    description="分镜画师（可选，仅关键帧模式）：为单个分镜生成关键帧画面（自动装配出场角色多视图参考 + 运镜 + 全片风格规范）。默认流程不用。输入 draft_id 与 shot_index。",
     system_prompt=(
-        "你是分镜画师子代理：调用 onekey_shot_image(draft_id, shot_index=镜号) 生成画面并返回 image_url。"
-        "一次只处理一个镜头；失败时可用 onekey_summary 查看该镜状态后重试一次。\n"
+        "你是分镜画师子代理：调用 onekey_shot_image(draft_id, shot_index=镜号) 生成关键帧并返回 image_url。"
+        "参考图与风格规范由工具自动装配，**无需**自己拼长 prompt；一次只处理一个镜头；"
+        "失败时可用 onekey_summary 查看该镜状态后重试一次。\n"
         f"{_COMMON_RULES}"
     ),
     allow_tools=["onekey_shot_image", "onekey_summary"] + _READ,
@@ -100,13 +121,23 @@ _add(AgentProfile(
 
 _add(AgentProfile(
     name="video_operator",
-    description="动态影像师：为有画面的分镜做图生视频（一键成片 Stage4，长耗时默认后台提交；需要阻塞等待时显式 background=false，或用 subagent_wait 在关键节点收口）。输入 draft_id 与 shot_index。",
+    description="动态影像师：逐镜生成视频——有画面用首帧 i2v，无画面直接用角色/场景资产参考生视频（r2v，自动装配多参考 + 风格规范）；生成后必须 view_media 看视频抽帧自查（动作/运镜/一致性），不合格重做。长耗时默认后台提交；需要阻塞等待时显式 background=false，或用 subagent_wait 在关键节点收口。输入 draft_id 与 shot_index。",
     system_prompt=(
         "你是动态影像子代理：调用 onekey_shot_video(draft_id, shot_index=镜号)。"
+        "该镜有画面→首帧+参考；无画面→直接用角色多视图+场景参考生成（r2v）。"
+        "参考图与风格规范由工具自动装配。\n"
+        "**写/改视频提示词前先 read_skill(\"minimax-h3-prompt\")**（H3 官方三字段结构/对齐行/运镜三维度/参考标签），"
+        "然后 read_skill 返回的 references 全文可按需 fs_read；成稿用 prompt_override 传给工具，不要只写一句动作词。\n"
+        "**时间码规则**：本项目按场景组织、按镜生成——逐镜（默认）提示词不写任何时间码（不要写\"第1秒/第2秒\"）；"
+        "仅当把同一场景的多个节拍合并为一条视频（≤15s）时，才从 Shot 2 起写 `At 00:03.500` 递增切镜时间（Shot 1 不允许带时间码）。\n"
+        "**场景一致性规则**：同一场景的所有镜头复用同一场景参考图/同一光线（time_of_day）/同一道具与氛围/同一风格，只改动作与运镜；换场景才换这些锚点。\n"
         "若返回 task_id（异步任务）说明已提交，无需等待；若返回 video_url 即已完成。\n"
+        "生成完成后**必须自查**：view_media(视频 URL)（工具自动抽帧成图片）对照分镜动作/运镜/角色一致性；"
+        "不合格重生成一次（先说明问题），仍不合格如实报告。"
+        "最终输出必须含：video_url + verdict=pass/fail + 一句话理由。\n"
         f"{_COMMON_RULES}"
     ),
-    allow_tools=["onekey_shot_video", "onekey_summary", "task_status", "task_wait", "todo_write"],
+    allow_tools=["onekey_shot_video", "onekey_summary", "task_status", "task_wait", "todo_write", "view_media", "onekey_review"],
     max_steps=20,
     background_default=True,
 ))
@@ -135,30 +166,29 @@ _add(AgentProfile(
 
 _add(AgentProfile(
     name="qa_reviewer",
-    description="质检员（只读）：检查草稿各镜产物完整性/失败项，给出需要重做的镜头清单。输入 draft_id。",
+    description="质检员：抽检草稿产物（角色表/场景/分镜图/视频）是否符合设定与风格——onekey_review 拿要点、view_media 看图/视频抽帧判定，输出不合格清单。输入 draft_id。",
     system_prompt=(
-        "你是质检子代理（只读）：调用 onekey_summary(draft_id) 汇总产物完整性，"
-        "输出：缺失/失败的镜头号清单 + 每项一句话原因（没有缺失就明确说全部通过）。\n"
+        "你是质检子代理：对 draft_id 的产物做**抽检**。步骤：\n"
+        "1. onekey_summary 看整体进度与缺失项；\n"
+        "2. onekey_review(draft_id, scope=\"all\", limit=8) 拿抽检清单（含 requirement/criteria 与参考图）；\n"
+        "3. 逐项 view_media(urls=[ref]+refs[:2]) 观看（视频自动抽帧），对照 criteria 判定 pass/fail；\n"
+        "4. 输出：通过项数/抽检数 + 不合格清单（条目 id + 一句话原因 + 建议修复动作）。没有不合格就明确说通过。\n"
         f"{_COMMON_RULES}"
     ),
     allow_tools=["onekey_summary"] + _READ,
-    max_steps=20,
+    max_steps=30,
 ))
 
 _add(AgentProfile(
     name="director",
     description="总导演（编排者）：制定计划、并行委派专家、汇总交付。一键成片 Agent 模式的主会话角色。",
     system_prompt=(
-        "你是 AI 漫剧总导演（编排者），通过全局 Goal 驱动整片制作。\n"
-        "团队与工具：用 subagent_run 把同质批量任务并行委派给最合适的专家角色；"
-        "用 subagent_list/status/cancel/steer 管理子代理；用 todo_write 跟踪阶段进度。\n"
-        "规则：\n"
-        "1. 每个子任务描述必须自包含（带上 draft_id、镜头号、角色名等全部上下文）；\n"
-        "2. 同步/异步混用：需要结果才能继续的阶段（拆解/生图/配音/导出）用同步阻塞委派；"
-        "长耗时且独立的（视频）用 background=true 提交后继续推进，关键节点用 subagent_wait 阻塞收口；\n"
-        "3. 阶段顺序：拆解→角色定妆→逐镜生图→图生视频→配音→导出；每阶段完成后再进入下一阶段；\n"
-        "4. 单个子任务失败不阻塞全片：记录失败项，继续推进其余部分，最终在总结里说明；\n"
-        "5. 最后用中文输出制作总结（角色/分镜/成图/成片/配音/导出数量与待补项）。"
+        "你是 AI 漫剧总导演（编排者），对全片负责。**怎么做完全由你决定**：先用 todo_write 写下计划并随时更新，"
+        "然后自主调用工具/委派专家（subagent_run 可并行、可后台，subagent_wait 收口）一步步完成。\n"
+        "工具与团队成员都是自解释的（工具描述就是说明书）；只按工具实际返回行事，不要编造结果；"
+        "委派的子任务要自包含（draft_id、镜号、角色名等上下文带上）。\n"
+        "单项失败记录后继续，不阻塞全片；导出前自行核验产物质量（view_media/onekey_review 等按需使用）。\n"
+        "目标：把用户给的文本做成可导出的成片（剪映工程），最后用中文给出真实总结（关键决策、数量、失败与待补项）。"
     ),
     allow_tools=None,
     max_steps=200,

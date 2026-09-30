@@ -142,7 +142,7 @@ export const NodeAgentBar: React.FC<{ nodeId: string; kind: GenKind }> = ({ node
       {/* 源 + 模型 */}
       <div className="flex items-center gap-1.5">
         <select value={providerId} onChange={(e) => selectProvider(e.target.value)}
-          className="flex-1 min-w-0 bg-surface-secondary border border-white/15 rounded-lg px-2 py-1 text-[11px] text-white/90 focus:outline-none focus:border-violet-500">
+          className="flex-1 min-w-0 bg-white/55 dark:bg-white/[.06] border border-white/15 rounded-lg px-2 py-1 text-[11px] text-white/90 focus:outline-none focus:border-violet-500">
           <option value="">{loading ? '加载生成源…' : providers.length ? '选择生成源…' : '无可用源'}</option>
           {providers.map((p) => (
             <option key={p.id} value={p.id}>{p.display_name || p.name}{p.provider_type === 'comfyui' ? ' ·ComfyUI' : p.builtin ? ' ·内置' : ''}</option>
@@ -151,7 +151,7 @@ export const NodeAgentBar: React.FC<{ nodeId: string; kind: GenKind }> = ({ node
         {currentProvider && currentProvider.models?.length > 0 && (
           <select value={d.model || currentProvider.default_model || currentProvider.models[0] || ''}
             onChange={(e) => updateNodeData(nodeId, { model: e.target.value })}
-            className="max-w-[110px] bg-surface-secondary border border-white/15 rounded-lg px-1.5 py-1 text-[10px] text-violet-300 font-mono focus:outline-none focus:border-violet-500">
+            className="max-w-[110px] bg-white/55 dark:bg-white/[.06] border border-white/15 rounded-lg px-1.5 py-1 text-[10px] text-violet-300 font-mono focus:outline-none focus:border-violet-500">
             {currentProvider.models.map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
         )}
@@ -177,7 +177,7 @@ export const NodeAgentBar: React.FC<{ nodeId: string; kind: GenKind }> = ({ node
               <div key={slot.key}
                 className={`flex items-center gap-1 px-1.5 py-1 rounded-lg border text-[10px] ${isPopulated ? 'bg-violet-950/30 border-violet-500/40 text-violet-200' : slot.required ? 'bg-red-950/20 border-dashed border-red-500/50 text-red-300' : 'bg-white/[0.02] border-dashed border-white/20 text-white/50 hover:border-white/40'}`}>
                 {isPopulated && thumb ? (
-                  <div className="w-5 h-5 rounded bg-surface-secondary overflow-hidden border border-white/20">
+                  <div className="w-5 h-5 rounded bg-white/55 dark:bg-white/[.06] overflow-hidden border border-white/20">
                     {slot.type === 'video' ? <video src={thumb} className="w-full h-full object-cover" /> : slot.type === 'audio' ? <div className="w-full h-full flex items-center justify-center text-[8px]">🎵</div> : <img src={thumb} alt="" className="w-full h-full object-cover" />}
                   </div>
                 ) : (
@@ -200,7 +200,7 @@ export const NodeAgentBar: React.FC<{ nodeId: string; kind: GenKind }> = ({ node
 
       {/* 参数抽屉 */}
       {showParams && paramSpecs.length > 0 && (
-        <div className="grid grid-cols-2 gap-2 p-2 rounded-xl bg-surface-secondary border border-white/10 max-h-[180px] overflow-y-auto">
+        <div className="grid grid-cols-2 gap-2 p-2 rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/10 max-h-[180px] overflow-y-auto">
           {paramSpecs.map((spec) => (
             <DynamicControl key={spec.param_name} spec={spec}
               value={customParams[spec.param_name] ?? spec.default_value}
@@ -218,7 +218,7 @@ export const NodeAgentBar: React.FC<{ nodeId: string; kind: GenKind }> = ({ node
         onChange={(e) => updateNodeData(nodeId, { prompt: e.target.value, text: e.target.value, image_prompt: e.target.value, video_prompt: e.target.value })}
         placeholder={skills.find((s) => s.id === activeSkill)?.guidePrompt || (kind === 'audio' ? '输入台词…' : '描述画面/运动…')}
         rows={2}
-        className="w-full bg-surface-secondary border border-white/10 rounded-xl px-2.5 py-2 text-[11px] text-white placeholder-white/40 focus:outline-none focus:border-violet-500 resize-none"
+        className="w-full bg-white/55 dark:bg-white/[.06] border border-white/10 rounded-xl px-2.5 py-2 text-[11px] text-white placeholder-white/40 focus:outline-none focus:border-violet-500 resize-none"
       />
 
       {/* 字段级 AI 润色：显式按钮（整段按技能重写）；只改一句/一个词走选中文字后的浮标 */}

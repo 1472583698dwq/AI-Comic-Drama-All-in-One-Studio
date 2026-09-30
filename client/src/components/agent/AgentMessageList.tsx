@@ -118,7 +118,7 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
               className={`${compact ? 'max-w-[92%] p-3 rounded-2xl' : `max-w-[85%] p-4 rounded-3xl ${m.sender === 'user' ? 'rounded-br-lg' : 'rounded-bl-lg'}`} leading-relaxed text-xs relative group/msg ${
                 m.sender === 'user'
                   ? 'bg-brand text-white shadow-lg shadow-brand/20'
-                  : 'bg-surface-secondary/60 [color:var(--color-text-main)]'
+                  : 'bg-white/55 dark:bg-white/[.05] [color:var(--color-text-main)]'
               }`}
             >
               {/* 身份标只给 Agent 侧：用户消息靠位置（右）+ 实色气泡已经足够区分。
@@ -152,7 +152,7 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
               {compact && m.text && (
                 <button
                   onClick={(e) => copyMsg(e, m.id, m.text)}
-                  className="absolute top-1.5 right-1.5 p-1 rounded-md opacity-0 group-hover/msg:opacity-100 transition-opacity bg-surface/85 hover:bg-surface/85 text-white/70 hover:text-white"
+                  className="absolute top-1.5 right-1.5 p-1 rounded-md opacity-0 group-hover/msg:opacity-100 transition-opacity bg-white/75 dark:bg-black/50 hover:bg-white/75 dark:bg-black/50 text-white/70 hover:text-white"
                   title="复制本条消息"
                 >
                   {copiedId === m.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
@@ -161,7 +161,7 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
               {compact && m.sender === 'user' && !isRunning && (
                 <button
                   onClick={(e) => startEdit(e, m.id, m.text)}
-                  className="absolute top-1.5 right-8 p-1 rounded-md opacity-0 group-hover/msg:opacity-100 transition-opacity bg-surface/85 text-white/70 hover:text-white"
+                  className="absolute top-1.5 right-8 p-1 rounded-md opacity-0 group-hover/msg:opacity-100 transition-opacity bg-white/75 dark:bg-black/50 text-white/70 hover:text-white"
                   title="编辑并重新发送"
                 >
                   <Pencil className="w-3 h-3" />
@@ -185,7 +185,7 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
                     </span>
                   </button>
                   {thinkingOpen && (
-                    <div className="px-3 py-2 border-t border-brand/15 text-[11px] leading-relaxed text-gray-300 font-mono whitespace-pre-wrap max-h-60 overflow-y-auto custom-scrollbar select-text bg-surface-secondary">
+                    <div className="px-3 py-2 border-t border-brand/15 text-[11px] leading-relaxed text-gray-300 font-mono whitespace-pre-wrap max-h-60 overflow-y-auto custom-scrollbar select-text bg-white/55 dark:bg-white/[.06]">
                       {m.thinking || (m.isThinkingStreaming ? '正在感知导演意图与分析分镜机位…' : '')}
                       {m.isThinkingStreaming && <span className="inline-block w-1.5 h-3.5 bg-brand ml-1 animate-pulse align-middle" />}
                     </div>
@@ -211,7 +211,7 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
                     onChange={(e) => setEditText(e.target.value)}
                     rows={Math.min(8, Math.max(2, editText.split('\n').length))}
                     autoFocus
-                    className="w-full bg-surface border border-brand/50 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none resize-none"
+                    className="w-full bg-white/60 dark:bg-white/[.05] border border-brand/50 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none resize-none"
                   />
                   <div className="flex gap-1.5 justify-end">
                     <button
@@ -322,7 +322,7 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
                     <button
                       key={s}
                       onClick={() => onSendSuggestion(s)}
-                      className="px-2 py-1 rounded-full bg-surface border border-border text-[10px] text-gray-300 hover:border-brand hover:text-white"
+                      className="px-2 py-1 rounded-full bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 text-[10px] text-gray-300 hover:border-brand hover:text-white"
                     >
                       {s}
                     </button>

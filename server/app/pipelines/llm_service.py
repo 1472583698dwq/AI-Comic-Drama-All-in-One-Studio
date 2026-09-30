@@ -10,6 +10,7 @@
 import os
 import re
 import json
+import asyncio
 import logging
 from typing import List, Dict, Any, Optional, AsyncGenerator
 
@@ -18,6 +19,35 @@ import httpx
 from app.core.config import settings
 
 logger = logging.getLogger("llm_service")
+
+
+def _err_text(e: Any) -> str:
+    """异常消息可读化：httpx 超时类异常 str() 为空，退化为类名。"""
+    s = str(e or "").strip()
+    return s or type(e).__name__
+
+
+async def _with_deadline(agen: AsyncGenerator[str, None], budget_s: float,
+                         label: str = "大模型流式响应") -> AsyncGenerator[str, None]:
+    """给流式生成器加**整体时限**（httpx 的 timeout 只管单次读取，不管总时长）。
+
+    背景：部分网关对超长请求只发心跳不吐内容，read timeout 永不触发 → 一次调用挂 8 分钟。
+    这里按总预算强制中止，失败快、重试快。
+    """
+    loop = asyncio.get_running_loop()
+    start = loop.time()
+    ait = agen.__aiter__()
+    while True:
+        remain = budget_s - (loop.time() - start)
+        if remain <= 0:
+            raise LLMServiceError(f"{label}超时（总时限 {budget_s:.0f}s，已中止）")
+        try:
+            chunk = await asyncio.wait_for(ait.__anext__(), timeout=remain)
+        except StopAsyncIteration:
+            return
+        except asyncio.TimeoutError:
+            raise LLMServiceError(f"{label}超时（总时限 {budget_s:.0f}s，已中止）")
+        yield chunk
 
 
 class LLMServiceError(RuntimeError):
@@ -42,41 +72,176 @@ def extract_think_tags(text: str) -> str:
     return ""
 
 
+def _strip_code_fence(text: str) -> str:
+    """剥掉 markdown 代码围栏（含只开出、未闭合的截断情况）。"""
+    s = text.strip()
+    if s.startswith("```"):
+        s = s[3:]
+        if s[:4].lower() == "json":
+            s = s[4:]
+        if s.rstrip().endswith("```"):
+            s = s.rstrip()[:-3]
+    return s.strip()
+
+
+def _escape_control_chars_in_strings(s: str) -> str:
+    """把字符串内的裸控制字符（换行/回车/制表）转义为 \\n 等（常见非法 JSON 来源）。"""
+    out: List[str] = []
+    in_str = False
+    esc = False
+    for ch in s:
+        if in_str:
+            if esc:
+                esc = False
+                out.append(ch)
+                continue
+            if ch == "\\":
+                esc = True
+                out.append(ch)
+                continue
+            if ch == '"':
+                in_str = False
+                out.append(ch)
+                continue
+            if ch == "\n":
+                out.append("\\n")
+                continue
+            if ch == "\r":
+                out.append("\\r")
+                continue
+            if ch == "\t":
+                out.append("\\t")
+                continue
+            out.append(ch)
+        else:
+            if ch == '"':
+                in_str = True
+            out.append(ch)
+    return "".join(out)
+
+
+def _close_unbalanced(s: str) -> str:
+    """按括号栈补全被截断的 JSON（字符串先补引号，去掉悬空的 , : 再闭合括号）。"""
+    stack: List[str] = []
+    in_str = False
+    esc = False
+    for ch in s:
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch in "{[":
+            stack.append(ch)
+        elif ch in "}]":
+            if stack:
+                stack.pop()
+    fixed = s.rstrip()
+    if in_str:
+        fixed += '"'
+    fixed = re.sub(r"[,:]\s*$", "", fixed.rstrip())
+    for opener in reversed(stack):
+        fixed += "}" if opener == "{" else "]"
+    return fixed
+
+
+def _repair_truncated_json(text: str) -> Optional[Dict[str, Any]]:
+    """尝试修复被截断的 JSON：先补齐括号；仍失败则按解析错误位置回退到上一个分隔符。"""
+    cur = text
+    for _ in range(12):
+        if not cur.strip():
+            return None
+        try:
+            obj = json.loads(_close_unbalanced(cur))
+            if isinstance(obj, dict) and obj:
+                return obj
+            return None
+        except json.JSONDecodeError as e:
+            pos = int(getattr(e, "pos", 0) or 0)
+            head = cur[:pos] if 0 < pos <= len(cur) else cur[:-1]
+            cut = max(head.rfind(","), head.rfind("{"), head.rfind("["))
+            if cut <= 0:
+                return None
+            cur = head[:cut]
+        except Exception:
+            return None
+    return None
+
+
+def _parse_json_lenient(cand: str) -> Optional[Dict[str, Any]]:
+    """宽松解析：原文 → 去尾逗号 → 转义裸控制字符 → 组合。"""
+    for variant in (
+        cand,
+        re.sub(r",\s*([}\]])", r"\1", cand),
+        _escape_control_chars_in_strings(cand),
+        _escape_control_chars_in_strings(re.sub(r",\s*([}\]])", r"\1", cand)),
+    ):
+        try:
+            obj = json.loads(variant)
+            if isinstance(obj, dict):
+                return obj
+        except Exception:
+            pass
+    return None
+
+
 def extract_json_from_text(text: str) -> Dict[str, Any]:
-    """从 LLM 返回的文本中提取并解析合法 JSON"""
+    """从 LLM 返回的文本中提取并解析合法 JSON（含代码围栏/尾逗号/裸换行/截断自愈）。"""
     if not text:
         raise LLMServiceError("LLM 返回空响应，无法解析 JSON")
 
-    cleaned = strip_think_tags(text)
+    cleaned = strip_think_tags(text).replace("\ufeff", "")
 
-    # 匹配 Markdown 代码块 (```json ... ``` 或 ``` ...)
+    candidates: List[str] = []
+    # ① 完整代码块 ```json ... ```
     code_block_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned, re.IGNORECASE)
-    candidates = []
     if code_block_match:
         candidates.append(code_block_match.group(1).strip())
-
-    # 匹配最外层 { ... }
+    # ② 只开了围栏、没闭合（响应被截断）
+    fenced = _strip_code_fence(cleaned)
+    if fenced and fenced != cleaned.strip():
+        candidates.append(fenced)
+    # ③ 最外层 { ... }
     first_brace = cleaned.find("{")
     last_brace = cleaned.rfind("}")
     if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
         candidates.append(cleaned[first_brace:last_brace + 1].strip())
+    # ④ 全文（可能本身就是 JSON）
+    if cleaned.strip():
+        candidates.append(cleaned.strip())
 
-    candidates.append(cleaned.strip())
-
-    last_error = None
+    last_error: Optional[Exception] = None
+    last_cand = candidates[-1] if candidates else ""
     for cand in candidates:
+        obj = _parse_json_lenient(cand)
+        if obj is not None:
+            return obj
         try:
-            return json.loads(cand)
+            json.loads(cand)
         except json.JSONDecodeError as e:
             last_error = e
-            try:
-                fixed = re.sub(r",\s*([}\]])", r"\1", cand)
-                return json.loads(fixed)
-            except Exception:
-                pass
+            last_cand = cand
+        except Exception as e:
+            last_error = e
+        repaired = _repair_truncated_json(cand)
+        if repaired is not None:
+            return repaired
 
-    preview = cleaned[:300] if len(cleaned) > 300 else cleaned
-    raise LLMServiceError(f"无法从 LLM 返回内容中解析有效 JSON: {preview} (解析错误: {last_error})")
+    preview = cleaned[:300]
+    where = ""
+    err_pos = getattr(last_error, "pos", None)
+    if isinstance(err_pos, int) and 0 <= err_pos <= len(last_cand):
+        lo = max(0, err_pos - 80)
+        hi = min(len(last_cand), err_pos + 80)
+        where = f" [出错位置附近: …{last_cand[lo:hi]}…]"
+    raise LLMServiceError(
+        f"无法从 LLM 返回内容中解析有效 JSON（响应 {len(cleaned)} 字符，超长响应可能被 max_tokens 截断）: "
+        f"{preview}{where} (解析错误: {last_error})")
 
 
 class LLMService:
@@ -388,8 +553,12 @@ class LLMService:
         """非流式完整响应接口（优先流式聚合，具备自愈回退与错误提示）"""
         chunks = []
         stream_error = None
+        budget = float(os.environ.get("LLM_TOTAL_TIMEOUT_S") or timeout or 120.0)
         try:
-            async for chunk in self.chat_stream(messages, temperature=temperature, max_tokens=max_tokens, timeout=timeout, extra_headers=extra_headers):
+            async for chunk in _with_deadline(
+                self.chat_stream(messages, temperature=temperature, max_tokens=max_tokens, timeout=timeout, extra_headers=extra_headers),
+                budget,
+            ):
                 chunks.append(chunk)
             if chunks:
                 return "".join(chunks).strip()
@@ -458,8 +627,8 @@ class LLMService:
                 return strip_think_tags(data["choices"][0]["message"]["content"])
         except Exception as e:
             if stream_error:
-                raise LLMServiceError(f"大模型调用失败: {stream_error} (重试错误: {e})")
-            raise LLMServiceError(f"大模型接口 ({endpoint}) 异常: {e}")
+                raise LLMServiceError(f"大模型调用失败: {_err_text(stream_error)} (重试错误: {_err_text(e)})")
+            raise LLMServiceError(f"大模型接口 ({endpoint}) 异常: {_err_text(e)}")
 
     async def chat_json(
         self,

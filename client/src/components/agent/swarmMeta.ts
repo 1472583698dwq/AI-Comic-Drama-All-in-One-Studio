@@ -1,6 +1,6 @@
 /**
  * 子代理集群共享元数据 — 角色标签/图标/配色 + 耗时格式化。
- * AgentSwarmPanel（会话内花名册）与 OneKeyRunModal（一键成片集群视图）共用，避免两处漂移。
+ * AgentSwarmPanel（会话内花名册）与成片工作室（OneKeyStudioView 的集群视图）共用，避免两处漂移。
  *
  * 动态角色：外部导演组扩展（storage/agent_profiles + 插件贡献）的 icon/color 由后端下发，
  * 通过 loadRoleMetas() 注册；图标名不在白名单时回退 Bot，配色不在白名单时回退紫色。
@@ -27,7 +27,7 @@ export const ROLE_META: Record<string, RoleMeta> = {
   voice_operator: { label: '配音', Icon: Mic, cls: 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10' },
   editor: { label: '剪辑', Icon: Scissors, cls: 'text-orange-300 border-orange-500/30 bg-orange-500/10' },
   qa_reviewer: { label: '质检', Icon: SearchCheck, cls: 'text-cyan-300 border-cyan-500/30 bg-cyan-500/10' },
-  generalist: { label: '通用', Icon: Users, cls: 'text-gray-300 border-border bg-surface-secondary' },
+  generalist: { label: '通用', Icon: Users, cls: 'text-gray-300 border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06]' },
 };
 
 /** 后端 icon 名 → lucide 组件（白名单，未知回退 Bot） */
@@ -48,7 +48,7 @@ const COLOR_MAP: Record<string, string> = {
   cyan: 'text-cyan-300 border-cyan-500/30 bg-cyan-500/10',
   orange: 'text-orange-300 border-orange-500/30 bg-orange-500/10',
   red: 'text-red-300 border-red-500/30 bg-red-500/10',
-  gray: 'text-gray-300 border-border bg-surface-secondary',
+  gray: 'text-gray-300 border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06]',
 };
 
 let _dynamic: Record<string, RoleMeta> = {};

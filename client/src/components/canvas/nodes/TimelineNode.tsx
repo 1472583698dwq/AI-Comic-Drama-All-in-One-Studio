@@ -154,7 +154,7 @@ export const TimelineNode: React.FC<NodeProps> = ({ id, data, selected }) => {
   return (
     <div
       className={`relative rounded-2xl border transition-all duration-200 ${
-        selected ? 'border-brand/70 shadow-2xl shadow-brand/15' : 'border-border hover:border-brand/40 shadow-xl'
+        selected ? 'border-brand/70 shadow-2xl shadow-brand/15' : 'border-white/70 dark:border-white/12 hover:border-brand/40 shadow-xl'
       }`}
       style={{ width: CARD_WIDTH, background: 'var(--color-surface)' }}
     >
@@ -178,7 +178,7 @@ export const TimelineNode: React.FC<NodeProps> = ({ id, data, selected }) => {
           onClick={() => updateRef.current({ collapsed: !collapsed })}
           aria-label={collapsed ? '展开时间线' : '折叠时间线'}
           title={collapsed ? '展开' : '折叠'}
-          className="nodrag ml-auto w-6 h-6 rounded-lg flex items-center justify-center shrink-0 [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-secondary transition-colors"
+          className="nodrag ml-auto w-6 h-6 rounded-lg flex items-center justify-center shrink-0 [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06] transition-colors"
         >
           {collapsed ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
         </button>
@@ -195,7 +195,7 @@ export const TimelineNode: React.FC<NodeProps> = ({ id, data, selected }) => {
         <div className="rounded-2xl overflow-hidden">
           {/* 大屏预览：**只在节点选中时显示**；未播放时定格在播放头所在的那一帧，点画面即在该屏上播放 */}
           {selected && (
-            <div className="nodrag border-b border-border" onPointerDown={(e) => e.stopPropagation()}>
+            <div className="nodrag border-b border-white/70 dark:border-white/12" onPointerDown={(e) => e.stopPropagation()}>
               <TimelinePreview
                 clip={activeClip}
                 localTime={localTime}
@@ -211,7 +211,7 @@ export const TimelineNode: React.FC<NodeProps> = ({ id, data, selected }) => {
           )}
 
           {/* 工具行：左（裁剪/删除）· 中（播放 + 时间码）· 右（下载/全屏编辑） */}
-          <div className="flex items-center gap-1 px-3 py-2 border-b border-border nodrag">
+          <div className="flex items-center gap-1 px-3 py-2 border-b border-white/70 dark:border-white/12 nodrag">
             <div className="flex items-center gap-1 shrink-0">
               <button
                 onClick={() => setTrimMode((v) => !v)}
@@ -221,7 +221,7 @@ export const TimelineNode: React.FC<NodeProps> = ({ id, data, selected }) => {
                 className={`w-6 h-6 rounded-md flex items-center justify-center transition-colors ${
                   trimMode
                     ? 'bg-brand/15 text-brand'
-                    : '[color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-secondary'
+                    : '[color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06]'
                 }`}
               >
                 <Scissors className="w-3.5 h-3.5" strokeWidth={1.7} />
@@ -270,7 +270,7 @@ export const TimelineNode: React.FC<NodeProps> = ({ id, data, selected }) => {
                 disabled={busy || !clips.length}
                 aria-label="导出成片"
                 title={exporter.engine && !exporter.engine.available ? 'ffmpeg 未就绪' : '合成 MP4 并在导出文件夹中打开'}
-                className="w-6 h-6 rounded-md flex items-center justify-center [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-secondary disabled:opacity-35 transition-colors"
+                className="w-6 h-6 rounded-md flex items-center justify-center [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06] disabled:opacity-35 transition-colors"
               >
                 {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" strokeWidth={1.7} />}
               </button>

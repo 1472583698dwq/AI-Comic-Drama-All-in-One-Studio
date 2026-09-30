@@ -42,6 +42,9 @@
       "location": "泰山之巅",
       "time_of_day": "night",
       "atmosphere": "epic",
+      "image_prompt": "",
+      "props": [],
+      "ref_image_url": null,
       "shots": [
         {
           "id": "96713ae7-5218-4cde-ad08-3c4f569ca9f7",

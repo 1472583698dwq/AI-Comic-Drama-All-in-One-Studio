@@ -165,7 +165,7 @@ export const AgentModeView: React.FC = () => {
       </div>
 
       {/* 中间：对话主区（圆角描边卡片，与会话栏形成明确分隔） */}
-      <div className="flex-1 flex flex-col min-w-0 rounded-2xl border border-border overflow-hidden">
+      <div className="flex-1 flex flex-col min-w-0 rounded-2xl border border-white/70 dark:border-white/12 overflow-hidden">
         {execution === 'auto' && (
           <div className="px-4 py-1.5 bg-red-500/10 border-b border-red-500/30 flex items-center gap-2 text-[11px] text-red-300 shrink-0">
             <Zap className="w-3.5 h-3.5 shrink-0" />
@@ -179,7 +179,7 @@ export const AgentModeView: React.FC = () => {
           {!isSidebarOpen && (
             <button
               onClick={() => setIsSidebarOpen(true)}
-              className="p-1.5 rounded-lg border border-border hover:border-brand/40 bg-surface text-gray-400 hover:text-white transition-all shrink-0"
+              className="p-1.5 rounded-lg border border-white/70 dark:border-white/12 hover:border-brand/40 bg-white/60 dark:bg-white/[.05] text-gray-400 hover:text-white transition-all shrink-0"
               title="展开会话列表"
             >
               <PanelLeft className="w-4 h-4 text-brand" />
@@ -209,16 +209,16 @@ export const AgentModeView: React.FC = () => {
                 <ShieldAlert className="w-3.5 h-3.5" />{pendingList.length} 待确认
               </button>
             )}
-            <div className="flex items-center rounded-xl bg-surface border border-border p-1" title="行为：能干什么 —— 标准 / 创造（缺能力先造） / 计划（只读侦察）">
+            <div className="flex items-center rounded-xl bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 p-1" title="行为：能干什么 —— 标准 / 创造（缺能力先造） / 计划（只读侦察）">
               <button onClick={() => setBehavior('standard')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${behavior === 'standard' ? 'bg-brand/20 text-brand-light' : 'text-gray-500 hover:text-white'}`}>标准</button>
               <button onClick={() => setBehavior('create')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${behavior === 'create' ? 'bg-violet-500/20 text-violet-300' : 'text-gray-500 hover:text-white'}`}>创造</button>
               <button onClick={() => setBehavior('plan')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${behavior === 'plan' ? 'bg-sky-500/20 text-sky-300' : 'text-gray-500 hover:text-white'}`}>计划</button>
             </div>
-            <div className="flex items-center rounded-xl bg-surface border border-border p-1" title="执行：要不要逐项人审 —— 审批=先审后干 / 自动=全部自动执行（含删源/写文件/跑命令）">
+            <div className="flex items-center rounded-xl bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 p-1" title="执行：要不要逐项人审 —— 审批=先审后干 / 自动=全部自动执行（含删源/写文件/跑命令）">
               <button onClick={() => setExecution('approve')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${execution === 'approve' ? 'bg-amber-500/20 text-amber-300' : 'text-gray-500 hover:text-white'}`}>审批</button>
               <button onClick={() => setExecution('auto')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${execution === 'auto' ? 'bg-red-500/20 text-red-300' : 'text-gray-500 hover:text-white'}`}>自动</button>
             </div>
-            <div className="flex items-center rounded-xl bg-surface border border-border p-1">
+            <div className="flex items-center rounded-xl bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 p-1">
               <button onClick={() => setMode('chat')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${mode === 'chat' ? 'bg-accent-green/20 text-accent-green' : 'text-gray-500 hover:text-white'}`}>问答</button>
               <button onClick={() => setMode('execute')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${mode === 'execute' ? 'bg-brand/20 text-brand-light' : 'text-gray-500 hover:text-white'}`}>执行</button>
             </div>
@@ -255,7 +255,7 @@ export const AgentModeView: React.FC = () => {
                 <button
                   onClick={scrollToBottom}
                   title="回到底部"
-                  className="pointer-events-auto absolute -top-11 left-1/2 -translate-x-1/2 w-9 h-9 rounded-full border border-border/60 bg-surface/90 backdrop-blur-xl text-gray-400 hover:text-white shadow-lg shadow-black/30 flex items-center justify-center transition-colors"
+                  className="pointer-events-auto absolute -top-11 left-1/2 -translate-x-1/2 w-9 h-9 rounded-full border border-white/55 dark:border-white/10 bg-white/80 dark:bg-black/55 backdrop-blur-xl text-gray-400 hover:text-white shadow-lg shadow-black/30 flex items-center justify-center transition-colors"
                 >
                   <ArrowDown className="w-4 h-4" />
                 </button>
@@ -285,8 +285,8 @@ export const AgentModeView: React.FC = () => {
       </div>
 
       {/* 右：模式与上下文侧栏 */}
-      <div className="w-72 ml-2 rounded-2xl bg-surface-secondary/70 p-4 space-y-4 overflow-y-auto custom-scrollbar shrink-0 hidden md:block">
-        <div className="rounded-2xl border border-border bg-surface p-3 space-y-2">
+      <div className="w-72 ml-2 rounded-2xl bg-white/60 dark:bg-white/[.05] p-4 space-y-4 overflow-y-auto custom-scrollbar shrink-0 hidden md:block">
+        <div className="rounded-2xl border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] p-3 space-y-2">
           <div className="text-xs font-bold text-white flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-brand-light" />模式说明</div>
           <div className={`text-[11px] leading-4 p-2 rounded-xl ${mode === 'chat' ? 'bg-accent-green/10 text-accent-green' : 'bg-brand/10 text-brand-light'}`}>
             {mode === 'chat'
@@ -295,7 +295,7 @@ export const AgentModeView: React.FC = () => {
                 ? '执行：ReAct 循环调全部工具；自动执行下不再逐项确认（可随时暂停）。'
                 : '执行：ReAct 循环调全部工具；删源/写文件/跑命令会弹窗确认，120s 超时自动拒绝。'}
           </div>
-          <div className="rounded-xl bg-surface-secondary border border-border p-2 space-y-1">
+          <div className="rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 p-2 space-y-1">
             <div className="text-[10px] font-bold text-gray-400 px-0.5">行为 · 能干什么</div>
             {BEHAVIOR_GUIDE.map((b) => (
               <div
@@ -310,7 +310,7 @@ export const AgentModeView: React.FC = () => {
               </div>
             ))}
           </div>
-          <div className="rounded-xl bg-surface-secondary border border-border p-2 space-y-1">
+          <div className="rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 p-2 space-y-1">
             <div className="text-[10px] font-bold text-gray-400 px-0.5">执行 · 要不要逐项人审</div>
             {EXECUTION_GUIDE.map((e) => (
               <div
@@ -326,11 +326,11 @@ export const AgentModeView: React.FC = () => {
             ))}
           </div>
           <div className="flex gap-2">
-            {/* hover 工具类带 `!`：index.css 的 .bg-surface-secondary / .border-border 是
+            {/* hover 工具类带 `!`：index.css 的 .bg-white/55 dark:bg-white/[.06] / .border-white/70 dark:border-white/12 是
                 `!important` 的，不带 important 的 hover 会被它整段压掉（这就是"鼠标放上去没反应"的根因） */}
             <button
               onClick={() => void clearAll()}
-              className="flex-1 py-1.5 rounded-lg bg-surface-secondary border border-border text-[11px] text-gray-300 hover:bg-surface-tertiary! hover:border-border-active! hover:text-white active:scale-95 transition-all flex items-center justify-center gap-1"
+              className="flex-1 py-1.5 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:bg-white/65 dark:bg-white/[.09]! hover:border-white/80 dark:border-white/20! hover:text-white active:scale-95 transition-all flex items-center justify-center gap-1"
             >
               <Trash2 className="w-3 h-3" />清空记忆
             </button>
@@ -338,7 +338,7 @@ export const AgentModeView: React.FC = () => {
               onClick={abort}
               disabled={!isRunning}
               title={isRunning ? '暂停当前任务（Enter 同效）' : '当前没有正在运行的任务'}
-              className="flex-1 py-1.5 rounded-lg bg-surface-secondary border border-border text-[11px] text-gray-300 hover:bg-surface-tertiary! hover:border-border-active! hover:text-white active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-surface-secondary! disabled:hover:text-gray-300"
+              className="flex-1 py-1.5 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:bg-white/65 dark:bg-white/[.09]! hover:border-white/80 dark:border-white/20! hover:text-white active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white/55 dark:bg-white/[.06]! disabled:hover:text-gray-300"
             >
               暂停
             </button>
@@ -346,7 +346,7 @@ export const AgentModeView: React.FC = () => {
         </div>
 
         {latestTodo && latestTodo.length > 0 && (
-          <div className="rounded-2xl border border-border bg-surface p-3">
+          <div className="rounded-2xl border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] p-3">
             <div className="text-xs font-bold text-white flex items-center gap-1.5 mb-1"><ListTodo className="w-3.5 h-3.5 text-sky-300" />待办清单</div>
             <AgentTodoPanel todo={latestTodo} />
           </div>
@@ -356,19 +356,19 @@ export const AgentModeView: React.FC = () => {
           <div className="rounded-2xl border border-amber-500/40 bg-amber-500/5 p-3 space-y-2">
             <div className="text-xs font-bold text-amber-300 flex items-center gap-1.5"><ShieldAlert className="w-3.5 h-3.5" />待确认 {pendingList.length}</div>
             {pendingList.map(([aid, v]) => (
-              <div key={aid} className="rounded-xl bg-surface-secondary border border-amber-500/20 p-2">
+              <div key={aid} className="rounded-xl bg-white/55 dark:bg-white/[.06] border border-amber-500/20 p-2">
                 <div className="text-[11px] font-mono text-white truncate">{v.tool_name}</div>
                 <div className="text-[10px] font-mono text-gray-500 break-all max-h-20 overflow-y-auto custom-scrollbar">{JSON.stringify(v.args).slice(0, 400)}</div>
                 <div className="flex gap-1.5 mt-1.5">
                   <button onClick={() => handleApprove(aid, true, false)} className="flex-1 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-black text-[11px] font-bold active:scale-95 transition-all">允许</button>
-                  <button onClick={() => handleApprove(aid, false, false)} className="flex-1 py-1 rounded-lg bg-surface-secondary border border-border text-[11px] text-gray-300 hover:bg-surface-tertiary! hover:border-border-active! hover:text-white active:scale-95 transition-all">拒绝</button>
+                  <button onClick={() => handleApprove(aid, false, false)} className="flex-1 py-1 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:bg-white/65 dark:bg-white/[.09]! hover:border-white/80 dark:border-white/20! hover:text-white active:scale-95 transition-all">拒绝</button>
                 </div>
               </div>
             ))}
           </div>
         )}
 
-        <div className="rounded-2xl border border-border bg-surface p-3 space-y-2">
+        <div className="rounded-2xl border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] p-3 space-y-2">
           <div className="text-xs font-bold text-white flex items-center gap-1.5"><Film className="w-3.5 h-3.5 text-accent-orange" />当前上下文</div>
           <div className="text-[11px] text-gray-400 leading-5">
             <div>项目：{project?.title || '未选择'}</div>
@@ -378,14 +378,14 @@ export const AgentModeView: React.FC = () => {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-border bg-surface p-3 space-y-2">
+        <div className="rounded-2xl border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] p-3 space-y-2">
           <div className="text-xs font-bold text-white">快捷指令{behavior === 'create' ? ' · 创造' : behavior === 'plan' ? ' · 计划' : ''}</div>
           <div className="text-[10px] text-gray-500 leading-4">按当前行为模式给示例，点一下即发出（想改再改就手动输入）。</div>
           {quickCommands.map((q) => (
             <button
               key={q}
               onClick={() => void send(q)}
-              className="group w-full text-left px-2.5 py-1.5 rounded-lg bg-surface-secondary border border-border text-[11px] text-gray-300 hover:bg-brand/10! hover:border-brand/60! hover:text-white active:scale-[0.98] transition-all flex items-start gap-1.5"
+              className="group w-full text-left px-2.5 py-1.5 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:bg-brand/10! hover:border-brand/60! hover:text-white active:scale-[0.98] transition-all flex items-start gap-1.5"
             >
               <span className="w-3 shrink-0 pt-0.5">
                 <Send className="w-3 h-3 opacity-40 group-hover:opacity-100 transition-opacity" />
@@ -395,12 +395,12 @@ export const AgentModeView: React.FC = () => {
           ))}
         </div>
 
-        <div className="rounded-2xl border border-border bg-surface p-3 space-y-2">
+        <div className="rounded-2xl border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] p-3 space-y-2">
           <div className="text-xs font-bold text-white flex items-center gap-1.5"><BookOpen className="w-3.5 h-3.5 text-brand-cyan" />使用指引</div>
           <div className="space-y-1.5">
             {USAGE_GUIDE.map((g, i) => (
               <div key={g.step} className="flex gap-2 text-[11px] leading-4">
-                <span className="mt-0.5 w-4 h-4 shrink-0 rounded-full bg-surface-secondary border border-border text-[9px] font-bold text-brand-cyan flex items-center justify-center">{i + 1}</span>
+                <span className="mt-0.5 w-4 h-4 shrink-0 rounded-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[9px] font-bold text-brand-cyan flex items-center justify-center">{i + 1}</span>
                 <span className="text-gray-400"><span className="text-white font-semibold">{g.step}</span> — {g.desc}</span>
               </div>
             ))}

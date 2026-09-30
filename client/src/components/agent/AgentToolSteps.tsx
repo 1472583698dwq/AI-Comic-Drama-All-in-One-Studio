@@ -113,13 +113,13 @@ const ApprovalInline: React.FC<{
         )}
       </div>
       {Object.keys(args || {}).length > 0 && (
-        <pre className="mt-1 text-[10px] font-mono text-gray-400 bg-surface/60 border border-border rounded-lg p-1.5 max-h-28 overflow-auto custom-scrollbar whitespace-pre-wrap break-all">
+        <pre className="mt-1 text-[10px] font-mono text-gray-400 bg-white/60 dark:bg-black/35 border border-white/70 dark:border-white/12 rounded-lg p-1.5 max-h-28 overflow-auto custom-scrollbar whitespace-pre-wrap break-all">
           {JSON.stringify(args, null, 1).slice(0, 2000)}
         </pre>
       )}
       <div className="mt-1.5 flex gap-1.5">
         <button onClick={() => onApprove(aid, true, always)} className="flex-1 py-1 rounded-lg bg-amber-500 text-black text-[11px] font-bold">允许</button>
-        <button onClick={() => onApprove(aid, false, false)} className="flex-1 py-1 rounded-lg border border-border text-[11px] text-gray-300">拒绝</button>
+        <button onClick={() => onApprove(aid, false, false)} className="flex-1 py-1 rounded-lg border border-white/70 dark:border-white/12 text-[11px] text-gray-300">拒绝</button>
       </div>
       <label className="mt-1.5 flex items-center gap-1.5 text-[10px] text-gray-400 cursor-pointer select-none">
         <input type="checkbox" checked={always} onChange={(e) => setAlways(e.target.checked)} className="accent-amber-500" />
@@ -161,7 +161,7 @@ const ToolStepRow: React.FC<{
           </span>
         )}
         {media && (
-          <span className="w-8 h-8 rounded-md overflow-hidden bg-surface-secondary border border-border shrink-0 flex items-center justify-center" title="结果预览">
+          <span className="w-8 h-8 rounded-md overflow-hidden bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 shrink-0 flex items-center justify-center" title="结果预览">
             {media.kind === 'image' ? (
               <img src={resolveMediaUrl(media.url)} alt="" className="w-full h-full object-cover" loading="lazy" />
             ) : media.kind === 'video' ? (
@@ -193,7 +193,7 @@ const ToolStepRow: React.FC<{
       {isOpen && (
         <div className="mt-1.5 ml-5 space-y-1.5">
           {s.args && Object.keys(s.args).length > 0 && (
-            <pre className="text-[10px] font-mono text-gray-400 bg-surface/60 border border-border rounded-lg p-1.5 max-h-32 overflow-auto custom-scrollbar whitespace-pre-wrap break-all">
+            <pre className="text-[10px] font-mono text-gray-400 bg-white/60 dark:bg-black/35 border border-white/70 dark:border-white/12 rounded-lg p-1.5 max-h-32 overflow-auto custom-scrollbar whitespace-pre-wrap break-all">
               {JSON.stringify(s.args, null, 1).slice(0, 3000)}
             </pre>
           )}
@@ -243,7 +243,7 @@ export const AgentToolSteps: React.FC<{
   }
 
   return (
-    <div className="mt-2 rounded-xl border border-border overflow-hidden">
+    <div className="mt-2 rounded-xl border border-white/70 dark:border-white/12 overflow-hidden">
       <button
         onClick={() => setExpanded((v) => !v)}
         className="w-full px-2.5 py-1.5 flex items-center gap-1.5 text-[10px] font-bold text-gray-300 hover:bg-white/5"
@@ -256,7 +256,7 @@ export const AgentToolSteps: React.FC<{
         <ChevronDown className={`w-3 h-3 ml-auto transition-transform ${expanded ? 'rotate-180' : ''}`} />
       </button>
       {expanded && (
-        <div className="border-t border-border divide-y divide-white/5">
+        <div className="border-t border-white/70 dark:border-white/12 divide-y divide-white/5">
           {groups.map((g, gi) => {
             if (g.steps.length === 1) {
               const s = g.steps[0];
