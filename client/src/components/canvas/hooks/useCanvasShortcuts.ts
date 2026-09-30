@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import { toast } from '../../../stores/useDialogStore';
+import { rectOf, findFreeInColumn } from '../autoLayout';
 
 /**
  * 画布标准快捷键：撤销 / 重做 / 复制 / 粘贴 / 删除。
@@ -135,13 +136,21 @@ export function useCanvasShortcuts({
     const clip = memoryClipboard;
     if (!clip || !clip.nodes.length) { toast.info('剪贴板是空的'); return; }
     const idMap = new Map<string, string>();
+    // 整组沿原列向下平移到第一个放得下整组的空位（自动放置统一规则，见 autoLayout.ts），不再固定 +48 叠在原卡上
+    const rects = clip.nodes.map(n => rectOf(n as any));
+    const bx = Math.min(...rects.map(r => r.x));
+    const by = Math.min(...rects.map(r => r.y));
+    const bw = Math.max(...rects.map(r => r.x + r.w)) - bx;
+    const bh = Math.max(...rects.map(r => r.y + r.h)) - by;
+    const slot = findFreeInColumn(live.current.nodes.map(n => rectOf(n as any)), bx, by, bw, bh);
+    const dy = slot.y - by;
     const newNodes = clip.nodes.map(n => {
       const nid = genId(String(n.type || 'node'));
       idMap.set(n.id, nid);
       return attachHandlers({
         ...n,
         id: nid,
-        position: { x: (n.position?.x ?? 0) + 48, y: (n.position?.y ?? 0) + 48 },
+        position: { x: n.position?.x ?? 0, y: (n.position?.y ?? 0) + dy },
         selected: true,
         data: { ...(n.data as any) },
       } as Node);
@@ -168,7 +177,7 @@ export function useCanvasShortcuts({
       es.filter(e => !ids.has(e.source) && !ids.has(e.target) && !e.selected),
     );
     onSelect?.(null);
-    toast.info(`已删除 ${sel.length} 个节点`);
+    toast.info(sel.length ? `已删除 ${sel.length} 个节点` : `已删除 ${selEdges.length} 条连线`);
   }, [setNodes, setEdges, onSelect]);
 
   useEffect(() => {

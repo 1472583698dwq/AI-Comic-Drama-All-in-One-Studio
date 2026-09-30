@@ -36,9 +36,24 @@
   --color-text-main: #F3F4F6;
   --color-text-secondary: #9CA3AF;
   --color-text-muted: #6B7280;
+  /* 创意画布 */
+  --canvas-bg: #08080B;
+  --canvas-grid: rgba(255, 255, 255, 0.04);
+  --canvas-grid-major: rgba(255, 255, 255, 0.075);
+  --canvas-edge: #5C5C78;
+  --canvas-edge-hl: #A78BFA;
+  --canvas-card-edge: rgba(255, 255, 255, 0.16);
+  --canvas-card-edge-hover: rgba(167, 139, 250, 0.55);
 }
 
 :root[data-theme="light"], .light {
+  --canvas-bg: #E8ECF1;
+  --canvas-grid: rgba(15, 23, 42, 0.055);
+  --canvas-grid-major: rgba(15, 23, 42, 0.1);
+  --canvas-edge: #8A97AB;
+  --canvas-edge-hl: #7C3AED;
+  --canvas-card-edge: rgba(15, 23, 42, 0.2);
+  --canvas-card-edge-hover: rgba(124, 58, 237, 0.5);
   --color-background: #F4F6F9;
   --color-surface: #FFFFFF;
   --color-surface-secondary: #F0F2F5;
@@ -123,6 +138,48 @@
   padding: 0 !important;
   box-shadow: none !important;
   color: var(--color-text-main) !important;
+}
+
+/* ---- 创意画布：卡片轮廓 / 连线 ----
+ * 卡片外框由各节点组件自己画（border-white/10、border-border 等，两套主题下都偏淡），
+ * 这里在卡片根元素外补一圈主题色轮廓，统一提高卡片与画布的对比度。
+ * 用 outline 而不是改 border / box-shadow：不影响布局，也不覆盖各节点自带的阴影与选中 ring
+ * （不用 filter: drop-shadow——含视频/大图的卡片会在平移缩放时额外合成，大画布掉帧）。 */
+.react-flow__node > :first-child:not(.react-flow__handle) {
+  outline: 1px solid var(--canvas-card-edge);
+  outline-offset: 0;
+  transition: outline-color 0.15s ease;
+}
+.react-flow__node:hover > :first-child:not(.react-flow__handle) {
+  outline-color: var(--canvas-card-edge-hover);
+}
+/* 选中卡片：各节点的选中样式不一（部分节点没有），统一补一圈品牌色描边 */
+.react-flow__node.selected > :first-child:not(.react-flow__handle) {
+  outline: 2px solid var(--canvas-edge-hl);
+  outline-offset: 2px;
+}
+
+.react-flow__edge .react-flow__edge-path {
+  stroke: var(--canvas-edge);
+  stroke-width: 2;
+  transition: stroke 0.15s ease, stroke-width 0.15s ease, opacity 0.15s ease;
+}
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: var(--canvas-edge-hl);
+}
+/* 选中卡片的上下游链路 / 单独点选的连线 */
+.react-flow__edge.canvas-edge-hl .react-flow__edge-path,
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--canvas-edge-hl);
+  stroke-width: 3;
+}
+/* 有卡片被选中时，与之无关的连线淡化，让高亮链路更突出 */
+.react-flow__edge.canvas-edge-dim .react-flow__edge-path {
+  opacity: 0.3;
+}
+.react-flow__connection-path {
+  stroke: var(--canvas-edge-hl);
+  stroke-width: 2;
 }
 
 body {
@@ -250,6 +307,7 @@ input::placeholder, textarea::placeholder {
 [data-theme="light"] .text-zinc-100 { color: #1E293B !important; }
 [data-theme="light"] .text-zinc-200 { color: #334155 !important; }
 [data-theme="light"] .text-zinc-300 { color: #475569 !important; }
+[data-theme="light"] .text-white\/95 { color: rgba(15, 23, 42, 0.95) !important; }
 [data-theme="light"] .text-white\/90 { color: rgba(15, 23, 42, 0.9) !important; }
 [data-theme="light"] .text-white\/80 { color: rgba(15, 23, 42, 0.82) !important; }
 [data-theme="light"] .text-white\/70 { color: rgba(15, 23, 42, 0.72) !important; }
@@ -279,6 +337,7 @@ input::placeholder, textarea::placeholder {
 [data-theme="light"] [class*="bg-gradient"]:not([class*="/10"]):not([class*="/15"]):not([class*="/20"]) :is(.text-gray-100, .text-gray-200, .text-zinc-100) { color: #E5E7EB !important; }
 [data-theme="light"] [class*="bg-gradient"]:not([class*="/10"]):not([class*="/15"]):not([class*="/20"]) :is(.text-gray-300, .text-zinc-200, .text-zinc-300) { color: #D1D5DB !important; }
 [data-theme="light"] [class*="bg-gradient"]:not([class*="/10"]):not([class*="/15"]):not([class*="/20"]) :is(.text-gray-400) { color: #9CA3AF !important; }
+[data-theme="light"] [class*="bg-gradient"]:not([class*="/10"]):not([class*="/15"]):not([class*="/20"]) :is(.text-white\/95) { color: rgba(255, 255, 255, .95) !important; }
 [data-theme="light"] [class*="bg-gradient"]:not([class*="/10"]):not([class*="/15"]):not([class*="/20"]) :is(.text-white\/90) { color: rgba(255, 255, 255, .9) !important; }
 [data-theme="light"] [class*="bg-gradient"]:not([class*="/10"]):not([class*="/15"]):not([class*="/20"]) :is(.text-white\/80) { color: rgba(255, 255, 255, .8) !important; }
 [data-theme="light"] [class*="bg-gradient"]:not([class*="/10"]):not([class*="/15"]):not([class*="/20"]) :is(.text-white\/70) { color: rgba(255, 255, 255, .7) !important; }
@@ -295,3 +354,11 @@ input::placeholder, textarea::placeholder {
 [data-theme="light"] [class*="bg-gradient"].fill-white { fill: #fff !important; }
 [data-theme="light"] :is(.bg-brand, .bg-brand-light, .bg-violet-500, .bg-violet-600, .bg-red-500, .bg-emerald-500, .bg-amber-500, .bg-brand\/80, .bg-violet-500\/90).text-white { color: #fff !important; }
 [data-theme="light"] :is(.bg-brand, .bg-brand-light, .bg-violet-500, .bg-violet-600, .bg-red-500, .bg-emerald-500, .bg-amber-500, .bg-brand\/80, .bg-violet-500\/90).fill-white { fill: #fff !important; }
+
+/* Agent 卡片左侧输入点：视觉尺寸不变（12px），用透明伪元素扩成 28px 命中区，与右侧 + 输出手柄一样大 */
+.agent-card .react-flow__handle-left::after {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  border-radius: 9999px;
+}

@@ -10,8 +10,11 @@ function getUrl(u?:string){ if(!u) return ''; return u.startsWith('/') ? API_ORI
 
 export const LoadImageNode: React.FC<NodeProps> = ({ data, id })=>{
   const d:any = data;
-  const [url, setUrl] = useState(d.image || d.url || '');
-  const set = (v:string)=> { setUrl(v); (d.onUpdate as any)?.(id, { image: v, url: v }); };
+  const [url, setUrl] = useState(d.image || d.url || d.image_url || '');
+  // 外部写入（自动放置的输入卡 / 撤销还原）同步进本地态
+  useEffect(() => { const ext = d.image || d.url || d.image_url || ''; if (ext !== url) setUrl(ext); }, [d.image, d.url, d.image_url]); // eslint-disable-line react-hooks/exhaustive-deps
+  // image_url 让改图能沿连线传播到下游输入槽（传播只认产出键）
+  const set = (v:string)=> { setUrl(v); (d.onUpdate as any)?.(id, { image: v, url: v, image_url: v }); };
   const onUpload = async (f:File)=>{
     try{
       const r = await apiService.uploadImageToComfyUI(f);
@@ -95,8 +98,9 @@ export const LoadImageBatchNode: React.FC<NodeProps> = ({ data, id })=>{
 
 export const LoadVideoNode: React.FC<NodeProps> = ({ data, id })=>{
   const d:any = data;
-  const [url,setUrl]=useState(d.video||d.url||'');
-  const sync=(v:string)=>{ setUrl(v); (d.onUpdate as any)?.(id,{video:v, url:v}); };
+  const [url,setUrl]=useState(d.video||d.url||d.video_url||'');
+  useEffect(() => { const ext = d.video || d.url || d.video_url || ''; if (ext !== url) setUrl(ext); }, [d.video, d.url, d.video_url]); // eslint-disable-line react-hooks/exhaustive-deps
+  const sync=(v:string)=>{ setUrl(v); (d.onUpdate as any)?.(id,{video:v, url:v, video_url:v}); };
   return (
     <div className="w-[260px] bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-2xl shadow-xl overflow-hidden">
       <div className="px-3 py-2.5 bg-white/60 dark:bg-white/[.05] border-b border-white/70 dark:border-white/12 flex items-center gap-1.5">
@@ -114,8 +118,9 @@ export const LoadVideoNode: React.FC<NodeProps> = ({ data, id })=>{
 
 export const LoadAudioNode: React.FC<NodeProps> = ({ data, id })=>{
   const d:any = data;
-  const [url,setUrl]=useState(d.audio||d.url||'');
-  const sync=(v:string)=>{ setUrl(v); (d.onUpdate as any)?.(id,{audio:v, url:v}); };
+  const [url,setUrl]=useState(d.audio||d.url||d.audio_url||'');
+  useEffect(() => { const ext = d.audio || d.url || d.audio_url || ''; if (ext !== url) setUrl(ext); }, [d.audio, d.url, d.audio_url]); // eslint-disable-line react-hooks/exhaustive-deps
+  const sync=(v:string)=>{ setUrl(v); (d.onUpdate as any)?.(id,{audio:v, url:v, audio_url:v}); };
   return (
     <div className="w-[260px] bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-2xl shadow-xl overflow-hidden">
       <div className="px-3 py-2.5 bg-white/60 dark:bg-white/[.05] border-b border-white/70 dark:border-white/12 flex items-center gap-1.5">

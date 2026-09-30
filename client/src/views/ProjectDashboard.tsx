@@ -57,7 +57,7 @@ export const ProjectDashboard: React.FC = () => {
     // 空白新建后端不落 content.json（content 为 null 是正常态）：必须兜底空工程，否则工作台无项目直接黑屏
     try {
       const data = await apiService.getProject(meta.id);
-      if (data?.content?.scenes) setProject(data.content);
+      if (data?.content?.scenes) setProject({ ...data.content, id: meta.id });
       else setProject(buildBlankProject(meta.id, fb));
     } catch {
       setProject(buildBlankProject(meta.id, fb));
@@ -100,7 +100,7 @@ export const ProjectDashboard: React.FC = () => {
       // 若返回内容则直接加载
       try {
         const data = await apiService.getProject(res.id);
-        if (data?.content?.scenes) setProject(data.content);
+        if (data?.content?.scenes) setProject({ ...data.content, id: res.id });
         useProjectStore.getState().setActiveTab('studio');
       } catch {}
     } catch (err: any) { toast.error(err.message || '导入项目失败'); }
@@ -112,7 +112,8 @@ export const ProjectDashboard: React.FC = () => {
     try {
       const data = await apiService.getProject(id);
       if (data?.content?.scenes) {
-        setProject(data.content);
+        // 项目身份以目录 id 为准（content.id 可能是剧本导入留下的 UUID）
+        setProject({ ...data.content, id });
         useProjectStore.getState().setActiveTab('studio');
       } else {
         // 空白项目：创建一个默认空 Project 供编辑

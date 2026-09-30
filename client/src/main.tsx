@@ -1,3 +1,5 @@
+// 深链接 ?project=&tab= 必须最先求值：各 store 在模块初始化时就读 localStorage
+import './utils/deepLink'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'

@@ -27,13 +27,21 @@ export function useCanvasSync(projectId: string | null) {
     }
   }, [projectId]);
 
+  // 未落盘的最近一次快照：卸载（切项目/切页签）时立即补存，不能随定时器一起丢掉
+  const pending = useRef<{ run: () => void } | null>(null);
+
   const debouncedSave = useCallback((snapshot: any, canvasId?: string, name?: string) => {
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
-    saveTimer.current = window.setTimeout(() => saveCanvas(snapshot, canvasId, name), 800) as any;
+    const run = () => { pending.current = null; saveCanvas(snapshot, canvasId, name); };
+    pending.current = { run };
+    saveTimer.current = window.setTimeout(run, 800) as any;
   }, [saveCanvas]);
 
   useEffect(() => {
-    return () => { if (saveTimer.current) window.clearTimeout(saveTimer.current); };
+    return () => {
+      if (saveTimer.current) window.clearTimeout(saveTimer.current);
+      pending.current?.run();
+    };
   }, []);
 
   return { loadCanvas, saveCanvas, debouncedSave };

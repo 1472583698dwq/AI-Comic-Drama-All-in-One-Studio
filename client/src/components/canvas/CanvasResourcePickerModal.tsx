@@ -33,7 +33,12 @@ const resolveUrl = (u?: string) => (u && u.startsWith('/') ? API_ORIGIN + u : (u
 interface Props {
   isOpen: boolean;
   onClose: () => void;
-  onSelect: (url: string | string[], meta?: any) => void;
+  /**
+   * meta：首个带 visual_prompt/voice_id 的选中项元数据（自动填 prompt 用）；
+   * metas：每个选中 URL → 其来源项（画布产出含 sourceNodeId/slotKey，素材库含 category 等），
+   * 调用方据此在画布上放置对应的输入卡片或直接连到来源卡片。
+   */
+  onSelect: (url: string | string[], meta?: any, metas?: Record<string, any>) => void;
   slotKey: string;
   slotLabel: string;
   multiSelect?: boolean;
@@ -167,7 +172,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
 
   const handleConfirmMulti = () => {
     if (selectedUrls.length > 0) {
-      onSelect(selectedUrls, metaOf(selectedUrls));
+      onSelect(selectedUrls, metaOf(selectedUrls), metaMap);
       onClose();
     }
   };
@@ -600,7 +605,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
               onClick={() => {
                 if (multiSelect) handleConfirmMulti();
                 else if (selectedUrls.length > 0) {
-                  onSelect(selectedUrls[0], metaMap[selectedUrls[0]]);
+                  onSelect(selectedUrls[0], metaMap[selectedUrls[0]], metaMap);
                   onClose();
                 }
               }}

@@ -34,6 +34,20 @@ import { FRAMING_PRESETS, MOTION_PRESETS, framingShortLabel, motionShortLabel } 
 // 相对 /storage 产物 URL 在 dev 下必须回源到后端（统一走 devOrigin）
 import { resolveMediaUrl } from '../../../utils/devOrigin';
 
+// 媒体分类配色：与句柄颜色同源（文本=青 / 图片=紫 / 视频=橙 / 音频=粉 / 机位=琥珀 / 合成=翠绿）
+// Tailwind 需要完整类名字面量，不能拼接
+type Cat = 'text' | 'image' | 'video' | 'audio' | 'camera' | 'output';
+const CAT: Record<Cat, { name: string; icon: string; bar: string; badge: string; ring: string }> = {
+  text:   { name: '文本', icon: 'text-cyan-400', bar: 'bg-cyan-500/80',    badge: 'bg-cyan-500/15 border-cyan-500/30 text-cyan-300',          ring: 'text-cyan-400' },
+  image:  { name: '图片', icon: 'text-violet-400', bar: 'bg-violet-500/80',  badge: 'bg-violet-500/15 border-violet-500/30 text-violet-300',    ring: 'text-violet-400' },
+  video:  { name: '视频', icon: 'text-orange-400', bar: 'bg-orange-500/80',  badge: 'bg-orange-500/15 border-orange-500/30 text-orange-300',    ring: 'text-orange-400' },
+  audio:  { name: '音频', icon: 'text-pink-400', bar: 'bg-pink-500/80',    badge: 'bg-pink-500/15 border-pink-500/30 text-pink-300',          ring: 'text-pink-400' },
+  camera: { name: '机位', icon: 'text-amber-400', bar: 'bg-amber-500/80',   badge: 'bg-amber-500/15 border-amber-500/30 text-amber-300',       ring: 'text-amber-400' },
+  output: { name: '合成', icon: 'text-emerald-400', bar: 'bg-emerald-500/80', badge: 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300', ring: 'text-emerald-400' },
+};
+// 端口标签：id / top 与对应 Handle 一致；只有鼠标悬停在该连接点上时，才在点的正上方显示
+type Port = { id: string; label: string; cat: Cat; top?: string };
+
 // 统一的 Agent 卡片外壳
 const AgentShell: React.FC<{
   id: string;
@@ -44,23 +58,42 @@ const AgentShell: React.FC<{
   topActions?: React.ReactNode;
   children: React.ReactNode;
   handles?: React.ReactNode;
-}> = ({ id, selected, icon: Icon, label, providerBadge, topActions, children, handles }) => {
+  category: Cat;
+  inputs?: Port[];
+  outputs?: Port[];
+}> = ({ id, selected, icon: Icon, label, providerBadge, topActions, children, handles, category, inputs = [], outputs = [] }) => {
+  const cat = CAT[category];
+  // React Flow 的 Handle 带 data-handleid / data-handlepos，用事件委托识别当前悬停的是哪个点
+  const [hoverPort, setHoverPort] = useState<{ side: 'in' | 'out'; id: string } | null>(null);
+  const onPortOver = (e: React.MouseEvent) => {
+    const h = (e.target as HTMLElement).closest?.('.react-flow__handle') as HTMLElement | null;
+    const hid = h?.getAttribute('data-handleid');
+    if (!h || !hid) { if (hoverPort) setHoverPort(null); return; }
+    const side = h.getAttribute('data-handlepos') === 'right' ? 'out' : 'in';
+    if (hoverPort?.side !== side || hoverPort?.id !== hid) setHoverPort({ side, id: hid });
+  };
+  const hoveredPort = hoverPort && (hoverPort.side === 'in' ? inputs : outputs).find((p) => p.id === hoverPort.id);
   const { setSelectedNodeId, agentFocusNodeIds } = useCanvasStore();
   const [showAddMenu, setShowAddMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // 捕获阶段 pointerdown：画布（d3-zoom）会拦截 mousedown 冒泡，冒泡监听收不到空白处点击。
+    // 点 + 手柄本身交给它的 onClick 切换，这里跳过，避免关了又开
     const h = (e: any) => {
-      if (menuRef.current && !menuRef.current.contains(e.target)) setShowAddMenu(false);
+      if (menuRef.current?.contains(e.target) || e.target.closest?.('.agent-out-handle')) return;
+      setShowAddMenu(false);
     };
-    if (showAddMenu) document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
+    if (showAddMenu) document.addEventListener('pointerdown', h, true);
+    return () => document.removeEventListener('pointerdown', h, true);
   }, [showAddMenu]);
 
   return (
     <div
       onClick={() => setSelectedNodeId(id)}
-      className={`w-[360px] bg-white/60 dark:bg-white/[.05] rounded-3xl border-2 transition-all duration-200 relative group select-none shadow-xl ${
+      onMouseOver={onPortOver}
+      onMouseLeave={() => setHoverPort(null)}
+      className={`agent-card w-[360px] bg-white/60 dark:bg-white/[.05] rounded-3xl border-2 transition-all duration-200 relative group select-none shadow-xl ${
         selected
           ? 'border-violet-500 ring-4 ring-violet-500/20 shadow-2xl shadow-violet-500/20'
           : 'border-white/10 hover:border-violet-500/40 shadow-black/40'
@@ -71,7 +104,7 @@ const AgentShell: React.FC<{
         <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-white/55 dark:bg-white/[.06] border border-white/15 rounded-full px-3 py-1 flex items-center gap-2 shadow-lg z-30 animate-in fade-in zoom-in-95 duration-150 backdrop-blur-md">
           {topActions || (
             <>
-              <span className="text-[11px] font-semibold text-violet-400 flex items-center gap-1">
+              <span className={`text-[11px] font-semibold flex items-center gap-1 ${cat.ring}`}>
                 <Icon className="w-3 h-3" /> {label}
               </span>
               <div className="w-px h-3 bg-white/15" />
@@ -91,13 +124,15 @@ const AgentShell: React.FC<{
       )}
 
       {/* 卡片头部 */}
-      <div className="px-4 py-3 flex items-center gap-2.5 border-b border-white/10">
-        <div className="w-6 h-6 rounded-lg bg-white/5 flex items-center justify-center text-violet-400">
+      {/* 顶部：分类色条（居中短条，距卡片顶边 7px） + 标题行；上 16 / 下 10 的内边距让色条与文字各留呼吸空间，总高度与原来基本一致 */}
+      <div className="relative px-4 pt-4 pb-2.5 flex items-center gap-2.5 border-b border-white/10">
+        <div className={`absolute top-[7px] left-1/2 -translate-x-1/2 w-24 h-[3px] rounded-full ${cat.bar}`} />
+        <div className={`w-6 h-6 rounded-lg bg-white/5 flex items-center justify-center ${cat.icon}`} title={`${cat.name}类节点`}>
           <Icon className="w-3.5 h-3.5" />
         </div>
-        <span className="text-xs font-bold text-white/95">{label}</span>
+        <span className="text-xs font-bold [color:var(--color-text-main)]">{label}</span>
         {providerBadge && (
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/15 border border-violet-500/30 text-violet-300 font-mono truncate max-w-[120px]">
+          <span className={`text-[10px] px-2 py-0.5 rounded-full border font-mono truncate max-w-[120px] ${cat.badge}`}>
             {providerBadge}
           </span>
         )}
@@ -110,31 +145,60 @@ const AgentShell: React.FC<{
               会话
             </span>
           )}
-          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/5 text-white/40 border border-white/10">
+          <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${cat.badge}`}>
             #{id.slice(-4)}
           </span>
         </span>
       </div>
 
-      {/* 句柄 */}
+      {/* 句柄 + 端口标签 */}
       {handles}
+      {hoveredPort && (
+        <span
+          className={`absolute z-40 pointer-events-none text-[10px] leading-none px-1.5 py-1 rounded-md border bg-surface-secondary whitespace-nowrap shadow-md ${CAT[hoveredPort.cat].badge}`}
+          style={{
+            top: hoveredPort.top || '50%',
+            [hoverPort!.side === 'in' ? 'left' : 'right']: 0,
+            transform: `translate(${hoverPort!.side === 'in' ? '-50%' : '50%'}, calc(-100% - 10px))`,
+          }}
+        >
+          {hoveredPort.label}
+        </span>
+      )}
 
       {/* 内容主体 */}
       <div className="p-4 flex flex-col items-center justify-center min-h-[200px]">
         {children}
       </div>
 
-      {/* 右侧 + 快速拉线衍生手柄 */}
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          setShowAddMenu((v) => !v);
-        }}
-        className="absolute -right-3.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-white/55 dark:bg-white/[.06] border border-white/20 shadow-lg flex items-center justify-center text-white/60 hover:text-white hover:border-violet-500 hover:scale-110 transition-all z-20"
-        title="向右衍生新节点"
-      >
-        <Plus className="w-4 h-4" />
-      </button>
+      {/* 右侧 + 手柄 = 输出点：拖动即连线，单击打开衍生菜单（原来 + 按钮盖在输出点上，导致无法手动连线） */}
+      {outputs[0] ? (
+        <Handle
+          type="source"
+          position={Position.Right}
+          id={outputs[0].id}
+          className="agent-out-handle !w-7 !h-7 !rounded-full !bg-white/55 dark:!bg-white/[.06] !border !border-white/20 shadow-lg flex items-center justify-center text-white/60 hover:text-white hover:!border-violet-500 transition-colors z-20"
+          style={{ top: outputs[0].top || '50%' }}
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowAddMenu((v) => !v);
+          }}
+          title="拖动连线 · 单击衍生新节点"
+        >
+          <Plus className="w-4 h-4 pointer-events-none" />
+        </Handle>
+      ) : (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowAddMenu((v) => !v);
+          }}
+          className="absolute -right-3.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-white/55 dark:bg-white/[.06] border border-white/20 shadow-lg flex items-center justify-center text-white/60 hover:text-white hover:border-violet-500 hover:scale-110 transition-all z-20"
+          title="向右衍生新节点"
+        >
+          <Plus className="w-4 h-4" />
+        </button>
+      )}
 
       {/* 衍生菜单 */}
       {showAddMenu && (
@@ -219,12 +283,14 @@ export const PromptNode: React.FC<NodeProps> = ({ id, data, selected }) => {
       selected={selected}
       icon={Type}
       label="剧本 / Prompt Agent"
+      category="text"
+      inputs={[{ id: 'prompt', label: '文本', cat: 'text' }]}
+      outputs={[{ id: 'prompt', label: '文本', cat: 'text' }]}
       providerBadge={d.provider || 'LLM Agent'}
       handles={
         <>
           {/* 句柄 id 必须与 nodeRegistry 'prompt'.inputs 一致（prompt），否则连入文本写进 data.prompt_in 不可见 */}
           <Handle type="target" position={Position.Left} id="prompt" className="!w-3 !h-3 !bg-cyan-500 !border-2 !border-[#141419]" />
-          <Handle type="source" position={Position.Right} id="prompt" className="!w-3 !h-3 !bg-cyan-500 !border-2 !border-[#141419]" />
         </>
       }
     >
@@ -331,6 +397,14 @@ export const ImageNode: React.FC<NodeProps> = ({ id, data, selected }) => {
       selected={selected}
       icon={ImageIcon}
       label="分镜生图 Agent"
+      category="image"
+      inputs={[
+        { id: 'prompt', label: '提示词', cat: 'text', top: '25%' },
+        { id: 'reference', label: '参考图', cat: 'image', top: '42%' },
+        { id: 'reference_images', label: '参考图集', cat: 'image', top: '58%' },
+        { id: 'camera_prompt', label: '机位', cat: 'camera', top: '75%' },
+      ]}
+      outputs={[{ id: 'image', label: '图片', cat: 'image' }]}
       providerBadge={d.provider ? `${d.provider}${d.model ? ':' + d.model : ''}` : '待绑定生成源'}
       handles={
         <>
@@ -338,7 +412,6 @@ export const ImageNode: React.FC<NodeProps> = ({ id, data, selected }) => {
           <Handle type="target" position={Position.Left} id="reference" className="!w-3 !h-3 !bg-violet-500 !border-2 !border-[#141419]" style={{ top: '42%' }} />
           <Handle type="target" position={Position.Left} id="reference_images" className="!w-3 !h-3 !bg-violet-400 !border-2 !border-[#141419]" style={{ top: '58%' }} />
           <Handle type="target" position={Position.Left} id="camera_prompt" className="!w-3 !h-3 !bg-amber-500 !border-2 !border-[#141419]" style={{ top: '75%' }} />
-          <Handle type="source" position={Position.Right} id="image" className="!w-3 !h-3 !bg-violet-500 !border-2 !border-[#141419]" />
         </>
       }
     >
@@ -418,6 +491,16 @@ export const VideoGenNode: React.FC<NodeProps> = ({ id, data, selected }) => {
       selected={selected}
       icon={VideoIcon}
       label="动态导演视频 Agent"
+      category="video"
+      inputs={[
+        { id: 'camera_prompt', label: '机位', cat: 'camera', top: '15%' },
+        { id: 'first_frame', label: '首帧', cat: 'image', top: '32%' },
+        { id: 'last_frame', label: '尾帧', cat: 'image', top: '46%' },
+        { id: 'reference_images', label: '参考图集', cat: 'image', top: '60%' },
+        { id: 'prompt', label: '提示词', cat: 'text', top: '78%' },
+        { id: 'ref_audio', label: '参考音频', cat: 'audio', top: '90%' },
+      ]}
+      outputs={[{ id: 'video', label: '视频', cat: 'video' }]}
       providerBadge={d.provider ? `${d.provider}${d.model ? ':' + d.model : ''}` : '待绑定视频源'}
       handles={
         <>
@@ -426,7 +509,7 @@ export const VideoGenNode: React.FC<NodeProps> = ({ id, data, selected }) => {
           <Handle type="target" position={Position.Left} id="last_frame" className="!w-3 !h-3 !bg-orange-400 !border-2 !border-[#141419]" style={{ top: '46%' }} />
           <Handle type="target" position={Position.Left} id="reference_images" className="!w-3 !h-3 !bg-amber-500 !border-2 !border-[#141419]" style={{ top: '60%' }} />
           <Handle type="target" position={Position.Left} id="prompt" className="!w-3 !h-3 !bg-cyan-500 !border-2 !border-[#141419]" style={{ top: '78%' }} />
-          <Handle type="source" position={Position.Right} id="video" className="!w-3 !h-3 !bg-orange-500 !border-2 !border-[#141419]" />
+          <Handle type="target" position={Position.Left} id="ref_audio" className="!w-3 !h-3 !bg-pink-500 !border-2 !border-[#141419]" style={{ top: '90%' }} />
         </>
       }
     >
@@ -483,7 +566,7 @@ export const VideoGenNode: React.FC<NodeProps> = ({ id, data, selected }) => {
           <div className="mt-2 flex flex-wrap gap-1 justify-center">
             {(d.first_frame || d.first_frame_url) && <span className="px-2 py-0.5 rounded-full bg-orange-500/10 border border-orange-500/30 text-[10px] text-orange-300 font-mono">✓ 首帧</span>}
             {(d.last_frame || d.last_frame_url) && <span className="px-2 py-0.5 rounded-full bg-orange-500/10 border border-orange-500/30 text-[10px] text-orange-300 font-mono">✓ 尾帧</span>}
-            {Array.isArray(d.reference_images) && d.reference_images.length > 0 && <span className="px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-[10px] text-amber-300 font-mono">✓ {d.reference_images.length} 参考</span>}
+            {Array.isArray(d.reference_images) && d.reference_images.length > 0 && <span className="px-2 py-0.5 rounded-full bg-orange-500/10 border border-orange-500/30 text-[10px] text-orange-300 font-mono">✓ {d.reference_images.length} 参考</span>}
           </div>
           {st?.status === 'failed' && <span className="text-[10px] text-red-400 mt-2 line-clamp-2" title={st.error}>✗ {st.error}</span>}
         </div>
@@ -511,12 +594,17 @@ export const AudioNode: React.FC<NodeProps> = ({ id, data, selected }) => {
       selected={selected}
       icon={Mic}
       label="配音 / 声音 Agent"
+      category="audio"
+      inputs={[
+        { id: 'prompt', label: '台词', cat: 'text', top: '35%' },
+        { id: 'ref_audio', label: '参考音色', cat: 'audio', top: '65%' },
+      ]}
+      outputs={[{ id: 'audio', label: '音频', cat: 'audio' }]}
       providerBadge={d.provider ? `${d.provider}${d.model ? ':' + d.model : ''}` : '待绑定语音源'}
       handles={
         <>
           <Handle type="target" position={Position.Left} id="prompt" className="!w-3 !h-3 !bg-cyan-500 !border-2 !border-[#141419]" style={{ top: '35%' }} />
           <Handle type="target" position={Position.Left} id="ref_audio" className="!w-3 !h-3 !bg-pink-500 !border-2 !border-[#141419]" style={{ top: '65%' }} />
-          <Handle type="source" position={Position.Right} id="audio" className="!w-3 !h-3 !bg-pink-500 !border-2 !border-[#141419]" />
         </>
       }
     >
@@ -567,11 +655,13 @@ export const Director3DMinimalNode: React.FC<NodeProps> = ({ id, data, selected 
       selected={selected}
       icon={Box}
       label="3D 导演机位 Agent"
+      category="camera"
+      inputs={[{ id: 'prompt', label: '提示词', cat: 'text' }]}
+      outputs={[{ id: 'camera_prompt', label: '机位', cat: 'camera' }]}
       providerBadge={d.skill_id || 'MCP: director_3d_stage_plan'}
       handles={
         <>
-          <Handle type="target" position={Position.Left} id="prompt" className="!w-3 !h-3 !bg-cyan-500 !border-2 !border-[#141419]" style={{top:'50%'}} />
-          <Handle type="source" position={Position.Right} id="camera_prompt" className="!w-3 !h-3 !bg-blue-500 !border-2 !border-[#141419]" />
+          <Handle type="target" position={Position.Left} id="prompt" className="!w-3 !h-3 !bg-amber-500 !border-2 !border-[#141419]" style={{top:'50%'}} />
         </>
       }
     >
@@ -588,7 +678,7 @@ export const Director3DMinimalNode: React.FC<NodeProps> = ({ id, data, selected 
             <>
               <label className="flex flex-col gap-1 p-2 rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/10">
                 <span className="text-white/40 text-[9px]">景别</span>
-                <select value={d.framing || 'medium'} onChange={(e) => updateNodeData(id, { framing: e.target.value })} className="bg-white/55 dark:bg-white/[.06] border border-white/10 rounded-lg px-1.5 py-1 text-[11px] text-cyan-300 focus:outline-none focus:border-cyan-500">
+                <select value={d.framing || 'medium'} onChange={(e) => updateNodeData(id, { framing: e.target.value })} className="bg-white/55 dark:bg-white/[.06] border border-white/10 rounded-lg px-1.5 py-1 text-[11px] text-amber-300 focus:outline-none focus:border-amber-500">
                   {FRAMING_PRESETS.map((f)=>(<option key={f.id} value={f.id}>{f.label}</option>))}
                 </select>
               </label>
@@ -603,7 +693,7 @@ export const Director3DMinimalNode: React.FC<NodeProps> = ({ id, data, selected 
             <>
               <div className="p-2 rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/10 flex flex-col">
                 <span className="text-white/40 text-[9px]">景别</span>
-                <span className="font-bold text-cyan-300">{framingShortLabel(d.framing)}</span>
+                <span className="font-bold text-amber-300">{framingShortLabel(d.framing)}</span>
               </div>
               <div className="p-2 rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/10 flex flex-col">
                 <span className="text-white/40 text-[9px]">运镜</span>
@@ -625,7 +715,7 @@ export const Director3DMinimalNode: React.FC<NodeProps> = ({ id, data, selected 
             onCut={(e) => e.stopPropagation()}
             placeholder="粘贴/输入自然语言机位指令，如“希区柯克变焦突显惊恐”或“贴地仰角双人对峙推镜”"
             rows={2}
-            className="w-full bg-white/55 dark:bg-white/[.06] border border-white/10 rounded-xl px-2.5 py-2 text-[11px] text-white placeholder-white/40 focus:outline-none focus:border-blue-500 resize-none nodrag select-text"
+            className="w-full bg-white/55 dark:bg-white/[.06] border border-white/10 rounded-xl px-2.5 py-2 text-[11px] text-white placeholder-white/40 focus:outline-none focus:border-amber-500 resize-none nodrag select-text"
             autoFocus
           />
         )}
@@ -640,12 +730,12 @@ export const Director3DMinimalNode: React.FC<NodeProps> = ({ id, data, selected 
           </div>
         )}
         {d.minimax_camera_prompt && (
-          <div className="p-2.5 rounded-xl bg-blue-950/20 border border-blue-500/30 text-[10px] text-blue-200 font-mono line-clamp-3 select-text nodrag">
+          <div className="p-2.5 rounded-xl bg-amber-950/20 border border-amber-500/30 text-[10px] text-amber-200 font-mono line-clamp-3 select-text nodrag">
             运镜 Prompt: {d.minimax_camera_prompt}
           </div>
         )}
         {selected && (
-          <button onClick={run} disabled={running} className="w-full py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold">
+          <button onClick={run} disabled={running} className="w-full py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-xs font-bold">
             {running ? '机位计算中…' : '生成机位 Prompt ↑'}
           </button>
         )}
@@ -664,6 +754,11 @@ export const ExportNode: React.FC<NodeProps> = ({ id, data, selected }) => {
       selected={selected}
       icon={Download}
       label="剪辑合成导出 Agent"
+      category="output"
+      inputs={[
+        { id: 'video', label: '视频', cat: 'video', top: '35%' },
+        { id: 'audio', label: '音频', cat: 'audio', top: '65%' },
+      ]}
       providerBadge="剪映 Draft"
       handles={
         <>
@@ -673,7 +768,7 @@ export const ExportNode: React.FC<NodeProps> = ({ id, data, selected }) => {
       }
     >
       <div className="w-full flex flex-col items-center justify-center p-4 text-center gap-3">
-        <Download className="w-8 h-8 text-violet-400" />
+        <Download className="w-8 h-8 text-emerald-400" />
         <span className="text-xs font-bold text-white/90">剪映草稿一键生成</span>
         <span className="text-[10px] text-white/40 max-w-[200px]">
           自动聚合上游所有镜头的视频轨、音频轨与台词字幕
@@ -683,7 +778,7 @@ export const ExportNode: React.FC<NodeProps> = ({ id, data, selected }) => {
             e.stopPropagation();
             window.dispatchEvent(new CustomEvent('open-export-modal'));
           }}
-          className="w-full py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold shadow-lg shadow-violet-600/30 transition-all"
+          className="w-full py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-lg shadow-emerald-600/30 transition-all"
         >
           配置导出选项
         </button>

@@ -46,6 +46,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
       H('last_frame','尾帧','image'),
       H('reference_images','参考集','image'),
       H('camera_prompt','机位','text'),
+      H('ref_audio','参考音频','audio'),
     ],
     outputs: [H('video','视频','video',true)],
     providerKind:'video',

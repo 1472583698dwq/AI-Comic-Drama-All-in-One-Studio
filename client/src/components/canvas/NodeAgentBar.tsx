@@ -10,6 +10,7 @@ import { useCanvasStore } from '../../stores/useCanvasStore';
 import { apiService } from '../../services/api';
 import { DynamicProviderInfo, extractSlotsFromProvider, AssetSlotDef, getSkillsForKind, getSkillPreset, paramsSchemaToSpecs } from './providerSkills';
 import { CanvasResourcePickerModal } from './CanvasResourcePickerModal';
+import { emitAttachInputs, emitDetachInput, toInputItems } from './inputCards';
 import { DynamicControl } from './controls/DynamicControl';
 import { useNodeExecution } from './hooks/useNodeExecution';
 import { AiPolishButton } from '../ui/AiPolishButton';
@@ -87,22 +88,25 @@ export const NodeAgentBar: React.FC<{ nodeId: string; kind: GenKind }> = ({ node
 
   const isSlotMulti = (slot: AssetSlotDef) => !!slot.multi || (slot.maxCount !== undefined && slot.maxCount > 1);
 
-  const handleSlotSelect = (urlOrUrls: string | string[], meta?: any) => {
+  const handleSlotSelect = (urlOrUrls: string | string[], meta?: any, metas?: Record<string, any>) => {
     if (!pickerSlot) return;
     const patch: Record<string, any> = {};
     // 仅写接口声明的键：归一 key + 源属性 originalKey，无别名猜测
     const writeKeys = new Set<string>([pickerSlot.key, pickerSlot.originalKey || pickerSlot.key]);
+    const picked = Array.isArray(urlOrUrls) ? urlOrUrls : [urlOrUrls];
+    let finalValues: string[] = [];
     if (isSlotMulti(pickerSlot)) {
-      const arr = Array.isArray(urlOrUrls) ? urlOrUrls : [urlOrUrls];
       const existing: string[] = Array.isArray(d[pickerSlot.key]) ? d[pickerSlot.key] : [];
       const merged = [...existing];
-      for (const u of arr) if (!merged.includes(u)) merged.push(u);
+      for (const u of picked) if (!merged.includes(u)) merged.push(u);
       const max = pickerSlot.maxCount;
       const limited = max !== undefined && merged.length > max ? merged.slice(-max) : merged;
       writeKeys.forEach(k => { patch[k] = limited; });
+      finalValues = limited;
     } else {
-      const url = Array.isArray(urlOrUrls) ? urlOrUrls[0] : urlOrUrls;
+      const url = picked[0];
       writeKeys.forEach(k => { patch[k] = url; });
+      finalValues = url ? [url] : [];
     }
     if (meta?.visual_prompt && !(d.prompt || '').includes(meta.visual_prompt)) {
       const cur = (d.prompt || d.text || '') as string;
@@ -112,6 +116,12 @@ export const NodeAgentBar: React.FC<{ nodeId: string; kind: GenKind }> = ({ node
     }
     if (meta?.voice_id && kind === 'audio') patch.voice_id = meta.voice_id;
     updateNodeData(nodeId, patch);
+    if (pickerSlot.type === 'image' || pickerSlot.type === 'video' || pickerSlot.type === 'audio') {
+      emitAttachInputs({
+        targetId: nodeId, slotKey: pickerSlot.key, mediaType: pickerSlot.type,
+        multi: isSlotMulti(pickerSlot), items: toInputItems(picked.filter(u => finalValues.includes(u)), metas), keep: finalValues,
+      });
+    }
     setPickerSlot(null);
   };
 
@@ -120,6 +130,9 @@ export const NodeAgentBar: React.FC<{ nodeId: string; kind: GenKind }> = ({ node
     const patch: Record<string, any> = { [key]: undefined };
     if (slot?.originalKey && slot.originalKey !== key) patch[slot.originalKey] = undefined;
     updateNodeData(nodeId, patch);
+    if (slot && (slot.type === 'image' || slot.type === 'video' || slot.type === 'audio')) {
+      emitDetachInput({ targetId: nodeId, slotKey: key, mediaType: slot.type });
+    }
   };
 
   const skills = getSkillsForKind(kind);
