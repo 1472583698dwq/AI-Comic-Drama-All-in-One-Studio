@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "active_canvas_id": "default",
+  "active_canvas_id": "cv_mttom7vo",
   "canvases": {
     "default": {
       "name": "默认画布",
@@ -9,8 +9,8 @@
           "id": "image_1788940941809_1",
           "type": "image",
           "position": {
-            "x": 173.8427058758607,
-            "y": 1.4639715995237168
+            "x": 696,
+            "y": 253
           },
           "data": {
             "prompt": "生成人物三视图",
@@ -100,12 +100,11 @@
             "width": 360,
             "height": 405
           },
-          "selected": true,
-          "dragging": false
+          "selected": false
         }
       ],
       "edges": [],
-      "updated_at": "2026-09-24 15:01:37"
+      "updated_at": "2026-09-18 11:02:53"
     },
     "cv_mttom7vo": {
       "name": "分镜#10画布",
@@ -130,8 +129,8 @@
           "id": "director3d_1788933165001_2",
           "type": "director3d",
           "position": {
-            "x": 120,
-            "y": 360
+            "x": 169.3940292648725,
+            "y": 409.3940292648725
           },
           "data": {
             "framing": "close_up",
@@ -145,15 +144,17 @@
           },
           "measured": {
             "width": 360,
-            "height": 253
-          }
+            "height": 270
+          },
+          "selected": true,
+          "dragging": false
         },
         {
           "id": "image_1788933165001_3",
           "type": "image",
           "position": {
-            "x": 162.44006386229114,
-            "y": 734.8987744194253
+            "x": 179.67053918724667,
+            "y": 747.5344563243926
           },
           "data": {
             "prompt": "japanese_anime, Makoto Shinkai style, close up of young man's eyes contracting, screen light reflecting, intense excitement, 4k anime visual, 9:16"
@@ -162,15 +163,15 @@
             "width": 360,
             "height": 405
           },
-          "selected": true,
+          "selected": false,
           "dragging": false
         },
         {
           "id": "video_1788933165001_4",
           "type": "video",
           "position": {
-            "x": 1278,
-            "y": 570
+            "x": 1103.8249557779782,
+            "y": 438.0492089227106
           },
           "data": {
             "prompt": "林川盯着选项，瞳孔猛然收缩，内心决断。",
@@ -194,6 +195,78 @@
           },
           "dragging": false,
           "selected": false
+        },
+        {
+          "id": "prompt_1789700573761_1",
+          "type": "prompt",
+          "position": {
+            "x": 1598,
+            "y": 200
+          },
+          "data": {
+            "prompt": "林川趴在办公桌，电脑亮着方案，手垂下，智能手表暗淡，桌角多肉植物。",
+            "text": "林川趴在办公桌，电脑亮着方案，手垂下，智能手表暗淡，桌角多肉植物。"
+          },
+          "measured": {
+            "width": 360,
+            "height": 253
+          }
+        },
+        {
+          "id": "director3d_1789700573761_2",
+          "type": "director3d",
+          "position": {
+            "x": 1598,
+            "y": 440
+          },
+          "data": {
+            "framing": "medium",
+            "motion": "static",
+            "pose": "stand",
+            "focal_length_mm": 35,
+            "camera_roll_deg": 0,
+            "cast_layout": "solo",
+            "speed": "1.0x",
+            "ai_directive": ""
+          },
+          "measured": {
+            "width": 360,
+            "height": 253
+          }
+        },
+        {
+          "id": "image_1789700573761_3",
+          "type": "image",
+          "position": {
+            "x": 1649.4608085201428,
+            "y": 789.5191565941501
+          },
+          "data": {
+            "prompt": "masterpiece, japanese_anime, Makoto Shinkai style, high quality, vibrant colors, beautiful lens flare, ultra-detailed background, 4k anime visual, 9:16 aspect ratio, office night, young man collapsed on desk, wrinkled plaid shirt, smart watch, computer screen glowing, potted succulent plant"
+          },
+          "measured": {
+            "width": 360,
+            "height": 405
+          },
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "video_1789700573761_4",
+          "type": "video",
+          "position": {
+            "x": 2018,
+            "y": 320
+          },
+          "data": {
+            "prompt": "林川趴在办公桌，电脑亮着方案，手垂下，智能手表暗淡，桌角多肉植物。",
+            "duration": 4,
+            "camera_prompt": ""
+          },
+          "measured": {
+            "width": 360,
+            "height": 405
+          }
         }
       ],
       "edges": [
@@ -232,9 +305,45 @@
           "targetHandle": "first_frame",
           "type": "smoothstep",
           "animated": true
+        },
+        {
+          "id": "e_prompt_1789700573761_1_video_1789700573761_4_prompt_prompt",
+          "source": "prompt_1789700573761_1",
+          "target": "video_1789700573761_4",
+          "sourceHandle": "prompt",
+          "targetHandle": "prompt",
+          "type": "smoothstep",
+          "animated": true
+        },
+        {
+          "id": "e_director3d_1789700573761_2_video_1789700573761_4_camera_prompt_camera_prompt",
+          "source": "director3d_1789700573761_2",
+          "target": "video_1789700573761_4",
+          "sourceHandle": "camera_prompt",
+          "targetHandle": "camera_prompt",
+          "type": "smoothstep",
+          "animated": true
+        },
+        {
+          "id": "e_prompt_1789700573761_1_image_1789700573761_3_prompt_prompt",
+          "source": "prompt_1789700573761_1",
+          "target": "image_1789700573761_3",
+          "sourceHandle": "prompt",
+          "targetHandle": "prompt",
+          "type": "smoothstep",
+          "animated": true
+        },
+        {
+          "id": "e_image_1789700573761_3_video_1789700573761_4_image_first_frame",
+          "source": "image_1789700573761_3",
+          "target": "video_1789700573761_4",
+          "sourceHandle": "image",
+          "targetHandle": "first_frame",
+          "type": "smoothstep",
+          "animated": true
         }
       ],
-      "updated_at": "2026-09-09 13:53:31"
+      "updated_at": "2026-09-18 11:03:40"
     }
   }
 }
