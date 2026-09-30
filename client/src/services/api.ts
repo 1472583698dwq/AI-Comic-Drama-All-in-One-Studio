@@ -1118,6 +1118,20 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
+  /** 代码源的生效配置：Key 来源（配置存储/代码内联/未配置）+ 代码里写死的常量 */
+  async getProviderEffectiveConfig(providerId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/providers/${encodeURIComponent(providerId)}/effective-config`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  /** 把代码里的内联 Key 迁到配置存储；rewrite_code=true 时同时改写代码改走 ctx */
+  async migrateProviderInlineKey(providerId: string, rewrite_code = true): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/providers/${encodeURIComponent(providerId)}/migrate-inline-key`, {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ rewrite_code }),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
   // 插件系统 P0
   async listPlugins(): Promise<{ plugins: any[]; total: number }> {
     const res = await fetch(`${API_BASE_URL}/plugins`);

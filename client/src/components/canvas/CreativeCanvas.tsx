@@ -3,7 +3,7 @@ import {
   ReactFlow, Background, Controls, ControlButton, MiniMap, useNodesState, useEdgesState, addEdge, Connection, Edge, Node, ReactFlowProvider, useReactFlow
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Search, Sparkles, Image as ImageIcon, Film, Box, Boxes, Library, Save, Download, Mic, Type, Plus, Wand2, Layers, ChevronsUp, ArrowLeftRight, MoreHorizontal, Pencil, Trash2, Keyboard, X, FolderOpen, FileText, Clapperboard } from 'lucide-react';
+import { Search, Sparkles, Image as ImageIcon, Film, Box, Boxes, Library, Save, Download, Mic, Type, Plus, Wand2, Layers, PanelLeft, ChevronsUp, ArrowLeftRight, MoreHorizontal, Pencil, Trash2, Keyboard, X, FolderOpen, Clapperboard } from 'lucide-react';
 import { useProjectListStore } from '../../stores/useProjectListStore';
 import { useThemeStore } from '../../stores/useThemeStore';
 import { useProjectStore } from '../../stores/useProjectStore';
@@ -28,9 +28,10 @@ import { TimelineNode } from './nodes/TimelineNode';
 import { CustomNode } from './nodes/CustomNode';
 import { ExtNode } from './nodes/ExtNode';
 import { syncCanvasNodeSpecs, listCanvasNodeSpecs, getCanvasNodeSpec } from './canvasNodeSpecs';
-import { FloatingAgentPromptBar } from './FloatingAgentPromptBar';
+import { NodeControlBar } from './NodeControlBar';
 import { CanvasAgentSidebar } from './CanvasAgentSidebar';
 import { NodeContextMenu, type NodeMenuState } from './NodeContextMenu';
+import { WorkflowInspectorModal } from '../workflow/WorkflowInspectorModal';
 import { getNodeSpec } from './nodeRegistry';
 import { CanvasManagerModal } from './CanvasManagerModal';
 import { buildShotReferenceInputs } from '../storyboard/shotReference';
@@ -76,7 +77,6 @@ const genId = (p: string) => `${p}_${Date.now()}_${++idSeq}`;
 
 const CORE_LIBRARY = [
   { type: 'prompt', label: '剧本 / Prompt', desc: '剧本拆解与分镜策划', icon: Type, color: 'text-sky-400' },
-  { type: 'text-prompt', label: '提示词文本', desc: '纯文本资源 · 拖放/连线自动填充', icon: FileText, color: 'text-sky-400' },
   { type: 'image', label: '生图 Agent', desc: '多引擎文生图与垫图参考', icon: ImageIcon, color: 'text-violet-400' },
   { type: 'video', label: '视频 Agent', desc: '动态视频 / 首尾帧 / 参考生视频', icon: Film, color: 'text-orange-400' },
   { type: 'audio', label: '配音 Agent', desc: '多角色情感 TTS 配音', icon: Mic, color: 'text-pink-400' },
@@ -161,7 +161,7 @@ const WorkbenchRow: React.FC<{
 );
 
 const InnerCanvas: React.FC = () => {
-  const { project } = useProjectStore();
+  const { project, canvasRailOpen, setCanvasRailOpen } = useProjectStore();
   const { activeProjectId } = useProjectListStore();
   const { effectiveTheme } = useThemeStore();
   const { selectedNodeId, setSelectedNodeId } = useCanvasStore();
@@ -202,6 +202,7 @@ const InnerCanvas: React.FC = () => {
     return () => window.removeEventListener('canvasnode-list-refresh', h as any);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pid]);
+  const [inspectWfId, setInspectWfId] = useState('');
   const [saving, setSaving] = useState(false);
   const [executingNodeIds, setExecutingNodeIds] = useState<Set<string>>(new Set());
   const isGenerating = executingNodeIds.size > 0;
@@ -273,8 +274,6 @@ const InnerCanvas: React.FC = () => {
   }, [toolbarMenuOpen]);
   // 节点右键菜单（添加到会话 / 删除）
   const [nodeMenu, setNodeMenu] = useState<NodeMenuState | null>(null);
-  // 空白画布右键菜单（对齐 LibTV：右键 → 添加节点）
-  const [paneMenu, setPaneMenu] = useState<{ x: number; y: number } | null>(null);
   const canvasIdRef = useRef<string>('default');
   useEffect(() => { canvasIdRef.current = canvasId; }, [canvasId]);
   // 切换/新建/删除清空时的单次保存抑制，避免空画布写回旧 id 复活已删画布
@@ -285,7 +284,11 @@ const InnerCanvas: React.FC = () => {
   const canvasRef = useRef<string>('default');
   const [isDragging, setIsDragging] = useState(false);
 
-  // open-workflow-inspector 已由 App 全局接管（任何页面可开槽位配置），此处不再监听避免双开
+  useEffect(() => {
+    const h = (e: any) => setInspectWfId(e.detail?.workflowId || '');
+    window.addEventListener('open-workflow-inspector', h as any);
+    return () => window.removeEventListener('open-workflow-inspector', h as any);
+  }, []);
 
   // 加载画布（项目/画布切换时重载）
   useEffect(() => {
@@ -389,10 +392,6 @@ const InnerCanvas: React.FC = () => {
           } else if (hType === 'text') {
             const txt = patch.prompt ?? patch.text ?? patch.camera_prompt ?? srcData?.prompt ?? srcData?.text ?? srcData?.camera_prompt;
             setKey(inDef!.id, typeof txt === 'string' ? txt : undefined);
-            // 文本类节点双写：PromptNode/TextPromptNode 读 text||prompt，只写句柄键会被旧值遮蔽
-            if ((tgt.type === 'prompt' || tgt.type === 'text-prompt') && inDef!.id === 'prompt') {
-              setKey('text', typeof txt === 'string' ? txt : undefined);
-            }
           }
           // params 类键（源声明的入参）原样透传，不在此层做语义解释
           for (const [k, v] of Object.entries(patch)) {
@@ -551,11 +550,7 @@ const InnerCanvas: React.FC = () => {
           const txt = srcData.prompt || srcData.text || srcData.brief || '';
           // 文本按目标句柄键写入；无句柄信息时按目标节点声明的首个 text 输入
           const key = tgtHandle || tgtSpec?.inputs.find(h => h.type === 'text')?.id || 'prompt';
-          if (txt) {
-            patch[key] = txt;
-            // 文本类节点双写，避免 data.text 旧值遮蔽（同级联传播口径）
-            if ((tgtNode.type === 'prompt' || tgtNode.type === 'text-prompt') && key === 'prompt') patch.text = txt;
-          }
+          if (txt) patch[key] = txt;
         }
         const srcMedia = srcData.image_url || srcData.result_url || srcData.image || srcData.url || srcData.file_url;
         if (['image', 'shot-card', 'comfy-workflow', 'load-image', 'load-image-batch'].includes(srcType) && srcMedia) {
@@ -601,7 +596,6 @@ const InnerCanvas: React.FC = () => {
       data: { onUpdate: handleNodeUpdate, onExecute: handleNodeExecute, ...(extraData || {}) },
     };
     if (type === 'prompt') node.data = { ...node.data, prompt: '' };
-    if (type === 'text-prompt') node.data = { ...node.data, prompt: '', text: '' };
     if (type === 'image') node.data = { ...node.data, prompt: '' };
     if (type === 'video') node.data = { ...node.data, prompt: '', duration: 5 };
     if (type === 'audio') node.data = { ...node.data, text: '' };
@@ -1055,23 +1049,10 @@ const InnerCanvas: React.FC = () => {
       if (nonce) importedAssetNonce.current = nonce;
       let abs = asset.file_url || '';
       if (abs && abs.startsWith('/')) abs = 'http://127.0.0.1:8000' + abs;
-      // 文本/提示词素材：无文件也要能落画布（此前 if(!abs) 直接吞掉）
-      const label0 = asset.visual_prompt || asset.description || asset.name || '';
-      if (asset.category === 'text') {
-        const txt = String(asset.content || asset.visual_prompt || '');
-        const curN = nodesRef.current || [];
-        const maxXN = curN.reduce((m: number, n: any) => Math.max(m, n.position?.x || 0), 0);
-        const posN = { x: curN.length ? maxXN + 320 : 120, y: 200 + (curN.length % 3) * 80 };
-        const tn = createNode('text-prompt', posN);
-        tn.data = { ...tn.data, prompt: txt, text: txt };
-        setNodes(nds => [...nds, tn]);
-        setSelectedNodeId(tn.id);
-        return;
-      }
       if (!abs) return;
       const isVideo = /\.(mp4|webm|mov)$/i.test(abs);
       const isAudio = /\.(mp3|wav|ogg|m4a|flac)$/i.test(abs);
-      const label = label0;
+      const label = asset.visual_prompt || asset.description || asset.name || '';
       const curNodes = nodesRef.current || [];
       const maxX = curNodes.reduce((m: number, n: any) => Math.max(m, n.position?.x || 0), 0);
       const pos = { x: curNodes.length ? maxX + 320 : 120, y: 200 + (curNodes.length % 3) * 80 };
@@ -1102,67 +1083,14 @@ const InnerCanvas: React.FC = () => {
     return () => window.removeEventListener('canvas-import-asset', onEvent as any);
   }, []);
 
-  /** 命中检测：返回指针正下方的节点（自上而下取最上层），用于「拖到节点上直接填充」 */
-  const findNodeAt = useCallback((clientX: number, clientY: number): Node | null => {
-    const p = screenToFlowPosition({ x: clientX, y: clientY });
-    const list: any[] = (nodesRef.current as any[]) || [];
-    for (let i = list.length - 1; i >= 0; i--) {
-      const n = list[i];
-      const w = n.measured?.width || n.width || 320;
-      const h = n.measured?.height || n.height || 200;
-      const x = n.position?.x || 0;
-      const y = n.position?.y || 0;
-      if (p.x >= x && p.x <= x + w && p.y >= y && p.y <= y + h) return n as Node;
-    }
-    return null;
-  }, [screenToFlowPosition]);
-
-  /** 文本投放：写入命中节点的首个 text 输入（走 handleNodeUpdate 保留级联传播）；节点无文本输入返回 false */
-  const fillNodeWithText = useCallback((nodeId: string, txt: string): boolean => {
-    const nds: any[] = (nodesRef.current as any[]) || [];
-    const n = nds.find(x => x.id === nodeId);
-    if (!n) return false;
-    const spec = getNodeSpec(n.type || '');
-    const inDef = spec?.inputs.find(h => h.type === 'text');
-    if (!inDef) return false;
-    const patch: any = { [inDef.id]: txt };
-    if ((n.type === 'prompt' || n.type === 'text-prompt') && inDef.id === 'prompt') patch.text = txt;
-    handleNodeUpdate(nodeId, patch);
-    setSelectedNodeId(nodeId);
-    return true;
-  }, [handleNodeUpdate]);
-
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     const type = e.dataTransfer.getData('application/canvas-nodetype');
     const droppedNodeId = e.dataTransfer.getData('application/canvas-nodeid');
     const assetId = e.dataTransfer.getData('application/canvas-assetid');
-    const assetKind = e.dataTransfer.getData('application/canvas-assetkind');
-    const dragText = e.dataTransfer.getData('application/canvas-text');
-    const plain = e.dataTransfer.getData('text/plain');
-    if (!type && !assetId && !dragText && !plain) return;
+    const assetUrl = e.dataTransfer.getData('text/plain');
+    if (!type && !assetId && !assetUrl) return;
     const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
-
-    // ── 文本投放（对齐 LibTV/即梦）：文本素材 或 自由文本 → 命中节点即填充，落空则新建「提示词文本」节点 ──
-    let textContent: string | null = null;
-    if (dragText) textContent = dragText;
-    else if (assetKind === 'text') {
-      const a: any = assets.find(x => x.id === assetId);
-      textContent = String(a?.content || a?.visual_prompt || '');
-    } else if (!type && !assetId && plain && !/^https?:\/\//i.test(plain.trim()) && !plain.trim().startsWith('/storage/')) {
-      textContent = plain;
-    }
-    if (textContent !== null && !type) {
-      const txt = textContent;
-      const hit = findNodeAt(e.clientX, e.clientY);
-      if (txt.trim() && hit && fillNodeWithText(hit.id, txt)) return;
-      const node = createNode('text-prompt', position);
-      node.data = { ...node.data, prompt: txt, text: txt };
-      setNodes(nds => [...nds, node]);
-      setSelectedNodeId(node.id);
-      return;
-    }
-
     if (assetId) {
       const asset = assets.find(a => a.id === assetId);
       if (!asset) return;
@@ -1182,7 +1110,7 @@ const InnerCanvas: React.FC = () => {
       setNodes(nds => [...nds, node]);
       setSelectedNodeId(node.id);
     }
-  }, [screenToFlowPosition, assets, findNodeAt, fillNodeWithText]);
+  }, [screenToFlowPosition, assets]);
 
   const handleManualSave = async () => {
     if (!pid) { alert('请先在 项目看板 创建/打开项目'); return; }
@@ -1252,10 +1180,11 @@ const InnerCanvas: React.FC = () => {
 
   const isEmpty = nodes.length === 0;
 
-  /** 右键菜单删除：节点 + 挂在它身上的连线一起删 */
+  /** 右键菜单删除：节点 + 挂在它身上的连线一起删，并把它移出会话关注 */
   const handleDeleteNode = (nodeId: string) => {
     setNodes(nds => nds.filter((n: any) => n.id !== nodeId));
     setEdges(es => es.filter((e: any) => e.source !== nodeId && e.target !== nodeId));
+    try { useCanvasStore.getState().removeAgentFocusNode(nodeId); } catch { /* ignore */ }
     if (selectedNodeId === nodeId) setSelectedNodeId(null);
     toast.info('节点已删除');
   };
@@ -1445,6 +1374,20 @@ const InnerCanvas: React.FC = () => {
         <div ref={workbenchRef} className="absolute left-3 top-[52px] bottom-3 z-30 flex flex-col items-start gap-2 pointer-events-none">
           {/* 悬浮条 */}
           <div className="pointer-events-auto flex items-center gap-0.5 p-1 rounded-md bg-surface border border-border shadow-md select-none">
+            <button
+              onClick={() => setCanvasRailOpen(!canvasRailOpen)}
+              aria-pressed={canvasRailOpen}
+              aria-label={canvasRailOpen ? '收起系统左侧栏' : '展开系统左侧栏'}
+              title={canvasRailOpen ? '收起系统左侧栏' : '展开系统左侧栏'}
+              className={`w-7 h-7 inline-flex items-center justify-center rounded-md transition-colors ${
+                canvasRailOpen
+                  ? 'bg-brand/15 text-brand'
+                  : '[color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-secondary'
+              }`}
+            >
+              <PanelLeft className="w-4 h-4" strokeWidth={1.7} />
+            </button>
+            <span className="w-px h-4 bg-border-subtle mx-0.5 shrink-0" />
             {WORKBENCH_TABS.map((t) => {
               const on = workbenchOpen && workbenchSection === t.id;
               const Icon = t.icon;
@@ -1627,21 +1570,12 @@ const InnerCanvas: React.FC = () => {
                         draggable
                         onDragStart={e => {
                           e.dataTransfer.setData('application/canvas-assetid', a.id);
-                          e.dataTransfer.setData('text/plain', abs || url || '');
-                          if (a.category === 'text') {
-                            e.dataTransfer.setData('application/canvas-assetkind', 'text');
-                            e.dataTransfer.setData('application/canvas-text', a.content || a.visual_prompt || '');
-                          }
+                          e.dataTransfer.setData('text/plain', abs || url);
                         }}
-                        title={a.category === 'text' ? `拖到节点上填充提示词：${a.name}` : `拖入画布：${a.name}`}
+                        title={`拖入画布：${a.name}`}
                         className="aspect-square rounded-md overflow-hidden border border-border bg-surface-secondary cursor-grab hover:border-brand/40 transition-colors"
                       >
-                        {a.category === 'text' ? (
-                          <div className="w-full h-full p-1.5 flex flex-col">
-                            <div className="text-[9px] font-bold text-sky-400 flex items-center gap-0.5 mb-0.5"><Type className="w-2.5 h-2.5" />文本</div>
-                            <div className="text-[9px] text-gray-500 leading-snug overflow-hidden" style={{ display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical' }}>{(a.content || a.visual_prompt || a.name || '').slice(0, 80)}</div>
-                          </div>
-                        ) : abs ? (
+                        {abs ? (
                           <AutoRatioMedia src={abs} fallbackAspect="1/1" className="w-full h-full" mediaClassName="group-hover:scale-[1.03] transition-transform" />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center"><ImageIcon className="w-4 h-4 text-gray-500" /></div>
@@ -1676,29 +1610,7 @@ const InnerCanvas: React.FC = () => {
           </div>
         </div>
 
-        {/* 画布区：双击空白新建「提示词文本」节点 + 右键弹「添加节点」菜单（对齐 LibTV） */}
-        <div
-          className="flex-1 relative"
-          onDoubleClick={(e) => {
-            if (isLoading || isEmpty) return;
-            const el = e.target as Element;
-            if (!el.closest || !el.closest('.react-flow')) return;
-            if (el.closest('.react-flow__node, .react-flow__edge, .react-flow__controls, .react-flow__minimap, .react-flow__panel, .react-flow__attribution')) return;
-            const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
-            const n = createNode('text-prompt', pos);
-            setNodes(nds => [...nds, n]);
-            setSelectedNodeId(n.id);
-          }}
-          onContextMenu={(e) => {
-            if (isLoading || isEmpty) return;
-            const el = e.target as Element;
-            if (!el.closest || !el.closest('.react-flow')) return;
-            if (el.closest('.react-flow__node, .react-flow__edge, .react-flow__controls, .react-flow__minimap, .react-flow__panel')) return;
-            e.preventDefault();
-            setNodeMenu(null);
-            setPaneMenu({ x: e.clientX, y: e.clientY });
-          }}
-        >
+        <div className="flex-1 relative">
           {isLoading ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center p-8 gap-4" style={{ background: isLight ? '#E8ECF1' : '#08080B' }}>
               <div className="w-8 h-8 border-2 border-zinc-600 border-t-brand rounded-full animate-spin" />
@@ -1742,11 +1654,11 @@ const InnerCanvas: React.FC = () => {
               onNodeClick={(_, node) => setSelectedNodeId(node.id)}
               onNodeContextMenu={(e, node) => {
                 e.preventDefault();
-                // 右键即选中，与主流编辑器一致：菜单操作的目标不会被误认
+                // 右键即选中，与主流编辑器一致：菜单里的「添加到会话」目标不会被误认
                 setSelectedNodeId(node.id);
                 setNodeMenu({ nodeId: node.id, x: (e as React.MouseEvent).clientX, y: (e as React.MouseEvent).clientY });
               }}
-              onPaneClick={() => { setSelectedNodeId(null); setNodeMenu(null); setPaneMenu(null); }}
+              onPaneClick={() => { setSelectedNodeId(null); setNodeMenu(null); }}
               onSelectionChange={handleSelectionChange}
               deleteKeyCode={null}  /* 删除交给 useCanvasShortcuts，统一处理节点+连线 */
               fitView
@@ -1771,7 +1683,7 @@ const InnerCanvas: React.FC = () => {
                 maskColor="rgba(10,10,12,0.8)"
                 maskStrokeColor={isLight ? 'transparent' : '#ffffff'}
                 maskStrokeWidth={1}
-                nodeColor={(n: any) => n.type === 'image' ? '#7C3AED' : n.type === 'video' ? '#F97316' : n.type === 'audio' ? '#EC4899' : (n.type === 'prompt' || n.type === 'text-prompt') ? '#06B6D4' : '#3F3F50'}
+                nodeColor={(n: any) => n.type === 'image' ? '#7C3AED' : n.type === 'video' ? '#F97316' : n.type === 'audio' ? '#EC4899' : n.type === 'prompt' ? '#06B6D4' : '#3F3F50'}
                 pannable
                 zoomable
               />
@@ -1779,76 +1691,24 @@ const InnerCanvas: React.FC = () => {
           )}
         </div>
 
-        {/* 底部：全局导演 Agent GO + 快速添加 + 选中生图/视频/配音节点时的节点控制台。
-            全局编排入口同时存在于右侧 CanvasAgentSidebar（有会话的一等入口），
-            底部栏保留原快捷键与节点控制台交互。 */}
-        {!isEmpty && (
-          <FloatingAgentPromptBar
-            onAddNode={(t) => {
-              const pos = { x: 120 + nodes.length * 40, y: 120 + nodes.length * 40 };
-              const n = createNode(t, pos);
-              setNodes(nds => [...nds, n]);
-              setSelectedNodeId(n.id);
-            }}
-            onOpenAssetLibrary={() => {
-              window.dispatchEvent(new CustomEvent('open-asset-library'));
-            }}
-            onExport={() => {
-              window.dispatchEvent(new CustomEvent('open-export-modal'));
-            }}
-            onCloseConsole={closeNodeConsole}
-          />
-        )}
+        {/* 底部：仅在选中「生图 / 视频 / 配音」节点时出现的节点控制块。
+            原先常驻的「全局导演 Agent GO + 快速添加」已撤销 —— 全局编排并入右侧 Agent 侧栏，
+            快速添加由左侧工作台栏承担，此处只做「选中哪个节点就控制哪个节点」。 */}
+        {!isEmpty && <NodeControlBar onClose={closeNodeConsole} />}
       </div>
 
-      {/* 右侧：导演 Agent 侧栏（可收起）—— 有会话的一等入口，与 AI 导演页共用会话 */}
+      {/* 右侧：导演 Agent 侧栏（可收起）—— 画布上唯一的 Agent 入口。
+          合并了原先的悬浮胶囊/浮窗与底部全局编排栏，见 CanvasAgentSidebar 文件头注释。 */}
       <CanvasAgentSidebar />
 
-      {/* 节点右键菜单（添加到会话 / 删除节点） */}
+      {/* 节点右键菜单（添加到会话 / 删除） */}
       <NodeContextMenu
         menu={nodeMenu}
         onClose={() => setNodeMenu(null)}
         onDelete={handleDeleteNode}
       />
 
-      {/* 空白画布右键菜单：添加节点（文本优先，对齐 LibTV「右键 → 添加节点」） */}
-      {paneMenu && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setPaneMenu(null)} onContextMenu={(e) => { e.preventDefault(); setPaneMenu(null); }} />
-          <div
-            className="fixed z-50 w-44 bg-surface border border-border rounded-xl shadow-2xl p-1 animate-fade-in"
-            style={{ left: Math.min(paneMenu.x, window.innerWidth - 200), top: Math.min(paneMenu.y, window.innerHeight - 240) }}
-          >
-            {[
-              { type: 'text-prompt', label: '提示词文本', desc: '纯文本资源', icon: FileText, color: 'text-sky-400' },
-              { type: 'prompt', label: '剧本 / Prompt', desc: '剧本拆解策划', icon: Type, color: 'text-sky-400' },
-              { type: 'image', label: '生图 Agent', desc: '文生图 / 垫图', icon: ImageIcon, color: 'text-violet-400' },
-              { type: 'video', label: '视频 Agent', desc: 'I2V / T2V', icon: Film, color: 'text-orange-400' },
-              { type: 'audio', label: '配音 Agent', desc: 'TTS 配音', icon: Mic, color: 'text-pink-400' },
-            ].map(it => {
-              const Icon = it.icon;
-              return (
-                <button
-                  key={it.type}
-                  onClick={() => {
-                    const pos = screenToFlowPosition({ x: paneMenu.x, y: paneMenu.y });
-                    const n = createNode(it.type, pos);
-                    setNodes(nds => [...nds, n]);
-                    setSelectedNodeId(n.id);
-                    setPaneMenu(null);
-                  }}
-                  className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left hover:bg-surface-secondary transition-colors group"
-                >
-                  <Icon className={`w-3.5 h-3.5 shrink-0 ${it.color}`} />
-                  <span className="text-xs font-medium [color:var(--color-text-main)] group-hover:[color:var(--color-text-main)]">{it.label}</span>
-                  <span className="ml-auto text-[9px] [color:var(--color-text-muted)]">{it.desc}</span>
-                </button>
-              );
-            })}
-          </div>
-        </>
-      )}
-
+      {inspectWfId && <WorkflowInspectorModal workflowId={inspectWfId} isOpen={!!inspectWfId} onClose={() => setInspectWfId('')} onSaved={() => {}} />}
     </div>
   );
 };
