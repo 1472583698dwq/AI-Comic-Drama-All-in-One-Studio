@@ -192,29 +192,28 @@ export const ChatHistory: React.FC<{
           </button>
         </div>
         <div className="ml-auto flex items-center gap-0.5">
-          {view === 'projects' && !showArchived && (
-            <>
+          {view === 'projects' && !showArchived && (() => {
+            // 动态单按钮：没全部展开 → 「全部展开」；已全部展开 → 「全部收起」（折叠成一行「项目」）
+            const allExpanded = !projectsFolded && collapsedProjects.size === 0;
+            return (
               <button
                 type="button"
-                title="收起全部：所有项目折叠成一行「项目」"
+                title={allExpanded ? '收起全部：所有项目折叠成一行「项目」' : '全部展开：显示所有项目与其会话'}
                 onClick={() => {
-                  setProjectsFolded(true);
-                  setCollapsedProjects(new Set(projectGroups.map((g) => g.projectId)));
+                  if (allExpanded) {
+                    setProjectsFolded(true);
+                    setCollapsedProjects(new Set(projectGroups.map((g) => g.projectId)));
+                  } else {
+                    setProjectsFolded(false);
+                    setCollapsedProjects(new Set());
+                  }
                 }}
-                className={`p-1.5 rounded-lg transition-colors ${projectsFolded ? 'bg-surface-tertiary text-amber-500' : `${MAIN} hover:bg-surface-hover`}`}
+                className={`p-1.5 rounded-lg transition-colors ${MAIN} hover:bg-surface-hover`}
               >
-                <Minimize2 className="w-3.5 h-3.5" />
+                {allExpanded ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
               </button>
-              <button
-                type="button"
-                title="展开全部：显示所有项目与其会话"
-                onClick={() => { setProjectsFolded(false); setCollapsedProjects(new Set()); }}
-                className={`p-1.5 rounded-lg transition-colors ${!projectsFolded ? 'bg-surface-tertiary' : `${MAIN} hover:bg-surface-hover`}`}
-              >
-                <Maximize2 className="w-3.5 h-3.5" />
-              </button>
-            </>
-          )}
+            );
+          })()}
           <div ref={filterRef} className="relative">
             <button
               type="button"
