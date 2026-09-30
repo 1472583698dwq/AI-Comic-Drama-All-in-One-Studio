@@ -140,6 +140,8 @@ export interface AgentSession {
   messages: ChatMsg[];
   mode?: AgentMode;
   run_mode?: RunMode;
+  /** 已归档：侧栏历史里折叠进归档视图，页内会话列表不显示（后端原样落盘） */
+  archived?: boolean;
 }
 
 /** 后端 WS/SSE 事件（字段因事件而异，统一收口） */

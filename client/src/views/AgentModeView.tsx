@@ -1,26 +1,148 @@
 /**
- * Agent 独立模式页 — 薄壳：会话侧栏 + 统一消息流 + 统一运行时 store
+ * AI 对话页 — 薄壳：统一消息流 + 统一运行时 store（项目选择 chip 在输入框上方）
  * 运行时（会话/流式/计划/审批）全部收敛到 agentStore，与悬浮抽屉共用同一会话。
  *
- * 界面为两块圆角卡片（会话栏 / 对话主区），右栏已删除：模式选择在输入框左下角菜单，
+ * 界面为单栏对话区（会话历史在应用侧栏的聊天历史区），模式选择在输入框左下角菜单，
  * 输入框以「悬浮层」浮在消息流之上；能力面保持上游 —— 多模态附件、运行中 steer 插话、
  * 行内审批与「始终允许」、子代理集群、自动执行警示齐备；清空记忆在页头图标按钮。
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ShieldAlert, Trash2, PanelLeft, ArrowDown,
+  ShieldAlert, Trash2, ArrowDown, Folder, ChevronDown, Check,
 } from 'lucide-react';
 import { useProjectStore } from '../stores/useProjectStore';
+import { useProjectListStore, type ProjectMeta } from '../stores/useProjectListStore';
 import { useAgentStore } from '../components/agent/agentStore';
 import { AgentMessageList } from '../components/agent/AgentMessageList';
 import { AgentComposer } from '../components/agent/AgentComposer';
 import { AgentSwarmPanel } from '../components/agent/AgentSwarmPanel';
 import { loadRoleMetas } from '../components/agent/swarmMeta';
-import { SessionSidebar } from '../components/agent/SessionSidebar';
+import { apiService } from '../services/api';
+import { toast, promptAsync } from '../stores/useDialogStore';
+
+/**
+ * 项目选择 chip（ZCode 工作目录选择器同位）：对话绑定哪个项目/工程。
+ * 弹层向上展开：搜索 + 项目单选 + 分隔线 + 新建项目；切换走双 store 同步。
+ */
+const ProjectChip: React.FC = () => {
+  const project = useProjectStore((s) => s.project);
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [projects, setProjects] = useState<ProjectMeta[]>([]);
+  const [loading, setLoading] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    apiService.listProjects({ sort: 'updated_at' })
+      .then((res) => setProjects((res?.projects || []) as ProjectMeta[]))
+      .catch(() => setProjects([]))
+      .finally(() => setLoading(false));
+  }, [open]);
+
+  const switchProject = async (id: string, title: string) => {
+    setOpen(false);
+    if (project?.id === id) return;
+    useProjectListStore.getState().setActiveProjectId(id);
+    await useProjectStore.getState().loadActiveProject(id);
+    toast.info(`已切换到「${title || '未命名项目'}」`);
+  };
+
+  const createProject = async () => {
+    const title = await promptAsync({
+      title: '新建项目',
+      message: '给新项目起个名字，创建后自动切换过来',
+      defaultValue: '未命名项目',
+      placeholder: '项目名称',
+    });
+    if (!title?.trim()) return;
+    try {
+      const meta = await useProjectListStore.getState().createBlank({ title: title.trim() });
+      await useProjectStore.getState().loadActiveProject(meta.id);
+      toast.success(`已创建「${meta.title}」`);
+      setOpen(false);
+    } catch (e: any) {
+      toast.error(e?.message || '创建项目失败');
+    }
+  };
+
+  const kw = search.trim().toLowerCase();
+  const filtered = projects.filter((p) => !kw || (p.title || '').toLowerCase().includes(kw) || p.id.toLowerCase().includes(kw));
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title="选择这段对话的工作目录（项目）"
+        className="inline-flex items-center gap-1 max-w-[15rem] rounded-full hover:bg-surface-hover pl-3 pr-2 py-1 text-[11px] [color:var(--color-text-main)] transition-colors"
+      >
+        <Folder className="w-3.5 h-3.5 opacity-60 shrink-0" />
+        <span className="truncate">{project?.title || '选择项目'}</span>
+        <ChevronDown className="w-3 h-3 opacity-60 shrink-0" />
+      </button>
+      {open && (
+        <div className="absolute bottom-full mb-1.5 left-0 z-50 w-72 bg-surface border border-border rounded-xl p-1 animate-fade-in">
+          <div className="p-1">
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="搜索项目…"
+              className="w-full h-8 rounded-lg bg-surface-hover px-2.5 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-main)] opacity-90 focus:outline-none"
+            />
+          </div>
+          <div className="max-h-56 overflow-y-auto custom-scrollbar">
+            {loading && <div className="px-2 py-2 text-[11px] [color:var(--color-text-main)] opacity-60">正在加载…</div>}
+            {!loading && filtered.length === 0 && (
+              <div className="px-2 py-2 text-[11px] [color:var(--color-text-main)] opacity-60">没有匹配的项目</div>
+            )}
+            {filtered.map((p) => {
+              const on = p.id === project?.id;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => { void switchProject(p.id, p.title); }}
+                  className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left text-xs [color:var(--color-text-main)] hover:bg-surface-hover ${on ? 'bg-surface-tertiary' : ''}`}
+                >
+                  <Folder className="w-3.5 h-3.5 opacity-60 shrink-0" />
+                  <span className="flex-1 truncate">{p.title || p.id}</span>
+                  {on && <Check className="w-3 h-3 text-brand shrink-0" />}
+                </button>
+              );
+            })}
+          </div>
+          <div className="my-1 h-px bg-border" />
+          <button
+            type="button"
+            onClick={() => { void createProject(); }}
+            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left text-xs [color:var(--color-text-main)] hover:bg-surface-hover"
+          >
+            <Folder className="w-3.5 h-3.5 opacity-60 shrink-0" />新建项目
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
 
 export const AgentModeView: React.FC = () => {
   const { project, activeShotId } = useProjectStore();
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [proposalBusy, setProposalBusy] = useState<Record<string, string>>({});
   // 消息流容器：输入框改为悬浮层后不再占据独立区域，贴底/回到底部都由它自己算
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -109,39 +231,9 @@ export const AgentModeView: React.FC = () => {
 
   return (
     <div className="flex-1 flex overflow-hidden p-2">
-      {/* 左：会话栏 —— 宽度过渡（而非条件渲染）才有展开收起的“一体感”，
-          外层容器吃掉溢出，内层整宽跟随；圆角裁切让三块区域各自成卡片。
-          间距用 margin 而非 gap：收起后不残留空档 */}
-      <div
-        className={`shrink-0 overflow-hidden rounded-2xl transition-[width,opacity,margin-right] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
-          isSidebarOpen ? 'w-64 lg:w-72 opacity-100 mr-2' : 'w-0 opacity-0 mr-0'
-        }`}
-      >
-        <SessionSidebar
-          sessions={sessions}
-          activeSessionId={activeSessionId}
-          loading={loadingSessions}
-          projectTitle={project.title}
-          onCreate={createSession}
-          onSelect={selectSession}
-          onDelete={deleteSession}
-          onCollapse={() => setIsSidebarOpen(false)}
-        />
-      </div>
-
       {/* 中间：对话主区（圆角描边卡片，与会话栏形成明确分隔） */}
       <div className="flex-1 flex flex-col min-w-0 rounded-2xl border border-white/70 dark:border-white/12 overflow-hidden">
         <div className="relative px-4 py-3 flex items-center shrink-0 border-b border-black/5 dark:border-white/10">
-          {/* 收起入口已移入会话栏标题行；这里只在收起后提供「展开」恢复入口 */}
-          {!isSidebarOpen && (
-            <button
-              onClick={() => setIsSidebarOpen(true)}
-              className="p-1.5 rounded-lg border border-white/70 dark:border-white/12 hover:border-brand/40 bg-white/60 dark:bg-white/[.05] [color:var(--color-text-main)] transition-all shrink-0"
-              title="展开会话列表"
-            >
-              <PanelLeft className="w-4 h-4 text-brand" />
-            </button>
-          )}
           {/* 会话标题：绝对居中，不随左右两侧按钮宽度偏移 */}
           <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 max-w-[52%] text-center pointer-events-none">
             <div className="flex items-center justify-center gap-1.5">
@@ -210,6 +302,10 @@ export const AgentModeView: React.FC = () => {
                 </button>
               )}
               <div className="pointer-events-auto">
+                {/* 对话工作目录（项目）选择，ZCode contextHeader 同位 */}
+                <div className="flex items-center mb-1.5">
+                  <ProjectChip />
+                </div>
                 <AgentComposer
                   floating
                   runMode={runMode}

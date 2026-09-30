@@ -88,7 +88,7 @@ export const SetupView: React.FC = () => {
   // 一个可用页都没有时兜底到首页（绝不硬跳一个被关掉的页）。
   useEscapeClose(!dirty, () => {
     const back = resolveTab(project ? 'canvas' : 'projects');
-    setActiveTab((back || 'home') as any);
+    setActiveTab((back || 'agent') as any);
   });
 
   const save = async () => {

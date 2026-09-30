@@ -9,7 +9,7 @@ import { toast } from '../../stores/useDialogStore';
 import { pageIcon } from '../../utils/pageIcons';
 
 /** 无项目时也能进的全局页（其余页面需要先有项目才能前往） */
-const GLOBAL_TABS = ['home', 'projects', 'config'];
+const GLOBAL_TABS = ['projects', 'config'];
 
 /**
  * 功能开关面板按 id 关键词挑图标（功能项契约里没有 icon 字段），
