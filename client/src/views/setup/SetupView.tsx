@@ -16,7 +16,7 @@ type TabKey = 'capabilities' | 'features' | 'extensions' | 'system';
 
 const TABS: Array<{ key: TabKey; label: string; sub: string; icon: any }> = [
   { key: 'capabilities', label: '能力配置', sub: '要做什么 · 谁来做 · 填什么', icon: Sliders },
-  { key: 'features',     label: '功能开关', sub: '页面级开关 · 开停即生效',    icon: Power },
+  { key: 'features',     label: '功能开关', sub: '页面 / 能力两层 · 开停即生效', icon: Power },
   { key: 'extensions',   label: '扩展',     sub: '装插件 · 管全部扩展',        icon: Boxes },
   { key: 'system',       label: '系统',     sub: '安全 · 内核参数 · 诊断',     icon: Cog },
 ];

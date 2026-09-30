@@ -1299,4 +1299,21 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json().catch(() => ({}));
   },
+  // ── 非页面级「功能开关」（L2 能力级开关） ──
+  /** 功能清单 + 当前值：{ features: [{ id, label, description, default, enabled }], values: {id: bool}, file } */
+  async getFeatures(): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/features`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  /** 批量写入功能开关，返回与 GET 同形状的最新全量状态 */
+  async saveFeatures(values: Record<string, boolean>): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/features`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values }),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json().catch(() => ({}));
+  },
 };
