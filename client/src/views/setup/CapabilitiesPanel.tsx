@@ -170,7 +170,8 @@ export const CapabilitiesArea: React.FC<Props> = ({ tab, cfg, draft, setDraft, l
         st = { ok, detail: res?.detail || res?.error || (ok ? '连通正常' : '未通过') };
       } else {
         // 把当前草稿一并带上，这样不保存也能先测
-        const res = await apiService.testConfig(ch.test as any, merged);
+        // 上面的前置守卫已保证走到这里时 ch.test 必有值（无 test 且无 providerId 会提前 return）
+        const res = await apiService.testConfig(ch.test!, merged);
         st = { ok: !!res?.ok, detail: res?.detail || '' };
       }
     } catch (e: any) {

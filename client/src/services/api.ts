@@ -1,6 +1,8 @@
 import { Project, StoryboardShot, MCPToolDefinition } from '../types';
 import { API_BASE_URL } from '../utils/devOrigin';
 import type { TimelineClip } from '../types/timeline';
+// 类型专用导入（不产生运行期依赖）：/config/test 的目标名单以设置面板的 TestTarget 为唯一口径
+import type { TestTarget } from '../views/setup/capabilityCatalog';
 
 /** 时间线引擎自检结果（ffmpeg 合片 + 剪映草稿降级两个出口） */
 export interface TimelineEngineStatus {
@@ -525,7 +527,10 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
-  async testConfig(    target: 'openai' | 'responses_api' | 'deepseek' | 'qwen' | 'minimax' | 'minimax_h3' | 'seedance' | 'kling' | 'wan3' | 'comfyui' | 'siliconflow' | 'dashscope' | 'elevenlabs' | 'cosyvoice' | 'gptsovits' | 'jianyin' | 'openai_compat',
+  async testConfig(
+    // 与后端 /config/test 及设置面板的 TestTarget 同源（旧口径拼作 gptsovits、缺
+    // openai_image/openai_video/indextts/openlist，被调用处的 as any 掩盖了）
+    target: TestTarget,
     config?: Record<string, string>
   ): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/config/test`, {
