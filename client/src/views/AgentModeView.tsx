@@ -8,7 +8,7 @@
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Bot, ShieldAlert, Trash2, PanelLeft, ArrowDown, Zap,
+  Bot, ShieldAlert, Trash2, PanelLeft, ArrowDown,
 } from 'lucide-react';
 import { useProjectStore } from '../stores/useProjectStore';
 import { useAgentStore } from '../components/agent/agentStore';
@@ -131,14 +131,6 @@ export const AgentModeView: React.FC = () => {
 
       {/* 中间：对话主区（圆角描边卡片，与会话栏形成明确分隔） */}
       <div className="flex-1 flex flex-col min-w-0 rounded-2xl border border-white/70 dark:border-white/12 overflow-hidden">
-        {runMode.endsWith('auto') && (
-          <div className="px-4 py-1.5 bg-red-500/10 border-b border-red-500/30 flex items-center gap-2 text-[11px] text-red-300 shrink-0">
-            <Zap className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">
-              <b>完全访问</b>：全部工具自动执行、删源/写文件/跑命令不再逐项确认。可随时用「暂停」中止。
-            </span>
-          </div>
-        )}
         <div className="px-5 py-3 flex items-center gap-3 shrink-0">
           {/* 收起入口已移入会话栏标题行；这里只在收起后提供「展开」恢复入口 */}
           {!isSidebarOpen && (

@@ -109,6 +109,8 @@ const ModeMenuPill: React.FC<{
   const ref = useRef<HTMLDivElement>(null);
   const permMeta = AGENT_PERMISSION_PRESETS.find((p) => p.key === permission) || AGENT_PERMISSION_PRESETS[0];
   const current = planOn ? AGENT_PLAN_PRESET : permMeta;
+  // 选中「完全访问」时胶囊文字与箭头黄色警示
+  const activeIsAuto = !planOn && permission === 'auto';
 
   useEffect(() => {
     if (!open) return;
@@ -131,10 +133,10 @@ const ModeMenuPill: React.FC<{
         onClick={() => setOpen((v) => !v)}
         disabled={disabled}
         title="工作模式：计划（先出方案）+ 权限（变更前确认 / 完全访问 / 造能力）"
-        className="flex items-center gap-1 px-2 py-1 rounded-lg bg-surface border border-border hover:border-brand/50 text-[10px] font-semibold [color:var(--color-text-main)] transition-colors disabled:opacity-40"
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface border border-border hover:border-brand/50 text-[11px] font-semibold [color:var(--color-text-main)] transition-colors disabled:opacity-40"
       >
-        <span className="[color:var(--color-text-main)]">{current.label}</span>
-        <ChevronUp className={`w-2.5 h-2.5 [color:var(--color-text-main)] transition-transform ${open ? '' : 'rotate-180'}`} />
+        <span className={activeIsAuto ? 'text-amber-500' : '[color:var(--color-text-main)]'}>{current.label}</span>
+        <ChevronUp className={`w-3 h-3 ${activeIsAuto ? 'text-amber-500' : '[color:var(--color-text-main)]'} transition-transform ${open ? '' : 'rotate-180'}`} />
       </button>
       {open && (
         <div className="absolute bottom-full mb-1.5 left-0 z-50 w-[280px] bg-surface border border-border rounded-xl p-1 animate-fade-in">
