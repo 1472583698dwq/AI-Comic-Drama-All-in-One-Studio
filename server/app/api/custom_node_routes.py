@@ -6,13 +6,15 @@
 """
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from app.core import pages
 from app.custom_nodes.manager import custom_node_manager, run_custom_node
 from app.custom_nodes.models import CustomNodeDefinition, PY_RUN_TEMPLATE, JS_RUN_TEMPLATE
 
-router = APIRouter()
+# 路由级守卫：创意画布（canvas）关闭时整族 404（运行期开关，路由始终挂载）
+router = APIRouter(dependencies=[Depends(pages.require("canvas"))])
 
 
 class CustomNodeRunRequest(BaseModel):

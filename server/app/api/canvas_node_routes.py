@@ -7,13 +7,15 @@
 """
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.canvas_nodes.manager import canvas_node_manager, list_effective_nodes, run_canvas_node
 from app.canvas_nodes.models import CanvasNodeSpec, MANIFEST_TEMPLATE
+from app.core import pages
 
-router = APIRouter()
+# 路由级守卫：创意画布（canvas）关闭时整族 404（运行期开关，路由始终挂载）
+router = APIRouter(dependencies=[Depends(pages.require("canvas"))])
 
 
 class CanvasNodeRunRequest(BaseModel):

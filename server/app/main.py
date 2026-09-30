@@ -153,6 +153,15 @@ async def _extension_project_scope(request, call_next):
             except Exception:
                 pass
 
+# 功能页（page）默认停用集播种：首次运行把默认关的页面写入扩展覆盖层（幂等，失败不阻断启动）
+try:
+    from app.core import pages as _pages
+    _page_seed = _pages.seed_defaults()
+    if _page_seed.get("seeded"):
+        print(f"[Main] Page defaults seeded (disabled={_page_seed.get('disabled')})")
+except Exception as e:
+    print(f"[Main] Page defaults seed failed: {e}")
+
 # Mount API routes
 app.include_router(router, prefix=settings.API_V1_STR)
 # 资产库路由
@@ -204,6 +213,13 @@ try:
     print("[Main] Extension routes mounted at /api/v1/extensions")
 except Exception as e:
     print(f"[Main] Extension routes mount failed: {e}")
+# 功能页运行时开关路由（清单 + 启停状态）
+try:
+    from app.api.page_routes import router as page_router
+    app.include_router(page_router, prefix=settings.API_V1_STR)
+    print("[Main] Page routes mounted at /api/v1/pages")
+except Exception as e:
+    print(f"[Main] Page routes mount failed: {e}")
 # 插件系统路由（P1：providers/skills/workflows/mcp_tools 四类扩展点）
 try:
     from app.api.plugin_routes import router as plugin_router

@@ -13,12 +13,14 @@ import time
 import uuid
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import Field
 
+from app.core import pages
 from app.models.schemas import PipelineRunRequest
 
-router = APIRouter()
+# 路由级守卫：分镜台（studio）关闭时整族 404（运行期开关，路由始终挂载）
+router = APIRouter(dependencies=[Depends(pages.require("studio"))])
 
 TASKS: Dict[str, Dict[str, Any]] = {}
 MAX_LOGS = 200

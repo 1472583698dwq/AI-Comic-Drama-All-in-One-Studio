@@ -553,6 +553,40 @@ def list_agent_team_extensions() -> List[ExtensionInfo]:
     return out
 
 
+def list_page_extensions() -> List[ExtensionInfo]:
+    """功能页（page）：内置清单直接映射为扩展项。
+
+    停用/启用状态由 ``registry.list()`` 依据覆盖层（``global.disabled``）统一标注，
+    这里不重复判定；但先 ``seed_defaults()``，保证默认关的页首次列表时就是 disabled。
+    """
+    out: List[ExtensionInfo] = []
+    try:
+        from app.core import pages as pages_mod
+        try:
+            pages_mod.seed_defaults()
+        except Exception:
+            pass
+        for p in pages_mod.PAGE_DEFS:
+            pid = str(p.get("id") or "")
+            if not pid:
+                continue
+            out.append(ExtensionInfo(
+                id=pages_mod.page_ext_id(pid),
+                kind=ExtensionKind.PAGE,
+                local_id=pid,
+                publisher="builtin",
+                name=str(p.get("label") or pid),
+                description=str(p.get("description") or ""),
+                icon=str(p.get("icon") or ""),
+                source=ExtensionSource.BUILTIN,
+                status=ExtensionStatus.BUILTIN,
+                detail_hint="settings/pages",
+            ))
+    except Exception:
+        pass
+    return out
+
+
 ADAPTERS = {
     ExtensionKind.PROVIDER: list_provider_extensions,
     ExtensionKind.SKILL: list_skill_extensions,
@@ -567,4 +601,5 @@ ADAPTERS = {
     ExtensionKind.DIRECTOR_PACK: list_director_pack_extensions,
     ExtensionKind.AGENT_PROFILE: list_agent_profile_extensions,
     ExtensionKind.AGENT_TEAM: list_agent_team_extensions,
+    ExtensionKind.PAGE: list_page_extensions,
 }
