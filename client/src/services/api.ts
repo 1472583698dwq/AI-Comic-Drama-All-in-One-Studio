@@ -1,5 +1,30 @@
 import { Project, StoryboardShot, MCPToolDefinition } from '../types';
 import { API_BASE_URL } from '../utils/devOrigin';
+import type { TimelineClip } from '../types/timeline';
+
+/** 时间线引擎自检结果（ffmpeg 合片 + 剪映草稿降级两个出口） */
+export interface TimelineEngineStatus {
+  ffmpeg: boolean;
+  ffprobe: boolean;
+  jianyin: boolean;
+  available: boolean;
+  ffmpeg_hint: string;
+  draft_hint: string;
+}
+
+/** 时间线合片任务（内存任务表，前端轮询 polling） */
+export interface TimelineTask {
+  task_id: string;
+  status: 'running' | 'success' | 'error';
+  stage: string;
+  progress: number;
+  output_url?: string;
+  output_path?: string;
+  duration?: number;
+  size_bytes?: number;
+  warnings?: string[];
+  error?: string;
+}
 
 function extractErrorMessage(res: Response, body: any): string {
   if (body?.detail) {
@@ -423,6 +448,52 @@ export const apiService = {
   async jianyinEngine(): Promise<{ installed: boolean; error?: string | null }> {
     const res = await fetch(`${API_BASE_URL}/projects/export-jianyin/engine`);
     if (!res.ok) return { installed: false, error: `HTTP ${res.status}` };
+    return await res.json();
+  },
+
+  // 6.2 画布时间线节点：合视频（ffmpeg）与降级剪映草稿
+  // 引擎自检：一次拿到 ffmpeg 合片与剪映草稿两个出口的就绪态与安装指引
+  async timelineEngine(): Promise<TimelineEngineStatus> {
+    const res = await fetch(`${API_BASE_URL}/timeline/engine`);
+    if (!res.ok) {
+      return { ffmpeg: false, ffprobe: false, jianyin: false, available: false, ffmpeg_hint: `引擎自检请求失败（HTTP ${res.status}）`, draft_hint: '' };
+    }
+    return await res.json();
+  },
+  // 提交合片任务：校验同步完成（非法片段当场 400），通过后返回 task_id 供轮询
+  async mergeTimeline(payload: {
+    clips: TimelineClip[];
+    project_id?: string;
+    title?: string;
+    output_name?: string;
+    aspect_ratio?: string;
+  }): Promise<{ status: string; task_id: string; clips: number; duration: number; stage: string }> {
+    const res = await fetch(`${API_BASE_URL}/timeline/merge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async getTimelineTask(taskId: string): Promise<TimelineTask> {
+    const res = await fetch(`${API_BASE_URL}/timeline/tasks/${encodeURIComponent(taskId)}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  // 降级出口：不打 MP4，导出剪映/CapCut 官方草稿工程
+  async exportTimelineDraft(payload: {
+    clips: TimelineClip[];
+    project_id?: string;
+    title?: string;
+    aspect_ratio?: string;
+  }): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/timeline/draft`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
 

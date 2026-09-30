@@ -115,6 +115,7 @@
 .react-flow__node-load-audio,
 .react-flow__node-text-prompt,
 .react-flow__node-comfy-workflow,
+.react-flow__node-timeline,
 .react-flow__node-timeline-export {
   background: transparent !important;
   background-color: transparent !important;

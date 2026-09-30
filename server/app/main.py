@@ -241,6 +241,13 @@ try:
     print("[Main] CanvasNode routes mounted at /api/v1/canvas-nodes")
 except Exception as e:
     print(f"[Main] CanvasNode routes mount failed: {e}")
+# 画布时间线节点路由（引擎自检 / 合片 MP4 长任务 / 降级剪映草稿；画布页关闭时整族 404）
+try:
+    from app.api.timeline_routes import router as timeline_router
+    app.include_router(timeline_router, prefix=settings.API_V1_STR)
+    print("[Main] Timeline routes mounted at /api/v1/timeline")
+except Exception as e:
+    print(f"[Main] Timeline routes mount failed: {e}")
 # 前端扩展点路由：主题包 / 导出器 / 导演包
 # 三个模块导出的都是 `router`（与其余路由模块一致），此前按 theme_router/exporter_router/
 # director_pack_router 取会 AttributeError，被 except 吞掉 → 三个扩展点静默未挂载

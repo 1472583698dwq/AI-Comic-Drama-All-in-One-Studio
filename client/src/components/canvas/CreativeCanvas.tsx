@@ -3,7 +3,7 @@ import {
   ReactFlow, Background, Controls, ControlButton, MiniMap, useNodesState, useEdgesState, addEdge, Connection, Edge, Node, ReactFlowProvider, useReactFlow
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Search, Sparkles, Image as ImageIcon, Film, Box, Boxes, Library, Save, Download, Mic, Type, Plus, Wand2, Layers, ChevronsUp, ArrowLeftRight, MoreHorizontal, Pencil, Trash2, Keyboard, X, FolderOpen, FileText } from 'lucide-react';
+import { Search, Sparkles, Image as ImageIcon, Film, Box, Boxes, Library, Save, Download, Mic, Type, Plus, Wand2, Layers, ChevronsUp, ArrowLeftRight, MoreHorizontal, Pencil, Trash2, Keyboard, X, FolderOpen, FileText, Clapperboard } from 'lucide-react';
 import { useProjectListStore } from '../../stores/useProjectListStore';
 import { useThemeStore } from '../../stores/useThemeStore';
 import { useProjectStore } from '../../stores/useProjectStore';
@@ -24,6 +24,7 @@ import { TimelineExportNode } from './nodes/TimelineExportNode';
 import { ProviderNode, ProviderImageNode, ProviderVideoNode, ProviderAudioNode } from './nodes/ProviderNode';
 import { LoadImageNode, LoadImageBatchNode, LoadVideoNode, LoadAudioNode, TextPromptNode } from './nodes/LoaderNodes';
 import { PromptNode, ImageNode, VideoGenNode, AudioNode, Director3DMinimalNode, ExportNode } from './nodes/MinimalNodes';
+import { TimelineNode } from './nodes/TimelineNode';
 import { CustomNode } from './nodes/CustomNode';
 import { ExtNode } from './nodes/ExtNode';
 import { syncCanvasNodeSpecs, listCanvasNodeSpecs, getCanvasNodeSpec } from './canvasNodeSpecs';
@@ -46,6 +47,7 @@ const nodeTypes: any = {
   'audio': AudioNode,
   'director3d': Director3DMinimalNode,
   'export': ExportNode,
+  'timeline': TimelineNode,
   // 兼容旧节点
   'shot-card': ShotCardNode,
   'comfy-workflow': ComfyWorkflowNode,
@@ -80,6 +82,7 @@ const CORE_LIBRARY = [
   { type: 'audio', label: '配音 Agent', desc: '多角色情感 TTS 配音', icon: Mic, color: 'text-pink-400' },
   { type: 'director3d', label: '3D导演台', desc: '机位规划与运镜指令', icon: Box, color: 'text-amber-500' },
   { type: 'export', label: '导出草稿', desc: '一键生成剪映工程', icon: Download, color: 'text-emerald-500' },
+  { type: 'timeline', label: '时间线', desc: '多段合片 · 轻剪辑（合视频）', icon: Clapperboard, color: 'text-brand' },
 ];
 
 const TEMPLATES = [
