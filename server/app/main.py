@@ -220,6 +220,13 @@ try:
     print("[Main] Page routes mounted at /api/v1/pages")
 except Exception as e:
     print(f"[Main] Page routes mount failed: {e}")
+# 功能级（feature）运行时开关路由（清单 + 批量写；页面关不掉的进阶能力，出厂全关）
+try:
+    from app.api.feature_routes import router as feature_router
+    app.include_router(feature_router, prefix=settings.API_V1_STR)
+    print("[Main] Feature routes mounted at /api/v1/features")
+except Exception as e:
+    print(f"[Main] Feature routes mount failed: {e}")
 # 插件系统路由（P1：providers/skills/workflows/mcp_tools 四类扩展点）
 try:
     from app.api.plugin_routes import router as plugin_router

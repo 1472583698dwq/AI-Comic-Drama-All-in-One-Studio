@@ -50,6 +50,29 @@ class TempStore(unittest.TestCase):
         return f"{prefix}_{uuid.uuid4().hex[:8]}"
 
 
+class SubagentFeatureOn(TempStore):
+    """子代理类用例的公共基类：子代理委派是功能级开关（出厂关闭）。
+
+    本文件这些用例测的是「开启后」的既有行为，故类级显式打开；storage 同时指到
+    cls._tmp，开关文件（storage/features.json）不落到真实 storage/。
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from app.core import features as features_mod
+        from app.core.config import settings as app_settings
+        cls._orig_storage = app_settings.STORAGE_DIR
+        app_settings.STORAGE_DIR = cls._tmp
+        features_mod.set_values({"agent_subagent": True})
+
+    @classmethod
+    def tearDownClass(cls):
+        from app.core.config import settings as app_settings
+        app_settings.STORAGE_DIR = cls._orig_storage
+        super().tearDownClass()
+
+
 class TestEvents(TempStore):
     def test_unknown_event_rejected(self):
         with self.assertRaises(ValueError):
@@ -740,7 +763,7 @@ class TestModesAndCommands(TempStore):
         self.assertEqual(lp.goal.phase, "complete")
 
 
-class TestJobsSubagentBatch(TempStore):
+class TestJobsSubagentBatch(SubagentFeatureOn):
     def test_job_background_lifecycle(self):
         from app.agent.runtime.loop import AgentLoop
         from app.agent.tools.pipeline import ToolOutcome
@@ -827,7 +850,7 @@ class TestJobsSubagentBatch(TempStore):
         self.assertEqual(res2["status"], "error")
 
 
-class TestRunModeHotSwitch(TempStore):
+class TestRunModeHotSwitch(SubagentFeatureOn):
     """运行模式热切换：切「自动」必须立即放行挂起审批并回执，且对子代理/后台任务生效。"""
 
     def test_switch_to_auto_resolves_pending_approvals(self):
@@ -926,7 +949,7 @@ class TestRunModeHotSwitch(TempStore):
         self.assertEqual(captured.get("run_mode"), "create_auto")
 
 
-class TestSubAgentPool(TempStore):
+class TestSubAgentPool(SubagentFeatureOn):
     """子代理集群：并发限流/批量扇出/后台通知/取消/角色裁剪（参考 Kimi Agent Swarm）。"""
 
     def _install_fake_children(self, sleep_s=0.1):

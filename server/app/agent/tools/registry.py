@@ -206,6 +206,15 @@ _TASK_CANCEL_SCHEMA = _internal_schema("task_cancel", "取消一个还在生成�
                                        {"task_id": {"type": "string"}}, ["task_id"])
 
 
+def _feature_on(fid: str) -> bool:
+    """功能开关判断（懒导入，异常视为关闭：宁可少给工具，不炸工具清单）。"""
+    try:
+        from app.core import features
+        return features.is_enabled(fid)
+    except Exception:
+        return False
+
+
 def tool_timeout(name: str) -> int:
     import os
     if name in _TOOL_TIMEOUTS:
@@ -246,7 +255,10 @@ class ToolRegistryView:
         return f"{len(names)}:{h}"
 
     def schemas(self, plan_mode: bool = False) -> List[Dict[str, Any]]:
-        key = self._fingerprint() + ("|plan" if plan_mode else "")
+        # 功能开关（多模态）进缓存键：运行期开关变化必须立刻重建清单，不吃旧缓存
+        multimodal = _feature_on("agent_multimodal")
+        key = (self._fingerprint() + ("|plan" if plan_mode else "")
+               + ("|mm" if multimodal else "|nomm"))
         if self._schema_cache is not None and self._schema_key == key:
             return self._schema_cache
         out: List[Dict[str, Any]] = []
@@ -270,7 +282,10 @@ class ToolRegistryView:
                 })
         except Exception as e:
             print(f"[RuntimeTools] schemas failed: {e}")
-        internal = [_TODO_TOOL_SCHEMA, _VIEW_MEDIA_SCHEMA]
+        internal = [_TODO_TOOL_SCHEMA]
+        if multimodal:
+            # 多模态功能关闭 → view_media 不出现在工具清单（提示词里的说明仍是无害的软描述）
+            internal.append(_VIEW_MEDIA_SCHEMA)
         if plan_mode:
             internal += [_JOB_LIST_SCHEMA, _JOB_STATUS_SCHEMA, _TASK_STATUS_SCHEMA,
                          _SUBAGENT_LIST_SCHEMA, _SUBAGENT_STATUS_SCHEMA, _ONEKEY_SUMMARY_SCHEMA]

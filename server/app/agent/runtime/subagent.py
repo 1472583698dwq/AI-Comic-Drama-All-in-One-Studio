@@ -10,6 +10,10 @@
 - 深度限制（AGENT_SUBAGENT_MAX_DEPTH）、并发上限（AGENT_SUBAGENT_MAX_CONCURRENCY）同步/异步共用；
 - Critical Steps 指标：批量完成时记录最慢子项耗时与观测到的并行宽度（防假并行）；
 - Context Sharding：子代理独立会话，只回最终结果；父会话可见 started/progress/settled 事件。
+- 功能开关 ``agent_subagent``（设置 → 功能开关，出厂关闭）关闭时，两个启动入口
+  （``spawn`` / ``spawn_batch``）直接返回与既有失败分支同形状的 ``{"status": "error", …}``，
+  不抛异常、不打断调用方（工具层照既有 error 分支处理）；
+  查询/控制类入口（list/status/wait/cancel/steer）不受影响，仍能读到已存在的句柄。
 """
 from __future__ import annotations
 
@@ -22,6 +26,20 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from app.agent.runtime import events as E
 from app.agent.runtime.agents import AgentProfile, get_profile
+
+#: 归本模块管的功能开关 id（子代理委派）
+FEATURE_ID = "agent_subagent"
+#: 关闭时的统一话术（与页面开关的 404 detail 同一措辞风格：指向设置页）
+DISABLED_ERROR = "子代理能力已关闭（设置 → 功能开关）"
+
+
+def feature_on() -> bool:
+    """子代理能力是否开启（未知/读盘失败 → False，即视为关闭）。"""
+    try:
+        from app.core import features
+        return features.is_enabled(FEATURE_ID)
+    except Exception:
+        return False
 
 
 def _env_int(name: str, default: int) -> int:
@@ -274,6 +292,8 @@ class SubAgentPool:
         background=True 立即返回句柄（完成后通知，可用 subagent_wait 阻塞等待）。
         auto_bg_ok=False 时禁用「同步超时自动转后台」，保证严格阻塞语义。
         """
+        if not feature_on():  # 功能开关关闭：同步/异步全路径都在这里被挡住
+            return {"status": "error", "error": DISABLED_ERROR}
         task = str(task or "").strip()
         if not task:
             return {"status": "error", "error": "subagent_run 需要非空 task"}
@@ -308,7 +328,12 @@ class SubAgentPool:
                           context: Optional[Dict[str, Any]] = None,
                           max_steps: Optional[int] = None,
                           timeout_s: Optional[float] = None) -> Dict[str, Any]:
-        """同质任务批量扇出：items=[{task, context?}, ...]，并行受会话信号量约束。"""
+        """同质任务批量扇出：items=[{task, context?}, ...]，并行受会话信号量约束。
+
+        注：batch 走的是独立入口（不经 ``spawn``），故这里单独加同一道闸。
+        """
+        if not feature_on():
+            return {"status": "error", "error": DISABLED_ERROR}
         if not isinstance(items, list) or not items:
             return {"status": "error", "error": "subagent_run.batch 需要非空数组"}
         if _depth_of(parent) >= self._max_depth():
