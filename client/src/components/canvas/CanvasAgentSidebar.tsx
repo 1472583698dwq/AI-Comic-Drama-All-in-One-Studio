@@ -44,10 +44,10 @@ export const CanvasAgentSidebar: React.FC = () => {
   const clearAgentFocusNodes = useCanvasStore((s) => s.clearAgentFocusNodes);
 
   const {
-    messages, isRunning, wsStatus, approvals, mode, runMode,
+    messages, isRunning, wsStatus, approvals, runMode, permission,
     bindProject, send, steer, abort, clearAll, approve,
     executePlan, proposalAction, applyArtifact,
-    setMode, setRunMode,
+    setRunMode, setPermission,
   } = useAgentStore();
 
   const [collapsed, setCollapsed] = useState<boolean>(() => {
@@ -300,12 +300,12 @@ export const CanvasAgentSidebar: React.FC = () => {
         <AgentComposer
           compact
           noPolish
-          mode={mode}
           runMode={runMode}
+          permission={permission}
           isRunning={isRunning}
           wsStatus={wsStatus}
-          onModeChange={setMode}
           onRunModeChange={setRunMode}
+          onPermissionChange={setPermission}
           onSend={(t, atts) => void send(t, atts)}
           onAbort={abort}
           onSteer={(t, atts) => void steer(t, atts)}

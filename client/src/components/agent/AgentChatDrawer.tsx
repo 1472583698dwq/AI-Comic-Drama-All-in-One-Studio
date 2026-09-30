@@ -20,8 +20,8 @@ export const AgentChatDrawer: React.FC = () => {
   const [proposalBusy, setProposalBusy] = useState<Record<string, string>>({});
 
   const {
-    messages, isRunning, wsStatus, approvals, subagents, mode, runMode, autoAllowTools,
-    bindProject, setMode, setRunMode, send, steer, abort, clearAll, approve, setAutoAllow,
+    messages, isRunning, wsStatus, approvals, subagents, runMode, permission, autoAllowTools,
+    bindProject, setRunMode, setPermission, send, steer, abort, clearAll, approve, setAutoAllow,
     executePlan, proposalAction, applyArtifact,
   } = useAgentFloatStore();
 
@@ -342,15 +342,15 @@ export const AgentChatDrawer: React.FC = () => {
           <div className="p-3 border-t border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] shrink-0">
             <AgentComposer
               compact
-              mode={mode}
               runMode={runMode}
+              permission={permission}
               isRunning={isRunning}
               wsStatus={wsStatus}
               onSend={(t, atts) => void send(t, atts)}
               onAbort={abort}
               onSteer={(t, atts) => void steer(t, atts)}
-              onModeChange={setMode}
               onRunModeChange={setRunMode}
+              onPermissionChange={setPermission}
             />
           </div>
         </div>

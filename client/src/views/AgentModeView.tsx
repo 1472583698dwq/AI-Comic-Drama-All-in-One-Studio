@@ -21,7 +21,7 @@ import { SessionSidebar } from '../components/agent/SessionSidebar';
 
 /**
  * 右栏是「说明 + 快速指令台」：使用指引 + 快捷指令 + 当前上下文。
- * 模式说明已收敛进输入框左下角的预设菜单（AgentComposer 的 AGENT_MODE_PRESETS）。
+ * 模式说明已收敛进输入框左下角的模式菜单（AgentComposer 的 ModeMenuPill：计划 + 权限三选一）。
  */
 const USAGE_GUIDE: Array<{ step: string; desc: string }> = [
   { step: '开始', desc: '左栏「新建会话」开一段干净上下文；会话按项目隔离持久化，随时可切回。' },
@@ -43,8 +43,8 @@ export const AgentModeView: React.FC = () => {
   const {
     sessions, activeSessionId, loadingSessions,
     messages, isRunning, wsStatus, approvals, subagents, autoAllowTools,
-    mode, behavior, runMode,
-    bindProject, setMode, setRunMode, setAutoAllow,
+    mode, behavior, runMode, permission,
+    bindProject, setRunMode, setPermission, setAutoAllow,
     createSession, selectSession, deleteSession,
     send, steer, executePlan, abort, approve, clearAll, proposalAction, applyArtifact,
   } = useAgentStore();
@@ -238,15 +238,15 @@ export const AgentModeView: React.FC = () => {
               <div className="pointer-events-auto">
                 <AgentComposer
                   floating
-                  mode={mode}
                   runMode={runMode}
+                  permission={permission}
                   isRunning={isRunning}
                   wsStatus={wsStatus}
                   onSend={(t, atts) => void send(t, atts)}
                   onAbort={abort}
                   onSteer={(t, atts) => void steer(t, atts)}
-                  onModeChange={setMode}
                   onRunModeChange={setRunMode}
+                  onPermissionChange={setPermission}
                 />
               </div>
             </div>

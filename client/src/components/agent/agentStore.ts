@@ -156,6 +156,8 @@ interface AgentStoreState {
   mode: AgentMode;
   /** 组合 token（wire 口径）；UI 请用 behavior/execution 两个维度 */
   runMode: RunMode;
+  /** 权限（三选一）：变更前确认 approve / 完全访问 auto / 造能力 create。计划进行中它表示"同意计划后按此执行" */
+  permission: RunMode;
   /** 行为模式：能干什么（标准/创造/计划） */
   behavior: BehaviorMode;
   /** 执行方式：要不要逐项人审（审批/自动） */
@@ -166,6 +168,8 @@ interface AgentStoreState {
   bindProject(projectId: string | null): void;
   setMode(m: AgentMode): void;
   setRunMode(r: RunMode): void;
+  /** 切换权限（三选一）：计划进行中仅记录、不退出计划；其余情况直接切换 run_mode */
+  setPermission(p: RunMode): void;
   setBehavior(b: BehaviorMode): void;
   setExecution(e: ExecutionMode): void;
   setAutoAllow(tool: string, on: boolean): void;
@@ -191,6 +195,7 @@ interface AgentStoreState {
 export function createAgentStore(scope: AgentScope) {
   const MODE_KEY = scope === 'float' ? 'agent_float_mode' : 'agent_mode';
   const RUNMODE_KEY = scope === 'float' ? 'agent_float_run_mode' : 'agent_run_mode';
+  const PERMISSION_KEY = scope === 'float' ? 'agent_float_permission' : 'agent_permission';
   const ALLOW_KEY = scope === 'float' ? 'agent_float_auto_allow' : 'agent_auto_allow';
 
   let persistTimer: ReturnType<typeof setTimeout> | null = null;
@@ -206,16 +211,21 @@ export function createAgentStore(scope: AgentScope) {
   };
 
   return create<AgentStoreState>()((set, get) => {
-    const getPrefs = (): { mode: AgentMode; runMode: RunMode } => {
+    const getPrefs = (): { mode: AgentMode; runMode: RunMode; permission: RunMode } => {
       let mode: AgentMode = 'execute';
       let runMode: RunMode = 'approve';
+      let permission: RunMode = 'approve';
       try {
         const m = localStorage.getItem(MODE_KEY);
         if (m === 'chat' || m === 'execute') mode = m;
         const r = localStorage.getItem(RUNMODE_KEY);
         if (r) runMode = composeRunMode(behaviorOfRunMode(r), executionOfRunMode(r));
+        const p = localStorage.getItem(PERMISSION_KEY);
+        if (p === 'approve' || p === 'auto' || p === 'create') permission = p;
       } catch {}
-      return { mode, runMode };
+      // 恢复到计划态时权限用本地记忆（计划 token 不携带权限信息）
+      if (behaviorOfRunMode(runMode) !== 'plan') permission = runMode;
+      return { mode, runMode, permission };
     };
 
     const sessionKey = () => {
@@ -266,11 +276,19 @@ export function createAgentStore(scope: AgentScope) {
       if (!sent) apiService.agentSetRunMode(sid, token).catch(() => {});
     };
 
-    /** 组合 token 落地：同步 behavior/execution 两维 + localStorage + 当前会话持久化 + 热推后端 */
+    /** 组合 token 落地：同步 behavior/execution 两维 + 权限记忆 + localStorage + 当前会话持久化 + 热推后端
+     *  计划与权限解耦：进入计划（plan token）不改权限；落到具体权限 token 时记住它（同意计划后按它执行） */
     const applyRunMode = (token: RunMode) => {
       const runMode = composeRunMode(behaviorOfRunMode(token), executionOfRunMode(token));
-      set({ runMode, behavior: behaviorOfRunMode(runMode), execution: executionOfRunMode(runMode) });
+      const planOn = behaviorOfRunMode(runMode) === 'plan';
+      set({
+        runMode,
+        behavior: behaviorOfRunMode(runMode),
+        execution: planOn ? executionOfRunMode(get().permission) : executionOfRunMode(runMode),
+        ...(planOn ? {} : { permission: runMode }),
+      });
       try { localStorage.setItem(RUNMODE_KEY, runMode); } catch {}
+      if (!planOn) { try { localStorage.setItem(PERMISSION_KEY, runMode); } catch {} }
       const { activeSessionId, sessions } = get();
       set({ sessions: sessions.map((s) => (s.id === activeSessionId ? { ...s, run_mode: runMode, updated_at: new Date().toISOString() } : s)) });
       // 立即持久化：避免防抖窗口内刷新导致服务端仍是旧模式（重开项目回退审批）
@@ -278,12 +296,16 @@ export function createAgentStore(scope: AgentScope) {
       pushRunMode(runMode);
     };
 
-    /** 会话 token → 两维状态（加载/切换会话时用） */
-    const dimsOf = (token: RunMode) => ({
-      runMode: token,
-      behavior: behaviorOfRunMode(token),
-      execution: executionOfRunMode(token),
-    });
+    /** 会话 token → 两维状态（加载/切换会话时用）；计划 token 不覆盖当前权限记忆 */
+    const dimsOf = (token: RunMode) => {
+      const planOn = behaviorOfRunMode(token) === 'plan';
+      return {
+        runMode: token,
+        behavior: behaviorOfRunMode(token),
+        execution: planOn ? executionOfRunMode(get().permission) : executionOfRunMode(token),
+        ...(planOn ? {} : { permission: token }),
+      };
+    };
 
     const dispatchRun = async (msgId: string, text: string, ctx: Record<string, any>, mode: AgentMode, runMode: RunMode, attachments?: AgentAttachment[]) => {
       agentSocket.ensure();
@@ -385,8 +407,11 @@ export function createAgentStore(scope: AgentScope) {
       subagents: {},
       mode: prefs.mode,
       runMode: prefs.runMode,
+      permission: prefs.permission,
       behavior: behaviorOfRunMode(prefs.runMode),
-      execution: executionOfRunMode(prefs.runMode),
+      execution: behaviorOfRunMode(prefs.runMode) === 'plan'
+        ? executionOfRunMode(prefs.permission)
+        : executionOfRunMode(prefs.runMode),
       autoAllowTools: loadAutoAllow(),
 
       bindProject(projectId) {
@@ -453,6 +478,16 @@ export function createAgentStore(scope: AgentScope) {
 
       setRunMode(r) {
         applyRunMode(r);
+      },
+
+      setPermission(p) {
+        // 三选一权限：计划进行中仅记录（同意计划后按它执行），不退出计划、不热推后端（run_mode 仍为 plan）
+        if (behaviorOfRunMode(get().runMode) === 'plan') {
+          set({ permission: p });
+          try { localStorage.setItem(PERMISSION_KEY, p); } catch {}
+          return;
+        }
+        applyRunMode(p);
       },
 
       setBehavior(b) {
@@ -616,8 +651,8 @@ export function createAgentStore(scope: AgentScope) {
         if (!planMsg || !planMsg.planMode || planMsg.planExecuted || st.isRunning) return;
         const planText = planMsg.text || '';
         if (!planText.trim()) return;
-        // 批准计划：退出计划行为回到标准，执行方式沿用用户当前选择（审批=逐步确认 / 自动=直接跑）
-        const nextToken = composeRunMode('standard', st.execution);
+        // 批准计划：退出计划态，回到用户选定的权限执行（变更前确认=危险操作逐个问 / 完全访问=直接跑 / 造能力=可提案新能力）
+        const nextToken = get().permission;
         get().setRunMode(nextToken);
         const text = '按已批准的计划执行';
         const ctx: Record<string, any> = { ...buildContext(), run_mode: nextToken, approved_plan: planText };

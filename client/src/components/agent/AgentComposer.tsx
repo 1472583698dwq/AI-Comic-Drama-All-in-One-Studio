@@ -23,21 +23,23 @@ import { AgentAttachmentPicker, kindOfUrl } from './AgentAttachmentPicker';
 import { apiService } from '../../services/api';
 import { API_ORIGIN } from '../../utils/devOrigin';
 import { toast } from '../../stores/useDialogStore';
-import type { AgentAttachment, AgentMode, RunMode, WsStatus } from './agentTypes';
+import type { AgentAttachment, RunMode, WsStatus } from './agentTypes';
 
 export interface AgentComposerProps {
-  mode: AgentMode;
-  /** 组合 token（run_mode）：决定预设菜单当前选中项 */
+  /** 组合 token（run_mode）：plan/plan_auto 表示计划进行中 */
   runMode?: RunMode;
+  /** 权限（三选一）：变更前确认 approve / 完全访问 auto / 造能力 create；计划进行中表示"同意后按此执行" */
+  permission?: RunMode;
   isRunning: boolean;
   wsStatus: WsStatus;
   onSend: (text: string, attachments?: AgentAttachment[]) => void;
   onAbort: () => void;
   /** 运行中插话（steer）：不填则运行中回车/按钮=暂停 */
   onSteer?: (text: string, attachments?: AgentAttachment[]) => void;
-  /** 模式预设菜单回调（三处入口都传；问答走 onModeChange，其余走 onRunModeChange） */
-  onModeChange?: (m: AgentMode) => void;
+  /** 模式菜单回调：计划开关与权限切换都走它（store 侧解耦计划与权限） */
   onRunModeChange?: (r: RunMode) => void;
+  /** 计划进行中切换权限：只记录不退出计划 */
+  onPermissionChange?: (p: RunMode) => void;
   compact?: boolean;
   autoFocus?: boolean;
   /**
@@ -54,39 +56,60 @@ export interface AgentComposerProps {
   headerSlot?: React.ReactNode;
 }
 
-/**
- * 模式预设（ZCode 式）：一个菜单项 = 一组完整行为。
- * runMode=null 表示「纯问答」—— 只切 mode，不动 run_mode（切回执行时原样恢复）。
- * 映射口径：变更前确认=approve（原「标准+审批」）、完全访问=auto（原「标准+自动」）、
- * 计划=plan、造能力=create（原「创造」）。
- */
-export const AGENT_MODE_PRESETS: Array<{
-  key: string;
-  label: string;
-  hint: string;
-  accent: string;
-  runMode: RunMode | null;
-}> = [
-  { key: 'approve', label: '变更前确认', hint: '正常干活；删源/写文件/跑命令等危险操作逐个问你', accent: 'text-amber-300', runMode: 'approve' },
-  { key: 'plan', label: '计划', hint: '只读侦察先出完整方案，批准后才执行；不生成不花钱', accent: 'text-sky-300', runMode: 'plan' },
-  { key: 'auto', label: '完全访问', hint: '全部工具自动执行、不再逐项确认（含删源/写文件/跑命令），可随时暂停', accent: 'text-red-300', runMode: 'auto' },
-  { key: 'create', label: '造能力', hint: '缺能力先提案：试跑验证后由你决定转正/丢弃，默认不写生产', accent: 'text-violet-300', runMode: 'create' },
-  { key: 'chat', label: '纯问答', hint: '只讲解不动手，不调工具、零副作用', accent: 'text-accent-green', runMode: null },
+/** 计划预设（独立开关，置顶显示）：只读出方案，同意后按所选权限执行 */
+const AGENT_PLAN_PRESET = {
+  key: 'plan', label: '计划', accent: 'text-sky-300',
+  hint: '只读侦察先出完整方案，同意后按所选权限执行；不生成不花钱',
+};
+
+/** 权限三选一（与计划不冲突）：映射到现有 run_mode token，后端零改动 */
+const AGENT_PERMISSION_PRESETS: Array<{ key: RunMode; label: string; hint: string; accent: string }> = [
+  { key: 'approve', label: '变更前确认', hint: '正常干活；删源/写文件/跑命令等危险操作逐个问你', accent: 'text-amber-300' },
+  { key: 'auto', label: '完全访问', hint: '全部工具自动执行、不再逐项确认（含删源/写文件/跑命令），可随时暂停', accent: 'text-red-300' },
+  { key: 'create', label: '造能力', hint: '缺能力先提案：试跑验证后由你决定转正/丢弃，默认不写生产', accent: 'text-violet-300' },
 ];
 
-/** 工具条上的下拉药丸（菜单向上弹，因为输入框常在屏幕底部） */
-const ToolPill: React.FC<{
+/** 菜单条目：标签 + 一句描述，选中打勾 */
+const ModeMenuItem: React.FC<{
   label: string;
-  title: string;
-  options: Array<{ value: string; label: string; hint?: string }>;
-  value: string;
-  onChange: (v: any) => void;
+  hint?: string;
   accent?: string;
+  checked?: boolean;
+  title?: string;
+  onClick: () => void;
+}> = ({ label, hint, accent, checked, title, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    title={title || hint}
+    className={`w-full px-2 py-1.5 rounded-lg text-left hover:bg-surface-hover flex items-start gap-1.5 transition-colors ${
+      checked ? 'bg-surface-tertiary' : ''
+    }`}
+  >
+    <span className="flex-1 min-w-0">
+      <span className={`block text-[11px] font-semibold ${accent || '[color:var(--color-text-main)]'}`}>{label}</span>
+      {hint && <span className="block text-[9px] leading-3 [color:var(--color-text-muted)] mt-0.5">{hint}</span>}
+    </span>
+    {checked && <Check className="w-3 h-3 text-brand shrink-0 mt-0.5" />}
+  </button>
+);
+
+/**
+ * 模式菜单（ZCode 式，背景不透明随主题明暗变化）：
+ * 计划置顶（独立开关，再点一次退出）—— 横线分隔 —— 权限三选一。
+ * 计划与权限不冲突：计划进行中切权限只记录，同意计划后按该权限执行。
+ */
+const ModeMenuPill: React.FC<{
+  planOn: boolean;
+  permission: RunMode;
   disabled?: boolean;
-}> = ({ label, title, options, value, onChange, accent = 'text-brand-light', disabled }) => {
+  onSelectPlan: () => void;
+  onSelectPermission: (p: RunMode) => void;
+}> = ({ planOn, permission, disabled, onSelectPlan, onSelectPermission }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const current = options.find((o) => o.value === value);
+  const permMeta = AGENT_PERMISSION_PRESETS.find((p) => p.key === permission) || AGENT_PERMISSION_PRESETS[0];
+  const current = planOn ? AGENT_PLAN_PRESET : permMeta;
 
   useEffect(() => {
     if (!open) return;
@@ -108,33 +131,38 @@ const ToolPill: React.FC<{
         type="button"
         onClick={() => setOpen((v) => !v)}
         disabled={disabled}
-        title={title}
-        className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 hover:border-brand/50 hover:bg-white/55 dark:bg-white/[.06] text-[10px] font-semibold [color:var(--color-text-main)] transition-colors disabled:opacity-40"
+        title="工作模式：计划（先出方案）+ 权限（变更前确认 / 完全访问 / 造能力）"
+        className="flex items-center gap-1 px-2 py-1 rounded-lg bg-surface border border-border hover:border-brand/50 text-[10px] font-semibold [color:var(--color-text-main)] transition-colors disabled:opacity-40"
       >
-        <span className={accent}>{current?.label || label}</span>
+        <span className={current.accent}>{current.label}</span>
         <ChevronUp className={`w-2.5 h-2.5 [color:var(--color-text-muted)] transition-transform ${open ? '' : 'rotate-180'}`} />
       </button>
       {open && (
-        <div className="absolute bottom-full mb-1.5 left-0 z-50 min-w-[236px] max-w-[300px] bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-xl shadow-2xl shadow-black/40 p-1 animate-fade-in">
-          {options.map((o) => (
-            <button
-              key={o.value}
-              type="button"
-              onClick={() => { onChange(o.value); setOpen(false); }}
-              title={o.hint}
-              className={`w-full px-2 py-1.5 rounded-lg text-left hover:bg-brand/10 flex items-start gap-1.5 ${
-                o.value === value ? 'bg-brand/10' : ''
-              }`}
-            >
-              <span className="flex-1 min-w-0">
-                <span className="block text-[11px] font-semibold [color:var(--color-text-main)]">{o.label}</span>
-                {o.hint && (
-                  <span className="block text-[9px] leading-3 [color:var(--color-text-muted)] mt-0.5">{o.hint}</span>
-                )}
-              </span>
-              {o.value === value && <Check className="w-3 h-3 text-brand shrink-0 mt-0.5" />}
-            </button>
+        <div className="absolute bottom-full mb-1.5 left-0 z-50 w-[280px] bg-surface border border-border rounded-xl shadow-2xl shadow-black/40 p-1 animate-fade-in">
+          <ModeMenuItem
+            label={AGENT_PLAN_PRESET.label}
+            hint={AGENT_PLAN_PRESET.hint}
+            accent={AGENT_PLAN_PRESET.accent}
+            checked={planOn}
+            onClick={() => { onSelectPlan(); setOpen(false); }}
+          />
+          {/* 计划（工作阶段）与权限（授权级别）分组 */}
+          <div className="my-1 h-px bg-border" />
+          {AGENT_PERMISSION_PRESETS.map((p) => (
+            <ModeMenuItem
+              key={p.key}
+              label={p.label}
+              hint={p.hint}
+              accent={p.accent}
+              checked={!planOn && p.key === permission}
+              onClick={() => { onSelectPermission(p.key); setOpen(false); }}
+            />
           ))}
+          {planOn && (
+            <div className="px-2 pt-1.5 pb-1 text-[9px] leading-3 [color:var(--color-text-muted)]">
+              计划进行中：切换权限不会退出计划，同意计划后按所选权限执行
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -149,15 +177,15 @@ const BULK_PASTE_CHARS = 1200;
 const resolveMediaUrl = (u?: string) => (!u ? '' : (u.startsWith('/') ? API_ORIGIN + u : u));
 
 export const AgentComposer: React.FC<AgentComposerProps> = ({
-  mode,
   runMode,
+  permission: permissionProp,
   isRunning,
   wsStatus,
   onSend,
   onAbort,
   onSteer,
-  onModeChange,
   onRunModeChange,
+  onPermissionChange,
   compact,
   autoFocus,
   floating,
@@ -239,40 +267,21 @@ export const AgentComposer: React.FC<AgentComposerProps> = ({
     if (errors.length) toast.error(errors[0]);
   };
 
-  // 预设派生：mode='chat' 即「纯问答」；执行态按 runMode token 归到对应预设
-  const activePresetKey = (() => {
-    if (mode === 'chat') return 'chat';
-    if (runMode === 'plan' || runMode === 'plan_auto') return 'plan';
-    if (runMode === 'create' || runMode === 'create_auto') return 'create';
-    if (runMode === 'auto') return 'auto';
-    return 'approve';
-  })();
-  const activePreset = AGENT_MODE_PRESETS.find((p) => p.key === activePresetKey) || AGENT_MODE_PRESETS[0];
-
-  const handlePresetChange = (key: string) => {
-    const p = AGENT_MODE_PRESETS.find((x) => x.key === key);
-    if (!p) return;
-    if (p.runMode == null) {
-      onModeChange?.('chat');
-    } else {
-      onModeChange?.('execute');
-      onRunModeChange?.(p.runMode);
-    }
-  };
+  // 计划与权限解耦：planOn 只看 run_mode token；权限优先取调用方回传，缺省从 token 派生
+  const planOn = runMode === 'plan' || runMode === 'plan_auto';
+  const perm: RunMode = permissionProp || (planOn ? 'approve' : runMode === 'create_auto' ? 'create' : (runMode || 'approve'));
 
   const placeholder = isRunning && onSteer
     ? '运行中：输入补充指令后回车插话（进入下一轮，不打断已产出）'
-    : activePresetKey === 'chat'
-      ? (compact ? '纯问答 · 只讲解不生成' : '问答模式：只讲解不生成，如“首尾帧和参考图有什么区别？”')
-      : activePresetKey === 'plan'
-        ? (compact ? '计划模式 · 只读侦察出计划' : '计划模式：只读侦察并产出完整计划，如“分析当前项目给出制作计划”')
-        : activePresetKey === 'auto'
-          ? (compact ? '吩咐 AI 导演做点什么…（完全访问）' : '完全访问：全部工具自动执行不弹确认，如“把画布现有节点全量执行一遍”')
-          : activePresetKey === 'create'
-            ? (compact ? '吩咐 AI 导演做点什么…（造能力）' : '造能力：缺什么能力直接说，如“做一个竖屏封面生成节点”')
-            : (compact ? '吩咐 AI 导演做点什么…' : '变更前确认：危险操作会先问你，如“为当前镜头规划特写推镜并配音”');
+    : planOn
+      ? (compact ? '计划模式 · 只读侦察出计划' : '计划模式：只读侦察并产出完整计划，同意后按所选权限执行')
+      : perm === 'auto'
+        ? (compact ? '吩咐 AI 导演做点什么…（完全访问）' : '完全访问：全部工具自动执行不弹确认，如“把画布现有节点全量执行一遍”')
+        : perm === 'create'
+          ? (compact ? '吩咐 AI 导演做点什么…（造能力）' : '造能力：缺什么能力直接说，如“做一个竖屏封面生成节点”')
+          : (compact ? '吩咐 AI 导演做点什么…' : '变更前确认：危险操作会先问你，如“为当前镜头规划特写推镜并配音”');
 
-  const hasMenu = !!(onModeChange && onRunModeChange && runMode != null);
+  const hasMenu = !!(onRunModeChange && runMode != null);
 
   return (
     <div className={compact || floating ? '' : 'p-4 border-t border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] shrink-0'}>
@@ -370,16 +379,14 @@ export const AgentComposer: React.FC<AgentComposerProps> = ({
             )}
           </div>
 
-          {/* 模式预设菜单（ZCode 式）：一个胶囊 = 一组完整行为，向上弹菜单 */}
+          {/* 模式菜单（ZCode 式）：计划置顶（开关）+ 横线 + 权限三选一；计划与权限不冲突 */}
           {hasMenu && (
-            <ToolPill
-              label="模式"
-              title="工作模式：变更前确认 / 计划 / 完全访问 / 造能力 / 纯问答"
-              options={AGENT_MODE_PRESETS.map((p) => ({ value: p.key, label: p.label, hint: p.hint }))}
-              value={activePresetKey}
-              onChange={handlePresetChange}
-              accent={activePreset.accent}
+            <ModeMenuPill
+              planOn={planOn}
+              permission={perm}
               disabled={isRunning}
+              onSelectPlan={() => onRunModeChange?.(planOn ? perm : 'plan')}
+              onSelectPermission={(p) => (planOn ? onPermissionChange?.(p) : onRunModeChange?.(p))}
             />
           )}
 
