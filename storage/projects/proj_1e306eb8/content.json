@@ -1,5 +1,5 @@
 {
-  "id": "f35e363d-3ceb-4e0c-b43c-5eadc782f811",
+  "id": "proj_1e306eb8",
   "title": "九龙拉棺·泰山之巅",
   "original_novel": "九龙拉棺，划破星空，降临在泰山之巅。\n叶凡仰望苍穹，只觉得一股苍茫古老的气息扑面而来。\n“天啊！那是什么？！”人群中爆发出一阵阵惊恐的尖叫。\n“大家快往山下退！”叶凡大声呼喊。\n突然，青铜古棺发出轰然巨响，一道神秘的八卦符文在虚空中缓缓展开……\n叶凡凝视着古棺内部，沉声道：“这一世，我命由我不由天！”",
   "style_preset": "donghua_xianxia",
@@ -15,6 +15,8 @@
       "visual_prompt": "three views, front view, side view, back view, 1boy, black hair, handsome, determined eyes, ancient style robe, donghua_xianxia character design",
       "voice_id": "male-qn-qingse",
       "voice_name": "清冷坚毅男声",
+      "ref_audio_url": null,
+      "ref_audio_name": "",
       "emotion_preset": "neutral",
       "avatar_url": null,
       "three_views": {}
@@ -29,6 +31,8 @@
       "visual_prompt": "three views, front view, side view, back view, crowd of people, fearful expressions, mixed clothing, donghua_xianxia style",
       "voice_id": "crowd-fearful",
       "voice_name": "惊恐群声",
+      "ref_audio_url": null,
+      "ref_audio_name": "",
       "emotion_preset": "neutral",
       "avatar_url": null,
       "three_views": {}
@@ -42,9 +46,6 @@
       "location": "泰山之巅",
       "time_of_day": "night",
       "atmosphere": "epic",
-      "image_prompt": "",
-      "props": [],
-      "ref_image_url": null,
       "shots": [
         {
           "id": "96713ae7-5218-4cde-ad08-3c4f569ca9f7",
@@ -225,6 +226,8 @@
     }
   ],
   "bgm_name": "Epic_Battle_Orchestra.mp3",
+  "bgm_url": null,
+  "bgm_volume": 0.5,
   "created_at": "2026-08-31T15:03:35.988990",
   "updated_at": "2026-08-31T15:03:35.988996",
   "engine": "minimax-llm"
