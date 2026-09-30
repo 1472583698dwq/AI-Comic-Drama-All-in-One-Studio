@@ -9,6 +9,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Hash, Folder, ListFilter, Archive, ArchiveX, Trash2, Check, ChevronDown, ChevronRight, Check as CheckIcon,
+  Maximize2, Minimize2,
 } from 'lucide-react';
 import { useChatHistoryStore, type ChatHistoryEntry } from '../../stores/useChatHistoryStore';
 
@@ -43,6 +44,8 @@ export const ChatHistory: React.FC<{
   const [filterOpen, setFilterOpen] = useState(false);
   const [confirmActionId, setConfirmActionId] = useState<string | null>(null);
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set());
+  /** 收起全部：项目分组整列隐藏，只留一行「项目」可下拉展开 */
+  const [projectsFolded, setProjectsFolded] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { void refresh(); }, [refresh]);
@@ -189,6 +192,29 @@ export const ChatHistory: React.FC<{
           </button>
         </div>
         <div className="ml-auto flex items-center gap-0.5">
+          {view === 'projects' && !showArchived && (
+            <>
+              <button
+                type="button"
+                title="收起全部：所有项目折叠成一行「项目」"
+                onClick={() => {
+                  setProjectsFolded(true);
+                  setCollapsedProjects(new Set(projectGroups.map((g) => g.projectId)));
+                }}
+                className={`p-1.5 rounded-lg transition-colors ${projectsFolded ? 'bg-surface-tertiary text-amber-500' : `${MAIN} hover:bg-surface-hover`}`}
+              >
+                <Minimize2 className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                title="展开全部：显示所有项目与其会话"
+                onClick={() => { setProjectsFolded(false); setCollapsedProjects(new Set()); }}
+                className={`p-1.5 rounded-lg transition-colors ${!projectsFolded ? 'bg-surface-tertiary' : `${MAIN} hover:bg-surface-hover`}`}
+              >
+                <Maximize2 className="w-3.5 h-3.5" />
+              </button>
+            </>
+          )}
           <div ref={filterRef} className="relative">
             <button
               type="button"
@@ -257,7 +283,21 @@ export const ChatHistory: React.FC<{
 
         {!showArchived && view === 'sessions' && activeEntries.map((e) => renderRow(e, { showProject: true }))}
 
-        {!showArchived && view === 'projects' && projectGroups.map((g) => {
+        {!showArchived && view === 'projects' && projectsFolded && (
+          <button
+            type="button"
+            onClick={() => setProjectsFolded(false)}
+            title="展开项目列表"
+            className="w-full h-7 flex items-center gap-1.5 rounded-lg px-2 hover:bg-surface-hover transition-colors"
+          >
+            <ChevronRight className="w-3 h-3 [color:var(--color-text-main)] opacity-60" />
+            <Folder className="w-3.5 h-3.5 [color:var(--color-text-main)] opacity-60 shrink-0" />
+            <span className={`text-[11px] font-semibold ${MAIN} flex-1 text-left`}>项目</span>
+            <span className={`text-[9px] font-mono ${MAIN} opacity-50`}>{activeEntries.length}</span>
+          </button>
+        )}
+
+        {!showArchived && view === 'projects' && !projectsFolded && projectGroups.map((g) => {
           const collapsed = collapsedProjects.has(g.projectId);
           return (
             <div key={g.projectId} className="space-y-0.5">
