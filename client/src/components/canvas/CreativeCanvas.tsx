@@ -1761,7 +1761,20 @@ const InnerCanvas: React.FC = () => {
                   <ArrowLeftRight className="w-3.5 h-3.5" strokeWidth={1.7} />
                 </ControlButton>
               </Controls>
-              <MiniMap className="!bg-surface !border-border !rounded-xl" maskColor="rgba(10,10,12,0.8)" nodeColor={(n: any) => n.type === 'image' ? '#7C3AED' : n.type === 'video' ? '#F97316' : n.type === 'audio' ? '#EC4899' : (n.type === 'prompt' || n.type === 'text-prompt') ? '#06B6D4' : '#3F3F50'} />
+              {/* pannable / zoomable 必须显式打开：@xyflow/react 12.11 的 MiniMap 这两个 prop
+                  默认是 false，不传就是「鼠标放上去、拖动全都没反应」——小地图只是个静态缩略图。
+                  视野框描边：暗色主题下遮罩是 rgba(10,10,12,.8)，框线默认 transparent 看不出来，
+                  故给白色描边。maskStrokeWidth 不能省：内部会被 viewScale 乘算，不传时用的是
+                  CSS 默认值 1（SVG 用户单位 ≈ 亚像素），传了才是「1 个屏幕像素」的细白线。 */}
+              <MiniMap
+                className="!bg-surface !border-border !rounded-xl cursor-grab active:cursor-grabbing"
+                maskColor="rgba(10,10,12,0.8)"
+                maskStrokeColor={isLight ? 'transparent' : '#ffffff'}
+                maskStrokeWidth={1}
+                nodeColor={(n: any) => n.type === 'image' ? '#7C3AED' : n.type === 'video' ? '#F97316' : n.type === 'audio' ? '#EC4899' : (n.type === 'prompt' || n.type === 'text-prompt') ? '#06B6D4' : '#3F3F50'}
+                pannable
+                zoomable
+              />
             </ReactFlow>
           )}
         </div>

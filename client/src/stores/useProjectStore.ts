@@ -76,6 +76,24 @@ const persistProject = (proj: Project | null, activePid: string | null) => {
   }, 250);
 };
 
+/**
+ * 空白项目兜底：后端「新建空白项目」不落 content.json，`GET /projects/{id}` 返回的
+ * `content` 为 null 是**正常态**，不是"项目无效"。
+ * 形状与项目看板打开空白项目的既有兜底（ProjectDashboard.handleOpen）保持一致，
+ * 避免同一份空工程在两处长得不一样。
+ */
+const buildBlankProject = (id: string, meta?: any): any => ({
+  id,
+  title: meta?.title || '未命名项目',
+  original_novel: '',
+  style_preset: meta?.style_preset || 'donghua_xianxia',
+  aspect_ratio: meta?.aspect_ratio || '9:16',
+  characters: [],
+  scenes: [{ id: 'scene-1', scene_index: 1, title: '场景 1', location: '', time_of_day: 'day', atmosphere: 'epic', shots: [] }],
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+});
+
 export const useProjectStore = create<ProjectState>((set, get) => ({
   project: null,
   activeProjectId: localStorage.getItem('activeProjectId') || null,
@@ -98,11 +116,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // open 仅更新 last_opened_at（返回 meta，无场景），内容以 getProject 的 content 为准
       try { await apiService.openProject(pid); } catch {}
       const p = await apiService.getProject(pid);
-      const content = (p as any)?.content ?? (p as any)?.project ?? p;
+      // 后端 /projects/{id} 形如 { meta, content }。content 为 null 表示「空白项目尚未落盘」，
+      // 此时按 meta 兜底成空工程 —— 绝不能走 closeProject()：那会清空 activeProjectId 并把
+      // 页签弹回项目看板，表现为"选了项目反而变成未选择项目"且每次重试都复现。
+      // 只有请求真的失败（404 / 后端未启动）才关项目，见下方 catch。
+      const meta = (p as any)?.meta ?? null;
+      const content = (p as any)?.content ?? (p as any)?.project ?? (meta ? null : p);
       if (content && Array.isArray(content.scenes)) {
         get().setProject(content as any);
       } else {
-        get().closeProject();
+        get().setProject(buildBlankProject(pid, meta || content));
       }
     } catch (e: any) {
       console.warn('Failed to auto-load active project:', e);

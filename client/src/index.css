@@ -218,6 +218,18 @@ input::placeholder, textarea::placeholder {
   color: var(--color-text-muted);
 }
 
+/* Tailwind v4 起 preflight 不再给按钮补 `cursor: pointer`（v3 有），
+   于是全站按钮 hover 都没有"可点"的手型反馈。这里补回该默认行为；
+   放进 base 层是为了让 `cursor-grab` 这类工具类（拖拽把手）仍能覆盖它。 */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  summary,
+  label[for] {
+    cursor: pointer;
+  }
+}
+
 /* ============ 浅色主题可读性修复 ============
  * 病因：大量组件把 text-white / gray-100~400 / zinc 等“只为深色设计”的
  * 浅色文字写死在主题表面（浅色下为白色底）上，导致白底白字看不清。

@@ -50,6 +50,11 @@ export interface AgentComposerProps {
   compact?: boolean;
   autoFocus?: boolean;
   /**
+   * 悬浮态（全屏「AI 导演」页）：不再占一条通栏空白，而是浮在消息流之上。
+   * 外壳交给调用方定位，这里只负责玻璃质感/大圆角/投影。
+   */
+  floating?: boolean;
+  /**
    * 标注 `data-no-polish`，让选区级润色浮标（`SelectionPolish`）跳过本输入框。
    * 这里是"跟 Agent 说话"的指令框，润色技能是给画面提示词/台词用的，挂上来不对路。
    */
@@ -169,6 +174,7 @@ export const AgentComposer: React.FC<AgentComposerProps> = ({
   onRunModeChange,
   compact,
   autoFocus,
+  floating,
   noPolish,
   headerSlot,
 }) => {
@@ -267,7 +273,7 @@ export const AgentComposer: React.FC<AgentComposerProps> = ({
   const showPills = !!compact && (!!onModeChange || !!onRunModeChange);
 
   return (
-    <div className={compact ? '' : 'p-4 border-t border-border bg-surface shrink-0'}>
+    <div className={compact || floating ? '' : 'p-4 border-t border-border bg-surface shrink-0'}>
       {/* IDE 式循环切换（页面页头用；compact 下拉模式下不重复渲染） */}
       {showCycles && !showPills && (
         <div className={`flex items-center gap-1.5 mb-1.5 ${compact ? '' : 'max-w-4xl mx-auto'}`}>
@@ -307,9 +313,11 @@ export const AgentComposer: React.FC<AgentComposerProps> = ({
       )}
 
       <div
-        className={`rounded-2xl border border-border bg-surface-secondary/60 transition-colors focus-within:border-brand/60 ${
-          compact ? '' : 'max-w-4xl mx-auto'
-        }`}
+        className={`transition-colors focus-within:border-brand/60 ${
+          floating
+            ? 'rounded-[26px] border border-border/60 bg-surface/90 backdrop-blur-xl shadow-2xl shadow-black/30'
+            : 'rounded-2xl border border-border bg-surface-secondary/60'
+        } ${compact ? '' : 'max-w-4xl mx-auto'}`}
       >
         {/* 顶部：上下文 chip（由调用方决定语义，如画布「已加入会话」的节点） */}
         {headerSlot}

@@ -315,10 +315,12 @@ export function App() {
         </main>
       </div>
 
-      {/* 3. 悬浮导演 Agent（仅当存在有效项目、且不在画布页时启用）
-          画布页有专属的右侧 Agent 侧栏（CanvasAgentSidebar），两者共用同一份页面版会话；
-          此处加 activeTab 闸门，避免画布上同时出现两个功能重复的导演 Agent 入口。 */}
-      {project && resolvedTab && resolvedTab !== 'canvas' && <AgentChatDrawer />}
+      {/* 3. 悬浮导演 Agent（仅当存在有效项目、且当前页没有自己的 Agent 界面时启用）
+          画布页有专属的右侧 Agent 侧栏（CanvasAgentSidebar）、「AI 导演」页本身就是全屏
+          Agent 主界面，两者都与本抽屉共用同一份会话；此处用**归一后的页签**做闸门，
+          避免同一份会话在页面上出现两个功能重复的入口。
+          key 绑定项目 id：切换项目即重建会话侧栏，避免串到上一个项目的会话。 */}
+      {project && resolvedTab && resolvedTab !== 'canvas' && resolvedTab !== 'agent' && <AgentChatDrawer key={project.id} />}
 
       {/* 3.1 Global AI Polish (covers all textareas) */}
       <GlobalAiPolish />

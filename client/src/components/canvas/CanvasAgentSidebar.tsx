@@ -208,8 +208,10 @@ export const CanvasAgentSidebar: React.FC = () => {
         />
       </div>
 
-      {/* 头部 */}
-      <div className="h-12 px-3 border-b border-border flex items-center gap-2 shrink-0 bg-surface">
+      {/* 头部：高度必须与画布顶部工具条一致（h-11 = 44px），
+          否则两栏相交处会出现 4px 错位的双分隔线（接缝不齐）。
+          全站顶部栏 / 画布工具条 / 本侧栏头统一 44px。 */}
+      <div className="h-11 px-3 border-b border-border flex items-center gap-2 shrink-0 bg-surface">
         <div className="p-1.5 rounded-xl bg-gradient-to-tr from-brand to-brand-blue text-white shadow-md shadow-brand/30 shrink-0">
           <Bot className="w-3.5 h-3.5" />
         </div>
