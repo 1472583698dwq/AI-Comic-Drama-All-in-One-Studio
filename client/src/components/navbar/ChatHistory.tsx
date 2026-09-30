@@ -9,9 +9,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Hash, Folder, ListFilter, Archive, ArchiveX, Trash2, Check, ChevronDown, ChevronRight, Check as CheckIcon,
-  Maximize2, Minimize2,
+  Maximize2, Minimize2, Plus,
 } from 'lucide-react';
 import { useChatHistoryStore, type ChatHistoryEntry } from '../../stores/useChatHistoryStore';
+import { useProjectStore } from '../../stores/useProjectStore';
+import { toast } from '../../stores/useDialogStore';
+import { NewProjectModal } from '../project/NewProjectModal';
 
 const MAIN = '[color:var(--color-text-main)]';
 
@@ -46,6 +49,7 @@ export const ChatHistory: React.FC<{
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set());
   /** 收起全部：项目分组整列隐藏，只留一行「项目」可下拉展开 */
   const [projectsFolded, setProjectsFolded] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { void refresh(); }, [refresh]);
@@ -111,7 +115,7 @@ export const ChatHistory: React.FC<{
 
   const actionBtn = 'p-1 rounded-md hover:bg-surface-tertiary [color:var(--color-text-main)] shrink-0';
 
-  const renderRow = (e: ChatHistoryEntry, opts: { showProject?: boolean; archived?: boolean }) => {
+  const renderRow = (e: ChatHistoryEntry, opts: { showProject?: boolean; archived?: boolean; indent?: boolean }) => {
     const sid = e.session.id;
     const isActive = !opts?.archived && sid === activeSessionId;
     const key = `${e.projectId}_${sid}`;
@@ -119,7 +123,9 @@ export const ChatHistory: React.FC<{
       <div
         key={key}
         onClick={() => { if (!opts?.archived) onOpenEntry(e); }}
-        className={`group/hist flex items-start gap-1 rounded-lg pl-2.5 pr-1 py-1 cursor-pointer transition-colors ${
+        className={`group/hist flex items-start gap-1 rounded-lg pr-1 py-1 cursor-pointer transition-colors ${
+          opts?.indent ? 'pl-10' : 'pl-2.5'
+        } ${
           isActive ? 'bg-surface-tertiary' : 'hover:bg-surface-hover'
         }`}
       >
@@ -282,21 +288,35 @@ export const ChatHistory: React.FC<{
 
         {!showArchived && view === 'sessions' && activeEntries.map((e) => renderRow(e, { showProject: true }))}
 
-        {!showArchived && view === 'projects' && projectsFolded && (
-          <button
-            type="button"
-            onClick={() => setProjectsFolded(false)}
-            title="展开项目列表"
-            className="w-full h-7 flex items-center gap-1.5 rounded-lg px-2 hover:bg-surface-hover transition-colors"
-          >
-            <ChevronRight className="w-3 h-3 [color:var(--color-text-main)] opacity-60" />
-            <Folder className="w-3.5 h-3.5 [color:var(--color-text-main)] opacity-60 shrink-0" />
-            <span className={`text-[11px] font-semibold ${MAIN} flex-1 text-left`}>项目</span>
-            <span className={`text-[9px] font-mono ${MAIN} opacity-50`}>{activeEntries.length}</span>
-          </button>
-        )}
+        {!showArchived && view === 'projects' && (
+          <>
+            {/* 项目常驻头行：箭头在文字右侧，最右加号新建项目 */}
+            <div className="flex items-center gap-0.5 h-8 rounded-lg px-2 mb-0.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => setProjectsFolded((v) => !v)}
+                title={projectsFolded ? '展开项目列表' : '收起项目列表'}
+                className="flex-1 min-w-0 h-full flex items-center gap-1.5 text-left group/prj"
+              >
+                <span className={`text-[11px] font-semibold ${MAIN}`}>项目</span>
+                {projectsFolded && (
+                  <span className={`text-[9px] font-mono ${MAIN} opacity-50`}>{activeEntries.length}</span>
+                )}
+                {projectsFolded
+                  ? <ChevronRight className="ml-auto w-3 h-3 [color:var(--color-text-main)] opacity-60" />
+                  : <ChevronDown className="ml-auto w-3 h-3 [color:var(--color-text-main)] opacity-60" />}
+              </button>
+              <button
+                type="button"
+                title="新建项目"
+                onClick={() => setCreateOpen(true)}
+                className="p-1 rounded-md hover:bg-surface-hover [color:var(--color-text-main)] shrink-0"
+              >
+                <Plus className="w-3.5 h-3.5" />
+              </button>
+            </div>
 
-        {!showArchived && view === 'projects' && !projectsFolded && projectGroups.map((g) => {
+            {!projectsFolded && projectGroups.map((g) => {
           const collapsed = collapsedProjects.has(g.projectId);
           return (
             <div key={g.projectId} className="space-y-0.5">
@@ -307,7 +327,7 @@ export const ChatHistory: React.FC<{
                   if (n.has(g.projectId)) n.delete(g.projectId); else n.add(g.projectId);
                   return n;
                 })}
-                className="w-full h-7 flex items-center gap-1.5 rounded-lg px-2 hover:bg-surface-hover transition-colors"
+                className="w-full h-7 flex items-center gap-1.5 rounded-lg pl-6 pr-1 hover:bg-surface-hover transition-colors"
               >
                 {collapsed ? <ChevronRight className="w-3 h-3 [color:var(--color-text-main)] opacity-60" /> : <ChevronDown className="w-3 h-3 [color:var(--color-text-main)] opacity-60" />}
                 <Folder className="w-3.5 h-3.5 [color:var(--color-text-main)] opacity-60 shrink-0" />
@@ -315,11 +335,24 @@ export const ChatHistory: React.FC<{
                 <span className={`text-[9px] font-mono ${MAIN} opacity-50`}>{g.items.length}</span>
               </button>
               {!collapsed && (g.items.length === 0 ? (
-                <div className={`pl-8 pr-2 py-1 text-[10px] ${MAIN} opacity-50`}>暂无会话</div>
-              ) : g.items.map((e) => renderRow(e, { showProject: false })))}
+                <div className={`pl-12 pr-2 py-1 text-[10px] ${MAIN} opacity-50`}>暂无会话</div>
+              ) : g.items.map((e) => renderRow(e, { showProject: false, indent: true })))}
             </div>
           );
         })}
+          </>
+        )}
+
+        <NewProjectModal
+          open={createOpen}
+          onClose={() => setCreateOpen(false)}
+          onCreated={async (meta) => {
+            setCreateOpen(false);
+            await useProjectStore.getState().loadActiveProject(meta.id);
+            toast.success(`已切换到「${meta.title}」`);
+            void refresh();
+          }}
+        />
       </div>
     </div>
   );

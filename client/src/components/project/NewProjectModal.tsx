@@ -4,6 +4,7 @@
  * 名称输入 + 四个风格模板（也可选空白）→ createBlank → onCreated 回调（调用方负责切换/进对话）。
  */
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Check, X } from 'lucide-react';
 import { useProjectListStore, type ProjectMeta } from '../../stores/useProjectListStore';
 import { toast } from '../../stores/useDialogStore';
@@ -67,7 +68,8 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({ open, onClose,
     }
   };
 
-  return (
+  // Portal 到 body：侧栏等祖先的 backdrop-blur 会把 fixed 的定位基准改掉，导致弹窗被挤进侧栏
+  return createPortal(
     <div className="fixed inset-0 z-[70] flex items-center justify-center p-6 bg-black/45" onMouseDown={onClose}>
       <div
         className="w-[460px] max-w-full bg-surface border border-border rounded-2xl p-5 animate-fade-in"
@@ -157,6 +159,7 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({ open, onClose,
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
