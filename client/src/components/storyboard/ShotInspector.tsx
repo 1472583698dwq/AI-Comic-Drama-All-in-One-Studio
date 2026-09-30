@@ -17,7 +17,7 @@ import { SlotManagerModal } from './slots/SlotManagerModal';
 import { toast } from '../../stores/useDialogStore';
 import type { ProductionMode, ShotSlotContext } from './slots/types';
 
-const API_ORIGIN = 'http://127.0.0.1:8000';
+import { API_ORIGIN } from '../../utils/devOrigin';
 
 // 内置 Slot 注册（P0）：P1 时替换为插件 slots/*.json 加载，宿主不动
 registerBuiltinSlots();
@@ -44,7 +44,7 @@ const removeShotId = (setter: React.Dispatch<React.SetStateAction<Set<string>>>,
   setter((prev) => { const next = new Set(prev); next.delete(id); return next; });
 
 /**
- * 分镜工作台宿主（ShotInspector）。
+ * 分镜台宿主（ShotInspector）。
  * P0 重构：本文件只拥有状态 + 数据 handler + 快捷键 + ctx 组装；
  * 所有渲染经 slots/ 注册表（左场记栏 / 中央预览台 / 右检查器 / 浮层）。
  * 渲染逻辑与条件与重构前逐行一致，零行为变化。
@@ -648,12 +648,12 @@ export const ShotInspector: React.FC = () => {
     if (activeMerged) setShotDynamicInputs(activeMerged);
     if (!bound) { toast.info('没有可绑定的镜头：请先为镜头选择生成源，并绑定人物/场景/素材'); return; }
     setBindUndo(undos);
-    toast.success(`已批量绑定 ${bound} 个镜头（${totalFilled} 项参考${totalGaps ? `，${totalGaps} 个必填缺口` : ''}${skipped ? `，${skipped} 镜无可用源跳过` : ''}）`);
+    toast.success(`已为 ${bound} 个镜头批量绑定参考（${totalFilled} 项参考${totalGaps ? `，${totalGaps} 个必填缺口` : ''}${skipped ? `，${skipped} 镜无可用源跳过` : ''}）`);
   };
 
   const handleRegenerateImage = async (customCount?: number) => {
     // 直出模式无需单张生图：角色立绘直接驱动视频，避免误触污染首帧
-    if (getMode(productionMode).caps.canImage === false) { setRegenError('直出模式无需生图，直接点「直出动态视频」'); return; }
+    if (getMode(productionMode).caps.canImage === false) { setRegenError('漫剧模式无需生图，直接点下方「立绘直接生成视频」'); return; }
     if (!activeShot.image_prompt?.trim()) { setRegenError('生图提示词为空'); return; }
     setRegenError(null);
     addShotId(setImageGenIds, activeShot.id);
@@ -774,7 +774,7 @@ export const ShotInspector: React.FC = () => {
     const hasVideoRefs = shotRefs.reference_images.length > 0;
 
     if (caps.needsFirstFrame && !activeShot.image_url) {
-      setVideoError('图生视频模式需要先在步骤 1 生成精控首帧画面');
+      setVideoError('图生视频模式需要先在步骤 1 生成首帧画面');
       return;
     }
 

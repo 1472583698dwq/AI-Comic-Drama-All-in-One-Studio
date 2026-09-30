@@ -29,7 +29,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenImport, onOpenExport }) =>
   const shotsCount = (project?.scenes || []).reduce(
     (n: number, s: any) => n + (s?.shots?.length || 0), 0);
 
-  // 播放头与桌面/移动视口只对「分镜工作台 / 多轨剪辑 / 3D 片场」这三个页签生效：
+  // 播放头与桌面/移动视口只对「分镜台 / 多轨剪辑 / 3D 片场」这三个页签生效：
   // 其余页签既不渲染多轨时间线，也不渲染移动端卡片流，两个控件在那里点了没有任何效果。
   // 与其摆在那里置灰，不如直接不显示。
   const stageTabs = ['studio', 'timeline', 'director3d'];

@@ -52,6 +52,16 @@ export function reduceAgentEvent(msg: ChatMsg, ev: AgentEvent): ReduceResult {
         msg: { ...msg, isThinkingStreaming: false, isStreaming: true, text: msg.text + (ev.delta || '') },
         sideEffects,
       };
+    case 'tool_progress': {
+      // 工具执行中阶段进度（如 register_custom_provider 的 LLM 生成代码阶段）→ 挂到执行中步骤上
+      const target = ev.tool_name || ev.tool || '';
+      const steps: ToolStep[] = (msg.steps || []).map((s) =>
+        s.name === target && s.status === 'executing'
+          ? { ...s, note: String(ev.text || ev.message || '').slice(0, 200) }
+          : s
+      );
+      return { msg: { ...msg, steps }, sideEffects };
+    }
     case 'tool_calling': {
       const step: ToolStep = {
         id: stepId(),

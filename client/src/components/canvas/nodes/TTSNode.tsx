@@ -3,7 +3,7 @@ import { Handle, Position, NodeProps } from '@xyflow/react';
 import { Mic, Play, Volume2 } from 'lucide-react';
 import { apiService } from '../../../services/api';
 
-const API_ORIGIN = window.location.port === '5173' ? 'http://127.0.0.1:8000' : '';
+import { API_ORIGIN } from '../../../utils/devOrigin';
 
 export const TTSNode: React.FC<NodeProps> = ({ data, id }) => {
   const d:any = data;

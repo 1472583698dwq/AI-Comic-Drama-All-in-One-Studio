@@ -7,7 +7,7 @@ import { AutoRatioMedia } from '../../ui/AutoRatioMedia';
 
 /**
  * 左栏：分镜场记（shot.list）。
- * 头部批量操作按钮经 actionRegistry 渲染（内置三个：批量生图/配音/视频）。
+ * 头部批量操作按钮经 actionRegistry 渲染（内置四个：批量生图/绑定参考/配音/生视频）。
  * （自 ShotInspector 原样搬移，标识符改为 ctx.*，零行为变化）
  */
 export const ShotListRail: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {

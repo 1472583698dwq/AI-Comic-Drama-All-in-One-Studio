@@ -12,6 +12,7 @@ import { DynamicProviderInfo, extractSlotsFromProvider, AssetSlotDef, getSkillsF
 import { CanvasResourcePickerModal } from './CanvasResourcePickerModal';
 import { DynamicControl } from './controls/DynamicControl';
 import { useNodeExecution } from './hooks/useNodeExecution';
+import { AiPolishButton } from '../ui/AiPolishButton';
 
 type GenKind = 'image' | 'video' | 'audio';
 
@@ -219,6 +220,16 @@ export const NodeAgentBar: React.FC<{ nodeId: string; kind: GenKind }> = ({ node
         rows={2}
         className="w-full bg-surface-secondary border border-white/10 rounded-xl px-2.5 py-2 text-[11px] text-white placeholder-white/40 focus:outline-none focus:border-violet-500 resize-none"
       />
+
+      {/* 字段级 AI 润色：显式按钮（整段按技能重写）；只改一句/一个词走选中文字后的浮标 */}
+      <div className="flex items-center justify-end">
+        <AiPolishButton
+          value={d.prompt || d.text || ''}
+          onPolish={(v: any) => updateNodeData(nodeId, { prompt: v, text: v, image_prompt: v, video_prompt: v })}
+          contextType={kind === 'audio' ? 'dialogue' : 'prompt'}
+          size="xs"
+        />
+      </div>
 
       {/* agent_state + 执行 */}
       <div className="flex items-center gap-2">

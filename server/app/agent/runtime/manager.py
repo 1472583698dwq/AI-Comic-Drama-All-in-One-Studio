@@ -84,6 +84,7 @@ class AgentManager:
         interactive: bool = False,
         sink: Optional[Sink] = None,
         agent_profile: Any = None,
+        attachments: Optional[List[Dict[str, Any]]] = None,
     ) -> AgentLoop:
         lp = await self.get_or_create(session_id, run_mode=run_mode, mode=mode,
                                       context=context, interactive=interactive,
@@ -92,14 +93,15 @@ class AgentManager:
             lp.attach(sink)
         if interactive:
             lp.pipeline.approvals.interactive = True
-        await lp.prompt(text, context=context, mode=mode, run_mode=run_mode)
+        await lp.prompt(text, context=context, mode=mode, run_mode=run_mode, attachments=attachments)
         return lp
 
-    async def steer(self, session_id: str, text: str) -> bool:
+    async def steer(self, session_id: str, text: str,
+                    attachments: Optional[List[Dict[str, Any]]] = None) -> bool:
         lp = self._loops.get(session_id)
         if lp is None:
             return False
-        await lp.steer(text)
+        await lp.steer(text, attachments=attachments)
         return True
 
     async def set_run_mode(self, session_id: str, run_mode: str) -> Optional[str]:

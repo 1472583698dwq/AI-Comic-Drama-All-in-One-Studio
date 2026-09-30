@@ -51,6 +51,8 @@ export interface ToolStep {
   startedAt?: number;
   /** 耗时（ms，tool_result 回填） */
   elapsedMs?: number;
+  /** 工具执行中的阶段进度（tool_progress 事件透出，如「正在调用 LLM 生成源代码…」） */
+  note?: string;
 }
 
 export interface AgentTodoItem {
@@ -91,6 +93,18 @@ export interface AgentErrorCard {
   next: string;
 }
 
+/** 用户消息的多模态附件（图/视频/音频）—— ref 指向 /storage 或 http(s) */
+export interface AgentAttachment {
+  id: string;
+  kind: 'image' | 'video' | 'audio';
+  name: string;
+  ref: string;
+  size?: number;
+  mime?: string;
+  source?: 'upload' | 'asset' | 'canvas' | 'paste';
+  meta?: Record<string, string>;
+}
+
 export interface ChatMsg {
   id: string;
   sender: 'user' | 'agent';
@@ -112,6 +126,10 @@ export interface ChatMsg {
   errors?: AgentErrorCard[];
   /** 待办清单（todo_write 事件实时更新） */
   todo?: AgentTodoItem[];
+  /** 用户消息携带的多模态附件 */
+  attachments?: AgentAttachment[];
+  /** 该消息由长文本粘贴产生 → 消息列表默认折叠（可展开全文） */
+  pastedBulk?: boolean;
 }
 
 export interface AgentSession {

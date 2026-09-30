@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
-import { Plug, Cpu, Globe, Mic, Video, Settings, Activity, Trash2, Edit3, Plus, Zap, Key } from 'lucide-react';
+import { Plug, Cpu, Globe, Mic, Video, Settings, Activity, Trash2, Plus, Key } from 'lucide-react';
 import { apiService } from '../../../services/api';
 import { confirmAsync, toast } from '../../../stores/useDialogStore';
 
-const API_ORIGIN = window.location.port === '5173' ? 'http://127.0.0.1:8000' : '';
+import { API_ORIGIN } from '../../../utils/devOrigin';
 
 type ProviderKind = 'image' | 'video' | 'audio' | 'llm';
 
@@ -19,7 +19,6 @@ export const ProviderNode: React.FC<NodeProps> = ({ data, id, type }) => {
   const [showKey, setShowKey] = useState(false);
   const [testing, setTesting] = useState(false);
   const [health, setHealth] = useState<any>(null);
-  const [showCreate, setShowCreate] = useState(false);
   const [paramValues, setParamValues] = useState<Record<string, any>>(d.default_params || d.params || selectedDef?.default_params || {});
   const [showParams, setShowParams] = useState(true);
   const [savingParams, setSavingParams] = useState(false);
@@ -46,6 +45,20 @@ export const ProviderNode: React.FC<NodeProps> = ({ data, id, type }) => {
   };
 
   useEffect(()=> { fetchProviders(); }, [nodeKind]);
+
+  // 新建自定义源成功且由本节点发起（贴文档/写代码/工作流）→ 自动选用新源
+  useEffect(() => {
+    const h = (e: any) => {
+      const det = e?.detail || {};
+      if (det.select && det.source === 'provider-node' && det.provider?.id) {
+        fetchProviders();
+        handleSelect(det.provider.id);
+      }
+    };
+    window.addEventListener('provider-created', h as any);
+    return () => window.removeEventListener('provider-created', h as any);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodeKind, providers]);
 
   useEffect(()=> {
     if (selectedId) {
@@ -97,23 +110,23 @@ export const ProviderNode: React.FC<NodeProps> = ({ data, id, type }) => {
     try {
       const res = await fetch(`${API_ORIGIN || ''}/api/v1/providers/${selectedId}/test`, { method: 'POST' }).then(r=>r.json());
       setHealth(res);
-      if (res.ok) alert(`✓ 连通正常`);
-      else alert(`✗ 检测结果: ${res.detail || JSON.stringify(res)}`);
-    } catch(e:any){ alert(e.message); } finally { setTesting(false); }
+      if (res.ok) toast.success(`✓ 连通正常`);
+      else toast.error(`✗ 检测结果: ${res.detail || JSON.stringify(res)}`);
+    } catch(e:any){ toast.error(e.message); } finally { setTesting(false); }
   };
 
   const handleSaveKey = async () => {
-    if (!selectedId || !apiKeyInput.trim()) { alert('请输入 API Key'); return; }
+    if (!selectedId || !apiKeyInput.trim()) { toast.error('请输入 API Key'); return; }
     try {
       const res = await fetch(`${API_ORIGIN || ''}/api/v1/providers/${selectedId}/api-key`, {
         method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ api_key: apiKeyInput.trim() })
       }).then(r=>r.json());
       if (res.status==='success' || res.has_key) {
-        alert('✓ API Key 已保存');
+        toast.success('✓ API Key 已保存');
         setApiKeyInput('');
-      } else alert(JSON.stringify(res));
-    } catch(e:any){ alert(e.message); }
+      } else toast.error(JSON.stringify(res));
+    } catch(e:any){ toast.error(e.message); }
   };
 
   const kindMeta = {
@@ -261,11 +274,11 @@ export const ProviderNode: React.FC<NodeProps> = ({ data, id, type }) => {
                             body: JSON.stringify({ default_params: paramValues, default_model: model })
                           }).then(r=>r.json());
                           if (res.status==='success' || res.provider) {
-                            alert('✓ 参数已保存');
+                            toast.success('✓ 参数已保存');
                             setSelectedDef(res.provider || {...selectedDef, default_params: paramValues, default_model: model});
                             (d.onUpdate as any)?.(id, { default_params: paramValues, params: paramValues, model });
-                          } else alert('保存失败: '+JSON.stringify(res).slice(0,300));
-                        } catch(e:any){ alert(e.message); } finally { setSavingParams(false); }
+                          } else toast.error('保存失败: '+JSON.stringify(res).slice(0,300));
+                        } catch(e:any){ toast.error(e.message); } finally { setSavingParams(false); }
                       }}
                       disabled={savingParams || isBuiltin}
                       className="w-full py-1.5 rounded-lg bg-brand text-white text-xs font-bold disabled:opacity-40 hover:bg-brand-light shadow-sm"
@@ -316,55 +329,15 @@ export const ProviderNode: React.FC<NodeProps> = ({ data, id, type }) => {
           </div>
         )}
 
-        {/* 快捷创建入口 */}
+        {/* 快捷创建入口：统一走「新建自定义源」弹窗（贴文档 / 写代码 / ComfyUI 工作流），成功后自动选中到本节点 */}
         <div className="rounded-xl border border-dashed border-brand/30 bg-brand/5 p-2.5 space-y-2">
           <div className="flex items-center gap-1.5 text-xs font-semibold text-brand"><Plus className="w-3 h-3"/> 扩展新生成源</div>
-          <div className="text-[11px] [color:var(--color-text-muted)] leading-relaxed">粘贴 API 文档/cURL/OpenAPI，让导演自动接入。或手动创建。</div>
+          <div className="text-[11px] [color:var(--color-text-muted)] leading-relaxed">粘贴 API 文档让导演自动写代码接入，或手写代码 / 导入 ComfyUI 工作流。创建成功自动选用。</div>
           <div className="flex gap-1.5">
-            <button onClick={()=> setShowCreate(v=>!v)} className="flex-1 py-1.5 rounded-lg bg-brand text-white text-xs font-semibold hover:bg-brand-light shadow-sm">{showCreate?'收起':'新建Provider'}</button>
-            <button onClick={()=> {
-              window.dispatchEvent(new CustomEvent('open-provider-create', {detail:{kind: nodeKind}}));
-              alert('可在右侧 Agent 输入框粘贴 API 文档，例如：\n“帮我接入这个生图 API：https://... 文档：... Key是...”\n导演将自动调用 register_custom_provider');
-            }} className="px-3 py-1.5 rounded-lg bg-surface border border-border text-xs [color:var(--color-text-main)] hover:bg-surface-secondary">让导演接入</button>
+            <button onClick={() => window.dispatchEvent(new CustomEvent('open-provider-create', { detail: { tab: 'doc', kind: nodeKind, select: true, source: 'provider-node' } }))} className="flex-1 py-1.5 rounded-lg bg-brand text-white text-xs font-semibold hover:bg-brand-light shadow-sm">贴文档创建</button>
+            <button onClick={() => window.dispatchEvent(new CustomEvent('open-provider-create', { detail: { tab: 'code', kind: nodeKind, select: true, source: 'provider-node' } }))} className="px-2.5 py-1.5 rounded-lg bg-surface border border-border text-xs [color:var(--color-text-main)] hover:bg-surface-secondary">写代码</button>
+            <button onClick={() => window.dispatchEvent(new CustomEvent('open-provider-create', { detail: { tab: 'comfy', kind: nodeKind, select: true, source: 'provider-node' } }))} className="px-2.5 py-1.5 rounded-lg bg-surface border border-border text-xs [color:var(--color-text-main)] hover:bg-surface-secondary">工作流</button>
           </div>
-          {showCreate && (
-            <div className="space-y-2 pt-2 border-t border-brand/20">
-              <input id={`prov-name-${id}`} placeholder="名称，如 我的FLUX" className="w-full bg-surface border border-border rounded-lg px-2 py-1.5 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand"/>
-              <div className="flex items-center gap-1.5">
-                <span className="text-[10px] [color:var(--color-text-muted)]">代码模式（唯一）</span>
-                <select id={`prov-lang-${id}`} className="ml-auto bg-surface border border-border rounded-lg px-2 py-1 text-[11px] [color:var(--color-text-main)] focus:outline-none focus:border-brand">
-                  <option value="python">python</option>
-                  <option value="javascript">javascript</option>
-                </select>
-                <button type="button" onClick={async()=>{
-                  const lang = (document.getElementById(`prov-lang-${id}`) as HTMLSelectElement)?.value || 'python';
-                  try {
-                    const r = await fetch(`${API_ORIGIN || ''}/api/v1/providers/code/templates?language=${lang}&kind=${nodeKind}`).then(x=>x.json());
-                    if (r?.template) (document.getElementById(`prov-code-${id}`) as HTMLTextAreaElement).value = r.template;
-                    else toast.error('模板不存在');
-                  } catch { toast.error('模板加载失败'); }
-                }} className="px-2 py-1 rounded-lg bg-surface border border-border text-[11px] [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)]">加载模板</button>
-              </div>
-              <textarea id={`prov-code-${id}`} rows={8} placeholder="async def generate(ctx, api): ...  # 末尾可追加 # PARAMS_SCHEMA: {...}" className="w-full bg-surface border border-border rounded-lg px-2 py-1.5 font-mono text-[11px] [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand"/>
-              <input id={`prov-key-${id}`} placeholder="API Key (可选)" className="w-full bg-surface border border-border rounded-lg px-2 py-1.5 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] font-mono focus:outline-none focus:border-brand"/>
-              <button onClick={async()=>{
-                const name = (document.getElementById(`prov-name-${id}`) as HTMLInputElement)?.value?.trim() || `自定义${nodeKind}源`;
-                const lang = (document.getElementById(`prov-lang-${id}`) as HTMLSelectElement)?.value || 'python';
-                const code = (document.getElementById(`prov-code-${id}`) as HTMLTextAreaElement)?.value?.trim();
-                const key = (document.getElementById(`prov-key-${id}`) as HTMLInputElement)?.value?.trim();
-                if(!code || code.length < 20){ alert('代码模式为唯一方式：请粘贴或加载完整携程源码（async def generate(ctx, api)）'); return; }
-                try{
-                  const body:any = { name, kind: nodeKind, language: lang, code, description: '画布内快速创建（手动代码）' };
-                  const res = await fetch(`${API_ORIGIN || ''}/api/v1/providers`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...body, api_key: key || undefined})}).then(r=>r.json());
-                  if(res.status==='success' || res.provider){
-                    alert(`✓ 已创建 ${res.provider?.id || ''}`);
-                    fetchProviders();
-                    if(res.provider?.id) handleSelect(res.provider.id);
-                  } else alert(`失败: ${JSON.stringify(res).slice(0,400)}`);
-                }catch(e:any){ alert(e.message); }
-              }} className="w-full py-2 rounded-lg bg-brand text-white text-xs font-bold hover:bg-brand-light shadow-sm">快速创建</button>
-            </div>
-          )}
         </div>
 
         <div className="text-[10px] [color:var(--color-text-muted)] text-center leading-relaxed">

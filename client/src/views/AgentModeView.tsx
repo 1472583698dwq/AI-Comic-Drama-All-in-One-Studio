@@ -217,9 +217,9 @@ export const AgentModeView: React.FC = () => {
           execution={execution}
           isRunning={isRunning}
           wsStatus={wsStatus}
-          onSend={(t) => void send(t)}
+          onSend={(t, atts) => void send(t, atts)}
           onAbort={abort}
-          onSteer={(t) => void steer(t)}
+          onSteer={(t, atts) => void steer(t, atts)}
           onCycleMode={() => setMode(mode === 'execute' ? 'chat' : 'execute')}
           onCycleBehavior={() => {
             const order: BehaviorMode[] = ['standard', 'create', 'plan'];

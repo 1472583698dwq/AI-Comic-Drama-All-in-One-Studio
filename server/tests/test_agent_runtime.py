@@ -286,6 +286,99 @@ class AgentLoopTest(TempStore):
         self.assertIn("任务A", user_texts)
         self.assertIn("任务B", user_texts)
 
+    def test_max_tokens_continuation(self):
+        """思考吃满输出上限被截断（finish=length）不结束回合：注入系统提示后继续，
+        直到模型产出工具调用——长思考模型不再因截断丢掉执行指令。"""
+        lp = self.make_loop("loop_trunc")
+        replies_alias = [
+            AssistantReply(content="", reasoning="很长很长的思考…" * 200, finish_reason="length"),
+            AssistantReply(content="", reasoning="继续深入推演…" * 200, finish_reason="length"),
+            AssistantReply(content="", tool_calls=[ToolCall(id="c1", name="generate_image", arguments="{}", parsed={})]),
+            AssistantReply(content="已执行"),
+        ]
+        calls = self.fake_model(lp, replies_alias)
+        run(lp.prompt("生成一张图"))
+        run(lp.wait_idle(timeout=10))
+        types = [e["type"] for e in lp.session.events]
+        self.assertIn(E.TOOL_CALL, types)
+        self.assertIn(E.TOOL_RESULT, types)
+        turn_end = [e for e in lp.session.events if e["type"] == E.TURN_END][-1]["data"]
+        self.assertEqual(turn_end["reason"], "completed")
+        # 截断后注入"直接行动"的系统提示，且后续模型请求能看到
+        nudge_seen = any(
+            m["role"] == "user" and "输出长度上限" in str(m.get("content") or "")
+            for c in calls for m in c["messages"]
+        )
+        self.assertTrue(nudge_seen, "截断后应注入继续执行提示")
+
+    def test_max_tokens_gives_up_after_streak(self):
+        """连续截断超过容忍次数：诚实终止并给出可操作建议（不再是假的"指令已执行"）。"""
+        lp = self.make_loop("loop_trunc2")
+        replies_alias = [
+            AssistantReply(content="", reasoning="思考…" * 50, finish_reason="length")
+            for _ in range(5)
+        ]
+        self.fake_model(lp, replies_alias)
+        events = []
+        lp.attach(lambda ev: events.append(dict(ev)))
+        run(lp.prompt("一直想不说话"))
+        run(lp.wait_idle(timeout=10))
+        turn_end = [e for e in lp.session.events if e["type"] == E.TURN_END][-1]["data"]
+        self.assertEqual(turn_end["reason"], "max-tokens")
+        errors = [e for e in events if e.get("event") == "error"]
+        self.assertTrue(any("长度上限" in (e.get("message") or "") for e in errors))
+        resp = [e for e in events if e.get("event") == "agent_response"]
+        self.assertTrue(resp and "长度上限" in (resp[-1].get("message") or ""))
+
+    def test_pressure_uses_latest_usage_not_cumulative(self):
+        """压缩压力必须看最近一次调用的 usage：累计 usage 会让长会话永久超压、每步都压缩。"""
+        from app.agent.runtime.token_meter import pressure_of
+        os.environ["AGENT_CONTEXT_WINDOW"] = "100000"
+        self.addCleanup(lambda: os.environ.pop("AGENT_CONTEXT_WINDOW", None))
+        s = Session.open(self.unique("pressure"), store=self.store)
+        s.append(E.USER_MESSAGE, {"text": "hi"})
+        s.append(E.ASSISTANT_MESSAGE, {"text": "旧轮", "usage": {"total_tokens": 500000}})
+        s.append(E.ASSISTANT_MESSAGE, {"text": "新轮", "usage": {"total_tokens": 1000}})
+        p = pressure_of(s)
+        self.assertEqual(p["usage_anchor"], 1000)
+        self.assertEqual(p["threshold"], 80000)
+        self.assertLess(max(p["estimated_input"], p["usage_anchor"]), p["threshold"])
+
+    def test_context_overflow_classifier(self):
+        from app.agent.runtime.compaction import is_context_overflow_error
+        self.assertTrue(is_context_overflow_error(RuntimeError("This model's maximum context length is 128000 tokens")))
+        self.assertTrue(is_context_overflow_error(RuntimeError("输入过长：上下文超限")))
+        self.assertFalse(is_context_overflow_error(RuntimeError("429 Too Many Requests: quota exceeded")))
+        self.assertFalse(is_context_overflow_error(ValueError("bad api key")))
+
+    def test_context_overflow_forces_compaction_and_retries(self):
+        """上游报上下文超限：强制压缩并重试本步，回合不被打死。"""
+        from app.agent.llm.adapter import LLMConfigError
+        lp = self.make_loop("loop_overflow")
+        import app.agent.runtime.loop as loop_mod
+        calls = {"n": 0}
+
+        async def fake_complete(messages, tools=None, temperature=0.3, max_tokens=4096, timeout=300, on_chunk=None):
+            sys_msg = "".join(str(m.get("content") or "") for m in messages if m.get("role") == "system")
+            if "压缩器" in sys_msg:
+                return AssistantReply(content="【摘要】历史已压缩")
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise LLMConfigError("This model's maximum context length is 2000 tokens")
+            return AssistantReply(content="已恢复执行")
+
+        orig = loop_mod.adapter.complete
+        loop_mod.adapter.complete = fake_complete
+        self.addCleanup(lambda: setattr(loop_mod.adapter, "complete", orig))
+        events = []
+        lp.attach(lambda ev: events.append(dict(ev)))
+        run(lp.prompt("继续"))
+        run(lp.wait_idle(timeout=10))
+        turn_end = [e for e in lp.session.events if e["type"] == E.TURN_END][-1]["data"]
+        self.assertEqual(turn_end["reason"], "completed")
+        self.assertEqual(calls["n"], 2)
+        self.assertTrue(any(e.get("event") == "agent_thinking" and "上下文超限" in (e.get("message") or "") for e in events))
+
     def test_steer_mid_run(self):
         lp = self.make_loop("loop_steer")
         released = asyncio.Event()

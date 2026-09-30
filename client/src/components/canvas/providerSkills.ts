@@ -21,6 +21,8 @@ export interface AssetSlotDef {
   role?: string;
   /** true 表示这是跨节点的聚合句柄（如 reference_images 数组），源若已提供逐节点独立槽时优先用后者 */
   aggregate?: boolean;
+  /** true 表示本次选择写回的是「参数」而非插槽（参数弹窗里的媒体参数 → 从画布/素材库添加） */
+  asParam?: boolean;
 }
 
 export interface DynamicProviderInfo {

@@ -194,8 +194,24 @@ class Session:
                 logged_system = str(d.get("text") or "")
             elif t == E.USER_MESSAGE:
                 text = str(d.get("text") or "")
-                if text:
-                    msgs.append({"role": "user", "content": text})
+                atts = ((d.get("meta") or {}).get("attachments") or []) if isinstance(d.get("meta"), dict) else []
+                content: Any = text
+                if atts:
+                    # 多模态附件：图片（视觉可用时）转 content parts；其余降级为文本行
+                    try:
+                        from app.agent.runtime.attachments import build_user_content
+                        content = build_user_content(text, atts)
+                    except Exception:
+                        content = text
+                elif d.get("source") == "user" and len(text) > 2000:
+                    # 复制粘贴的长文：模型历史折成 头+尾+locator（全文落盘，fs_read 可取）
+                    try:
+                        from app.agent.runtime.compaction import maybe_fold_user_text
+                        content = maybe_fold_user_text(self.id, seq, text)
+                    except Exception:
+                        content = text
+                if content:
+                    msgs.append({"role": "user", "content": content})
             elif t == E.ASSISTANT_MESSAGE:
                 text = str(d.get("text") or "")
                 tcs = d.get("tool_calls") or []

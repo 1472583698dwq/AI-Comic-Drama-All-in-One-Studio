@@ -1,4 +1,11 @@
+# ── 日志必须最先初始化：exe 无控制台（--windowed），print/未捕获异常全部落盘 storage/logs/studio.log ──
+import logging
+from app.core.logging_config import bootstrap_logging, attach_asyncio_exception_handler
+bootstrap_logging()
+logger = logging.getLogger("main")
+
 import os
+import time as _time
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -31,6 +38,8 @@ from app.storage_sync.mirror import mirror
 @asynccontextmanager
 async def _lifespan(_app):
     """MCP 原有 lifespan 照常走，另外把素材/工程的云端同步拉起来。"""
+    attach_asyncio_exception_handler()  # asyncio 后台任务崩溃 → traceback 落盘
+    logger.info("lifespan begin")
     try:
         await mirror.start()
     except Exception as e:
@@ -64,6 +73,44 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# 请求日志：4xx WARNING / 5xx ERROR（带 traceback）/ 其余 DEBUG（LOG_LEVEL=DEBUG 时可见全流水）
+_REQ_LOG_NOISE = ("/assets/", "/storage/", "/exports/", "/system/logs/", "/api/v1/health", "/api/status", "/mcp-server")
+
+
+@app.middleware("http")
+async def _request_log(request, call_next):
+    path = request.url.path
+    noisy = any(path.startswith(p) or path == p.rstrip("/") for p in _REQ_LOG_NOISE)
+    t0 = _time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        dt = int((_time.perf_counter() - t0) * 1000)
+        if not noisy:
+            logger.error("%s %s -> 500 (%dms) unhandled", request.method, path, dt, exc_info=True)
+        raise
+    dt = int((_time.perf_counter() - t0) * 1000)
+    if not noisy:
+        line = "%s %s -> %s (%dms)" % (request.method, path, response.status_code, dt)
+        if response.status_code >= 500:
+            logger.error(line)
+        elif response.status_code >= 400:
+            logger.warning(line)
+        else:
+            logger.debug(line)
+    return response
+
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request, exc):
+    # 注意：handler 收到的 exc 不在 except 块内，必须显式 exc_info=exc 才有 traceback
+    logger.error("未处理异常 %s %s: %s", request.method, request.url.path, exc, exc_info=exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"服务器内部错误: {type(exc).__name__}: {str(exc)[:300]}"},
+    )
 
 
 # 任意工具执行口：CORS 只挡浏览器读响应，跨源 POST 在服务端仍会执行（fire-and-forget）。
@@ -201,6 +248,13 @@ try:
     print("[Main] Setup routes mounted at /api/v1/system/setup-status")
 except Exception as e:
     print(f"[Main] Setup routes mount failed: {e}")
+# 日志接口（调试）：tail / files / download / frontend 上报 / 运行期级别
+try:
+    from app.api.log_routes import router as log_router
+    app.include_router(log_router, prefix=settings.API_V1_STR)
+    logger.info("Log routes mounted at /api/v1/system/logs")
+except Exception as e:
+    logger.error("Log routes mount failed: %s", e)
 # 自定义代码节点 MCP Tool 注册（一节点一Tool）
 try:
     from app.mcp.server import mcp_registry as _mcp_reg

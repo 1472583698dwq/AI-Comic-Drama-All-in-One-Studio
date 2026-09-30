@@ -28,6 +28,7 @@ interface AssetState {
     name: string; prompt: string; category?: string; style_preset?: string;
     provider?: string; workflow_id?: string; negative_prompt?: string; aspect_ratio?: string;
     seed?: number; tags?: string; dynamic_inputs?: Record<string, any>;
+    params?: Record<string, any>;
   }) => Promise<{ asset: Asset; generation: any }>;
   deleteAsset: (id: string) => Promise<void>;
   duplicateAsset: (id: string) => Promise<void>;

@@ -5,7 +5,8 @@ import { apiService } from '../../../services/api';
 import { useProjectStore } from '../../../stores/useProjectStore';
 import { AutoRatioMedia } from '../../ui/AutoRatioMedia';
 
-const API_ORIGIN = window.location.port === '5173' ? 'http://127.0.0.1:8000' : '';
+import { API_ORIGIN } from '../../../utils/devOrigin';
+import { pollVideoTask } from '../../../utils/videoTask';
 
 export const ShotCardNode: React.FC<NodeProps> = ({ data, id }) => {
   const d: any = data;
@@ -125,18 +126,8 @@ export const ShotCardNode: React.FC<NodeProps> = ({ data, id }) => {
               const res: any = await apiService.generateShotVideo({ prompt, mode: 'i2v', first_frame_url: localData.image_url, duration: 5, provider: provider || undefined });
               let url = res.video_url;
               if (!url && res.task_id) {
-                const taskId = res.task_id;
-                // 轮询排队任务
-                for (let i=0;i<500;i++) {
-                  await new Promise(r=> setTimeout(r, 3000));
-                  try{
-                    const st:any = await apiService.getVideoTaskStatus(taskId);
-                    const status=(st.status||"").toString().toUpperCase();
-                    if(status==="SUCCESS"||status==="COMPLETED"){ url=st.video_url||st.videoUrl||(st.results&&st.results[0])||""; if(url) break; }
-                    else if(status==="FAILED"||status==="FAIL") throw new Error(st.error||"任务失败");
-                  }catch(e:any){ if(e?.message?.includes("not_found")) continue; }
-                }
-                if(!url) throw new Error("排队超时");
+                // 排队任务统一轮询（pollVideoTask：网络抖动不误杀，终态失败即抛）
+                url = await pollVideoTask(res.task_id);
               }
               setLocalData((p:any)=>({...p, video_url: url})); (d.onUpdate as any)?.(id,{video_url:url});
             }catch(e:any){ alert(e.message); }

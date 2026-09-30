@@ -41,22 +41,43 @@ def estimate_messages(messages: Iterable[Dict[str, Any]]) -> int:
 
 
 def context_window() -> int:
-    """上下文窗口（tokens）。可用 AGENT_CONTEXT_WINDOW 覆盖，默认 64k。"""
+    """上下文窗口（tokens）。可用 AGENT_CONTEXT_WINDOW 覆盖，默认 800k（压缩在窗口 80% 才触发）。"""
     try:
-        return int(os.environ.get("AGENT_CONTEXT_WINDOW") or 65536)
+        return int(os.environ.get("AGENT_CONTEXT_WINDOW") or 800000)
     except Exception:
-        return 65536
+        return 800000
+
+
+def latest_context_tokens(session) -> int:
+    """最近一次模型调用的 usage 作为"当前上下文压力"锚点。
+
+    必须用最近一次（而非累计 usage_totals）——累计值是整个会话的流水，会话一长就会
+    永久超过阈值，导致每一步都触发压缩（"压得太狠"的根因之一）。
+    """
+    try:
+        events = getattr(session, "events", None) or getattr(session, "_events", None) or []
+        for ev in reversed(list(events)):
+            if ev.get("type") != "assistant/message":
+                continue
+            u = (ev.get("data") or {}).get("usage") or {}
+            total = int(u.get("total_tokens") or 0)
+            if total <= 0:
+                total = int(u.get("prompt_tokens") or 0) + int(u.get("completion_tokens") or 0)
+            if total > 0:
+                return total
+    except Exception:
+        pass
+    return 0
 
 
 def pressure_of(session) -> Dict[str, int]:
-    """当前会话压力：surface 估算 + provider usage 锚点（取两者较大值作为判断依据）。"""
+    """当前会话压力：surface 估算 + 最近一次调用 usage 锚点（取两者较大值作为判断依据）。"""
     try:
         msgs = session.derive_messages()
         est = estimate_messages(msgs)
     except Exception:
         est = 0
-    usage = session.usage_totals()
-    anchor = int(usage.get("total_tokens") or 0)
+    anchor = latest_context_tokens(session)
     return {
         "estimated_input": est,
         "usage_anchor": anchor,

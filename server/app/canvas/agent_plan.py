@@ -5,9 +5,14 @@
 产出最终 prompt + 参数 JSON，随后统一交 provider_* Tool 执行。
 LLM 不可用/解析失败时自动降级为规则式规划（绝不阻断生成）。
 """
+import asyncio
 import json
 import re
 from typing import Any, Dict, List, Optional
+
+# 规划阶段 LLM 总预算（秒）：流式聚合→非流式→多 provider 降级链全程串行，
+# 不设总预算时最坏 120s×N 级回退挂 3~5 分钟；规则规划本身可用，超时直接降级。
+LLM_PLAN_BUDGET_S = 30.0
 
 # 技能目录（与前端 providerSkills.ts 对齐）
 SKILL_CATALOG = {
@@ -184,6 +189,10 @@ def _providers_brief(kind: str) -> List[Dict[str, Any]]:
 
 def _rule_plan(node_type: str, idea: str, provider_id: str, slots: Dict[str, Any], forced_skill: str = "") -> Dict[str, Any]:
     """无 LLM 时的规则降级规划（支持多图/多音频计数）"""
+    # 计数变量先初始化：forced_skill 分支不走下面的统计，return 的 reasoning 仍会引用（P3-1 回归修复 UnboundLocalError）
+    ref_count = 0
+    audio_count = 0
+    has_first = False
     if not provider_id:
         briefs = _providers_brief(node_type)
         provider_id = briefs[0]["id"] if briefs else ""
@@ -263,16 +272,26 @@ async def plan_node_agent(node_type: str, idea: str, provider_id: str = "", slot
     plan = None
     try:
         from app.pipelines.llm_service import llm_service
-        raw = await llm_service.chat_completion(
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)}],
-            temperature=0.3,
-            max_tokens=1200,
+        # 总预算护栏：LLM 降级链（流式→非流式→多 provider）全程串行，
+        # 超过预算直接放弃 LLM 润色，走规则规划（P3-1）
+        raw = await asyncio.wait_for(
+            llm_service.chat_completion(
+                messages=[{"role": "system", "content": system}, {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)}],
+                temperature=0.3,
+                max_tokens=1200,
+                timeout=LLM_PLAN_BUDGET_S,
+            ),
+            timeout=LLM_PLAN_BUDGET_S + 3.0,
         )
         plan = _extract_json(raw or "")
     except Exception as e:
-        print(f"[AgentPlanner] LLM plan failed: {e}")
+        print(f"[AgentPlanner] LLM plan failed（预算 {LLM_PLAN_BUDGET_S:.0f}s，超时/失败自动降级规则规划）: {e}")
     if not plan or not isinstance(plan, dict) or not plan.get("prompt"):
-        return _rule_plan(node_type, idea, provider_id, slots, forced_skill)
+        rule = _rule_plan(node_type, idea, provider_id, slots, forced_skill)
+        rule["plan_source"] = "rule"
+        rule["reasoning"] = f"{rule.get('reasoning') or ''}（LLM 不可用或超时，已降级规则规划）".strip()
+        return rule
+    plan["plan_source"] = "llm"
     # 强制 skill 优先：用户显式选择的不允许被 LLM 覆盖
     if forced_skill and forced_skill in {s["id"] for s in skills}:
         plan["skill_id"] = forced_skill

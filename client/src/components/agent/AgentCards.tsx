@@ -1,6 +1,7 @@
 import React from 'react';
 import { Image as ImageIcon, Film, Mic, AlertTriangle, ExternalLink, Copy, Check, Wand2, Lightbulb, FlaskConical, PackageCheck, Trash2 } from 'lucide-react';
 import type { CreatorProposal } from './agentTypes';
+import { resolveMediaUrl } from '../../utils/devOrigin';
 
 // 兼容旧引用：类型口径已收敛到 agentTypes.ts
 export type { PlanStep, PlanPreview, CreatorProposal } from './agentTypes';
@@ -20,7 +21,7 @@ export const ArtifactCard: React.FC<{
     try { await navigator.clipboard.writeText(url); } catch {}
     setCopied(true); setTimeout(() => setCopied(false), 1200);
   };
-  const full = url.startsWith('http') ? url : `http://127.0.0.1:8000${url.startsWith('/') ? '' : '/'}${url}`;
+  const full = resolveMediaUrl(url.startsWith('/') ? url : `/${url}`);
   return (
     <div className="mt-2 rounded-xl border border-emerald-500/25 bg-emerald-500/5 overflow-hidden">
       <div className="px-2.5 py-1.5 flex items-center gap-1.5 text-[11px] font-bold text-emerald-300">

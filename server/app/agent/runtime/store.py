@@ -113,6 +113,30 @@ class SessionStore:
             shutil.rmtree(d, ignore_errors=True)
         return True
 
+    def resolve(self, session_id: str) -> tuple:
+        """把调用方给的会话标识解析到真实目录名，返回 ``(真实目录名, 命中的候选数)``。
+
+        存在两套 id 容易混：磁盘目录是 ``proj_<项目id>_sess_<前端会话id>``，
+        而前端只知道 ``sess_xxx``（甚至有人直接传内部 UUID）。这里允许传全名或子串：
+        - 精确命中目录 → 直接用；
+        - 否则按「目录名以它结尾 / 包含」匹配，命中多个时取最近修改的（并回报候选数），
+          让调用方能提示歧义，而不是静默猜一个）。
+        """
+        raw = str(session_id or "").strip()
+        if not raw:
+            return "", 0
+        if self.path_for(raw).exists():
+            return safe_session_id(raw), 1
+        try:
+            dirs = [d for d in self.root.iterdir() if d.is_dir()]
+        except Exception:
+            return "", 0
+        hits = [d for d in dirs if d.name.endswith(raw) or raw in d.name]
+        if not hits:
+            return "", 0
+        hits.sort(key=lambda d: (d / "events.v1.jsonl").stat().st_mtime if (d / "events.v1.jsonl").exists() else 0, reverse=True)
+        return hits[0].name, len(hits)
+
     def list_sessions(self, limit: int = 50) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []
         try:

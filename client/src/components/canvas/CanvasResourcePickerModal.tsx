@@ -4,6 +4,7 @@
  * 4 大真实数据源：画布产出资源 + 角色库立绘 + 项目素材库 + 本地上传
  */
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   X,
   Search,
@@ -25,7 +26,7 @@ import { apiService } from '../../services/api';
 import { useEscapeClose } from '../../hooks/useEscapeClose';
 import { AutoRatioMedia } from '../ui/AutoRatioMedia';
 
-const API_ORIGIN = typeof window !== 'undefined' && window.location.port === '5173' ? 'http://127.0.0.1:8000' : '';
+import { API_ORIGIN } from '../../utils/devOrigin';
 // 相对产物 URL（/storage、/assets）在 dev 下必须回源，否则缩略图 404；存值保持原样，仅展示拼接
 const resolveUrl = (u?: string) => (u && u.startsWith('/') ? API_ORIGIN + u : (u || ''));
 
@@ -51,6 +52,8 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
   const [activeTab, setActiveTab] = useState<'canvas' | 'characters' | 'assets' | 'upload'>('canvas');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedUrls, setSelectedUrls] = useState<string[]>([]);
+  /** 选中项 → 元数据（visual_prompt/voice_id），确认时回传给 NodeAgentBar/Console 自动填 prompt */
+  const [metaMap, setMetaMap] = useState<Record<string, any>>({});
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [uploading, setUploading] = useState(false);
 
@@ -68,6 +71,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
     if (!isOpen) return;
     // 切槽位/重开时清掉上次的勾选与搜索，避免串槽
     setSelectedUrls([]);
+    setMetaMap({});
     setSearchQuery('');
     let cancelled = false;
     (async () => {
@@ -145,16 +149,25 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
 
   const handleToggleSelect = (url: string, meta?: any) => {
     if (!url) return;
-    if (multiSelect) {
-      setSelectedUrls((prev) => (prev.includes(url) ? prev.filter((u) => u !== url) : [...prev, url]));
-    } else {
-      setSelectedUrls((prev) => (prev[0] === url ? [] : [url]));
-    }
+    const isSel = selectedUrls.includes(url);
+    let next: string[];
+    if (multiSelect) next = isSel ? selectedUrls.filter((u) => u !== url) : [...selectedUrls, url];
+    else next = isSel ? [] : [url];
+    setSelectedUrls(next);
+    // 记住每个选中项的元数据（visual_prompt/voice_id），确认时回传给节点自动填 prompt
+    setMetaMap((prev) => {
+      const m: Record<string, any> = { ...prev };
+      if (meta) m[url] = meta;
+      for (const k of Object.keys(m)) if (!next.includes(k)) delete m[k];
+      return m;
+    });
   };
+
+  const metaOf = (urls: string[]) => urls.map((u) => metaMap[u]).find((m) => m && (m.visual_prompt || m.voice_id)) || undefined;
 
   const handleConfirmMulti = () => {
     if (selectedUrls.length > 0) {
-      onSelect(selectedUrls);
+      onSelect(selectedUrls, metaOf(selectedUrls));
       onClose();
     }
   };
@@ -230,8 +243,10 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={onClose}>
+  return createPortal(
+    // Portal 到 body：操作台/底部栏外壳带 translate 变换，fixed 会被它当成包含块并遭 overflow 裁剪
+    // （表现为选择器被塞进底栏、画布内容出现在插槽组件下面）；z-[70] 保证盖在参数弹窗(z-[60])之上。
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={onClose}>
       <div className="w-full max-w-4xl max-h-[85vh] bg-surface border border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden text-white" onClick={(e) => e.stopPropagation()}>
         {/* 顶部标题栏 */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-white/[0.02]">
@@ -585,7 +600,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
               onClick={() => {
                 if (multiSelect) handleConfirmMulti();
                 else if (selectedUrls.length > 0) {
-                  onSelect(selectedUrls[0]);
+                  onSelect(selectedUrls[0], metaMap[selectedUrls[0]]);
                   onClose();
                 }
               }}
@@ -597,6 +612,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

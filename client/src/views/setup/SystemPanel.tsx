@@ -5,20 +5,20 @@ import {
 } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { toast } from '../../stores/useDialogStore';
-
-const API_ORIGIN = typeof window !== 'undefined' && window.location.port === '5173'
-  ? 'http://127.0.0.1:8000' : '';
+import { API_ORIGIN } from '../../utils/devOrigin';
+import { resetContextTips } from '../../utils/guideFlags';
+import { LogViewer } from './LogViewer';
 
 /** 只能改 .env 的 Agent / 任务中心参数：界面里改不了，但至少别再是黑盒 */
 const ENV_ONLY: Array<{ key: string; def: string; desc: string }> = [
   { key: 'AGENT_ENGINE',             def: 'v2',    desc: '导演 Agent 内核。出问题可设 v1 回退旧 LangChain 引擎' },
   { key: 'AGENT_MAX_ITERATIONS',     def: '200',   desc: '单次任务的轮次安全上限，防死循环' },
-  { key: 'AGENT_LLM_TIMEOUT',        def: '300',   desc: '单次模型调用超时（秒）' },
+  { key: 'AGENT_LLM_TIMEOUT',        def: '600',   desc: '单次模型调用超时（秒）' },
   { key: 'AGENT_LLM_RETRIES',        def: '2',     desc: '模型调用失败重试次数' },
-  { key: 'AGENT_MAX_TOKENS',         def: '8192',  desc: '单次回复最大输出 token' },
+  { key: 'AGENT_MAX_TOKENS',         def: '32768', desc: '单次回复最大输出 token（含思考 tokens，长思考被截断就调大）' },
   { key: 'AGENT_TOOL_TIMEOUT_S',     def: '900',   desc: '单个工具执行超时（秒），视频类固定 1800' },
   { key: 'AGENT_APPROVAL_TIMEOUT',   def: '120',   desc: '破坏性工具等你点头的超时（秒），超时按拒绝' },
-  { key: 'AGENT_CONTEXT_WINDOW',     def: '65536', desc: '上下文窗口，超过就触发压缩' },
+  { key: 'AGENT_CONTEXT_WINDOW',     def: '800000', desc: '上下文窗口（token）；达到窗口 80%（默认约 64 万 token）才触发压缩' },
   { key: 'AGENT_COMPACT_KEEP_RATIO', def: '0.2',   desc: '压缩时保留的比例' },
   { key: 'AGENT_MAX_JOBS',           def: '4',     desc: '后台任务并发上限' },
   { key: 'AGENT_SUBAGENT_MAX_DEPTH', def: '1',     desc: '子代理委派深度' },
@@ -237,6 +237,10 @@ export const SystemPanel: React.FC<Props> = ({ cfg, draft, setDraft, envFile, js
               className="px-2.5 py-1 rounded-lg bg-surface-secondary border border-border text-[11px] text-brand-light hover:text-white">
               重新运行安装向导
             </button>
+            <button onClick={() => { resetContextTips(); toast.success('已重置：下次进入画布 / 分镜台会重新显示新手提示'); }}
+              className="px-2.5 py-1 rounded-lg bg-surface-secondary border border-border text-[11px] text-gray-300 hover:text-white">
+              重置新手提示
+            </button>
           </div>
         </div>
       </section>
@@ -263,6 +267,9 @@ export const SystemPanel: React.FC<Props> = ({ cfg, draft, setDraft, envFile, js
           </div>
         </div>
       </section>
+
+      {/* 日志（调试）：实时尾部 / 级别切换 / 下载 / 前端错误回传 */}
+      <LogViewer />
     </div>
   );
 };

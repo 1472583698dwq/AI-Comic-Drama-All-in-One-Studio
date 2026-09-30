@@ -5,8 +5,12 @@ Provider 管理路由 - 代码生成源唯一模式（彻底去 JSON）
 import os
 import json
 import re
+import time
+import uuid
+import asyncio
+import logging
 import httpx
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Callable
 from fastapi import APIRouter, HTTPException, Body
 from pydantic import BaseModel, Field
 
@@ -15,6 +19,7 @@ from app.providers.custom.manager import custom_provider_manager
 from app.providers import verification
 from app.core.config import settings
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # ---------- 代码模板 ----------
@@ -417,12 +422,21 @@ def _strip_code_fences(text: str) -> str:
     return t.strip()
 
 
-async def llm_generate_code(kind: str, language: str, doc_text: str, name_hint: str = "") -> str:
+async def llm_generate_code(kind: str, language: str, doc_text: str, name_hint: str = "",
+                            on_stage: Optional[Callable[[str], None]] = None) -> str:
     """LLM 生成生成源代码的单点入口（MCP register 文档分支 / /providers/import / Creator 草稿共用）。
 
     优先走 Agent 适配器（流式 + 重试，兼容推理模型）：推理模型会把 max_tokens 烧在思考上，
     因此逐级放大预算（16384→32768）；输出为空且因长度截断时自动重试。失败再回落 llm_service。
+    on_stage: 阶段进度回调（人话文案，供导入任务 / Agent tool_progress 透出）。
     """
+    def _stage(msg: str) -> None:
+        if on_stage:
+            try:
+                on_stage(msg)
+            except Exception:
+                pass
+
     lang = "javascript" if language in ("javascript", "js", "node") else "python"
     tmpl = CODE_TEMPLATES.get((lang, kind)) or CODE_TEMPLATES.get(("python", kind)) or ""
     system_prompt = code_gen_system_prompt(kind, lang, tmpl)
@@ -432,28 +446,35 @@ async def llm_generate_code(kind: str, language: str, doc_text: str, name_hint: 
     # 1) Agent 适配器（与导演 Agent 同一运输层）
     try:
         from app.agent.llm.adapter import adapter
-        for mt in (16384, 32768):
+        for attempt, mt in enumerate((16384, 32768), start=1):
+            _stage(f"正在调用 LLM 生成源代码（第 {attempt} 次）…")
             try:
                 reply = await adapter.complete(messages, temperature=0.2, max_tokens=mt, timeout=600)
             except Exception as e:
                 last_err = e
+                _stage(f"LLM 调用异常：{str(e)[:120]}")
                 break
             text = _strip_code_fences(reply.content or "")
             if len(text) >= 20:
+                _stage("代码生成完成")
                 return text
             last_err = RuntimeError(f"模型输出为空（finish={reply.finish_reason}，思考可能占满 max_tokens={mt}）")
             if reply.finish_reason != "length":
                 break
+            _stage("输出被截断，扩大输出重试…")
     except Exception as e:
         last_err = e
     # 2) llm_service 回落（老网关）
+    _stage("正在用备用通道生成代码…")
     try:
         from app.pipelines.llm_service import llm_service
         text = _strip_code_fences(str(await llm_service.chat_completion(messages=messages, temperature=0.2) or ""))
         if len(text) >= 20:
+            _stage("代码生成完成（备用通道）")
             return text
     except Exception as e:
         last_err = e
+    logger.error("LLM 代码生成失败 kind=%s lang=%s: %s", kind, lang, str(last_err)[:300])
     raise RuntimeError(f"LLM 代码生成失败: {str(last_err)[:300]}")
 
 
@@ -933,9 +954,12 @@ async def update_provider(provider_id: str, body: Dict[str, Any] = Body(...)):
                     os.environ.pop(f"CUSTOM_PROVIDER_{provider_id}", None)
             except Exception as e:
                 print(f"[ProviderRoutes] clear api_key failed: {e}")
+            # 指示器同步：列表 has_key 由 auth.key_env 派生，清 Key 后必须置空（否则 UI 永远显示"已配置"）
+            pd.auth.key_env = None
         else:
             _save_api_key(provider_id, api_key)
-            body.setdefault("auth", {})["key_env"] = f"CUSTOM_PROVIDER_{provider_id}"
+            # 回填 key_env（原先写进 body.auth 是死代码——下方 legacy 清理会把 auth 整个丢弃）
+            pd.auth.key_env = f"CUSTOM_PROVIDER_{provider_id}"
     # 非代码模式已删除：legacy 字段不再接受更新，provider_type 不允许改写
     for _legacy_key in ("transport", "auth", "mapping", "health_check", "provider_type"):
         body.pop(_legacy_key, None)
@@ -1141,43 +1165,49 @@ class ProviderImportRequest(BaseModel):
     language: Optional[str] = "python"  # python | javascript
     definition: Optional[Dict[str, Any]] = None
     trusted: bool = False  # A档可信开关
+    async_task: bool = False  # True=后台任务化（立即返回 task_id，前端轮询 /providers/import/tasks/{id}）
 
 
-@router.post("/providers/import")
-async def import_provider_from_doc(req: ProviderImportRequest):
-    """从文档/cURL/OpenAPI 通过 LLM 生成代码 Provider（导演自动调用）"""
-    if req.definition:
-        try:
-            data = req.definition
-            if not data.get("id"):
-                import uuid
-                data["id"] = f"prov_{uuid.uuid4().hex[:8]}"
-            data["kind"] = req.kind or data.get("kind", "image")
-            if req.name:
-                data["name"] = req.name
-            # 非代码模式已删除：definition 必须内联完整 code（旧 transport 自动迁移路径已移除）
-            code_in = str(data.get("code") or "").strip()
-            if len(code_in) < 20:
-                raise HTTPException(status_code=400, detail="非代码模式已删除：definition 必须包含完整 code（async def generate(ctx, api)）")
-            data["provider_type"] = "code"
-            pd = ProviderDefinition.model_validate(data)
-            if not pd.params_schema or not pd.params_schema.get("properties"):
-                pd.params_schema = _default_params_schema(pd.kind)
-            if not pd.input_schema or not pd.input_schema.get("properties"):
-                pd.input_schema = _default_input_schema(pd.kind)
-            if not pd.output_schema or not pd.output_schema.get("properties"):
-                pd.output_schema = _default_output_schema(pd.kind)
-            saved = custom_provider_manager.save_definition(pd)
-            if req.api_key:
-                _save_api_key(saved.id, req.api_key)
-                saved.auth.key_env = f"CUSTOM_PROVIDER_{saved.id}"
-                custom_provider_manager.save_definition(saved)
-            from app.providers.init_providers import register_single_custom_provider
-            register_single_custom_provider(saved)
-            return {"status": "success", "provider": _sanitize_for_frontend(saved), "mode": "direct_definition"}
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"definition 导入失败: {e}")
+# ─────────────────── 文档导入任务化（长 LLM 调用期间给前端阶段进度）───────────────────
+# 单机应用：内存任务表 + TTL 清理即可；不复用 task_center（其面向生成任务的轮询器/持久化）。
+_IMPORT_TASKS: Dict[str, Dict[str, Any]] = {}
+_IMPORT_TASK_TTL_S = 3600
 
+
+def _import_task_create() -> str:
+    tid = f"imp_{uuid.uuid4().hex[:10]}"
+    now = time.time()
+    for k in [k for k, v in _IMPORT_TASKS.items() if now - float(v.get("updated_at") or 0) > _IMPORT_TASK_TTL_S]:
+        _IMPORT_TASKS.pop(k, None)
+    _IMPORT_TASKS[tid] = {
+        "task_id": tid, "stage": "queued", "stage_label": "排队中…",
+        "log": [], "created_at": now, "updated_at": now,
+        "done": False, "provider": None, "error": None, "result_status": None,
+    }
+    return tid
+
+
+def _import_task_update(tid: str, **kw: Any) -> None:
+    rec = _IMPORT_TASKS.get(tid)
+    if not rec:
+        return
+    log_line = kw.pop("log_line", None)
+    if log_line:
+        rec["log"].append({"t": time.time(), "text": str(log_line)[:300]})
+    rec.update(kw)
+    rec["updated_at"] = time.time()
+
+
+async def _import_from_doc_core(req: ProviderImportRequest, on_stage: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
+    """文档导入核心（同步路径与任务化路径共用）：取文档 → LLM 生成代码 → 统一创建注册。"""
+    def _stage(msg: str) -> None:
+        if on_stage:
+            try:
+                on_stage(msg)
+            except Exception:
+                pass
+
+    _stage("正在获取 API 文档…")
     doc_content = req.doc_text or ""
     if req.curl:
         doc_content += f"\n\nCURL:\n{req.curl}"
@@ -1202,38 +1232,116 @@ async def import_provider_from_doc(req: ProviderImportRequest):
         except Exception as e:
             doc_content += f"\nOpenAPI fetch failed: {e}"
     if not doc_content or len(doc_content.strip()) < 10:
-        raise HTTPException(status_code=400, detail="请提供 doc_text / doc_url / curl / openapi_url 或 definition")
+        raise ValueError("请提供 doc_text / doc_url / curl / openapi_url 或 definition")
     # LLM 生成代码（单点：优先 Agent 适配器，抗推理模型烧光 max_tokens）
+    lang = (req.language or "python").lower()
+    if lang == "js": lang = "javascript"
+    code_text = await llm_generate_code(req.kind, lang, doc_content, req.name or "", on_stage=on_stage)
+    if len((code_text or "").strip()) < 50:
+        raise ValueError("LLM 生成代码过短")
+    inferred = _infer_kind_from_doc(doc_content, "")
+    final_kind = req.kind
+    if inferred and inferred != req.kind and req.kind in (None, "", "image") and inferred == "video":
+        final_kind = inferred
+    _stage("正在注册生成源（schema 规整 / 编译体检）…")
+    # 统一创建入口：schema 规整/超时策略/保存注册/Key 落盘/沙箱体检 一条龙
+    created = create_code_source(
+        name=req.name or f"自定义{final_kind}源",
+        kind=final_kind,
+        code=code_text,
+        language=lang,
+        description=f"由导演从文档自动生成（{lang}）",
+        api_key=req.api_key,
+        doc_text=doc_content,
+        doc_url=req.doc_url or "",
+        trusted=bool(getattr(req, "trusted", False)),
+    )
+    _stage("注册完成")
+    return {"status": "success" if created["compile_check"].get("ok") else "compile_failed",
+            "provider": created["provider"], "mode": "llm_code", "code": created["code"],
+            "compile_check": created["compile_check"],
+            **({"hint": "生成的代码未通过沙箱编译体检，请根据 compile_check.error 修正后重试"} if not created["compile_check"].get("ok") else {})}
+
+
+async def _import_task_run(tid: str, req: ProviderImportRequest) -> None:
+    def _on_stage(msg: str) -> None:
+        logger.info("导入任务 %s: %s", tid, msg)
+        _import_task_update(tid, stage_label=msg, log_line=msg)
+
     try:
-        lang = (req.language or "python").lower()
-        if lang == "js": lang = "javascript"
-        code_text = await llm_generate_code(req.kind, lang, doc_content, req.name or "")
-        if len((code_text or "").strip()) < 50:
-            raise ValueError("LLM 生成代码过短")
-        inferred = _infer_kind_from_doc(doc_content, "")
-        final_kind = req.kind
-        if inferred and inferred != req.kind and req.kind in (None, "", "image") and inferred == "video":
-            final_kind = inferred
-        # 统一创建入口：schema 规整/超时策略/保存注册/Key 落盘/沙箱体检 一条龙
-        created = create_code_source(
-            name=req.name or f"自定义{final_kind}源",
-            kind=final_kind,
-            code=code_text,
-            language=lang,
-            description=f"由导演从文档自动生成（{lang}）",
-            api_key=req.api_key,
-            doc_text=doc_content,
-            doc_url=req.doc_url or "",
-            trusted=bool(getattr(req, "trusted", False)),
-        )
-        return {"status": "success" if created["compile_check"].get("ok") else "compile_failed",
-                "provider": created["provider"], "mode": "llm_code", "code": created["code"],
-                "compile_check": created["compile_check"],
-                **({"hint": "生成的代码未通过沙箱编译体检，请根据 compile_check.error 修正后重试"} if not created["compile_check"].get("ok") else {})}
-    except HTTPException:
-        raise
+        _import_task_update(tid, stage="fetching_docs", stage_label="正在获取 API 文档…", log_line="任务开始")
+        res = await _import_from_doc_core(req, on_stage=_on_stage)
+        _import_task_update(tid, stage="done", stage_label="完成", done=True,
+                            provider=res.get("provider"), result_status=res.get("status"),
+                            log_line=f"完成：{res.get('status')}")
+    except Exception as e:
+        logger.exception("文档导入任务失败 %s", tid)
+        _import_task_update(tid, stage="failed", stage_label="失败", done=True,
+                            error=str(e)[:600], log_line=f"失败：{str(e)[:200]}")
+
+
+@router.post("/providers/import")
+async def import_provider_from_doc(req: ProviderImportRequest):
+    """从文档/cURL/OpenAPI 通过 LLM 生成代码 Provider（导演自动调用）。
+
+    async_task=True 时后台任务化执行并立即返回 task_id（LLM 生成可达数分钟，
+    前端轮询 GET /providers/import/tasks/{task_id} 拿阶段进度与结果）。
+    """
+    if req.definition:
+        try:
+            data = req.definition
+            if not data.get("id"):
+                data["id"] = f"prov_{uuid.uuid4().hex[:8]}"
+            data["kind"] = req.kind or data.get("kind", "image")
+            if req.name:
+                data["name"] = req.name
+            # 非代码模式已删除：definition 必须内联完整 code（旧 transport 自动迁移路径已移除）
+            code_in = str(data.get("code") or "").strip()
+            if len(code_in) < 20:
+                raise HTTPException(status_code=400, detail="非代码模式已删除：definition 必须包含完整 code（async def generate(ctx, api)）")
+            data["provider_type"] = "code"
+            pd = ProviderDefinition.model_validate(data)
+            if not pd.params_schema or not pd.params_schema.get("properties"):
+                pd.params_schema = _default_params_schema(pd.kind)
+            if not pd.input_schema or not pd.input_schema.get("properties"):
+                pd.input_schema = _default_input_schema(pd.kind)
+            if not pd.output_schema or not pd.output_schema.get("properties"):
+                pd.output_schema = _default_output_schema(pd.kind)
+            saved = custom_provider_manager.save_definition(pd)
+            if req.api_key:
+                _save_api_key(saved.id, req.api_key)
+                saved.auth.key_env = f"CUSTOM_PROVIDER_{saved.id}"
+                custom_provider_manager.save_definition(saved)
+            from app.providers.init_providers import register_single_custom_provider
+            register_single_custom_provider(saved)
+            return {"status": "success", "provider": _sanitize_for_frontend(saved), "mode": "direct_definition"}
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"definition 导入失败: {e}")
+
+    # 任务化：立即返回 task_id，后台跑完整导入（含长 LLM 调用）
+    if req.async_task:
+        tid = _import_task_create()
+        asyncio.create_task(_import_task_run(tid, req))
+        return {"status": "queued", "task_id": tid, "mode": "llm_code"}
+
+    # 同步路径（向后兼容：Agent/脚本旧调用）
+    try:
+        return await _import_from_doc_core(req)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"LLM 生成代码失败: {e}")
+
+
+@router.get("/providers/import/tasks/{task_id}")
+async def get_import_task(task_id: str):
+    """查询文档导入任务的阶段进度与结果（前端轮询）。"""
+    rec = _IMPORT_TASKS.get(task_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail=f"导入任务不存在或已过期: {task_id}")
+    return rec
 
 
 @router.post("/providers/{provider_id}/api-key")
@@ -1250,6 +1358,74 @@ async def set_provider_api_key(provider_id: str, body: Dict[str, Any] = Body(...
         pd.auth.key_env = f"CUSTOM_PROVIDER_{provider_id}"
         custom_provider_manager.save_definition(pd)
     return {"status": "success", "provider_id": provider_id, "has_key": True}
+
+
+# ─────────────────── 代码源「隐式配置」显式化（见 custom/inline_config.py）───────────────────
+#
+# 代码型生成源常把 Key / 网关地址 / 工作流 ID 写在代码里，设置页只能看到一个空 Key 输入框：
+# 用户不知道这个源实际用哪个 Key、连哪个网关，想更换还得翻代码，且明文值随定义落盘。
+# 两个接口把「配置里存的」与「代码里写的」一起摊开，并支持把内联 Key 迁到配置存储。
+class MigrateInlineKeyRequest(BaseModel):
+    rewrite_code: bool = True
+
+
+@router.get("/providers/{provider_id}/effective-config")
+async def get_provider_effective_config(provider_id: str):
+    """自定义代码源的生效配置：Key 来源（配置存储 / 代码内联 / 未配置）+ 代码里写死的常量。
+    与 GET /config 同一口径（本地桌面默认明文），明文与掩码两份都返回，由前端决定默认展示。
+    """
+    from app.providers.custom.inline_config import effective_config
+    pd = custom_provider_manager.get_definition(provider_id)
+    if not pd:
+        raise HTTPException(status_code=404, detail=f"Provider 不存在: {provider_id}")
+    if getattr(pd, "provider_type", "") != "code":
+        raise HTTPException(status_code=400, detail="仅代码型自定义源存在「隐式配置」")
+    return {"effective": effective_config(pd)}
+
+
+@router.post("/providers/{provider_id}/migrate-inline-key")
+async def migrate_provider_inline_key(provider_id: str, body: Optional[MigrateInlineKeyRequest] = Body(None)):
+    """把代码里的内联 Key 迁到配置存储 CUSTOM_PROVIDER_<id>，可选同时改写代码（改从 ctx 读）。"""
+    from app.providers.custom.inline_config import effective_config, mask_secret, rewrite_inline_key
+    pd = custom_provider_manager.get_definition(provider_id)
+    if not pd:
+        raise HTTPException(status_code=404, detail=f"Provider 不存在: {provider_id}")
+    eff = effective_config(pd)
+    literal = eff.get("inline_key") or ""
+    if not literal:
+        raise HTTPException(status_code=400, detail="代码里没有找到内联 Key，无需迁移")
+
+    rewrite = True if body is None else bool(body.rewrite_code)
+    _save_api_key(provider_id, literal)
+    if not pd.auth.key_env:
+        pd.auth.key_env = f"CUSTOM_PROVIDER_{provider_id}"
+
+    notes: List[str] = []
+    if rewrite:
+        const_name = eff.get("inline_key_name") or ""
+        new_code, notes = rewrite_inline_key(
+            pd.code or "", pd.language or "python", literal, const_name or None, pd.auth.key_env,
+        )
+        if new_code != (pd.code or ""):
+            pd.code = new_code
+
+    custom_provider_manager.save_definition(pd)
+    try:
+        from app.providers.init_providers import register_single_custom_provider
+        register_single_custom_provider(pd)  # 热注册：运行中的进程立刻用上新代码/新 Key
+    except Exception as e:
+        print(f"[ProviderRoutes] migrate inline key hot register failed {provider_id}: {e}")
+    verification.clear(provider_id)  # 代码/Key 变更 → 需重新测试
+    return {
+        "status": "success",
+        "provider_id": provider_id,
+        "env_name": pd.auth.key_env,
+        "key_source": "stored",
+        "stored_masked": mask_secret(literal),
+        "rewritten": bool(notes),
+        "notes": notes,
+        "effective": effective_config(pd),
+    }
 
 
 @router.get("/providers/custom/stats")

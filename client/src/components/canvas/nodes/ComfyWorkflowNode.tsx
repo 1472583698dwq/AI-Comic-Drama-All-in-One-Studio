@@ -4,7 +4,7 @@ import { Cpu, Settings, Image as ImageIcon, Type, Upload, Check } from 'lucide-r
 import { apiService } from '../../../services/api';
 import { AutoRatioMedia } from '../../ui/AutoRatioMedia';
 
-const API_ORIGIN = window.location.port === '5173' ? 'http://127.0.0.1:8000' : '';
+import { API_ORIGIN } from '../../../utils/devOrigin';
 
 export const ComfyWorkflowNode: React.FC<NodeProps> = ({ data, id }) => {
   const d: any = data;

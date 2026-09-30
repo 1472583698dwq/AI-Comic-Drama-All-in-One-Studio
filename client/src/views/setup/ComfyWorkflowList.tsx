@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { RefreshCw, Trash2, Sliders, Loader2, Image as ImageIcon, Video } from 'lucide-react';
+import { RefreshCw, Trash2, Sliders, Loader2, Image as ImageIcon, Video, Plus } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { toast, confirmAsync } from '../../stores/useDialogStore';
 import { WorkflowInspectorModal } from '../../components/workflow/WorkflowInspectorModal';
@@ -47,17 +47,23 @@ export const ComfyWorkflowList: React.FC<Props> = ({ defaultImage, defaultVideo,
   return (
     <div className="mt-3.5 rounded-xl border border-border bg-surface-secondary/40 overflow-hidden">
       <div className="px-3.5 py-2 border-b border-border/70 flex items-center gap-2">
-        <span className="text-[11.5px] font-bold text-[color:var(--color-text-main)]">工作流</span>
-        <span className="text-[10.5px] text-gray-500">{list.length} 个 · 每个都是一个独立生成源</span>
+        <span className="text-[11.5px] font-bold [color:var(--color-text-main)]">工作流</span>
+        <span className="text-[10.5px] text-gray-500">{list.length} 个 · 每个都是一个生成源</span>
+        <button
+          onClick={() => window.dispatchEvent(new CustomEvent('open-workflow-import'))}
+          className="ml-auto px-2 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-[10.5px] text-emerald-300 hover:text-emerald-200 flex items-center gap-1"
+        >
+          <Plus className="w-3 h-3" />导入工作流
+        </button>
         <button onClick={load} disabled={loading}
-          className="ml-auto text-[10.5px] text-gray-400 hover:text-white flex items-center gap-1 disabled:opacity-40">
+          className="text-[10.5px] text-gray-400 hover:text-white flex items-center gap-1 disabled:opacity-40">
           {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}刷新
         </button>
       </div>
 
       {list.length === 0 ? (
         <div className="px-3.5 py-4 text-[11px] text-gray-500">
-          还没有工作流。填上面的「工作流目录」可直读本机 ComfyUI 的，或到画布里上传一个。
+          还没有工作流。点右上「导入工作流」，支持上传/粘贴 .json 或从外部目录直接选 ComfyUI 模板。
         </div>
       ) : (
         <div className="max-h-64 overflow-y-auto custom-scrollbar divide-y divide-border/60">

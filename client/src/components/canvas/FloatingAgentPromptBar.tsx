@@ -19,20 +19,30 @@ import { useCanvasStore } from '../../stores/useCanvasStore';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { useProjectListStore } from '../../stores/useProjectListStore';
 import { apiService } from '../../services/api';
+import { useEscapeClose } from '../../hooks/useEscapeClose';
 import { NodeAgentConsole } from './NodeAgentConsole';
 
 interface Props {
   onAddNode: (type: string) => void;
   onOpenAssetLibrary: () => void;
   onExport: () => void;
+  /** 关闭节点控制台（回到全局态）：除清 store 外，同时清 React Flow 的选中态 */
+  onCloseConsole?: () => void;
 }
 
-export const FloatingAgentPromptBar: React.FC<Props> = ({ onAddNode, onOpenAssetLibrary, onExport }) => {
+export const FloatingAgentPromptBar: React.FC<Props> = ({ onAddNode, onOpenAssetLibrary, onExport, onCloseConsole }) => {
   const selectedNodeId = useCanvasStore((s) => s.selectedNodeId);
   const nodes = useCanvasStore((s) => s.nodes);
   const setSelectedNodeId = useCanvasStore((s) => s.setSelectedNodeId);
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
   const isAgentNode = !!selectedNode && ['image', 'video', 'audio'].includes(selectedNode.type || '');
+
+  const closeConsole = React.useCallback(() => {
+    if (onCloseConsole) onCloseConsole();
+    else setSelectedNodeId(null);
+  }, [onCloseConsole, setSelectedNodeId]);
+  // Esc 关闭：与全站弹窗同一套栈管理（LIFO，不会一次关穿多层）
+  useEscapeClose(isAgentNode, closeConsole);
 
   const [goText, setGoText] = useState('');
   const [dispatching, setDispatching] = useState(false);
@@ -70,8 +80,8 @@ export const FloatingAgentPromptBar: React.FC<Props> = ({ onAddNode, onOpenAsset
         <div className="w-full bg-surface/95 backdrop-blur-2xl border border-white/15 rounded-2xl shadow-2xl overflow-hidden">
           <div className="px-4 py-2 bg-white/[0.03] border-b border-white/10 flex items-center gap-2 text-xs">
             <span className="text-[11px] font-bold text-violet-300">节点 Agent 控制台</span>
-            <span className="text-[11px] text-white/40">· 点画布空白返回全局</span>
-            <button onClick={() => setSelectedNodeId(null)} className="ml-auto p-1 rounded hover:bg-white/10 text-white/40 hover:text-white" title="返回全局"><X className="w-3.5 h-3.5" /></button>
+            <span className="text-[11px] text-white/40">· 点画布空白 / Esc 返回全局</span>
+            <button onClick={closeConsole} className="ml-auto p-1 rounded hover:bg-white/10 text-white/40 hover:text-white" title="返回全局（也可点画布空白 / Esc）"><X className="w-3.5 h-3.5" /></button>
           </div>
           <div className="p-3">
             <NodeAgentConsole nodeId={selectedNode!.id} kind={kind} />

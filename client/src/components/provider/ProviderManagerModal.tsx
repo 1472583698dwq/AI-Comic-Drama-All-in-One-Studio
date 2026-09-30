@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { X, Plus, Plug, Globe, Video, Mic, Cpu, Trash2, Edit3, Activity, Save, Upload, FileText, Link2, TestTube } from 'lucide-react';
+import { X, Plus, Plug, Globe, Video, Mic, Cpu, Trash2, Edit3, Activity, Save, FileText } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { CAPABILITIES_BY_KIND, getCapabilities } from './providerCapabilities';
 import { confirmAsync, toast } from '../../stores/useDialogStore';
@@ -24,12 +24,6 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
   const [editing, setEditing] = useState<any>(null);
   const [editApiKey, setEditApiKey] = useState('');
   const [editSrc, setEditSrc] = useState<any>(null);
-  const [showCreate, setShowCreate] = useState(false);
-  const [importMode, setImportMode] = useState(false);
-  const [importDoc, setImportDoc] = useState('');
-  const [importKind, setImportKind] = useState<'image'|'video'|'audio'>('image');
-  const [importName, setImportName] = useState('');
-  const [importKey, setImportKey] = useState('');
 
   const fetchAll = async ()=>{
     try {
@@ -102,7 +96,7 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
       // 处理 JSON 字符串字段
       for (const k of ['params_schema','input_schema','output_schema','default_params','headers']) {
         if (typeof payload[k] === 'string' && payload[k].trim()) {
-          try { payload[k] = JSON.parse(payload[k]); } catch { alert(`${k} JSON 格式错误`); return; }
+          try { payload[k] = JSON.parse(payload[k]); } catch { toast.error(`${k} JSON 格式错误`); return; }
         }
         if (payload[k]==='' || payload[k]==='null') delete payload[k];
       }
@@ -112,7 +106,7 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
       if (editProvider) { onClose(); } else { setEditing(null); }
       await fetchAll();
       window.dispatchEvent(new Event('provider-list-refresh'));
-    } catch(e:any){ alert(e.message); }
+    } catch(e:any){ toast.error(e.message); }
   };
 
   const handleAutoFixVideoCode = ()=>{
@@ -172,27 +166,6 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
     const fixedInput = { type: "object", properties: newIProps, required: ["prompt"] };
     setEditing({...editing, params_schema: fixedParams, input_schema: fixedInput});
   };
-  const handleCreate = async (form: any)=>{
-    try {
-      const res = await apiService.createProvider(form);
-      setShowCreate(false);
-      await fetchAll();
-      window.dispatchEvent(new Event('provider-list-refresh'));
-      alert(`✓ 已创建 ${res.provider?.id}`);
-    } catch(e:any){ alert(e.message); }
-  };
-  const handleImport = async ()=>{
-    if (!importDoc.trim()) { alert('请粘贴 API 文档/cURL/OpenAPI'); return; }
-    try {
-      const res = await apiService.importProvider({ kind: importKind, name: importName || undefined, doc_text: importDoc, api_key: importKey || undefined });
-      setImportMode(false);
-      setImportDoc(''); setImportName(''); setImportKey('');
-      await fetchAll();
-      window.dispatchEvent(new Event('provider-list-refresh'));
-      alert(`✓ 已导入 ${res.provider?.id} (${res.mode})`);
-    } catch(e:any){ alert(e.message); }
-  };
-
   useEscapeClose(isOpen, onClose);
   if (!isOpen) return null;
 
@@ -222,29 +195,17 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={()=> setImportMode(!importMode)} className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1 ${importMode?'bg-brand border-brand text-white':'bg-surface-secondary border-border text-white hover:border-brand'}`}><FileText className="w-3.5 h-3.5"/> {importMode?'关闭导入':'从文档导入'}</button>
-            <button onClick={()=> setShowCreate(true)} className="px-3 py-1.5 rounded-xl bg-brand text-white text-xs font-bold flex items-center gap-1"><Plus className="w-3.5 h-3.5"/> 新建</button>
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent('open-provider-create', { detail: { tab: 'doc' } }))}
+              className="px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1 bg-surface-secondary border-border text-white hover:border-brand"
+            ><FileText className="w-3.5 h-3.5"/> 从文档导入</button>
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent('open-provider-create', { detail: { tab: 'code' } }))}
+              className="px-3 py-1.5 rounded-xl bg-brand text-white text-xs font-bold flex items-center gap-1"
+            ><Plus className="w-3.5 h-3.5"/> 新建</button>
             <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-surface-tertiary"><X className="w-5 h-5"/></button>
           </div>
         </div>
-
-        {/* Import Panel */}
-        {importMode && (
-          <div className="mx-6 mt-4 p-4 rounded-xl bg-brand/5 border border-brand/20 space-y-3">
-            <div className="flex items-center gap-2">
-              <select value={importKind} onChange={e=> setImportKind(e.target.value as any)} className="bg-surface border border-border rounded-lg px-2 py-1.5 text-xs text-white">
-                <option value="image">生图 image</option><option value="video">视频 video</option><option value="audio">语音 audio</option>
-              </select>
-              <input value={importName} onChange={e=> setImportName(e.target.value)} placeholder="名称（可选，如 我的FLUX）" className="flex-1 bg-surface border border-border rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-500"/>
-              <input value={importKey} onChange={e=> setImportKey(e.target.value)} placeholder="API Key（可选）" className="flex-1 bg-surface border border-border rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-500 font-mono"/>
-            </div>
-            <textarea value={importDoc} onChange={e=> setImportDoc(e.target.value)} placeholder="粘贴 API 文档 / cURL / OpenAPI JSON… 导演将自动解析 transport/auth/input_schema/output_schema" rows={4} className="w-full bg-surface-secondary border border-border rounded-xl p-3 text-xs font-mono text-white placeholder-gray-500 focus:outline-none focus:border-brand resize-none"/>
-            <div className="flex justify-end gap-2">
-              <button onClick={()=> setImportMode(false)} className="px-3 py-1.5 rounded-lg bg-surface border border-border text-xs text-white">取消</button>
-              <button onClick={handleImport} className="px-4 py-1.5 rounded-lg bg-brand text-white text-xs font-bold">让导演解析并创建</button>
-            </div>
-          </div>
-        )}
 
         {/* Filters */}
         <div className="px-6 py-3 border-b border-border flex items-center gap-2 shrink-0">
@@ -339,7 +300,8 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
                             message:`清除「${editing.name || editing.id}」已保存的 Key？清除后这个源会变成未配置。` });
                           if (!ok) return;
                           try {
-                            await apiService.setProviderApiKey(editing.id, '');
+                            // 清 Key 走 PUT（api_key:"" = 删除，走 POST /api-key 会被 400 拒绝）
+                            await apiService.updateProvider(editing.id, { api_key: '' });
                             toast.success('已清除');
                             window.dispatchEvent(new Event('provider-list-refresh'));
                           } catch(e:any){ toast.error(e?.message || '清除失败'); }
@@ -417,86 +379,6 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
           </div>
         )}
 
-        {/* Create Modal */}
-        {showCreate && (
-          <div className="absolute inset-0 bg-surface/85 backdrop-blur-sm flex items-center justify-center p-4">
-            <CreateForm onClose={()=> setShowCreate(false)} onCreated={()=> { setShowCreate(false); fetchAll(); window.dispatchEvent(new Event('provider-list-refresh')); }} />
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-const CreateForm: React.FC<{onClose:()=>void, onCreated:()=>void}> = ({ onClose, onCreated })=>{
-  const [form, setForm] = useState<any>({ name:'', kind:'image', language:'python', code:'', description:'', models:'', default_model:'', capabilities: [] });
-  const [apiKey, setApiKey] = useState('');
-  const [headers, setHeaders] = useState<Record<string, string>>({});
-  const [tplBusy, setTplBusy] = useState(false);
-  const toggleCap = (id: string)=>{
-    const cur: string[] = Array.isArray(form.capabilities) ? form.capabilities : [];
-    setForm({ ...form, capabilities: cur.includes(id) ? cur.filter(c=>c!==id) : [...cur, id] });
-  };
-  const loadTemplate = async ()=>{
-    try {
-      setTplBusy(true);
-      const r = await apiService.getCodeTemplate(form.language, form.kind);
-      setForm((f:any)=> ({ ...f, code: r.template || '' }));
-    } catch(e:any){ alert(e?.message || '模板加载失败'); } finally { setTplBusy(false); }
-  };
-  const handleSubmit = async ()=>{
-    try {
-      if (!form.code || String(form.code).trim().length < 20) { alert('代码模式为唯一方式：请提供 python/javascript 携程源码（可点「加载模板」起步）'); return; }
-      const payload: any = {
-        name: form.name, kind: form.kind, language: form.language,
-        code: form.code, description: form.description,
-        capabilities: Array.isArray(form.capabilities) ? form.capabilities : [],
-      };
-      if (form.models) payload.models = String(form.models).split(',').map((s:string)=>s.trim()).filter(Boolean);
-      if (form.default_model) payload.default_model = form.default_model;
-      if (apiKey) payload.api_key = apiKey;
-      if (Object.keys(headers).length > 0) payload.headers = headers;
-      await apiService.createProvider(payload);
-      onCreated();
-    } catch(e:any){ alert(e.message); }
-  };
-  return (
-    <div className="w-full max-w-xl bg-surface rounded-2xl border border-border p-4 space-y-3 max-h-[85vh] overflow-y-auto">
-      <div className="flex items-center justify-between"><span className="text-sm font-bold text-white">新建自定义源 · 代码模式</span><button onClick={onClose}><X className="w-4 h-4 text-gray-400"/></button></div>
-      <input value={form.name} onChange={e=> setForm({...form, name:e.target.value})} placeholder="名称，如 我的FLUX" className="w-full bg-surface-secondary border border-border rounded-lg px-3 py-2 text-xs text-white placeholder-gray-500"/>
-      <select value={form.kind} onChange={e=> setForm({...form, kind:e.target.value, capabilities: []})} className="w-full bg-surface-secondary border border-border rounded-lg px-3 py-2 text-xs text-white">
-        <option value="image">生图 image</option><option value="video">视频 video</option><option value="audio">语音 audio</option>
-      </select>
-      <div>
-        <div className="text-[11px] text-gray-400 mb-1.5">能力细分（多选；不选=按插槽自动推断：{(CAPABILITIES_BY_KIND[form.kind] || []).map(o=>o.label).join(' / ') || '—'}）</div>
-        <div className="flex flex-wrap gap-1.5">
-          {(CAPABILITIES_BY_KIND[form.kind] || []).map(o=> {
-            const on = (form.capabilities || []).includes(o.id);
-            return <button key={o.id} type="button" title={o.desc} onClick={()=> toggleCap(o.id)} className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition-all ${on ? 'bg-brand/20 border-brand text-white' : 'bg-surface-secondary border-border text-gray-400 hover:text-white'}`}>{o.label}</button>;
-          })}
-        </div>
-      </div>
-      <textarea value={form.description} onChange={e=> setForm({...form, description:e.target.value})} placeholder="描述" rows={2} className="w-full bg-surface-secondary border border-border rounded-lg p-2 text-xs text-white"/>
-      <div className="space-y-1">
-        <label className="text-[11px] font-semibold text-gray-300">自定义请求头 (Custom Headers / OpenCode 规范)</label>
-        <CustomHeadersEditor headers={headers} onChange={setHeaders} />
-      </div>
-      <div className="space-y-1">
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] font-semibold text-gray-300">代码（异步携程 async def generate(ctx, api)）</span>
-          <select value={form.language} onChange={e=> setForm({...form, language:e.target.value})} className="ml-auto bg-surface-secondary border border-border rounded-lg px-2 py-1 text-[11px] text-white">
-            <option value="python">python</option><option value="javascript">javascript</option>
-          </select>
-          <button type="button" onClick={loadTemplate} disabled={tplBusy} className="px-2.5 py-1 rounded-lg bg-surface-secondary border border-border text-[11px] text-gray-300 hover:text-white disabled:opacity-40">{tplBusy ? '加载中…' : '加载模板'}</button>
-        </div>
-        <textarea value={form.code} onChange={e=> setForm({...form, code:e.target.value})} rows={10} placeholder="async def generate(ctx, api): ...  # 末尾可追加 # PARAMS_SCHEMA: {...}" className="w-full bg-surface-secondary border border-border rounded-lg p-2 font-mono text-[11px] text-white placeholder-gray-500 focus:outline-none focus:border-brand"/>
-      </div>
-      <input value={form.models} onChange={e=> setForm({...form, models:e.target.value})} placeholder="models 逗号分隔，可空" className="w-full bg-surface-secondary border border-border rounded-lg px-3 py-2 text-xs text-white"/>
-      <input value={form.default_model} onChange={e=> setForm({...form, default_model:e.target.value})} placeholder="default_model，可空" className="w-full bg-surface-secondary border border-border rounded-lg px-3 py-2 text-xs text-white"/>
-      <input value={apiKey} onChange={e=> setApiKey(e.target.value)} placeholder="API Key（可选）" className="w-full bg-surface-secondary border border-border rounded-lg px-3 py-2 text-xs text-white font-mono"/>
-      <div className="flex justify-end gap-2 pt-2">
-        <button onClick={onClose} className="px-3 py-1.5 rounded-lg bg-surface-secondary border border-border text-xs text-white">取消</button>
-        <button onClick={handleSubmit} className="px-4 py-1.5 rounded-lg bg-brand text-white text-xs font-bold">创建</button>
       </div>
     </div>
   );

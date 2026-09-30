@@ -67,6 +67,7 @@ class AgentLoop:
         self._open_step = False
         self._turn_seq = 0
         self._run_id = ""
+        self._turn_started_at = 0.0
         self._lock = asyncio.Lock()
         self.pipeline = ToolPipeline(
             session_id,
@@ -83,6 +84,8 @@ class AgentLoop:
         except Exception:
             self.goal = None
         self._last_turn_reason = ""
+        # 已回投过的媒体引用（会话级去重：同一张图不重复作为附件塞给模型）
+        self._seen_media_refs: set = set()
         _profile_steps = int(getattr(agent_profile, "max_steps", 0) or 0)
         self._max_steps = int(max_steps or _profile_steps or _env_int("AGENT_MAX_ITERATIONS", 200))
         # 后台任务（P5）：长耗时工具调用异步化，完成后注入通知
@@ -125,7 +128,8 @@ class AgentLoop:
 
     # ── 输入 ─────────────────────────────────────────────
     async def prompt(self, text: str, context: Optional[Dict[str, Any]] = None,
-                     mode: Optional[str] = None, run_mode: Optional[str] = None) -> None:
+                     mode: Optional[str] = None, run_mode: Optional[str] = None,
+                     attachments: Optional[List[Dict[str, Any]]] = None) -> None:
         # 免模型命令：/plan /goal /status /compact /cancel /help
         try:
             from app.agent.runtime.commands import execute_command
@@ -153,7 +157,7 @@ class AgentLoop:
             except Exception:
                 plan_text = str(approved)
             text = f"{text}\n\n【用户已批准的执行计划（请严格按步骤执行；偏离需说明理由）】\n{plan_text[:6000]}"
-        self.inbox.followup(text, source="user")
+        self.inbox.followup(text, source="user", meta={"attachments": attachments} if attachments else None)
 
     def set_run_mode(self, run_mode: str) -> None:
         try:
@@ -219,8 +223,8 @@ class AgentLoop:
         self.goal = None
         save_goal(self.session, None)
 
-    async def steer(self, text: str) -> None:
-        self.inbox.steer(text, source="user")
+    async def steer(self, text: str, attachments: Optional[List[Dict[str, Any]]] = None) -> None:
+        self.inbox.steer(text, source="user", meta={"attachments": attachments} if attachments else None)
 
     def is_running(self) -> bool:
         return self._driver is not None and not self._driver.done()
@@ -243,7 +247,6 @@ class AgentLoop:
             self._close_turn("aborted", cause)
         await self._emit({"event": "agent_response", "message": "⏹️ 已暂停",
                           "suggested_actions": [], "executed_tools": []})
-
     async def wait_idle(self, timeout: Optional[float] = None) -> None:
         task = self._driver
         if task and not task.done():
@@ -295,13 +298,36 @@ class AgentLoop:
         return True
 
     # ── 单轮 ─────────────────────────────────────────────
+    def _trace(self, event: str, data: Dict[str, Any]) -> None:
+        """run 级审计留痕：一次运行一个文件 `storage/agent_traces/<run_id>.jsonl`。
+
+        与「会话事件日志」（`storage/agent_sessions/*/events.v1.jsonl`，全量事件溯源、
+        给模型当记忆用）分工不同：这里只记**审计关心的骨架**（回合边界、工具名/状态/
+        耗时/错误），一个文件对应一次运行，便于按运行检索与统计。
+
+        注意：**不落工具入参的值** —— provider_* 类工具的参数里带 api_key，
+        写进磁盘就是泄密面。只留参数名，够定位"调了什么"即可。
+        """
+        try:
+            from app.agent.trace import log_event
+            log_event(self._run_id, event, data)
+        except Exception:
+            pass
+
     async def _run_turn(self) -> None:
         claimed = self.inbox.claim()
         if not claimed:
             return
         self._turn_seq += 1
         self._run_id = f"{self.session.id}_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+        self._turn_started_at = time.time()
         self.session.append(E.TURN_START, {"mode": self.mode, "run_mode": self.run_mode, "run_id": self._run_id})
+        self._trace("turn_start", {
+            "session_id": self.session.id,
+            "mode": self.mode,
+            "run_mode": self.run_mode,
+            "input": (claimed[0].text[:200] if claimed else ""),
+        })
         self._open_turn = True
         reason = "completed"
         final_text = ""
@@ -328,9 +354,30 @@ class AgentLoop:
             if context_block:
                 # 运行时上下文是模型可见输入：以 user 消息形式落账，附在本轮输入之后
                 self.session.append(E.USER_MESSAGE, {"text": context_block, "source": "system", "form": "context"})
+            # 画布「加入会话」节点的已有产出：自动作为媒体附件注入（图片始终；视频/音频按开关）
+            try:
+                from app.agent.runtime.attachments import attachments_from_focus_nodes
+                _focus_atts = [
+                    a for a in attachments_from_focus_nodes(self.context)
+                    if a.get("ref") and a["ref"] not in self._seen_media_refs
+                ]
+                if _focus_atts:
+                    for a in _focus_atts:
+                        self._seen_media_refs.add(a["ref"])
+                    self.session.append(E.USER_MESSAGE, {
+                        "text": "【会话关注节点（画布已加入会话）的已有产出（自动附带）】",
+                        "source": "canvas-focus", "form": "notice",
+                        "meta": {"attachments": _focus_atts},
+                    })
+                    await self._emit({"event": "media_attached", "tool_name": "canvas_focus",
+                                      "items": [{k: a.get(k) for k in ("kind", "name", "ref")} for a in _focus_atts]})
+            except Exception:
+                pass
             tools = self._tool_schemas()
             step_index = 0
             bad_args_streak = 0
+            trunc_streak = 0
+            overflow_compacts = 0
             while True:
                 if step_index >= safety_cap:
                     reason = "max-steps"
@@ -367,9 +414,30 @@ class AgentLoop:
                         "finish_reason": reply.finish_reason,
                     })
                     if truncated:
-                        reason = "max-tokens"
+                        trunc_streak += 1
+                        # 长思考/长参数吃满输出上限（reasoning 也计入 completion_tokens）时
+                        # finish_reason=length：截断的工具调用一律丢弃（JSON 不可信），
+                        # 但不因此结束回合——明确要求"停止展开思考、参数从简、立刻给出可解析调用"后继续下一步，
+                        # 让同一回合内仍能产出执行指令；连续多次截断才终止，避免死循环。
                         if reply.tool_calls:
-                            await self._emit({"event": "error", "message": "模型输出达到长度上限，工具调用被截断已丢弃；请精简参数或拆分任务后重试。"})
+                            await self._emit({"event": "error", "message": "模型输出达到长度上限，工具调用被截断已丢弃；正在要求模型精简参数后重试…"})
+                        if trunc_streak <= 2:
+                            await self._emit({"event": "agent_thinking", "message": f"输出达到长度上限被截断（第 {trunc_streak} 次），正压缩思考继续执行…"})
+                            self.session.append(E.USER_MESSAGE, {
+                                "text": (
+                                    "[系统] 你上一条回复在思考/输出中途因输出长度上限被截断，"
+                                    "其中不完整的工具调用已全部丢弃，尚未产出可执行指令。"
+                                    "请立刻直接行动：不要复述思考、不要解释，优先输出下一步工具调用；"
+                                    "参数务必从简且一次给出完整合法 JSON（长文档/长文本拆成多次调用分步提交）。"
+                                ),
+                                "source": "system", "form": "notice",
+                            })
+                            continue
+                        reason = "max-tokens"
+                        final_text = ("模型输出连续达到长度上限，未能产出完整执行指令；"
+                                      "请到「设置 → 系统」调大「单次回复最大 token」（AGENT_MAX_TOKENS），"
+                                      "或把任务拆小后重试。")
+                        await self._emit({"event": "error", "message": final_text})
                         break
                     if tool_calls:
                         # 参数被截断/非法（多为输出超长）：绝不执行，也绝不把非法 JSON 回传上游，
@@ -404,11 +472,17 @@ class AgentLoop:
                     reason = "aborted"
                     raise
                 except LLMConfigError as e:
+                    if await self._recover_context_overflow(e, overflow_compacts):
+                        overflow_compacts += 1
+                        continue
                     reason = "error"
                     self.session.append(E.ASSISTANT_ATTEMPT, {"error": str(e)[:500], "terminal": True})
                     await self._emit({"event": "error", "message": str(e)})
                     break
                 except Exception as e:
+                    if await self._recover_context_overflow(e, overflow_compacts):
+                        overflow_compacts += 1
+                        continue
                     reason = "error"
                     self.session.append(E.ASSISTANT_ATTEMPT, {"error": str(e)[:500], "terminal": True})
                     await self._emit({"event": "error", "message": f"模型调用失败: {e}"})
@@ -440,6 +514,11 @@ class AgentLoop:
         if not self._open_turn:
             return
         self.session.append(E.TURN_END, {"reason": reason, "cause": cause or reason})
+        self._trace("turn_end", {
+            "reason": reason,
+            "cause": cause or reason,
+            "elapsed_ms": int((time.time() - self._turn_started_at) * 1000) if self._turn_started_at else None,
+        })
         self._open_turn = False
         if self._open_step:
             self.session.append(E.STEP_END, {"index": -1, "note": "interrupted"})
@@ -463,6 +542,7 @@ class AgentLoop:
                 "event": "tool_calling", "tool_name": tc.name,
                 "arguments": tc.parsed or {}, "status": "executing",
             })
+            _t0 = time.time()
             try:
                 outcome = await self.pipeline.execute(
                     tc.id, tc.name, tc.parsed or {},
@@ -487,8 +567,38 @@ class AgentLoop:
                 "result": outcome.result if outcome.status == "success" else None,
                 "error": outcome.error, "meta": outcome.meta or None,
             })
+            # 审计：被拒（denied）/超时（error）也会走到这里，正好把"没执行成功"的原因留痕
+            self._trace("tool", {
+                "name": tc.name,
+                "status": outcome.status,
+                "elapsed_ms": int((time.time() - _t0) * 1000),
+                "error": ((outcome.error or "")[:300] or None),
+                # 只记参数名不记值（provider_* 会带 api_key）
+                "arg_keys": sorted((tc.parsed or {}).keys()),
+                "spill": (outcome.meta or {}).get("spill_path"),
+            })
             if outcome.additional_context:
                 self.inbox.inject(outcome.additional_context, source="plugin", form="notice")
+            # 多模态回投：工具产物（图/视频/音频）作为附件注入，让模型下一步"看到"结果
+            if outcome.status == "success":
+                try:
+                    atts = list((outcome.meta or {}).get("media_attachments") or [])
+                    if not atts:
+                        from app.agent.runtime.attachments import attachments_from_tool_result
+                        atts = attachments_from_tool_result(tc.name, outcome.result)
+                    atts = [a for a in atts if a.get("ref") and a["ref"] not in self._seen_media_refs]
+                    if atts:
+                        for a in atts:
+                            self._seen_media_refs.add(a["ref"])
+                        self.session.append(E.USER_MESSAGE, {
+                            "text": f"【工具 {tc.name} 的媒体产物（自动附带）】",
+                            "source": "tool-media", "form": "notice",
+                            "meta": {"attachments": atts},
+                        })
+                        await self._emit({"event": "media_attached", "tool_name": tc.name,
+                                          "items": [{k: a.get(k) for k in ("kind", "name", "ref")} for a in atts]})
+                except Exception:
+                    pass
 
     # ── 模型调用（流式 + 重试）────────────────────────────
     def _tool_schemas(self) -> List[Dict[str, Any]]:
@@ -503,10 +613,27 @@ class AgentLoop:
             ]
         return schemas
 
+    async def _recover_context_overflow(self, err: Exception, used: int) -> bool:
+        """上游报"上下文超限"时的应急恢复：强制压缩历史后由调用方重试本步（每回合最多 2 次）。
+
+        默认窗口 800k、压缩阈值 80%（约 64 万 token 才压缩），常规会话不会触发压缩；
+        仅当模型真实窗口小于阈值、上游明确拒绝时才走这里兜底——既不"压得太狠"，
+        也不至于把长会话直接打死。
+        """
+        try:
+            from app.agent.runtime.compaction import is_context_overflow_error, maybe_compact
+            if used >= 2 or not is_context_overflow_error(err):
+                return False
+            await maybe_compact(self.session, emit=self._emit, force=True)
+            await self._emit({"event": "agent_thinking", "message": "模型上下文超限，已压缩历史后重试本步…"})
+            return True
+        except Exception:
+            return False
+
     async def _call_model(self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]]) -> AssistantReply:
         retries = _env_int("AGENT_LLM_RETRIES", 2)
-        timeout = float(_env_int("AGENT_LLM_TIMEOUT", 300))
-        max_tokens = _env_int("AGENT_MAX_TOKENS", 8192)
+        timeout = float(_env_int("AGENT_LLM_TIMEOUT", 600))
+        max_tokens = _env_int("AGENT_MAX_TOKENS", 32768)
         last_err: Optional[Exception] = None
 
         for attempt in range(1, retries + 2):

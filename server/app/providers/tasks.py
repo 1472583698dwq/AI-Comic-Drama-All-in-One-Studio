@@ -366,10 +366,23 @@ class TaskCenter:
             return url
 
     def _settle(self, rec: TaskRecord, status: str, error: str = "") -> None:
+        _already = rec.terminal
         rec.status = status
         if error:
             rec.error = error
         rec.updated_at = time.time()
+        # 异步任务终态计时：提交→拿到结果的总耗时（meta.elapsed_ms 随 to_dict 暴露给 /videos/status）。
+        # 重复 settle（取消/超时竞态）不重复记账。
+        if not _already:
+            try:
+                _ms = int(max(0.0, rec.updated_at - rec.created_at) * 1000)
+                rec.meta["elapsed_ms"] = _ms
+                from app.providers.gen_timer import settle as _settle_timer
+                _settle_timer(rec.task_id, status, kind=rec.kind or "video",
+                              provider=rec.provider_id, elapsed_ms=_ms,
+                              detail=(rec.error or "")[:120])
+            except Exception:
+                pass
         self._persist(rec)
         ev = self._events.get(rec.task_id)
         if ev is not None:

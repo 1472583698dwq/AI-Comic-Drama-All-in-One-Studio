@@ -39,6 +39,7 @@ PLAN_READONLY_TOOLS = frozenset({
     "creator_inspect_runtime",
     "list_custom_nodes",
     "todo_write",
+    "view_media",
     "job_list", "job_status",
     "task_status",
     "subagent_list", "subagent_status",
@@ -52,7 +53,7 @@ TOOL_RISK: Dict[str, str] = {
     "list_image_providers": "low", "list_voice_providers": "low", "list_video_providers": "low",
     "list_voices": "low", "list_comfyui_workflows": "low", "list_custom_providers": "low",
     "get_provider_code": "low", "canvas_query": "low", "canvas_query_assets": "low",
-    "fs_read": "low", "read_skill": "low",
+    "fs_read": "low", "read_skill": "low", "view_media": "low",
     "director_3d_stage_plan": "low", "split_novel_script": "medium",
     # 生成
     "generate_image": "medium", "comfyui_render_node": "medium",
@@ -60,6 +61,9 @@ TOOL_RISK: Dict[str, str] = {
     "generate_video": "high", "canvas_create_node": "medium",
     "canvas_update_node": "medium", "canvas_connect": "medium",
     "canvas_execute": "high", "canvas_dispatch_skill": "high",
+    # 删节点不可逆（连带删线），且会打断已有链路 → 与 canvas_execute 同档。
+    # 是否人审由执行维决定（审批=确认，自动=直跑），plan 模式无此工具（只读白名单外）。
+    "canvas_delete_node": "high",
     "export_jianyin_draft": "medium",
     # 能力变更（Creator 提案链，默认走人审）
     "register_custom_provider": "high", "update_custom_provider": "high",

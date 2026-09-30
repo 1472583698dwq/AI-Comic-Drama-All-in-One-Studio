@@ -805,7 +805,7 @@ def _ts(sec: float) -> str:
 
 ### 4.11 agent_teams — 导演组（成员名单 + 编排脚本）
 
-声明一个可在一键成片（`engine=agent`）中选择的导演组：成员约束 + 总导演 playbook + 默认参数 + 质检门。
+声明一个可在一键成片中选择的导演组：成员约束 + 总导演 playbook + 默认参数 + 质检门。
 
 ```json
 {

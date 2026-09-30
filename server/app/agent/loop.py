@@ -29,7 +29,7 @@ CORE_TOOLS = {
     "generate_image", "generate_voice", "generate_video",
     "split_novel_script", "director_3d_stage_plan", "export_jianyin_draft",
     "canvas_query", "canvas_create_node", "canvas_connect", "canvas_execute",
-    "canvas_update_node", "list_assets", "search_tools",
+    "canvas_update_node", "canvas_delete_node", "list_assets", "search_tools",
 }
 
 

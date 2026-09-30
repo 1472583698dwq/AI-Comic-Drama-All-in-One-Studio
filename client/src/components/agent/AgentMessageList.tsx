@@ -5,11 +5,43 @@
 import React, { useState } from 'react';
 import {
   Bot, User, Sparkles, ChevronDown, Check, Copy, Pencil, X,
+  Image as ImageIcon, Film, Music,
 } from 'lucide-react';
 import { MarkdownText } from './MarkdownText';
 import { ArtifactCard, CapabilityProposalCard, ErrorCard } from './AgentCards';
 import { AgentToolSteps, AgentTodoPanel } from './AgentToolSteps';
-import type { ApprovalInfo, ChatMsg } from './agentTypes';
+import { API_ORIGIN } from '../../utils/devOrigin';
+import type { AgentAttachment, ApprovalInfo, ChatMsg } from './agentTypes';
+
+const resolveMediaUrl = (u?: string) => (!u ? '' : (u.startsWith('/') ? API_ORIGIN + u : u));
+
+/** 用户消息里的附件预览（图=缩略图可点开；视频/音频=原生播放器） */
+const UserAttachment: React.FC<{ att: AgentAttachment }> = ({ att }) => {
+  const url = resolveMediaUrl(att.ref);
+  if (att.kind === 'image') {
+    return (
+      <a href={url} target="_blank" rel="noreferrer" title={att.name}
+        className="block w-20 h-20 rounded-xl overflow-hidden border border-white/20 hover:border-white/50 transition-colors bg-black/20">
+        <img src={url} alt={att.name} className="w-full h-full object-cover" loading="lazy" />
+      </a>
+    );
+  }
+  if (att.kind === 'video') {
+    return (
+      <div className="rounded-xl overflow-hidden border border-white/20 bg-black/20" title={att.name}>
+        <video src={url} controls preload="metadata" className="w-44 max-h-28" />
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-black/20 border border-white/20 max-w-[220px]" title={att.name}>
+      <Music className="w-3 h-3 shrink-0 text-white/70" />
+      <audio src={url} controls preload="none" className="h-7" />
+    </div>
+  );
+};
+
+export { UserAttachment };
 
 export interface AgentMessageListProps {
   messages: ChatMsg[];
@@ -45,6 +77,8 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
+  /** 长文本（粘贴/超长）展开态：默认折叠为摘要 */
+  const [expandedLong, setExpandedLong] = useState<Record<string, boolean>>({});
 
   const copyMsg = async (e: React.MouseEvent, id: string, text: string) => {
     e.stopPropagation();
@@ -74,6 +108,9 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
         const thinkingOpen = expandedThinking[m.id] !== undefined ? expandedThinking[m.id] : !!m.isThinkingStreaming;
         const isPlaceholder = isAgent && isRunning && !m.text && !m.thinking;
         const isEditing = editingId === m.id;
+        // 长文本折叠：粘贴产生的长文（或超过 2000 字的用户消息）默认只显示摘要
+        const isLongUser = !isAgent && !!m.text && (m.pastedBulk || m.text.length > 2000);
+        const longOpen = !!expandedLong[m.id];
 
         return (
           <div key={m.id} className={`flex ${m.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -152,6 +189,15 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
                 </div>
               )}
 
+              {/* 用户消息携带的多模态附件（图/视频/音频） */}
+              {!isAgent && (m.attachments?.length || 0) > 0 && (
+                <div className={`flex flex-wrap gap-1.5 ${m.text ? 'mb-2' : ''}`}>
+                  {m.attachments!.map((a) => (
+                    <UserAttachment key={a.id} att={a} />
+                  ))}
+                </div>
+              )}
+
               {isAgent ? (
                 <MarkdownText text={m.text || (isPlaceholder ? '思考中…' : '')} />
               ) : isEditing ? (
@@ -179,8 +225,31 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
                     </button>
                   </div>
                 </div>
+              ) : isLongUser && !longOpen ? (
+                <div className="whitespace-pre-wrap">
+                  {m.text.slice(0, 400)}
+                  <span className="opacity-70">…</span>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setExpandedLong((prev) => ({ ...prev, [m.id]: true })); }}
+                    className="ml-1.5 px-1.5 py-0.5 rounded-md bg-white/20 hover:bg-white/30 text-[10px] font-bold align-middle"
+                    title="展开全文"
+                  >
+                    展开全文（{m.text.length.toLocaleString()} 字）
+                  </button>
+                </div>
               ) : (
-                <div className="whitespace-pre-wrap">{m.text}</div>
+                <div className="whitespace-pre-wrap">
+                  {m.text}
+                  {isLongUser && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setExpandedLong((prev) => { const n = { ...prev }; delete n[m.id]; return n; }); }}
+                      className="ml-1.5 px-1.5 py-0.5 rounded-md bg-white/20 hover:bg-white/30 text-[10px] font-bold align-middle"
+                      title="收起长文"
+                    >
+                      收起
+                    </button>
+                  )}
+                </div>
               )}
 
               {isAgent && (m.plan as any)?.creator_proposal && (

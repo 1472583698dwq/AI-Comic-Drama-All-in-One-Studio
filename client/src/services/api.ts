@@ -1,7 +1,5 @@
 import { Project, StoryboardShot, MCPToolDefinition } from '../types';
-
-const isDev = typeof window !== 'undefined' && window.location.port === '5173';
-const API_BASE_URL = isDev ? 'http://127.0.0.1:8000/api/v1' : '/api/v1';
+import { API_BASE_URL } from '../utils/devOrigin';
 
 function extractErrorMessage(res: Response, body: any): string {
   if (body?.detail) {
@@ -126,8 +124,10 @@ export const apiService = {
     return await res.json();
   },
 
-  async listImageProviders(): Promise<any> {
-    const res = await fetch(`${API_BASE_URL}/images/providers`);
+  async listImageProviders(opts?: { withHealth?: boolean }): Promise<any> {
+    // 默认带健康点（并行+短缓存，后端已提速）；生成弹窗等只看列表的场景传 withHealth:false 零探测秒开
+    const q = opts?.withHealth === false ? '?with_health=false' : '';
+    const res = await fetch(`${API_BASE_URL}/images/providers${q}`);
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
@@ -467,20 +467,20 @@ export const apiService = {
   },
 
   // 8. 导演 Agent (LangChain 多轮+流式，双模式：chat问答/execute执行)
-  async agentChat(prompt: string, context?: any, sessionId?: string, mode?: string, runMode?: string): Promise<any> {
+  async agentChat(prompt: string, context?: any, sessionId?: string, mode?: string, runMode?: string, attachments?: any[]): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/agent/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, context: context || {}, session_id: sessionId || undefined, mode: mode || 'execute', run_mode: runMode || 'approve' }),
+      body: JSON.stringify({ prompt, context: context || {}, session_id: sessionId || undefined, mode: mode || 'execute', run_mode: runMode || 'approve', attachments: attachments || [] }),
     });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
-  async agentChatStream(prompt: string, context?: any, sessionId?: string, onEvent?: (event: string, data: any)=>void, opts?: { signal?: AbortSignal; mode?: string; runMode?: string }): Promise<any> {
+  async agentChatStream(prompt: string, context?: any, sessionId?: string, onEvent?: (event: string, data: any)=>void, opts?: { signal?: AbortSignal; mode?: string; runMode?: string; attachments?: any[] }): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/agent/chat/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, context: context || {}, session_id: sessionId || undefined, mode: opts?.mode || 'execute', run_mode: opts?.runMode || 'approve' }),
+      body: JSON.stringify({ prompt, context: context || {}, session_id: sessionId || undefined, mode: opts?.mode || 'execute', run_mode: opts?.runMode || 'approve', attachments: opts?.attachments || [] }),
       signal: opts?.signal,
     });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
@@ -526,11 +526,19 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
-  async agentSteer(sessionId: string, prompt: string): Promise<any> {
+  async agentSteer(sessionId: string, prompt: string, attachments?: any[]): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/agent/session/${encodeURIComponent(sessionId)}/steer`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, context: {} }),
+      body: JSON.stringify({ prompt, context: {}, attachments: attachments || [] }),
     });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  /** 附件上传：存 storage/agent_uploads（不进素材库），返回 {kind,name,ref,size,mime} */
+  async uploadAgentAttachment(file: File): Promise<{ kind: string; name: string; ref: string; size: number; mime: string }> {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`${API_BASE_URL}/agent/upload`, { method: 'POST', body: form });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
@@ -650,13 +658,13 @@ export const apiService = {
     return await res.json();
   },
 
-  // 9.1 一键成片 Agent（异步任务 + 轮询；engine=agent 时走总导演+子代理集群）
+  // 9.1 一键成片 Agent（异步任务 + 轮询；总导演 + 子代理集群，可传 team_id 选择导演组）
   async onekeyRun(params: {
     title?: string; text: string; style_preset?: string; aspect_ratio?: string; custom_instructions?: string;
     max_images?: number; image_provider?: string; image_workflow_id?: string; audio_provider?: string;
     video_provider?: string; video_workflow_id?: string; enable_video?: boolean; max_videos?: number;
-    gen_roles?: boolean; max_roles?: number; engine?: 'pipeline' | 'agent'; team_id?: string;
-  }): Promise<{ task_id: string; status: string; engine?: string; team_id?: string; team_name?: string }> {
+    gen_roles?: boolean; max_roles?: number; team_id?: string;
+  }): Promise<{ task_id: string; status: string; team_id?: string; team_name?: string }> {
     const res = await fetch(`${API_BASE_URL}/onekey/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -676,7 +684,6 @@ export const apiService = {
         max_videos: params.max_videos ?? 6,
         gen_roles: params.gen_roles ?? true,
         max_roles: params.max_roles ?? 4,
-        engine: params.engine || 'pipeline',
         team_id: params.team_id || '',
       }),
     });
@@ -831,6 +838,7 @@ export const apiService = {
     name: string; prompt: string; category?: string; style_preset?: string;
     provider?: string; workflow_id?: string; negative_prompt?: string; aspect_ratio?: string;
     seed?: number; tags?: string; dynamic_inputs?: Record<string, any>;
+    params?: Record<string, any>;
     project_id?: string; scope?: string;
   }): Promise<{ asset: any; generation: any }> {
     const fd = new FormData();
@@ -845,6 +853,7 @@ export const apiService = {
     if (params.seed != null) fd.append('seed', String(params.seed));
     if (params.tags) fd.append('tags', params.tags);
     if (params.dynamic_inputs) fd.append('dynamic_inputs', JSON.stringify(params.dynamic_inputs));
+    if (params.params) fd.append('params', JSON.stringify(params.params));
     if (params.project_id) fd.append('project_id', params.project_id);
     if (params.scope) fd.append('scope', params.scope);
     const res = await fetch(`${API_BASE_URL}/assets/generate`, { method: 'POST', body: fd });
@@ -996,10 +1005,42 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
-  async importProvider(payload: { kind: string; name?: string; doc_text?: string; doc_url?: string; curl?: string; openapi_url?: string; api_key?: string; definition?: any; language?: string; code?: string }): Promise<any> {
+  async importProvider(payload: { kind: string; name?: string; doc_text?: string; doc_url?: string; curl?: string; openapi_url?: string; api_key?: string; definition?: any; language?: string; code?: string; trusted?: boolean; async_task?: boolean }): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/providers/import`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
+  },
+  /** 文档导入任务进度查询（async_task=true 导入后轮询；含 stage/stage_label/log/provider/error） */
+  async getProviderImportTask(taskId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/providers/import/tasks/${encodeURIComponent(taskId)}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  // 日志（调试）：尾读 / 文件清单 / 下载 / 前端上报 / 运行期级别
+  async getLogTail(opts?: { lines?: number; level?: string; q?: string }): Promise<{ lines: string[]; count: number; path: string; level: number }> {
+    const qs = new URLSearchParams();
+    if (opts?.lines) qs.set('lines', String(opts.lines));
+    if (opts?.level) qs.set('level', opts.level);
+    if (opts?.q) qs.set('q', opts.q);
+    const res = await fetch(`${API_BASE_URL}/system/logs/tail?${qs.toString()}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async getLogFiles(): Promise<{ files: any[]; total: number; main: string; level: number }> {
+    const res = await fetch(`${API_BASE_URL}/system/logs/files`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async setLogLevel(level: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/system/logs/level`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ level }) });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  /** 下载主日志文件（返回 blob，调用方自行触发保存） */
+  async downloadLogBlob(): Promise<Blob> {
+    const res = await fetch(`${API_BASE_URL}/system/logs/download`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.blob();
   },
   async setProviderApiKey(providerId: string, api_key: string): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/providers/${encodeURIComponent(providerId)}/api-key`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ api_key }) });

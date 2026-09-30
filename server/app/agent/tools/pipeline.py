@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 import time
@@ -18,6 +19,8 @@ from typing import Any, Dict, List, Optional
 
 from app.agent.tools.registry import tool_timeout, PLAN_READONLY_TOOLS
 from app.agent.runtime import events as E
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -33,8 +36,13 @@ class ToolOutcome:
 
 
 def is_destructive(name: str, args: Dict[str, Any]) -> bool:
-    """破坏性调用：删源 / 可信 fs 写操作 / shell 执行。"""
-    if name in ("shell_exec", "delete_custom_provider"):
+    """破坏性调用：删源 / 删画布节点 / 可信 fs 写操作 / shell 执行。
+
+    注意：这里的判定与 `mode_policy.TOOL_RISK` 是**两道并联的门**（见下方 need_confirm），
+    命中任一即需人审。删节点在风险表里已是 high，这里再列一次是刻意显式化
+    「这是破坏性动作」的语义，方便后续给前端标 HITL 徽标时不必反查风险表。
+    """
+    if name in ("shell_exec", "delete_custom_provider", "canvas_delete_node"):
         return True
     if name == "fs_file":
         return str((args or {}).get("action", "")).lower() in ("write", "append", "delete")
@@ -344,6 +352,88 @@ class ToolPipeline:
             return ToolOutcome(call_id, name, "success", result=counts,
                                model_content=json.dumps(counts, ensure_ascii=False))
 
+        # ③ 内置工具：媒体查看（只读）——把画布节点产物/素材/URL 变成多模态附件
+        if name == "view_media":
+            from app.agent.runtime.attachments import sanitize_attachments
+            collected: List[Dict[str, Any]] = []
+            kind_hint = str(args.get("kind") or "").strip().lower()
+            urls = args.get("urls") if isinstance(args.get("urls"), list) else []
+            if args.get("url"):
+                urls = [args["url"], *urls]
+            for u in urls[:6]:
+                if isinstance(u, str) and u.strip():
+                    collected.append({"kind": kind_hint, "ref": u.strip(),
+                                      "name": os.path.basename(u.split("?")[0]) or "media", "source": "url"})
+            node_ids = args.get("node_ids") if isinstance(args.get("node_ids"), list) else []
+            if args.get("node_id"):
+                node_ids = [args["node_id"], *node_ids]
+            if node_ids:
+                pid = args.get("project_id") or (
+                    (project_context or {}).get("id") if isinstance(project_context, dict) else None
+                )
+                try:
+                    from app.providers.project.manager import project_manager as _pm
+                    if not pid:
+                        lst = _pm.list_projects()
+                        if lst:
+                            pid = lst[0].get("id")
+                    snap = _pm.get_canvas(pid) if pid else None
+                except Exception:
+                    snap = None
+                nodes = (snap or {}).get("nodes") or []
+                by_id = {str(n.get("id")): n for n in nodes if isinstance(n, dict)}
+                for nid in node_ids[:6]:
+                    n = by_id.get(str(nid))
+                    if not n:
+                        continue
+                    d = n.get("data") or {}
+                    media_map = [
+                        ("image", d.get("image_url") or d.get("result_url")),
+                        ("image", d.get("first_frame") or d.get("first_frame_url")),
+                        ("image", d.get("last_frame") or d.get("last_frame_url")),
+                        ("video", d.get("video_url")),
+                        ("audio", d.get("audio_url")),
+                    ]
+                    for kind, ref in media_map:
+                        if isinstance(ref, str) and ref.strip():
+                            collected.append({"kind": kind_hint or kind, "ref": ref.strip(),
+                                              "name": f"{n.get('type') or '节点'}#{str(nid)[-4]}", "source": "canvas",
+                                              "meta": {"node_id": str(nid)}})
+                    for ref in (d.get("reference_images") or [])[:3] if isinstance(d.get("reference_images"), list) else []:
+                        if isinstance(ref, str) and ref.strip():
+                            collected.append({"kind": "image", "ref": ref.strip(),
+                                              "name": f"参考图#{str(nid)[-4]}", "source": "canvas",
+                                              "meta": {"node_id": str(nid)}})
+            asset_ids = args.get("asset_ids") if isinstance(args.get("asset_ids"), list) else []
+            if args.get("asset_id"):
+                asset_ids = [args["asset_id"], *asset_ids]
+            for aid in asset_ids[:6]:
+                try:
+                    from app.providers.asset.manager import asset_manager
+                    a = asset_manager.get_asset(str(aid))
+                    ref = getattr(a, "file_url", None) or getattr(a, "image_url", None) or getattr(a, "thumb_url", None)
+                    if ref:
+                        collected.append({"kind": kind_hint, "ref": str(ref),
+                                          "name": getattr(a, "name", None) or str(aid), "source": "asset",
+                                          "meta": {"asset_id": str(aid)}})
+                except Exception:
+                    continue
+            atts = sanitize_attachments(collected)
+            if not atts:
+                msg = "view_media 未找到可用媒体（检查 node_id/asset_id/url；画布节点需已产出图/视频/音频）"
+                return ToolOutcome(call_id, name, "error", error=msg,
+                                   model_content=json.dumps({"error": msg}, ensure_ascii=False))
+            brief = {"count": len(atts),
+                     "items": [{k: a.get(k) for k in ("kind", "name", "ref")} for a in atts]}
+            return ToolOutcome(
+                call_id, name, "success", result=brief,
+                meta={"media_attachments": atts},
+                model_content=json.dumps(
+                    {"loaded": brief["count"], "items": brief["items"],
+                     "note": "媒体已作为多模态附件注入，下一步即可直接查看内容"},
+                    ensure_ascii=False)[:2000],
+            )
+
         # ③ 内置工具：后台任务 / 子代理 / 批量流水线
         if name in ("job_start", "job_list", "job_status", "job_cancel"):
             jobs = getattr(self, "jobs", None)
@@ -536,10 +626,20 @@ class ToolPipeline:
 
         # ⑤ 执行（带 per-tool 超时）
         timeout = tool_timeout(name)
+
+        def _on_tool_progress(msg: str) -> None:
+            """工具阶段进度（如 register_custom_provider 的 LLM 生成中）→ SSE tool_progress 透出到前端。"""
+            try:
+                asyncio.create_task(self.emit({
+                    "event": "tool_progress", "call_id": call_id, "tool": name, "text": str(msg)[:200],
+                }))
+            except Exception:
+                pass
+
         try:
             from app.mcp.server import mcp_registry
             res = await asyncio.wait_for(
-                mcp_registry.execute_tool(name, args, project_context=project_context),
+                mcp_registry.execute_tool(name, args, project_context=project_context, on_progress=_on_tool_progress),
                 timeout=timeout,
             )
             status = getattr(res, "status", "error")
@@ -549,8 +649,10 @@ class ToolPipeline:
             raise
         except asyncio.TimeoutError:
             status, result, error = "error", None, f"工具 {name} 执行超时（{timeout}s）"
+            logger.error("工具超时 %s (%ds) session=%s", name, timeout, self.session_id)
         except Exception as e:
             status, result, error = "error", None, str(e)
+            logger.exception("工具执行异常 %s session=%s", name, self.session_id)
 
         # ④ 裁剪 / 溢写
         meta: Dict[str, Any] = {}

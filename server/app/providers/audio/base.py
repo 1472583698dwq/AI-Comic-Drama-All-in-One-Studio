@@ -32,6 +32,7 @@ class AudioGenerateResult:
     duration: float
     provider: str
     engine: str
+    elapsed_ms: int = 0
     status: str = "ready"
     raw: Optional[Dict[str, Any]] = None
 

@@ -1,6 +1,6 @@
 import os
 import json
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query
 
 from app.models.asset import Asset, AssetCreateRequest, AssetUpdateRequest
@@ -82,6 +82,13 @@ async def batch_create_assets(
     return {"imported": len(created), "total": len(files), "assets": created, "errors": errors}
 
 
+@router.post("/assets/clean-missing")
+async def clean_missing_assets():
+    """手动清理「文件已删、记录还在」的悬空素材（删除前先备份清单到 .missing_backup.jsonl）"""
+    report = asset_manager.cleanup_missing()
+    return {"status": "ok", **report}
+
+
 @router.post("/assets/generate")
 async def generate_asset(
     name: str = Form(...),
@@ -95,6 +102,7 @@ async def generate_asset(
     seed: Optional[int] = Form(None),
     tags: Optional[str] = Form(None),
     dynamic_inputs: Optional[str] = Form(None),
+    params: Optional[str] = Form(None, description="生成源参数 JSON（steps/resolution/cfg/model 及源自定义参数）"),
     project_id: Optional[str] = Form(None, description="归属项目"),
     scope: str = Form("project"),
 ):
@@ -123,6 +131,26 @@ async def generate_asset(
         except Exception:
             pass
 
+    # 生成源参数：已知字段进 ImageGenerateRequest，其余进 extra + dynamic_inputs（代码源经 merge_user_params 读取）
+    parsed_params: Dict[str, Any] = {}
+    if params:
+        try:
+            _pp = json.loads(params)
+            if isinstance(_pp, dict):
+                parsed_params = _pp
+        except Exception:
+            pass
+    req_kw: Dict[str, Any] = {}
+    for _k in ("resolution", "steps", "cfg", "width", "height", "fps", "duration", "model"):
+        _v = parsed_params.pop(_k, None)
+        if _v not in (None, ""):
+            req_kw[_k] = _v
+    merged_dyn = dict(parsed_dynamic_inputs or {})
+    for _k, _v in parsed_params.items():
+        if _v in (None, ""):
+            continue
+        merged_dyn.setdefault(_k, _v)
+
     effective_provider = provider
     if not effective_provider and workflow_id:
         effective_provider = "comfyui"
@@ -134,7 +162,9 @@ async def generate_asset(
         style_preset=style_preset,
         seed=seed,
         workflow_id=workflow_id or None,
-        dynamic_inputs=parsed_dynamic_inputs,
+        dynamic_inputs=merged_dyn or None,
+        extra=(parsed_params or None),
+        **req_kw,
     )
     try:
         res = await image_registry.generate(req, provider_id=effective_provider)
@@ -182,6 +212,7 @@ async def create_asset(
     description: Optional[str] = Form(None),
     tags: Optional[str] = Form(None, description="JSON数组或逗号分隔"),
     visual_prompt: Optional[str] = Form(None),
+    content: Optional[str] = Form(None, description="文本/提示词素材正文（category=text）"),
     style_preset: Optional[str] = Form(None),
     project_id: Optional[str] = Form(None),
     scope: str = Form("project", description="project|global"),
@@ -222,6 +253,7 @@ async def create_asset(
         "description": description or "",
         "tags": tag_list,
         "visual_prompt": visual_prompt or "",
+        "content": content or "",
         "style_preset": style_preset,
         "project_id": eff_project_id,
         "scope": eff_scope,
@@ -252,6 +284,7 @@ async def update_asset(
     description: Optional[str] = Form(None),
     tags: Optional[str] = Form(None),
     visual_prompt: Optional[str] = Form(None),
+    content: Optional[str] = Form(None, description="文本/提示词素材正文"),
     style_preset: Optional[str] = Form(None),
     status: Optional[str] = Form(None),
     file_url: Optional[str] = Form(None),
@@ -284,6 +317,8 @@ async def update_asset(
         updates["tags"] = tag_list
     if visual_prompt is not None:
         updates["visual_prompt"] = visual_prompt
+    if content is not None:
+        updates["content"] = content
     if style_preset is not None:
         updates["style_preset"] = style_preset
     if status is not None:

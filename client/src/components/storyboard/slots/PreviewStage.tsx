@@ -55,7 +55,7 @@ export const PreviewStage: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
           onClick={() => handleRegenerateImage()}
           disabled={isRegenerating}
           className="p-2 rounded-xl bg-surface-secondary hover:bg-brand text-white backdrop-blur-md border border-white/10 transition-all shadow-md disabled:opacity-40"
-          title={`重新生成画面 (按 R) ${candidateCount===4 ? '- 4抽模式' : ''}`}
+          title={`重新生成画面 (按 R)${candidateCount===4 ? ' · 一次出4张' : ''}`}
         >
           <RefreshCw className={`w-4 h-4 text-brand-light ${isRegenerating ? 'animate-spin' : ''}`} />
         </button>
@@ -155,7 +155,7 @@ export const PreviewStage: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
                 disabled={isGeneratingVid}
                 className="px-4 py-2 rounded-xl bg-gradient-to-r from-accent-orange to-brand-glow text-white text-xs font-bold shadow-lg hover:opacity-90 disabled:opacity-40"
               >
-                {isGeneratingVid ? '视频生成中...' : (mode.caps.direct ? '🎬 角色立绘直出视频' : '立即生成动态视频')}
+                {isGeneratingVid ? '视频生成中...' : (mode.caps.direct ? '🎬 立绘直接生成视频' : '立即生成动态视频')}
               </button>
             </div>
             {stageOverlays}
@@ -180,7 +180,7 @@ export const PreviewStage: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
           <div className="w-full h-full min-h-[30vh] bg-surface-secondary flex flex-col items-center justify-center text-gray-400 text-xs space-y-3 p-4 text-center">
             <span>{activeShot.status === 'generating_image' ? '⚡ 画面生成中，请稍候...' : '该分镜暂无画面'}</span>
             <button onClick={() => handleRegenerateImage()} disabled={isRegenerating} className="px-4 py-2 rounded-xl bg-brand text-white text-xs font-bold shadow-lg hover:bg-brand-light disabled:opacity-40 flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5" /> 立即生成画面 {candidateCount===4 ? '(4抽⚡)' : ''}
+              <Sparkles className="w-3.5 h-3.5" /> 立即生成画面 {candidateCount===4 ? '(4张选优)' : ''}
             </button>
           </div>
           {stageOverlays}

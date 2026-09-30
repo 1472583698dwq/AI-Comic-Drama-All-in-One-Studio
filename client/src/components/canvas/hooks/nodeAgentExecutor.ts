@@ -5,6 +5,7 @@
  */
 import { apiService } from '../../../services/api';
 import { getNodeSpec } from '../nodeRegistry';
+import { pollVideoTask } from '../../../utils/videoTask';
 
 export interface AgentState {
   status: 'idle' | 'running' | 'completed' | 'failed';
@@ -77,29 +78,6 @@ export function buildAgentArgs(d: any, prompt: string, extraKeys: string[] = [])
     if (v === undefined || v === '' || (Array.isArray(v) && v.length === 0)) delete args[k];
   }
   return args;
-}
-
-async function pollVideoTask(taskId: string): Promise<string> {
-  for (let i = 0; i < 500; i++) {
-    await new Promise((r) => setTimeout(r, 3000));
-    let st: any;
-    try {
-      st = await apiService.getVideoTaskStatus(taskId);
-    } catch {
-      continue; // 状态接口网络抖动：继续轮询，不误杀任务
-    }
-    const s = (st.status || st.state || '').toString().toUpperCase();
-    if (s === 'SUCCESS' || s === 'COMPLETED') {
-      const url = st.video_url || st.videoUrl || st.results?.[0] || st.url || '';
-      if (url) return url;
-      continue;
-    }
-    // 终态失败：把后端真实错误上抛（含 last_error 兜底），不再静默轮询
-    if (s === 'FAILED' || s === 'FAIL' || s === 'ERROR' || s === 'TIMEOUT' || s === 'CANCELLED' || s === 'CANCELED') {
-      throw new Error(st.error || st.msg || st.last_error || '视频任务失败');
-    }
-  }
-  throw new Error(`视频排队超时 task_id=${taskId}，请稍后重试或查看 /storage/videos/`);
 }
 
 const _customDefCache = new Map<string, any>();

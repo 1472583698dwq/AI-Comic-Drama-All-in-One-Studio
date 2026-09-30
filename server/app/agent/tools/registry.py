@@ -48,7 +48,7 @@ _TODO_TOOL_SCHEMA: Dict[str, Any] = {
     },
 }
 
-INTERNAL_TOOL_NAMES = {"todo_write", "job_start", "job_list", "job_status", "job_cancel",
+INTERNAL_TOOL_NAMES = {"todo_write", "view_media", "job_start", "job_list", "job_status", "job_cancel",
                        "subagent_run", "subagent_wait", "subagent_list", "subagent_status", "subagent_cancel", "subagent_steer",
                        "batch_run", "task_status", "task_wait", "task_cancel",
                        "onekey_split", "onekey_role_image", "onekey_shot_image",
@@ -60,6 +60,21 @@ def _internal_schema(name: str, desc: str, props: Dict[str, Any], required: List
         "name": name, "description": desc,
         "parameters": {"type": "object", "properties": props, "required": required},
     }}
+
+
+# 媒体查看（只读）：把画布节点产物 / 素材库资源 / URL 作为多模态附件交给模型"亲眼看"
+_VIEW_MEDIA_SCHEMA = _internal_schema(
+    "view_media",
+    "查看图片/视频/音频的实际内容（多模态）：把画布节点产物、素材库资源或 URL 作为附件加载后，"
+    "你就能直接看到画面（图片）或拿到媒体引用（视频/音频）。改图、参考图、质检成片前先看再动手。",
+    {"node_id": {"type": "string", "description": "画布节点 id（自动取其 image_url/video_url/audio_url/首尾帧/参考图）"},
+     "node_ids": {"type": "array", "items": {"type": "string"}, "description": "一次查看多个画布节点"},
+     "asset_id": {"type": "string", "description": "素材库资源 id"},
+     "url": {"type": "string", "description": "直接给媒体 URL（/storage/... 或 http(s)）"},
+     "kind": {"type": "string", "enum": ["image", "video", "audio"], "description": "可选：指定媒体类型"},
+     "project_id": {"type": "string", "description": "画布归属项目（不传用上下文项目）"}},
+    [],
+)
 
 
 _JOB_START_SCHEMA = _internal_schema(
@@ -255,7 +270,7 @@ class ToolRegistryView:
                 })
         except Exception as e:
             print(f"[RuntimeTools] schemas failed: {e}")
-        internal = [_TODO_TOOL_SCHEMA]
+        internal = [_TODO_TOOL_SCHEMA, _VIEW_MEDIA_SCHEMA]
         if plan_mode:
             internal += [_JOB_LIST_SCHEMA, _JOB_STATUS_SCHEMA, _TASK_STATUS_SCHEMA,
                          _SUBAGENT_LIST_SCHEMA, _SUBAGENT_STATUS_SCHEMA, _ONEKEY_SUMMARY_SCHEMA]

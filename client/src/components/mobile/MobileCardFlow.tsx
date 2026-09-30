@@ -14,7 +14,7 @@ import { useProjectStore } from '../../stores/useProjectStore';
 import { StoryboardShot } from '../../types';
 import { apiService } from '../../services/api';
 
-const API_ORIGIN = 'http://127.0.0.1:8000';
+import { API_ORIGIN } from '../../utils/devOrigin';
 
 interface MobileCardFlowProps {
   onOpenExport: () => void;
