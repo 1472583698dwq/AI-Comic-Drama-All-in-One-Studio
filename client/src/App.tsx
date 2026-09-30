@@ -162,14 +162,18 @@ export function App() {
     };
   }, []);
 
-  // 严格 UI 准入拦截：未选择或创建项目时，禁止停留在任何项目内部功能页，自动重定向至项目看板。
-  // 恢复项目期间（isLoading）跳过，否则会把缓存的项目内页签冲掉（与旧线的启动恢复口径一致）。
+  // 严格 UI 准入拦截：未选择或创建项目时，禁止停留在任何项目内部功能页，自动重定向到一个全局页。
+  // 两个跳过条件缺一不可：
+  //   isLoading —— 项目恢复中，否则会把缓存的项目内页签冲掉；
+  //   !pagesLoaded —— 功能页开关还没拉到，此时 resolvedTab 尚未确定；抢跑会把
+  //   「缓存页签 → 回落 + 提示」整条链路吃掉（缓存 studio 且 studio 已关闭时会静默跳走）。
+  // 目标页同样走 resolveTab：看板/首页都可能被功能开关关掉，不能硬跳一个不可用页。
   useEffect(() => {
-    if (isLoading) return;
+    if (isLoading || !pagesLoaded) return;
     if (!project && !GLOBAL_TABS.includes(activeTab)) {
-      useProjectStore.getState().setActiveTab('projects');
+      useProjectStore.getState().setActiveTab((resolveTab('home') || 'projects') as any);
     }
-  }, [project, activeTab, isLoading]);
+  }, [project, activeTab, isLoading, pagesLoaded]);
 
   /** 启动恢复中（有缓存项目正在拉取）：先占位，别先闪一眼首页/看板再跳 */
   const restoring = isLoading && !project && !!activeProjectId;

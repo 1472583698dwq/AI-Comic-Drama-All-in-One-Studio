@@ -4,6 +4,7 @@ import {
   Film, Clock, Users, Sparkles, ChevronRight, LayoutGrid, ArrowUpRight,
 } from 'lucide-react';
 import { useProjectStore } from '../stores/useProjectStore';
+import { isPageEnabled } from '../stores/usePageStore';
 import { useProjectListStore, type ProjectMeta } from '../stores/useProjectListStore';
 import { apiService } from '../services/api';
 import { toast, promptAsync } from '../stores/useDialogStore';
@@ -118,6 +119,18 @@ export const HomeView: React.FC = () => {
     if (project) { setActiveTab('canvas'); return true; }
     return false;
   };
+
+  /**
+   * 项目看板入口（首页有两处）：看板可能已被功能开关关掉。
+   * 关掉时按钮灰显 + tooltip 说明，点击只提示去哪儿开 —— 不做「点了没反应」也不静默跳走。
+   */
+  const boardOn = isPageEnabled('projects');
+  const BOARD_OFF_HINT = '项目看板已关闭，可在 设置 → 功能开关 开启';
+  const goBoard = () => {
+    if (!boardOn) { toast.info(BOARD_OFF_HINT); return; }
+    setActiveTab('projects');
+  };
+  const boardCls = boardOn ? '' : 'opacity-45 cursor-not-allowed';
 
   /** 继续创作：有活跃项目直接进画布；否则接管最近项目 */
   const handleContinue = async () => {
@@ -255,8 +268,9 @@ export const HomeView: React.FC = () => {
               title="最近项目"
               hint={(
                 <button
-                  onClick={() => setActiveTab('projects')}
-                  className={`inline-flex items-center gap-1 h-7 px-2.5 rounded-lg text-[11px] ${T_MUTED} hover:[color:var(--color-text-main)] hover:bg-white/60 dark:hover:bg-white/[.07] transition-colors`}
+                  onClick={goBoard}
+                  title={boardOn ? '进入项目看板' : BOARD_OFF_HINT}
+                  className={`inline-flex items-center gap-1 h-7 px-2.5 rounded-lg text-[11px] ${T_MUTED} hover:[color:var(--color-text-main)] hover:bg-white/60 dark:hover:bg-white/[.07] transition-colors ${boardCls}`}
                 >
                   全部项目<ChevronRight className="w-3 h-3" strokeWidth={2} />
                 </button>
@@ -383,8 +397,9 @@ export const HomeView: React.FC = () => {
               </button>
             ))}
             <button
-              onClick={() => setActiveTab('projects')}
-              className={`h-8 px-3.5 inline-flex items-center gap-1.5 rounded-xl border border-white/70 bg-white/50 text-[11.5px] font-medium ${T_SEC} hover:bg-white/80 transition-colors dark:border-white/10 dark:bg-white/[.05] dark:hover:bg-white/[.09]`}
+              onClick={goBoard}
+              title={boardOn ? '进入项目看板' : BOARD_OFF_HINT}
+              className={`h-8 px-3.5 inline-flex items-center gap-1.5 rounded-xl border border-white/70 bg-white/50 text-[11.5px] font-medium ${T_SEC} hover:bg-white/80 transition-colors dark:border-white/10 dark:bg-white/[.05] dark:hover:bg-white/[.09] ${boardCls}`}
             >
               <LayoutGrid className="w-3.5 h-3.5" strokeWidth={1.9} />项目看板
             </button>
