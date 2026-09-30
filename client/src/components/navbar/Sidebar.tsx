@@ -1,11 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Sparkles, Layers, Users, Compass, Video, Library, FolderKanban, Bot,
-  Settings, Sun, Moon, PanelLeftClose, PanelLeft, Lock, Plug,
+  Settings, Sun, Moon, PanelLeftClose, PanelLeft, Lock, Plug, type LucideIcon,
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
+import { usePageStore } from '../../stores/usePageStore';
 import { useThemeStore } from '../../stores/useThemeStore';
 import { toast } from '../../stores/useDialogStore';
+import { pageIcon } from '../../utils/pageIcons';
 
 interface SidebarProps {
   /** 设置页内仍会用到这三个弹窗，App 统一持有开关 */
@@ -17,20 +18,32 @@ interface SidebarProps {
 interface NavItem {
   id: string;
   label: string;
-  icon: any;
+  icon: LucideIcon;
   count?: number;
   accent?: 'pink' | 'purple';
   pulse?: boolean;
 }
 
+/** 无项目时也能进的全局页（其余条目需要先有项目） */
+const GLOBAL_TABS = ['home', 'projects', 'config'];
+
+/** 未分组页面的兜底分组名 */
+const OTHER_GROUP = 'other';
+
 /**
  * 左侧主导航（SaaS 惯例：主导航常驻侧栏 + 设置沉到底部工具区）。
  * - 顶栏只保留全局上下文；本项目主频道全部收敛到这里，支持折叠成图标栏。
- * - 底部工具区固定放「生成源 / 主题 / 系统设置」，设置永远可见（技能与 MCP 入口在 设置→扩展）。
+ * - 分组与条目 **由功能页开关数据驱动**（GET /api/v1/pages 的 group/order/label/icon）：
+ *   只渲染 enabled 的页，关掉的页不会留下半开启入口；设置（config）固定沉在底部工具区，不在分组里重复。
+ * - 底部的强调色 / 角标 / 呼吸点按页 id 决定（assets→粉、canvas→紫、agent→呼吸点、
+ *   studio→分镜数、characters→角色数），后端新增未知页面时退化为普通条目。
  */
 export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
   const { project, activeTab, setActiveTab, setWorkspace } = useProjectStore();
   const { effectiveTheme, toggleTheme } = useThemeStore();
+  const pages = usePageStore((s) => s.items);
+  const values = usePageStore((s) => s.values);
+  const groupMeta = usePageStore((s) => s.groups);
 
   const shotsCount = (project?.scenes || []).reduce(
     (n: number, s: any) => n + (s?.shots?.length || 0), 0);
@@ -49,8 +62,39 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
     try { localStorage.setItem('studio_sidebar_collapsed', collapsed ? '1' : '0'); } catch { /* ignore */ }
   }, [collapsed]);
 
+  /** 分组 → 条目（只含开启的页；设置不进分组） */
+  const groups = useMemo(() => {
+    const enabled = pages.filter((p) => p.id !== 'config' && values[p.id] === true);
+    const labelOf = (gid: string) => groupMeta.find((g) => g.id === gid)?.label
+      || (gid === OTHER_GROUP ? '其他' : gid);
+    const orderOf = (gid: string) => groupMeta.find((g) => g.id === gid)?.order ?? 9999;
+
+    const buckets = new Map<string, NavItem[]>();
+    enabled.forEach((p) => {
+      const gid = p.group || OTHER_GROUP;
+      const decorate: Partial<NavItem> =
+        p.id === 'assets' ? { accent: 'pink' }
+        : p.id === 'canvas' ? { accent: 'purple' }
+        : p.id === 'agent' ? { pulse: true }
+        : p.id === 'studio' ? { count: shotsCount }
+        : p.id === 'characters' ? { count: charactersCount }
+        : {};
+      const list = buckets.get(gid) || [];
+      list.push({ id: p.id, label: p.label, icon: pageIcon(p.id, p.icon), ...decorate });
+      buckets.set(gid, list);
+    });
+
+    return [...buckets.entries()]
+      .sort(([a], [b]) => orderOf(a) - orderOf(b) || a.localeCompare(b))
+      .map(([gid, items]) => ({
+        // 分组内条目沿用后端 order（pages 已按 order 排序）
+        title: labelOf(gid),
+        items,
+      }));
+  }, [pages, values, groupMeta, shotsCount, charactersCount]);
+
   const go = (id: string) => {
-    if (id !== 'projects' && !project) {
+    if (!GLOBAL_TABS.includes(id) && !project) {
       toast.info('请先在看板创建或打开项目');
       return;
     }
@@ -58,27 +102,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
     else if (id === 'assets') { setWorkspace('production'); setActiveTab('assets'); }
     else { setWorkspace('production'); setActiveTab(id as any); }
   };
-
-  const groups: Array<{ title: string; items: NavItem[] }> = [
-    {
-      title: '漫剧工坊',
-      items: [
-        { id: 'projects', label: '项目看板', icon: FolderKanban },
-        { id: 'studio', label: '分镜台', icon: Layers, count: shotsCount },
-        { id: 'characters', label: '角色设定', icon: Users, count: charactersCount },
-        { id: 'director3d', label: '3D 片场', icon: Compass },
-        { id: 'timeline', label: '多轨剪辑', icon: Video },
-        { id: 'assets', label: '素材库', icon: Library, accent: 'pink' },
-      ],
-    },
-    {
-      title: '创意工坊',
-      items: [
-        { id: 'agent', label: 'AI 导演', icon: Bot, pulse: true },
-        { id: 'canvas', label: '创意画布', icon: Sparkles, accent: 'purple' },
-      ],
-    },
-  ];
 
   const activeCls = (item: NavItem, locked: boolean, active: boolean) => {
     if (locked) return 'opacity-35 cursor-not-allowed text-gray-500';
@@ -113,7 +136,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
             )}
             <div className="space-y-0.5">
               {g.items.map((item) => {
-                const locked = item.id !== 'projects' && !project;
+                const locked = !GLOBAL_TABS.includes(item.id) && !project;
                 const active = activeTab === item.id;
                 const Icon = item.icon;
                 return (
@@ -170,7 +193,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
 
         <button
           onClick={() => setActiveTab('config')}
-          title="设置：能力配置 / 扩展与插件 / 系统"
+          title="设置：能力配置 / 功能开关 / 扩展与插件 / 系统"
           className={`w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-xs font-bold transition-all ${
             collapsed ? 'justify-center px-0' : ''
           } ${
@@ -199,7 +222,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
 };
 
 const UtilButton: React.FC<{
-  icon: any;
+  icon: LucideIcon;
   label: string;
   collapsed: boolean;
   onClick: () => void;

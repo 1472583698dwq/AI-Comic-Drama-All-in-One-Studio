@@ -1,19 +1,22 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Sliders, Boxes, Cog, Loader2, Save, RotateCcw, Check, AlertTriangle,
+  Sliders, Boxes, Cog, Loader2, Save, RotateCcw, Check, AlertTriangle, Power,
 } from 'lucide-react';
 import { apiService } from '../../services/api';
+import { resolveTab } from '../../stores/usePageStore';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { toast } from '../../stores/useDialogStore';
 import { useEscapeClose } from '../../hooks/useEscapeClose';
 import { CapabilitiesPanel } from './CapabilitiesPanel';
 import { ExtensionsPanel } from './ExtensionsPanel';
+import { FeaturesPanel } from './FeaturesPanel';
 import { SystemPanel } from './SystemPanel';
 
-type TabKey = 'capabilities' | 'extensions' | 'system';
+type TabKey = 'capabilities' | 'features' | 'extensions' | 'system';
 
 const TABS: Array<{ key: TabKey; label: string; sub: string; icon: any }> = [
   { key: 'capabilities', label: '能力配置', sub: '要做什么 · 谁来做 · 填什么', icon: Sliders },
+  { key: 'features',     label: '功能开关', sub: '页面级开关 · 开停即生效',    icon: Power },
   { key: 'extensions',   label: '扩展',     sub: '装插件 · 管全部扩展',        icon: Boxes },
   { key: 'system',       label: '系统',     sub: '安全 · 内核参数 · 诊断',     icon: Cog },
 ];
@@ -34,7 +37,8 @@ export const SetupView: React.FC = () => {
       const pending = localStorage.getItem('config_pending_tab');
       if (pending) {
         localStorage.removeItem('config_pending_tab');
-        // 兼容旧入口：plugins / extensions 都落到「扩展」
+        // 兼容旧入口：plugins / extensions 都落到「扩展」；pages / features 落到「功能开关」
+        if (pending === 'features' || pending === 'pages') return 'features';
         if (pending === 'plugins' || pending === 'extensions') return 'extensions';
         if (pending === 'infra' || pending === 'system') return 'system';
       }
@@ -72,7 +76,11 @@ export const SetupView: React.FC = () => {
   );
   const dirty = changed.length > 0;
 
-  useEscapeClose(!dirty, () => setActiveTab(project ? 'studio' : 'projects'));
+  // 退出设置：回落到一个确实开启的页（分镜台 / 看板都可能已在功能开关里被关掉）
+  useEscapeClose(!dirty, () => {
+    const back = resolveTab(project ? 'studio' : 'projects');
+    setActiveTab((back || (project ? 'canvas' : 'home')) as any);
+  });
 
   const save = async () => {
     if (!dirty) return;
@@ -152,6 +160,7 @@ export const SetupView: React.FC = () => {
           {tab === 'capabilities' && (
             <CapabilitiesPanel cfg={cfg} draft={draft} setDraft={setDraft} loading={loading} />
           )}
+          {tab === 'features' && <FeaturesPanel />}
           {tab === 'extensions' && <ExtensionsPanel />}
           {tab === 'system' && (
             <SystemPanel cfg={cfg} draft={draft} setDraft={setDraft} envFile={envFile} jsonFile={jsonFile} />

@@ -1,12 +1,16 @@
 import { create } from 'zustand';
 import { Project, StoryboardShot, Character, AspectRatio, StylePreset } from '../types';
 import { apiService } from '../services/api';
+import { resolveTab } from './usePageStore';
+
+/** 页签 id 与后端功能页 id（page）一一对应；'home' 为跨项目首页 */
+export type ActiveTab = 'home' | 'projects' | 'studio' | 'director3d' | 'timeline' | 'characters' | 'assets' | 'mcp' | 'config' | 'canvas' | 'agent';
 
 interface ProjectState {
   project: Project | null;
   activeProjectId: string | null; // P0: 关联 ProjectMeta
   activeShotId: string | null;
-  activeTab: 'projects' | 'studio' | 'director3d' | 'timeline' | 'characters' | 'assets' | 'mcp' | 'config' | 'canvas' | 'agent';
+  activeTab: ActiveTab;
   workspace: 'production' | 'creative'; // P0: 双工作台
   platformMode: 'desktop' | 'mobile';
   isPlaying: boolean;
@@ -17,11 +21,17 @@ interface ProjectState {
   apiError: string | null;
 
   loadActiveProject: (projectId?: string) => Promise<void>;
+  /**
+   * 启动友好化：确保有可用项目。
+   * 'restored' 恢复了缓存项目；'empty' 无任何项目可恢复（落首页，不再落看板）。
+   * 注：新基线不自动接管最近项目 —— 最近项目入口在首页「最近项目」区。
+   */
+  ensureActiveProject: () => Promise<'restored' | 'empty'>;
   closeProject: () => void;
   // Actions
   setProject: (project: Project) => void;
   setActiveShotId: (shotId: string | null) => void;
-  setActiveTab: (tab: 'projects' | 'studio' | 'director3d' | 'timeline' | 'characters' | 'assets' | 'mcp' | 'config' | 'canvas' | 'agent') => void;
+  setActiveTab: (tab: ActiveTab) => void;
   setWorkspace: (w: 'production'|'creative') => void;
   setPlatformMode: (mode: 'desktop' | 'mobile') => void;
   setIsPlaying: (isPlaying: boolean) => void;
@@ -102,14 +112,28 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 
+  /**
+   * 启动位置：优先恢复缓存项目；一个项目都没有（含后端未启动）时落到首页 —— 
+   * 首页承担「快速创建 / 模板 / 最近项目」，是空环境唯一有意义的落点。
+   */
+  ensureActiveProject: async () => {
+    await get().loadActiveProject();
+    if (get().project) return 'restored';
+    localStorage.setItem('app_active_tab', 'home');
+    set({ activeTab: 'home' });
+    return 'empty';
+  },
+
   closeProject: () => {
     localStorage.removeItem('activeProjectId');
-    localStorage.setItem('app_active_tab', 'projects');
+    // 项目看板可能已在功能开关里关掉 → 落在确实开启的页（首页兜底）
+    const backTab = (resolveTab('projects') || 'home') as ActiveTab;
+    localStorage.setItem('app_active_tab', backTab);
     set({
       project: null,
       activeProjectId: null,
       activeShotId: null,
-      activeTab: 'projects',
+      activeTab: backTab,
       isPlaying: false,
       currentTime: 0,
       totalDuration: 0,
@@ -151,15 +175,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ activeShotId: shotId });
   },
   setActiveTab: (tab) => {
-    // 未选择项目时，严禁切换到项目内部功能（只允许 projects 和 config）
-    if (!get().project && tab !== 'projects' && tab !== 'config') {
+    // 未选择项目时，严禁切换到项目内部功能（全局页 home / projects / config 放行）
+    if (!get().project && tab !== 'home' && tab !== 'projects' && tab !== 'config') {
       return;
     }
     localStorage.setItem('app_active_tab', tab);
     if (tab === 'canvas') {
       localStorage.setItem('app_workspace', 'creative');
       set({ activeTab: tab, workspace: 'creative' });
-    } else if (['projects', 'studio', 'director3d', 'timeline', 'characters', 'assets', 'agent'].includes(tab)) {
+    } else if (['home', 'projects', 'studio', 'director3d', 'timeline', 'characters', 'assets', 'agent'].includes(tab)) {
       localStorage.setItem('app_workspace', 'production');
       set({ activeTab: tab, workspace: 'production' });
     } else {
@@ -174,7 +198,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       set({ workspace, activeTab: 'canvas' });
     } else {
       const currentTab = get().activeTab;
-      const nextTab = currentTab === 'canvas' ? 'studio' : currentTab;
+      // 离开创意画布时回落到「确实开启」的生产侧页（分镜台可能已在功能开关里被关掉）
+      const nextTab = currentTab === 'canvas'
+        ? ((resolveTab('studio') || 'home') as ActiveTab)
+        : currentTab;
       localStorage.setItem('app_active_tab', nextTab);
       set({ workspace, activeTab: nextTab });
     }

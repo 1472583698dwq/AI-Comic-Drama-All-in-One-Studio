@@ -4,6 +4,7 @@ import {
   FolderKanban, Film, ChevronDown, Lock, LogOut,
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
+import { resolveTab } from '../../stores/usePageStore';
 import { toast } from '../../stores/useDialogStore';
 
 interface HeaderProps {
@@ -35,12 +36,16 @@ export const Header: React.FC<HeaderProps> = ({ onOpenImport, onOpenExport }) =>
   const stageTabs = ['studio', 'timeline', 'director3d'];
   const onStage = !!project && stageTabs.includes(activeTab);
 
+  // 「返回项目看板」的目标页可能已在 设置 → 功能开关 里被关掉：取一个确实开启的页（首页兜底），
+  // 免得点了没反应或落到已关闭页。
+  const backToBoard = () => setActiveTab((resolveTab('projects') || 'home') as any);
+
   return (
     <header className="h-[54px] bg-surface/95 backdrop-blur-xl border-b border-border px-3 lg:px-4 flex items-center justify-between gap-2 select-none z-30 relative shrink-0">
       {/* ── 左侧：品牌 + 当前项目 + 工作区切换 ── */}
       <div className="flex items-center gap-2 shrink-0 min-w-0">
         <div
-          onClick={() => setActiveTab('projects')}
+          onClick={backToBoard}
           className="flex items-center gap-2 cursor-pointer group"
           title="点击返回项目看板"
         >
@@ -59,7 +64,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenImport, onOpenExport }) =>
         {project ? (
           <div className="flex items-center gap-1 bg-surface-secondary/70 border border-border rounded-xl p-0.5 shrink-0">
             <button
-              onClick={() => setActiveTab('projects')}
+              onClick={backToBoard}
               className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg transition-all text-left ${
                 activeTab === 'projects'
                   ? 'bg-brand/20 text-brand border border-brand/40 font-semibold'
@@ -90,7 +95,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenImport, onOpenExport }) =>
           </div>
         ) : (
           <button
-            onClick={() => setActiveTab('projects')}
+            onClick={backToBoard}
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 text-left shrink-0 transition-all"
             title="请先在项目看板创建或选择一个项目"
           >

@@ -14,7 +14,11 @@ import { McpToolsModal } from './components/mcp/McpToolsModal';
 import { SkillStudioModal } from './components/skills/SkillStudioModal';
 import { SetupView } from './views/setup/SetupView';
 import { ProjectDashboard } from './views/ProjectDashboard';
+import { HomeView } from './views/HomeView';
 import { AgentModeView } from './views/AgentModeView';
+import { NoPageEnabled } from './components/ui/NoPageEnabled';
+import { usePageStore, resolveTab } from './stores/usePageStore';
+import { Loader2 } from 'lucide-react';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
 import { ProviderManagerModal } from './components/provider/ProviderManagerModal';
 import { ProviderCreateModal, CreateTab, CreateKind } from './components/provider/ProviderCreateModal';
@@ -47,9 +51,39 @@ const CreativeCanvas = lazyView(()=> import('./components/canvas/CreativeCanvas'
 import { useProjectStore } from './stores/useProjectStore';
 import { useMcpStore } from './stores/useMcpStore';
 
+/**
+ * 功能页 host 键 → 组件。键取自后端 `/api/v1/pages` 的 host 字段（契约冻结），
+ * 大组件（画布）继续走 lazyView，主包只装首页 / 看板 / 设置这类秒开页。
+ */
+const PAGE_HOSTS: Record<string, React.ComponentType<any>> = {
+  home: HomeView,
+  projects: ProjectDashboard,
+  canvas: CreativeCanvas,
+  agent: AgentModeView,
+  assets: AssetLibrary,
+  characters: CharacterStudio,
+  studio: ShotInspector,
+  timeline: ShotInspector,
+  director3d: Director3DStage,
+  config: SetupView,
+};
+
+/** 共用 ShotInspector 的三个「片场」host：桌面模式下其下方固定渲染多轨时间线（结构同新基线） */
+const STAGE_HOSTS = ['studio', 'timeline', 'director3d'];
+
+/** 无项目时仍可停留的全局页（其余都是项目内部页，需要先有项目 —— 既有准入规则） */
+const GLOBAL_TABS = ['home', 'projects', 'config'];
+
+/** 历史页签的展示名（归一提示用；查不到的页签不提示，免得给用户念一串 id） */
+const LEGACY_TAB_LABEL: Record<string, string> = { mcp: 'MCP 工具' };
+
 export function App() {
-  const { project, activeTab, platformMode, apiError, clearApiError } = useProjectStore();
+  const { project, activeTab, platformMode, apiError, clearApiError, isLoading, activeProjectId } = useProjectStore();
   const { fetchTools } = useMcpStore();
+  // 功能页运行时开关：页签准入的唯一依据（后端 /api/v1/pages）
+  const pagesLoaded = usePageStore((s) => s.loaded);
+  const pagesItems = usePageStore((s) => s.items);
+  const pagesValues = usePageStore((s) => s.values);
 
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
@@ -71,7 +105,9 @@ export function App() {
     try { sessionStorage.removeItem('studio_chunk_reload_once'); } catch {}
     installGlobalDialogPatch();
     fetchTools().catch((e: any) => setMcpError(e?.message || 'MCP 服务连接失败'));
-    useProjectStore.getState().loadActiveProject();
+    // 启动：先拉功能页开关（渲染准入依据），再恢复项目；没有项目则落到首页
+    usePageStore.getState().load().catch(() => {});
+    useProjectStore.getState().ensureActiveProject().catch(() => {});
     const h = (e: any) => { setProviderEdit(e?.detail?.provider || null); setIsProviderOpen(true); };
     // 新建自定义生成源（统一创建弹窗）：detail = { tab?: 'doc'|'code'|'comfy', kind?, select?, source? }
     const onOpenProviderCreate = (e: any) => {
@@ -126,12 +162,89 @@ export function App() {
     };
   }, []);
 
-  // 严格 UI 准入拦截：未选择或创建项目时，禁止停留在任何项目内部功能页，自动重定向至项目看板
+  // 严格 UI 准入拦截：未选择或创建项目时，禁止停留在任何项目内部功能页，自动重定向至项目看板。
+  // 恢复项目期间（isLoading）跳过，否则会把缓存的项目内页签冲掉（与旧线的启动恢复口径一致）。
   useEffect(() => {
-    if (!project && activeTab !== 'projects' && activeTab !== 'config') {
+    if (isLoading) return;
+    if (!project && !GLOBAL_TABS.includes(activeTab)) {
       useProjectStore.getState().setActiveTab('projects');
     }
-  }, [project, activeTab]);
+  }, [project, activeTab, isLoading]);
+
+  /** 启动恢复中（有缓存项目正在拉取）：先占位，别先闪一眼首页/看板再跳 */
+  const restoring = isLoading && !project && !!activeProjectId;
+
+  /**
+   * 归一后的页签（渲染的唯一依据）：
+   * - 未加载完成 / 启动恢复中 → null，渲染轻量加载占位（绝不闪出未开启页）
+   * - 请求页可用 → 就是它；已关闭 / 未知 / 历史页签 → 第一个可用页
+   * - 一个可用页都没有 → null，渲染空态页
+   * 无项目时再叠一层既有准入规则：只能落在全局页。
+   *
+   * 每次渲染现算（几次数组成员判断，成本可忽略）：resolveTab 读的是 store 快照，
+   * 用 memo 反而要靠「假装存在的依赖」才能重算 —— 直接算最不容易出错。
+   */
+  const resolvedTab: string | null = (() => {
+    if (!pagesLoaded || restoring) return null;
+    const hit = resolveTab(activeTab);
+    if (!project && hit && !GLOBAL_TABS.includes(hit)) {
+      for (const g of GLOBAL_TABS) {
+        const r = resolveTab(g);
+        if (r && GLOBAL_TABS.includes(r)) return r;
+      }
+      return null;
+    }
+    return hit;
+  })();
+
+  // 归一发生（含「开关一变」）→ 切到可用页并解释原因。
+  // 这里读 pagesValues 既是提示文案的依据，也是「页面开关变化必须触发重渲染」的订阅来源
+  // （resolvedTab 是渲染期现算的，没有这个订阅 App 就感知不到开关变化）。
+  useEffect(() => {
+    if (!pagesLoaded || !resolvedTab || resolvedTab === activeTab) return;
+    const requested = pagesItems.find((i) => i.id === activeTab);
+    const fromLabel = requested && pagesValues[requested.id] !== true
+      ? requested.label
+      : LEGACY_TAB_LABEL[activeTab];
+    const toLabel = pagesItems.find((i) => i.id === resolvedTab)?.label || resolvedTab;
+    if (fromLabel) toast.info(`${fromLabel} 已关闭，已为你切到 ${toLabel}`);
+    useProjectStore.getState().setActiveTab(resolvedTab as any);
+  }, [pagesLoaded, resolvedTab, activeTab, pagesItems, pagesValues]);
+
+  /** 归一页签 → host 键（后端允许 host 与 id 不同）→ 组件 */
+  const renderTab = (tab: string) => {
+    const host = pagesItems.find((i) => i.id === tab)?.host || tab;
+
+    // 片场三页（分镜台 / 多轨剪辑 / 3D 片场）：桌面模式下共用 ShotInspector + 底部固定多轨时间线
+    if (STAGE_HOSTS.includes(host)) {
+      const Stage = PAGE_HOSTS[host];
+      return platformMode === 'desktop' ? (
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex-1 flex overflow-hidden">
+            <Stage />
+          </div>
+          <MultiTrackTimeline />
+        </div>
+      ) : (
+        <MobileCardFlow onOpenExport={() => setIsExportOpen(true)} />
+      );
+    }
+
+    const Host = PAGE_HOSTS[host] || ProjectDashboard;
+    if (host === 'canvas') {
+      return (
+        <ErrorBoundary name="创意画布">
+          <Suspense fallback={<div className="flex-1 flex items-center justify-center text-xs text-gray-500">画布加载中…</div>}>
+            <Host />
+          </Suspense>
+        </ErrorBoundary>
+      );
+    }
+    if (host === 'agent') return <ErrorBoundary name="Agent模式页"><Host /></ErrorBoundary>;
+    if (host === 'config') return <ErrorBoundary name="设置中心"><Host /></ErrorBoundary>;
+    if (host === 'home') return <ErrorBoundary name="首页"><Host /></ErrorBoundary>;
+    return <Host />;
+  };
 
   return (
     <div className="h-screen w-screen flex flex-col bg-background text-gray-100 overflow-hidden">
@@ -168,47 +281,27 @@ export function App() {
         <main className="flex-1 flex flex-col overflow-hidden relative min-w-0">
           {/* 兜底边界：任何视图运行时崩溃都显示可读错误 + 重试，而不是黑屏/白屏 */}
           <ErrorBoundary name="当前页面">
-          {activeTab === 'config' ? (
-            <ErrorBoundary name="设置中心">
-              <SetupView />
-            </ErrorBoundary>
-          ) : (!project || activeTab === 'projects') ? (
-            <ProjectDashboard />
-          ) : activeTab === 'canvas' ? (
-            <ErrorBoundary name="创意画布">
-              <Suspense fallback={<div className="flex-1 flex items-center justify-center text-xs text-gray-500">画布加载中…</div>}>
-                <CreativeCanvas />
-              </Suspense>
-            </ErrorBoundary>
-          ) : activeTab === 'agent' ? (
-            <ErrorBoundary name="Agent模式页">
-              <AgentModeView />
-            </ErrorBoundary>
-          ) : activeTab === 'characters' ? (
-            <CharacterStudio />
-          ) : activeTab === 'assets' ? (
-            <AssetLibrary />
-          ) : platformMode === 'desktop' ? (
-            <div className="flex-1 flex flex-col overflow-hidden">
-              <div className="flex-1 flex overflow-hidden">
-                {(activeTab === 'studio' || activeTab === 'timeline') && <ShotInspector />}
-                {activeTab === 'director3d' && <Director3DStage />}
-              </div>
-              <MultiTrackTimeline />
+          {!pagesLoaded || restoring ? (
+            // 加载占位：功能页开关到手前不渲染任何页，避免闪出「已关闭」的页
+            <div className="flex-1 flex items-center justify-center gap-2 text-xs text-gray-500">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              {restoring ? '正在恢复项目…' : '正在加载功能页…'}
             </div>
+          ) : resolvedTab ? (
+            renderTab(resolvedTab)
           ) : (
-            <MobileCardFlow onOpenExport={() => setIsExportOpen(true)} />
+            <NoPageEnabled />
           )}
           </ErrorBoundary>
           {/* 上下文轻引导卡：每页首进只出现 1 张，读过不再出现（设置 → 系统 可重置） */}
-          {project && activeTab === 'canvas' && (
+          {project && resolvedTab === 'canvas' && (
             <ContextTipCard
               storageKey="canvas_first"
               title="画布这样玩"
               desc="按住节点右侧圆点拖到下一个节点即连线；选中生图 / 视频 / 配音节点，底部会弹出它的 Agent 控制台，用一句大白话描述你要什么即可。"
             />
           )}
-          {project && platformMode === 'desktop' && (activeTab === 'studio' || activeTab === 'timeline') && (
+          {project && platformMode === 'desktop' && (resolvedTab === 'studio' || resolvedTab === 'timeline') && (
             <ContextTipCard
               storageKey="studio_first"
               title="分镜台这样用"
@@ -221,7 +314,7 @@ export function App() {
       {/* 3. 悬浮导演 Agent（仅当存在有效项目、且不在画布页时启用）
           画布页有专属的右侧 Agent 侧栏（CanvasAgentSidebar），两者共用同一份页面版会话；
           此处加 activeTab 闸门，避免画布上同时出现两个功能重复的导演 Agent 入口。 */}
-      {project && activeTab !== 'canvas' && <AgentChatDrawer />}
+      {project && resolvedTab && resolvedTab !== 'canvas' && <AgentChatDrawer />}
 
       {/* 3.1 Global AI Polish (covers all textareas) */}
       <GlobalAiPolish />

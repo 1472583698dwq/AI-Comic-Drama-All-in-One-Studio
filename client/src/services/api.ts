@@ -1213,4 +1213,19 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
+  // ── 功能页（page）运行时开关 ──
+  /** 页面清单 + 当前值：{ pages: [...], values: {id: bool}, groups: [...], file } */
+  async getPages(): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/pages`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  /** 页面级启用 / 停用（config 为系统页，后端拒绝停用并返回 400） */
+  async setPageEnabled(pageId: string, enabled: boolean): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/extensions/page:${encodeURIComponent(pageId)}/${enabled ? 'enable' : 'disable'}`, {
+      method: 'POST',
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json().catch(() => ({}));
+  },
 };
