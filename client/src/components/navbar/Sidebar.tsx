@@ -1,8 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import {
   Settings, Sun, Moon, PanelLeftClose, PanelLeft, Lock, Plug, type LucideIcon,
 } from 'lucide-react';
-import { useProjectStore } from '../../stores/useProjectStore';
+import { useProjectStore, selectSidebarCollapsed } from '../../stores/useProjectStore';
 import { usePageStore } from '../../stores/usePageStore';
 import { useThemeStore } from '../../stores/useThemeStore';
 import { toast } from '../../stores/useDialogStore';
@@ -49,7 +49,8 @@ const OTHER_GROUP = 'other';
  * 点击一律 `setActiveTab`（工作区与页签准入由 store / App 归一，不在侧栏自造跳转逻辑）。
  */
 export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
-  const { project, activeTab, setActiveTab, canvasRailOpen, setCanvasRailOpen } = useProjectStore();
+  const { project, activeTab, setActiveTab, toggleSidebar } = useProjectStore();
+  const sidebarCollapsed = useProjectStore(selectSidebarCollapsed);
   const { effectiveTheme, toggleTheme } = useThemeStore();
   const pages = usePageStore((s) => s.items);
   const values = usePageStore((s) => s.values);
@@ -59,27 +60,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
     (n: number, s: any) => n + (s?.shots?.length || 0), 0);
   const charactersCount = project?.characters?.length || 0;
 
-  const [collapsed, setCollapsed] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem('studio_sidebar_collapsed');
-      if (saved !== null) return saved === '1';
-      return typeof window !== 'undefined' && window.innerWidth < 1180;
-    } catch {
-      return false;
-    }
-  });
-  useEffect(() => {
-    try { localStorage.setItem('studio_sidebar_collapsed', collapsed ? '1' : '0'); } catch { /* ignore */ }
-  }, [collapsed]);
-
-  // 画布态：整条侧栏隐藏，唤出按钮已合并到画布左上角「画布操作台」条上的第一个按钮
-  // （状态在 store 里，画布那边点它 → 这里滑出图标轨）；每次切换页签都回到隐藏态。
-  const isCanvas = activeTab === 'canvas';
-  useEffect(() => { setCanvasRailOpen(false); }, [activeTab, setCanvasRailOpen]);
-
-  /** 画布态强制缩小态（图标轨）；其余页面沿用用户自己的折叠偏好 */
-  const effectiveCollapsed = collapsed || isCanvas;
-  const railVisible = !isCanvas || canvasRailOpen;
+  // 收起 = 只显示图标（不显示文字），展开 = 图标 + 文字；侧栏在所有页面（含画布）都常驻，不整条隐藏。
+  // 画布页每次进入默认收起；画布操作台条的第一个按钮与这里底部的按钮走同一个 toggleSidebar。
+  const effectiveCollapsed = sidebarCollapsed;
 
   /** 分组 → 条目（只含开启的页；设置不进分组） */
   const groups = useMemo(() => {
@@ -143,14 +126,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
   return (
     <aside
       className={`relative shrink-0 h-full bg-white/60 dark:bg-white/[.04] backdrop-blur-2xl flex flex-col z-20 overflow-hidden transition-[width] duration-[260ms] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none ${
-        !railVisible ? 'w-0' : effectiveCollapsed ? 'w-[60px]' : 'w-[218px]'
+        effectiveCollapsed ? 'w-[60px]' : 'w-[218px]'
       }`}
     >
-      {/* 固定宽度内层：宽度动画期间内容不参与压缩；隐藏态 inert 掉，不进入 Tab 序列。
-          发丝右边框挂在内层，收起动画时随内容一起被 overflow 裁掉，不会留下 1px 竖线。 */}
+      {/* 固定宽度内层：宽度动画期间内容不参与压缩 */}
       <div
-        inert={!railVisible}
-        aria-hidden={!railVisible}
         className={`h-full flex flex-col border-r border-white/60 dark:border-white/10 ${effectiveCollapsed ? 'w-[60px]' : 'w-[218px]'}`}
       >
         {/* 主导航区 */}
@@ -234,15 +214,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
             {!effectiveCollapsed && <span className="truncate">设置</span>}
           </button>
 
-          {/* 画布态收起 = 整条隐藏回画布上的唤出按钮；其余页面仍是「图标轨 ⇄ 完整栏」 */}
+          {/* 图标轨 ⇄ 完整栏（所有页面一致） */}
           <button
-            onClick={() => (isCanvas ? setCanvasRailOpen(false) : setCollapsed((v) => !v))}
-            title={isCanvas ? '收起侧栏' : effectiveCollapsed ? '展开侧栏' : '收起侧栏'}
+            onClick={toggleSidebar}
+            title={effectiveCollapsed ? '展开侧栏' : '收起侧栏'}
             className={`w-full flex items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-[11px] text-gray-500 hover:text-gray-300 hover:bg-white/70 dark:hover:bg-white/[.09] transition-all ${
               effectiveCollapsed ? 'justify-center px-0' : ''
             }`}
           >
-            {effectiveCollapsed && !isCanvas ? <PanelLeft className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
+            {effectiveCollapsed ? <PanelLeft className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
             {!effectiveCollapsed && <span>收起侧栏</span>}
           </button>
         </div>

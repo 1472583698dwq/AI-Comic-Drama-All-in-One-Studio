@@ -16,6 +16,7 @@ import { ShotWriteBackControls } from './nodes/ShotWriteBackControl';
 import { DynamicProviderInfo, extractSlotsFromProvider, AssetSlotDef, getSkillsForKind, describeProviderSlots, paramsSchemaToSpecs } from './providerSkills';
 import { collectResources, planBinding } from '../storyboard/referenceBinder';
 import { CanvasResourcePickerModal } from './CanvasResourcePickerModal';
+import { emitAttachInputs, emitDetachInput, toInputItems } from './inputCards';
 import { DynamicControl, groupSpecs, CATEGORY_LABEL, ControlSpec } from './controls/DynamicControl';
 import { pollVideoTask } from '../../utils/videoTask';
 
@@ -239,6 +240,14 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
       return;
     }
     updateNodeData(nodeId, plan.patch);
+    // 绑定进来的每个插槽都在画布上放输入卡片
+    for (const s of slots) {
+      if (s.type !== 'image' && s.type !== 'video' && s.type !== 'audio') continue;
+      const v = plan.patch[s.key] ?? (s.originalKey ? plan.patch[s.originalKey] : undefined);
+      const vals: string[] = (Array.isArray(v) ? v : [v]).filter((u: any) => typeof u === 'string' && u);
+      if (!vals.length) continue;
+      emitAttachInputs({ targetId: nodeId, slotKey: s.key, mediaType: s.type, multi: isSlotMulti(s), items: toInputItems(vals), keep: vals });
+    }
     const n = plan.filled.filter((f) => !f.kept).length;
     toast.success(`已绑定 ${n} 项参考${plan.gaps.length ? `，${plan.gaps.length} 个必填缺口` : ''}`);
   };
@@ -246,7 +255,7 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
     updateNodeData(nodeId, { skill_id: skillId });
   };
   const isSlotMulti = (s: AssetSlotDef) => !!s.multi || (s.maxCount !== undefined && s.maxCount > 1);
-  const handleSlotSelect = (urlOrUrls: string | string[], meta?: any) => {
+  const handleSlotSelect = (urlOrUrls: string | string[], meta?: any, metas?: Record<string, any>) => {
     if (!pickerSlot) return;
     // 参数模式：只落「参数草稿」（与参数弹窗的点「应用」流程一致，不直接写节点）
     if (pickerSlot.asParam === true) {
@@ -261,8 +270,10 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
     const patch: Record<string, any> = {};
     // 只写插槽声明的键（归一 key + 源属性 originalKey），不做任何别名猜测
     const writeKeys = new Set<string>([pickerSlot.key, pickerSlot.originalKey || pickerSlot.key]);
+    const picked = Array.isArray(urlOrUrls) ? urlOrUrls : [urlOrUrls];
+    let finalValues: string[] = [];
     if (isSlotMulti(pickerSlot)) {
-      const arr = Array.isArray(urlOrUrls) ? urlOrUrls : [urlOrUrls];
+      const arr = picked;
       const existing: string[] = Array.isArray(d[pickerSlot.key]) ? d[pickerSlot.key] : [];
       const merged = [...existing];
       for (const u of arr) if (!merged.includes(u)) merged.push(u);
@@ -275,14 +286,16 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
       if (pickerSlot.key === 'reference_images') {
         patch.reference_images = limited;
       }
+      finalValues = limited;
     } else {
-      const url = Array.isArray(urlOrUrls) ? urlOrUrls[0] : urlOrUrls;
+      const url = picked[0];
       writeKeys.forEach(k => { patch[k] = url; });
       if (pickerSlot.type === 'image' && pickerSlot.key.startsWith('img_')) {
         const curRefs = Array.isArray(d.reference_images) ? [...d.reference_images] : [];
         if (!curRefs.includes(url)) curRefs.push(url);
         patch.reference_images = curRefs;
       }
+      finalValues = url ? [url] : [];
     }
     if (meta?.visual_prompt && !(idea || '').includes(meta.visual_prompt)) {
       const nextIdea = idea ? `${idea}, ${meta.visual_prompt}` : meta.visual_prompt;
@@ -290,6 +303,13 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
     }
     if (meta?.voice_id && kind === 'audio') patch.voice_id = meta.voice_id;
     updateNodeData(nodeId, patch);
+    // 画布上放对应的输入卡片（或直接连到来源卡片），让输入了什么一眼可见
+    if (pickerSlot.type === 'image' || pickerSlot.type === 'video' || pickerSlot.type === 'audio') {
+      emitAttachInputs({
+        targetId: nodeId, slotKey: pickerSlot.key, mediaType: pickerSlot.type,
+        multi: isSlotMulti(pickerSlot), items: toInputItems(picked.filter(u => finalValues.includes(u)), metas), keep: finalValues,
+      });
+    }
     setPickerSlot(null);
   };
   const clearSlot = (key: string) => {
@@ -298,6 +318,9 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
     if (slot?.originalKey && slot.originalKey !== key) patch[slot.originalKey] = undefined;
     if (key === 'reference_images') patch.reference_images = [];
     updateNodeData(nodeId, patch);
+    if (slot && (slot.type === 'image' || slot.type === 'video' || slot.type === 'audio')) {
+      emitDetachInput({ targetId: nodeId, slotKey: key, mediaType: slot.type });
+    }
   };
 
   /** 媒体类参数补「从画布 / 素材库添加」：打开统一资源选择器，选中后落参数草稿（与「应用」流程一致） */

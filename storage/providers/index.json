@@ -88,7 +88,7 @@
     "kind": "video",
     "provider_type": "code",
     "supports_workflow": false,
-    "description": "RunningHub OpenAPI v2 视频生成源（AI App 2095868555916038145）。提交返 task_id 交框架轮询，查询单次秒回。",
+    "description": "RunningHub OpenAPI v2 图生视频（AI App 2095868555916038145）：首帧自动上传，提交返 task_id 后台轮询取片。",
     "icon": "Zap",
     "scope": "global",
     "project_id": null,
@@ -96,7 +96,55 @@
     "enabled": true,
     "models": [],
     "default_model": null,
-    "params_schema": null,
+    "params_schema": {
+      "type": "object",
+      "properties": {
+        "duration": {
+          "type": "integer",
+          "title": "时长(秒)",
+          "minimum": 1,
+          "maximum": 30,
+          "default": 5,
+          "x-category": "motion",
+          "x-visibility": "basic",
+          "x-agent": "auto",
+          "x-priority": 20
+        },
+        "aspect_ratio": {
+          "type": "string",
+          "title": "比例",
+          "enum": [
+            "9:16 (Portrait Widescreen)",
+            "16:9 (Widescreen)",
+            "1:1 (Square)",
+            "3:4 (Portrait Standard)",
+            "4:3 (Standard)",
+            "2:3 (Portrait Photo)",
+            "3:2 (Photo)",
+            "21:9 (Ultrawide)"
+          ],
+          "default": "9:16 (Portrait Widescreen)",
+          "x-category": "layout",
+          "x-visibility": "basic",
+          "x-agent": "auto",
+          "x-priority": 10
+        },
+        "instance_type": {
+          "type": "string",
+          "title": "实例类型",
+          "enum": [
+            "default",
+            "plus",
+            "ultra"
+          ],
+          "default": "default",
+          "x-category": "advanced",
+          "x-visibility": "advanced",
+          "x-agent": "suggest",
+          "x-priority": 30
+        }
+      }
+    },
     "default_params": {},
     "input_schema": {
       "type": "object",
@@ -171,12 +219,12 @@
     "headers": {},
     "custom_headers": {},
     "auth": {
-      "type": "none",
+      "type": "bearer",
       "header_name": "Authorization",
       "query_name": "api_key",
-      "key_env": null,
+      "key_env": "CUSTOM_PROVIDER_prov_ecf35ae4",
       "prefix": "Bearer ",
-      "has_key": false
+      "has_key": true
     },
     "health_check": {
       "url": null,
@@ -185,15 +233,14 @@
       "test_payload": null
     },
     "doc_url": null,
-    "created_at": "2026-09-17T14:54:49.677198",
-    "updated_at": "2026-09-17T15:56:48.995792",
+    "created_at": "2026-09-30T17:42:07.436870",
+    "updated_at": "2026-09-30T17:44:52.295388",
     "language": "python",
     "code_entry": "generate",
     "code_timeout": 1200,
     "trusted": false,
-    "legacy_json_mode": false,
     "has_code": true,
-    "code": "import asyncio\nimport httpx\n\n\nasync def generate(ctx, api):\n    \"\"\"RunningHub OpenAPI v2 视频生成源 (AI App 2095868555916038145)。\n\n    参数提示: nodeId 27=时长(秒), 28=prompt, 29=aspect_ratio/megapixels, 6=首帧图。\n\n    工作方式(重要):\n      本 Studio 对代码源不做工具层轮询, 故本携程在一次调用内完成\n      「提交 -> 有界轮询 /query -> 取回 video_url」全链路(封顶 MAX_WAIT_S)。\n      另支持: 若调用方携带 task_id 且无 prompt, 则仅做单次查询即返回。\n\n    沙箱约束: 仅可 import asyncio / httpx。\n    \"\"\"\n    APP_ID = \"2095868555916038145\"\n    BASE = \"https://www.runninghub.cn/openapi/v2\"\n    RUN_URL = f\"{BASE}/run/ai-app/{APP_ID}\"\n    QUERY_URL = f\"{BASE}/query\"\n\n    # ============================================================\n    # API KEY 注入位（已填入用户提供的 Key；如需更换只改这一行）\n    # ============================================================\n    HARDCODED_API_KEY = \"6704ef3723904f51b6cee0f73ea2304a\"\n\n    POLL_INTERVAL_S = 6      # 轮询间隔\n    MAX_WAIT_S = 840         # 单次调用内最长等待 14 分钟(低于 code_timeout 1200)\n\n    NODE_PROMPT = \"28\"\n    NODE_DURATION = \"27\"\n    NODE_FRAME = \"29\"\n    NODE_IMAGE = \"6\"\n\n    AR_FIELDDATA = ('[\"COMBO\", {\"default\": \"9:16 (Portrait Widescreen)\", '\n                    '\"options\": [\"1:1 (Square)\", \"2:3 (Portrait Photo)\", \"3:2 (Photo)\", '\n                    '\"3:4 (Portrait Standard)\", \"4:3 (Standard)\", \"9:16 (Portrait Widescreen)\", '\n                    '\"16:9 (Widescreen)\", \"21:9 (Ultrawide)\"], '\n                    '\"tooltip\": \"The aspect ratio for the output dimensions.\", '\n                    '\"multiselect\": false}]')\n\n    AR_OPTIONS = {\n        \"1:1\": \"1:1 (Square)\", \"2:3\": \"2:3 (Portrait Photo)\", \"3:2\": \"3:2 (Photo)\",\n        \"3:4\": \"3:4 (Portrait Standard)\", \"4:3\": \"4:3 (Standard)\",\n        \"9:16\": \"9:16 (Portrait Widescreen)\", \"16:9\": \"16:9 (Widescreen)\",\n        \"21:9\": \"21:9 (Ultrawide)\",\n    }\n\n    DONE = (\"SUCCESS\", \"SUCCEEDED\", \"COMPLETED\", \"FINISHED\")\n    BAD = (\"FAILED\", \"ERROR\", \"CANCELED\", \"CANCELLED\")\n\n    # ---------------- 工具函数 ----------------\n    def _key():\n        cands = [HARDCODED_API_KEY]\n        for name in (\"api_key\", \"RUNNINGHUB_API_KEY\", \"runninghub_api_key\",\n                     \"runninghub_key\", \"token\", \"access_token\", \"api_token\"):\n            try:\n                cands.append(ctx.get(name))\n            except Exception:\n                pass\n        try:\n            cands.append(api.get(\"get_api_key\", lambda: \"\")())\n        except Exception:\n            pass\n        try:\n            env = ctx.get(\"env\") or {}\n            if isinstance(env, dict):\n                for name in (\"RUNNINGHUB_API_KEY\", \"RUNNINGHUB_KEY\", \"RUNNINGHUB_TOKEN\"):\n                    cands.append(env.get(name))\n        except Exception:\n            pass\n        for c in cands:\n            if c and str(c).strip():\n                return str(c).strip()\n        return \"\"\n\n    def _box(obj):\n        if isinstance(obj, dict):\n            d = obj.get(\"data\")\n            if isinstance(d, dict):\n                return d\n        return obj if isinstance(obj, dict) else {}\n\n    def _extract_url(results):\n        for it in (results or []):\n            if not isinstance(it, dict):\n                continue\n            u = it.get(\"url\") or it.get(\"fileUrl\") or it.get(\"outputUrl\") or \"\"\n            if u:\n                return u\n        return \"\"\n\n    def _norm_ar(raw):\n        r = (raw or \"\").strip()\n        if not r:\n            return AR_OPTIONS[\"9:16\"]\n        if \"(\" in r:\n            return r\n        r = r.replace(\"：\", \":\").split()[0]\n        return AR_OPTIONS.get(r, AR_OPTIONS[\"9:16\"])\n\n    def _success(tid, url, results, raw):\n        return {\"status\": \"SUCCESS\", \"task_id\": tid, \"taskId\": tid,\n                \"video_url\": url, \"url\": url, \"output_url\": url,\n                \"results\": results, \"raw\": raw}\n\n    async def _poll_once(client, headers, tid):\n        \"\"\"单次查询, 返回 (status_upper, url, raw_dict)。秒回, 不阻塞。\"\"\"\n        r = await client.post(QUERY_URL, headers=headers, json={\"taskId\": tid})\n        if r.status_code != 200:\n            raise RuntimeError(f\"RunningHub 查询失败 HTTP {r.status_code}: {r.text[:300]}\")\n        try:\n            data = r.json() or {}\n        except Exception:\n            raise RuntimeError(f\"RunningHub 查询响应非 JSON: {r.text[:300]}\")\n        b = _box(data)\n        st = str(b.get(\"status\") or data.get(\"status\") or \"\").upper()\n        res = b.get(\"results\") or data.get(\"results\") or []\n        return st, _extract_url(res), res, data\n\n    # ---------------- 入参解析 ----------------\n    dyn = ctx.get(\"dynamic_inputs\") or {}\n    raw_prompt = (ctx.get(\"prompt\") or \"\").strip()\n    task_id = (ctx.get(\"task_id\") or dyn.get(\"task_id\") or \"\").strip()\n    prompt = raw_prompt\n    if raw_prompt.upper().startswith(\"QUERY:\"):\n        task_id = raw_prompt.split(\":\", 1)[1].strip()\n        prompt = \"\"\n\n    key = _key()\n    if not key:\n        raise RuntimeError(\"RunningHub 鉴权缺失: HARDCODED_API_KEY 为空且源配置 api_key 也未填。\")\n    headers = {\"Content-Type\": \"application/json\", \"Authorization\": \"Bearer \" + key}\n    for probe in (\"headers\", \"custom_headers\"):\n        try:\n            extra = ctx.get(probe)\n            if isinstance(extra, dict):\n                for k, v in extra.items():\n                    if k and v and k not in headers:\n                        headers[k] = v\n        except Exception:\n            pass\n\n    # ============================================================\n    # 纯查询模式: 有 task_id 且无 prompt -> 单次秒回\n    # ============================================================\n    if task_id and not prompt:\n        async with httpx.AsyncClient(timeout=30) as client:\n            st, url, res, data = await _poll_once(client, headers, task_id)\n        if st in DONE and url:\n            return _success(task_id, url, res, data)\n        if st in BAD:\n            raise RuntimeError(f\"RunningHub 任务失败({st}): {str(data)[:300]}\")\n        return {\"status\": \"PENDING\", \"task_id\": task_id, \"taskId\": task_id,\n                \"video_url\": None, \"results\": None, \"raw\": data}\n\n    # ============================================================\n    # 提交模式\n    # ============================================================\n    if not prompt:\n        raise ValueError(\"RunningHub 源需要 prompt（或 QUERY:<taskId> 查询）\")\n\n    try:\n        duration = max(1, min(30, int(float(ctx.get(\"duration\")\n                                            or dyn.get(\"duration\") or 5))))\n    except Exception:\n        duration = 5\n\n    ar_val = _norm_ar(ctx.get(\"aspect_ratio\") or dyn.get(\"aspect_ratio\") or \"9:16\")\n    first_frame = (ctx.get(\"first_frame\") or ctx.get(\"first_frame_url\")\n                   or dyn.get(\"first_frame\") or \"\").strip()\n\n    node_info = [\n        {\"nodeId\": NODE_PROMPT, \"fieldName\": \"prompt\",\n         \"fieldValue\": prompt, \"description\": \"prompt\"},\n        {\"nodeId\": NODE_DURATION, \"fieldName\": \"value\",\n         \"fieldValue\": str(duration), \"description\": \"value\"},\n        {\"nodeId\": NODE_FRAME, \"fieldName\": \"aspect_ratio\",\n         \"fieldData\": AR_FIELDDATA, \"fieldValue\": ar_val, \"description\": \"aspect_ratio\"},\n        {\"nodeId\": NODE_FRAME, \"fieldName\": \"megapixels\",\n         \"fieldValue\": \"0.7000000000000001\", \"description\": \"megapixels\"},\n    ]\n    if first_frame:\n        node_info.append({\"nodeId\": NODE_IMAGE, \"fieldName\": \"image\",\n                          \"fieldValue\": first_frame, \"description\": \"image\"})\n\n    payload = {\n        \"nodeInfoList\": node_info,\n        \"instanceType\": (ctx.get(\"instance_type\") or dyn.get(\"instance_type\") or \"default\"),\n        \"usePersonalQueue\": str(ctx.get(\"use_personal_queue\") or \"false\").lower(),\n    }\n\n    async with httpx.AsyncClient(timeout=60) as client:\n        r = await client.post(RUN_URL, headers=headers, json=payload)\n        try:\n            body_raw = r.json() or {}\n        except Exception:\n            body_raw = {}\n\n        body = _box(body_raw)\n        if r.status_code in (401, 403) or body_raw.get(\"code\") == 1602:\n            raise RuntimeError(\n                f\"RunningHub 鉴权被拒 (HTTP {r.status_code} / code={body_raw.get('code')} / \"\n                f\"msg={body_raw.get('msg')})。\")\n        if r.status_code != 200:\n            raise RuntimeError(f\"RunningHub 提交失败 HTTP {r.status_code}: {r.text[:300]}\")\n\n        new_task = str(body.get(\"taskId\") or body_raw.get(\"taskId\") or \"\").strip()\n        if not new_task:\n            raise RuntimeError(f\"RunningHub 未返回 taskId: {str(body_raw)[:300]}\")\n\n        # 提交即出结果(同步场景)\n        url_now = _extract_url(body.get(\"results\"))\n        if url_now:\n            return _success(new_task, url_now, body.get(\"results\"), body_raw)\n\n        # ================= 有界轮询至终态 =================\n        waited = 0\n        last = {}\n        while waited < MAX_WAIT_S:\n            await asyncio.sleep(POLL_INTERVAL_S)\n            waited += POLL_INTERVAL_S\n            st, url, res, data = await _poll_once(client, headers, new_task)\n            last = data\n            if st in DONE:\n                if not url:\n                    raise RuntimeError(f\"任务成功但无结果URL: {str(data)[:300]}\")\n                return _success(new_task, url, res, data)\n            if st in BAD:\n                raise RuntimeError(\n                    f\"RunningHub 任务失败({st}): \"\n                    f\"{_box(data).get('errorCode', '')} \"\n                    f\"{_box(data).get('errorMessage', '')} {str(data)[:200]}\")\n\n    # 超时: 回传 task_id 供后续 QUERY:<taskId> 续查\n    return {\"status\": \"PENDING\", \"task_id\": new_task, \"taskId\": new_task,\n            \"video_url\": None, \"results\": None, \"raw\": last,\n            \"note\": f\"等待 {MAX_WAIT_S}s 未完成, 可用 prompt='QUERY:{new_task}' 续查\"}"
+    "code": "import base64\nimport httpx\n\n# RunningHub OpenAPI v2 视频生成源（AI App 2095868555916038145）\n# 节点：6=首帧图 27=时长(秒) 28=prompt 29=aspect_ratio/megapixels\n# 契约：提交即返 task_id（框架后台轮询）；task_id 非空且 prompt 为空 → 单次查询秒回\nAPP_ID = \"2095868555916038145\"\nAPI_BASE = \"https://www.runninghub.cn/openapi/v2\"\nRUN_URL = API_BASE + \"/run/ai-app/\" + APP_ID\nQUERY_URL = API_BASE + \"/query\"\nUPLOAD_URL = API_BASE + \"/media/upload/binary\"\n\nAR_OPTIONS = {\n    \"1:1\": \"1:1 (Square)\", \"2:3\": \"2:3 (Portrait Photo)\", \"3:2\": \"3:2 (Photo)\",\n    \"3:4\": \"3:4 (Portrait Standard)\", \"4:3\": \"4:3 (Standard)\",\n    \"9:16\": \"9:16 (Portrait Widescreen)\", \"16:9\": \"16:9 (Widescreen)\",\n    \"21:9\": \"21:9 (Ultrawide)\",\n}\nAR_FIELDDATA = ('[\"COMBO\", {\"default\": \"9:16 (Portrait Widescreen)\", '\n                '\"options\": [\"1:1 (Square)\", \"2:3 (Portrait Photo)\", \"3:2 (Photo)\", '\n                '\"3:4 (Portrait Standard)\", \"4:3 (Standard)\", \"9:16 (Portrait Widescreen)\", '\n                '\"16:9 (Widescreen)\", \"21:9 (Ultrawide)\"], '\n                '\"tooltip\": \"The aspect ratio for the output dimensions.\", '\n                '\"multiselect\": false}]')\nPENDING = (\"CREATE\", \"QUEUED\", \"RUNNING\", \"PENDING\", \"SUBMITTED\")\n\n\ndef _norm_ar(raw):\n    r = str(raw or \"\").strip()\n    if not r:\n        return AR_OPTIONS[\"9:16\"]\n    if \"(\" in r:\n        return r\n    return AR_OPTIONS.get(r.replace(\"：\", \":\").split()[0], AR_OPTIONS[\"9:16\"])\n\n\ndef _box(obj):\n    if isinstance(obj, dict) and isinstance(obj.get(\"data\"), dict):\n        return obj[\"data\"]\n    return obj if isinstance(obj, dict) else {}\n\n\nasync def _upload(client, api_key, value):\n    \"\"\"首帧三态归一：data: URI / http(s) → 上传换 RunningHub 文件名；已是文件名原样透传。\"\"\"\n    v = str(value or \"\").strip()\n    if not v:\n        return \"\"\n    if not (v.startswith(\"data:\") or v.startswith(\"http://\") or v.startswith(\"https://\")):\n        return v\n    if v.startswith(\"data:\"):\n        raw = base64.b64decode(v.split(\",\", 1)[1])\n    else:\n        g = await client.get(v, timeout=120)\n        g.raise_for_status()\n        raw = g.content\n    if not raw:\n        raise RuntimeError(\"首帧图内容为空\")\n    # 上传只能带 Bearer 头：手写 Content-Type 会破坏 multipart 边界\n    up = await client.post(UPLOAD_URL, headers={\"Authorization\": f\"Bearer {api_key}\"},\n                           files={\"file\": (\"first_frame.png\", raw, \"image/png\")}, timeout=300)\n    try:\n        uj = up.json() or {}\n    except Exception:\n        raise RuntimeError(f\"首帧上传失败 HTTP {up.status_code}: {up.text[:300]}\")\n    if uj.get(\"code\") not in (0, None) or up.status_code >= 400:\n        raise RuntimeError(f\"首帧上传失败: {uj.get('message') or uj.get('msg') or str(uj)[:300]}\")\n    d = _box(uj)\n    name = d.get(\"fileName\") or d.get(\"download_url\")\n    if not name:\n        raise RuntimeError(f\"首帧上传未返回文件名: {str(uj)[:300]}\")\n    return name\n\n\nasync def generate(ctx, api):\n    dyn = ctx.get(\"dynamic_inputs\") or {}\n    api_key = ctx.get(\"api_key\") or \"\"\n    if not api_key and isinstance(api, dict) and callable(api.get(\"get_api_key\")):\n        api_key = api[\"get_api_key\"]()\n    api_key = str(api_key or \"\").strip()\n    if not api_key:\n        raise RuntimeError(\"缺少 RunningHub API Key（请在生成源配置里填入 Key 后重试）\")\n    headers = {\"Authorization\": f\"Bearer {api_key}\", \"Content-Type\": \"application/json\"}\n\n    task_id = str(ctx.get(\"task_id\") or dyn.get(\"task_id\") or \"\").strip()\n    prompt = str(ctx.get(\"prompt\") or \"\").strip()\n    if prompt.upper().startswith(\"QUERY:\"):\n        task_id, prompt = prompt.split(\":\", 1)[1].strip(), \"\"\n\n    async with httpx.AsyncClient(timeout=120) as client:\n        # —— 查询分支：单次秒回，不 sleep ——\n        if task_id and not prompt:\n            q = await client.post(QUERY_URL, headers=headers, json={\"taskId\": task_id})\n            if q.status_code != 200:\n                raise RuntimeError(f\"RunningHub 查询失败 HTTP {q.status_code}: {q.text[:300]}\")\n            qj = q.json() or {}\n            b = _box(qj)\n            status = str(b.get(\"status\") or qj.get(\"status\") or \"\").upper()\n            err_code = str(b.get(\"errorCode\") or qj.get(\"errorCode\") or \"\").strip()\n            if not status and err_code:\n                # 如 1004 任务不存在/已过期：空 status + errorCode，必须判终态，否则会被当成排队中空转到超时\n                raise RuntimeError(f\"任务失败({err_code}): {b.get('errorMessage') or qj.get('errorMessage') or ''}\")\n            if status in PENDING or not status:\n                return {\"video_url\": None, \"task_id\": task_id, \"status\": status or \"RUNNING\"}\n            if status in (\"SUCCESS\", \"SUCCEEDED\", \"COMPLETED\", \"FINISHED\"):\n                results = b.get(\"results\") or qj.get(\"results\") or []\n                fallback = \"\"\n                for it in results:\n                    if not isinstance(it, dict):\n                        continue\n                    url = str(it.get(\"url\") or it.get(\"fileUrl\") or it.get(\"outputUrl\") or \"\")\n                    ot = str(it.get(\"outputType\") or \"\").lower()\n                    if url and (ot in (\"mp4\", \"webm\", \"mov\") or \".mp4\" in url.lower()):\n                        return {\"video_url\": url, \"url\": url, \"task_id\": task_id, \"status\": \"SUCCESS\"}\n                    fallback = fallback or url\n                if fallback:\n                    return {\"video_url\": fallback, \"url\": fallback, \"task_id\": task_id, \"status\": \"SUCCESS\"}\n                raise RuntimeError(f\"任务成功但无结果URL: {str(qj)[:300]}\")\n            if status == \"CANCEL\":\n                status = \"CANCELLED\"\n            raise RuntimeError(f\"任务失败({status}): {b.get('errorCode') or ''} {b.get('errorMessage') or str(qj)[:300]}\")\n\n        # —— 提交分支：上传首帧 → nodeInfoList → 立即返回 task_id ——\n        if not prompt:\n            raise ValueError(\"RunningHub 源需要 prompt（或 QUERY:<taskId> 查询）\")\n        try:\n            duration = max(1, min(30, int(float(ctx.get(\"duration\") or dyn.get(\"duration\") or 5))))\n        except Exception:\n            duration = 5\n        ar_val = _norm_ar(ctx.get(\"aspect_ratio\") or dyn.get(\"aspect_ratio\") or \"9:16\")\n        first = ctx.get(\"first_frame\") or ctx.get(\"first_frame_url\") or dyn.get(\"first_frame\") or \"\"\n        node_info = [\n            {\"nodeId\": \"28\", \"fieldName\": \"prompt\", \"fieldValue\": prompt, \"description\": \"prompt\"},\n            {\"nodeId\": \"27\", \"fieldName\": \"value\", \"fieldValue\": str(duration), \"description\": \"value\"},\n            {\"nodeId\": \"29\", \"fieldName\": \"aspect_ratio\", \"fieldData\": AR_FIELDDATA,\n             \"fieldValue\": ar_val, \"description\": \"aspect_ratio\"},\n            {\"nodeId\": \"29\", \"fieldName\": \"megapixels\", \"fieldValue\": \"0.7000000000000001\",\n             \"description\": \"megapixels\"},\n        ]\n        if first:\n            rh_name = await _upload(client, api_key, first)\n            node_info.append({\"nodeId\": \"6\", \"fieldName\": \"image\", \"fieldValue\": rh_name, \"description\": \"image\"})\n        payload = {\n            \"nodeInfoList\": node_info,\n            \"instanceType\": str(ctx.get(\"instance_type\") or dyn.get(\"instance_type\") or \"default\"),\n            \"usePersonalQueue\": \"false\",\n        }\n        r = await client.post(RUN_URL, headers=headers, json=payload, timeout=60)\n        try:\n            rj = r.json() or {}\n        except Exception:\n            rj = {}\n        if r.status_code in (401, 403) or rj.get(\"code\") == 1602:\n            raise RuntimeError(f\"RunningHub 鉴权被拒 (HTTP {r.status_code} / code={rj.get('code')} / msg={rj.get('msg')})\")\n        if r.status_code != 200:\n            raise RuntimeError(f\"RunningHub 提交失败 HTTP {r.status_code}: {r.text[:300]}\")\n        b = _box(rj)\n        new_id = str(b.get(\"taskId\") or rj.get(\"taskId\") or \"\").strip()\n        if not new_id:\n            raise RuntimeError(f\"RunningHub 未返回 taskId: {str(rj)[:300]}\")\n        return {\"video_url\": None, \"task_id\": new_id, \"status\": \"SUBMITTED\"}\n# PARAMS_SCHEMA: {\"type\":\"object\",\"properties\":{\"duration\":{\"type\":\"integer\",\"title\":\"时长(秒)\",\"minimum\":1,\"maximum\":30,\"default\":5,\"x-category\":\"motion\",\"x-visibility\":\"basic\",\"x-agent\":\"auto\",\"x-priority\":20},\"aspect_ratio\":{\"type\":\"string\",\"title\":\"比例\",\"enum\":[\"9:16 (Portrait Widescreen)\",\"16:9 (Widescreen)\",\"1:1 (Square)\",\"3:4 (Portrait Standard)\",\"4:3 (Standard)\",\"2:3 (Portrait Photo)\",\"3:2 (Photo)\",\"21:9 (Ultrawide)\"],\"default\":\"9:16 (Portrait Widescreen)\",\"x-category\":\"layout\",\"x-visibility\":\"basic\",\"x-agent\":\"auto\",\"x-priority\":10},\"instance_type\":{\"type\":\"string\",\"title\":\"实例类型\",\"enum\":[\"default\",\"plus\",\"ultra\"],\"default\":\"default\",\"x-category\":\"advanced\",\"x-visibility\":\"advanced\",\"x-agent\":\"suggest\",\"x-priority\":30}}}\n"
   },
   {
     "id": "prov_e3a19229",
@@ -2817,6 +2864,103 @@
     "doc_url": null,
     "created_at": "2026-09-30T15:42:23.079665",
     "updated_at": "2026-09-30T15:42:23.079837",
+    "language": "python",
+    "code_entry": "generate",
+    "code_timeout": 1200,
+    "trusted": false,
+    "has_code": false,
+    "code": ""
+  },
+  {
+    "id": "comfyui_wf_b6dd2cda",
+    "name": "ComfyUI SDXL 快速生图 (NoobAI + DMD2)",
+    "display_name": "ComfyUI·SDXL 快速生图 (NoobAI + DMD2)",
+    "kind": "image",
+    "provider_type": "comfyui",
+    "supports_workflow": true,
+    "description": "从本机 ComfyUI 的 SDXL.json 导出（API 格式）：NoobAI-XL vPred + DMD2 4步 LoRA，6 步 / CFG 1.5，默认 768x1344 竖图",
+    "icon": "Workflow",
+    "scope": "global",
+    "project_id": null,
+    "builtin": false,
+    "enabled": true,
+    "models": [
+      "noobaiXLNAIXL_vPred10Version.safetensors"
+    ],
+    "default_model": "noobaiXLNAIXL_vPred10Version.safetensors",
+    "params_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "default_params": {},
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "description": "画面提示词",
+          "x-handle": "text",
+          "x-role": "prompt"
+        },
+        "reference_images": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          },
+          "description": "参考图/垫图",
+          "x-handle": "image",
+          "x-slot": "reference_images"
+        }
+      },
+      "required": [
+        "prompt"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "image_url": {
+          "type": "string",
+          "format": "uri",
+          "x-handle": "image"
+        }
+      },
+      "required": [
+        "image_url"
+      ]
+    },
+    "workflow_id": "wf_b6dd2cda",
+    "workflow_hash": "60216d14",
+    "workflow_exposed": [],
+    "schema_version": 4,
+    "capabilities": [],
+    "transport": {
+      "method": "POST",
+      "url": "",
+      "headers": {},
+      "query": {},
+      "timeout": 1200
+    },
+    "headers": {},
+    "custom_headers": {},
+    "auth": {
+      "type": "none",
+      "header_name": "Authorization",
+      "query_name": "api_key",
+      "key_env": null,
+      "prefix": "Bearer ",
+      "has_key": false
+    },
+    "health_check": {
+      "url": null,
+      "method": "GET",
+      "expect_status": 200,
+      "test_payload": null
+    },
+    "doc_url": null,
+    "created_at": "2026-09-30T17:38:59.392165",
+    "updated_at": "2026-09-30T17:38:59.393164",
     "language": "python",
     "code_entry": "generate",
     "code_timeout": 1200,

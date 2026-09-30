@@ -295,9 +295,11 @@ export function App() {
           onOpenProvider={() => setIsProviderOpen(true)}
         />
         <main className="flex-1 flex flex-col overflow-hidden relative min-w-0">
-          {/* 兜底边界：任何视图运行时崩溃都显示可读错误 + 重试，而不是黑屏/白屏 */}
-          <ErrorBoundary name="当前页面">
-{!pagesLoaded || restoring ? (
+          {/* 兜底边界：任何视图运行时崩溃都显示可读错误 + 重试，而不是黑屏/白屏。
+              key 绑定项目 id：切换项目即整页重建，画布/素材库等「挂载时拉数据」的视图才会加载新项目内容，
+              不会停留在上一个项目（同一页签下切项目不会自然卸载组件）。 */}
+          <ErrorBoundary name="当前页面" key={project?.id || 'no-project'}>
+          {!pagesLoaded || restoring ? (
             // 加载占位：功能页开关到手前不渲染任何页，避免闪出「已关闭」的页
             <div className="flex-1 flex items-center justify-center gap-2 text-xs text-gray-500">
               <Loader2 className="w-3.5 h-3.5 animate-spin" />

@@ -13,6 +13,9 @@
       "location": "",
       "time_of_day": "day",
       "atmosphere": "epic",
+      "image_prompt": "",
+      "props": [],
+      "ref_image_url": null,
       "shots": [
         {
           "id": "shot-1789033375844",
@@ -43,6 +46,8 @@
     }
   ],
   "bgm_name": "Epic_Battle_Orchestra.mp3",
+  "bgm_url": null,
+  "bgm_volume": 0.5,
   "created_at": "2026-09-10T05:13:09.495Z",
   "updated_at": "2026-09-10T05:13:09.512Z",
   "engine": null

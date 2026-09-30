@@ -79,9 +79,9 @@ export const ScriptImportView: React.FC<ScriptImportViewProps> = ({ isOpen, onCl
       // P0: 自动保存到当前项目
       if (saveToProject && activeProjectId) {
         const proj = useProjectStore.getState().project;
-        if (proj) {
-          try { await (await import('../services/api')).apiService.saveProjectContent(activeProjectId, proj); } catch {}
-        }
+        // 拆解结果自带一个新 UUID 作 id：改回当前项目 id 再 setProject（其内自动保存到该项目），
+        // 否则 activeProjectId 会被切到那个不存在的 UUID 上
+        if (proj) useProjectStore.getState().setProject({ ...proj, id: activeProjectId });
       }
       onClose();
     } catch (e: any) {

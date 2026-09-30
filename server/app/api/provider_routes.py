@@ -853,8 +853,8 @@ async def create_provider(req: ProviderCreateRequest):
             raise HTTPException(status_code=400, detail=f"Python 语法错误: {e}")
     data: Dict[str, Any] = req.model_dump(exclude={"api_key"})
     hdrs = req.headers if req.headers is not None else req.custom_headers
-    if hdrs is not None:
-        data["headers"] = hdrs
+    # 两者都没传时 model_dump 会给出 headers=None，而 ProviderDefinition.headers 要求 dict → 400
+    data["headers"] = hdrs if hdrs is not None else {}
     data["language"] = "javascript" if req.language == "js" else req.language
     data["provider_type"] = "code"
     if not data.get("id"):

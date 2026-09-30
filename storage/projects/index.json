@@ -121,8 +121,8 @@
     "aspect_ratio": "9:16",
     "status": "draft",
     "created_at": "2026-09-10T11:27:48.371937",
-    "updated_at": "2026-09-13T23:47:40.312506",
-    "last_opened_at": "2026-09-13T23:47:40.041229",
+    "updated_at": "2026-09-30T23:11:00.030062",
+    "last_opened_at": "2026-09-30T23:10:59.663592",
     "stats": {
       "shots": 1,
       "duration": 3.5,
@@ -206,6 +206,25 @@
     },
     "source": "blank",
     "description": "",
+    "engine": null
+  },
+  {
+    "id": "proj_7e528eff",
+    "title": "樱花回眸 · ComfyUI 生图 → RunningHub 生视频",
+    "cover_url": null,
+    "style_preset": "japanese_anime",
+    "aspect_ratio": "9:16",
+    "status": "draft",
+    "created_at": "2026-09-30T17:45:54.734039",
+    "updated_at": "2026-09-30T18:28:25.323341",
+    "last_opened_at": "2026-09-30T18:28:24.362869",
+    "stats": {
+      "shots": 0,
+      "duration": 0,
+      "characters": 0
+    },
+    "source": "blank",
+    "description": "工作流演示：本机 ComfyUI（SDXL NoobAI+DMD2）出首帧 → RunningHub AI App 图生视频",
     "engine": null
   }
 ]
