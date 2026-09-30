@@ -4,8 +4,7 @@
  */
 import React, { useState } from 'react';
 import {
-  Bot, Sparkles, ChevronDown, Check, Copy, Pencil, X,
-  Image as ImageIcon, Film, Music,
+  Sparkles, ChevronDown, Check, Copy, Pencil, X, Music,
 } from 'lucide-react';
 import { MarkdownText } from './MarkdownText';
 import { ArtifactCard, CapabilityProposalCard, ErrorCard } from './AgentCards';
@@ -21,21 +20,21 @@ const UserAttachment: React.FC<{ att: AgentAttachment }> = ({ att }) => {
   if (att.kind === 'image') {
     return (
       <a href={url} target="_blank" rel="noreferrer" title={att.name}
-        className="block w-20 h-20 rounded-xl overflow-hidden border border-white/20 hover:border-white/50 transition-colors bg-black/20">
+        className="block w-20 h-20 rounded-xl overflow-hidden border border-black/10 dark:border-white/20 hover:border-brand transition-colors bg-black/[.06] dark:bg-black/20">
         <img src={url} alt={att.name} className="w-full h-full object-cover" loading="lazy" />
       </a>
     );
   }
   if (att.kind === 'video') {
     return (
-      <div className="rounded-xl overflow-hidden border border-white/20 bg-black/20" title={att.name}>
+      <div className="rounded-xl overflow-hidden border border-black/10 dark:border-white/20 bg-black/[.06] dark:bg-black/20" title={att.name}>
         <video src={url} controls preload="metadata" className="w-44 max-h-28" />
       </div>
     );
   }
   return (
-    <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-black/20 border border-white/20 max-w-[220px]" title={att.name}>
-      <Music className="w-3 h-3 shrink-0 text-white/70" />
+    <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-black/[.06] dark:bg-black/20 border border-black/10 dark:border-white/20 max-w-[220px]" title={att.name}>
+      <Music className="w-3 h-3 shrink-0 [color:var(--color-text-muted)]" />
       <audio src={url} controls preload="none" className="h-7" />
     </div>
   );
@@ -115,34 +114,21 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
         return (
           <div key={m.id} className={`flex ${m.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div
-              className={`${compact ? 'max-w-[92%] p-3 rounded-2xl' : `max-w-[85%] p-4 rounded-3xl ${m.sender === 'user' ? 'rounded-br-lg' : 'rounded-bl-lg'}`} leading-relaxed text-xs relative group/msg ${
-                m.sender === 'user'
-                  ? 'bg-brand text-white shadow-lg shadow-brand/20'
-                  : 'bg-white/55 dark:bg-white/[.05] [color:var(--color-text-main)]'
+              className={`relative group/msg leading-[1.7] ${
+                compact
+                  ? `max-w-[92%] p-3 rounded-2xl text-[13px] ${isAgent ? 'bg-white/55 dark:bg-white/[.05] [color:var(--color-text-main)]' : 'bg-brand/15 border border-brand/25 [color:var(--color-text-main)]'}`
+                  : isAgent
+                    // 页面版：助手回复去气泡化——通栏正文直接铺在背景上（ChatGPT/Claude 式），
+                    // 只有用户的输入保留一个浅色块，让「谁说的」靠位置和底色就能区分。
+                    ? 'w-full min-w-0 text-sm [color:var(--color-text-main)]'
+                    : 'max-w-[85%] px-3.5 py-2.5 rounded-2xl bg-brand/15 border border-brand/25 text-sm [color:var(--color-text-main)]'
               }`}
             >
-              {/* 身份标只给 Agent 侧：用户消息靠位置（右）+ 实色气泡已经足够区分。
-                  用户侧连"只放时间"的一行也去掉 —— 那一行没有身份信息、只剩一个靠右的
-                  小字，视觉上就是气泡顶部一条空行（用户反馈）。 */}
-              {!compact && m.sender === 'agent' && (
-                <div className="flex items-center gap-1.5 mb-1.5 text-[10px] [color:var(--color-text-main)]">
-                  <Bot className="w-3 h-3 text-brand-light" />
-                  <span>Agent</span>
-                  {m.mode && (
-                    <span className={`px-1.5 py-px rounded font-bold ${m.mode === 'execute' ? 'bg-brand/20 text-brand-light' : 'bg-accent-green/20 text-accent-green'}`}>
-                      {m.mode === 'execute' ? '执行' : '问答'}
-                    </span>
-                  )}
-                  <span className="ml-auto">{m.time}</span>
-                </div>
-              )}
-
-              {/* 用户侧不占身份行后（见上），编辑入口改为气泡内悬浮按钮：既保留上游「编辑重发」能力，
-                  又不会像原来那样在用户气泡顶部多出一条只有时间的空行。 */}
+              {/* 用户消息编辑重发入口：气泡内悬浮按钮（浮在右上角外侧，不占气泡内空间） */}
               {!compact && m.sender === 'user' && !isRunning && (
                 <button
                   onClick={(e) => startEdit(e, m.id, m.text)}
-                  className="absolute top-1.5 right-1.5 p-1 rounded-md opacity-0 group-hover/msg:opacity-100 transition-opacity bg-black/25 hover:bg-black/40 text-white/80 hover:text-white"
+                  className="absolute -top-2.5 -right-2 p-1 rounded-md opacity-0 group-hover/msg:opacity-100 transition-opacity bg-surface border border-border [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] shadow-sm"
                   title="编辑并重新发送"
                 >
                   <Pencil className="w-3 h-3" />
@@ -152,16 +138,16 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
               {compact && m.text && (
                 <button
                   onClick={(e) => copyMsg(e, m.id, m.text)}
-                  className="absolute top-1.5 right-1.5 p-1 rounded-md opacity-0 group-hover/msg:opacity-100 transition-opacity bg-white/75 dark:bg-black/50 hover:bg-white/75 dark:bg-black/50 text-white/70 hover:text-white"
+                  className="absolute top-1.5 right-1.5 p-1 rounded-md opacity-0 group-hover/msg:opacity-100 transition-opacity bg-surface border border-border [color:var(--color-text-muted)] hover:[color:var(--color-text-main)]"
                   title="复制本条消息"
                 >
-                  {copiedId === m.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                  {copiedId === m.id ? <Check className="w-3 h-3 text-emerald-500 dark:text-emerald-400" /> : <Copy className="w-3 h-3" />}
                 </button>
               )}
               {compact && m.sender === 'user' && !isRunning && (
                 <button
                   onClick={(e) => startEdit(e, m.id, m.text)}
-                  className="absolute top-1.5 right-8 p-1 rounded-md opacity-0 group-hover/msg:opacity-100 transition-opacity bg-white/75 dark:bg-black/50 text-white/70 hover:text-white"
+                  className="absolute top-1.5 right-8 p-1 rounded-md opacity-0 group-hover/msg:opacity-100 transition-opacity bg-surface border border-border [color:var(--color-text-muted)] hover:[color:var(--color-text-main)]"
                   title="编辑并重新发送"
                 >
                   <Pencil className="w-3 h-3" />
@@ -203,7 +189,8 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
               )}
 
               {isAgent ? (
-                <MarkdownText text={m.text || (isPlaceholder ? '思考中…' : '')} />
+                // 阅读行宽收在 ~68ch（与容器宽度解耦）：长回复不会一行拉到屏幕边缘
+                <MarkdownText text={m.text || (isPlaceholder ? '思考中…' : '')} className={compact ? undefined : 'max-w-[68ch]'} />
               ) : isEditing ? (
                 <div className="space-y-1.5 min-w-[200px]" onClick={(e) => e.stopPropagation()}>
                   <textarea
@@ -216,14 +203,14 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
                   <div className="flex gap-1.5 justify-end">
                     <button
                       onClick={() => setEditingId(null)}
-                      className="px-2.5 py-1 rounded-lg border border-white/20 text-[11px] [color:var(--color-text-main)] flex items-center gap-1"
+                      className="px-2.5 py-1 rounded-lg border border-brand/40 text-[11px] [color:var(--color-text-main)] flex items-center gap-1"
                     >
                       <X className="w-3 h-3" />取消
                     </button>
                     <button
                       onClick={submitEdit}
                       disabled={!editText.trim()}
-                      className="px-2.5 py-1 rounded-lg bg-white text-brand text-[11px] font-bold disabled:opacity-40"
+                      className="px-2.5 py-1 rounded-lg bg-brand text-white text-[11px] font-bold disabled:opacity-40"
                     >
                       修改并重发
                     </button>
@@ -235,7 +222,7 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
                   <span className="opacity-70">…</span>
                   <button
                     onClick={(e) => { e.stopPropagation(); setExpandedLong((prev) => ({ ...prev, [m.id]: true })); }}
-                    className="ml-1.5 px-1.5 py-0.5 rounded-md bg-white/20 hover:bg-white/30 text-[10px] font-bold align-middle"
+                    className="ml-1.5 px-1.5 py-0.5 rounded-md bg-brand/15 hover:bg-brand/25 text-[10px] font-bold align-middle"
                     title="展开全文"
                   >
                     展开全文（{m.text.length.toLocaleString()} 字）
@@ -247,7 +234,7 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
                   {isLongUser && (
                     <button
                       onClick={(e) => { e.stopPropagation(); setExpandedLong((prev) => { const n = { ...prev }; delete n[m.id]; return n; }); }}
-                      className="ml-1.5 px-1.5 py-0.5 rounded-md bg-white/20 hover:bg-white/30 text-[10px] font-bold align-middle"
+                      className="ml-1.5 px-1.5 py-0.5 rounded-md bg-brand/15 hover:bg-brand/25 text-[10px] font-bold align-middle"
                       title="收起长文"
                     >
                       收起
@@ -266,7 +253,7 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
               )}
               {isAgent && m.planMode && m.text && !m.isThinkingStreaming && (
                 m.planExecuted ? (
-                  <div className="mt-1.5 text-[10px] text-emerald-300">✓ 计划已批准，正在执行…</div>
+                  <div className="mt-1.5 text-[11px] text-emerald-600 dark:text-emerald-300">✓ 计划已批准，正在执行…</div>
                 ) : (
                   <div className="mt-2 flex items-center gap-2 flex-wrap">
                     <button

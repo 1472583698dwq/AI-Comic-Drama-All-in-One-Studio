@@ -19,15 +19,15 @@ export interface RoleMeta {
 }
 
 export const ROLE_META: Record<string, RoleMeta> = {
-  director: { label: '总导演', Icon: Bot, cls: 'text-brand-light border-brand/40 bg-brand/10' },
-  screenwriter: { label: '编剧', Icon: PenLine, cls: 'text-sky-300 border-sky-500/30 bg-sky-500/10' },
-  character_designer: { label: '角色定妆', Icon: Palette, cls: 'text-pink-300 border-pink-500/30 bg-pink-500/10' },
-  storyboard_artist: { label: '分镜画师', Icon: ImageIcon, cls: 'text-violet-300 border-violet-500/30 bg-violet-500/10' },
-  video_operator: { label: '动态影像', Icon: Film, cls: 'text-amber-300 border-amber-500/30 bg-amber-500/10' },
-  voice_operator: { label: '配音', Icon: Mic, cls: 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10' },
-  editor: { label: '剪辑', Icon: Scissors, cls: 'text-orange-300 border-orange-500/30 bg-orange-500/10' },
-  qa_reviewer: { label: '质检', Icon: SearchCheck, cls: 'text-cyan-300 border-cyan-500/30 bg-cyan-500/10' },
-  generalist: { label: '通用', Icon: Users, cls: 'text-gray-300 border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06]' },
+  director: { label: '总导演', Icon: Bot, cls: 'text-brand dark:text-brand-light border-brand/40 bg-brand/10' },
+  screenwriter: { label: '编剧', Icon: PenLine, cls: 'text-sky-600 dark:text-sky-300 border-sky-500/30 bg-sky-500/10' },
+  character_designer: { label: '角色定妆', Icon: Palette, cls: 'text-pink-600 dark:text-pink-300 border-pink-500/30 bg-pink-500/10' },
+  storyboard_artist: { label: '分镜画师', Icon: ImageIcon, cls: 'text-violet-600 dark:text-violet-300 border-violet-500/30 bg-violet-500/10' },
+  video_operator: { label: '动态影像', Icon: Film, cls: 'text-amber-600 dark:text-amber-300 border-amber-500/30 bg-amber-500/10' },
+  voice_operator: { label: '配音', Icon: Mic, cls: 'text-emerald-600 dark:text-emerald-300 border-emerald-500/30 bg-emerald-500/10' },
+  editor: { label: '剪辑', Icon: Scissors, cls: 'text-orange-600 dark:text-orange-300 border-orange-500/30 bg-orange-500/10' },
+  qa_reviewer: { label: '质检', Icon: SearchCheck, cls: 'text-cyan-600 dark:text-cyan-300 border-cyan-500/30 bg-cyan-500/10' },
+  generalist: { label: '通用', Icon: Users, cls: '[color:var(--color-text-main)] border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06]' },
 };
 
 /** 后端 icon 名 → lucide 组件（白名单，未知回退 Bot） */
@@ -40,15 +40,15 @@ const ICON_MAP: Record<string, typeof Bot> = {
 
 /** 后端 color 名 → chip 样式（白名单，未知回退紫） */
 const COLOR_MAP: Record<string, string> = {
-  purple: 'text-brand-light border-brand/40 bg-brand/10',
-  blue: 'text-sky-300 border-sky-500/30 bg-sky-500/10',
-  green: 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10',
-  pink: 'text-pink-300 border-pink-500/30 bg-pink-500/10',
-  amber: 'text-amber-300 border-amber-500/30 bg-amber-500/10',
-  cyan: 'text-cyan-300 border-cyan-500/30 bg-cyan-500/10',
-  orange: 'text-orange-300 border-orange-500/30 bg-orange-500/10',
-  red: 'text-red-300 border-red-500/30 bg-red-500/10',
-  gray: 'text-gray-300 border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06]',
+  purple: 'text-brand dark:text-brand-light border-brand/40 bg-brand/10',
+  blue: 'text-sky-600 dark:text-sky-300 border-sky-500/30 bg-sky-500/10',
+  green: 'text-emerald-600 dark:text-emerald-300 border-emerald-500/30 bg-emerald-500/10',
+  pink: 'text-pink-600 dark:text-pink-300 border-pink-500/30 bg-pink-500/10',
+  amber: 'text-amber-600 dark:text-amber-300 border-amber-500/30 bg-amber-500/10',
+  cyan: 'text-cyan-600 dark:text-cyan-300 border-cyan-500/30 bg-cyan-500/10',
+  orange: 'text-orange-600 dark:text-orange-300 border-orange-500/30 bg-orange-500/10',
+  red: 'text-red-600 dark:text-red-300 border-red-500/30 bg-red-500/10',
+  gray: '[color:var(--color-text-main)] border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06]',
 };
 
 let _dynamic: Record<string, RoleMeta> = {};

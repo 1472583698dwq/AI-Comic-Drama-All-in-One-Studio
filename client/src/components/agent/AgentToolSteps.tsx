@@ -103,25 +103,25 @@ const ApprovalInline: React.FC<{
   const remain = createdAt ? Math.max(0, APPROVAL_TIMEOUT_S - Math.floor((now - createdAt) / 1000)) : null;
   return (
     <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-2">
-      <div className="text-[10px] font-bold text-amber-300 flex items-center gap-1">
+      <div className="text-[10px] font-bold text-amber-600 dark:text-amber-300 flex items-center gap-1">
         <ShieldAlert className="w-3 h-3" />
         <span>敏感操作待确认 · <span className="font-mono">{tool}</span></span>
         {remain !== null && (
-          <span className={`ml-auto font-mono font-normal ${remain <= 15 ? 'text-red-300' : 'text-gray-400'}`}>
+          <span className={`ml-auto font-mono font-normal ${remain <= 15 ? 'text-red-500 dark:text-red-300' : '[color:var(--color-text-secondary)]'}`}>
             {remain > 0 ? `${remain}s 后自动拒绝` : '已超时，后端自动拒绝'}
           </span>
         )}
       </div>
       {Object.keys(args || {}).length > 0 && (
-        <pre className="mt-1 text-[10px] font-mono text-gray-400 bg-white/60 dark:bg-black/35 border border-white/70 dark:border-white/12 rounded-lg p-1.5 max-h-28 overflow-auto custom-scrollbar whitespace-pre-wrap break-all">
+        <pre className="mt-1 text-[10px] font-mono [color:var(--color-text-secondary)] bg-black/[.04] dark:bg-black/35 border border-black/5 dark:border-white/12 rounded-lg p-1.5 max-h-28 overflow-auto custom-scrollbar whitespace-pre-wrap break-all">
           {JSON.stringify(args, null, 1).slice(0, 2000)}
         </pre>
       )}
       <div className="mt-1.5 flex gap-1.5">
         <button onClick={() => onApprove(aid, true, always)} className="flex-1 py-1 rounded-lg bg-amber-500 text-black text-[11px] font-bold">允许</button>
-        <button onClick={() => onApprove(aid, false, false)} className="flex-1 py-1 rounded-lg border border-white/70 dark:border-white/12 text-[11px] text-gray-300">拒绝</button>
+        <button onClick={() => onApprove(aid, false, false)} className="flex-1 py-1 rounded-lg border border-white/70 dark:border-white/12 text-[11px] [color:var(--color-text-main)]">拒绝</button>
       </div>
-      <label className="mt-1.5 flex items-center gap-1.5 text-[10px] text-gray-400 cursor-pointer select-none">
+      <label className="mt-1.5 flex items-center gap-1.5 text-[10px] [color:var(--color-text-secondary)] cursor-pointer select-none">
         <input type="checkbox" checked={always} onChange={(e) => setAlways(e.target.checked)} className="accent-amber-500" />
         本会话始终允许此工具（不再打扰）
       </label>
@@ -147,11 +147,11 @@ const ToolStepRow: React.FC<{
         {s.status === 'completed' ? (
           <CheckCircle2 className="w-3.5 h-3.5 text-accent-green shrink-0" />
         ) : s.status === 'error' ? (
-          <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />
+          <XCircle className="w-3.5 h-3.5 text-red-500 dark:text-red-400 shrink-0" />
         ) : (
-          <RefreshCw className="w-3.5 h-3.5 text-amber-400 animate-spin shrink-0" />
+          <RefreshCw className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 animate-spin shrink-0" />
         )}
-        <span className="font-mono text-gray-200 shrink-0 max-w-[32%] truncate" title={s.name}>
+        <span className="font-mono [color:var(--color-text-main)] shrink-0 max-w-[32%] truncate" title={s.name}>
           {indexLabel ? `${s.name} #${indexLabel}` : s.name}
         </span>
         {s.name === 'subagent_run' && (s.args as any)?.agent && (
@@ -175,33 +175,33 @@ const ToolStepRow: React.FC<{
           </span>
         )}
         {preview ? (
-          <span className="text-gray-500 truncate flex-1" title={preview}>{preview}</span>
+          <span className="[color:var(--color-text-muted)] truncate flex-1" title={preview}>{preview}</span>
         ) : (
           <span className="flex-1" />
         )}
         {s.elapsedMs !== undefined && (
-          <span className="text-[10px] text-gray-500 font-mono shrink-0">{fmtElapsed(s.elapsedMs)}</span>
+          <span className="text-[10px] [color:var(--color-text-muted)] font-mono shrink-0">{fmtElapsed(s.elapsedMs)}</span>
         )}
         {s.status === 'executing' && !approvalAid && (
-          <span className="text-[10px] text-amber-300 shrink-0 animate-pulse truncate max-w-[220px]" title={s.note || '执行中…'}>{s.note || '执行中…'}</span>
+          <span className="text-[10px] text-amber-600 dark:text-amber-300 shrink-0 animate-pulse truncate max-w-[220px]" title={s.note || '执行中…'}>{s.note || '执行中…'}</span>
         )}
         {approvalAid && (
-          <span className="text-[10px] font-bold text-amber-300 shrink-0">待确认</span>
+          <span className="text-[10px] font-bold text-amber-600 dark:text-amber-300 shrink-0">待确认</span>
         )}
-        <ChevronDown className={`w-3 h-3 text-gray-500 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        <ChevronDown className={`w-3 h-3 [color:var(--color-text-muted)] shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </button>
       {isOpen && (
         <div className="mt-1.5 ml-5 space-y-1.5">
           {s.args && Object.keys(s.args).length > 0 && (
-            <pre className="text-[10px] font-mono text-gray-400 bg-white/60 dark:bg-black/35 border border-white/70 dark:border-white/12 rounded-lg p-1.5 max-h-32 overflow-auto custom-scrollbar whitespace-pre-wrap break-all">
+            <pre className="text-[10px] font-mono [color:var(--color-text-secondary)] bg-black/[.04] dark:bg-black/35 border border-black/5 dark:border-white/12 rounded-lg p-1.5 max-h-32 overflow-auto custom-scrollbar whitespace-pre-wrap break-all">
               {JSON.stringify(s.args, null, 1).slice(0, 3000)}
             </pre>
           )}
           {s.status === 'error' && s.error && (
-            <div className="text-[10px] text-red-400 break-all">{String(s.error).slice(0, 600)}</div>
+            <div className="text-[10px] text-red-500 dark:text-red-400 break-all">{String(s.error).slice(0, 600)}</div>
           )}
           {s.status === 'completed' && s.result !== undefined && resultSummary(s.result) && (
-            <div className="text-[10px] text-gray-500 break-all">{resultSummary(s.result)}</div>
+            <div className="text-[10px] [color:var(--color-text-muted)] break-all">{resultSummary(s.result)}</div>
           )}
           {approvalAid && approvalInfo && (
             <ApprovalInline
@@ -246,17 +246,17 @@ export const AgentToolSteps: React.FC<{
     <div className="mt-2 rounded-xl border border-white/70 dark:border-white/12 overflow-hidden">
       <button
         onClick={() => setExpanded((v) => !v)}
-        className="w-full px-2.5 py-1.5 flex items-center gap-1.5 text-[10px] font-bold text-gray-300 hover:bg-white/5"
+        className="w-full px-2.5 py-1.5 flex items-center gap-1.5 text-[10px] font-bold [color:var(--color-text-main)] hover:bg-black/[.03] dark:hover:bg-white/5"
       >
         <Wrench className="w-3 h-3 text-accent-orange" />
         <span>工具步骤 {done}/{steps.length}</span>
         {groups.length < steps.length && (
-          <span className="text-[9px] font-normal text-gray-500">（已合并 {groups.length} 组）</span>
+          <span className="text-[9px] font-normal [color:var(--color-text-muted)]">（已合并 {groups.length} 组）</span>
         )}
         <ChevronDown className={`w-3 h-3 ml-auto transition-transform ${expanded ? 'rotate-180' : ''}`} />
       </button>
       {expanded && (
-        <div className="border-t border-white/70 dark:border-white/12 divide-y divide-white/5">
+        <div className="border-t border-white/70 dark:border-white/12 divide-y divide-black/5 dark:divide-white/5">
           {groups.map((g, gi) => {
             if (g.steps.length === 1) {
               const s = g.steps[0];
@@ -281,27 +281,27 @@ export const AgentToolSteps: React.FC<{
               <div key={gKey}>
                 <button
                   onClick={() => setOpenGroups((p) => ({ ...p, [gKey]: !gOpen }))}
-                  className="w-full px-2.5 py-1.5 flex items-center gap-2 text-[11px] text-left bg-white/[0.02]"
+                  className="w-full px-2.5 py-1.5 flex items-center gap-2 text-[11px] text-left bg-black/[.02] dark:bg-white/[0.02]"
                 >
                   {gErr > 0 ? (
-                    <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />
+                    <XCircle className="w-3.5 h-3.5 text-red-500 dark:text-red-400 shrink-0" />
                   ) : gDone === g.steps.length ? (
                     <CheckCircle2 className="w-3.5 h-3.5 text-accent-green shrink-0" />
                   ) : (
-                    <RefreshCw className="w-3.5 h-3.5 text-amber-400 animate-spin shrink-0" />
+                    <RefreshCw className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 animate-spin shrink-0" />
                   )}
-                  <span className="font-mono text-gray-200 shrink-0 truncate">{g.name}</span>
-                  <span className="text-[10px] text-gray-400 shrink-0">× {g.steps.length}</span>
-                  <span className="text-[10px] text-gray-500 flex-1 truncate">
+                  <span className="font-mono [color:var(--color-text-main)] shrink-0 truncate">{g.name}</span>
+                  <span className="text-[10px] [color:var(--color-text-secondary)] shrink-0">× {g.steps.length}</span>
+                  <span className="text-[10px] [color:var(--color-text-muted)] flex-1 truncate">
                     {gDone}/{g.steps.length} 完成{gErr > 0 ? ` · ${gErr} 失败` : ''}
                   </span>
                   {totalMs > 0 && (
-                    <span className="text-[10px] text-gray-500 font-mono shrink-0">{fmtElapsed(totalMs)}</span>
+                    <span className="text-[10px] [color:var(--color-text-muted)] font-mono shrink-0">{fmtElapsed(totalMs)}</span>
                   )}
-                  <ChevronDown className={`w-3 h-3 text-gray-500 shrink-0 transition-transform ${gOpen ? 'rotate-180' : ''}`} />
+                  <ChevronDown className={`w-3 h-3 [color:var(--color-text-muted)] shrink-0 transition-transform ${gOpen ? 'rotate-180' : ''}`} />
                 </button>
                 {gOpen && (
-                  <div className="border-t border-white/5 divide-y divide-white/5 bg-black/10">
+                  <div className="border-t border-black/5 dark:border-white/5 divide-y divide-black/5 dark:divide-white/5 bg-black/[.02] dark:bg-black/10">
                     {g.steps.map((s, si) => {
                       const aid = s.status === 'executing' ? pendingFor(s.name) : undefined;
                       return (
@@ -343,11 +343,11 @@ export const AgentTodoPanel: React.FC<{ todo?: AgentTodoItem[] }> = ({ todo }) =
             {t.status === 'completed' ? (
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-px" />
             ) : t.status === 'in_progress' ? (
-              <Loader2 className="w-3.5 h-3.5 text-amber-300 animate-spin shrink-0 mt-px" />
+              <Loader2 className="w-3.5 h-3.5 text-amber-600 dark:text-amber-300 animate-spin shrink-0 mt-px" />
             ) : (
-              <Circle className="w-3.5 h-3.5 text-gray-500 shrink-0 mt-px" />
+              <Circle className="w-3.5 h-3.5 [color:var(--color-text-muted)] shrink-0 mt-px" />
             )}
-            <span className={t.status === 'completed' ? 'text-gray-500 line-through' : 'text-gray-200'}>{t.content}</span>
+            <span className={t.status === 'completed' ? '[color:var(--color-text-muted)] line-through' : '[color:var(--color-text-main)]'}>{t.content}</span>
           </div>
         ))}
       </div>

@@ -62,7 +62,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
             <History className="w-3.5 h-3.5" />
           </div>
           <div className="min-w-0">
-            <div className="text-xs font-bold text-white truncate flex items-center gap-1.5">
+            <div className="text-xs font-bold [color:var(--color-text-main)] truncate flex items-center gap-1.5">
               <span>项目会话</span>
               <span className="text-[9px] px-1 py-0.2 rounded bg-brand/20 text-brand font-mono">隔离</span>
             </div>
@@ -115,7 +115,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                 onClick={() => onSelect(s.id)}
                 className={`group relative p-2.5 rounded-2xl transition-colors cursor-pointer flex flex-col gap-1 ${
                   isActive
-                    ? 'bg-brand/15 text-white'
+                    ? 'bg-brand/15 [color:var(--color-text-main)]'
                     : 'hover:bg-white/65 dark:bg-black/40 [color:var(--color-text-main)]'
                 }`}
               >
@@ -151,7 +151,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
       <div className="p-2.5 flex items-center justify-between text-[10px] [color:var(--color-text-main)] shrink-0">
         <span className="flex items-center gap-1 [color:var(--color-text-main)]">
-          <History className="w-3 h-3 text-emerald-400" />
+          <History className="w-3 h-3 text-emerald-500 dark:text-emerald-400" />
           <span>本工程专属持久化</span>
         </span>
         <span className="font-mono">{sessions.length}个会话</span>

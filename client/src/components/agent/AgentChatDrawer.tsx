@@ -215,7 +215,7 @@ export const AgentChatDrawer: React.FC = () => {
           className={`group flex items-center space-x-2 px-3.5 py-2.5 rounded-full backdrop-blur-xl border transition-all shadow-xl cursor-grab active:cursor-grabbing ${
             isOpen
               ? 'bg-brand text-white border-brand-glow shadow-brand/40 ring-2 ring-brand/50'
-              : 'bg-white/80 dark:bg-black/55 hover:bg-white/70 dark:hover:bg-white/[.09] border-white/70 dark:border-white/12 hover:border-brand/60 text-white shadow-black/40 hover:scale-105'
+              : 'bg-white/80 dark:bg-black/55 hover:bg-white/70 dark:hover:bg-white/[.09] border-white/70 dark:border-white/12 hover:border-brand/60 [color:var(--color-text-main)] shadow-black/40 hover:scale-105'
           }`}
           title="点击展开/收起导演 Agent，按住可任意拖拽位置"
         >
@@ -326,14 +326,14 @@ export const AgentChatDrawer: React.FC = () => {
 
           {pendingList.length > 0 && (
             <div className="px-3 py-2 border-t border-amber-500/30 bg-amber-500/5 space-y-1.5 shrink-0">
-              <div className="text-[10px] font-bold text-amber-300 flex items-center gap-1">
+              <div className="text-[10px] font-bold text-amber-600 dark:text-amber-300 flex items-center gap-1">
                 <ShieldAlert className="w-3 h-3" />待确认 {pendingList.length}
               </div>
               {pendingList.map(([aid, v]) => (
                 <div key={aid} className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-mono text-white truncate flex-1">{v.tool_name}</span>
+                  <span className="text-[10px] font-mono [color:var(--color-text-main)] truncate flex-1">{v.tool_name}</span>
                   <button onClick={() => approve(aid, true)} className="px-2 py-0.5 rounded-md bg-amber-500 text-black text-[10px] font-bold">允许</button>
-                  <button onClick={() => approve(aid, false)} className="px-2 py-0.5 rounded-md border border-white/70 dark:border-white/12 text-[10px] text-gray-300">拒绝</button>
+                  <button onClick={() => approve(aid, false)} className="px-2 py-0.5 rounded-md border border-white/70 dark:border-white/12 text-[10px] [color:var(--color-text-main)]">拒绝</button>
                 </div>
               ))}
             </div>

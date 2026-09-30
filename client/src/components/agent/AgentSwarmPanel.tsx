@@ -14,10 +14,10 @@ interface SwarmGroup {
 }
 
 const StatusIcon: React.FC<{ status: string; className?: string }> = ({ status, className }) => {
-  if (status === 'success') return <CheckCircle2 className={`w-3.5 h-3.5 text-emerald-400 shrink-0 ${className || ''}`} />;
-  if (status === 'error' || status === 'cancelled') return <XCircle className={`w-3.5 h-3.5 text-red-400 shrink-0 ${className || ''}`} />;
-  if (status === 'queued' || status === 'launched') return <Clock className={`w-3.5 h-3.5 text-gray-400 shrink-0 ${className || ''}`} />;
-  return <Loader2 className={`w-3.5 h-3.5 text-amber-300 animate-spin shrink-0 ${className || ''}`} />;
+  if (status === 'success') return <CheckCircle2 className={`w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0 ${className || ''}`} />;
+  if (status === 'error' || status === 'cancelled') return <XCircle className={`w-3.5 h-3.5 text-red-500 dark:text-red-400 shrink-0 ${className || ''}`} />;
+  if (status === 'queued' || status === 'launched') return <Clock className={`w-3.5 h-3.5 [color:var(--color-text-secondary)] shrink-0 ${className || ''}`} />;
+  return <Loader2 className={`w-3.5 h-3.5 text-amber-600 dark:text-amber-300 animate-spin shrink-0 ${className || ''}`} />;
 };
 
 export const AgentSwarmPanel: React.FC<{
@@ -58,15 +58,15 @@ export const AgentSwarmPanel: React.FC<{
     <div className={`${compact ? 'mx-2 mt-1.5' : 'mx-4 mt-2'} rounded-xl border border-white/70 dark:border-white/12 bg-white/40 dark:bg-white/[.03] overflow-hidden shrink-0`}>
       <button
         onClick={() => setCollapsed((v) => !v)}
-        className={`w-full px-3 ${compact ? 'py-1' : 'py-1.5'} flex items-center gap-2 text-[10px] font-bold text-gray-300 hover:bg-white/5`}
+        className={`w-full px-3 ${compact ? 'py-1' : 'py-1.5'} flex items-center gap-2 text-[10px] font-bold [color:var(--color-text-main)] hover:bg-black/[.03] dark:hover:bg-white/10`}
         title="子代理集群（点击折叠/展开）"
       >
         <Bot className={`${compact ? 'w-3 h-3' : 'w-3.5 h-3.5'} text-accent-purple`} />
         <span>子代理集群</span>
-        <span className="font-normal text-gray-500">{list.length} 个</span>
-        {running > 0 && <span className="text-amber-300 animate-pulse">{running} 运行中</span>}
-        {done > 0 && <span className="text-emerald-400">{done} 完成</span>}
-        {failed > 0 && <span className="text-red-400">{failed} 失败</span>}
+        <span className="font-normal [color:var(--color-text-muted)]">{list.length} 个</span>
+        {running > 0 && <span className="text-amber-600 dark:text-amber-300 animate-pulse">{running} 运行中</span>}
+        {done > 0 && <span className="text-emerald-600 dark:text-emerald-400">{done} 完成</span>}
+        {failed > 0 && <span className="text-red-500 dark:text-red-400">{failed} 失败</span>}
         <ChevronDown className={`w-3 h-3 ml-auto transition-transform ${collapsed ? '' : 'rotate-180'}`} />
       </button>
       {!collapsed && (
@@ -79,17 +79,17 @@ export const AgentSwarmPanel: React.FC<{
             const rows: React.ReactNode[] = [];
             if (isBatch) {
               rows.push(
-                <div key={`g${gi}`} className="flex items-center gap-1.5 pt-1 text-[10px] text-gray-400">
+                <div key={`g${gi}`} className="flex items-center gap-1.5 pt-1 text-[10px] [color:var(--color-text-secondary)]">
                   <span className="font-bold">批次 ×{g.items.length}</span>
-                  <span className="text-gray-500">{gDone}/{g.items.length} 完成{gFail > 0 ? ` · ${gFail} 失败` : ''}</span>
-                  <span className="flex-1 h-px bg-white/5" />
+                  <span className="[color:var(--color-text-muted)]">{gDone}/{g.items.length} 完成{gFail > 0 ? ` · ${gFail} 失败` : ''}</span>
+                  <span className="flex-1 h-px bg-white/5 dark:bg-white/10" />
                 </div>,
               );
             }
             for (const s of g.items) {
               if (rendered >= maxRows) {
                 rows.push(
-                  <div key="more" className="text-[10px] text-gray-500 pl-1">…还有 {list.length - rendered} 个（点击列表查看）</div>,
+                  <div key="more" className="text-[10px] [color:var(--color-text-muted)] pl-1">…还有 {list.length - rendered} 个（点击列表查看）</div>,
                 );
                 break;
               }
@@ -103,13 +103,13 @@ export const AgentSwarmPanel: React.FC<{
                     <meta.Icon className="w-3 h-3" />
                     {meta.label}
                   </span>
-                  <span className="text-gray-400 truncate flex-1" title={s.task}>{s.task}</span>
+                  <span className="[color:var(--color-text-secondary)] truncate flex-1" title={s.task}>{s.task}</span>
                   {s.status === 'running' && s.tool && (
-                    <span className="text-gray-500 font-mono shrink-0 max-w-[110px] truncate" title={s.tool}>{s.tool}</span>
+                    <span className="[color:var(--color-text-muted)] font-mono shrink-0 max-w-[110px] truncate" title={s.tool}>{s.tool}</span>
                   )}
-                  {elapsed > 0 && <span className="text-gray-500 font-mono shrink-0">{fmtElapsed(elapsed)}</span>}
+                  {elapsed > 0 && <span className="[color:var(--color-text-muted)] font-mono shrink-0">{fmtElapsed(elapsed)}</span>}
                   {s.status === 'error' && s.error && (
-                    <span className="text-red-400/80 truncate max-w-[160px] shrink-0" title={s.error}>{s.error}</span>
+                    <span className="text-red-500 dark:text-red-400/80 truncate max-w-[160px] shrink-0" title={s.error}>{s.error}</span>
                   )}
                 </div>,
               );

@@ -8,7 +8,7 @@
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Bot, ShieldAlert, Trash2, PanelLeft, ArrowDown,
+  ShieldAlert, Trash2, PanelLeft, ArrowDown,
 } from 'lucide-react';
 import { useProjectStore } from '../stores/useProjectStore';
 import { useAgentStore } from '../components/agent/agentStore';
@@ -131,7 +131,7 @@ export const AgentModeView: React.FC = () => {
 
       {/* 中间：对话主区（圆角描边卡片，与会话栏形成明确分隔） */}
       <div className="flex-1 flex flex-col min-w-0 rounded-2xl border border-white/70 dark:border-white/12 overflow-hidden">
-        <div className="px-5 py-3 flex items-center gap-3 shrink-0">
+        <div className="relative px-4 py-3 flex items-center shrink-0 border-b border-black/5 dark:border-white/10">
           {/* 收起入口已移入会话栏标题行；这里只在收起后提供「展开」恢复入口 */}
           {!isSidebarOpen && (
             <button
@@ -142,15 +142,13 @@ export const AgentModeView: React.FC = () => {
               <PanelLeft className="w-4 h-4 text-brand" />
             </button>
           )}
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-brand to-accent-green flex items-center justify-center text-white shadow-md shrink-0">
-            <Bot className="w-5 h-5" />
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-bold [color:var(--color-text-main)] truncate max-w-[200px] sm:max-w-[280px]">{activeSessionTitle}</span>
-              <span className={`w-1.5 h-1.5 rounded-full ${wsStatus === 'open' ? 'bg-accent-green' : 'bg-amber-400'}`} title={wsStatus === 'open' ? 'WS 在线' : 'HTTP 通道（自动重连中）'} />
+          {/* 会话标题：绝对居中，不随左右两侧按钮宽度偏移 */}
+          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 max-w-[52%] text-center pointer-events-none">
+            <div className="flex items-center justify-center gap-1.5">
+              <span className="text-sm font-bold [color:var(--color-text-main)] truncate">{activeSessionTitle}</span>
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${wsStatus === 'open' ? 'bg-accent-green' : 'bg-amber-400'}`} title={wsStatus === 'open' ? 'WS 在线' : 'HTTP 通道（自动重连中）'} />
             </div>
-            <div className="text-[10px] [color:var(--color-text-main)] truncate">
+            <div className="text-[10px] [color:var(--color-text-muted)] truncate">
               {project.title || '当前项目'} · {shots.length}镜 · 会话: {activeSessionId.slice(0, 12) || '就绪'}
               {isRunning && runningSteps.total > 0 && ` · 步骤 ${runningSteps.done}/${runningSteps.total}`}
               {isRunning && ' · 运行中'}
@@ -160,14 +158,14 @@ export const AgentModeView: React.FC = () => {
             <button
               onClick={() => void clearAll()}
               title="清空本会话的全部消息记忆（不影响项目文件）"
-              className="p-2 rounded-lg border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] [color:var(--color-text-main)] hover:border-red-400/50 hover:text-red-300 active:scale-95 transition-all shrink-0"
+              className="p-2 rounded-lg border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] [color:var(--color-text-main)] hover:border-red-400/50 hover:text-red-500 dark:hover:text-red-300 active:scale-95 transition-all shrink-0"
             >
               <Trash2 className="w-3.5 h-3.5" />
             </button>
             {pendingList.length > 0 && (
               <button
                 onClick={scrollToBottom}
-                className="px-2.5 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-300 text-xs font-bold flex items-center gap-1 animate-pulse"
+                className="px-2.5 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-600 dark:text-amber-300 text-xs font-bold flex items-center gap-1 animate-pulse"
                 title="有工具待确认，点击定位到行内审批卡"
               >
                 <ShieldAlert className="w-3.5 h-3.5" />{pendingList.length} 待确认
@@ -182,7 +180,7 @@ export const AgentModeView: React.FC = () => {
             滚动时内容从输入框底下穿过，不再有一条通栏的输入框占位 */}
         <div className="flex-1 relative min-h-0">
           <div ref={scrollRef} onScroll={handleScroll} className="absolute inset-0 overflow-y-auto custom-scrollbar">
-            <div className="max-w-4xl mx-auto px-6 pt-5 pb-44 space-y-4">
+            <div className="max-w-3xl mx-auto px-6 pt-6 pb-44 space-y-5">
               <AgentMessageList
                 messages={messages}
                 isRunning={isRunning}
@@ -201,7 +199,7 @@ export const AgentModeView: React.FC = () => {
 
           {/* 悬浮输入层：渐变蒙版只负责视觉过渡，pointer-events 交给内部，避免挡住消息操作 */}
           <div className="absolute inset-x-0 bottom-0 px-5 pb-4 pt-12 bg-gradient-to-t from-background via-background/85 to-transparent pointer-events-none">
-            <div className="max-w-4xl mx-auto relative">
+            <div className="max-w-3xl mx-auto relative">
               {!atBottom && (
                 <button
                   onClick={scrollToBottom}
