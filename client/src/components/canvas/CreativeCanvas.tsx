@@ -3,7 +3,7 @@ import {
   ReactFlow, Background, Controls, ControlButton, MiniMap, useNodesState, useEdgesState, addEdge, Connection, Edge, Node, ReactFlowProvider, useReactFlow
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Search, Sparkles, Image as ImageIcon, Film, Box, Boxes, Library, Save, Download, Mic, Type, Plus, Wand2, Layers, PanelLeft, ChevronsUp, ArrowLeftRight, MoreHorizontal, Pencil, Trash2, Keyboard, X, FolderOpen, Clapperboard } from 'lucide-react';
+import { Search, Sparkles, Image as ImageIcon, Film, Box, Boxes, Library, Save, Download, Mic, Type, Plus, Wand2, Layers, PanelLeft, ChevronsUp, ArrowLeftRight, MoreHorizontal, Pencil, Trash2, Keyboard, X, FolderOpen, Clapperboard, FileText } from 'lucide-react';
 import { useProjectListStore } from '../../stores/useProjectListStore';
 import { useThemeStore } from '../../stores/useThemeStore';
 import { useProjectStore } from '../../stores/useProjectStore';
@@ -77,6 +77,7 @@ const genId = (p: string) => `${p}_${Date.now()}_${++idSeq}`;
 
 const CORE_LIBRARY = [
   { type: 'prompt', label: '剧本 / Prompt', desc: '剧本拆解与分镜策划', icon: Type, color: 'text-sky-400' },
+  { type: 'text-prompt', label: '提示词文本', desc: '纯文本资源 · 拖放/连线自动填充', icon: FileText, color: 'text-sky-400' },
   { type: 'image', label: '生图 Agent', desc: '多引擎文生图与垫图参考', icon: ImageIcon, color: 'text-violet-400' },
   { type: 'video', label: '视频 Agent', desc: '动态视频 / 首尾帧 / 参考生视频', icon: Film, color: 'text-orange-400' },
   { type: 'audio', label: '配音 Agent', desc: '多角色情感 TTS 配音', icon: Mic, color: 'text-pink-400' },
@@ -164,7 +165,8 @@ const WorkbenchRow: React.FC<{
  * 底部「节点操作台」—— 只服务当前选中的生成节点（本地版观感：画布底部无常驻浮层）。
  *
  * ⚠ 适配说明：本地版这里 import 的是 `./NodeControlBar`，但新基线已删除该文件
- * （上游用 `FloatingAgentPromptBar` 取代：常驻「全局导演 Agent GO + 快速添加」）。
+ * （上游改用 `FloatingAgentPromptBar` 常驻「全局导演 Agent GO + 快速添加」；该文件**已废弃**
+ * —— 全局编排入口由画布右侧 `CanvasAgentSidebar` 承担，见其文件头）。
  * 本轮要求「只改点名的文件」，故把本地版 NodeControlBar 的实现**内联**在本文件，
  * 逐行保持本地版的类名/文案/尺寸（682px 实色卡片、左上角节点身份标识、无说明栏、无快速添加条）。
  * 若后续允许新增文件，应把它还原成 `client/src/components/canvas/NodeControlBar.tsx`。
@@ -1112,10 +1114,23 @@ const InnerCanvas: React.FC = () => {
       if (nonce) importedAssetNonce.current = nonce;
       let abs = asset.file_url || '';
       if (abs && abs.startsWith('/')) abs = 'http://127.0.0.1:8000' + abs;
+      // 文本/提示词素材：无文件也要能落画布（此前 if(!abs) 直接吞掉）
+      const label0 = asset.visual_prompt || asset.description || asset.name || '';
+      if (asset.category === 'text') {
+        const txt = String(asset.content || asset.visual_prompt || '');
+        const curN = nodesRef.current || [];
+        const maxXN = curN.reduce((m: number, n: any) => Math.max(m, n.position?.x || 0), 0);
+        const posN = { x: curN.length ? maxXN + 320 : 120, y: 200 + (curN.length % 3) * 80 };
+        const tn = createNode('text-prompt', posN);
+        tn.data = { ...tn.data, prompt: txt, text: txt };
+        setNodes(nds => [...nds, tn]);
+        setSelectedNodeId(tn.id);
+        return;
+      }
       if (!abs) return;
       const isVideo = /\.(mp4|webm|mov)$/i.test(abs);
       const isAudio = /\.(mp3|wav|ogg|m4a|flac)$/i.test(abs);
-      const label = asset.visual_prompt || asset.description || asset.name || '';
+      const label = label0;
       const curNodes = nodesRef.current || [];
       const maxX = curNodes.reduce((m: number, n: any) => Math.max(m, n.position?.x || 0), 0);
       const pos = { x: curNodes.length ? maxX + 320 : 120, y: 200 + (curNodes.length % 3) * 80 };
@@ -1146,14 +1161,67 @@ const InnerCanvas: React.FC = () => {
     return () => window.removeEventListener('canvas-import-asset', onEvent as any);
   }, []);
 
+  /** 命中检测：返回指针正下方的节点（自上而下取最上层），用于「拖到节点上直接填充」 */
+  const findNodeAt = useCallback((clientX: number, clientY: number): Node | null => {
+    const p = screenToFlowPosition({ x: clientX, y: clientY });
+    const list: any[] = (nodesRef.current as any[]) || [];
+    for (let i = list.length - 1; i >= 0; i--) {
+      const n = list[i];
+      const w = n.measured?.width || n.width || 320;
+      const h = n.measured?.height || n.height || 200;
+      const x = n.position?.x || 0;
+      const y = n.position?.y || 0;
+      if (p.x >= x && p.x <= x + w && p.y >= y && p.y <= y + h) return n as Node;
+    }
+    return null;
+  }, [screenToFlowPosition]);
+
+  /** 文本投放：写入命中节点的首个 text 输入（走 handleNodeUpdate 保留级联传播）；节点无文本输入返回 false */
+  const fillNodeWithText = useCallback((nodeId: string, txt: string): boolean => {
+    const nds: any[] = (nodesRef.current as any[]) || [];
+    const n = nds.find(x => x.id === nodeId);
+    if (!n) return false;
+    const spec = getNodeSpec(n.type || '');
+    const inDef = spec?.inputs.find(h => h.type === 'text');
+    if (!inDef) return false;
+    const patch: any = { [inDef.id]: txt };
+    if ((n.type === 'prompt' || n.type === 'text-prompt') && inDef.id === 'prompt') patch.text = txt;
+    handleNodeUpdate(nodeId, patch);
+    setSelectedNodeId(nodeId);
+    return true;
+  }, [handleNodeUpdate]);
+
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     const type = e.dataTransfer.getData('application/canvas-nodetype');
     const droppedNodeId = e.dataTransfer.getData('application/canvas-nodeid');
     const assetId = e.dataTransfer.getData('application/canvas-assetid');
-    const assetUrl = e.dataTransfer.getData('text/plain');
-    if (!type && !assetId && !assetUrl) return;
+    const assetKind = e.dataTransfer.getData('application/canvas-assetkind');
+    const dragText = e.dataTransfer.getData('application/canvas-text');
+    const plain = e.dataTransfer.getData('text/plain');
+    if (!type && !assetId && !dragText && !plain) return;
     const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+
+    // ── 文本投放：文本素材 或 自由文本 → 命中节点即填充，落空则新建「提示词文本」节点 ──
+    let textContent: string | null = null;
+    if (dragText) textContent = dragText;
+    else if (assetKind === 'text') {
+      const a: any = assets.find(x => x.id === assetId);
+      textContent = String(a?.content || a?.visual_prompt || '');
+    } else if (!type && !assetId && plain && !/^https?:\/\//i.test(plain.trim()) && !plain.trim().startsWith('/storage/')) {
+      textContent = plain;
+    }
+    if (textContent !== null && !type) {
+      const txt = textContent;
+      const hit = findNodeAt(e.clientX, e.clientY);
+      if (txt.trim() && hit && fillNodeWithText(hit.id, txt)) return;
+      const node = createNode('text-prompt', position);
+      node.data = { ...node.data, prompt: txt, text: txt };
+      setNodes(nds => [...nds, node]);
+      setSelectedNodeId(node.id);
+      return;
+    }
+
     if (assetId) {
       const asset = assets.find(a => a.id === assetId);
       if (!asset) return;
@@ -1173,7 +1241,7 @@ const InnerCanvas: React.FC = () => {
       setNodes(nds => [...nds, node]);
       setSelectedNodeId(node.id);
     }
-  }, [screenToFlowPosition, assets]);
+  }, [screenToFlowPosition, assets, findNodeAt, fillNodeWithText]);
 
   const handleManualSave = async () => {
     if (!pid) { alert('请先在 项目看板 创建/打开项目'); return; }
@@ -1746,7 +1814,7 @@ const InnerCanvas: React.FC = () => {
                 maskColor="rgba(10,10,12,0.8)"
                 maskStrokeColor={isLight ? 'transparent' : '#ffffff'}
                 maskStrokeWidth={1}
-                nodeColor={(n: any) => n.type === 'image' ? '#7C3AED' : n.type === 'video' ? '#F97316' : n.type === 'audio' ? '#EC4899' : n.type === 'prompt' ? '#06B6D4' : '#3F3F50'}
+                nodeColor={(n: any) => n.type === 'image' ? '#7C3AED' : n.type === 'video' ? '#F97316' : n.type === 'audio' ? '#EC4899' : (n.type === 'prompt' || n.type === 'text-prompt') ? '#06B6D4' : '#3F3F50'}
                 pannable
                 zoomable
               />
