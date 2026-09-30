@@ -37,7 +37,7 @@ export const ChatHistory: React.FC<{
   onOpenEntry: (e: ChatHistoryEntry) => void;
 }> = ({ activeSessionId, onOpenEntry }) => {
   const {
-    entries, loading, view, sortBy, setView, setSortBy, setSessionArchived, removeSession, refresh,
+    entries, projects, loading, view, sortBy, setView, setSortBy, setSessionArchived, removeSession, refresh,
   } = useChatHistoryStore();
   const [showArchived, setShowArchived] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -76,19 +76,26 @@ export const ChatHistory: React.FC<{
     () => entries.filter((e) => e.session.archived).sort(sortByKey),
     [entries, sortByKey]
   );
+  // 项目视图显示全部项目（没有会话的新项目也占一个空分组，保证「新建完就能看到」）
   const projectGroups = useMemo(() => {
-    const map = new Map<string, { projectId: string; projectTitle: string; items: ChatHistoryEntry[] }>();
+    const groups = projects.map((p) => ({
+      projectId: p.id,
+      projectTitle: p.title || p.id,
+      items: activeEntries.filter((e) => e.projectId === p.id),
+    }));
+    const known = new Set(groups.map((g) => g.projectId));
     for (const e of activeEntries) {
-      const g = map.get(e.projectId) || { projectId: e.projectId, projectTitle: e.projectTitle, items: [] };
-      g.items.push(e);
-      map.set(e.projectId, g);
+      if (!known.has(e.projectId)) {
+        groups.push({
+          projectId: e.projectId,
+          projectTitle: e.projectTitle,
+          items: activeEntries.filter((x) => x.projectId === e.projectId),
+        });
+        known.add(e.projectId);
+      }
     }
-    return [...map.values()].sort((a, b) => {
-      const ka = a.items[0] ? String(a.items[0].session[sortBy === 'created' ? 'created_at' : 'updated_at'] || '') : '';
-      const kb = b.items[0] ? String(b.items[0].session[sortBy === 'created' ? 'created_at' : 'updated_at'] || '') : '';
-      return kb.localeCompare(ka);
-    });
-  }, [activeEntries, sortBy]);
+    return groups;
+  }, [projects, activeEntries]);
 
   const doArchive = async (e: ChatHistoryEntry, archived: boolean) => {
     await setSessionArchived(e.projectId, e.session.id, archived);
@@ -268,7 +275,9 @@ export const ChatHistory: React.FC<{
                 <span className={`text-[11px] font-semibold ${MAIN} truncate flex-1 text-left`}>{g.projectTitle}</span>
                 <span className={`text-[9px] font-mono ${MAIN} opacity-50`}>{g.items.length}</span>
               </button>
-              {!collapsed && g.items.map((e) => renderRow(e, { showProject: false }))}
+              {!collapsed && (g.items.length === 0 ? (
+                <div className={`pl-8 pr-2 py-1 text-[10px] ${MAIN} opacity-50`}>暂无会话</div>
+              ) : g.items.map((e) => renderRow(e, { showProject: false })))}
             </div>
           );
         })}
