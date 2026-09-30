@@ -18,7 +18,8 @@ import { AgentComposer } from '../components/agent/AgentComposer';
 import { AgentSwarmPanel } from '../components/agent/AgentSwarmPanel';
 import { loadRoleMetas } from '../components/agent/swarmMeta';
 import { apiService } from '../services/api';
-import { toast, promptAsync } from '../stores/useDialogStore';
+import { toast } from '../stores/useDialogStore';
+import { NewProjectModal } from '../components/project/NewProjectModal';
 
 /**
  * 项目选择 chip（ZCode 工作目录选择器同位）：对话绑定哪个项目/工程。
@@ -30,6 +31,7 @@ const ProjectChip: React.FC = () => {
   const [search, setSearch] = useState('');
   const [projects, setProjects] = useState<ProjectMeta[]>([]);
   const [loading, setLoading] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -63,22 +65,11 @@ const ProjectChip: React.FC = () => {
     toast.info(`已切换到「${title || '未命名项目'}」`);
   };
 
-  const createProject = async () => {
-    const title = await promptAsync({
-      title: '新建项目',
-      message: '给新项目起个名字，创建后自动切换过来',
-      defaultValue: '未命名项目',
-      placeholder: '项目名称',
-    });
-    if (!title?.trim()) return;
-    try {
-      const meta = await useProjectListStore.getState().createBlank({ title: title.trim() });
-      await useProjectStore.getState().loadActiveProject(meta.id);
-      toast.success(`已创建「${meta.title}」`);
-      setOpen(false);
-    } catch (e: any) {
-      toast.error(e?.message || '创建项目失败');
-    }
+  const createProject = async (meta: ProjectMeta) => {
+    setCreateOpen(false);
+    setOpen(false);
+    await useProjectStore.getState().loadActiveProject(meta.id);
+    toast.success(`已切换到「${meta.title}」`);
   };
 
   const kw = search.trim().toLowerCase();
@@ -130,13 +121,19 @@ const ProjectChip: React.FC = () => {
           <div className="my-1 h-px bg-border" />
           <button
             type="button"
-            onClick={() => { void createProject(); }}
+            onClick={() => { setCreateOpen(true); }}
             className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left text-xs [color:var(--color-text-main)] hover:bg-surface-hover"
           >
             <Folder className="w-3.5 h-3.5 opacity-60 shrink-0" />新建项目
           </button>
         </div>
       )}
+
+      <NewProjectModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={(meta) => { void createProject(meta); }}
+      />
     </div>
   );
 };

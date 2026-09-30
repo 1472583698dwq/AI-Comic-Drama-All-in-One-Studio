@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Settings, PanelLeftClose, PanelLeft, Lock, Plug, MessageCirclePlus, type LucideIcon,
 } from 'lucide-react';
@@ -10,7 +10,9 @@ import { useAgentStore } from '../agent/agentStore';
 import { toast } from '../../stores/useDialogStore';
 import { pageIcon } from '../../utils/pageIcons';
 import { ChatHistory } from './ChatHistory';
+import { NewProjectModal } from '../project/NewProjectModal';
 import type { ChatHistoryEntry } from '../../stores/useChatHistoryStore';
+import type { ProjectMeta } from '../../stores/useProjectListStore';
 
 interface SidebarProps {
   /** 设置页内仍会用到这三个弹窗，App 统一持有开关 */
@@ -51,6 +53,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
   const groupMeta = usePageStore((s) => s.groups);
   const refreshHistory = useChatHistoryStore((s) => s.refresh);
   const agentActiveSessionId = useAgentStore((s) => s.activeSessionId);
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
 
   const shotsCount = (project?.scenes || []).reduce(
     (n: number, s: any) => n + (s?.shots?.length || 0), 0);
@@ -99,30 +102,30 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
     setActiveTab(id as any);
   };
 
-  /** 新建任务：无项目静默创建承接；当前会话没发过消息就直接复用，避免空会话堆积 */
-  const handleNewTask = async () => {
-    const listStore = useProjectListStore.getState();
-    let pid = useProjectStore.getState().project?.id;
-    if (!pid) {
-      try {
-        const meta = await listStore.createBlank({ title: '新任务' });
-        await useProjectStore.getState().loadActiveProject(meta.id);
-        pid = meta.id;
-      } catch (e: any) {
-        toast.error(e?.message || '创建任务失败');
-        return;
-      }
+  /** 新建任务：有项目直接进对话（空会话复用不堆积）；无项目先走「名称+风格模板」引导弹窗 */
+  const handleNewTask = () => {
+    if (!project) {
+      setNewProjectOpen(true);
+      return;
     }
     setActiveTab('agent');
     const agent = useAgentStore.getState();
-    if (agent.projectId !== pid) {
+    if (agent.projectId !== project.id) {
       // 换了项目：绑定后由 bindProject 在空项目上自建「新会话」草稿
-      agent.bindProject(pid);
+      agent.bindProject(project.id);
     } else {
       const cur = agent.sessions.find((s) => s.id === agent.activeSessionId);
       const started = (cur?.messages || []).some((m) => m.sender === 'user');
       if (started) agent.createSession();
     }
+    void refreshHistory();
+  };
+
+  const handleTaskProjectCreated = async (meta: ProjectMeta) => {
+    setNewProjectOpen(false);
+    await useProjectStore.getState().loadActiveProject(meta.id);
+    setActiveTab('agent');
+    useAgentStore.getState().bindProject(meta.id);
     void refreshHistory();
   };
 
@@ -263,6 +266,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
           </button>
         </div>
       </div>
+
+      <NewProjectModal
+        open={newProjectOpen}
+        onClose={() => setNewProjectOpen(false)}
+        onCreated={(meta) => { void handleTaskProjectCreated(meta); }}
+        hint="起个项目名、挑个风格模板，创建后直接开始 AI 对话。"
+      />
     </aside>
   );
 };
