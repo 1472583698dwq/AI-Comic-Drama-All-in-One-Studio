@@ -24,7 +24,7 @@ export const CharacterStudio: React.FC = () => {
   const [isGeneratingSheet, setIsGeneratingSheet] = useState(false);
   const [regenError, setRegenError] = useState<string | null>(null);
   // ref_audio 走音频素材选择器（mediaType=audio），三视图走图片选择器
-  const [assetPickerViewKey, setAssetPickerViewKey] = useState<'front' | 'ref_audio' | null>(null);
+  const [assetPickerViewKey, setAssetPickerViewKey] = useState<'front' | 'side' | 'three_quarter' | 'ref_audio' | null>(null);
 
   // Auto select first char if active becomes invalid
   useEffect(() => {
@@ -108,10 +108,10 @@ export const CharacterStudio: React.FC = () => {
         style_preset: project?.style_preset || 'donghua_xianxia',
       });
       const views = res.three_views || {};
-      if (views.front) {
-        updateCharacter(selectedChar.id, { 
-          three_views: { ...selectedChar.three_views, front: views.front },
-          avatar_url: selectedChar.avatar_url || views.front
+      if (views.front || views.side || views.three_quarter) {
+        updateCharacter(selectedChar.id, {
+          three_views: { ...selectedChar.three_views, ...views },
+          avatar_url: selectedChar.avatar_url || views.front || views.three_quarter
         });
       }
       if (res.errors && Object.keys(res.errors).length) {
@@ -146,7 +146,7 @@ export const CharacterStudio: React.FC = () => {
         <div className="flex-1 overflow-y-auto p-3 space-y-2.5 custom-scrollbar">
           {characters.map((char) => {
             const isSelected = char.id === selectedChar?.id;
-            const avatar = char.three_views?.front || char.avatar_url;
+            const avatar = char.three_views?.front || char.avatar_url || char.three_views?.three_quarter;
             return (
               <div
                 key={char.id}
@@ -271,7 +271,7 @@ export const CharacterStudio: React.FC = () => {
               <div className="bg-surface p-4 rounded-2xl border border-border flex flex-col group relative">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-brand" /> 角色三视图 (Character Sheet)
+                    <span className="w-2 h-2 rounded-full bg-brand" /> 正面视图 (Front 0°)
                   </span>
                   {selectedChar.three_views?.front && <span className="text-[10px] text-emerald-400 font-bold">已绑定</span>}
                 </div>
@@ -279,10 +279,10 @@ export const CharacterStudio: React.FC = () => {
                 {selectedChar.three_views?.front ? (
                   <AutoRatioMedia
                     src={resolveUrl(selectedChar.three_views.front)}
-                    alt="Three Views"
+                    alt="Front View"
                     fallbackAspect="3/4"
                     onClick={() => setAssetPickerViewKey('front')}
-                    title="点击从素材库选择或上传三视图"
+                    title="点击从素材库选择或上传正面参考图"
                     className="rounded-xl bg-surface-secondary mb-3 border border-border cursor-pointer hover:border-brand transition-all group"
                     mediaClassName="group-hover:scale-105 transition-transform"
                   >
@@ -296,11 +296,11 @@ export const CharacterStudio: React.FC = () => {
                   <div
                     onClick={() => setAssetPickerViewKey('front')}
                     className="aspect-[3/4] rounded-xl overflow-hidden bg-surface-secondary mb-3 border border-border flex items-center justify-center relative cursor-pointer hover:border-brand transition-all group"
-                    title="点击从素材库选择或上传三视图"
+                    title="点击从素材库选择或上传正面参考图"
                   >
                     <div className="flex flex-col items-center justify-center text-gray-500 text-xs space-y-2 p-4 text-center">
                       <FolderOpen className="w-8 h-8 text-brand-light/60" />
-                      <span className="text-gray-300 font-medium">点击从素材库选择三视图</span>
+                      <span className="text-gray-300 font-medium">点击从素材库选择正面图</span>
                     </div>
                     <div className="absolute inset-0 bg-brand/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                       <span className="px-3 py-1.5 rounded-full bg-brand text-white text-xs font-bold shadow-lg flex items-center gap-1">
@@ -331,6 +331,133 @@ export const CharacterStudio: React.FC = () => {
                 <span className="text-[10px] text-gray-400 mt-1.5">分镜生图时作为主面部特征与发型锁定输入</span>
               </div>
 
+              {/* 2. Side Profile View (侧面轮廓) */}
+              <div className="bg-surface p-4 rounded-2xl border border-border flex flex-col group relative">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-accent-orange" /> 侧面轮廓 (Side 90°)
+                  </span>
+                  {selectedChar.three_views?.side && <span className="text-[10px] text-emerald-400 font-bold">已绑定</span>}
+                </div>
+
+                {selectedChar.three_views?.side ? (
+                  <AutoRatioMedia
+                    src={resolveUrl(selectedChar.three_views.side)}
+                    alt="Side View"
+                    fallbackAspect="3/4"
+                    onClick={() => setAssetPickerViewKey('side')}
+                    title="点击从素材库选择或上传侧面参考图"
+                    className="rounded-xl bg-surface-secondary mb-3 border border-border cursor-pointer hover:border-accent-orange transition-all group"
+                    mediaClassName="group-hover:scale-105 transition-transform"
+                  >
+                    <div className="absolute inset-0 bg-accent-orange/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <span className="px-3 py-1.5 rounded-full bg-accent-orange text-white text-xs font-bold shadow-lg flex items-center gap-1">
+                        <FolderOpen className="w-3.5 h-3.5" /> 从素材库更换
+                      </span>
+                    </div>
+                  </AutoRatioMedia>
+                ) : (
+                  <div
+                    onClick={() => setAssetPickerViewKey('side')}
+                    className="aspect-[3/4] rounded-xl overflow-hidden bg-surface-secondary mb-3 border border-border flex items-center justify-center relative cursor-pointer hover:border-accent-orange transition-all group"
+                    title="点击从素材库选择或上传侧面参考图"
+                  >
+                    <div className="flex flex-col items-center justify-center text-gray-500 text-xs space-y-2 p-4 text-center">
+                      <FolderOpen className="w-8 h-8 text-accent-orange/60" />
+                      <span className="text-gray-300 font-medium">点击从素材库选择侧面图</span>
+                    </div>
+                    <div className="absolute inset-0 bg-accent-orange/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <span className="px-3 py-1.5 rounded-full bg-accent-orange text-white text-xs font-bold shadow-lg flex items-center gap-1">
+                        <FolderOpen className="w-3.5 h-3.5" /> 从素材库更换
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-1.5 pt-1 border-t border-border">
+                  <button
+                    onClick={() => setAssetPickerViewKey('side')}
+                    className="flex-1 py-2 rounded-xl bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/30 text-orange-300 text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-sm"
+                  >
+                    <FolderOpen className="w-3.5 h-3.5 text-orange-400" />
+                    <span>从素材库导入</span>
+                  </button>
+                  {selectedChar.three_views?.side && (
+                    <button
+                      onClick={() => updateCharacter(selectedChar.id, { three_views: { ...selectedChar.three_views, side: '' } })}
+                      className="p-2 rounded-xl bg-surface-secondary hover:bg-red-500/20 text-gray-400 hover:text-red-400 border border-border"
+                      title="清除此视角"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+                <span className="text-[10px] text-gray-400 mt-1.5">用于侧脸特写、转头动作与运镜视差过渡</span>
+              </div>
+
+              {/* 3. 3/4 Dynamic Angle View (3/4 动态视角) */}
+              <div className="bg-surface p-4 rounded-2xl border border-border flex flex-col group relative">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-accent-pink" /> 3/4 视角 (Dynamic 45°)
+                  </span>
+                  {selectedChar.three_views?.three_quarter && <span className="text-[10px] text-emerald-400 font-bold">已绑定</span>}
+                </div>
+
+                {selectedChar.three_views?.three_quarter ? (
+                  <AutoRatioMedia
+                    src={resolveUrl(selectedChar.three_views.three_quarter)}
+                    alt="3/4 View"
+                    fallbackAspect="3/4"
+                    onClick={() => setAssetPickerViewKey('three_quarter')}
+                    title="点击从素材库选择或上传 3/4 视角参考图"
+                    className="rounded-xl bg-surface-secondary mb-3 border border-border cursor-pointer hover:border-accent-pink transition-all group"
+                    mediaClassName="group-hover:scale-105 transition-transform"
+                  >
+                    <div className="absolute inset-0 bg-accent-pink/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <span className="px-3 py-1.5 rounded-full bg-accent-pink text-white text-xs font-bold shadow-lg flex items-center gap-1">
+                        <FolderOpen className="w-3.5 h-3.5" /> 从素材库更换
+                      </span>
+                    </div>
+                  </AutoRatioMedia>
+                ) : (
+                  <div
+                    onClick={() => setAssetPickerViewKey('three_quarter')}
+                    className="aspect-[3/4] rounded-xl overflow-hidden bg-surface-secondary mb-3 border border-border flex items-center justify-center relative cursor-pointer hover:border-accent-pink transition-all group"
+                    title="点击从素材库选择或上传 3/4 视角参考图"
+                  >
+                    <div className="flex flex-col items-center justify-center text-gray-500 text-xs space-y-2 p-4 text-center">
+                      <FolderOpen className="w-8 h-8 text-accent-pink/60" />
+                      <span className="text-gray-300 font-medium">点击从素材库选择 3/4 图</span>
+                    </div>
+                    <div className="absolute inset-0 bg-accent-pink/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <span className="px-3 py-1.5 rounded-full bg-accent-pink text-white text-xs font-bold shadow-lg flex items-center gap-1">
+                        <FolderOpen className="w-3.5 h-3.5" /> 从素材库更换
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-1.5 pt-1 border-t border-border">
+                  <button
+                    onClick={() => setAssetPickerViewKey('three_quarter')}
+                    className="flex-1 py-2 rounded-xl bg-pink-500/15 hover:bg-pink-500/25 border border-pink-500/30 text-pink-300 text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-sm"
+                  >
+                    <FolderOpen className="w-3.5 h-3.5 text-pink-400" />
+                    <span>从素材库导入</span>
+                  </button>
+                  {selectedChar.three_views?.three_quarter && (
+                    <button
+                      onClick={() => updateCharacter(selectedChar.id, { three_views: { ...selectedChar.three_views, three_quarter: '' } })}
+                      className="p-2 rounded-xl bg-surface-secondary hover:bg-red-500/20 text-gray-400 hover:text-red-400 border border-border"
+                      title="清除此视角"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+                <span className="text-[10px] text-gray-400 mt-1.5">用于战斗对决、对话特写与戏剧化分镜生成</span>
+              </div>
             </div>
           </div>
 
@@ -397,9 +524,13 @@ export const CharacterStudio: React.FC = () => {
         isOpen={!!assetPickerViewKey}
         mediaType={assetPickerViewKey === 'ref_audio' ? 'audio' : 'image'}
         title={
-          assetPickerViewKey === 'ref_audio'
-            ? `从素材库选择【${selectedChar?.name || '角色'}】参考音频`
-            : `从素材库选择【${selectedChar?.name || '角色'}】角色三视图`
+          assetPickerViewKey === 'front'
+            ? `从素材库选择【${selectedChar?.name || '角色'}】正面视图`
+            : assetPickerViewKey === 'side'
+            ? `从素材库选择【${selectedChar?.name || '角色'}】侧面轮廓`
+            : assetPickerViewKey === 'three_quarter'
+            ? `从素材库选择【${selectedChar?.name || '角色'}】3/4 动态视角`
+            : `从素材库选择【${selectedChar?.name || '角色'}】参考音频`
         }
         defaultCategory={assetPickerViewKey === 'ref_audio' ? 'other' : 'character'}
         onSelect={handleSelectAssetForView}
