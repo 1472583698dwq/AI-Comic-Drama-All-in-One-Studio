@@ -4,8 +4,10 @@
  *
  * 与悬浮窗版本的区别：
  *   ① 悬浮胶囊 / 可拖拽浮窗（`AgentChatDrawer`）→ 画布页不再渲染（见 App.tsx 的 activeTab 闸门）
- *   ② 底部全局编排条（`FloatingAgentPromptBar` 的全局态）保留原样，但全局输入仍建议走本侧栏：
- *      侧栏是有会话的一等入口，底部栏只服务"选中哪个生成节点就控制哪个节点"。
+ *   ② 底部全局编排条（上游旧 `FloatingAgentPromptBar` 的全局态）**已废弃**：它与本侧栏同属
+ *      "一句话让 Agent 编排画布"的入口，而有会话能力的是本侧栏 → 全局输入统一走这里；
+ *      底部的"节点态"（选中生成节点 → `NodeAgentConsole`）改由本地版内联的 `NodeControlBar` 承接，
+ *      只服务当前选中的生成节点。
  *
  * 会话共用页面版 `useAgentStore`（与「AI 导演」页同一份会话），所以在这里发的消息，
  * 切到 AI 导演页能看到完整后续。`bindProject` / `agentSocket.ensure()` 都是幂等的，
