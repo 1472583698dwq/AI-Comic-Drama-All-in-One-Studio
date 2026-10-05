@@ -2,7 +2,7 @@ import type React from 'react';
 import type { Project, StoryboardShot } from '../../../types';
 
 /**
- * 分镜工作台 Slot 契约（P0：内部拆分，零行为变化）。
+ * 分镜台 Slot 契约（P0：内部拆分，零行为变化）。
  *
  * 宿主（ShotInspector）拥有全部状态与 handler，只组装一个 ShotSlotContext
  * 往下传；各 Slot 为纯展示组件，经 registry 按 order/when 渲染。

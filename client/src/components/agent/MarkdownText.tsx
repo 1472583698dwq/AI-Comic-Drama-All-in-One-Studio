@@ -27,7 +27,7 @@ function parseInline(text: string): React.ReactNode[] {
     const [full, code, bold1, bold2, strike, ital1, ital2, _link, linkText, href] = m;
     if (code) {
       out.push(
-        <code key={nk('c')} className="px-1 py-px rounded bg-surface-secondary border border-white/10 font-mono text-[11px] text-amber-200 break-all">
+        <code key={nk('c')} className="px-1 py-px rounded bg-black/[.05] dark:bg-white/[.06] border border-black/5 dark:border-white/10 font-mono text-[12px] [color:var(--color-text-main)] break-all">
           {code.slice(1, -1)}
         </code>
       );
@@ -75,19 +75,19 @@ const CodeBlock: React.FC<{ lang: string; code: string }> = ({ lang, code }) => 
     setTimeout(() => setCopied(false), 1500);
   };
   return (
-    <div className="my-2 rounded-lg border border-white/10 bg-surface-secondary overflow-hidden">
-      <div className="flex items-center justify-between px-2.5 py-1 bg-white/5 border-b border-white/10">
-        <span className="text-[10px] font-mono text-white/50">{lang || 'code'}</span>
+    <div className="my-2 rounded-lg border border-black/5 dark:border-white/10 bg-black/[.04] dark:bg-white/[.06] overflow-hidden">
+      <div className="flex items-center justify-between px-2.5 py-1 bg-black/[.03] dark:bg-white/5 border-b border-black/5 dark:border-white/10">
+        <span className="text-[11px] font-mono [color:var(--color-text-muted)]">{lang || 'code'}</span>
         <button
           onClick={doCopy}
-          className="flex items-center gap-1 text-[10px] text-white/60 hover:text-white transition-colors px-1.5 py-0.5 rounded hover:bg-white/10"
+          className="flex items-center gap-1 text-[11px] [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] transition-colors px-1.5 py-0.5 rounded hover:bg-black/5 dark:hover:bg-white/10"
           title="复制代码"
         >
           {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
           {copied ? '已复制' : '复制'}
         </button>
       </div>
-      <pre className="p-2.5 text-[11px] leading-relaxed font-mono text-zinc-100 overflow-x-auto whitespace-pre custom-scrollbar select-text">
+      <pre className="p-2.5 text-[12px] leading-relaxed font-mono [color:var(--color-text-main)] overflow-x-auto whitespace-pre custom-scrollbar select-text">
         {code}
       </pre>
     </div>
@@ -136,13 +136,13 @@ function renderBlocks(text: string): React.ReactNode[] {
       // 空行：分段
       if (!t) { flushPara(); i++; continue; }
       // 分割线
-      if (/^(-{3,}|\*{3,}|_{3,})$/.test(t)) { flushPara(); out.push(<hr key={nk('hr')} className="my-2 border-white/10" />); i++; continue; }
+      if (/^(-{3,}|\*{3,}|_{3,})$/.test(t)) { flushPara(); out.push(<hr key={nk('hr')} className="my-2 border-black/10 dark:border-white/10" />); i++; continue; }
       // 标题
       const h = /^(#{1,4})\s+(.*)$/.exec(t);
       if (h) {
         flushPara();
         const level = h[1].length;
-        const cls = level === 1 ? 'text-sm font-bold mt-2 mb-1' : level === 2 ? 'text-[13px] font-bold mt-2 mb-1' : 'text-xs font-bold mt-1.5 mb-1';
+        const cls = level === 1 ? 'text-base font-bold mt-2.5 mb-1' : level === 2 ? 'text-sm font-bold mt-2.5 mb-1' : 'text-[13px] font-bold mt-2 mb-1';
         out.push(<div key={nk('h')} className={cls}>{parseInline(h[2])}</div>);
         i++; continue;
       }
@@ -152,7 +152,7 @@ function renderBlocks(text: string): React.ReactNode[] {
         const qs: string[] = [];
         while (i < lines.length && /^>/.test(lines[i].trim())) { qs.push(lines[i].trim().replace(/^>\s?/, '')); i++; }
         out.push(
-          <blockquote key={nk('q')} className="my-1 pl-2.5 border-l-2 border-brand/60 text-white/80">
+          <blockquote key={nk('q')} className="my-1 pl-2.5 border-l-2 border-brand/60 [color:var(--color-text-secondary)]">
             {qs.map((q, idx) => (<div key={idx}>{parseInline(q)}</div>))}
           </blockquote>
         );
@@ -167,10 +167,10 @@ function renderBlocks(text: string): React.ReactNode[] {
         const rows: string[][] = [];
         while (i < lines.length && lines[i].trim().startsWith('|')) { rows.push(splitRow(lines[i])); i++; }
         out.push(
-          <div key={nk('tw')} className="my-2 overflow-x-auto custom-scrollbar rounded-lg border border-white/10">
-            <table className="w-full text-[11px] border-collapse">
-              <thead><tr className="bg-white/5">{head.map((c, ci) => (<th key={ci} className="px-2 py-1 text-left font-bold border-b border-white/10 whitespace-nowrap">{parseInline(c)}</th>))}</tr></thead>
-              <tbody>{rows.map((r, ri) => (<tr key={ri} className="border-b border-white/5 last:border-0">{r.map((c, ci) => (<td key={ci} className="px-2 py-1 align-top break-words">{parseInline(c)}</td>))}</tr>))}</tbody>
+          <div key={nk('tw')} className="my-2 overflow-x-auto custom-scrollbar rounded-lg border border-black/5 dark:border-white/10">
+            <table className="w-full text-[12px] border-collapse">
+              <thead><tr className="bg-black/[.03] dark:bg-white/5">{head.map((c, ci) => (<th key={ci} className="px-2 py-1 text-left font-bold border-b border-black/5 dark:border-white/10 whitespace-nowrap">{parseInline(c)}</th>))}</tr></thead>
+              <tbody>{rows.map((r, ri) => (<tr key={ri} className="border-b border-black/5 dark:border-white/5 last:border-0">{r.map((c, ci) => (<td key={ci} className="px-2 py-1 align-top break-words">{parseInline(c)}</td>))}</tr>))}</tbody>
             </table>
           </div>
         );

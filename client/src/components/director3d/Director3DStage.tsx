@@ -168,6 +168,25 @@ const ratioToNumber = (ratio?: string): number => {
   return 9 / 16;
 };
 
+/** 摄影机位（对标 LibTV 导演台：多机位保存/切换/多视角截图） */
+interface StageCamera {
+  id: string;
+  name: string;
+  pos: [number, number, number];
+  quat: [number, number, number, number];
+  fov: number;
+}
+
+/** 截图队列项（本地 dataUrl 立即可用；上传成功后带资产地址） */
+interface QueueShot {
+  id: string;
+  camera: string;
+  dataUrl: string;
+  assetUrl?: string;
+  uploading?: boolean;
+  error?: string;
+}
+
 export const Director3DStage: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const pipContainerRef = useRef<HTMLDivElement>(null);
@@ -271,6 +290,12 @@ export const Director3DStage: React.FC = () => {
   const [snapshotSuccess, setSnapshotSuccess] = useState(false);
   const [snapshotMsg, setSnapshotMsg] = useState<string | null>(null);
   const [lastRecordAssetUrl, setLastRecordAssetUrl] = useState<string | null>(null);
+  // —— 多机位 + 截图队列（LibTV 式：机位保存/切换 + 多视角截图队列 → 资产库 → 分镜参考）——
+  const [stageCameras, setStageCameras] = useState<StageCamera[]>([]);
+  const [shotQueue, setShotQueue] = useState<QueueShot[]>([]);
+  const [activeCamId, setActiveCamId] = useState<string | null>(null);
+  const camOverrideRef = useRef<StageCamera | null>(null);
+  const presetKeyRef = useRef('');
 
   // 同步 activeShot（仅跟随 activeShotId，避免任何 project 更新都重置未保存的手动调整）
   useEffect(() => {
@@ -287,6 +312,11 @@ export const Director3DStage: React.FC = () => {
     if (shot.props_config) setPropsConfig(shot.props_config);
     if (shot.motion_speed) setMotionSpeed(shot.motion_speed);
     if (shot.walk_path) setWaypointsBoth(shot.walk_path);
+    // 机位列表跟随分镜；切镜清空本镜截图队列与机位覆盖（避免串镜）
+    setStageCameras(Array.isArray((shot as any).stage_cameras) ? (shot as any).stage_cameras : []);
+    setShotQueue([]);
+    camOverrideRef.current = null;
+    setActiveCamId(null);
     // 摆位持久化恢复（小云雀式：切镜不丢摆放）
     if ((shot as any).stage_layout) {
       entityTransformsRef.current = { ...(shot as any).stage_layout };
@@ -1293,6 +1323,24 @@ export const Director3DStage: React.FC = () => {
     if (!virtualCameraRef.current) return;
     const vCam = virtualCameraRef.current;
     const sensorHeight = 24;
+    const presetKey = `${framing}|${focalLength}|${cameraRoll}|${projectAspectNum}`;
+    // 机位覆盖优先：用户切到某个已保存机位时，光圈/景别预设不再抢占视角；
+    // 一旦用户改了景别/焦距/roll（presetKey 变化），自动解除覆盖回到预设机位。
+    if (presetKeyRef.current !== presetKey) {
+      presetKeyRef.current = presetKey;
+      camOverrideRef.current = null;
+      setActiveCamId(null);
+    }
+    if (camOverrideRef.current) {
+      const c = camOverrideRef.current;
+      vCam.position.set(c.pos[0], c.pos[1], c.pos[2]);
+      vCam.quaternion.set(c.quat[0], c.quat[1], c.quat[2], c.quat[3]);
+      vCam.fov = c.fov || vCam.fov;
+      vCam.aspect = projectAspectNum;
+      vCam.updateProjectionMatrix();
+      if (cameraHelperRef.current) cameraHelperRef.current.update();
+      return;
+    }
     const fovCalculated = 2 * Math.atan(sensorHeight / (2 * focalLength)) * (180 / Math.PI);
     vCam.fov = Math.max(12, Math.min(105, fovCalculated));
     // 摄像机画幅 = 项目画幅（与生成结果一致），不再用独立遮幅
@@ -1617,15 +1665,58 @@ export const Director3DStage: React.FC = () => {
     setAppliedSuccess(true); setTimeout(() => setAppliedSuccess(false), 2500);
   };
 
-  const handleCaptureSnapshot = async () => {
-    if (!activeShot) return;
-    const shotId = activeShot.id;
-    // 截图源：监视器（导演机位视角）优先，关闭时用主舞台视角兜底
+  // ============================================================
+  // 多机位 + 截图队列（对标 LibTV：多机位多视角截图 → 资产库 → 分镜参考）
+  // ============================================================
+  const makeCameraFrom = (cam: THREE.PerspectiveCamera, name: string): StageCamera => ({
+    id: `cam_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`,
+    name,
+    pos: [cam.position.x, cam.position.y, cam.position.z],
+    quat: [cam.quaternion.x, cam.quaternion.y, cam.quaternion.z, cam.quaternion.w],
+    fov: cam.fov,
+  });
+
+  const applyPose = useCallback((cam: StageCamera) => {
+    const v = virtualCameraRef.current;
+    if (!v) return;
+    camOverrideRef.current = cam;
+    setActiveCamId(cam.id);
+    v.position.set(cam.pos[0], cam.pos[1], cam.pos[2]);
+    v.quaternion.set(cam.quat[0], cam.quat[1], cam.quat[2], cam.quat[3]);
+    v.fov = cam.fov || v.fov;
+    v.updateProjectionMatrix();
+    if (cameraHelperRef.current) cameraHelperRef.current.update();
+  }, []);
+
+  const persistCameras = (list: StageCamera[]) => {
+    setStageCameras(list);
+    if (activeShot) { try { updateShot(activeShot.id, { stage_cameras: list } as any); } catch {} }
+  };
+
+  /** 从当前导演视角（主视图）新建机位 → 监视器可切到该机位 */
+  const addCameraFromDirectorView = () => {
+    const m = mainCameraRef.current;
+    if (!m) { setSnapshotMsg('舞台未就绪'); return; }
+    const cam = makeCameraFrom(m, `机位${stageCameras.length + 1}`);
+    persistCameras([...stageCameras, cam]);
+    applyPose(cam);
+    setSnapshotMsg(`已新建 ${cam.name}（当前导演视角），可继续调角度后「全部机位截图」`);
+  };
+
+  /** 抓取监视器画面（cover 裁切到项目画幅）；抓帧前强制渲染一帧保证是当前机位 */
+  const captureFrameDataUrl = (): string | null => {
     const src = (showPip && pipRendererRef.current?.domElement) || rendererRef.current?.domElement;
-    if (!src) { setSnapshotMsg('无可用画面（请确认舞台已加载）'); return; }
-    let dataUrl: string;
+    if (!src) return null;
     try {
-      // 输出画幅强制 = 项目画幅（与生成结果一致）：按目标比例做 cover 裁切，杜绝拉伸/比例错位
+      if (rendererRef.current && sceneRef.current && mainCameraRef.current) {
+        rendererRef.current.render(sceneRef.current, mainCameraRef.current);
+      }
+      if (showPip && pipRendererRef.current && sceneRef.current && virtualCameraRef.current) {
+        const helper = cameraHelperRef.current;
+        if (helper) helper.visible = false;
+        pipRendererRef.current.render(sceneRef.current, virtualCameraRef.current);
+        if (helper) helper.visible = showHelpers;
+      }
       const targetRatio = ratioToNumber(project?.aspect_ratio || '9:16');
       const outW = Math.min(1024, src.width || 1024);
       const outH = Math.max(1, Math.round(outW / targetRatio));
@@ -1637,17 +1728,79 @@ export const Director3DStage: React.FC = () => {
       if (sRatio > targetRatio) { sW = (src.height || outH) * targetRatio; sx = ((src.width || outW) - sW) / 2; }
       else { sH = (src.width || outW) / targetRatio; sy = ((src.height || outH) - sH) / 2; }
       ctx.drawImage(src as CanvasImageSource, sx, sy, sW, sH, 0, 0, outW, outH);
-      dataUrl = c.toDataURL('image/jpeg', 0.88);
-    } catch { setSnapshotMsg('截图失败（画布不可读）'); return; }
-    // 先即时挂为参考不断链；上传成功后替换为资产地址（持久化 + 复用）
-    try { updateShot(shotId, { previz_url: dataUrl }); } catch {}
-    setSnapshotSuccess(true); setTimeout(() => setSnapshotSuccess(false), 2500);
-    setSnapshotMsg('截图已挂为参考，正在上传资产库…');
+      return c.toDataURL('image/jpeg', 0.88);
+    } catch { return null; }
+  };
+
+  /** 截图入队：可指定机位（先切位再抓帧）；成功后自动上传资产库并落盘 previz_shots */
+  const queueSnapshot = async (cameraName: string, cam?: StageCamera) => {
+    if (!activeShot) return;
+    if (cam) {
+      applyPose(cam);
+      // 等两帧，确保监视器已按该机位渲染完成
+      await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+    }
+    const dataUrl = captureFrameDataUrl();
+    if (!dataUrl) { setSnapshotMsg('截图失败（画布不可读或舞台未加载）'); return; }
+    const item: QueueShot = {
+      id: `qs_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`,
+      camera: cameraName,
+      dataUrl,
+      uploading: true,
+    };
+    setShotQueue((q) => [...q, item]);
+    setSnapshotSuccess(true); setTimeout(() => setSnapshotSuccess(false), 2000);
+    setSnapshotMsg(`「${cameraName}」已入队，正在上传资产库…`);
     try {
-      const assetUrl = await uploadPrevizFile(dataUrlToFile(dataUrl, `previz_shot${activeShot.shot_index || ''}_${Date.now()}.jpg`), `白模截图_分镜${activeShot.shot_index || ''}`);
-      try { updateShot(shotId, { previz_url: assetUrl }); } catch {}
-      setSnapshotMsg('截图已存资产库并挂为参考');
-    } catch { setSnapshotMsg('截图已挂为参考（本地，资产库上传失败）'); }
+      const assetUrl = await uploadPrevizFile(
+        dataUrlToFile(dataUrl, `previz_shot${activeShot.shot_index || ''}_${Date.now()}.jpg`),
+        `白模截图_分镜${activeShot.shot_index || ''}_${cameraName}`,
+      );
+      setShotQueue((q) => q.map((x) => (x.id === item.id ? { ...x, assetUrl, uploading: false } : x)));
+      // 落盘：previz_shots 保留最近 12 张机位截图；previz_url 仅在未挂时补首张（不覆盖用户已选参考）
+      const existing: string[] = Array.isArray((activeShot as any).previz_shots) ? (activeShot as any).previz_shots : [];
+      const nextShots = [...existing, assetUrl].slice(-12);
+      const patch: Record<string, any> = { previz_shots: nextShots };
+      if (!(activeShot as any).previz_url) patch.previz_url = assetUrl;
+      try { updateShot(activeShot.id, patch as any); } catch {}
+      setSnapshotMsg(`「${cameraName}」已存资产库${patch.previz_url ? ' 并挂为参考' : ''}（队列 ${nextShots.length} 张）`);
+    } catch {
+      setShotQueue((q) => q.map((x) => (x.id === item.id ? { ...x, uploading: false, error: '上传失败' } : x)));
+      setSnapshotMsg(`「${cameraName}」截图完成，但资产库上传失败（本地缩略图仍可设为首帧/参考）`);
+    }
+  };
+
+  /** 全部机位依次截图入队（LibTV 式多视角截图） */
+  const captureAllCameras = async () => {
+    if (!activeShot) return;
+    if (!stageCameras.length) { setSnapshotMsg('先点「＋机位」新建至少一个机位'); return; }
+    for (const cam of stageCameras) {
+      // eslint-disable-next-line no-await-in-loop
+      await queueSnapshot(cam.name || '机位', cam);
+    }
+    // 抓完回到第一个机位，保持监视器与列表一致
+    if (stageCameras[0]) applyPose(stageCameras[0]);
+    setSnapshotMsg(`已按 ${stageCameras.length} 个机位截图并入队`);
+  };
+
+  const removeCamera = (camId: string) => {
+    const next = stageCameras.filter((c) => c.id !== camId);
+    if (camOverrideRef.current?.id === camId) camOverrideRef.current = null;
+    persistCameras(next);
+  };
+
+  const removeQueueItem = (id: string) => setShotQueue((q) => q.filter((x) => x.id !== id));
+
+  /** 队列项 → 本镜参考图（previz_url） */
+  const setQueueItemAsRef = (item: QueueShot) => {
+    if (!activeShot) return;
+    try { updateShot(activeShot.id, { previz_url: item.assetUrl || item.dataUrl } as any); } catch {}
+    setSnapshotMsg(`「${item.camera}」已设为参考图`);
+  };
+
+  /** 现有按钮入口：截当前监视器画面入队（等价于「当前机位」截图） */
+  const handleCaptureSnapshot = async () => {
+    await queueSnapshot('当前机位');
   };
 
   // 截图明确设为本镜首帧（覆盖需二次确认；与“仅作参考”分离）
@@ -1665,6 +1818,25 @@ export const Director3DStage: React.FC = () => {
     updateShot(activeShot.id, { image_url: activeShot.previz_url });
     setSnapshotMsg('已设为本镜首帧');
     toast.success('3D 虚拟片场截图已设为当前镜头首帧');
+  };
+
+  /** 队列项明确设为本镜首帧（覆盖需二次确认） */
+  const setQueueItemAsFirstFrame = async (item: QueueShot) => {
+    if (!activeShot) return;
+    const url = item.assetUrl || item.dataUrl;
+    if (!url) return;
+    if (activeShot.image_url) {
+      const confirmed = await confirmAsync({
+        title: '覆盖首帧画面',
+        message: `当前镜头已存在首帧画面，确定用「${item.camera}」的 3D 白模截图覆盖它吗？`,
+        confirmText: '确认覆盖',
+        cancelText: '取消',
+      });
+      if (!confirmed) return;
+    }
+    updateShot(activeShot.id, { image_url: url } as any);
+    setSnapshotMsg(`「${item.camera}」已设为本镜首帧`);
+    toast.success('白模截图已设为当前镜头首帧');
   };
 
   const dataUrlToFile = (dataUrl: string, name: string): File => {
@@ -1845,16 +2017,52 @@ export const Director3DStage: React.FC = () => {
         {showPip && (
           <div className="absolute bottom-18 md:bottom-4 right-4 z-20 w-52 h-80 bg-surface/95 border-2 border-brand/60 rounded-2xl shadow-2xl overflow-hidden backdrop-blur-md flex flex-col transition-all">
             <div className="h-7 px-3 bg-surface-secondary border-b border-border flex items-center justify-between text-[10px] text-gray-300 font-mono">
-              <span className="flex items-center space-x-1.5"><span className="w-2 h-2 rounded-full bg-red-500 animate-ping" /><span className="text-white font-bold">CAM 1 [REC]</span></span>
+              <span className="flex items-center space-x-1.5"><span className="w-2 h-2 rounded-full bg-red-500 animate-ping" /><span className="text-white font-bold">{stageCameras.find((c) => c.id === activeCamId)?.name || 'CAM 1'} [REC]</span></span>
               <div className="flex items-center space-x-1"><span className="text-brand-light font-bold">{aspectRatioMask}</span><span className="text-gray-500">|</span><span className="text-accent-blue font-bold">{focalLength}mm</span></div>
             </div>
             <div ref={pipBoxRef} className="flex-1 relative overflow-hidden bg-surface-secondary flex items-center justify-center"><div className="relative shadow-inner" style={{ width: pipFrame.w || '100%', height: pipFrame.h || undefined, aspectRatio: projectAspect, maxHeight: '100%' }}><div ref={pipContainerRef} className="absolute inset-0" />{compositionGrid === 'rule_of_thirds' && <div className="absolute inset-0 pointer-events-none grid grid-cols-3 grid-rows-3 border border-white/10 opacity-40"><div className="border-r border-b border-white/25" /><div className="border-r border-b border-white/25" /><div className="border-b border-white/25" /><div className="border-r border-b border-white/25" /><div className="border-r border-b border-white/25" /><div className="border-b border-white/25" /><div className="border-r border-b border-white/25" /><div className="border-r border-b border-white/25" /><div /></div>}{compositionGrid === 'crosshair' && <div className="absolute inset-0 pointer-events-none flex items-center justify-center"><Crosshair className="w-6 h-6 text-brand-light/70" /></div>}{compositionGrid === 'golden_ratio' && <div className="absolute inset-0 pointer-events-none border border-brand-light/30 rounded-full scale-90 opacity-40" />}</div></div>
             <div className="p-2 bg-surface-secondary/95 border-t border-border flex items-center justify-between text-[10px] gap-1">
               <button onClick={() => setCompositionGrid((g) => (g === 'rule_of_thirds' ? 'crosshair' : g === 'crosshair' ? 'golden_ratio' : g === 'golden_ratio' ? 'none' : 'rule_of_thirds'))} className="px-2 py-0.5 rounded bg-surface border border-border text-gray-300 hover:text-white font-mono" title="切换构图参考线">网格: {compositionGrid === 'rule_of_thirds' ? '九宫' : compositionGrid === 'crosshair' ? '十字' : compositionGrid === 'golden_ratio' ? '黄金' : '无'}</button>
-              <button onClick={handleCaptureSnapshot} className="flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-brand/30 hover:bg-brand border border-brand/50 text-brand-light hover:text-white font-bold transition-all" title="截取导演视角为图片参考（存资产库 previz，挂分镜 previz_url）">{snapshotSuccess ? <Check className="w-3 h-3 text-accent-green" /> : <Camera className="w-3 h-3" />}<span>{snapshotSuccess ? '已快照' : '截屏为参考'}</span></button>
+              <button onClick={handleCaptureSnapshot} className="flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-brand/30 hover:bg-brand border border-brand/50 text-brand-light hover:text-white font-bold transition-all" title="截取当前监视器画面入队（上传资产库 previz）">{snapshotSuccess ? <Check className="w-3 h-3 text-accent-green" /> : <Camera className="w-3 h-3" />}<span>{snapshotSuccess ? '已入队' : '截屏入队'}</span></button>
               <button onClick={handleSetSnapshotAsFirstFrame} className="px-2 py-1 rounded-lg bg-surface border border-border text-gray-300 hover:text-white font-mono" title="把当前截图参考设为本镜首帧（覆盖需确认）">设为首帧</button>
             </div>
-            {(snapshotMsg || activeShot?.previz_url) && <div className="px-2 py-1 bg-surface-secondary/95 border-t border-border text-[10px] text-gray-400 leading-4">{activeShot?.previz_url && <span className="text-accent-green font-bold">✓ 参考已挂载 </span>}{snapshotMsg}</div>}
+            {/* 多机位：＋机位(当前导演视角) / 全部机位截图 / 机位切换 */}
+            <div className="px-2 py-1.5 bg-surface-secondary/95 border-t border-border space-y-1">
+              <div className="flex items-center gap-1 flex-wrap">
+                <button onClick={addCameraFromDirectorView} className="px-1.5 py-0.5 rounded bg-brand/20 border border-brand/40 text-[9.5px] text-brand-light hover:bg-brand/30 font-bold" title="把主视图当前视角保存为一个机位">＋机位</button>
+                <button onClick={() => void captureAllCameras()} disabled={!stageCameras.length} className="px-1.5 py-0.5 rounded bg-surface border border-border text-[9.5px] text-gray-300 hover:text-white disabled:opacity-40" title="按顺序为每个机位截图并入队">全部机位截图</button>
+                {stageCameras.map((c) => (
+                  <span key={c.id} className={`flex items-center rounded border overflow-hidden ${activeCamId === c.id ? 'border-brand/60 bg-brand/15 text-brand-light' : 'border-border bg-surface text-gray-400'}`}>
+                    <button onClick={() => applyPose(c)} className="px-1.5 py-0.5 text-[9.5px] hover:text-white" title="切到此机位">{c.name}</button>
+                    <button onClick={() => removeCamera(c.id)} className="px-1 py-0.5 text-[9.5px] hover:text-red-300 border-l border-border/60" title="删除机位">×</button>
+                  </span>
+                ))}
+              </div>
+              {shotQueue.length > 0 && (
+                <div className="flex gap-1.5 overflow-x-auto custom-scrollbar pb-0.5">
+                  {shotQueue.map((item) => (
+                    <div key={item.id} className="w-[74px] shrink-0 rounded-lg overflow-hidden border border-border bg-black/40">
+                      <img src={item.dataUrl} alt={item.camera} className="w-full h-11 object-cover" />
+                      <div className="px-1 pt-0.5 text-[8.5px] text-gray-400 truncate" title={item.camera}>
+                        {item.camera}{item.uploading ? ' · 上传中' : item.error ? ' · 失败' : ' · ✓'}
+                      </div>
+                      <div className="flex border-t border-border/60 text-[9px]">
+                        <button onClick={() => void setQueueItemAsFirstFrame(item)} className="flex-1 py-0.5 text-gray-300 hover:text-brand-light" title="设为本镜首帧">首帧</button>
+                        <button onClick={() => setQueueItemAsRef(item)} className="flex-1 py-0.5 text-gray-300 hover:text-accent-green border-l border-border/60" title="设为本镜参考图（previz_url）">参考</button>
+                        <button onClick={() => removeQueueItem(item.id)} className="px-1 py-0.5 text-gray-500 hover:text-red-300 border-l border-border/60" title="移除">×</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            {(snapshotMsg || activeShot?.previz_url) && <div className="px-2 py-1 bg-surface-secondary/95 border-t border-border text-[10px] text-gray-400 leading-4">
+              {activeShot?.previz_url && <span className="text-accent-green font-bold">✓ 参考已挂载 </span>}
+              {Array.isArray((activeShot as any)?.previz_shots) && (activeShot as any).previz_shots.length > 0 && (
+                <span className="text-gray-500">机位截图 {(activeShot as any).previz_shots.length} 张 · </span>
+              )}
+              {snapshotMsg}
+            </div>}
           </div>
         )}
       </div>

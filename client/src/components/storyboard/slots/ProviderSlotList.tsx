@@ -1,5 +1,6 @@
 import React from 'react';
 import { Upload, UserCheck, FolderOpen } from 'lucide-react';
+import { AutoRatioMedia } from '../../ui/AutoRatioMedia';
 
 /**
  * 生成源插槽挂载区：完全按该源 input_schema 声明的媒体槽位逐条渲染（首帧/尾帧/参考图/参考音频…），
@@ -36,7 +37,7 @@ export const ProviderSlotList: React.FC<{
                 {urls.map((u) => (
                   slot.type === 'audio'
                     ? <span key={u} className="px-2 py-1 rounded bg-surface-secondary text-[10px] font-mono text-pink-300 max-w-[150px] truncate">🎵 {u.split(/[\\/]/).pop()}</span>
-                    : <img key={u} src={resolveUrl(u)} alt="" className="w-16 h-16 rounded-lg object-cover border border-border" />
+                    : <AutoRatioMedia key={u} src={resolveUrl(u)} fallbackAspect="1/1" maxHeight={64} className="rounded-lg border border-border" />
                 ))}
                 <button type="button" onClick={() => onWrite(writeKeys, isMulti ? [] : '')} className="px-2 py-1 rounded bg-red-500/20 text-red-400 text-[11px] hover:bg-red-500/30">清除</button>
               </div>

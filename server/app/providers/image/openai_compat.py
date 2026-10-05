@@ -1,10 +1,7 @@
 """
-OpenAI 兼容图片 Provider（设置中心「生图 → 自定义（OpenAI 兼容）」通道）
-适用于任意支持 /v1/images/generations 的服务（OpenAI / Azure / 中转站 / 自建代理）
-
-Key 独立：优先用 OPENAI_IMAGE_API_KEY；只有它为空时才回退复用文本大模型的 OPENAI_API_KEY
-（旧配置兼容）。地址与模型分别由 OPENAI_IMAGE_BASE_URL / OPENAI_IMAGE_MODEL 指定，
-地址留空才回退文本大模型的 OPENAI_BASE_URL。
+OpenAI 兼容图片 Provider
+适用于任意支持 /v1/images/generations 的服务（OpenAI / Azure / 自建代理）
+通过环境变量 OPENAI_IMAGE_BASE_URL / OPENAI_IMAGE_MODEL 配置
 """
 import os
 import time
@@ -19,46 +16,32 @@ GENERATED_DIR = os.path.join(settings.STORAGE_DIR, "generated")
 os.makedirs(GENERATED_DIR, exist_ok=True)
 
 
-def image_api_key() -> str:
-    """生图专用 Key 优先；留空回退文本大模型的 Key（旧配置兼容）。"""
-    return (
-        getattr(settings, "OPENAI_IMAGE_API_KEY", "")
-        or getattr(settings, "OPENAI_API_KEY", "")
-        or ""
-    ).strip()
-
-
-def image_base_url() -> str:
-    """生图接口地址：OPENAI_IMAGE_BASE_URL 优先，留空回退文本大模型的地址。"""
-    return (
-        getattr(settings, "OPENAI_IMAGE_BASE_URL", "")
-        or getattr(settings, "OPENAI_BASE_URL", "")
-        or ""
-    ).strip().rstrip("/")
-
-
 class OpenAICompatProvider(ImageProvider):
     id = "openai_compat"
-    display_name = "自定义 (OpenAI 兼容生图)"
-    description = "兼容 OpenAI /v1/images/generations 协议的任意生图服务，独立 Key / 地址 / 模型"
+    display_name = "OpenAI 兼容 (DALL·E / 代理)"
+    description = "兼容 OpenAI /v1/images/generations 协议的任意生图服务"
     icon = "Globe"
     category = "ai_generation"
 
+    def _api_key(self) -> str:
+        """生图专用 Key 优先（OPENAI_IMAGE_API_KEY）；留空回退文本网关的 OPENAI_API_KEY。"""
+        return (getattr(settings, "OPENAI_IMAGE_API_KEY", "") or getattr(settings, "OPENAI_API_KEY", "") or "").strip()
+
+    def _base_url(self) -> str:
+        """生图专用地址优先（OPENAI_IMAGE_BASE_URL）；留空回退 OPENAI_BASE_URL。"""
+        return (getattr(settings, "OPENAI_IMAGE_BASE_URL", "") or getattr(settings, "OPENAI_BASE_URL", "") or "").strip().rstrip("/")
+
     def is_configured(self) -> bool:
-        return bool(image_api_key() and image_base_url())
+        return bool(self._api_key() and self._base_url())
 
     async def check_health(self) -> bool:
         if not self.is_configured():
             return False
         try:
-            base = image_base_url()
-            probe = base if base.endswith("/v1") else f"{base}/v1"
-            # 尝试 /models 接口
+            base = self._base_url()
+            url = f"{base}/models" if base.endswith("/v1") else f"{base}/v1/models"
             async with httpx.AsyncClient(timeout=6.0) as client:
-                r = await client.get(
-                    f"{probe}/models",
-                    headers={"Authorization": f"Bearer {image_api_key()}"},
-                )
+                r = await client.get(url, headers={"Authorization": f"Bearer {self._api_key()}"})
                 return r.status_code in (200, 404)  # 404也说明服务在线只是无此接口
         except Exception:
             return False
@@ -66,34 +49,30 @@ class OpenAICompatProvider(ImageProvider):
     async def generate(self, req: ImageGenerateRequest) -> ImageGenerateResult:
         if not req.prompt or not req.prompt.strip():
             raise ValueError("提示词不能为空")
-        api_key = image_api_key()
+        api_key = self._api_key()
         if not api_key:
-            raise RuntimeError(
-                "生图 Key 未配置：请在「设置 → 能力配置 → 生图 → 自定义（OpenAI 兼容）」里填 OPENAI_IMAGE_API_KEY"
-            )
+            raise RuntimeError("OPENAI_IMAGE_API_KEY / OPENAI_API_KEY 未配置")
 
         started = time.time()
-        base = image_base_url()
-        if not base:
-            raise RuntimeError(
-                "生图接口地址未配置：请填 OPENAI_IMAGE_BASE_URL（或给文本大模型配一个 OPENAI_BASE_URL 作为回退）"
-            )
-        # 兼容 base 已包含 /v1 或误填到具体端点的情况
+        base = self._base_url()
+        # 兼容 base 已包含 /v1 的情况
         if base.endswith("/chat/completions"):
             base = base.replace("/chat/completions", "")
-        if base.endswith("/images/generations"):
-            url = base
-        elif base.endswith("/v1"):
+        if base.endswith("/v1"):
             url = f"{base}/images/generations"
         else:
             url = f"{base}/v1/images/generations"
-        model = req.model or getattr(settings, "OPENAI_IMAGE_MODEL", "") or "dall-e-3"
-        # 尺寸映射：dall-e-3 支持 1024x1024, 1792x1024, 1024x1792
-        size_map = {
-            "1:1": "1024x1024",
-            "16:9": "1792x1024",
-            "9:16": "1024x1792",
-        }
+        model = (req.model or getattr(settings, "OPENAI_IMAGE_MODEL", "") or "gpt-image-2.5-flare").strip()
+        # 模型族不同，尺寸/返回格式都不同：
+        # - gpt-image-1 / 1.5 / 2 只接受 1024x1024 / 1536x1024 / 1024x1536，且恒返回 b64_json（不支持 response_format）
+        # - dall-e-3 支持 1792x1024 / 1024x1792，且必须显式 response_format=url
+        is_gpt_image = model.startswith("gpt-image") or model.startswith("chatgpt-image")
+        if is_gpt_image:
+            size_map = {"1:1": "1024x1024", "16:9": "1536x1024", "9:16": "1024x1536",
+                        "4:3": "1536x1024", "3:4": "1024x1536"}
+        else:
+            size_map = {"1:1": "1024x1024", "16:9": "1792x1024", "9:16": "1024x1792",
+                        "4:3": "1792x1024", "3:4": "1024x1792"}
         size = size_map.get(req.aspect_ratio, "1024x1024")
         if req.width and req.height:
             size = f"{req.width}x{req.height}"
@@ -104,8 +83,7 @@ class OpenAICompatProvider(ImageProvider):
             "n": 1,
             "size": size,
         }
-        # dall-e-3 支持 response_format；gpt-image-1 等新模型只返回 b64，不认该字段
-        if "dall-e" in model.lower():
+        if not is_gpt_image:
             payload["response_format"] = "url"
 
         headers = {

@@ -47,11 +47,11 @@ export const TimelineExportNode: React.FC<NodeProps> = ({ data, id }) => {
   };
 
   return (
-    <div className="w-[360px] bg-surface border border-border rounded-2xl shadow-xl overflow-hidden">
-      <div className="px-3 py-2.5 bg-surface border-b border-border flex items-center gap-1.5">
-        <div className="w-6 h-6 rounded-lg bg-surface-secondary border border-border flex items-center justify-center"><Film className="w-3.5 h-3.5 text-emerald-500"/></div>
+    <div className="w-[360px] bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-2xl shadow-xl overflow-hidden">
+      <div className="px-3 py-2.5 bg-white/60 dark:bg-white/[.05] border-b border-white/70 dark:border-white/12 flex items-center gap-1.5">
+        <div className="w-6 h-6 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 flex items-center justify-center"><Film className="w-3.5 h-3.5 text-emerald-500"/></div>
         <span className="text-xs font-bold [color:var(--color-text-main)]">时间线 / 剪映导出</span>
-        <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-surface-secondary border border-border [color:var(--color-text-muted)] font-mono">Jianying Draft</span>
+        <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 [color:var(--color-text-muted)] font-mono">Jianying Draft</span>
       </div>
       <Handle type="target" position={Position.Left} className="!bg-brand !w-3 !h-3 !border-2 !border-surface"/>
       <Handle type="target" position={Position.Top} id="shots" className="!bg-pink-500 !w-3 !h-3 !border-2 !border-surface" style={{left:'30%'}}/>

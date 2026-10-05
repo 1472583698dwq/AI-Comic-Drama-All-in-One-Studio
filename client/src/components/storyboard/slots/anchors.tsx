@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, FolderOpen, Mountain, Plus, UserCheck, Users } from 'lucide-react';
 import type { ShotSlotContext } from './types';
+import { AutoRatioMedia } from '../../ui/AutoRatioMedia';
 
 /**
  * 锚点 Slot（shot.anchors）：出场角色 / 场景空间 / 道具法宝。
@@ -27,7 +28,8 @@ export const CharacterAnchor: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => 
         {(project?.characters || []).map((char) => {
           const isBound = (activeShot.character_ids || []).includes(char.id);
           const weight = activeShot.character_weights?.[char.id] ?? 0.8;
-          const charAvatar = char.three_views?.front || char.avatar_url || char.three_views?.three_quarter;
+          const _tv = (char.three_views || {}) as Record<string, string>;
+          const charAvatar = _tv.front || char.avatar_url || _tv.three_quarter || _tv.side;
 
           return (
             <div
@@ -86,7 +88,9 @@ export const CharacterAnchor: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => 
       {(activeShot.character_ids || []).length > 0 && (() => {
         const boundChar = (project?.characters || []).find(c => (activeShot.character_ids || []).includes(c.id));
         if (!boundChar) return null;
-        const currentRef = (activeShot as any).reference_image || boundChar.three_views?.front || boundChar.avatar_url || boundChar.three_views?.three_quarter;
+        const _btv = (boundChar.three_views || {}) as Record<string, string>;
+        const boundImg = _btv.front || boundChar.avatar_url || _btv.three_quarter || _btv.side;
+        const currentRef = (activeShot as any).reference_image || boundImg;
 
         return (
           <div className="pt-2 border-t border-brand/15 space-y-2 text-[11px]">
@@ -107,16 +111,15 @@ export const CharacterAnchor: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => 
                 className="flex items-center gap-2 cursor-pointer group"
                 title="点击从素材库更换参考垫图"
               >
-                <div className="w-10 h-10 rounded-lg overflow-hidden bg-surface-secondary border border-border shrink-0 relative group-hover:border-brand transition-all">
-                  {currentRef ? (
-                    <img src={getMediaUrl(currentRef)} alt="" className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-[9px] text-gray-500">无图</div>
-                  )}
-                  <div className="absolute inset-0 bg-brand/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                    <FolderOpen className="w-3.5 h-3.5 text-white" />
-                  </div>
-                </div>
+                {currentRef ? (
+                  <AutoRatioMedia src={getMediaUrl(currentRef)} fallbackAspect="1/1" maxHeight={40} className="rounded-lg bg-surface-secondary border border-border shrink-0 group-hover:border-brand transition-all">
+                    <div className="absolute inset-0 bg-brand/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                      <FolderOpen className="w-3.5 h-3.5 text-white" />
+                    </div>
+                  </AutoRatioMedia>
+                ) : (
+                  <div className="w-10 h-10 rounded-lg overflow-hidden bg-surface-secondary border border-border shrink-0 flex items-center justify-center text-[9px] text-gray-500">无图</div>
+                )}
                 <div>
                   <div className="font-bold text-white flex items-center gap-1 group-hover:text-brand-light transition-colors">
                     <span>已绑定参考图:</span>
@@ -130,31 +133,13 @@ export const CharacterAnchor: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => 
 
               {/* 视角切换与素材库选取按钮 */}
               <div className="flex items-center gap-1">
-                {boundChar.three_views?.front && (
+                {boundImg && (
                   <button
-                    onClick={() => updateShot(activeShot.id, { dynamic_inputs: { ...shotDynamicInputs, reference_image: boundChar.three_views?.front } } as any)}
+                    onClick={() => updateShot(activeShot.id, { dynamic_inputs: { ...shotDynamicInputs, reference_image: boundImg } } as any)}
                     className="px-1.5 py-0.5 rounded bg-surface-secondary hover:bg-brand/30 border border-border text-[9px] text-gray-300"
-                    title="使用正面图"
+                    title="使用三视图"
                   >
-                    正面
-                  </button>
-                )}
-                {boundChar.three_views?.side && (
-                  <button
-                    onClick={() => updateShot(activeShot.id, { dynamic_inputs: { ...shotDynamicInputs, reference_image: boundChar.three_views?.side } } as any)}
-                    className="px-1.5 py-0.5 rounded bg-surface-secondary hover:bg-brand/30 border border-border text-[9px] text-gray-300"
-                    title="使用侧面图"
-                  >
-                    侧面
-                  </button>
-                )}
-                {boundChar.three_views?.three_quarter && (
-                  <button
-                    onClick={() => updateShot(activeShot.id, { dynamic_inputs: { ...shotDynamicInputs, reference_image: boundChar.three_views?.three_quarter } } as any)}
-                    className="px-1.5 py-0.5 rounded bg-surface-secondary hover:bg-brand/30 border border-border text-[9px] text-gray-300"
-                    title="使用 3/4 动态图"
-                  >
-                    3/4
+                    三视图
                   </button>
                 )}
                 <button
@@ -224,13 +209,11 @@ export const SceneAnchor: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
       {activeShot.scene_name ? (
         <div className="flex items-center justify-between bg-surface-secondary p-2 rounded-xl border border-emerald-500/30">
           <div className="flex items-center gap-2 min-w-0">
-            <div className="w-10 h-10 rounded-lg overflow-hidden bg-surface-secondary border border-border shrink-0">
-              {activeShot.scene_ref_image ? (
-                <img src={getMediaUrl(activeShot.scene_ref_image)} alt="" className="w-full h-full object-cover" />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center text-[9px] text-gray-500">场景</div>
-              )}
-            </div>
+            {activeShot.scene_ref_image ? (
+              <AutoRatioMedia src={getMediaUrl(activeShot.scene_ref_image)} fallbackAspect="1/1" maxHeight={40} className="rounded-lg bg-surface-secondary border border-border shrink-0" />
+            ) : (
+              <div className="w-10 h-10 rounded-lg overflow-hidden bg-surface-secondary border border-border shrink-0 flex items-center justify-center text-[9px] text-gray-500">场景</div>
+            )}
             <div className="min-w-0">
               <div className="text-xs font-bold text-white truncate">{activeShot.scene_name}</div>
               <div className="text-[10px] text-gray-400 truncate">{activeShot.scene_prompt || '已注入环境光影'}</div>

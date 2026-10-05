@@ -76,7 +76,9 @@ class AudioProviderRegistry:
         from app.extensions import guard
         _pid = (req.extra.get("project_id") if req.extra and isinstance(req.extra, dict) else None)
         guard.ensure_provider_enabled(getattr(prov, "id", provider_id or ""), _pid)
-        return await prov.generate(req)
+        from app.providers.gen_timer import with_timer
+        return await with_timer("audio", getattr(prov, "id", "") or "unknown", prov.generate(req),
+                                detail=(req.text or "")[:40])
 
     @staticmethod
     def _normalize_ref_audio(req: AudioGenerateRequest) -> AudioGenerateRequest:

@@ -4,6 +4,7 @@
  * 4 大真实数据源：画布产出资源 + 角色库立绘 + 项目素材库 + 本地上传
  */
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   X,
   Search,
@@ -32,7 +33,12 @@ const resolveUrl = (u?: string) => (u && u.startsWith('/') ? API_ORIGIN + u : (u
 interface Props {
   isOpen: boolean;
   onClose: () => void;
-  onSelect: (url: string | string[], meta?: any) => void;
+  /**
+   * meta：首个带 visual_prompt/voice_id 的选中项元数据（自动填 prompt 用）；
+   * metas：每个选中 URL → 其来源项（画布产出含 sourceNodeId/slotKey，素材库含 category 等），
+   * 调用方据此在画布上放置对应的输入卡片或直接连到来源卡片。
+   */
+  onSelect: (url: string | string[], meta?: any, metas?: Record<string, any>) => void;
   slotKey: string;
   slotLabel: string;
   multiSelect?: boolean;
@@ -51,6 +57,8 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
   const [activeTab, setActiveTab] = useState<'canvas' | 'characters' | 'assets' | 'upload'>('canvas');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedUrls, setSelectedUrls] = useState<string[]>([]);
+  /** 选中项 → 元数据（visual_prompt/voice_id），确认时回传给 NodeAgentBar/Console 自动填 prompt */
+  const [metaMap, setMetaMap] = useState<Record<string, any>>({});
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [uploading, setUploading] = useState(false);
 
@@ -68,6 +76,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
     if (!isOpen) return;
     // 切槽位/重开时清掉上次的勾选与搜索，避免串槽
     setSelectedUrls([]);
+    setMetaMap({});
     setSearchQuery('');
     let cancelled = false;
     (async () => {
@@ -145,16 +154,25 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
 
   const handleToggleSelect = (url: string, meta?: any) => {
     if (!url) return;
-    if (multiSelect) {
-      setSelectedUrls((prev) => (prev.includes(url) ? prev.filter((u) => u !== url) : [...prev, url]));
-    } else {
-      setSelectedUrls((prev) => (prev[0] === url ? [] : [url]));
-    }
+    const isSel = selectedUrls.includes(url);
+    let next: string[];
+    if (multiSelect) next = isSel ? selectedUrls.filter((u) => u !== url) : [...selectedUrls, url];
+    else next = isSel ? [] : [url];
+    setSelectedUrls(next);
+    // 记住每个选中项的元数据（visual_prompt/voice_id），确认时回传给节点自动填 prompt
+    setMetaMap((prev) => {
+      const m: Record<string, any> = { ...prev };
+      if (meta) m[url] = meta;
+      for (const k of Object.keys(m)) if (!next.includes(k)) delete m[k];
+      return m;
+    });
   };
+
+  const metaOf = (urls: string[]) => urls.map((u) => metaMap[u]).find((m) => m && (m.visual_prompt || m.voice_id)) || undefined;
 
   const handleConfirmMulti = () => {
     if (selectedUrls.length > 0) {
-      onSelect(selectedUrls);
+      onSelect(selectedUrls, metaOf(selectedUrls), metaMap);
       onClose();
     }
   };
@@ -230,9 +248,11 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={onClose}>
-      <div className="w-full max-w-4xl max-h-[85vh] bg-surface border border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden text-white" onClick={(e) => e.stopPropagation()}>
+  return createPortal(
+    // Portal 到 body：操作台/底部栏外壳带 translate 变换，fixed 会被它当成包含块并遭 overflow 裁剪
+    // （表现为选择器被塞进底栏、画布内容出现在插槽组件下面）；z-[70] 保证盖在参数弹窗(z-[60])之上。
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={onClose}>
+      <div className="w-full max-w-4xl max-h-[85vh] bg-white/60 dark:bg-white/[.05] border border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden text-white" onClick={(e) => e.stopPropagation()}>
         {/* 顶部标题栏 */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-white/[0.02]">
           <div className="flex items-center gap-3">
@@ -259,7 +279,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
 
         {/* Tab 切换与搜索栏 */}
         <div className="px-6 py-3 border-b border-white/10 bg-white/[0.01] flex items-center justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-1 bg-surface-secondary p-1 rounded-xl border border-white/10">
+          <div className="flex items-center gap-1 bg-white/55 dark:bg-white/[.06] p-1 rounded-xl border border-white/10">
             <button
               onClick={() => setActiveTab('canvas')}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
@@ -314,10 +334,10 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
                 placeholder="搜索资源..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-44 bg-surface-secondary border border-white/10 rounded-xl pl-9 pr-3 py-1.5 text-xs text-white placeholder-white/40 focus:outline-none focus:border-violet-500 transition-colors"
+                className="w-44 bg-white/55 dark:bg-white/[.06] border border-white/10 rounded-xl pl-9 pr-3 py-1.5 text-xs text-white placeholder-white/40 focus:outline-none focus:border-violet-500 transition-colors"
               />
             </div>
-            <div className="flex items-center bg-surface-secondary border border-white/10 rounded-lg p-0.5">
+            <div className="flex items-center bg-white/55 dark:bg-white/[.06] border border-white/10 rounded-lg p-0.5">
               <button
                 onClick={() => setViewMode('grid')}
                 className={`p-1.5 rounded ${viewMode === 'grid' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white'}`}
@@ -370,11 +390,11 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
                           kind={asset.type === 'video' ? 'video' : 'image'}
                           alt={asset.name}
                           fallbackAspect="9/16"
-                          className="w-full bg-surface-secondary"
+                          className="w-full bg-white/55 dark:bg-white/[.06]"
                           mediaClassName="group-hover:scale-105 transition-transform duration-300"
                           videoProps={{ muted: true }}
                         >
-                          <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-surface/85 backdrop-blur-md text-[10px] font-mono text-white/80 border border-white/10">
+                          <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-white/75 dark:bg-black/50 backdrop-blur-md text-[10px] font-mono text-white/80 border border-white/10">
                             {asset.sourceNodeType}
                           </div>
                           {isSelected && (
@@ -383,7 +403,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
                             </div>
                           )}
                         </AutoRatioMedia>
-                        <div className="p-2 bg-surface-secondary border-t border-white/5">
+                        <div className="p-2 bg-white/55 dark:bg-white/[.06] border-t border-white/5">
                           <div className="text-xs font-medium text-white/90 truncate">{asset.name}</div>
                           <div className="text-[10px] text-white/40 truncate">{asset.url.split('/').pop()}</div>
                         </div>
@@ -425,7 +445,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
                             src={resolveUrl(avatar)}
                             alt={char.name}
                             fallbackAspect="1/1"
-                            className="w-full rounded-xl bg-surface-secondary border border-white/10"
+                            className="w-full rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/10"
                             mediaClassName="group-hover:scale-105 transition-transform"
                           >
                             {isSelected && (
@@ -435,7 +455,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
                             )}
                           </AutoRatioMedia>
                         ) : (
-                          <div className="aspect-square w-full rounded-xl bg-surface-secondary overflow-hidden relative border border-white/10 flex items-center justify-center">
+                          <div className="aspect-square w-full rounded-xl bg-white/55 dark:bg-white/[.06] overflow-hidden relative border border-white/10 flex items-center justify-center">
                             <UserCheck className="w-10 h-10 text-white/20" />
                           </div>
                         )}
@@ -496,7 +516,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
                               kind="video"
                               alt={asset.name}
                               fallbackAspect="16/9"
-                              className="w-full bg-surface-secondary"
+                              className="w-full bg-white/55 dark:bg-white/[.06]"
                               mediaClassName="group-hover:scale-105 transition-transform"
                               videoProps={{ muted: true }}
                             >
@@ -507,16 +527,16 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
                               )}
                             </AutoRatioMedia>
                           ) : (
-                            <div className="aspect-[4/3] w-full bg-surface-secondary relative overflow-hidden flex items-center justify-center"><Video className="w-8 h-8 text-orange-400" /></div>
+                            <div className="aspect-[4/3] w-full bg-white/55 dark:bg-white/[.06] relative overflow-hidden flex items-center justify-center"><Video className="w-8 h-8 text-orange-400" /></div>
                           )
                         ) : asset.category === 'audio' || asset.type === 'audio' ? (
-                          <div className="aspect-[4/3] w-full bg-surface-secondary relative overflow-hidden flex items-center justify-center"><Music className="w-8 h-8 text-pink-400" /></div>
+                          <div className="aspect-[4/3] w-full bg-white/55 dark:bg-white/[.06] relative overflow-hidden flex items-center justify-center"><Music className="w-8 h-8 text-pink-400" /></div>
                         ) : u ? (
                           <AutoRatioMedia
                             src={resolveUrl(u)}
                             alt={asset.name}
                             fallbackAspect="4/3"
-                            className="w-full bg-surface-secondary"
+                            className="w-full bg-white/55 dark:bg-white/[.06]"
                             mediaClassName="group-hover:scale-105 transition-transform"
                           >
                             {isSelected && (
@@ -526,9 +546,9 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
                             )}
                           </AutoRatioMedia>
                         ) : (
-                          <div className="aspect-[4/3] w-full bg-surface-secondary relative overflow-hidden flex items-center justify-center"><ImageIcon className="w-8 h-8 text-white/30" /></div>
+                          <div className="aspect-[4/3] w-full bg-white/55 dark:bg-white/[.06] relative overflow-hidden flex items-center justify-center"><ImageIcon className="w-8 h-8 text-white/30" /></div>
                         )}
-                        <div className="p-2 bg-surface-secondary border-t border-white/5">
+                        <div className="p-2 bg-white/55 dark:bg-white/[.06] border-t border-white/5">
                           <div className="text-xs font-medium text-white/90 truncate">{asset.name || '未命名资产'}</div>
                           <div className="text-[10px] text-white/40 truncate">{asset.category || asset.type || 'asset'}</div>
                         </div>
@@ -564,7 +584,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
         </div>
 
         {/* 底部确认栏 - 始终显示，修复无法确定/退出 */}
-        <div className="px-6 py-3 border-t border-white/10 bg-surface flex items-center justify-between shrink-0">
+        <div className="px-6 py-3 border-t border-white/10 bg-white/60 dark:bg-white/[.05] flex items-center justify-between shrink-0">
           <span className="text-xs text-white/60">
             {selectedUrls.length === 0 ? (
               <span>未选择 {multiSelect ? '· 可多选' : ''}</span>
@@ -585,7 +605,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
               onClick={() => {
                 if (multiSelect) handleConfirmMulti();
                 else if (selectedUrls.length > 0) {
-                  onSelect(selectedUrls[0]);
+                  onSelect(selectedUrls[0], metaMap[selectedUrls[0]], metaMap);
                   onClose();
                 }
               }}
@@ -597,6 +617,7 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

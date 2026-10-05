@@ -45,6 +45,7 @@ class AgentLoop:
         interactive: bool = True,
         store: Optional[SessionStore] = None,
         max_steps: Optional[int] = None,
+        agent_profile: Any = None,
     ):
         self.session = Session.open(session_id, store=store)
         try:
@@ -54,7 +55,7 @@ class AgentLoop:
             self.run_mode = run_mode or "approve"
             behavior_of = lambda m: "plan" if str(m).startswith("plan") else ("create" if str(m).startswith("create") else "standard")  # noqa: E731
         self.mode = "chat" if str(mode or "execute").lower() == "chat" else "execute"
-        # 行为维（standard/create/plan）决定只读门控与提示词；执行维（approve/auto）只决定是否逐项人审
+        self.agent_profile = agent_profile
         self.plan_mode = behavior_of(self.run_mode) == "plan"
         # /plan off 回到进入计划前的行为（如 创造+自动），避免把行为维度一并重置
         self._pre_plan_run_mode = "approve"
@@ -75,6 +76,7 @@ class AgentLoop:
             approval_policy="ask",
             interactive=interactive,
             session=self.session,
+            agent_profile=agent_profile,
         )
         try:
             from app.agent.runtime.goal import load_goal
@@ -82,7 +84,10 @@ class AgentLoop:
         except Exception:
             self.goal = None
         self._last_turn_reason = ""
-        self._max_steps = int(max_steps or _env_int("AGENT_MAX_ITERATIONS", 200))
+        # 已回投过的媒体引用（会话级去重：同一张图不重复作为附件塞给模型）
+        self._seen_media_refs: set = set()
+        _profile_steps = int(getattr(agent_profile, "max_steps", 0) or 0)
+        self._max_steps = int(max_steps or _profile_steps or _env_int("AGENT_MAX_ITERATIONS", 200))
         # 后台任务（P5）：长耗时工具调用异步化，完成后注入通知
         try:
             from app.agent.runtime.jobs import JobManager
@@ -107,6 +112,12 @@ class AgentLoop:
             pass
 
     async def _emit(self, ev: Dict[str, Any]) -> None:
+        # 客户端按 session_id 分流（页面版与悬浮窗版独立会话共用一条 WS）。
+        try:
+            if isinstance(ev, dict) and "session_id" not in ev:
+                ev = {**ev, "session_id": self.session_id}
+        except Exception:
+            pass
         for sink in list(self._sinks):
             try:
                 r = sink(ev)
@@ -117,7 +128,8 @@ class AgentLoop:
 
     # ── 输入 ─────────────────────────────────────────────
     async def prompt(self, text: str, context: Optional[Dict[str, Any]] = None,
-                     mode: Optional[str] = None, run_mode: Optional[str] = None) -> None:
+                     mode: Optional[str] = None, run_mode: Optional[str] = None,
+                     attachments: Optional[List[Dict[str, Any]]] = None) -> None:
         # 免模型命令：/plan /goal /status /compact /cancel /help
         try:
             from app.agent.runtime.commands import execute_command
@@ -145,7 +157,7 @@ class AgentLoop:
             except Exception:
                 plan_text = str(approved)
             text = f"{text}\n\n【用户已批准的执行计划（请严格按步骤执行；偏离需说明理由）】\n{plan_text[:6000]}"
-        self.inbox.followup(text, source="user")
+        self.inbox.followup(text, source="user", meta={"attachments": attachments} if attachments else None)
 
     def set_run_mode(self, run_mode: str) -> None:
         try:
@@ -158,7 +170,6 @@ class AgentLoop:
             behavior = "plan" if m.startswith("plan") else ("create" if m.startswith("create") else "standard")
             prev_behavior = "plan" if str(self.run_mode).startswith("plan") else "standard"
             execution_of = lambda x: "auto" if str(x).endswith("auto") else "approve"  # noqa: E731
-        # 进计划前记住原组合，供 /plan off 原样退回
         if behavior == "plan" and prev_behavior != "plan":
             self._pre_plan_run_mode = self.run_mode
         changed = m != self.run_mode
@@ -174,15 +185,15 @@ class AgentLoop:
     async def apply_run_mode(self, run_mode: str) -> str:
         """热切换运行模式（对当前轮后续工具立即生效）。
 
-        切到「自动」（执行维=auto，含 create_auto / plan_auto）时同步放行全部挂起审批并补发 approval_ack，
+        切到「自动」时同步放行全部挂起审批并补发 approval_ack，
         否则用户切了自动，之前弹出的审批卡仍会阻塞工具直到超时。
         """
         self.set_run_mode(run_mode)
         try:
-            from app.agent.mode_policy import execution_of as _execution_of
-            to_auto = _execution_of(self.run_mode) == "auto"
+            from app.agent.mode_policy import execution_of
+            to_auto = execution_of(self.run_mode) == "auto"
         except Exception:
-            to_auto = str(self.run_mode).strip().lower().endswith("auto")
+            to_auto = str(self.run_mode).endswith("auto")
         if to_auto:
             approvals = getattr(getattr(self, "pipeline", None), "approvals", None)
             resolver = getattr(approvals, "resolve_all", None)
@@ -212,8 +223,8 @@ class AgentLoop:
         self.goal = None
         save_goal(self.session, None)
 
-    async def steer(self, text: str) -> None:
-        self.inbox.steer(text, source="user")
+    async def steer(self, text: str, attachments: Optional[List[Dict[str, Any]]] = None) -> None:
+        self.inbox.steer(text, source="user", meta={"attachments": attachments} if attachments else None)
 
     def is_running(self) -> bool:
         return self._driver is not None and not self._driver.done()
@@ -236,7 +247,6 @@ class AgentLoop:
             self._close_turn("aborted", cause)
         await self._emit({"event": "agent_response", "message": "⏹️ 已暂停",
                           "suggested_actions": [], "executed_tools": []})
-
     async def wait_idle(self, timeout: Optional[float] = None) -> None:
         task = self._driver
         if task and not task.done():
@@ -333,14 +343,41 @@ class AgentLoop:
             first_text = claimed[0].text[:40] if claimed else ""
             await self._emit({"event": "agent_thinking", "message": f"正在解析导演指令: 「{first_text}」..."})
             system_text = build_system_prompt(plan_mode=self.plan_mode, run_mode=self.run_mode)
+            _profile = getattr(self, "agent_profile", None)
+            if _profile is not None:
+                try:
+                    system_text = f"{system_text}\n\n{_profile.system_prompt}"
+                except Exception:
+                    pass
             self.session.append(E.SYSTEM_MESSAGE, {"text": system_text})
             context_block = build_context_block(self.context)
             if context_block:
                 # 运行时上下文是模型可见输入：以 user 消息形式落账，附在本轮输入之后
                 self.session.append(E.USER_MESSAGE, {"text": context_block, "source": "system", "form": "context"})
+            # 画布「加入会话」节点的已有产出：自动作为媒体附件注入（图片始终；视频/音频按开关）
+            try:
+                from app.agent.runtime.attachments import attachments_from_focus_nodes
+                _focus_atts = [
+                    a for a in attachments_from_focus_nodes(self.context)
+                    if a.get("ref") and a["ref"] not in self._seen_media_refs
+                ]
+                if _focus_atts:
+                    for a in _focus_atts:
+                        self._seen_media_refs.add(a["ref"])
+                    self.session.append(E.USER_MESSAGE, {
+                        "text": "【会话关注节点（画布已加入会话）的已有产出（自动附带）】",
+                        "source": "canvas-focus", "form": "notice",
+                        "meta": {"attachments": _focus_atts},
+                    })
+                    await self._emit({"event": "media_attached", "tool_name": "canvas_focus",
+                                      "items": [{k: a.get(k) for k in ("kind", "name", "ref")} for a in _focus_atts]})
+            except Exception:
+                pass
             tools = self._tool_schemas()
             step_index = 0
             bad_args_streak = 0
+            trunc_streak = 0
+            overflow_compacts = 0
             while True:
                 if step_index >= safety_cap:
                     reason = "max-steps"
@@ -377,9 +414,30 @@ class AgentLoop:
                         "finish_reason": reply.finish_reason,
                     })
                     if truncated:
-                        reason = "max-tokens"
+                        trunc_streak += 1
+                        # 长思考/长参数吃满输出上限（reasoning 也计入 completion_tokens）时
+                        # finish_reason=length：截断的工具调用一律丢弃（JSON 不可信），
+                        # 但不因此结束回合——明确要求"停止展开思考、参数从简、立刻给出可解析调用"后继续下一步，
+                        # 让同一回合内仍能产出执行指令；连续多次截断才终止，避免死循环。
                         if reply.tool_calls:
-                            await self._emit({"event": "error", "message": "模型输出达到长度上限，工具调用被截断已丢弃；请精简参数或拆分任务后重试。"})
+                            await self._emit({"event": "error", "message": "模型输出达到长度上限，工具调用被截断已丢弃；正在要求模型精简参数后重试…"})
+                        if trunc_streak <= 2:
+                            await self._emit({"event": "agent_thinking", "message": f"输出达到长度上限被截断（第 {trunc_streak} 次），正压缩思考继续执行…"})
+                            self.session.append(E.USER_MESSAGE, {
+                                "text": (
+                                    "[系统] 你上一条回复在思考/输出中途因输出长度上限被截断，"
+                                    "其中不完整的工具调用已全部丢弃，尚未产出可执行指令。"
+                                    "请立刻直接行动：不要复述思考、不要解释，优先输出下一步工具调用；"
+                                    "参数务必从简且一次给出完整合法 JSON（长文档/长文本拆成多次调用分步提交）。"
+                                ),
+                                "source": "system", "form": "notice",
+                            })
+                            continue
+                        reason = "max-tokens"
+                        final_text = ("模型输出连续达到长度上限，未能产出完整执行指令；"
+                                      "请到「设置 → 系统」调大「单次回复最大 token」（AGENT_MAX_TOKENS），"
+                                      "或把任务拆小后重试。")
+                        await self._emit({"event": "error", "message": final_text})
                         break
                     if tool_calls:
                         # 参数被截断/非法（多为输出超长）：绝不执行，也绝不把非法 JSON 回传上游，
@@ -414,11 +472,17 @@ class AgentLoop:
                     reason = "aborted"
                     raise
                 except LLMConfigError as e:
+                    if await self._recover_context_overflow(e, overflow_compacts):
+                        overflow_compacts += 1
+                        continue
                     reason = "error"
                     self.session.append(E.ASSISTANT_ATTEMPT, {"error": str(e)[:500], "terminal": True})
                     await self._emit({"event": "error", "message": str(e)})
                     break
                 except Exception as e:
+                    if await self._recover_context_overflow(e, overflow_compacts):
+                        overflow_compacts += 1
+                        continue
                     reason = "error"
                     self.session.append(E.ASSISTANT_ATTEMPT, {"error": str(e)[:500], "terminal": True})
                     await self._emit({"event": "error", "message": f"模型调用失败: {e}"})
@@ -495,6 +559,7 @@ class AgentLoop:
             self.session.append(E.TOOL_RESULT, {
                 "call_id": tc.id, "name": tc.name, "status": outcome.status,
                 "result": outcome.result if outcome.status == "success" else None,
+                "model_content": outcome.model_content or "",
                 "error": outcome.error, "meta": outcome.meta or None,
             })
             await self._emit({
@@ -514,17 +579,61 @@ class AgentLoop:
             })
             if outcome.additional_context:
                 self.inbox.inject(outcome.additional_context, source="plugin", form="notice")
+            # 多模态回投：工具产物（图/视频/音频）作为附件注入，让模型下一步"看到"结果
+            if outcome.status == "success":
+                try:
+                    atts = list((outcome.meta or {}).get("media_attachments") or [])
+                    if not atts:
+                        from app.agent.runtime.attachments import attachments_from_tool_result
+                        atts = attachments_from_tool_result(tc.name, outcome.result)
+                    atts = [a for a in atts if a.get("ref") and a["ref"] not in self._seen_media_refs]
+                    if atts:
+                        for a in atts:
+                            self._seen_media_refs.add(a["ref"])
+                        self.session.append(E.USER_MESSAGE, {
+                            "text": f"【工具 {tc.name} 的媒体产物（自动附带）】",
+                            "source": "tool-media", "form": "notice",
+                            "meta": {"attachments": atts},
+                        })
+                        await self._emit({"event": "media_attached", "tool_name": tc.name,
+                                          "items": [{k: a.get(k) for k in ("kind", "name", "ref")} for a in atts]})
+                except Exception:
+                    pass
 
     # ── 模型调用（流式 + 重试）────────────────────────────
     def _tool_schemas(self) -> List[Dict[str, Any]]:
         if self.mode != "execute":
             return []
-        return tool_view.schemas(plan_mode=self.plan_mode)
+        schemas = tool_view.schemas(plan_mode=self.plan_mode)
+        _profile = getattr(self, "agent_profile", None)
+        if _profile is not None:
+            schemas = [
+                s for s in schemas
+                if _profile.allows(str((((s.get("function") or {}).get("name")) or "")))
+            ]
+        return schemas
+
+    async def _recover_context_overflow(self, err: Exception, used: int) -> bool:
+        """上游报"上下文超限"时的应急恢复：强制压缩历史后由调用方重试本步（每回合最多 2 次）。
+
+        默认窗口 800k、压缩阈值 80%（约 64 万 token 才压缩），常规会话不会触发压缩；
+        仅当模型真实窗口小于阈值、上游明确拒绝时才走这里兜底——既不"压得太狠"，
+        也不至于把长会话直接打死。
+        """
+        try:
+            from app.agent.runtime.compaction import is_context_overflow_error, maybe_compact
+            if used >= 2 or not is_context_overflow_error(err):
+                return False
+            await maybe_compact(self.session, emit=self._emit, force=True)
+            await self._emit({"event": "agent_thinking", "message": "模型上下文超限，已压缩历史后重试本步…"})
+            return True
+        except Exception:
+            return False
 
     async def _call_model(self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]]) -> AssistantReply:
         retries = _env_int("AGENT_LLM_RETRIES", 2)
-        timeout = float(_env_int("AGENT_LLM_TIMEOUT", 300))
-        max_tokens = _env_int("AGENT_MAX_TOKENS", 8192)
+        timeout = float(_env_int("AGENT_LLM_TIMEOUT", 600))
+        max_tokens = _env_int("AGENT_MAX_TOKENS", 32768)
         last_err: Optional[Exception] = None
 
         for attempt in range(1, retries + 2):

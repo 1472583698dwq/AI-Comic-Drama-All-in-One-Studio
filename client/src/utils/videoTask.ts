@@ -1,8 +1,8 @@
 /**
  * 视频任务轮询统一工具 —— 状态协议单点收敛为 {status, task_id, video_url, error}。
  *
- * 背景：此前三处前端各写一遍轮询兜底（video_url/videoUrl/results[0]/url 口径不一）：
- * NodeAgentConsole / VideoNode / ShotCardNode，现全部引用本模块。
+ * 背景：此前多处前端各写一遍轮询兜底（video_url/videoUrl/results[0]/url 口径不一）：
+ * NodeAgentConsole / VideoNode / ShotCardNode / nodeAgentExecutor，现全部引用本模块。
  */
 import { apiService } from '../services/api';
 

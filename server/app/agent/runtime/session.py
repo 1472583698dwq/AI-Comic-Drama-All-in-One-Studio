@@ -194,8 +194,24 @@ class Session:
                 logged_system = str(d.get("text") or "")
             elif t == E.USER_MESSAGE:
                 text = str(d.get("text") or "")
-                if text:
-                    msgs.append({"role": "user", "content": text})
+                atts = ((d.get("meta") or {}).get("attachments") or []) if isinstance(d.get("meta"), dict) else []
+                content: Any = text
+                if atts:
+                    # 多模态附件：图片（视觉可用时）转 content parts；其余降级为文本行
+                    try:
+                        from app.agent.runtime.attachments import build_user_content
+                        content = build_user_content(text, atts)
+                    except Exception:
+                        content = text
+                elif d.get("source") == "user" and len(text) > 2000:
+                    # 复制粘贴的长文：模型历史折成 头+尾+locator（全文落盘，fs_read 可取）
+                    try:
+                        from app.agent.runtime.compaction import maybe_fold_user_text
+                        content = maybe_fold_user_text(self.id, seq, text)
+                    except Exception:
+                        content = text
+                if content:
+                    msgs.append({"role": "user", "content": content})
             elif t == E.ASSISTANT_MESSAGE:
                 text = str(d.get("text") or "")
                 tcs = d.get("tool_calls") or []
@@ -210,19 +226,10 @@ class Session:
                         })
                 msgs.append(m)
             elif t == E.TOOL_RESULT:
-                d2 = d
-                content = d2.get("result")
-                if not isinstance(content, str):
-                    try:
-                        content = json.dumps(content, ensure_ascii=False, default=str)
-                    except Exception:
-                        content = str(content)
-                if d2.get("status") != "success":
-                    content = json.dumps({"error": d2.get("error") or "工具执行失败"}, ensure_ascii=False)
                 msgs.append({
                     "role": "tool",
-                    "tool_call_id": d2.get("call_id") or "",
-                    "content": content or "",
+                    "tool_call_id": d.get("call_id") or "",
+                    "content": E.tool_result_content_text(d),
                 })
             elif t == E.COMPACTION_SUMMARY and seq not in shadowed:
                 text = str(d.get("text") or "")

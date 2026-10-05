@@ -4,51 +4,28 @@
  * 此文件为唯一口径，历史会话（steps/artifacts/errors/plan）与之兼容。
  */
 export type AgentMode = 'chat' | 'execute';
-/** 组合 token：行为 × 执行，wire/持久化的唯一口径（与后端 app/agent/mode_policy.py 一一对应） */
-export type RunMode = 'approve' | 'auto' | 'create' | 'create_auto' | 'plan' | 'plan_auto';
-/** 行为维：能干什么（standard 标准 / create 创造 / plan 计划只读），代码硬门控 */
+/** 行为模式：能干什么（standard 标准 / create 创造 / plan 计划-只读），与执行方式正交 */
 export type BehaviorMode = 'standard' | 'create' | 'plan';
-/** 执行维：要不要逐项人审（approve 审批 / auto 自动） */
+/** 执行方式：要不要逐项人审（approve 审批 / auto 自动执行） */
 export type ExecutionMode = 'approve' | 'auto';
+/** 组合后的运行模式 token（wire 与持久化口径；plan 只读，plan_auto 与 plan 等价仅为往返） */
+export type RunMode = 'approve' | 'auto' | 'create' | 'create_auto' | 'plan' | 'plan_auto';
 
-export const RUN_MODES: RunMode[] = ['approve', 'auto', 'create', 'create_auto', 'plan', 'plan_auto'];
-
-/** 旧值 / 口语值 → 组合 token（与后端 normalize_run_mode 的别名表同口径） */
-const RUN_MODE_ALIASES: Record<string, RunMode> = {
-  supervisor: 'approve', approval: 'approve', ask: 'approve',
-  standard: 'approve', normal: 'approve', default: 'approve',
-  automation: 'auto', automatic: 'auto', never: 'auto', yolo: 'auto',
-  creator: 'create', creation: 'create', creative: 'create',
-  planning: 'plan', plan_mode: 'plan', readonly: 'plan',
-  'create-auto': 'create_auto', 'create+auto': 'create_auto', 'create:auto': 'create_auto',
-  createauto: 'create_auto', creator_auto: 'create_auto', auto_create: 'create_auto',
-  'plan-auto': 'plan_auto', 'plan+auto': 'plan_auto', 'plan:auto': 'plan_auto',
-  planauto: 'plan_auto', auto_plan: 'plan_auto',
-};
-
-export function normalizeRunMode(value?: string | null): RunMode {
-  const s = String(value ?? '').trim().toLowerCase() || 'approve';
-  const t = (RUN_MODE_ALIASES[s] || s) as RunMode;
-  return RUN_MODES.includes(t) ? t : 'approve';
-}
-
-/** 行为维：standard / create / plan */
-export function behaviorOfRunMode(value?: string | null): BehaviorMode {
-  const m = normalizeRunMode(value);
-  if (m.startsWith('plan')) return 'plan';
-  if (m.startsWith('create')) return 'create';
+export function behaviorOfRunMode(r?: RunMode | string): BehaviorMode {
+  const s = String(r || 'approve').trim().toLowerCase();
+  if (s.startsWith('plan') || s.startsWith('planning') || s.startsWith('readonly')) return 'plan';
+  if (s.startsWith('create') || s.startsWith('creator') || s.startsWith('creation') || s.startsWith('creative')) return 'create';
   return 'standard';
 }
 
-/** 执行维：approve / auto */
-export function executionOfRunMode(value?: string | null): ExecutionMode {
-  return normalizeRunMode(value).endsWith('auto') ? 'auto' : 'approve';
+export function executionOfRunMode(r?: RunMode | string): ExecutionMode {
+  const s = String(r || 'approve').trim().toLowerCase();
+  return s.endsWith('auto') || s === 'yolo' || s === 'never' || s === 'automation' || s === 'automatic'
+    ? 'auto'
+    : 'approve';
 }
 
-/** 行为 × 执行 → 组合 token（UI 两个选择器的唯一合成口径） */
-export function composeRunMode(behavior?: string | null, execution?: string | null): RunMode {
-  const b = behavior === 'plan' || behavior === 'create' ? behavior : 'standard';
-  const e = execution === 'auto' ? 'auto' : 'approve';
+export function composeRunMode(b: BehaviorMode, e: ExecutionMode): RunMode {
   if (b === 'plan') return e === 'auto' ? 'plan_auto' : 'plan';
   if (b === 'create') return e === 'auto' ? 'create_auto' : 'create';
   return e === 'auto' ? 'auto' : 'approve';
@@ -68,6 +45,37 @@ export interface ToolStep {
   status: ToolStatus;
   result?: any;
   error?: string;
+  /** 调用参数（tool_calling 事件携带，用于行内卡展开查看） */
+  args?: Record<string, any>;
+  /** 调用开始时间戳（ms） */
+  startedAt?: number;
+  /** 耗时（ms，tool_result 回填） */
+  elapsedMs?: number;
+  /** 工具执行中的阶段进度（tool_progress 事件透出，如「正在调用 LLM 生成源代码…」） */
+  note?: string;
+}
+
+export interface AgentTodoItem {
+  content: string;
+  status: 'pending' | 'in_progress' | 'completed';
+}
+
+/** 子代理集群：父会话可见的并行子代理状态（subagent_* 事件驱动，Kimi 式 roster） */
+export interface SubAgentInfo {
+  id: string;
+  /** 角色名（generalist/screenwriter/character_designer/...） */
+  agent: string;
+  /** 子任务描述（截断展示） */
+  task: string;
+  /** queued | running | success | error | cancelled */
+  status: string;
+  startedAt?: number;
+  elapsedMs?: number;
+  /** 最近一次工具调用名（进度闪烁） */
+  tool?: string;
+  /** 批次 ID（同批并行的子代理归为一组展示） */
+  batchId?: string;
+  error?: string;
 }
 
 export interface AgentArtifact {
@@ -83,6 +91,18 @@ export interface AgentErrorCard {
   what: string;
   why: string;
   next: string;
+}
+
+/** 用户消息的多模态附件（图/视频/音频）—— ref 指向 /storage 或 http(s) */
+export interface AgentAttachment {
+  id: string;
+  kind: 'image' | 'video' | 'audio';
+  name: string;
+  ref: string;
+  size?: number;
+  mime?: string;
+  source?: 'upload' | 'asset' | 'canvas' | 'paste';
+  meta?: Record<string, string>;
 }
 
 export interface ChatMsg {
@@ -104,6 +124,12 @@ export interface ChatMsg {
   planExecuted?: boolean;
   artifacts?: AgentArtifact[];
   errors?: AgentErrorCard[];
+  /** 待办清单（todo_write 事件实时更新） */
+  todo?: AgentTodoItem[];
+  /** 用户消息携带的多模态附件 */
+  attachments?: AgentAttachment[];
+  /** 该消息由长文本粘贴产生 → 消息列表默认折叠（可展开全文） */
+  pastedBulk?: boolean;
 }
 
 export interface AgentSession {
@@ -137,6 +163,8 @@ export interface ApprovalInfo {
   tool_name: string;
   args: Record<string, any>;
   decided?: boolean;
+  /** 审批请求到达时间戳（ms），用于 120s 自动拒绝倒计时 */
+  createdAt?: number;
 }
 
 export type WsStatus = 'connecting' | 'open' | 'closed';

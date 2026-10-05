@@ -48,8 +48,11 @@ _TODO_TOOL_SCHEMA: Dict[str, Any] = {
     },
 }
 
-INTERNAL_TOOL_NAMES = {"todo_write", "job_start", "job_list", "job_status", "job_cancel",
-                       "subagent_run", "batch_run", "task_status", "task_wait", "task_cancel"}
+INTERNAL_TOOL_NAMES = {"todo_write", "view_media", "job_start", "job_list", "job_status", "job_cancel",
+                       "subagent_run", "subagent_wait", "subagent_list", "subagent_status", "subagent_cancel", "subagent_steer",
+                       "batch_run", "task_status", "task_wait", "task_cancel",
+                       "onekey_split", "onekey_style_lock", "onekey_scene_image", "onekey_role_image", "onekey_shot_image",
+                       "onekey_shot_video", "onekey_shot_voice", "onekey_export", "onekey_summary", "onekey_review"}
 
 
 def _internal_schema(name: str, desc: str, props: Dict[str, Any], required: List[str]) -> Dict[str, Any]:
@@ -57,6 +60,21 @@ def _internal_schema(name: str, desc: str, props: Dict[str, Any], required: List
         "name": name, "description": desc,
         "parameters": {"type": "object", "properties": props, "required": required},
     }}
+
+
+# 媒体查看（只读）：把画布节点产物 / 素材库资源 / URL 作为多模态附件交给模型"亲眼看"
+_VIEW_MEDIA_SCHEMA = _internal_schema(
+    "view_media",
+    "查看图片/视频/音频的实际内容（多模态）：把画布节点产物、素材库资源或 URL 作为附件加载后，"
+    "你就能直接看到画面（图片）或拿到媒体引用（视频/音频）。改图、参考图、质检成片前先看再动手。",
+    {"node_id": {"type": "string", "description": "画布节点 id（自动取其 image_url/video_url/audio_url/首尾帧/参考图）"},
+     "node_ids": {"type": "array", "items": {"type": "string"}, "description": "一次查看多个画布节点"},
+     "asset_id": {"type": "string", "description": "素材库资源 id"},
+     "url": {"type": "string", "description": "直接给媒体 URL（/storage/... 或 http(s)）"},
+     "kind": {"type": "string", "enum": ["image", "video", "audio"], "description": "可选：指定媒体类型"},
+     "project_id": {"type": "string", "description": "画布归属项目（不传用上下文项目）"}},
+    [],
+)
 
 
 _JOB_START_SCHEMA = _internal_schema(
@@ -73,11 +91,128 @@ _JOB_CANCEL_SCHEMA = _internal_schema("job_cancel", "取消一个运行中的后
                                       {"job_id": {"type": "string"}}, ["job_id"])
 _SUBAGENT_SCHEMA = _internal_schema(
     "subagent_run",
-    "委派一个独立子任务给子代理（新上下文，只回最终结果）。适合资料侦察、多方案分析；不支持嵌套委派。",
-    {"task": {"type": "string", "description": "清晰、自包含的子任务描述"},
-     "max_steps": {"type": "integer", "description": "子代理最大步数，默认 40"}},
-    ["task"],
+    "委派子任务给专家子代理（独立上下文，只回最终结果）。默认同步阻塞直到结果返回；background=true 立即返回句柄（完成自动通知，"
+    "关键节点用 subagent_wait 阻塞等待）。同质任务用 batch 数组一次扇出并行。",
+    {"agent": {"type": "string", "description": "专家角色名（默认 generalist=全工具通用）"},
+     "task": {"type": "string", "description": "清晰、自包含的子任务描述（带上全部必要上下文，如 draft_id/镜头号）"},
+     "context": {"type": "object", "description": "随任务下发的上下文键值对（如 {\"draft_id\": \"ok_xxx\"}），会注入子代理提示词，子代理无需再传"},
+     "background": {"type": "boolean", "description": "缺省=按角色默认（多数同步阻塞）；true=后台执行立即返回；false=强制同步阻塞"},
+     "batch": {"type": "array", "items": {"type": "object"},
+               "description": "同质任务批量扇出：[{task, context?}, ...]，并行执行并汇总（与 task 二选一）"},
+     "max_steps": {"type": "integer", "description": "子代理最大步数（默认按角色画像）"},
+     "timeout_s": {"type": "integer", "description": "子代理超时秒数（默认 1200；长任务显式调大）"}},
+    ["agent"],
 )
+
+
+def _subagent_schema_dynamic() -> Dict[str, Any]:
+    """动态角色名单：内置 + 外部导演组扩展（storage/agent_profiles + 插件贡献）。"""
+    roles = "generalist/screenwriter/scene_designer/character_designer/storyboard_artist/video_operator/voice_operator/editor/qa_reviewer"
+    extra = ""
+    try:
+        from app.agent.runtime.agents import list_profiles
+        builtin = "generalist/screenwriter/scene_designer/character_designer/storyboard_artist/video_operator/voice_operator/editor/qa_reviewer"
+        custom = [p.name for p in list_profiles() if p.name not in builtin.split("/")]
+        if custom:
+            extra = "；自定义导演组角色：" + "/".join(custom)
+    except Exception:
+        pass
+    schema = dict(_SUBAGENT_SCHEMA)
+    fn = dict(_SUBAGENT_SCHEMA["function"])
+    fn["description"] = f"{fn['description']}可用角色：{roles}{extra}。"
+    schema["function"] = fn
+    return schema
+
+_SUBAGENT_WAIT_SCHEMA = _internal_schema(
+    "subagent_wait",
+    "阻塞等待子代理（或整批）完成并回收结果——用于后台提交后的同步收口（如导出前等全部视频完成）。"
+    "已结束的立即返回；超时仅返回快照，不取消任务。",
+    {"subagent_id": {"type": "string", "description": "等待单个子代理（与 batch_id 二选一）"},
+     "batch_id": {"type": "string", "description": "等待一个批次的全部子代理"},
+     "timeout_s": {"type": "integer", "description": "等待上限秒数（默认 1800）"}},
+    [])
+_SUBAGENT_LIST_SCHEMA = _internal_schema(
+    "subagent_list",
+    "列出本会话的子代理（角色/任务/状态/耗时），用于跟踪并行集群进度。",
+    {"limit": {"type": "integer", "description": "最多返回条数，默认 50"}}, [])
+_SUBAGENT_STATUS_SCHEMA = _internal_schema(
+    "subagent_status",
+    "查询单个子代理的状态与结果（后台子代理完成后用此读取结果）。",
+    {"subagent_id": {"type": "string"}}, ["subagent_id"])
+_SUBAGENT_CANCEL_SCHEMA = _internal_schema(
+    "subagent_cancel",
+    "取消一个运行中的子代理（其内部工具调用一并中止）。",
+    {"subagent_id": {"type": "string"}}, ["subagent_id"])
+_SUBAGENT_STEER_SCHEMA = _internal_schema(
+    "subagent_steer",
+    "给运行中的子代理插话纠偏（进入其当前轮的下一步）。",
+    {"subagent_id": {"type": "string"}, "text": {"type": "string"}}, ["subagent_id", "text"])
+
+# ── 一键成片原子工具（导演/专家子代理共用；draft_id 由 onekey 任务创建）──
+_ONEKEY_SPLIT_SCHEMA = _internal_schema(
+    "onekey_split",
+    "[一键成片] 把草稿的小说文本拆解为角色与分镜脚本（Stage1）。返回角色清单与分镜概要。",
+    {"draft_id": {"type": "string"}}, ["draft_id"])
+_ONEKEY_STYLE_LOCK_SCHEMA = _internal_schema(
+    "onekey_style_lock",
+    "[一键成片] 用大模型生成本片统一风格规范（画风/线条/色彩/光影/镜头语言）。之后所有生图/生视频会自动附加该规范；"
+    "这是保证全片资产风格一致的关键步骤。已有规范则直接复用，force=true 可重写。",
+    {"draft_id": {"type": "string"},
+     "force": {"type": "boolean", "description": "已有规范时也强制重新生成（默认 false）"}},
+    ["draft_id"])
+_ONEKEY_SCENE_SCHEMA = _internal_schema(
+    "onekey_scene_image",
+    "[一键成片] 场景资产：为该场景生成无人的空镜参考图（含关键道具，自动附加全片风格规范）。"
+    "分镜生图/生视频会自动把场景参考图连同角色多视图一起装配成多参考，保证跨镜空间一致。已有则直接复用。",
+    {"draft_id": {"type": "string"}, "scene_index": {"type": "integer", "description": "场景号（onekey_split 返回的 scenes[].scene_index）"},
+     "force": {"type": "boolean", "description": "已有场景参考也强制重生成（默认 false=复用）"}},
+    ["draft_id", "scene_index"])
+_ONEKEY_ROLE_SCHEMA = _internal_schema(
+    "onekey_role_image",
+    "[一键成片] 角色资产：已有三视图/形象直接复用（不重复定妆）；缺失时才生成角色表（正面+侧面+3/4 三视图同图，"
+    "自动附加全片风格规范并写回角色资产，供后续多参考生成）。",
+    {"draft_id": {"type": "string"}, "character": {"type": "string", "description": "角色名"},
+     "force": {"type": "boolean", "description": "已有资产也强制重做定妆（默认 false=直接复用）"}},
+    ["draft_id", "character"])
+_ONEKEY_SHOT_IMAGE_SCHEMA = _internal_schema(
+    "onekey_shot_image",
+    "[一键成片] 为指定分镜生成关键帧画面（**可选，默认流程不用**：默认直接把资产参考生视频）。"
+    "自动装配该镜出场角色的多个视图参考图与运镜/风格规范并写回。",
+    {"draft_id": {"type": "string"}, "shot_index": {"type": "integer"},
+     "prompt_override": {"type": "string", "description": "可选：替换该镜生图提示词"}},
+    ["draft_id", "shot_index"])
+_ONEKEY_SHOT_VIDEO_SCHEMA = _internal_schema(
+    "onekey_shot_video",
+    "[一键成片] 为分镜生成视频：该镜有画面→首帧 i2v + 参考；无画面→直接用角色多视图 + 场景参考生成（r2v，默认流程）。"
+    "写/改视频提示词前先 read_skill('minimax-h3-prompt')（H3 三字段结构/对齐行/运镜规则），成稿用 prompt_override 传入。"
+    "返回 video_url 或异步 task_id。",
+    {"draft_id": {"type": "string"}, "shot_index": {"type": "integer"},
+     "prompt_override": {"type": "string",
+                         "description": "可选：Agent 自写/改写后的视频提示词（建议按 minimax-h3-prompt 技能结构；原样使用，不再自动拼后缀）"}},
+    ["draft_id", "shot_index"])
+_ONEKEY_SHOT_VOICE_SCHEMA = _internal_schema(
+    "onekey_shot_voice",
+    "[一键成片] 为指定分镜的台词/旁白生成配音并写回（Stage5）。",
+    {"draft_id": {"type": "string"}, "shot_index": {"type": "integer"}},
+    ["draft_id", "shot_index"])
+_ONEKEY_EXPORT_SCHEMA = _internal_schema(
+    "onekey_export",
+    "[一键成片] 把草稿导出为剪映工程草稿（Stage6）。",
+    {"draft_id": {"type": "string"}}, ["draft_id"])
+_ONEKEY_SUMMARY_SCHEMA = _internal_schema(
+    "onekey_summary",
+    "[一键成片] 草稿进度速览（角色/场景/分镜/视频/配音/导出计数 + 告警），供编排者调度用。",
+    {"draft_id": {"type": "string"}}, ["draft_id"])
+_ONEKEY_REVIEW_SCHEMA = _internal_schema(
+    "onekey_review",
+    "[一键成片] 产物验收清单（**生成后必做检查**）：列出角色/场景/分镜产物的 URL、验收要点（requirement/criteria）"
+    "与对比参考图 refs。配合 view_media 逐项观看判定 pass/fail（视频自动抽帧成图片），不合格调整 prompt 重做，"
+    "并把验收结果纳入总结。",
+    {"draft_id": {"type": "string"},
+     "scope": {"type": "string", "enum": ["all", "characters", "scenes", "shots"],
+               "description": "验收范围（默认 all）"},
+     "limit": {"type": "integer", "description": "最多返回条目（默认 10，≤30；抽检用）"}},
+    ["draft_id"])
 _BATCH_SCHEMA = _internal_schema(
     "batch_run",
     "同一工具的参数矩阵批量执行（如 20 个镜头批量生图）。只回传每条状态与产物；条目多时并发受控。",
@@ -101,6 +236,15 @@ _TASK_WAIT_SCHEMA = _internal_schema(
 )
 _TASK_CANCEL_SCHEMA = _internal_schema("task_cancel", "取消一个还在生成中的异步任务。",
                                        {"task_id": {"type": "string"}}, ["task_id"])
+
+
+def _feature_on(fid: str) -> bool:
+    """功能开关判断（懒导入，异常视为关闭：宁可少给工具，不炸工具清单）。"""
+    try:
+        from app.core import features
+        return features.is_enabled(fid)
+    except Exception:
+        return False
 
 
 def tool_timeout(name: str) -> int:
@@ -131,11 +275,22 @@ class ToolRegistryView:
             names = sorted(t.name for t in self._registry().get_all_tools() if getattr(t, "is_enabled", True))
         except Exception:
             names = []
-        h = hashlib.md5(("|".join(names)).encode("utf-8")).hexdigest()
+        extra = ""
+        try:
+            from app.agent.runtime.agents import refresh_external_profiles
+            refresh_external_profiles()
+            from app.agent_teams.manager import signature as _team_sig
+            extra = _team_sig()
+        except Exception:
+            extra = ""
+        h = hashlib.md5(("|".join(names) + "||" + extra).encode("utf-8")).hexdigest()
         return f"{len(names)}:{h}"
 
     def schemas(self, plan_mode: bool = False) -> List[Dict[str, Any]]:
-        key = self._fingerprint() + ("|plan" if plan_mode else "")
+        # 功能开关（多模态）进缓存键：运行期开关变化必须立刻重建清单，不吃旧缓存
+        multimodal = _feature_on("agent_multimodal")
+        key = (self._fingerprint() + ("|plan" if plan_mode else "")
+               + ("|mm" if multimodal else "|nomm"))
         if self._schema_cache is not None and self._schema_key == key:
             return self._schema_cache
         out: List[Dict[str, Any]] = []
@@ -160,12 +315,22 @@ class ToolRegistryView:
         except Exception as e:
             print(f"[RuntimeTools] schemas failed: {e}")
         internal = [_TODO_TOOL_SCHEMA]
+        if multimodal:
+            # 多模态功能关闭 → view_media 不出现在工具清单（提示词里的说明仍是无害的软描述）
+            internal.append(_VIEW_MEDIA_SCHEMA)
         if plan_mode:
-            internal += [_JOB_LIST_SCHEMA, _JOB_STATUS_SCHEMA, _TASK_STATUS_SCHEMA]
+            internal += [_JOB_LIST_SCHEMA, _JOB_STATUS_SCHEMA, _TASK_STATUS_SCHEMA,
+                         _SUBAGENT_LIST_SCHEMA, _SUBAGENT_STATUS_SCHEMA,
+                         _ONEKEY_SUMMARY_SCHEMA, _ONEKEY_REVIEW_SCHEMA]
         else:
             internal += [_JOB_START_SCHEMA, _JOB_LIST_SCHEMA, _JOB_STATUS_SCHEMA, _JOB_CANCEL_SCHEMA,
-                         _SUBAGENT_SCHEMA, _BATCH_SCHEMA,
-                         _TASK_STATUS_SCHEMA, _TASK_WAIT_SCHEMA, _TASK_CANCEL_SCHEMA]
+                         _subagent_schema_dynamic(), _SUBAGENT_WAIT_SCHEMA, _SUBAGENT_LIST_SCHEMA, _SUBAGENT_STATUS_SCHEMA,
+                         _SUBAGENT_CANCEL_SCHEMA, _SUBAGENT_STEER_SCHEMA,
+                         _BATCH_SCHEMA,
+                         _TASK_STATUS_SCHEMA, _TASK_WAIT_SCHEMA, _TASK_CANCEL_SCHEMA,
+                         _ONEKEY_SPLIT_SCHEMA, _ONEKEY_STYLE_LOCK_SCHEMA, _ONEKEY_SCENE_SCHEMA, _ONEKEY_ROLE_SCHEMA, _ONEKEY_SHOT_IMAGE_SCHEMA,
+                         _ONEKEY_SHOT_VIDEO_SCHEMA, _ONEKEY_SHOT_VOICE_SCHEMA,
+                         _ONEKEY_EXPORT_SCHEMA, _ONEKEY_SUMMARY_SCHEMA, _ONEKEY_REVIEW_SCHEMA]
         out.extend(internal)
         self._schema_cache = out
         self._schema_key = key

@@ -114,7 +114,7 @@ export const CAPABILITIES: Capability[] = [
           KEY('OPENAI_BASE_URL', '接口地址', { kind: 'url', placeholder: 'https://api.deepseek.com/v1', hint: '留空则用默认的 DeepSeek' , required: false }),
           KEY('OPENAI_MODEL', '模型名', {
             kind: 'text', placeholder: 'deepseek-v4-flash', required: false,
-            options: ['deepseek-v4-flash', 'deepseek-chat', 'deepseek-reasoner'],
+            options: ['deepseek-v4-flash', 'deepseek-chat', 'deepseek-reasoner', 'deepseek-v4-pro', 'MiniMax-M3', 'MiniMax-M2.5', 'qwen3.7-plus'],
             hint: '点输入框可下拉选常见档；中转站的模型名以对方文档为准，可直接手填',
           }),
           KEY('OPENAI_CUSTOM_HEADERS', '自定义请求头', { kind: 'text', required: false, placeholder: '{"X-Foo":"bar"}', hint: 'JSON 格式，接私有网关时才需要', advanced: true }),
@@ -133,7 +133,7 @@ export const CAPABILITIES: Capability[] = [
           KEY('RESPONSES_API_URL', '接口地址', { kind: 'url', placeholder: 'https://api.openai.com/v1/responses', required: false }),
           KEY('RESPONSES_MODEL', '模型名', {
             kind: 'text', placeholder: 'gpt-5.2', required: false,
-            options: ['gpt-5.2', 'gpt-5', 'gpt-4o'],
+            options: ['gpt-5.2', 'gpt-5', 'gpt-4o', 'gpt-5.5', 'gpt-5.4-mini', 'gpt-4.1', 'deepseek-v4-flash'],
           }),
         ],
       },
@@ -151,7 +151,7 @@ export const CAPABILITIES: Capability[] = [
           KEY('MINIMAX_BASE_URL', '接口地址', { kind: 'url', placeholder: 'https://api.minimax.chat/v1', required: false }),
           KEY('LLM_MODEL', '模型名', {
             kind: 'text', placeholder: 'MiniMax-M2.5', required: false,
-            options: ['MiniMax-M2.5', 'abab6.5s-chat'],
+            options: ['MiniMax-M2.5', 'abab6.5s-chat', 'MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.1', 'MiniMax-M2'],
             hint: 'abab 系列是旧版文本模型，官方现行档为 MiniMax-M2.5',
           }),
         ],
@@ -196,12 +196,12 @@ export const CAPABILITIES: Capability[] = [
         where: 'cloud',
         summary: '国内直连，默认 FLUX.1-schnell，出图快。',
         test: 'siliconflow',
-        docUrl: 'https://docs.siliconflow.cn/',
+        docUrl: 'https://docs.siliconflow.cn/cn/api-reference/images/images-generations',
         fields: [
           KEY('SILICONFLOW_API_KEY', 'API Key'),
           KEY('SILICONFLOW_IMAGE_MODEL', '模型名', {
             kind: 'text', placeholder: 'black-forest-labs/FLUX.1-schnell', required: false,
-            options: ['black-forest-labs/FLUX.1-schnell', 'black-forest-labs/FLUX.1-dev'],
+            options: ['black-forest-labs/FLUX.1-schnell', 'black-forest-labs/FLUX.1-dev', 'black-forest-labs/FLUX.1-Kontext-dev', 'Qwen/Qwen-Image', 'Kwai-Kolors/Kolors'],
           }),
         ],
       },
@@ -211,12 +211,12 @@ export const CAPABILITIES: Capability[] = [
         where: 'cloud',
         summary: '阿里百炼 DashScope。这把 Key 同时也是视频侧「万相 Wan3.0」要用的。',
         test: 'dashscope',
-        docUrl: 'https://help.aliyun.com/zh/model-studio/',
+        docUrl: 'https://help.aliyun.com/zh/model-studio/text-to-image-v2-api-reference',
         fields: [
           KEY('DASHSCOPE_API_KEY', 'API Key'),
           KEY('DASHSCOPE_IMAGE_MODEL', '模型名', {
             kind: 'text', placeholder: 'wan2.6-t2i', required: false,
-            options: ['wan2.6-t2i', 'wanx2.1-t2i-turbo'],
+            options: ['wan2.6-t2i', 'wanx2.1-t2i-turbo', 'qwen-image-2.0-pro', 'qwen-image-max', 'wan2.5-t2i-preview'],
             hint: '万相 2.5 及以后走新版同步接口，老版模型名（wanx…）仍兼容',
           }),
         ],
@@ -227,7 +227,7 @@ export const CAPABILITIES: Capability[] = [
         where: 'cloud',
         summary: '接任何实现 OpenAI /v1/images/generations 协议的服务——官方 DALL·E、gpt-image、国内中转站、自建代理都走这条。Key / 地址 / 模型三项都自己填，不跟别人共用。',
         test: 'openai_image',
-        docUrl: 'https://platform.openai.com/docs/api-reference/images',
+        docUrl: 'https://developers.openai.com/api/docs/guides/image-generation',
         fields: [
           KEY('OPENAI_IMAGE_API_KEY', 'API Key', {
             placeholder: 'sk-...', altKeys: ['OPENAI_API_KEY'],
@@ -239,7 +239,7 @@ export const CAPABILITIES: Capability[] = [
           }),
           KEY('OPENAI_IMAGE_MODEL', '模型名', {
             kind: 'text', required: false, placeholder: 'gpt-image-2.5-flare',
-            options: ['gpt-image-2.5-flare', 'gpt-image-1', 'dall-e-3', 'flux-schnell'],
+            options: ['gpt-image-2.5-flare', 'gpt-image-1', 'dall-e-3', 'flux-schnell', 'gpt-image-2.5-sunburst', 'gpt-image-2', 'gpt-image-1.5', 'gpt-image-1-mini'],
             hint: '中转站的模型名以对方文档为准；gpt-image 系列返回 b64、不接受 response_format，本通道已兼容',
           }),
         ],
@@ -262,13 +262,14 @@ export const CAPABILITIES: Capability[] = [
         where: 'cloud',
         summary: '快手可灵，默认 kling-v3。',
         test: 'kling',
-        docUrl: 'https://app.klingai.com/cn/dev/document-api',
+        docUrl: 'https://klingai.com/document-api/guides/capability-map/video',
+        warn: '可灵 1.x / 2.0 / 2.1 等旧模型已于 2026-09-15 下线，请使用 v3 / 3.0 Turbo / O1 系列。',
         fields: [
           KEY('KLING_API_KEY', 'API Key'),
           KEY('KLING_BASE_URL', '接口地址', { kind: 'url', placeholder: 'https://api-beijing.klingai.com', required: false }),
           KEY('KLING_MODEL', '模型名', {
             kind: 'text', placeholder: 'kling-v3', required: false,
-            options: ['kling-v3'],
+            options: ['kling-v3', 'kling-3.0-turbo', 'kling-v3-omni', 'kling-video-o1', 'kling-v2-6', 'kling-v2-5-turbo'],
             hint: '下拉只是本版默认档，其它版本按官方文档手填',
           }),
         ],
@@ -279,7 +280,7 @@ export const CAPABILITIES: Capability[] = [
         where: 'cloud',
         summary: '与 MiniMax 文本/配音共用同一把 Key，768P~2K、4~15 秒。',
         test: 'minimax_h3',
-        docUrl: 'https://platform.minimaxi.com/document',
+        docUrl: 'https://platform.minimax.io/docs/api-reference/video-generation-v2-query',
         fields: [
           KEY('MINIMAX_API_KEY', 'API Key', { hint: '与文本大模型那栏是同一把' }),
           KEY('MINIMAX_H3_MODEL', '模型名', {
@@ -295,7 +296,7 @@ export const CAPABILITIES: Capability[] = [
         where: 'cloud',
         summary: '字节火山方舟 Ark 上的 doubao-seedance 系列。',
         test: 'seedance',
-        docUrl: 'https://www.volcengine.com/docs/82379',
+        docUrl: 'https://www.volcengine.com/docs/82379/1520757',
         fields: [
           KEY('SEEDANCE_API_KEY', 'API Key'),
           KEY('SEEDANCE_BASE_URL', '接口地址', {
@@ -320,7 +321,7 @@ export const CAPABILITIES: Capability[] = [
         where: 'cloud',
         summary: '阿里万相。注意它通常是账号专属 MaaS 实例，和通用 DashScope 不是一套 —— Key 和地址都要单独填。',
         test: 'wan3',
-        docUrl: 'https://help.aliyun.com/zh/model-studio/',
+        docUrl: 'https://help.aliyun.com/zh/model-studio/wan3-video-generation-api-reference',
         fields: [
           KEY('WAN_API_KEY', 'API Key', { hint: '留空会回退用生图那栏的 DASHSCOPE_API_KEY，但专属实例通常不通用' }),
           KEY('WAN3_BASE_URL', '接口地址', {
@@ -403,13 +404,13 @@ export const CAPABILITIES: Capability[] = [
         where: 'cloud',
         summary: '超拟人配音，支持怒吼/低语/哭腔等情绪。与文本大模型共用一把 Key。',
         test: 'minimax',
-        docUrl: 'https://platform.minimaxi.com/document',
+        docUrl: 'https://platform.minimax.io/docs/api-reference/speech-t2a-http',
         fields: [
           KEY('MINIMAX_API_KEY', 'API Key', { hint: '与文本大模型那栏是同一把' }),
           KEY('MINIMAX_GROUP_ID', 'Group ID', { kind: 'text' }),
           KEY('TTS_MODEL', '模型名', {
             kind: 'text', placeholder: 'speech-2.8-turbo', required: false,
-            options: ['speech-2.8-turbo', 'speech-01-turbo'],
+            options: ['speech-2.8-turbo', 'speech-01-turbo', 'speech-2.8-hd', 'speech-2.6-hd', 'speech-2.6-turbo', 'speech-02-hd', 'speech-02-turbo'],
             hint: 'speech-01 系列是旧档，本版默认已改为 speech-2.8-turbo',
           }),
         ],
@@ -420,12 +421,12 @@ export const CAPABILITIES: Capability[] = [
         where: 'cloud',
         summary: '多语种音色库最全的一档。',
         test: 'elevenlabs',
-        docUrl: 'https://elevenlabs.io/docs/api-reference',
+        docUrl: 'https://elevenlabs.io/docs/models',
         fields: [
           KEY('ELEVENLABS_API_KEY', 'API Key'),
           KEY('ELEVENLABS_MODEL', '模型名', {
             kind: 'text', placeholder: 'eleven_multilingual_v2', required: false,
-            options: ['eleven_multilingual_v2'],
+            options: ['eleven_multilingual_v2', 'eleven_v3', 'eleven_flash_v2_5', 'eleven_turbo_v2_5'],
           }),
         ],
       },

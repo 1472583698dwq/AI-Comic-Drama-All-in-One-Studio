@@ -16,7 +16,6 @@ import {
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { StoryboardShot } from '../../types';
-
 import { API_ORIGIN } from '../../utils/devOrigin';
 
 export const MultiTrackTimeline: React.FC = () => {
@@ -38,7 +37,7 @@ export const MultiTrackTimeline: React.FC = () => {
   const timelineRef = useRef<HTMLDivElement>(null);
 
   // 进「多轨剪辑」自动展开、离开自动收起。
-  // 修复前只展不收：去过一次多轨剪辑后，「分镜工作台」和「多轨剪辑」两个入口画面完全一样。
+  // 修复前只展不收：去过一次多轨剪辑后，「分镜台」和「多轨剪辑」两个入口画面完全一样。
   useEffect(() => {
     setIsCollapsed(activeTab !== 'timeline');
   }, [activeTab]);
@@ -117,7 +116,7 @@ export const MultiTrackTimeline: React.FC = () => {
 
           <button
             onClick={() => setIsPlaying(!isPlaying)}
-            title="时间线走带：只推进播放头，不在此处播放画面与声音（素材预览/连播在分镜工作台）"
+            title="时间线走带：只推进播放头，不在此处播放画面与声音（素材预览/连播在分镜台）"
             className="p-1.5 px-3 rounded-lg bg-brand text-white font-medium flex items-center space-x-1.5 shadow-sm shadow-brand/30 hover:opacity-90 transition-all"
           >
             {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 fill-current" />}

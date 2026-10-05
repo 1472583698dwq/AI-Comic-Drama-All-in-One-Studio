@@ -50,6 +50,29 @@ class TempStore(unittest.TestCase):
         return f"{prefix}_{uuid.uuid4().hex[:8]}"
 
 
+class SubagentFeatureOn(TempStore):
+    """子代理类用例的公共基类：子代理委派是功能级开关（出厂关闭）。
+
+    本文件这些用例测的是「开启后」的既有行为，故类级显式打开；storage 同时指到
+    cls._tmp，开关文件（storage/features.json）不落到真实 storage/。
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from app.core import features as features_mod
+        from app.core.config import settings as app_settings
+        cls._orig_storage = app_settings.STORAGE_DIR
+        app_settings.STORAGE_DIR = cls._tmp
+        features_mod.set_values({"agent_subagent": True})
+
+    @classmethod
+    def tearDownClass(cls):
+        from app.core.config import settings as app_settings
+        app_settings.STORAGE_DIR = cls._orig_storage
+        super().tearDownClass()
+
+
 class TestEvents(TempStore):
     def test_unknown_event_rejected(self):
         with self.assertRaises(ValueError):
@@ -102,6 +125,36 @@ class TestSession(TempStore):
         self.assertEqual(msgs[3]["tool_call_id"], "c1")
         self.assertIn("a.png", msgs[3]["content"])
         self.assertEqual(msgs[4]["content"], "已完成")
+
+    def test_derive_prefers_pipeline_model_content(self):
+        """管线压好的内容进历史，result 原文留在日志供前端渲染与复盘（两者不再混用一份）。"""
+        sid = self.unique("sess_mc")
+        s = Session.open(sid, store=self.store)
+        s.append(E.USER_MESSAGE, {"text": "读源码"})
+        s.append(E.ASSISTANT_MESSAGE, {"text": "", "tool_calls": [
+            {"id": "c1", "name": "get_provider_code", "arguments": "{}"}]})
+        s.append(E.TOOL_RESULT, {
+            "call_id": "c1", "name": "get_provider_code", "status": "success",
+            "result": {"code": "X" * 5000, "code_next_offset": 200},
+            "model_content": '{"code":"窗口正文","code_next_offset":200}',
+        })
+        msgs = s.derive_messages()
+        self.assertEqual(msgs[2]["content"], '{"code":"窗口正文","code_next_offset":200}')
+        # 原文未被裁剪：日志里仍是完整 result
+        raw = [e for e in s.events if e["type"] == E.TOOL_RESULT][0]["data"]["result"]
+        self.assertEqual(len(raw["code"]), 5000)
+
+    def test_failed_tool_never_shows_model_content(self):
+        sid = self.unique("sess_mc_err")
+        s = Session.open(sid, store=self.store)
+        s.append(E.ASSISTANT_MESSAGE, {"text": "", "tool_calls": [
+            {"id": "c1", "name": "generate_video", "arguments": "{}"}]})
+        s.append(E.TOOL_RESULT, {"call_id": "c1", "name": "generate_video", "status": "error",
+                                 "result": None, "model_content": '{"ok":true}',
+                                 "error": "配额不足"})
+        content = s.derive_messages()[-1]["content"]
+        self.assertNotIn("ok", content)
+        self.assertIn("配额不足", content)
 
     def test_attempt_not_in_history(self):
         sid = self.unique("sess_attempt")
@@ -255,6 +308,99 @@ class AgentLoopTest(TempStore):
         user_texts = [m["content"] for m in msgs if m["role"] == "user"]
         self.assertIn("任务A", user_texts)
         self.assertIn("任务B", user_texts)
+
+    def test_max_tokens_continuation(self):
+        """思考吃满输出上限被截断（finish=length）不结束回合：注入系统提示后继续，
+        直到模型产出工具调用——长思考模型不再因截断丢掉执行指令。"""
+        lp = self.make_loop("loop_trunc")
+        replies_alias = [
+            AssistantReply(content="", reasoning="很长很长的思考…" * 200, finish_reason="length"),
+            AssistantReply(content="", reasoning="继续深入推演…" * 200, finish_reason="length"),
+            AssistantReply(content="", tool_calls=[ToolCall(id="c1", name="generate_image", arguments="{}", parsed={})]),
+            AssistantReply(content="已执行"),
+        ]
+        calls = self.fake_model(lp, replies_alias)
+        run(lp.prompt("生成一张图"))
+        run(lp.wait_idle(timeout=10))
+        types = [e["type"] for e in lp.session.events]
+        self.assertIn(E.TOOL_CALL, types)
+        self.assertIn(E.TOOL_RESULT, types)
+        turn_end = [e for e in lp.session.events if e["type"] == E.TURN_END][-1]["data"]
+        self.assertEqual(turn_end["reason"], "completed")
+        # 截断后注入"直接行动"的系统提示，且后续模型请求能看到
+        nudge_seen = any(
+            m["role"] == "user" and "输出长度上限" in str(m.get("content") or "")
+            for c in calls for m in c["messages"]
+        )
+        self.assertTrue(nudge_seen, "截断后应注入继续执行提示")
+
+    def test_max_tokens_gives_up_after_streak(self):
+        """连续截断超过容忍次数：诚实终止并给出可操作建议（不再是假的"指令已执行"）。"""
+        lp = self.make_loop("loop_trunc2")
+        replies_alias = [
+            AssistantReply(content="", reasoning="思考…" * 50, finish_reason="length")
+            for _ in range(5)
+        ]
+        self.fake_model(lp, replies_alias)
+        events = []
+        lp.attach(lambda ev: events.append(dict(ev)))
+        run(lp.prompt("一直想不说话"))
+        run(lp.wait_idle(timeout=10))
+        turn_end = [e for e in lp.session.events if e["type"] == E.TURN_END][-1]["data"]
+        self.assertEqual(turn_end["reason"], "max-tokens")
+        errors = [e for e in events if e.get("event") == "error"]
+        self.assertTrue(any("长度上限" in (e.get("message") or "") for e in errors))
+        resp = [e for e in events if e.get("event") == "agent_response"]
+        self.assertTrue(resp and "长度上限" in (resp[-1].get("message") or ""))
+
+    def test_pressure_uses_latest_usage_not_cumulative(self):
+        """压缩压力必须看最近一次调用的 usage：累计 usage 会让长会话永久超压、每步都压缩。"""
+        from app.agent.runtime.token_meter import pressure_of
+        os.environ["AGENT_CONTEXT_WINDOW"] = "100000"
+        self.addCleanup(lambda: os.environ.pop("AGENT_CONTEXT_WINDOW", None))
+        s = Session.open(self.unique("pressure"), store=self.store)
+        s.append(E.USER_MESSAGE, {"text": "hi"})
+        s.append(E.ASSISTANT_MESSAGE, {"text": "旧轮", "usage": {"total_tokens": 500000}})
+        s.append(E.ASSISTANT_MESSAGE, {"text": "新轮", "usage": {"total_tokens": 1000}})
+        p = pressure_of(s)
+        self.assertEqual(p["usage_anchor"], 1000)
+        self.assertEqual(p["threshold"], 80000)
+        self.assertLess(max(p["estimated_input"], p["usage_anchor"]), p["threshold"])
+
+    def test_context_overflow_classifier(self):
+        from app.agent.runtime.compaction import is_context_overflow_error
+        self.assertTrue(is_context_overflow_error(RuntimeError("This model's maximum context length is 128000 tokens")))
+        self.assertTrue(is_context_overflow_error(RuntimeError("输入过长：上下文超限")))
+        self.assertFalse(is_context_overflow_error(RuntimeError("429 Too Many Requests: quota exceeded")))
+        self.assertFalse(is_context_overflow_error(ValueError("bad api key")))
+
+    def test_context_overflow_forces_compaction_and_retries(self):
+        """上游报上下文超限：强制压缩并重试本步，回合不被打死。"""
+        from app.agent.llm.adapter import LLMConfigError
+        lp = self.make_loop("loop_overflow")
+        import app.agent.runtime.loop as loop_mod
+        calls = {"n": 0}
+
+        async def fake_complete(messages, tools=None, temperature=0.3, max_tokens=4096, timeout=300, on_chunk=None):
+            sys_msg = "".join(str(m.get("content") or "") for m in messages if m.get("role") == "system")
+            if "压缩器" in sys_msg:
+                return AssistantReply(content="【摘要】历史已压缩")
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise LLMConfigError("This model's maximum context length is 2000 tokens")
+            return AssistantReply(content="已恢复执行")
+
+        orig = loop_mod.adapter.complete
+        loop_mod.adapter.complete = fake_complete
+        self.addCleanup(lambda: setattr(loop_mod.adapter, "complete", orig))
+        events = []
+        lp.attach(lambda ev: events.append(dict(ev)))
+        run(lp.prompt("继续"))
+        run(lp.wait_idle(timeout=10))
+        turn_end = [e for e in lp.session.events if e["type"] == E.TURN_END][-1]["data"]
+        self.assertEqual(turn_end["reason"], "completed")
+        self.assertEqual(calls["n"], 2)
+        self.assertTrue(any(e.get("event") == "agent_thinking" and "上下文超限" in (e.get("message") or "") for e in events))
 
     def test_steer_mid_run(self):
         lp = self.make_loop("loop_steer")
@@ -440,6 +586,41 @@ class TestCompaction(TempStore):
         self.assertEqual(msgs[1]["tool_calls"][0]["id"], "c1")
         self.assertEqual(msgs[2]["tool_call_id"], "c1")
 
+    def test_prune_measures_model_content_not_raw_result(self):
+        """剪裁是兜底不是主刀：量的是进模型的那份文本。
+
+        否则 get_provider_code 的 6000 字分页窗口会被 2000 字通用剪盲切，
+        模型永远读不全源码（真实日志里 13/13 次调用全被剪过）。
+        """
+        from app.agent.runtime.compaction import maybe_prune_tool_results
+        sid = self.unique("prune_window")
+        s = Session.open(sid, store=self.store)
+        s.append(E.USER_MESSAGE, {"text": "读第 2 页"})
+        s.append(E.ASSISTANT_MESSAGE, {"text": "", "tool_calls": [
+            {"id": "c1", "name": "get_provider_code", "arguments": "{}"}]})
+        s.append(E.TOOL_RESULT, {
+            "call_id": "c1", "name": "get_provider_code", "status": "success",
+            "result": {"code": "Y" * 40000},                      # 原文很大
+            "model_content": '{"code":"' + "Z" * 6000 + '"}',      # 但已按页压好
+        })
+        self.assertEqual(maybe_prune_tool_results(s), 0)           # 兜底不该再动它
+        content = s.derive_messages()[-1]["content"]
+        self.assertEqual(content.count("Z"), 6000)
+        self.assertNotIn("已剪裁", content)
+
+    def test_prune_still_catches_unsummarized_giant_result(self):
+        from app.agent.runtime.compaction import maybe_prune_tool_results
+        sid = self.unique("prune_backstop")
+        s = Session.open(sid, store=self.store)
+        s.append(E.ASSISTANT_MESSAGE, {"text": "", "tool_calls": [
+            {"id": "c1", "name": "canvas_query", "arguments": "{}"}]})
+        s.append(E.TOOL_RESULT, {"call_id": "c1", "name": "canvas_query", "status": "success",
+                                 "result": {"blob": "W" * 60000}})
+        self.assertEqual(maybe_prune_tool_results(s), 1)
+        msgs = s.derive_messages()
+        self.assertIn("已剪裁", msgs[-1]["content"])
+        self.assertLess(len(msgs[-1]["content"]), 12000)
+
     def test_select_shadow_range_avoids_tool_start(self):
         from app.agent.runtime.compaction import select_shadow_range
         surface = [
@@ -582,7 +763,7 @@ class TestModesAndCommands(TempStore):
         self.assertEqual(lp.goal.phase, "complete")
 
 
-class TestJobsSubagentBatch(TempStore):
+class TestJobsSubagentBatch(SubagentFeatureOn):
     def test_job_background_lifecycle(self):
         from app.agent.runtime.loop import AgentLoop
         from app.agent.tools.pipeline import ToolOutcome
@@ -621,8 +802,9 @@ class TestJobsSubagentBatch(TempStore):
 
     def test_subagent_depth_limit(self):
         from app.agent.runtime.loop import AgentLoop
-        from app.agent.runtime.subagent import run_subagent
-        lp = AgentLoop(self.unique("sub_depth"), context={"subagent_depth": 1}, store=self.store)
+        from app.agent.runtime.subagent import run_subagent, subagent_pool
+        max_depth = subagent_pool._max_depth()
+        lp = AgentLoop(self.unique("sub_depth"), context={"subagent_depth": max_depth}, store=self.store)
         r = run(run_subagent(lp, "调研"))
         self.assertEqual(r["status"], "error")
         self.assertIn("深度", r["error"])
@@ -668,7 +850,7 @@ class TestJobsSubagentBatch(TempStore):
         self.assertEqual(res2["status"], "error")
 
 
-class TestRunModeHotSwitch(TempStore):
+class TestRunModeHotSwitch(SubagentFeatureOn):
     """运行模式热切换：切「自动」必须立即放行挂起审批并回执，且对子代理/后台任务生效。"""
 
     def test_switch_to_auto_resolves_pending_approvals(self):
@@ -733,8 +915,9 @@ class TestRunModeHotSwitch(TempStore):
 
         class FakeChild:
             def __init__(self, child_sid, run_mode=None, mode=None, context=None,
-                         interactive=None, store=None, max_steps=None):
+                         interactive=None, store=None, max_steps=None, agent_profile=None):
                 captured["run_mode"] = run_mode
+                captured["profile"] = getattr(agent_profile, "name", None)
                 self.session = type("S", (), {
                     "id": child_sid, "seq": 0, "store": store,
                     "last_assistant_text": lambda self: "子代理完成",
@@ -750,7 +933,7 @@ class TestRunModeHotSwitch(TempStore):
                 return False
 
         class FakeParent:
-            run_mode = "auto"
+            run_mode = "create_auto"
             context = {}
 
             class session:
@@ -763,7 +946,210 @@ class TestRunModeHotSwitch(TempStore):
 
         r = run(run_subagent(FakeParent(), "独立任务", max_steps=5, timeout=5))
         self.assertEqual(r["status"], "success")
-        self.assertEqual(captured.get("run_mode"), "auto")
+        self.assertEqual(captured.get("run_mode"), "create_auto")
+
+
+class TestSubAgentPool(SubagentFeatureOn):
+    """子代理集群：并发限流/批量扇出/后台通知/取消/角色裁剪（参考 Kimi Agent Swarm）。"""
+
+    def _install_fake_children(self, sleep_s=0.1):
+        import app.agent.runtime.loop as loop_mod
+        tracker = {"active": 0, "peak": 0}
+
+        class FakeSession:
+            def __init__(self, sid):
+                self.id = sid
+                self.seq = 0
+                self.store = None
+
+            def last_assistant_text(self):
+                return "子代理产物OK"
+
+        class FakeChild:
+            def __init__(self, sid, run_mode=None, mode=None, context=None,
+                         interactive=None, store=None, max_steps=None, agent_profile=None):
+                self.session = FakeSession(sid)
+                self.run_mode = run_mode
+                self.profile = getattr(agent_profile, "name", None)
+                self._running = False
+
+            async def prompt(self, text):
+                self._running = True
+                tracker["active"] += 1
+                tracker["peak"] = max(tracker["peak"], tracker["active"])
+                try:
+                    await asyncio.sleep(sleep_s)
+                finally:
+                    tracker["active"] -= 1
+                    self._running = False
+
+            async def wait_idle(self, timeout=None):
+                pass
+
+            def is_running(self):
+                return False
+
+            async def steer(self, text):
+                pass
+
+            async def abort(self, cause="user"):
+                pass
+
+        orig = loop_mod.AgentLoop
+        loop_mod.AgentLoop = FakeChild
+        self.addCleanup(lambda: setattr(loop_mod, "AgentLoop", orig))
+        return tracker
+
+    def _fake_parent(self):
+        from app.agent.runtime.inbox import Inbox
+        from app.agent.runtime.session import Session
+
+        class P:
+            pass
+
+        p = P()
+        p.session = Session.open(self.unique("pool_parent"), store=self.store)
+        p.context = {}
+        p.run_mode = "auto"
+        p.inbox = Inbox()
+        p.events = []
+
+        async def _emit(ev):
+            p.events.append(ev)
+
+        p._emit = _emit
+        return p
+
+    def test_batch_semaphore_and_metrics(self):
+        from app.agent.runtime.subagent import SubAgentPool
+        tracker = self._install_fake_children(0.08)
+        os.environ["AGENT_SUBAGENT_MAX_CONCURRENCY"] = "2"
+        self.addCleanup(lambda: os.environ.pop("AGENT_SUBAGENT_MAX_CONCURRENCY", None))
+        pool = SubAgentPool()
+        parent = self._fake_parent()
+        res = run(pool.spawn_batch(parent, "storyboard_artist",
+                                   [{"task": f"生成分镜#{i} 画面"} for i in range(5)]))
+        self.assertEqual(res["status"], "success")
+        self.assertEqual(res["success"], 5)
+        self.assertLessEqual(tracker["peak"], 2)
+        self.assertGreaterEqual(res["parallel_width"], 2)
+        self.assertGreater(res["critical_steps_ms"], 0)
+        metrics = [e for e in parent.events if e.get("event") == "subagent_metrics"]
+        self.assertTrue(metrics)
+        self.assertEqual(metrics[0]["total"], 5)
+
+    def test_background_notifies_parent_inbox(self):
+        from app.agent.runtime.subagent import SubAgentPool
+        self._install_fake_children(0.05)
+        pool = SubAgentPool()
+        parent = self._fake_parent()
+        res = run(pool.spawn(parent, "video_operator", "给分镜#1做图生视频", background=True))
+        self.assertEqual(res["status"], "launched")
+
+        async def wait():
+            for _ in range(200):
+                if parent.inbox.pending_count() > 0:
+                    return True
+                await asyncio.sleep(0.01)
+            return False
+
+        self.assertTrue(run(wait()))
+        msgs = parent.inbox.claim()
+        self.assertIn("子代理", msgs[0].text)
+        self.assertEqual(pool.get(res["subagent_id"]).status, "success")
+
+    def test_cancel_running_subagent(self):
+        from app.agent.runtime.subagent import SubAgentPool
+        self._install_fake_children(2.0)
+        pool = SubAgentPool()
+        parent = self._fake_parent()
+        res = run(pool.spawn(parent, "storyboard_artist", "慢任务", background=True))
+        sid = res["subagent_id"]
+
+        async def wait_cancel():
+            await asyncio.sleep(0.05)
+            await pool.cancel(sid)
+            for _ in range(200):
+                h = pool.get(sid)
+                if h and h.status in ("cancelled", "error", "success"):
+                    return h.status
+                await asyncio.sleep(0.01)
+            return None
+
+        self.assertEqual(run(wait_cancel()), "cancelled")
+
+    def test_subagent_wait_blocks_until_settled(self):
+        from app.agent.runtime.subagent import SubAgentPool
+        self._install_fake_children(0.1)
+        pool = SubAgentPool()
+        parent = self._fake_parent()
+        res = run(pool.spawn(parent, "storyboard_artist", "后台生图", background=True))
+        self.assertEqual(res["status"], "launched")
+        # 立即 wait：阻塞到子代理完成并回收结果
+        out = run(pool.wait(subagent_id=res["subagent_id"], timeout_s=5))
+        self.assertEqual(out["status"], "success")
+        self.assertIn("产物", out["result"])
+        self.assertFalse(out["timed_out"])
+
+    def test_batch_background_then_wait(self):
+        from app.agent.runtime.subagent import SubAgentPool
+        self._install_fake_children(0.08)
+        pool = SubAgentPool()
+        parent = self._fake_parent()
+        res = run(pool.spawn_batch(parent, "voice_operator",
+                                   [{"task": f"配音#{i}"} for i in range(3)], background=True))
+        self.assertEqual(res["status"], "launched")
+        out = run(pool.wait(batch_id=res["batch_id"], timeout_s=5))
+        self.assertEqual(out["status"], "success")
+        self.assertEqual(out["success"], 3)
+        self.assertFalse(out["timed_out"])
+        self.assertEqual(len(out["items"]), 3)
+
+    def test_explicit_sync_forces_blocking_over_auto_bg(self):
+        from app.agent.runtime.subagent import SubAgentPool
+        self._install_fake_children(0.2)
+        os.environ["AGENT_SUBAGENT_AUTO_BG_S"] = "0.01"
+        self.addCleanup(lambda: os.environ.pop("AGENT_SUBAGENT_AUTO_BG_S", None))
+        pool = SubAgentPool()
+        parent = self._fake_parent()
+        # 显式同步（auto_bg_ok=False）→ 严格阻塞直到结果
+        r1 = run(pool.spawn(parent, "storyboard_artist", "任务A", background=False, auto_bg_ok=False))
+        self.assertEqual(r1["status"], "success")
+        # 允许自动后台 → 超时转后台返回句柄
+        r2 = run(pool.spawn(parent, "storyboard_artist", "任务B", background=False, auto_bg_ok=True))
+        self.assertEqual(r2["status"], "launched")
+        self.assertTrue(r2.get("auto_background"))
+
+    def test_wait_tool_registered(self):
+        from app.agent.tools.registry import tool_view
+        names = [x["function"]["name"] for x in tool_view.schemas()]
+        self.assertIn("subagent_wait", names)
+
+    def test_profile_tool_filter_at_pipeline(self):
+        from app.agent.runtime.agents import get_profile
+        from app.agent.tools.pipeline import ToolPipeline
+
+        async def emit(ev):
+            pass
+
+        prof = get_profile("qa_reviewer")
+        p = ToolPipeline(self.unique("profile_pipe"), emit, interactive=True, agent_profile=prof)
+        out = run(p.execute("c1", "generate_image", {"prompt": "x"}, run_mode="auto"))
+        self.assertEqual(out.status, "denied")
+        self.assertIn("能力范围", out.error)
+        # 白名单内工具：正常进入执行（draft 不存在 → onekey 处理返回错误，但非 denied）
+        out2 = run(p.execute("c2", "onekey_summary", {"draft_id": "nope"}, run_mode="auto"))
+        self.assertNotEqual(out2.status, "denied")
+
+    def test_profiles_registry(self):
+        from app.agent.runtime.agents import get_profile, list_profiles, team_brief
+        self.assertEqual(get_profile("unknown_agent").name, "generalist")
+        self.assertFalse(get_profile("qa_reviewer").allows("generate_image"))
+        self.assertTrue(get_profile("qa_reviewer").allows("onekey_summary"))
+        names = {p.name for p in list_profiles()}
+        self.assertIn("storyboard_artist", names)
+        self.assertNotIn("generalist", names)
+        self.assertIn("screenwriter", team_brief())
 
 
 class TestCreatorMode(TempStore):
@@ -984,6 +1370,67 @@ class TestTransportIntegration(TempStore):
             final = next(e for e in events if e.get("event") == "agent_response")
             self.assertIn("WS 响应", final.get("message", ""))
 
+    def test_ws_set_run_mode_hot_switch(self):
+        """WS 运行中切自动：挂起审批立即放行（approval_ack），无需等超时。"""
+        sid = self.unique("ws_rm")
+        import app.agent.runtime.loop as loop_mod
+        replies = [
+            AssistantReply(content="", tool_calls=[ToolCall(
+                id="c1", name="generate_video",
+                arguments='{"prompt":"x"}', parsed={"prompt": "x"})]),
+            AssistantReply(content="已处理"),
+        ]
+
+        async def fake_complete(messages, tools=None, **kwargs):
+            return replies.pop(0) if replies else AssistantReply(content="完成")
+
+        orig = loop_mod.adapter.complete
+        loop_mod.adapter.complete = fake_complete
+        self.addCleanup(lambda: setattr(loop_mod.adapter, "complete", orig))
+
+        with self.client.websocket_connect("/api/v1/ws/agent") as ws:
+            ws.send_json({"action": "agent_prompt", "prompt": "生成视频", "session_id": sid,
+                          "mode": "execute", "run_mode": "approve", "context": {}})
+            events = []
+            for _ in range(60):
+                ev = ws.receive_json()
+                events.append(ev)
+                if ev.get("event") == "approval_required":
+                    break
+            self.assertTrue(any(e.get("event") == "approval_required" for e in events))
+            ws.send_json({"action": "set_run_mode", "session_id": sid, "run_mode": "auto"})
+            for _ in range(80):
+                ev = ws.receive_json()
+                events.append(ev)
+                if ev.get("event") == "agent_response":
+                    break
+        names = [e.get("event") for e in events]
+        self.assertIn("run_mode_set", names)
+        self.assertIn("approval_ack", names)
+        ack = next(e for e in events if e.get("event") == "approval_ack")
+        self.assertTrue(ack.get("approved"))
+        # 事件落账：运行模式切换留痕
+        snap = self.client.get(f"/api/v1/agent/session/{sid}/snapshot").json()
+        plan_evs = [e for e in snap["events"] if e["type"] == "plan/mode"]
+        self.assertTrue(any(e["data"].get("execution") == "auto" for e in plan_evs))
+
+    def test_http_set_run_mode_endpoint(self):
+        sid = self.unique("http_rm")
+        self.fake_model("ok")
+        resp = self.client.post("/api/v1/agent/chat", json={
+            "prompt": "hi", "session_id": sid, "mode": "execute", "run_mode": "approve"})
+        self.assertEqual(resp.status_code, 200)
+        r2 = self.client.post(f"/api/v1/agent/session/{sid}/run_mode", json={"run_mode": "auto"})
+        self.assertEqual(r2.status_code, 200)
+        data = r2.json()
+        self.assertEqual(data["run_mode"], "auto")
+        self.assertTrue(data["applied"])
+        # 未创建的会话：不报错，仅 applied=false（下一条 prompt 会携带）
+        r3 = self.client.post(f"/api/v1/agent/session/{self.unique('no_loop')}/run_mode",
+                              json={"run_mode": "auto"})
+        self.assertEqual(r3.status_code, 200)
+        self.assertFalse(r3.json()["applied"])
+
     def test_sse_chat_v2(self):
         sid = self.unique("sse")
         self.fake_model("SSE 响应")
@@ -995,6 +1442,86 @@ class TestTransportIntegration(TempStore):
         self.assertIn("agent_response", body)
         self.assertIn("SSE 响应", body)
         self.assertIn("[DONE]", body)
+
+
+class TestApprovalAudit(TempStore):
+    """审批必须留痕并给出精确裁决：否则"用户拒绝"和"没人答/无通道"事后无法区分。"""
+
+    def _svc(self, interactive: bool, session=None):
+        from app.agent.tools.pipeline import ApprovalService
+
+        async def emit(ev):
+            pass
+        return ApprovalService(self.unique("appr"), emit, interactive=interactive, session=session)
+
+    def test_non_interactive_verdict_and_audit(self):
+        sid = self.unique("audit_ni")
+        s = Session.open(sid, store=self.store)
+        svc = self._svc(interactive=False, session=s)
+        verdict = run(svc.request("generate_video", {"prompt": "x"}))
+        self.assertEqual(verdict, "non_interactive")
+        types = [e["type"] for e in s.events]
+        self.assertEqual(types, [E.APPROVAL_ASKED, E.APPROVAL_DECIDED])
+        decided = s.events[-1]["data"]
+        self.assertFalse(decided["approved"])
+        self.assertEqual(decided["reason"], "non_interactive")
+
+    def test_rejected_by_human_verdict(self):
+        sid = self.unique("audit_rej")
+        s = Session.open(sid, store=self.store)
+        svc = self._svc(interactive=True, session=s)
+
+        async def scenario():
+            task = asyncio.create_task(svc.request("generate_video", {"prompt": "x"}))
+            for _ in range(100):
+                pending = list(svc._pending)
+                if pending:
+                    self.assertTrue(svc.resolve(pending[0], False))
+                    break
+                await asyncio.sleep(0.01)
+            return await task
+
+        self.assertEqual(run(scenario()), "rejected")
+        self.assertEqual(s.events[-1]["data"]["reason"], "rejected")
+
+    def test_pipeline_denial_carries_verdict_meta(self):
+        from app.agent.tools.pipeline import ToolPipeline
+
+        async def emit(ev):
+            pass
+        sid = self.unique("audit_pipe")
+        s = Session.open(sid, store=self.store)
+        p = ToolPipeline(sid, emit, interactive=False, session=s)
+        out = run(p.execute("c1", "generate_video", {"prompt": "x"}, run_mode="approve"))
+        self.assertEqual(out.status, "denied")
+        self.assertEqual(out.meta.get("approval"), "non_interactive")
+        self.assertIn("无交互", out.error)
+        # 记账失败不得阻断执行：审批事件确实落了账
+        self.assertIn(E.APPROVAL_DECIDED, [e["type"] for e in s.events])
+
+    def test_audit_write_failure_does_not_break_deny(self):
+        from app.agent.tools.pipeline import ApprovalService
+
+        class BrokenSession:
+            def append(self, *a, **k):
+                raise RuntimeError("disk gone")
+
+        async def emit(ev):
+            pass
+        svc = ApprovalService("s", emit, interactive=False, session=BrokenSession())
+        self.assertEqual(run(svc.request("generate_video", {})), "non_interactive")
+
+
+class TestUpstreamBlame(unittest.TestCase):
+    """网关转发的上游 400 该重试，不能当请求错误打死整轮。"""
+
+    def test_upstream_shapes(self):
+        from app.agent.llm.adapter import _is_upstream_blame
+        self.assertTrue(_is_upstream_blame(
+            '{"error":{"type":"server_error","message":"Upstream request failed: [400]"}}'))
+        self.assertTrue(_is_upstream_blame("Internal Server Error"))
+        self.assertFalse(_is_upstream_blame('{"error":{"message":"missing model"}}'))
+        self.assertFalse(_is_upstream_blame(""))
 
 
 if __name__ == "__main__":

@@ -94,17 +94,24 @@ class ImageProviderRegistry:
         from app.extensions import guard
         _pid = (req.extra.get("project_id") if req.extra and isinstance(req.extra, dict) else None)
         guard.ensure_provider_enabled(getattr(prov, "id", target_provider or ""), _pid)
-        return await prov.generate(req)
+        from app.providers.gen_timer import with_timer
+        return await with_timer("image", getattr(prov, "id", "") or "unknown", prov.generate(req),
+                                detail=(req.prompt or "")[:40])
 
     async def check_health_all(self) -> Dict[str, Any]:
-        results = {}
-        for pid, prov in self._providers.items():
+        """并行探测所有图片源健康（串行在离线/慢网络下会叠加成几十秒）。"""
+        import asyncio
+
+        async def _one(pid: str, prov) -> tuple:
             try:
                 ok = await prov.check_health()
-                results[pid] = {"ok": ok, "configured": prov.is_configured()}
+                return pid, {"ok": ok, "configured": prov.is_configured()}
             except Exception as e:
-                results[pid] = {"ok": False, "configured": prov.is_configured(), "error": str(e)}
-        return results
+                return pid, {"ok": False, "configured": prov.is_configured(), "error": str(e)}
+
+        jobs = [_one(pid, prov) for pid, prov in self._providers.items()]
+        pairs = await asyncio.gather(*jobs) if jobs else []
+        return {pid: info for pid, info in pairs}
 
     def list_ids(self) -> List[str]:
         return list(self._order)

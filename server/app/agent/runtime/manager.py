@@ -39,16 +39,25 @@ class AgentManager:
         mode: str = "execute",
         context: Optional[Dict[str, Any]] = None,
         interactive: bool = False,
+        agent_profile: Any = None,
     ) -> AgentLoop:
         async with self._lock:
             lp = self._loops.get(session_id)
             if lp is None:
                 lp = AgentLoop(session_id, run_mode=run_mode, mode=mode,
-                               context=context or {}, interactive=interactive)
+                               context=context or {}, interactive=interactive,
+                               agent_profile=agent_profile)
                 self._loops[session_id] = lp
             else:
                 if context:
                     lp.context = dict(context)
+                if agent_profile is not None:
+                    # 会话已存在也允许热换角色（如重试时补上导演画像）
+                    lp.agent_profile = agent_profile
+                    try:
+                        lp.pipeline.agent_profile = agent_profile
+                    except Exception:
+                        pass
             return lp
 
     # ── 订阅 ─────────────────────────────────────────────
@@ -74,21 +83,25 @@ class AgentManager:
         run_mode: str = "approve",
         interactive: bool = False,
         sink: Optional[Sink] = None,
+        agent_profile: Any = None,
+        attachments: Optional[List[Dict[str, Any]]] = None,
     ) -> AgentLoop:
         lp = await self.get_or_create(session_id, run_mode=run_mode, mode=mode,
-                                      context=context, interactive=interactive)
+                                      context=context, interactive=interactive,
+                                      agent_profile=agent_profile)
         if sink is not None:
             lp.attach(sink)
         if interactive:
             lp.pipeline.approvals.interactive = True
-        await lp.prompt(text, context=context, mode=mode, run_mode=run_mode)
+        await lp.prompt(text, context=context, mode=mode, run_mode=run_mode, attachments=attachments)
         return lp
 
-    async def steer(self, session_id: str, text: str) -> bool:
+    async def steer(self, session_id: str, text: str,
+                    attachments: Optional[List[Dict[str, Any]]] = None) -> bool:
         lp = self._loops.get(session_id)
         if lp is None:
             return False
-        await lp.steer(text)
+        await lp.steer(text, attachments=attachments)
         return True
 
     async def set_run_mode(self, session_id: str, run_mode: str) -> Optional[str]:

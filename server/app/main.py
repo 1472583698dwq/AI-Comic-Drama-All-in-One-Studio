@@ -1,4 +1,11 @@
+# ── 日志必须最先初始化：exe 无控制台（--windowed），print/未捕获异常全部落盘 storage/logs/studio.log ──
+import logging
+from app.core.logging_config import bootstrap_logging, attach_asyncio_exception_handler
+bootstrap_logging()
+logger = logging.getLogger("main")
+
 import os
+import time as _time
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -31,6 +38,8 @@ from app.storage_sync.mirror import mirror
 @asynccontextmanager
 async def _lifespan(_app):
     """MCP 原有 lifespan 照常走，另外把素材/工程的云端同步拉起来。"""
+    attach_asyncio_exception_handler()  # asyncio 后台任务崩溃 → traceback 落盘
+    logger.info("lifespan begin")
     try:
         await mirror.start()
     except Exception as e:
@@ -64,6 +73,44 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# 请求日志：4xx WARNING / 5xx ERROR（带 traceback）/ 其余 DEBUG（LOG_LEVEL=DEBUG 时可见全流水）
+_REQ_LOG_NOISE = ("/assets/", "/storage/", "/exports/", "/system/logs/", "/api/v1/health", "/api/status", "/mcp-server")
+
+
+@app.middleware("http")
+async def _request_log(request, call_next):
+    path = request.url.path
+    noisy = any(path.startswith(p) or path == p.rstrip("/") for p in _REQ_LOG_NOISE)
+    t0 = _time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        dt = int((_time.perf_counter() - t0) * 1000)
+        if not noisy:
+            logger.error("%s %s -> 500 (%dms) unhandled", request.method, path, dt, exc_info=True)
+        raise
+    dt = int((_time.perf_counter() - t0) * 1000)
+    if not noisy:
+        line = "%s %s -> %s (%dms)" % (request.method, path, response.status_code, dt)
+        if response.status_code >= 500:
+            logger.error(line)
+        elif response.status_code >= 400:
+            logger.warning(line)
+        else:
+            logger.debug(line)
+    return response
+
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request, exc):
+    # 注意：handler 收到的 exc 不在 except 块内，必须显式 exc_info=exc 才有 traceback
+    logger.error("未处理异常 %s %s: %s", request.method, request.url.path, exc, exc_info=exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"服务器内部错误: {type(exc).__name__}: {str(exc)[:300]}"},
+    )
 
 
 # 任意工具执行口：CORS 只挡浏览器读响应，跨源 POST 在服务端仍会执行（fire-and-forget）。
@@ -106,56 +153,138 @@ async def _extension_project_scope(request, call_next):
             except Exception:
                 pass
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 路由挂载 —— 精简链路（SLIM BUILD）
-# ══════════════════════════════════════════════════════════════════════════════
-# 目标链路：基础配置 + 无限画布 + 素材库 + AI 导演 + 生图/生视频
-#
-# 保留：核心(router) / 素材库 / 项目 / 画布 / 生成源 / 扩展中心 / 插件中心 /
-#       代码节点 / 画布节点（画布工具栏）/ 首次引导
-# 裁掉：一键成片 / 分镜槽 / 主题包 / 导出器 / 导演包
-#       —— 这五类的宿主页签（分镜工作台 / 3D 片场 / 多轨剪辑）已从前端下线，
-#          路由留着只会变成"没人调用但仍在启动时 import"的冷负担。
-#
-# 回到全量对照测试：设环境变量 STUDIO_FULL_BUILD=1（.env 或启动脚本）。
-SLIM_BUILD = os.environ.get("STUDIO_FULL_BUILD", "0") not in ("1", "true", "True", "on")
+# 功能页（page）默认停用集播种：首次运行把默认关的页面写入扩展覆盖层（幂等，失败不阻断启动）
+try:
+    from app.core import pages as _pages
+    _page_seed = _pages.seed_defaults()
+    if _page_seed.get("seeded"):
+        print(f"[Main] Page defaults seeded (disabled={_page_seed.get('disabled')})")
+except Exception as e:
+    print(f"[Main] Page defaults seed failed: {e}")
 
-
-def _mount_router(module_path: str, attr: str, label: str) -> None:
-    """挂载单个路由模块：失败只告警不影响其余路由（原逐块 try/except 的收敛写法）。"""
+# Mount API routes
+app.include_router(router, prefix=settings.API_V1_STR)
+# 资产库路由
+try:
+    from app.api.asset_routes import router as asset_router
+    app.include_router(asset_router, prefix=settings.API_V1_STR)
+    print("[Main] Asset routes mounted at /api/v1/assets")
+except Exception as e:
+    print(f"[Main] Asset routes mount failed: {e}")
+# 项目管理路由 (P0)
+try:
+    from app.api.project_routes import router as project_router
+    app.include_router(project_router, prefix=settings.API_V1_STR)
+    print("[Main] Project routes mounted at /api/v1/projects")
+except Exception as e:
+    print(f"[Main] Project routes mount failed: {e}")
+# 画布执行路由 (P2)
+try:
+    from app.api.canvas_routes import router as canvas_router
+    app.include_router(canvas_router, prefix=settings.API_V1_STR)
+    print("[Main] Canvas routes mounted at /api/v1/canvas")
+except Exception as e:
+    print(f"[Main] Canvas routes mount failed: {e}")
+# Provider 管理路由（解耦：每个生成源为独立节点）
+try:
+    from app.api.provider_routes import router as provider_router
+    app.include_router(provider_router, prefix=settings.API_V1_STR)
+    print("[Main] Provider routes mounted at /api/v1/providers")
+except Exception as e:
+    print(f"[Main] Provider routes mount failed: {e}")
+# 一键成片 Agent 任务路由（异步 + 轮询）
+try:
+    from app.api.onekey_routes import router as onekey_router
+    app.include_router(onekey_router, prefix=settings.API_V1_STR)
+    print("[Main] OneKey routes mounted at /api/v1/onekey")
+except Exception as e:
+    print(f"[Main] OneKey routes mount failed: {e}")
+# 分镜槽路由（storyboard_slots 聚合 + 项目覆盖 + 裸件 CRUD）
+try:
+    from app.api.storyboard_slot_routes import router as storyboard_slot_router
+    app.include_router(storyboard_slot_router, prefix=settings.API_V1_STR)
+    print("[Main] StoryboardSlot routes mounted at /api/v1/storyboard/slots")
+except Exception as e:
+    print(f"[Main] StoryboardSlot routes mount failed: {e}")
+# 统一扩展注册表路由（聚合查看 + 统一执行 + 统一启停）
+try:
+    from app.api.extension_routes import router as extension_router
+    app.include_router(extension_router, prefix=settings.API_V1_STR)
+    print("[Main] Extension routes mounted at /api/v1/extensions")
+except Exception as e:
+    print(f"[Main] Extension routes mount failed: {e}")
+# 功能页运行时开关路由（清单 + 启停状态）
+try:
+    from app.api.page_routes import router as page_router
+    app.include_router(page_router, prefix=settings.API_V1_STR)
+    print("[Main] Page routes mounted at /api/v1/pages")
+except Exception as e:
+    print(f"[Main] Page routes mount failed: {e}")
+# 功能级（feature）运行时开关路由（清单 + 批量写；页面关不掉的进阶能力，出厂全关）
+try:
+    from app.api.feature_routes import router as feature_router
+    app.include_router(feature_router, prefix=settings.API_V1_STR)
+    print("[Main] Feature routes mounted at /api/v1/features")
+except Exception as e:
+    print(f"[Main] Feature routes mount failed: {e}")
+# 插件系统路由（P1：providers/skills/workflows/mcp_tools 四类扩展点）
+try:
+    from app.api.plugin_routes import router as plugin_router
+    app.include_router(plugin_router, prefix=settings.API_V1_STR)
+    print("[Main] Plugin routes mounted at /api/v1/plugins")
+except Exception as e:
+    print(f"[Main] Plugin routes mount failed: {e}")
+# 自定义代码节点路由（CRUD/体检/试运行/单次执行）
+try:
+    from app.api.custom_node_routes import router as custom_node_router
+    app.include_router(custom_node_router, prefix=settings.API_V1_STR)
+    print("[Main] CustomNode routes mounted at /api/v1/custom-nodes")
+except Exception as e:
+    print(f"[Main] CustomNode routes mount failed: {e}")
+# 声明式画布节点路由（canvas_nodes 声明 CRUD/单次执行）
+try:
+    from app.api.canvas_node_routes import router as canvas_node_router
+    app.include_router(canvas_node_router, prefix=settings.API_V1_STR)
+    print("[Main] CanvasNode routes mounted at /api/v1/canvas-nodes")
+except Exception as e:
+    print(f"[Main] CanvasNode routes mount failed: {e}")
+# 画布时间线节点路由（引擎自检 / 合片 MP4 长任务 / 降级剪映草稿；画布页关闭时整族 404）
+try:
+    from app.api.timeline_routes import router as timeline_router
+    app.include_router(timeline_router, prefix=settings.API_V1_STR)
+    print("[Main] Timeline routes mounted at /api/v1/timeline")
+except Exception as e:
+    print(f"[Main] Timeline routes mount failed: {e}")
+# 前端扩展点路由：主题包 / 导出器 / 导演包
+# 三个模块导出的都是 `router`（与其余路由模块一致），此前按 theme_router/exporter_router/
+# director_pack_router 取会 AttributeError，被 except 吞掉 → 三个扩展点静默未挂载
+for _mod, _name, _path in (
+    ("app.api.theme_routes", "router", "/api/v1/themes"),
+    ("app.api.exporter_routes", "router", "/api/v1/exporters"),
+    ("app.api.director_pack_routes", "router", "/api/v1/director-packs"),
+    ("app.api.agent_team_routes", "router", "/api/v1/agent-teams"),
+):
     try:
-        import importlib
-        _r = getattr(importlib.import_module(module_path), attr)
+        import importlib as _il
+        _r = getattr(_il.import_module(_mod), _name)
         app.include_router(_r, prefix=settings.API_V1_STR)
-        print(f"[Main] {label} mounted")
+        print(f"[Main] FrontendExt routes mounted at {_path}")
     except Exception as e:
-        print(f"[Main] {label} mount failed: {e}")
-
-
-# ── 核心：Agent / MCP / 技能 / 任务 等主路由（始终保留） ──
-_mount_router("app.api.routes", "router", "Core routes")
-
-# ── 保留链路 ──
-_mount_router("app.api.asset_routes", "router", "Asset routes (/api/v1/assets)")
-_mount_router("app.api.project_routes", "router", "Project routes (/api/v1/projects)")
-_mount_router("app.api.canvas_routes", "router", "Canvas routes (/api/v1/canvas)")
-_mount_router("app.api.provider_routes", "router", "Provider routes (/api/v1/providers)")
-_mount_router("app.api.extension_routes", "router", "Extension routes (/api/v1/extensions)")
-_mount_router("app.api.plugin_routes", "router", "Plugin routes (/api/v1/plugins)")
-_mount_router("app.api.custom_node_routes", "router", "CustomNode routes (/api/v1/custom-nodes)")
-_mount_router("app.api.canvas_node_routes", "router", "CanvasNode routes (/api/v1/canvas-nodes)")
-_mount_router("app.api.setup_routes", "router", "Setup routes (/api/v1/system/setup-status)")
-
-# ── 已裁剪链路：宿主页签已下线，路由不挂 ──
-if not SLIM_BUILD:
-    _mount_router("app.api.onekey_routes", "router", "OneKey routes (/api/v1/onekey)")
-    _mount_router("app.api.storyboard_slot_routes", "router", "StoryboardSlot routes (/api/v1/storyboard/slots)")
-    _mount_router("app.api.theme_routes", "router", "Theme routes (/api/v1/themes)")
-    _mount_router("app.api.exporter_routes", "router", "Exporter routes (/api/v1/exporters)")
-    _mount_router("app.api.director_pack_routes", "router", "DirectorPack routes (/api/v1/director-packs)")
-else:
-    print("[Main] SLIM_BUILD=1：已跳过 一键成片 / 分镜槽 / 主题包 / 导出器 / 导演包 路由"
-          "（STUDIO_FULL_BUILD=1 可恢复全量）")
+        print(f"[Main] FrontendExt routes mount failed ({_mod}): {e}")
+# 首次启动引导路由（安装向导状态）
+try:
+    from app.api.setup_routes import router as setup_router
+    app.include_router(setup_router, prefix=settings.API_V1_STR)
+    print("[Main] Setup routes mounted at /api/v1/system/setup-status")
+except Exception as e:
+    print(f"[Main] Setup routes mount failed: {e}")
+# 日志接口（调试）：tail / files / download / frontend 上报 / 运行期级别
+try:
+    from app.api.log_routes import router as log_router
+    app.include_router(log_router, prefix=settings.API_V1_STR)
+    logger.info("Log routes mounted at /api/v1/system/logs")
+except Exception as e:
+    logger.error("Log routes mount failed: %s", e)
 # 自定义代码节点 MCP Tool 注册（一节点一Tool）
 try:
     from app.mcp.server import mcp_registry as _mcp_reg
@@ -247,8 +376,10 @@ async def health_check():
     try:
         from app.providers.image.registry import image_registry
         from app.providers.audio.registry import audio_registry
+        from app.providers.video.registry import video_registry
         img_ids = image_registry.list_ids() if hasattr(image_registry, "list_ids") else []
         aud_ids = audio_registry.list_ids() if hasattr(audio_registry, "list_ids") else []
+        vid_ids = video_registry.list_ids() if hasattr(video_registry, "list_ids") else []
         return {
             "status": "healthy",
             "comfyui_online": False,
@@ -256,8 +387,10 @@ async def health_check():
             "providers": {
                 "image": img_ids,
                 "audio": aud_ids,
+                "video": vid_ids,
                 "image_count": len(img_ids),
                 "audio_count": len(aud_ids),
+                "video_count": len(vid_ids),
             },
         }
     except Exception as e:

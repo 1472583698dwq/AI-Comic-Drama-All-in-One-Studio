@@ -39,8 +39,14 @@ PLAN_READONLY_TOOLS = frozenset({
     "creator_inspect_runtime",
     "list_custom_nodes",
     "todo_write",
+    "view_media",
     "job_list", "job_status",
     "task_status",
+    "subagent_list", "subagent_status",
+    "onekey_summary",
+    "onekey_review",
+    "onekey_style_lock",
+    "onekey_scene_image",
 })
 
 # 工具风险分级：low 查询/规划 / medium 单镜生成 / high 批量·覆盖·花钱 / catastrophic 删源·越界写·危险命令
@@ -50,7 +56,7 @@ TOOL_RISK: Dict[str, str] = {
     "list_image_providers": "low", "list_voice_providers": "low", "list_video_providers": "low",
     "list_voices": "low", "list_comfyui_workflows": "low", "list_custom_providers": "low",
     "get_provider_code": "low", "canvas_query": "low", "canvas_query_assets": "low",
-    "fs_read": "low", "read_skill": "low",
+    "fs_read": "low", "read_skill": "low", "view_media": "low",
     "director_3d_stage_plan": "low", "split_novel_script": "medium",
     # 生成
     "generate_image": "medium", "comfyui_render_node": "medium",
@@ -69,6 +75,12 @@ TOOL_RISK: Dict[str, str] = {
     "creator_start_test": "medium", "creator_finalize": "high",
     # 可信双工具
     "fs_file": "high", "shell_exec": "high",
+    # 子代理集群 / 一键成片原子工具
+    "subagent_run": "medium", "subagent_list": "low", "subagent_status": "low",
+    "subagent_cancel": "medium", "subagent_steer": "low",
+    "onekey_split": "medium", "onekey_style_lock": "low", "onekey_scene_image": "medium", "onekey_role_image": "medium", "onekey_shot_image": "medium",
+    "onekey_shot_video": "high", "onekey_shot_voice": "medium", "onekey_export": "medium",
+    "onekey_summary": "low", "onekey_review": "low",
 }
 
 CATASTROPHIC_TOOLS = {"delete_custom_provider"}

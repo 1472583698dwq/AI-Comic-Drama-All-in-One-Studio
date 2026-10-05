@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Play } from 'lucide-react';
 import type { ShotSlotContext } from './types';
 import { substituteTpl, useRunSlotAction } from './slotRun';
+import { AutoRatioMedia } from '../../ui/AutoRatioMedia';
 
 /**
  * 插件槽通用渲染器（P1，仅组件；运行辅助见 slotRun）。
@@ -115,7 +116,7 @@ export const PluginAnchor: React.FC<{ ctx: ShotSlotContext; doc: any }> = ({ ctx
       {v ? (
         <div className="flex items-center gap-2 bg-surface-secondary p-2 rounded-xl border border-teal-500/30">
           {isUrl && !v.startsWith('data:audio') ? (
-            <img src={getMediaUrl(v)} alt="" className="w-10 h-10 rounded-lg object-cover border border-border shrink-0" />
+            <AutoRatioMedia src={getMediaUrl(v)} fallbackAspect="1/1" maxHeight={40} className="rounded-lg border border-border shrink-0" />
           ) : null}
           <div className="min-w-0 text-[11px] text-gray-300 truncate flex-1">{typeof v === 'object' ? JSON.stringify(v) : String(v)}</div>
           <button

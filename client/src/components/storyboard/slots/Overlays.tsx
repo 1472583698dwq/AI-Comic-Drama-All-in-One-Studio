@@ -32,7 +32,7 @@ export const ShotOverlays: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
           <div className="flex items-center gap-2">
             <span><kbd className="px-1.5 py-0.5 rounded bg-surface-secondary border border-border [color:var(--color-text-main)] font-mono text-[10px]">Space</kbd> 播放</span>
             <span><kbd className="px-1.5 py-0.5 rounded bg-surface-secondary border border-border [color:var(--color-text-main)] font-mono text-[10px]">A</kbd>/<kbd className="px-1.5 py-0.5 rounded bg-surface-secondary border border-border [color:var(--color-text-main)] font-mono text-[10px]">D</kbd> 切镜头</span>
-            <span><kbd className="px-1.5 py-0.5 rounded bg-surface-secondary border border-border [color:var(--color-text-main)] font-mono text-[10px]">R</kbd> 抽卡</span>
+            <span><kbd className="px-1.5 py-0.5 rounded bg-surface-secondary border border-border [color:var(--color-text-main)] font-mono text-[10px]">R</kbd> 生成画面</span>
             <span><kbd className="px-1.5 py-0.5 rounded bg-surface-secondary border border-border [color:var(--color-text-main)] font-mono text-[10px]">V</kbd> 视频</span>
             <span><kbd className="px-1.5 py-0.5 rounded bg-surface-secondary border border-border [color:var(--color-text-main)] font-mono text-[10px]">T</kbd> 配音</span>
             <span><kbd className="px-1.5 py-0.5 rounded bg-surface-secondary border border-border [color:var(--color-text-main)] font-mono text-[10px]">1-4</kbd> 选候选</span>

@@ -51,12 +51,12 @@ export const ShotWriteBackControls: React.FC<{ nodeId: string; nodeType: string;
   };
 
   return (
-    <div className="rounded-xl bg-surface-secondary border border-white/10 p-2.5 space-y-2">
+    <div className="rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/10 p-2.5 space-y-2">
       <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-300">
         <CornerUpLeft className="w-3 h-3" /> 回写到分镜
         {linkedShotId && targetShot && <span className="text-[10px] font-normal text-white/40">· 已关联 {shotDisplayName(targetShot)}</span>}
       </div>
-      <select value={targetShotId} onChange={(e) => setTargetShotId(e.target.value)} className="w-full bg-surface border border-white/15 rounded-lg px-2 py-1 text-[11px] text-white/90 focus:outline-none focus:border-emerald-500">
+      <select value={targetShotId} onChange={(e) => setTargetShotId(e.target.value)} className="w-full bg-white/60 dark:bg-white/[.05] border border-white/15 rounded-lg px-2 py-1 text-[11px] text-white/90 focus:outline-none focus:border-emerald-500">
         <option value="">选择目标分镜…</option>
         {shotOptions.map((s) => (
           <option key={s.id} value={s.id}>{s.label}{s.hasVideo ? ' ·已有视频' : s.hasImage ? ' ·已有图' : ''}{s.hasAudio ? ' ·已有配音' : ''}</option>

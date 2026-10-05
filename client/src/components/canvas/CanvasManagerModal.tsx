@@ -94,13 +94,13 @@ export const CanvasManagerModal: React.FC<Props> = ({ isOpen, onClose, projectId
 
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="w-full max-w-xl max-h-[82vh] bg-surface rounded-2xl border border-border flex flex-col overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
-        <div className="h-12 px-4 border-b border-border flex items-center justify-between bg-surface-secondary/50 shrink-0">
+      <div className="w-full max-w-xl max-h-[82vh] bg-white/60 dark:bg-white/[.05] rounded-2xl border border-white/70 dark:border-white/12 flex flex-col overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
+        <div className="h-12 px-4 border-b border-white/70 dark:border-white/12 flex items-center justify-between bg-white/50 dark:bg-white/[.04] shrink-0">
           <span className="text-sm font-bold text-white">画布管理 <span className="text-[10px] text-gray-500 font-normal ml-1">{list.length} 个 · 分镜隶属见各行</span></span>
-          <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-surface-tertiary"><X className="w-4 h-4" /></button>
+          <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/65 dark:bg-white/[.09]"><X className="w-4 h-4" /></button>
         </div>
-        <div className="p-3 border-b border-border flex items-center gap-2 shrink-0">
-          <input value={newName} onChange={e => setNewName(e.target.value)} placeholder={`新建画布名称（默认 画布${list.length + 1}）`} className="flex-1 bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand" />
+        <div className="p-3 border-b border-white/70 dark:border-white/12 flex items-center gap-2 shrink-0">
+          <input value={newName} onChange={e => setNewName(e.target.value)} placeholder={`新建画布名称（默认 画布${list.length + 1}）`} className="flex-1 bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand" />
           <button onClick={handleCreate} className="px-4 py-2 rounded-xl bg-brand text-white text-xs font-bold flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> 新建</button>
         </div>
         <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
@@ -110,10 +110,10 @@ export const CanvasManagerModal: React.FC<Props> = ({ isOpen, onClose, projectId
             const affil = shotsOf(c.id);
             const isCur = c.id === currentId;
             return (
-              <div key={c.id} className={`p-3 rounded-xl border transition-all ${isCur ? 'bg-brand/10 border-brand/40' : 'bg-surface-secondary/60 border-border'}`}>
+              <div key={c.id} className={`p-3 rounded-xl border transition-all ${isCur ? 'bg-brand/10 border-brand/40' : 'bg-white/55 dark:bg-white/[.05] border-white/70 dark:border-white/12'}`}>
                 <div className="flex items-center gap-2">
                   {renaming === c.id ? (
-                    <input autoFocus value={renameValue} onChange={e => setRenameValue(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleRename(c.id); if (e.key === 'Escape') setRenaming(null); }} onBlur={() => handleRename(c.id)} className="flex-1 bg-surface-secondary border border-brand rounded-lg px-2 py-1 text-xs text-white focus:outline-none" />
+                    <input autoFocus value={renameValue} onChange={e => setRenameValue(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleRename(c.id); if (e.key === 'Escape') setRenaming(null); }} onBlur={() => handleRename(c.id)} className="flex-1 bg-white/55 dark:bg-white/[.06] border border-brand rounded-lg px-2 py-1 text-xs text-white focus:outline-none" />
                   ) : (
                     <span className="flex-1 text-xs font-bold text-white truncate">{isCur ? '● ' : ''}{c.name}</span>
                   )}
@@ -123,14 +123,14 @@ export const CanvasManagerModal: React.FC<Props> = ({ isOpen, onClose, projectId
                 {affil.length > 0 && (
                   <div className="mt-1.5 flex items-center gap-1 flex-wrap text-[10px] text-gray-400">
                     <Film className="w-3 h-3 text-brand-light" />
-                    {affil.map(s => <span key={s.id} className="px-1.5 py-0.5 rounded bg-surface-secondary border border-border font-mono">#{s.shot_index}</span>)}
+                    {affil.map(s => <span key={s.id} className="px-1.5 py-0.5 rounded bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 font-mono">#{s.shot_index}</span>)}
                   </div>
                 )}
                 <div className="mt-2 flex items-center gap-1.5">
                   {!isCur && <button onClick={() => { onSwitch(c.id); onClose(); }} className="flex-1 py-1.5 rounded-lg bg-brand/15 border border-brand/30 text-[11px] text-brand-light hover:text-white flex items-center justify-center gap-1"><FolderOpen className="w-3 h-3" /> 打开</button>}
                   {isCur && <span className="flex-1 py-1.5 text-center text-[11px] text-emerald-400 font-bold">当前画布</span>}
-                  <button onClick={() => { setRenaming(c.id); setRenameValue(c.name); }} className="px-2.5 py-1.5 rounded-lg bg-surface border border-border text-[11px] text-gray-300 hover:text-white flex items-center gap-1"><Pencil className="w-3 h-3" /> 改名</button>
-                  <button onClick={() => handleDelete(c.id, c.name)} disabled={list.length <= 1} className="px-2.5 py-1.5 rounded-lg bg-surface border border-border text-[11px] text-gray-300 hover:text-red-400 disabled:opacity-40 flex items-center gap-1"><Trash2 className="w-3 h-3" /> 删除</button>
+                  <button onClick={() => { setRenaming(c.id); setRenameValue(c.name); }} className="px-2.5 py-1.5 rounded-lg bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:text-white flex items-center gap-1"><Pencil className="w-3 h-3" /> 改名</button>
+                  <button onClick={() => handleDelete(c.id, c.name)} disabled={list.length <= 1} className="px-2.5 py-1.5 rounded-lg bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:text-red-400 disabled:opacity-40 flex items-center gap-1"><Trash2 className="w-3 h-3" /> 删除</button>
                 </div>
               </div>
             );

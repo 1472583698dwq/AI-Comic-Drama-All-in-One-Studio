@@ -1,144 +1,149 @@
-# AI 漫剧 Studio · 精简新手版 (multi_ai_simpleuse)
+# MiniMax AI 漫剧 Studio（桌面 + 移动 双端工作台）
 
-> 基于 AI 漫剧工作台项目裁剪而来的**简化新手版本**：保留核心创作流程，去掉进阶/实验性功能，让新机器和新用户拉下来就能跑、界面上少一半看不懂的东西。
->
-> **上游完整版**：https://gitcode.com/dwq147/src （功能更全，进阶用户请移步）
-
----
-
-## ⚠️ 本仓库是什么
-
-- 这是一个**面向新手和轻量使用的精简版**，不是完整版。
-- 相比上游 `dwq147/src`，**裁掉了部分功能**（见下方清单）。同步方式是**按主题挑选**：上游与已下线页签/链路无关的修复与增强照取，依赖进阶功能的整体跳过（逐项取舍见 `docs/上游同步说明_2026-09-24.md`）。
-- 分支说明：本仓库 `master` 已同步推送为上游的 `multi_ai_simpleuse` 分支。
-- 精简版保持了独立演进：包含上游没有的多项修复与重构（开发环境回源统一、视频任务轮询收敛、画布选中态修复、LLM 规划超时护栏、悬空素材清理等）。
-
-### 与上游完整版相比，本版本裁掉的功能
-
-| 裁掉的功能 | 说明 |
-| --- | --- |
-| 导演组扩展系统 | `agent_profile` / `agent_team`：插件贡献、热加载、编排脚本、质检门 |
-| 子代理集群与一键成片 Agent 引擎 | 同步/异步/批量子代理调度 + `wait` 收口，集群可视化视图（一键成片路由本版本默认不挂） |
-| 导演台多机位与白模参考自动装配 | 3D 导演台的多机位编排新特性（对应宿主页签本版本已下线） |
-| Agent 工具卡与审批留痕配套 | 上游 `AgentToolSteps` 工具卡分组、审批归因三态、页面版/悬浮窗版会话隔离 |
-| 上游的 README / 使用说明重写 | 本仓库 README 与《使用说明.md》按精简版口径自行维护 |
-
-> 需要以上任何功能，请使用上游完整版：https://gitcode.com/dwq147/src
-
-### 已跟随上游同步的增强（本版本内含）
-
-- **Agent 模式双维拆分**：「行为」（标准 / 创造 / 计划）× 「执行」（逐项审批 / 全自动）两维组合，后端沿用上游实现，前端按精简链路自补。
-- **IndexTTS 内置配音通道**：设置页填地址即用（Gradio 三步式：上传参考音频 → 提交 → SSE 取结果）。
-- **桌面端启动与构建自愈**：Edge 独立 profile 防复用旧窗口、构建更新后分片 404 自愈、视图崩溃兜底 ErrorBoundary。
-- **其他上游修复**：剪映草稿按素材真实时长重建时间线、绑定预览与生成口径同表（旧键别名归一）、运行模式切「自动」即时生效、DashScope 万相 2.5+/千问新接口、官方模型与域名按 2026-09 迁移、技能扫描收敛到项目内。
-
-### 精简版保留并增强的核心能力
-
-- **无限画布（Creative Canvas）**：节点式创作流，图像/视频/音频/Comfy 工作流/分镜卡等节点自由连线，节点 Agent 控制台"说人话"生成。
-- **生成源（Provider）体系**：内置与自定义生成源统一管理，支持把密钥从代码内联迁移到配置存储；设置页明确提示"填了是否生效"。
-- **素材库**：人物/场景/道具等分类素材管理与拖拽上画布；悬空素材（文件已删、记录还在）一键清理，删除前自动备份清单。
-- **角色设定**：角色增删改、三视图生成（`POST /images/character-3views`）、三视图槽位与参考音频绑定（音色克隆）——画布与分镜的角色一致性由这里驱动。
-- **素材与工程云同步（OpenList）**：素材与工程异步同步到 OpenList，换台机器还是同一套（**默认关闭**，在设置里填自己的地址与账号后开启）。
-- **剪映草稿导出**：按素材真实时长重建时间线的基础成片导出链路。
-- **MCP 工具中枢**：统一的 Model Context Protocol 工具注册与调用，画布节点可被 Agent 读写（键名自动驼峰→snake_case 归一）。
-
-> **页签口径**：分镜工作台（`studio`）/ 3D 片场（`director3d`）/ 多轨剪辑（`timeline`）三个页签的**入口已下线**，由 `normalizeTab` 重定向到创意画布；对应组件实现仍保留在 `client/src/components/` 下。
->
-> **角色设定（`characters`）保留启用**：它是角色三视图与参考音频的**唯一生产端**，而画布链路仍在消费这两个字段（`referenceBinder.characterMainImage` / `collectAudioResources`）。若下线，角色一致性会退化为「只有单张 `avatar` 兜底图、参考音频恒为空」。
+> 长篇小说 → 一键成片：**总导演 Agent + 专家子代理集群**并行编排（拆解 / 定妆 / 生图 / 图生视频 / 配音 / 导出剪映）。
+> 内置 **3D 虚拟导演台**、多轨剪辑时间线、角色一致性资产库、**13 类插件扩展体系**（含自定义导演组），
+> 并以 **MCP (Model Context Protocol)** 对外开放工具生态。
 
 ---
 
-## 🛠️ 技术栈
+## 🌟 核心特性
+
+### 1. 🎬 一键成片（总导演 Agent + 子代理集群）
+- **🤖 智能体集群**：总导演 Agent 规划 + 专家子代理**并行扇出**（同质任务批量 batch、长耗时视频后台提交 + `subagent_wait` 关键节点收口），
+  单点失败不阻塞全片；前端实时花名册展示角色 / 批次 / 状态 / 耗时 / 当前工具。
+- **导演组（可扩展编排）**：在弹窗选择导演组即切换成员名单与总导演编排脚本（playbook），
+  支持 `qa_gate` 质检门（导出后强制质检员复核并汇总缺失镜头）。
+- 产出直接落盘为正式项目并跳转分镜台，可继续逐镜微调。
+
+### 2. 🖥️ 桌面专业版（Desktop Studio）
+- **3D 虚拟导演台**：Three.js 实时渲染，角色素体 / 姿态预设 / 机位轨迹（推拉摇移、环绕、震颤），可同步为分镜运镜参数。
+- **多轨音视频剪辑时间线**：主画面 / 对白 / 旁白 / BGM / 字幕多轨，帧级拖拽、缩放、吸附与音画对齐。
+- **角色一致性资产库**：三视图（正面 / 侧面 / 3/4）管理，服饰与特征词锁定，跨镜复用。
+- **桌面壳**：PyInstaller 独立包 + WebView2（pywebview，回退 Edge/Chrome App 模式），双击即用，无黑框。
+
+### 3. 📱 移动端卡片流（Mobile）
+- 整章粘贴 → 秒级拆解人物关系与分镜；9:16 全屏卡片流逐镜微调（换图 / 换声线 / 改台词 / 智能重绘）。
+
+### 4. 🔌 插件与扩展体系（13 类扩展点）
+- **统一扩展注册表**：生成源 / 技能 / 工作流 / 代码节点 / MCP 工具 / 画布节点 / 分镜槽 / 主题 / 导出器 / 导演包 / **导演组成员** / **导演组** / 插件包，
+  扩展中心统一查看、启停（支持项目级软停用）、执行与健康观测。
+- **插件包**：一个 zip 声明式带进全部扩展点；安装 → 启用（逐类落地）→ 禁用（精确回滚）→ 卸载，3 秒热重载。
+- **导演组扩展**：自定义专家角色（系统提示 + 工具白名单 + 预算）与导演组编排（成员 + playbook + 质检门），
+  插件贡献或直接落盘 `storage/agent_profiles|agent_teams/*.json` 即热生效。
+  规范见 [`docs/plugin-dev.md`](docs/plugin-dev.md)（4.10 / 4.11 节），示例见 `plugins/example-drama-pack/`。
+
+### 5. ☁️ 素材与工程云同步（OpenList）
+- 本机 `storage/` 的素材与工程后台异步同步到 OpenList，换机打开即见项目列表；前端零改动（`/storage/xxx` 本地缺就去云端取）。
+- 白名单同步（不涉 API Key 等配置），版本化快照 + 冲突保留；设置 →「素材与工程云端同步」可填自己的地址账号并测试联通。
+
+### 6. 🔗 MCP 统一工具生态
+- 内置 MCP 中枢：小说拆解、MiniMax 语音、3D 运镜规划、ComfyUI 桥接、剪映草稿导出等；
+- 支持接入外部 MCP Server，自定义工具在 Agent 会话中可被直接调用。
+
+---
+
+## 🛠️ 技术栈架构
 
 ```mermaid
-flowchart TD
-    subgraph FE["客户端 client/"]
-        direction LR
-        A1["React 19 + TypeScript + Vite"]
-        A2["Tailwind CSS v4"]
-        A3["React Flow 无限画布"]
-        A1 --- A2
-        A1 --- A3
+graph TD
+    subgraph 客户端
+        A1[React 19 + TypeScript + Vite]
+        A2[Tailwind CSS v4 暗黑工业风]
+        A3[Three.js 3D 导演台]
+        A4[Zustand 状态层 + WebSocket 流式]
     end
 
-    subgraph BE["后端 server/"]
-        B1["Python FastAPI"]
-        B2["MCP 统一工具中枢"]
-        B3["图像/视频/音频 Provider 调度"]
-        B4["剪映草稿导出器"]
-        B1 --> B2
-        B2 --> B3
-        B2 --> B4
+    subgraph 后端
+        B1[FastAPI 异步服务]
+        B2[Agent 运行时: AgentLoop + SubAgentPool 子代理集群]
+        B3[统一扩展注册表 + 插件生命周期]
+        B4[FastMCP 工具中枢 / 生成源注册表]
+        B5[流水线: 一键成片 unified_orchestrator / onekey_agent]
+        B6[剪映 Draft 导出器 + 素材云同步]
     end
 
-    A1 <-->|"REST + WebSocket"| B1
+    A1 --> A2 & A3 & A4
+    A4 <-->|REST + WebSocket / SSE| B1
+    B1 --> B2 & B3 & B4 & B5
+    B2 --> B4
+    B5 --> B4 & B6
 ```
-
-> 桌面打包基于 Python（PyInstaller），仓库内的 `.spec` 与 `launch_desktop_app.py` 负责无黑框启动。
 
 ---
 
 ## 🚀 快速启动
 
-### 方式一：Windows 一键启动（推荐）
+### 方式一：Windows 桌面版（推荐给最终用户）
+- 双击发布包内的 **`Studio.exe`**（或同目录 **`一键启动.bat`**），几秒后自动打开工作台。
+- 使用说明见 [`使用说明.md`](使用说明.md)；首次使用在「设置 → 生成源」填 API Key 并点「测试」。
 
-双击根目录 **`一键启动.bat`**（或 `start_all.bat`）。已打包过 `dist/Studio` 的话会直接拉起桌面版。
-
-### 方式二：开发模式分步启动
-
+### 方式二：源码运行（开发）
 ```bash
-# 1. 后端（http://127.0.0.1:8000 ，API 文档 /docs）
+# 1) 启动后端
 cd server
-python run_server.py
+python run_server.py            # http://127.0.0.1:8000 （文档 /docs）
 
-# 2. 前端（http://localhost:5173 ，与 51xx 段端口均可用）
+# 2) 启动前端
 cd client
-npm run dev
+npm install
+npm run dev                     # http://localhost:5173
 ```
 
-### 双端开发模式
+### 打包桌面 exe（一键全量构建）
+```powershell
+python build_release.py         # 前端构建 + PyInstaller → dist\Studio\Studio.exe（保留用户配置）
+python build_release.py --release   # 干净发布包 → dist\AI漫剧Studio_0.1.0（剔除 Key/数据，附使用说明）
+```
 
-`一键启动(双端开发模式).bat` 同时拉起前后端热更新环境。
-
-> 首次使用请在 **系统设置** 里配置各生成源（图像/视频/语音）的 API Key。密钥支持写入配置存储，避免明文散落在自定义生成源代码里。
+### 回归与检查
+```bash
+cd server && python -m unittest discover -s tests -p "test_*.py"   # 后端全量用例
+cd client && npx tsc -b && npm run lint && npm run build           # 前端类型 / 规范 / 构建
+```
 
 ---
 
-## 📂 项目结构
+## 📂 项目工程目录
 
 ```text
-├── client/                 # 前端 (React 19 + Vite + Tailwind + React Flow)
+d:/ai漫剧/
+├── client/                              # 前端（React 19 + Vite + TS + Tailwind v4 + Three.js + Zustand）
 │   └── src/
 │       ├── components/
-│       │   ├── canvas/     # 无限画布：节点、Agent 控制台、控制条
-│       │   ├── asset/      # 素材库与素材选择器
-│       │   ├── timeline/   # 多轨时间线
-│       │   ├── storyboard/ # 分镜工作台与镜头检查器
-│       │   ├── character/  # 角色工坊
-│       │   ├── mobile/     # 移动端卡片流
-│       │   ├── mcp/        # MCP 工具管理
-│       │   └── export/     # 剪映草稿/成片导出
-│       ├── services/       # API 通信层
-│       ├── stores/         # Zustand 状态
-│       └── utils/          # devOrigin（回源统一）/ videoTask（轮询统一）等
-├── server/                 # 后端 (FastAPI + MCP)
+│       │   ├── agent/                   # Agent 会话 / 集群面板 / 工具步骤卡（子代理可视化）
+│       │   ├── director3d/              # 3D 虚拟导演台
+│       │   ├── timeline/                # 多轨剪辑时间线
+│       │   ├── storyboard/              # 分镜工作台与参数检查器
+│       │   ├── workflow/                # 一键成片弹窗 / 工作流检查器
+│       │   ├── skills/ mcp/ export/ character/ mobile/ ...
+│       ├── services/ stores/ views/     # API 层 / 状态层 / 页面（含设置·扩展中心）
+├── server/                              # 后端（FastAPI + FastMCP）
 │   └── app/
-│       ├── api/            # REST 路由（素材、工程、画布…）
-│       ├── canvas/         # 画布引擎与 Agent 规划
-│       ├── mcp/            # MCP 工具注册中枢
-│       ├── providers/      # 生成源管理（含自定义内联源沙盒）
-│       └── pipelines/      # TTS / 一致性等流水线
-├── storage/                # 运行时数据（工程、画布、素材、提供方索引）
-├── plugins/                # 插件目录
-├── exports/                # 成片/导出产物
-├── 一键启动.bat             # Windows 一键启动
-└── 使用说明.md              # 通俗版使用手册（新手从这里开始）
+│       ├── agent/                       # Agent 运行时（loop / manager / subagent 集群 / 工具管线 / trace）
+│       ├── agent_teams/                 # 导演组扩展（角色画像 + 导演组编排 + 校验/热加载）
+│       ├── api/                         # REST/WS 路由（onekey_routes / agent_team_routes / extension_routes ...）
+│       ├── extensions/                  # 统一扩展注册表（13 kind 聚合 / 启停 / guard 审计 / 遥测）
+│       ├── plugins/                     # 插件生命周期（安装 / 启用 / 精确回滚 / 热重载）
+│       ├── pipelines/                   # 一键成片（unified_orchestrator / onekey_agent 草稿与原子工具）
+│       ├── providers/                   # 生成源（图像 / 视频 / 音频[含 IndexTTS] / 素材）
+│       ├── director_packs/ themes/ exporters/ canvas_nodes/ custom_nodes/ storyboard/ skills/ mcp/
+│       ├── storage_sync/                # 素材与工程云同步（OpenList 镜像）
+│       └── main.py                      # 应用入口与路由挂载
+├── plugins/example-drama-pack/          # 示例插件包（技能/代码节点/画布节点/主题/导演包/导演组成员/导演组）
+├── docs/plugin-dev.md                   # 插件开发规范（扩展点 / manifest / 生命周期 / API）
+├── storage/                             # 运行时数据（项目 / 素材 / 配置 / 插件 / 扩展状态）
+├── build_release.py                     # 一键全量构建（前端 + PyInstaller + 配置保留）
+├── dist/Studio/Studio.exe               # 桌面产物（onedir）
+├── 使用说明.md                           # 发布包用户手册
+└── README.md
 ```
 
 ---
 
-## 📚 更多文档
+## 📚 相关文档
 
-- `使用说明.md`：面向新手的操作手册
-- `docs/`：同步说明、链路测试与优化计划等开发文档
-- 上游完整版：https://gitcode.com/dwq147/src
+| 文档 | 内容 |
+|---|---|
+| [`docs/plugin-dev.md`](docs/plugin-dev.md) | 插件开发规范：13 类扩展点详解、manifest 字段、生命周期与热重载、统一执行口、HTTP API、安全模型 |
+| [`使用说明.md`](使用说明.md) | 发布包安装与配置（用户向） |
+| [`docs/`](docs/) | 各阶段设计文档与未落地清单 |

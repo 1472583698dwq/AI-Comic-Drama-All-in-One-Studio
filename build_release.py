@@ -194,7 +194,7 @@ if not RELEASE:
                 except Exception as _e:
                     print(f"  还原失败 {_rt}: {_e}")
 
-# 3.6 附带文档与示例插件包（使用说明引用的 plugin-dev.md / 可直接安装的示例插件包）
+# 3.6 附带文档与示例插件包（使用说明引用的 plugin-dev.md / 可直接安装的示例导演组包）
 try:
     _pkg_docs = os.path.join(OUT_DIR, "docs")
     os.makedirs(_pkg_docs, exist_ok=True)
@@ -206,7 +206,7 @@ try:
     if os.path.isdir(_demo_src):
         shutil.rmtree(_demo_dst, ignore_errors=True)
         shutil.copytree(_demo_src, _demo_dst)
-    print("  已附: docs/plugin-dev.md 与 plugins/example-drama-pack（示例插件包）")
+    print("  已附: docs/plugin-dev.md 与 plugins/example-drama-pack（示例插件包/导演组）")
 except Exception as _e:
     print(f"  附带文档/示例包跳过: {_e}")
 

@@ -287,6 +287,11 @@ class ExtensionRegistry:
         ext = self.get(ext_id)
         if not ext:
             raise ValueError(f"扩展不存在: {ext_id}")
+        # 功能页（page）：设置页 locked，不可关闭（其余页面走下方覆盖层；不抛 500）
+        if ext.kind == ExtensionKind.PAGE:
+            from app.core import pages as pages_mod
+            if pages_mod.is_locked(ext.local_id):
+                raise ValueError("设置页不可关闭，其余页面均可开关")
         # 项目作用域：所有 kind 统一走覆盖层（原生 kind 不改全局注册状态，仅在本项目软停用）
         if scope:
             det = state.set_disabled(ext.id, not enabled, scope)
@@ -318,6 +323,10 @@ class ExtensionRegistry:
             else:
                 unregister_single_custom_provider(d.id, getattr(d, "kind", "image"))
             return {"extension": ext.id, "enabled": enabled, "mode": "native"}
+        # 功能页（page）：内置但对用户可开关，一律走覆盖层（进/出 global.disabled）
+        if ext.kind == ExtensionKind.PAGE:
+            return {"extension": ext.id, "enabled": enabled, "mode": "overlay",
+                    "detail": state.set_disabled(ext.id, not enabled, scope)}
         # 内置常驻：不可停用
         if ext.source == ExtensionSource.BUILTIN or ext.kind not in OVERLAY_LIFECYCLE_KINDS:
             raise ValueError(

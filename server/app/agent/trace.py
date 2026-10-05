@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List
 
-# run_id 会被拼进文件名：必须过一遍围栏，否则带路径分隔符/上跳的 id 能越出 trace 目录
+# run_id 会被拼进文件名：必须过一遍围栏，否则带路径分隔符/上跳符的 id 能越出 trace 目录
 _SAFE_RUN_ID_RE = re.compile(r"[^A-Za-z0-9_.\-]")
 
 

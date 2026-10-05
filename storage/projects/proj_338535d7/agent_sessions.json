@@ -14,5 +14,29 @@
     ],
     "mode": "execute",
     "run_mode": "approve"
+  },
+  {
+    "id": "fsess_munu5w9l_yay6d",
+    "title": "新会话",
+    "created_at": "2026-09-30T08:21:05.817Z",
+    "updated_at": "2026-09-30T08:21:05.817Z",
+    "messages": [
+      {
+        "id": "welcome_munu5w9l_1g9ji",
+        "sender": "agent",
+        "mode": "execute",
+        "text": "这里是 **执行模式**。我会按 ReAct 循环直接调生图/配音/视频/画布/剪映等工具；「行为」决定我能干什么（标准/创造/计划），「执行」决定要不要逐项确认（审批/自动），两者可自由组合。",
+        "suggested": [
+          "为当前镜头规划3D特写推镜",
+          "生成主角怒吼配音并对齐时长",
+          "把画布现有节点全量执行一遍",
+          "导出剪映工程草稿"
+        ],
+        "time": "就绪"
+      }
+    ],
+    "mode": "execute",
+    "run_mode": "approve",
+    "scope": "float"
   }
 ]

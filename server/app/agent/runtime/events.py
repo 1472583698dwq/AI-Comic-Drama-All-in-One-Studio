@@ -5,6 +5,7 @@
 - 模型可见 ⟺ 已记录：任何进入模型请求的内容都必须能从会话日志重建。
 - 事件是不可变事实；读取方按类型纯折叠，遇到未知类型直接拒绝重建。
 """
+import json
 from typing import Any, Dict, List
 
 SESSION_FORMAT_VERSION = 1
@@ -31,7 +32,7 @@ SYSTEM_MESSAGE = "system/message"        # data: {text}
 ASSISTANT_MESSAGE = "assistant/message"  # data: {text, thinking, tool_calls, usage}
 ASSISTANT_ATTEMPT = "assistant/attempt"  # data: {error, attempt}
 TOOL_CALL = "tool/call"                  # data: {call_id, name, arguments}
-TOOL_RESULT = "tool/result"              # data: {call_id, name, status, result, error, meta}
+TOOL_RESULT = "tool/result"              # data: {call_id, name, status, result, model_content, error, meta}
 
 # ── 请求元数据 ────────────────────────────────────────────
 REQUEST_HEADER = "request/header"        # data: {provider, model, tools_count, purpose}
@@ -49,9 +50,15 @@ TODO_WRITE = "todo/write"                # data: {items}
 JOB_STARTED = "job/started"              # data: {job_id, kind, label}
 JOB_SETTLED = "job/settled"              # data: {job_id, status, result_summary}
 
+# ── 子代理集群（P6）──────────────────────────────────────
+SUBAGENT_STARTED = "subagent/started"    # data: {subagent_id, agent, task, background, batch_id}
+SUBAGENT_PROGRESS = "subagent/progress"  # data: {subagent_id, tool_name, status}
+SUBAGENT_SETTLED = "subagent/settled"    # data: {subagent_id, status, elapsed_ms, result_summary, error}
+SUBAGENT_METRICS = "subagent/metrics"    # data: {batch_id, total, success, failed, critical_steps_ms, parallel_width}
+
 # ── 上下文压缩（P3）──────────────────────────────────────
 COMPACTION_SUMMARY = "compaction/summary"  # data: {text, shadowed_seqs}
-COMPACTION_PRUNE = "compaction/prune"      # data: {shadowed_seqs}
+COMPACTION_PRUNE = "compaction/prune"      # data: {shadowed_seqs, replacements}
 
 # 所有已声明类型（未知类型拒绝重建）
 KNOWN_EVENT_TYPES = {
@@ -61,6 +68,7 @@ KNOWN_EVENT_TYPES = {
     APPROVAL_ASKED, APPROVAL_DECIDED,
     PLAN_MODE, GOAL_CHANGE, TODO_WRITE,
     JOB_STARTED, JOB_SETTLED,
+    SUBAGENT_STARTED, SUBAGENT_PROGRESS, SUBAGENT_SETTLED, SUBAGENT_METRICS,
     COMPACTION_SUMMARY, COMPACTION_PRUNE,
 }
 
@@ -84,6 +92,27 @@ def validate_event(ev: Dict[str, Any]) -> None:
         raise ValueError(f"未知事件类型: {t}（当前格式 v{SESSION_FORMAT_VERSION}，拒绝重建）")
     if "seq" in ev and not isinstance(ev["seq"], int):
         raise ValueError("事件 seq 必须为 int")
+
+
+def tool_result_content_text(data: Dict[str, Any]) -> str:
+    """工具结果进入模型历史的唯一口径。
+
+    管线已按工具语义压好的 model_content 优先（保留分页窗口、剔除 code 全文、附溢写定位）；
+    缺失时回落到原始 result 序列化。失败态统一只回错误，禁止模型臆测成功结果。
+    日志里 result 原文永不动，前端渲染与复盘仍拿全量。
+    """
+    if data.get("status") != "success":
+        return json.dumps({"error": data.get("error") or "工具执行失败"}, ensure_ascii=False)
+    mc = data.get("model_content")
+    if isinstance(mc, str) and mc.strip():
+        return mc
+    result = data.get("result")
+    if isinstance(result, str):
+        return result
+    try:
+        return json.dumps(result, ensure_ascii=False, default=str)
+    except Exception:
+        return str(result)
 
 
 def open_turn_seq(events: List[Dict[str, Any]]) -> int | None:

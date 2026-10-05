@@ -43,7 +43,7 @@ export function registerBuiltinSlots() {
     color: 'text-orange-400',
     // 漫画模式无运镜页（与原 `productionMode !== 'comic'` 条件一致）
     when: (ctx) => ctx.productionMode !== 'comic',
-    label: () => '运镜动态',
+    label: () => '视频与运镜',
     render: (ctx) => <MotionTab ctx={ctx} />,
   });
 
@@ -73,8 +73,8 @@ export function registerBuiltinSlots() {
     id: 'batch-bind',
     order: 15,
     render: (ctx) => (
-      <button onClick={ctx.handleBatchBind} className="flex-1 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 font-bold flex items-center justify-center gap-1 transition-all" title="按各镜所选生成源声明，批量把人物 / 场景 / 道具 / 参考音频填入参考列表（图片源 + 视频源，仅补空缺）">
-        <Link2 className="w-3 h-3 text-emerald-400" /> 批量绑定
+      <button onClick={ctx.handleBatchBind} className="flex-1 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 font-bold flex items-center justify-center gap-1 transition-all" title="把人物 / 场景 / 道具 / 参考音频批量填入各镜头（按所选生成源声明，仅补空缺）">
+        <Link2 className="w-3 h-3 text-emerald-400" /> 批量绑定参考
       </button>
     ),
   });
@@ -93,8 +93,8 @@ export function registerBuiltinSlots() {
     order: 30,
     when: (ctx) => ctx.productionMode !== 'comic',
     render: (ctx) => (
-      <button onClick={ctx.handleBatchAllVideos} className="flex-1 py-1 rounded-lg bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/30 text-orange-300 font-bold flex items-center justify-center gap-1 transition-all" title="批量转为动态视频">
-        <Film className="w-3 h-3 text-orange-400" /> 批量视频
+      <button onClick={ctx.handleBatchAllVideos} className="flex-1 py-1 rounded-lg bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/30 text-orange-300 font-bold flex items-center justify-center gap-1 transition-all" title="为选中 / 全部镜头批量生成动态视频（按各镜当前制作模式执行）">
+        <Film className="w-3 h-3 text-orange-400" /> 批量生视频
       </button>
     ),
   });

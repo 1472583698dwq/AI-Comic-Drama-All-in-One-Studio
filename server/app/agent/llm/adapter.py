@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Dict, List, Optional
@@ -16,6 +17,33 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 import httpx
 
 from app.core.config import settings
+
+
+def _sanitize_tool_schemas(tools: Optional[List[Dict[str, Any]]]) -> Optional[List[Dict[str, Any]]]:
+    """工具 schema 防御性清洗（发送前守门）。
+
+    JSON Schema 规定 `required` 必须是字符串数组；任何来源（工作流派生源 / 用户代码源 /
+    自定义节点）把布尔的 "required" 写进属性 schema 时，严格校验的 LLM 上游会直接
+    400 "Invalid request parameters" 把整次调用一票否决。这里递归剔除所有非法 required，
+    保证脏 schema 永远不会打穿模型调用。
+    """
+    if not tools:
+        return tools
+
+    def _walk(node: Any) -> None:
+        if isinstance(node, dict):
+            req = node.get("required")
+            if req is not None and not (isinstance(req, list) and all(isinstance(x, str) for x in req)):
+                node.pop("required", None)
+            for v in list(node.values()):
+                _walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                _walk(v)
+
+    out = copy.deepcopy(tools)
+    _walk(out)
+    return out
 
 
 class LLMTransportError(RuntimeError):
@@ -28,7 +56,7 @@ class LLMTransportError(RuntimeError):
 
 
 class LLMConfigError(RuntimeError):
-    """不可重试：缺 Key/参数错误/4xx。"""
+    """不可重试：缺 Key/参数错误/4xx（网关转发的上游瞬时错误除外，见 _is_upstream_blame）。"""
 
 
 @dataclass
@@ -67,6 +95,15 @@ class AssistantReply:
     @property
     def has_tool_calls(self) -> bool:
         return bool(self.tool_calls)
+
+
+def _is_upstream_blame(body: str) -> bool:
+    """网关代转的上游瞬时故障：形态是 400，责任不在本次请求，该重试而非打死回合。
+
+    真·请求错误（缺 model、参数非法）不带这类字样，仍按配置错误立即失败。
+    """
+    b = (body or "").lower()
+    return any(k in b for k in ("upstream", "server_error", "server error", "internal server", "bad gateway"))
 
 
 def _arguments_valid(raw: str) -> bool:
@@ -157,7 +194,7 @@ class OpenAICompatAdapter:
             payload["temperature"] = temperature
             payload["max_tokens"] = max_tokens
         if tools:
-            payload["tools"] = tools
+            payload["tools"] = _sanitize_tool_schemas(tools)
             payload["tool_choice"] = "auto"
         return payload
 
@@ -186,6 +223,9 @@ class OpenAICompatAdapter:
                         if resp.status_code != 200:
                             body = (await resp.aread()).decode(errors="ignore")[:400]
                             retryable = resp.status_code in (408, 409, 425, 429) or resp.status_code >= 500
+                            # 网关转发的上游 400 交给外层重试（带退避），别按请求错误打死整轮
+                            if _is_upstream_blame(body):
+                                raise LLMTransportError(f"LLM HTTP {resp.status_code}: {body}", status=resp.status_code)
                             if not attempt_plain and resp.status_code == 400:
                                 continue  # 用剥离版重试
                             if retryable:

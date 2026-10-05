@@ -2,12 +2,8 @@
 /**
  * 画布节点右键菜单。
  *
- * 一期只放两个动作（按需求「先删除和添加到会话」）：
- *   · 添加到会话 / 移出会话 —— 把节点加入 Agent 会话上下文，
- *     之后在 AI 导演里说「把这个节点改成…」时，模型能确切知道指谁
- *     （否则画布摘要只有一行标题，模型只能猜）。
- *   · 删除节点 —— 连带删掉挂在它身上的连线。
- *
+ * 菜单头（类型 / #id / 摘要）明确操作对象 + 「添加到会话 / 移出会话」（Agent 上下文聚焦）
+ * + 「删除节点」（连带删掉挂在它身上的连线）。
  * 关闭时机：点菜单外、Esc、画布滚动、右键到别处（外部会换 menu 状态）。
  * 位置按视口夹紧，避免贴边被切掉。
  */
@@ -74,7 +70,7 @@ export const NodeContextMenu: React.FC<Props> = ({ menu, onClose, onDelete }) =>
     <div
       ref={ref}
       style={{ position: 'fixed', top, left, width: MENU_W, zIndex: 9998 }}
-      className="bg-surface-secondary border border-white/15 rounded-2xl p-1.5 shadow-2xl shadow-black/50 flex flex-col gap-0.5 backdrop-blur-md animate-in fade-in zoom-in-95 duration-100"
+      className="bg-white/55 dark:bg-white/[.06] border border-white/15 rounded-2xl p-1.5 shadow-2xl shadow-black/50 flex flex-col gap-0.5 backdrop-blur-md animate-in fade-in zoom-in-95 duration-100"
     >
       {/* 菜单头：明确操作对象，避免"右键的到底是哪个" */}
       <div className="px-2.5 py-1.5 border-b border-white/10 mb-1">

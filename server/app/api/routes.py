@@ -1,13 +1,15 @@
 import os
 import json
 import asyncio
+import time
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Request
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from fastapi.concurrency import run_in_threadpool
+from app.core import features
 from app.models.schemas import (
     Project, ScriptParseRequest, TTSGenerateRequest,
-    ImageGenerateRequest, Character3ViewsRequest, PipelineRunRequest,
+    ImageGenerateRequest, Character3ViewsRequest,
     VideoGenerateRequestPayload,
     MCPToolDefinition, MCPToolCallRequest, MCPToolCallResponse
 )
@@ -15,7 +17,6 @@ from app.pipelines.script_agent import script_agent
 from app.pipelines.llm_service import llm_service, LLMServiceError
 from app.pipelines.jianyin_exporter import jianyin_exporter, DraftExportError, engine_status as jianyin_engine_status
 from app.pipelines.consistency_engine import consistency_engine
-from app.pipelines.unified_orchestrator import unified_orchestrator
 from app.mcp.server import mcp_registry
 from app.skills.engine import skill_engine, SkillDefinition, SkillExecutionResult
 from app.core.config import settings, read_env_file, write_env_file, MANAGED_KEYS, get_primary_env_file, JSON_CONFIG_FILE, _is_secret_key
@@ -88,9 +89,12 @@ router = APIRouter()
 # ============================================================
 
 @router.get("/skills", response_model=List[SkillDefinition])
-async def list_skills():
-    """获取所有已加载的技能 (Skills)"""
-    return skill_engine.list_skills()
+async def list_skills(all: bool = False):
+    """获取已加载的技能 (Skills)。默认只给可执行的：润色按钮/技能工作室拿到的列表就该能跑。
+
+    all=true 才返回被关闭或在扩展中心停用的技能（界面要能看见它们才知道怎么恢复）。
+    """
+    return skill_engine.list_skills() if all else skill_engine.active_skills()
 
 @router.post("/skills/execute", response_model=SkillExecutionResult)
 async def execute_skill(req: SkillExecuteRequest):
@@ -363,12 +367,45 @@ async def generate_speech(req: TTSGenerateRequest):
 # 图片生成（动态Provider + 工作流）
 # ============================================================
 
+# 图片源健康探测短缓存：弹窗/面板每次打开都要列表，串行网络探测会叠加成几十秒；
+# 并行 + 单源 2.5s 上限 + 20s TTL 缓存，健康点的新鲜度对 UI 足够，列表不再被探测阻塞。
+_IMAGE_HEALTH_CACHE: Dict[str, Any] = {"ts": 0.0, "data": {}}
+
+
+async def _image_health_cached(reg, ttl: float = 20.0, per_probe: float = 2.5) -> Dict[str, Any]:
+    now = time.time()
+    cached = _IMAGE_HEALTH_CACHE.get("data") or {}
+    if cached and (now - float(_IMAGE_HEALTH_CACHE.get("ts") or 0.0)) < ttl:
+        return cached
+
+    async def _probe(pid: str, prov):
+        try:
+            ok = await asyncio.wait_for(prov.check_health(), timeout=per_probe)
+        except Exception:
+            ok = False
+        try:
+            configured = bool(prov.is_configured())
+        except Exception:
+            configured = False
+        return pid, {"ok": bool(ok), "configured": configured}
+
+    jobs = []
+    for pid in reg.list_ids():
+        prov = reg.get(pid)
+        if prov is not None:
+            jobs.append(_probe(pid, prov))
+    results = dict(await asyncio.gather(*jobs)) if jobs else {}
+    _IMAGE_HEALTH_CACHE["ts"] = now
+    _IMAGE_HEALTH_CACHE["data"] = results
+    return results
+
+
 @router.get("/images/providers")
-async def list_image_providers(production_only: bool = False):
-    """列出所有图片Providers及健康状态"""
+async def list_image_providers(production_only: bool = False, with_health: bool = True):
+    """列出所有图片Providers及健康状态（with_health=false 用于只需列表的场景，零网络探测）"""
     reg = get_image_registry()
     providers = reg.list_providers()
-    health = await reg.check_health_all()
+    health = (await _image_health_cached(reg)) if with_health else {}
     from app.providers import verification
     for p in providers:
         p["health"] = health.get(p["id"], {})
@@ -823,47 +860,63 @@ async def check_videos_health():
 @router.get("/videos/status/{task_id}")
 async def get_video_task_status(task_id: str):
     """查询异步视频生成任务状态（TaskCenter 统一口径 + 旧表兼容）"""
+    resp: Dict[str, Any] | None = None
     # TaskCenter 统一口径优先（提交即返的源都会登记在此）
     try:
         from app.providers.tasks import task_center
         rec = task_center.status(task_id)
         if rec is not None:
-            return rec.to_dict()
+            resp = rec.to_dict()
     except Exception:
         pass
     # 代码视频源任务表兜底（非代码模式已删除，仅代码源会登记任务）
-    try:
-        from app.providers.generic.code_provider import get_code_video_task
-        custom = get_code_video_task(task_id)
-        if custom is not None:
-            return custom
-    except Exception:
-        pass
+    if resp is None:
+        try:
+            from app.providers.generic.code_provider import get_code_video_task
+            custom = get_code_video_task(task_id)
+            if custom is not None:
+                resp = custom
+        except Exception:
+            pass
     # 聚合查询全部已注册视频源 (h3/seedance/kling/wan3/comfyui/旧通道)
+    if resp is None:
+        try:
+            reg = get_video_registry()
+            for pid in reg.list_ids():
+                prov = reg.get(pid)
+                if prov and hasattr(prov, "get_task_status"):
+                    try:
+                        st = prov.get_task_status(task_id)
+                        if isinstance(st, dict) and st.get("status") not in (None, "not_found"):
+                            resp = st
+                            break
+                    except Exception:
+                        continue
+                # classmethod 兜底 (按类名)
+                if resp is None:
+                    try:
+                        cls = prov.__class__ if prov else None
+                        if cls and hasattr(cls, "get_task_status"):
+                            st = cls.get_task_status(task_id)
+                            if isinstance(st, dict) and st.get("status") not in (None, "not_found"):
+                                resp = st
+                                break
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+    if resp is None:
+        from app.providers.video.minimax_video import CloudVideoProvider
+        resp = CloudVideoProvider.get_task_status(task_id)
+    # 终态计时观察点：本进程见过该任务的 submit 且此刻已终态 → 记一次「提交→拿到结果」总耗时
     try:
-        reg = get_video_registry()
-        for pid in reg.list_ids():
-            prov = reg.get(pid)
-            if prov and hasattr(prov, "get_task_status"):
-                try:
-                    st = prov.get_task_status(task_id)
-                    if isinstance(st, dict) and st.get("status") not in (None, "not_found"):
-                        return st
-                except Exception:
-                    continue
-            # classmethod 兜底 (按类名)
-            try:
-                cls = prov.__class__ if prov else None
-                if cls and hasattr(cls, "get_task_status"):
-                    st = cls.get_task_status(task_id)
-                    if isinstance(st, dict) and st.get("status") not in (None, "not_found"):
-                        return st
-            except Exception:
-                continue
+        from app.providers.gen_timer import observe_status
+        observe_status(task_id,
+                       (resp or {}).get("status"),
+                       provider=str((resp or {}).get("provider") or ""))
     except Exception:
         pass
-    from app.providers.video.minimax_video import CloudVideoProvider
-    return CloudVideoProvider.get_task_status(task_id)
+    return resp
 
 @router.post("/videos/generate")
 async def generate_video(req: VideoGenerateRequestPayload):
@@ -884,13 +937,22 @@ async def generate_video(req: VideoGenerateRequestPayload):
         for k in ("fps","steps","cfg","aspect_ratio","resolution"):
             if k in extra and k not in dyn:
                 dyn[k] = extra[k]
+        # 白模动态预演自动作为视频参考：前端把 previz_video_url 放在 dynamic_inputs，
+        # 这里统一提升为 reference_videos（只有声明了视频参考槽的源才会消费）。
+        ref_videos = list(req.reference_videos or [])
+        if not ref_videos:
+            pv = dyn.get("previz_video_url") or dyn.get("previz_videos") or extra.get("previz_video_url")
+            if isinstance(pv, str) and pv.strip():
+                ref_videos = [pv.strip()]
+            elif isinstance(pv, (list, tuple)):
+                ref_videos = [str(x).strip() for x in pv if str(x).strip()]
         vid_req = VidReq(
             prompt=req.prompt,
             mode=req.mode or "i2v",
             first_frame_url=req.first_frame_url,
             last_frame_url=req.last_frame_url,
             reference_images=req.reference_images,
-            reference_videos=req.reference_videos,
+            reference_videos=ref_videos or None,
             reference_audios=getattr(req, 'reference_audios', None),
             duration=req.duration or 5,
             resolution=req.resolution or extra.get("resolution") or "720p",
@@ -956,36 +1018,6 @@ async def export_jianyin_draft(project: Project):
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"剪映草稿导出失败: {type(e).__name__}: {e}")
-
-# ============================================================
-# 全链路编排（LLM 拆解 → 生图 → 配音 → 导出）
-# ============================================================
-
-@router.post("/pipeline/full-run")
-async def pipeline_full_run(req: PipelineRunRequest):
-    """全链路真实编排：小说 → 拆解 → 角色资产 → 批量生图 → 图生视频 → TTS → 剪映草稿"""
-    try:
-        return await unified_orchestrator.execute_full_pipeline(
-            novel_text=req.text,
-            style_preset=req.style_preset,
-            aspect_ratio=req.aspect_ratio,
-            custom_instructions=req.custom_instructions or "",
-            max_images=req.max_images,
-            image_provider=getattr(req, "image_provider", None),
-            image_workflow_id=getattr(req, "image_workflow_id", None),
-            audio_provider=getattr(req, "audio_provider", None),
-            video_provider=getattr(req, "video_provider", None),
-            video_workflow_id=getattr(req, "video_workflow_id", None),
-            enable_video=getattr(req, "enable_video", True),
-            max_videos=getattr(req, "max_videos", 6),
-            gen_roles=getattr(req, "gen_roles", True),
-            max_roles=getattr(req, "max_roles", 4),
-        )
-    except LLMServiceError as e:
-        raise HTTPException(status_code=503, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"全链路执行失败: {e}")
-
 # ============================================================
 # 导演 Agent 实时通道（真 LLM 决策，暴露全部生成能力）
 # ============================================================
@@ -1036,7 +1068,7 @@ AGENT_SYSTEM_PROMPT_BODY = """你是「AI漫剧导演 Agent」，运行在 MiniM
 20. canvas_query —— 查询画布摘要与节点清单，感知当前画布状态
 21. canvas_create_node —— 创建节点。参数：type(prompt/image/video/audio/director3d/export/custom/brief/script-split/shot-card/comfy-workflow/provider-image/provider-video/provider-audio/tts/load-image/load-image-batch/load-video/load-audio/text-prompt/timeline-export), position{x,y}, params(可选内部参数；type=custom 时 params 必带 custom_node_id，即 customnode_<id> 工具去掉前缀的 id，可直接调该工具执行)
 22. canvas_update_node —— 更新节点。参数：node_id, patch(要更新的 data 字段)
-22.5 canvas_delete_node —— 删除节点（连带删除挂在它身上的连线）。参数：node_id。【高危：任何模式都需人工审批】删前先用 canvas_query 确认真实 id，并说清会影响哪些下游
+22.5 canvas_delete_node —— 删除节点（连带删除挂在它身上的连线）。参数：node_id。【高危：审批模式必弹人审确认，自动模式直跑】删前先用 canvas_query 确认真实 id，并说清会影响哪些下游
 23. canvas_connect —— 连线。参数：source, sourceHandle, target, targetHandle（类型需匹配 image/video/audio/text/provider）
 24. canvas_execute —— 执行画布 DAG。参数：target_ids(可选，仅执行选中), project_id
 
@@ -1342,11 +1374,18 @@ async def websocket_agent_endpoint(websocket: WebSocket):
             if AGENT_V2:
                 try:
                     await _v2_attach(session_id)
+                    _atts_ws = []
+                    try:
+                        from app.agent.runtime.attachments import sanitize_attachments as _san_att
+                        _atts_ws = _san_att(data.get("attachments"))
+                    except Exception:
+                        _atts_ws = []
                     await agent_manager.prompt(
                         session_id, prompt_text,
                         context=context if isinstance(context, dict) else {},
                         mode=_wmode, run_mode=_rm,
                         interactive=True, sink=None,
+                        attachments=_atts_ws,
                     )
                 except Exception as e:
                     try:
@@ -1562,9 +1601,9 @@ class ConfigUpdateRequest(BaseModel):
     SILICONFLOW_IMAGE_MODEL: Optional[str] = Field(default="black-forest-labs/FLUX.1-schnell")
     DASHSCOPE_API_KEY: Optional[str] = Field(default="")
     DASHSCOPE_IMAGE_MODEL: Optional[str] = Field(default="wan2.6-t2i")
-    OPENAI_IMAGE_API_KEY: Optional[str] = Field(default="")
     OPENAI_IMAGE_MODEL: Optional[str] = Field(default="gpt-image-2.5-flare")
     OPENAI_IMAGE_BASE_URL: Optional[str] = Field(default="")
+    OPENAI_IMAGE_API_KEY: Optional[str] = Field(default="")
 
     # Voice & TTS
     TTS_PROVIDER: Optional[str] = Field(default="minimax")
@@ -1599,7 +1638,7 @@ class ConfigUpdateRequest(BaseModel):
     STUDIO_TRUSTED_MODE: Optional[str] = Field(default="0")
 
 class ConfigTestRequest(BaseModel):
-    target: str = Field(description="openai | responses_api | deepseek | qwen | minimax | openai_image | openai_video | comfyui | siliconflow | dashscope | elevenlabs | cosyvoice | gpt_sovits | jianyin")
+    target: str = Field(description="openai | responses_api | minimax | minimax_h3 | wan3 | seedance | kling | comfyui | siliconflow | dashscope | openai_image | openai_video | elevenlabs | cosyvoice | gpt_sovits | jianyin")
     config: Dict[str, Any] | None = None
 
 class AgentChatRequest(BaseModel):
@@ -1609,6 +1648,7 @@ class AgentChatRequest(BaseModel):
     stream: bool = Field(default=False, description="是否流式返回")
     mode: str = Field(default="execute", description="Agent模式：chat问答（不调工具）| execute执行（ReAct调工具生成）")
     run_mode: str = Field(default="approve", description="运行模式：approve审批 / auto自动 / create创造")
+    attachments: List[Dict[str, Any]] = Field(default_factory=list, description="多模态附件引用（图/视频/音频），ref 指向 /storage 或 http(s)")
 
 def _is_masked_placeholder(v: str) -> bool:
     return "****" in v
@@ -1639,25 +1679,13 @@ async def get_config(unmask: bool = True):
     }
 
 @router.put("/config")
-async def save_config(req: ConfigUpdateRequest, request: Request):
-    """保存配置到 .env 及 storage/config_store.json 并热重载。
-
-    只写入**请求体里显式出现**的键：未出现的键一律保持原值。
-    （历史 bug：整包 model_dump 会把模型默认值一并写回，导致「保存后已配置的
-      Key/地址被清空或退回默认值」。这里以原始请求体为准，杜绝该问题。）
-    """
+async def save_config(req: ConfigUpdateRequest):
+    """保存配置到 .env 及 storage/config_store.json 并热重载。"""
     raw_existing = read_env_file(unmask=True)
     updates: Dict[str, str] = {}
-    try:
-        raw_body = await request.json()
-    except Exception:
-        raw_body = None
-    if isinstance(raw_body, dict):
-        incoming: Dict[str, Any] = {str(k): v for k, v in raw_body.items()}
-    else:
-        # 兜底：拿不到原始请求体时退回模型（仅含显式传入的字段 + 额外字段）
-        incoming = dict(req.model_dump(exclude_unset=True))
-        incoming.update(getattr(req, "model_extra", None) or {})
+    # 只写客户端显式提交的键：exclude_unset=False 会把模型里的默认值当"用户输入"，
+    # 保存任意一项都会把其余配置重置回默认值（旧版 bug）。
+    incoming = req.model_dump(exclude_unset=True)
 
     for k in MANAGED_KEYS:
         new_val = incoming.get(k)
@@ -1806,6 +1834,41 @@ async def test_config_connection(req: ConfigTestRequest):
         except Exception as e:
             return {"target": "responses_api", "ok": False, "detail": f"Responses API 连接失败：{e}"}
 
+    if target in ["openai_image", "openai_compat_image"]:
+        api_key = (cfg.get("OPENAI_IMAGE_API_KEY") or cfg.get("OPENAI_API_KEY")
+                   or getattr(settings, "OPENAI_IMAGE_API_KEY", "") or settings.OPENAI_API_KEY)
+        if _is_masked_placeholder(api_key):
+            api_key = getattr(settings, "OPENAI_IMAGE_API_KEY", "") or settings.OPENAI_API_KEY
+        base = (cfg.get("OPENAI_IMAGE_BASE_URL") or cfg.get("OPENAI_BASE_URL")
+                or getattr(settings, "OPENAI_IMAGE_BASE_URL", "") or settings.OPENAI_BASE_URL or "").rstrip("/")
+        model = cfg.get("OPENAI_IMAGE_MODEL") or getattr(settings, "OPENAI_IMAGE_MODEL", "") or "gpt-image-2.5-flare"
+        if not api_key:
+            return {"target": "openai_image", "ok": False, "detail": "OPENAI_IMAGE_API_KEY / OPENAI_API_KEY 未配置"}
+        if not base:
+            return {"target": "openai_image", "ok": False, "detail": "OPENAI_IMAGE_BASE_URL / OPENAI_BASE_URL 未配置"}
+        url = f"{base}/models" if base.endswith("/v1") else f"{base}/v1/models"
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                r = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
+                if r.status_code == 401:
+                    return {"target": "openai_image", "ok": False, "detail": "生图网关鉴权失败（401）：请检查 API Key"}
+                if r.status_code == 404:
+                    return {"target": "openai_image", "ok": True, "detail": f"网关可达（不支持 /models 列表，模型 {model} 将在生成时校验）"}
+                r.raise_for_status()
+                ids = []
+                try:
+                    ids = [str(m.get("id")) for m in (r.json().get("data") or []) if isinstance(m, dict)]
+                except Exception:
+                    ids = []
+                if ids and model not in ids:
+                    return {"target": "openai_image", "ok": True,
+                            "detail": f"网关可达，但模型列表里没有 {model}（示例：{', '.join(ids[:3])}…）"}
+                return {"target": "openai_image", "ok": True, "detail": f"生图网关连通正常（{model}）"}
+        except httpx.HTTPStatusError as e:
+            return {"target": "openai_image", "ok": False, "detail": f"生图网关返回 {e.response.status_code}: {e.response.text[:200]}"}
+        except Exception as e:
+            return {"target": "openai_image", "ok": False, "detail": f"生图网关连接失败：{e}"}
+
     if target == "siliconflow":
         api_key = cfg.get("SILICONFLOW_API_KEY") or settings.SILICONFLOW_API_KEY
         if _is_masked_placeholder(api_key):
@@ -1882,7 +1945,7 @@ async def test_config_connection(req: ConfigTestRequest):
         base = (cfg.get("OPENLIST_BASE_URL") or settings.OPENLIST_BASE_URL or "").strip().rstrip("/")
         user = (cfg.get("OPENLIST_USERNAME") or settings.OPENLIST_USERNAME or "").strip()
         pwd = cfg.get("OPENLIST_PASSWORD") or settings.OPENLIST_PASSWORD or ""
-        root = (cfg.get("OPENLIST_ROOT") or settings.OPENLIST_ROOT or "/comic-studio").rstrip("/")
+        root = (cfg.get("OPENLIST_ROOT") or settings.OPENLIST_ROOT or "/autoword/comic-studio").rstrip("/")
         if not base:
             return {"target": "openlist", "ok": False, "detail": "服务地址未配置"}
         if not user or not pwd:
@@ -1967,48 +2030,6 @@ async def test_config_connection(req: ConfigTestRequest):
             detail += " —— " + "；".join(notes)
         return {"target": "wan3", "ok": True, "detail": detail}
 
-    # 生图：自定义（OpenAI 兼容）通道。Key 独立，留空才回退文本大模型的 Key，
-    # 与 providers/image/openai_compat.py 的回退链保持一致，否则「设置里测通、生成时却报未配置」。
-    if target in ["openai_image", "openai_compat"]:
-        api_key = (
-            cfg.get("OPENAI_IMAGE_API_KEY")
-            or getattr(settings, "OPENAI_IMAGE_API_KEY", "")
-            or cfg.get("OPENAI_API_KEY")
-            or settings.OPENAI_API_KEY
-        )
-        if _is_masked_placeholder(api_key):
-            api_key = getattr(settings, "OPENAI_IMAGE_API_KEY", "") or settings.OPENAI_API_KEY
-        base = (
-            cfg.get("OPENAI_IMAGE_BASE_URL")
-            or getattr(settings, "OPENAI_IMAGE_BASE_URL", "")
-            or cfg.get("OPENAI_BASE_URL")
-            or settings.OPENAI_BASE_URL
-            or ""
-        ).strip().rstrip("/")
-        model = cfg.get("OPENAI_IMAGE_MODEL") or getattr(settings, "OPENAI_IMAGE_MODEL", "") or "gpt-image-2.5-flare"
-        if not api_key:
-            return {"target": "openai_image", "ok": False, "detail": "生图 Key 未配置：请填 OPENAI_IMAGE_API_KEY（或用文本大模型的 Key 兜底）"}
-        if not base:
-            return {"target": "openai_image", "ok": False, "detail": "生图接口地址未配置：请填 OPENAI_IMAGE_BASE_URL"}
-        # 归一化到 .../v1，兼容用户误填到具体端点
-        probe = base.replace("/images/generations", "").replace("/chat/completions", "").rstrip("/")
-        if not probe.endswith("/v1"):
-            probe = f"{probe}/v1"
-        try:
-            async with httpx.AsyncClient(timeout=8.0) as client:
-                r = await client.get(
-                    f"{probe}/models",
-                    headers={"Authorization": f"Bearer {api_key}"},
-                )
-                if r.status_code == 401:
-                    return {"target": "openai_image", "ok": False, "detail": "生图鉴权失败（401）：请检查 OPENAI_IMAGE_API_KEY"}
-                # 404 说明服务在线但没实现 /models，同样视为连通
-                if r.status_code in (200, 404):
-                    return {"target": "openai_image", "ok": True, "detail": f"生图接口连通正常（{model}）"}
-                return {"target": "openai_image", "ok": False, "detail": f"生图接口返回 {r.status_code}: {r.text[:200]}"}
-        except Exception as e:
-            return {"target": "openai_image", "ok": False, "detail": f"生图接口连接失败：{e}"}
-
     # 生视频：自定义（OpenAI 兼容 /v1/videos）通道。Key 与文本、生图完全独立，无回退。
     if target == "openai_video":
         api_key = cfg.get("OPENAI_VIDEO_API_KEY") or getattr(settings, "OPENAI_VIDEO_API_KEY", "")
@@ -2074,9 +2095,16 @@ async def http_agent_chat(req: AgentChatRequest):
                 done.set()
 
         try:
+            _atts_http = []
+            try:
+                from app.agent.runtime.attachments import sanitize_attachments as _san_att2
+                _atts_http = _san_att2(getattr(req, "attachments", None))
+            except Exception:
+                _atts_http = []
             await agent_manager.prompt(
                 session_id, prompt_text, context=dict(req.context or {}),
                 mode=_mode, run_mode=_rm_v2, interactive=False, sink=_sink,
+                attachments=_atts_http,
             )
             try:
                 await asyncio.wait_for(done.wait(), timeout=float(os.environ.get("AGENT_HTTP_TIMEOUT") or 900))
@@ -2215,9 +2243,16 @@ async def http_agent_chat_stream(req: AgentChatRequest):
                 await queue.put(ev)
 
             try:
+                _atts_sse = []
+                try:
+                    from app.agent.runtime.attachments import sanitize_attachments as _san_att3
+                    _atts_sse = _san_att3(getattr(req, "attachments", None))
+                except Exception:
+                    _atts_sse = []
                 await agent_manager.prompt(
                     session_id, prompt_text, context=dict(req.context or {}),
                     mode=_smode, run_mode=_rmode_sse, interactive=False, sink=_sink,
+                    attachments=_atts_sse,
                 )
             except Exception as e:
                 yield f"data: {json.dumps({'event': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
@@ -2401,12 +2436,18 @@ async def agent_session_steer(session_id: str, req: AgentChatRequest):
     """运行中插话：进入当前轮的下一步（v2）。"""
     if not AGENT_V2:
         raise HTTPException(status_code=400, detail="仅 v2 内核支持 steer")
-    ok = await agent_manager.steer(session_id, req.prompt or "")
+    _atts_steer = []
+    try:
+        from app.agent.runtime.attachments import sanitize_attachments as _san_att4
+        _atts_steer = _san_att4(getattr(req, "attachments", None))
+    except Exception:
+        _atts_steer = []
+    ok = await agent_manager.steer(session_id, req.prompt or "", attachments=_atts_steer)
     return {"status": "accepted" if ok else "no_session", "session_id": session_id}
 
 
 class AgentRunModeRequest(BaseModel):
-    run_mode: str = Field(default="approve", description="运行模式（approve/auto/create/plan）")
+    run_mode: str = Field(default="approve", description="组合运行模式 token（approve/auto/create/create_auto/plan/plan_auto）")
 
 
 @router.post("/agent/session/{session_id}/run_mode")
@@ -2422,6 +2463,26 @@ async def agent_session_set_run_mode(session_id: str, req: AgentRunModeRequest):
         return {"run_mode": rm, "applied": False, "note": "v1 内核按每条消息透传 run_mode"}
     applied = await agent_manager.set_run_mode(session_id, rm)
     return {"run_mode": rm, "applied": applied is not None}
+
+
+@router.post("/agent/upload", dependencies=[Depends(features.require("agent_multimodal"))])
+async def agent_upload_attachment(file: UploadFile = File(...), session_id: str = Form("")):
+    """Agent 输入框附件上传：存 `storage/agent_uploads/` 并返回可引用 URL。
+
+    附件**不进入素材库**（素材库有独立的归档/分类语义）；返回的 ref 直接随
+    `agent_prompt.attachments` 回传，由 runtime 决定内联为图片 part 还是文本说明。
+    """
+    try:
+        data = await file.read()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"读取文件失败: {e}")
+    try:
+        from app.agent.runtime.attachments import save_upload
+        return save_upload(file.filename or "attachment", file.content_type or "", data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"附件保存失败: {e}")
 
 
 @router.get("/agent/session/{session_id}/snapshot")

@@ -52,8 +52,24 @@ export function reduceAgentEvent(msg: ChatMsg, ev: AgentEvent): ReduceResult {
         msg: { ...msg, isThinkingStreaming: false, isStreaming: true, text: msg.text + (ev.delta || '') },
         sideEffects,
       };
+    case 'tool_progress': {
+      // 工具执行中阶段进度（如 register_custom_provider 的 LLM 生成代码阶段）→ 挂到执行中步骤上
+      const target = ev.tool_name || ev.tool || '';
+      const steps: ToolStep[] = (msg.steps || []).map((s) =>
+        s.name === target && s.status === 'executing'
+          ? { ...s, note: String(ev.text || ev.message || '').slice(0, 200) }
+          : s
+      );
+      return { msg: { ...msg, steps }, sideEffects };
+    }
     case 'tool_calling': {
-      const step: ToolStep = { id: stepId(), name: ev.tool_name || 'tool', status: 'executing' };
+      const step: ToolStep = {
+        id: stepId(),
+        name: ev.tool_name || 'tool',
+        status: 'executing',
+        args: (ev.arguments || ev.args) && typeof (ev.arguments || ev.args) === 'object' ? (ev.arguments || ev.args) : undefined,
+        startedAt: Date.now(),
+      };
       return { msg: { ...msg, steps: [...(msg.steps || []), step] }, sideEffects };
     }
     case 'tool_result': {
@@ -64,6 +80,7 @@ export function reduceAgentEvent(msg: ChatMsg, ev: AgentEvent): ReduceResult {
               status: (ev.status === 'success' ? 'completed' : 'error') as ToolStep['status'],
               result: ev.result,
               error: ev.error,
+              elapsedMs: s.startedAt ? Date.now() - s.startedAt : undefined,
             }
           : s
       );
@@ -94,6 +111,10 @@ export function reduceAgentEvent(msg: ChatMsg, ev: AgentEvent): ReduceResult {
         sideEffects.push({ type: 'canvas_updated', tool: name });
       }
       return { msg: { ...msg, steps, artifacts, errors, plan }, sideEffects };
+    }
+    case 'todo_write': {
+      const items = Array.isArray(ev.items) ? ev.items.filter((t: any) => t && typeof t.content === 'string') : [];
+      return { msg: { ...msg, todo: items }, sideEffects };
     }
     case 'agent_response':
       return {
@@ -133,6 +154,7 @@ export function collectFromExecutedTools(executed: any[]): {
       status: t.status === 'success' ? 'completed' : 'error',
       result: t.result,
       error: t.error,
+      args: t.arguments && typeof t.arguments === 'object' ? t.arguments : undefined,
     });
     try {
       if (t.status === 'success' && t.result) {

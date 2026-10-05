@@ -26,6 +26,8 @@ class PluginExtensionPoints(BaseModel):
     director_packs: List[str] = Field(default_factory=list)
     exporters: List[str] = Field(default_factory=list)
     themes: List[str] = Field(default_factory=list)
+    agent_profiles: List[str] = Field(default_factory=list)
+    agent_teams: List[str] = Field(default_factory=list)
 
 
 class PluginManifest(BaseModel):
@@ -61,6 +63,8 @@ class PluginRecord(BaseModel):
     theme_ids: List[str] = Field(default_factory=list)
     exporter_ids: List[str] = Field(default_factory=list)
     director_pack_ids: List[str] = Field(default_factory=list)
+    agent_profile_ids: List[str] = Field(default_factory=list)
+    agent_team_ids: List[str] = Field(default_factory=list)
 
 
 # mcp_tools 查壳文件契约（P1）：每个 .py 须定义 PLUGIN_TOOLS 列表 + 同模块入口函数
@@ -102,4 +106,6 @@ EXTENSION_POINTS_DOC: Dict[str, str] = {
     "themes": "可用：CSS 变量主题包（vars: --xxx → 值，mode: all|dark|light），启用后在扩展中心可应用/取消",
     "exporters": "可用：声明式导出器（accepts 载荷 + run.extension），启用后出现在导出中心",
     "director_packs": "可用：导演台扩展包（presets 景别/运镜/姿态/站位 + environments 背景底图 + props GLB），启用后注入 3D 导演台",
+    "agent_profiles": "可用：导演组成员角色画像（system_prompt + allow_tools 工具白名单，禁止委派类 subagent_*），启用后成为 subagent_run 可委派角色",
+    "agent_teams": "可用：导演组编排包（members 成员名单 + playbook 总导演脚本，支持 {draft_id} 等占位符与 qa_gate 质检门），启用后在一键成片可选",
 }

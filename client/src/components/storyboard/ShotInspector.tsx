@@ -4,7 +4,7 @@ import { StoryboardShot } from '../../types';
 import { apiService } from '../../services/api';
 import { extractSlotsFromProvider } from '../canvas/providerSkills';
 import { buildShotReferenceInputs, promptWithCharacterTags, withCameraIntent } from './shotReference';
-import { collectResources, planBinding } from './referenceBinder';
+import { collectResources, planBinding, missingBoundCharacters, LEGACY_SLOT_ALIASES } from './referenceBinder';
 import { BindPreviewModal } from './slots/BindPreviewModal';
 import { getMode } from './slots/registry';
 import { registerBuiltinSlots } from './slots/builtin';
@@ -44,7 +44,7 @@ const removeShotId = (setter: React.Dispatch<React.SetStateAction<Set<string>>>,
   setter((prev) => { const next = new Set(prev); next.delete(id); return next; });
 
 /**
- * 分镜工作台宿主（ShotInspector）。
+ * 分镜台宿主（ShotInspector）。
  * P0 重构：本文件只拥有状态 + 数据 handler + 快捷键 + ctx 组装；
  * 所有渲染经 slots/ 注册表（左场记栏 / 中央预览台 / 右检查器 / 浮层）。
  * 渲染逻辑与条件与重构前逐行一致，零行为变化。
@@ -170,7 +170,7 @@ export const ShotInspector: React.FC = () => {
   const isPlayingAudio = activeShot ? audioPlayingIds.has(activeShot.id) : false;
 
   // 一键绑定预览编排（资源×源插槽声明；hook 必须在 early return 之前）
-  const bindPlan = useMemo(() => {
+  const bindPreviewData = useMemo(() => {
     if (!bindPreview) return null;
     const shot = shots.find((s) => s.id === bindPreview.shotId);
     if (!shot) return null;
@@ -180,8 +180,19 @@ export const ShotInspector: React.FC = () => {
     const resources = collectResources({
       shot, project, projectAssets: _projectAssets, kind: bindPreview.kind, includeFirstFrame,
     });
-    return planBinding(resources, slots, (shot as any).dynamic_inputs || {}, { overwrite: bindPreview.overwrite });
+    return {
+      resources,
+      plan: planBinding(resources, slots, (shot as any).dynamic_inputs || {}, { overwrite: bindPreview.overwrite }),
+    };
   }, [bindPreview, shots, project, _projectAssets, productionMode, videoMode]);
+  const bindPlan = bindPreviewData?.plan ?? null;
+
+  // 已绑定但无立绘/三视图的角色：预览里显式提示（否则弹框会"空"得没有理由）
+  const bindMissingChars = useMemo(() => {
+    if (!bindPreview) return [];
+    const shot = shots.find((s) => s.id === bindPreview.shotId);
+    return missingBoundCharacters(shot, project);
+  }, [bindPreview, shots, project]);
 
   useEffect(() => {
     if (activeShot?.production_mode) {
@@ -457,9 +468,10 @@ export const ShotInspector: React.FC = () => {
 
   const injectCharacterToSlot = (writeKeys: string[], multi: boolean) => {
     const currentChar = project?.characters.find(c => c.name === activeShot.speaker_name) || project?.characters?.[0];
-    const charImg = currentChar?.three_views?.front || currentChar?.avatar_url || currentChar?.three_views?.three_quarter;
+    const tv = (currentChar?.three_views || {}) as Record<string, string>;
+    const charImg = tv.front || currentChar?.avatar_url || tv.three_quarter || tv.side;
     if (!charImg) {
-      alert('当前角色未找到立绘或三视图图片，请在角色工坊生成');
+      alert(`角色「${currentChar?.name || '当前角色'}」没有可用立绘/三视图，请先在角色工坊生成`);
       return;
     }
     setSlotValue(writeKeys, multi ? [charImg] : charImg);
@@ -509,14 +521,7 @@ export const ShotInspector: React.FC = () => {
 
   // 只提交该源声明过的键（input_schema + params_schema 的并集），杜绝切换源后残留上一源的参数；
   // 未选源（definition 为空）时原样放行，保持系统默认通道的旧行为。
-  // LEGACY_SLOT_ALIASES：旧代码里的单数 / 带 _url 后缀写法，归并到源真正声明的槽位键。
-  const LEGACY_SLOT_ALIASES: Record<string, string[]> = {
-    reference_image: ['reference_images', 'reference'],
-    first_frame_url: ['first_frame'],
-    last_frame_url: ['last_frame'],
-    reference_audio_url: ['reference_audio', 'reference_audios'],
-  };
-
+  // LEGACY_SLOT_ALIASES 来自 referenceBinder（与一键绑定的归一别名同表，避免预览与生成口径漂移）。
   const keepDeclaredOnly = (def: any, values: Record<string, any>): Record<string, any> => {
     const declared = new Set<string>([
       ...Object.keys(def?.input_schema?.properties || {}),
@@ -568,7 +573,12 @@ export const ShotInspector: React.FC = () => {
     if (activeShot?.id === bindPreview.shotId) setShotDynamicInputs(merged);
     setBindUndo([{ shotId: bindPreview.shotId, prev }]);
     const realCount = bindPlan.filled.filter((f) => !f.kept).length;
-    toast.success(`已绑定 ${realCount} 项参考${bindPlan.gaps.length ? `，${bindPlan.gaps.length} 个必填缺口待补` : ''}`);
+    const slotNames = [...new Set(bindPlan.filled.map((f) => f.slotLabel))].slice(0, 3).join('、');
+    if (realCount === 0) {
+      toast.success(`该镜旧键参考已归一到「${slotNames || '源声明槽'}」${bindPlan.gaps.length ? `，${bindPlan.gaps.length} 个必填缺口待补` : ''}`);
+    } else {
+      toast.success(`已绑定 ${realCount} 项参考${bindPlan.gaps.length ? `，${bindPlan.gaps.length} 个必填缺口待补` : ''}`);
+    }
     setBindPreview(null);
   };
 
@@ -638,12 +648,12 @@ export const ShotInspector: React.FC = () => {
     if (activeMerged) setShotDynamicInputs(activeMerged);
     if (!bound) { toast.info('没有可绑定的镜头：请先为镜头选择生成源，并绑定人物/场景/素材'); return; }
     setBindUndo(undos);
-    toast.success(`已批量绑定 ${bound} 个镜头（${totalFilled} 项参考${totalGaps ? `，${totalGaps} 个必填缺口` : ''}${skipped ? `，${skipped} 镜无可用源跳过` : ''}）`);
+    toast.success(`已为 ${bound} 个镜头批量绑定参考（${totalFilled} 项参考${totalGaps ? `，${totalGaps} 个必填缺口` : ''}${skipped ? `，${skipped} 镜无可用源跳过` : ''}）`);
   };
 
   const handleRegenerateImage = async (customCount?: number) => {
     // 直出模式无需单张生图：角色立绘直接驱动视频，避免误触污染首帧
-    if (getMode(productionMode).caps.canImage === false) { setRegenError('直出模式无需生图，直接点「直出动态视频」'); return; }
+    if (getMode(productionMode).caps.canImage === false) { setRegenError('漫剧模式无需生图，直接点下方「立绘直接生成视频」'); return; }
     if (!activeShot.image_prompt?.trim()) { setRegenError('生图提示词为空'); return; }
     setRegenError(null);
     addShotId(setImageGenIds, activeShot.id);
@@ -764,7 +774,7 @@ export const ShotInspector: React.FC = () => {
     const hasVideoRefs = shotRefs.reference_images.length > 0;
 
     if (caps.needsFirstFrame && !activeShot.image_url) {
-      setVideoError('图生视频模式需要先在步骤 1 生成精控首帧画面');
+      setVideoError('图生视频模式需要先在步骤 1 生成首帧画面');
       return;
     }
 
@@ -801,6 +811,8 @@ export const ShotInspector: React.FC = () => {
         duration: Math.round(activeShot.duration) || 5,
         provider: videoProvider,
         workflow_id: videoWorkflowId || undefined,
+        // 白模动态预演自动作为参考视频（有声明的源才消费；dynamic_inputs 里另留一份供插槽映射）
+        reference_videos: shotRefs.previz_video_url ? [shotRefs.previz_video_url] : undefined,
         dynamic_inputs,
         omit_first_frame: isDirect,
       });
@@ -962,6 +974,8 @@ export const ShotInspector: React.FC = () => {
           duration: Math.round(sh.duration) || 5,
           provider: prov,
           workflow_id: (sh as any).workflow_id || undefined,
+          // 白模动态预演自动作为参考视频（有声明的源才消费；dynamic_inputs 里另留一份供插槽映射）
+          reference_videos: bvRefs.previz_video_url ? [bvRefs.previz_video_url] : undefined,
           dynamic_inputs: bvInputs,
           omit_first_frame: shDirect,
         });
@@ -1064,6 +1078,8 @@ export const ShotInspector: React.FC = () => {
         providerName={bindPreview?.def?.display_name || bindPreview?.def?.name || bindPreview?.def?.id}
         shotLabel={activeShot?.shot_index ? `#${activeShot.shot_index}` : ''}
         plan={bindPlan}
+        resources={bindPreviewData?.resources}
+        missingChars={bindMissingChars}
         overwrite={!!bindPreview?.overwrite}
         onToggleOverwrite={(v) => setBindPreview((p) => (p ? { ...p, overwrite: v } : p))}
         onApply={applyBind}

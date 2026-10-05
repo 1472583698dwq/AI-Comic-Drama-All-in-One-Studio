@@ -1489,8 +1489,10 @@ def _resolve_exposed_raw(clean_wf: Dict[str, Any], meta: Optional[Dict[str, Any]
     except Exception:
         current_mapping = {}
 
-    # 默认不暴露任何输入：未由用户显式配置过白名单的工作流一律返回空清单
-    if meta.get("exposed_source") != "user":
+    # 默认不暴露任何输入：未由用户显式配置过白名单的工作流一律返回空清单；
+    # 存量兼容：早期版本（exposed_source 标记引入前）保存的白名单非空即视为用户白名单，
+    # 否则老工作流的暴露清单会被整体判空（检查器显示"未暴露"、生成源 workflow_exposed 变空）
+    if meta.get("exposed_source") != "user" and not meta.get("exposed_inputs"):
         return [], current_mapping
     saved_exposed = meta.get("exposed_inputs")
     if not saved_exposed:
@@ -3132,6 +3134,19 @@ class ComfyWorkflowManager:
 
         exposed_inputs, current_mapping = resolve_exposed_inputs(clean_wf, meta)
 
+        # 白名单为空的展示兜底：工作流真实可配置输入（存量分析清单 + 新鲜探测合并），
+        # 仅作为「生成源参数」表单的展示数据；resolve_exposed_inputs 仍是注入侧唯一权威口径
+        detected_inputs: List[Dict[str, Any]] = []
+        if not exposed_inputs:
+            try:
+                if (meta or {}).get("exposed_inputs"):
+                    detected_inputs, _ = _resolve_exposed_raw(clean_wf, {**meta, "exposed_source": "user"})
+                if not detected_inputs:
+                    detected_inputs = auto_detect_exposed_inputs(clean_wf, current_mapping)
+                apply_app_contract(detected_inputs, (meta or {}).get("app_contract"))
+            except Exception:
+                detected_inputs = []
+
         return {
             "workflow_id": workflow_id,
             "name": meta.get("name", workflow_id) if meta else workflow_id,
@@ -3140,6 +3155,7 @@ class ComfyWorkflowManager:
             "mapping": current_mapping,
             "node_overrides": node_overrides,
             "exposed_inputs": exposed_inputs,
+            "detected_inputs": detected_inputs,
             "app_contract": (meta or {}).get("app_contract"),
             "source_file": (meta or {}).get("source_file"),
             "subgraphs": list(subgraphs_map.values()),
@@ -3594,7 +3610,8 @@ def _build_provider_schemas_from_workflow(workflow: Dict[str, Any], meta: Option
             "x-comfy-id": eid,
             "x-comfy-param": exp.get("param_name"),
             "x-comfy-node": exp.get("node_id"),
-            "required": bool(exp.get("required")),
+            # 注意：绝不能在这里写 "required": bool —— JSON Schema 的 required 必须是字符串数组，
+            # 布尔值会被 LLM 上游（严格校验）直接 400 Invalid request parameters（工具 schema 全量被拒）。
         }
 
     # 存在独立槽位时，把标准聚合句柄标记为 x-aggregate，前端据此不再重复画一个泛化多选槽
@@ -3692,7 +3709,7 @@ def _build_provider_schemas_from_workflow(workflow: Dict[str, Any], meta: Option
 
 # 工作流→生成源的 Schema 生成规则版本：resolve/auto_detect/_build_* 等规则变更时 +1，
 # 存量源在下次启动时自动重建一次。启动 fast path 靠它判断，未变更时全程零网络。
-WORKFLOW_SCHEMA_VERSION = 3
+WORKFLOW_SCHEMA_VERSION = 4
 
 
 def sync_workflow_provider(workflow_id: str, force: bool = False):
@@ -3713,7 +3730,22 @@ def sync_workflow_provider(workflow_id: str, force: bool = False):
         pid = _workflow_provider_id(workflow_id)
         from app.providers.custom.manager import custom_provider_manager
         existing = custom_provider_manager.get_definition(pid)
+        # 存量兼容迁移：早期版本保存的白名单没有 exposed_source 标记（标记引入前的老数据），
+        # 非空即视为用户白名单——补齐标记并跳过快路径强制重建一次生成源，语义与旧版一致；
+        # 用户显式保存 / 读取 App 契约后标记固化，后续走快路径不再重建。
+        migrated_legacy = False
+        if meta.get("exposed_inputs") and meta.get("exposed_source") != "user":
+            meta["exposed_source"] = "user"
+            meta["updated_at"] = time.time()
+            migrated_legacy = True
+            try:
+                os.makedirs(WORKFLOWS_DIR, exist_ok=True)
+                with open(_meta_path(workflow_id), "w", encoding="utf-8") as f:
+                    json.dump(meta, f, ensure_ascii=False, indent=2)
+            except Exception:
+                pass
         if (not force
+                and not migrated_legacy
                 and existing is not None
                 and getattr(existing, "workflow_hash", None) == content_hash
                 and getattr(existing, "workflow_id", None) == workflow_id

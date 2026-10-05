@@ -1,23 +1,40 @@
 import React, { useEffect, useState } from 'react';
-import { FolderKanban, Plus, Upload, Search, Trash2, Copy, Archive, ExternalLink, Sparkles, Clock, Film, Users, Filter } from 'lucide-react';
+import { FolderKanban, Plus, Upload, Search, Trash2, Copy, Archive, ExternalLink, Sparkles, Clock, Film, Users, Filter, Zap } from 'lucide-react';
 import { useProjectListStore } from '../stores/useProjectListStore';
 import { useProjectStore } from '../stores/useProjectStore';
+import { usePageStore } from '../stores/usePageStore';
 import { apiService } from '../services/api';
 import { confirmAsync, toast } from '../stores/useDialogStore';
 import { useEscapeClose } from '../hooks/useEscapeClose';
 
+/** 空状态风格模板（对标 no-blank-canvas：点一下直接建项，不再先弹标题弹窗） */
+const STYLE_TEMPLATES = [
+  { label: '国漫仙侠', style: 'donghua_xianxia', desc: '仙气打光 · 大场面', emoji: '⚔️' },
+  { label: '日式二次元', style: 'japanese_anime', desc: '高饱和 · 热血质感', emoji: '🔥' },
+  { label: '影视 3D', style: 'cinematic_3d', desc: '电影感 · 真实光影', emoji: '🎬' },
+] as const;
+
 export const ProjectDashboard: React.FC = () => {
   const { projects, fetchProjects, createBlank, importProjectFile, openProject, deleteProject, duplicateProject, isLoading } = useProjectListStore();
   const { setProject } = useProjectStore();
+  // 一键成片已页面化（host=onekey）：这里只负责跳页；页开关未加载完不提示，避免误报。
+  const pagesLoaded = usePageStore((s) => s.loaded);
+  const studioEnabled = usePageStore((s) => s.values?.studio === true);
+  const onekeyEnabled = usePageStore((s) => s.values?.onekey === true);
+  const oneKeyDepsHint = pagesLoaded && !studioEnabled && !onekeyEnabled
+    ? '一键成片依赖「分镜台」或「成片工作室」页：两页当前都关闭，调用会返回 404。请先在 设置 → 功能开关 打开'
+    : undefined;
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('all');
   const [sort, setSort] = useState('updated_at');
   const [showCreate, setShowCreate] = useState(false);
   useEscapeClose(showCreate, () => setShowCreate(false));
-  // 精简链路：「一键成片」（整集流水线）已随分镜/剪辑链路下线，入口与弹窗一并移除
   const [newTitle, setNewTitle] = useState('');
   const [newStyle, setNewStyle] = useState('donghua_xianxia');
   const [newRatio, setNewRatio] = useState('9:16');
+  // 首屏引导条：基础能力未配置时提示先跑安装向导（只查一次，失败静默）
+  const [setupHint, setSetupHint] = useState<any>(null);
+  useEffect(() => { apiService.setupStatus().then(setSetupHint).catch(() => {}); }, []);
 
   useEffect(() => { fetchProjects({ q: q || undefined, status, sort }); }, [status, sort]);
   const handleSearch = () => fetchProjects({ q: q || undefined, status, sort });
@@ -34,24 +51,42 @@ export const ProjectDashboard: React.FC = () => {
     updated_at: new Date().toISOString(),
   });
 
+  /** 创建成功后的统一落点：兜底空工程 + 双 store 同步 + 进入分镜台 */
+  const afterCreate = async (meta: any, fallback?: any) => {
+    const fb = { ...meta, ...fallback };
+    // 空白新建后端不落 content.json（content 为 null 是正常态）：必须兜底空工程，否则工作台无项目直接黑屏
+    try {
+      const data = await apiService.getProject(meta.id);
+      if (data?.content?.scenes) setProject({ ...data.content, id: meta.id });
+      else setProject(buildBlankProject(meta.id, fb));
+    } catch {
+      setProject(buildBlankProject(meta.id, fb));
+    }
+    // 双 store 的 activeProjectId 保持一致（画布/素材按它隔离）
+    try { useProjectListStore.getState().setActiveProjectId(meta.id); } catch {}
+    try { localStorage.setItem('activeProjectId', meta.id); } catch {}
+    useProjectStore.getState().setActiveTab('studio');
+  };
+
   const handleCreate = async () => {
     if (!newTitle.trim()) return;
     try {
-      const meta = await createBlank({ title: newTitle.trim(), style_preset: newStyle, aspect_ratio: newRatio });
+      const fallback = { title: newTitle.trim(), style_preset: newStyle, aspect_ratio: newRatio };
+      const meta = await createBlank(fallback);
       setShowCreate(false); setNewTitle('');
-      // 空白新建后端不落 content.json（content 为 null 是正常态）：必须兜底空工程，否则工作台无项目直接黑屏
-      try {
-        const data = await apiService.getProject(meta.id);
-        if (data?.content?.scenes) setProject(data.content);
-        else setProject(buildBlankProject(meta.id, meta));
-      } catch {
-        setProject(buildBlankProject(meta.id, undefined));
-      }
-      // 双 store 的 activeProjectId 保持一致（画布/素材按它隔离）
-      try { useProjectListStore.getState().setActiveProjectId(meta.id); } catch {}
-      try { localStorage.setItem('activeProjectId', meta.id); } catch {}
-      // 精简链路：新建后直接进入创意画布（原落脚点是已下线的分镜工作台）
-      useProjectStore.getState().setActiveTab('canvas');
+      await afterCreate(meta, fallback);
+    } catch (e: any) {
+      toast.error(e?.message || '创建项目失败');
+    }
+  };
+
+  /** 空状态模板一键建项：不弹标题框，直接带风格进工作台（缩短首条产出路径） */
+  const createFromTemplate = async (t: typeof STYLE_TEMPLATES[number]) => {
+    const fallback = { title: `${t.label}漫剧`, style_preset: t.style, aspect_ratio: '9:16' };
+    try {
+      const meta = await createBlank(fallback);
+      await afterCreate(meta, fallback);
+      toast.success(`已按「${t.label}」风格创建项目`);
     } catch (e: any) {
       toast.error(e?.message || '创建项目失败');
     }
@@ -65,8 +100,8 @@ export const ProjectDashboard: React.FC = () => {
       // 若返回内容则直接加载
       try {
         const data = await apiService.getProject(res.id);
-        if (data?.content?.scenes) setProject(data.content);
-        useProjectStore.getState().setActiveTab('canvas');
+        if (data?.content?.scenes) setProject({ ...data.content, id: res.id });
+        useProjectStore.getState().setActiveTab('studio');
       } catch {}
     } catch (err: any) { toast.error(err.message || '导入项目失败'); }
     e.target.value = '';
@@ -77,8 +112,9 @@ export const ProjectDashboard: React.FC = () => {
     try {
       const data = await apiService.getProject(id);
       if (data?.content?.scenes) {
-        setProject(data.content);
-        useProjectStore.getState().setActiveTab('canvas');
+        // 项目身份以目录 id 为准（content.id 可能是剧本导入留下的 UUID）
+        setProject({ ...data.content, id });
+        useProjectStore.getState().setActiveTab('studio');
       } else {
         // 空白项目：创建一个默认空 Project 供编辑
         const meta = projects.find(p=>p.id===id);
@@ -93,7 +129,7 @@ export const ProjectDashboard: React.FC = () => {
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         } as any);
-        useProjectStore.getState().setActiveTab('canvas');
+        useProjectStore.getState().setActiveTab('studio');
       }
     } catch (e:any) { toast.error(e.message || '打开项目失败'); }
   };
@@ -126,9 +162,22 @@ export const ProjectDashboard: React.FC = () => {
           <label className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface border border-border text-xs font-medium text-[color:var(--color-text-main)] hover:border-border-active cursor-pointer">
             <Upload className="w-3.5 h-3.5"/> 导入 <input type="file" accept=".json,.zip" className="hidden" onChange={handleImport} />
           </label>
+          <button onClick={()=>useProjectStore.getState().setActiveTab('onekey')} title={oneKeyDepsHint} className="px-4 py-1.5 rounded-full bg-gradient-to-r from-amber-500 to-brand text-white text-xs font-bold shadow-md flex items-center gap-1.5"><Zap className="w-3.5 h-3.5"/> 一键成片</button>
           <button onClick={()=>setShowCreate(true)} className="px-4 py-1.5 rounded-full bg-brand text-white text-xs font-bold shadow-md shadow-brand/20 hover:bg-brand-light flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/> 新建项目</button>
         </div>
       </div>
+
+      {/* 未配置引导条：基础能力缺失 = 首屏最该出现的提示（不配就走不到出画面那一步） */}
+      {setupHint && !setupHint.onboarding_done && !setupHint.minimal_ready && (
+        <div className="mx-5 mt-3 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center gap-2.5 text-xs text-amber-200 shrink-0">
+          <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+          <span>还差<b>文本理解 / 图像生成</b>没配置 —— 先花 2 分钟配好，才能拆小说、出第一张分镜图。</span>
+          <button onClick={() => window.dispatchEvent(new Event('open-first-run-wizard'))}
+            className="ml-auto px-3 py-1 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-100 hover:bg-amber-500/30 text-[11px] font-bold shrink-0">
+            运行安装向导
+          </button>
+        </div>
+      )}
 
       {/* Grid — 留白与卡片节奏 */}
       <div className="flex-1 overflow-y-auto">
@@ -136,13 +185,29 @@ export const ProjectDashboard: React.FC = () => {
         {isLoading ? (
           <div className="py-20 text-center text-gray-500 text-sm">加载中…</div>
         ) : projects.length === 0 ? (
-          <div className="py-20 text-center">
+          <div className="py-12 text-center">
             <div className="w-20 h-20 mx-auto rounded-[20px] bg-surface border border-border flex items-center justify-center mb-4"><FolderKanban className="w-8 h-8 text-gray-500" /></div>
-            <p className="text-sm font-bold text-white">还没有项目</p>
-            <p className="text-xs text-gray-500 mt-1 max-w-[420px] mx-auto leading-relaxed">创建空白项目或导入小说/项目包开始创作，素材将按项目隔离并支持全局共享</p>
-            <div className="flex justify-center gap-2 pt-4">
-              <button onClick={()=>setShowCreate(true)} className="px-5 py-2 rounded-full bg-brand text-white text-xs font-bold shadow-md">新建空白项目</button>
-              <label className="px-5 py-2 rounded-full bg-surface border border-border text-xs font-medium cursor-pointer hover:border-border-active">导入项目包 <input type="file" accept=".json,.zip" className="hidden" onChange={handleImport} /></label>
+            <p className="text-[15px] font-bold text-white">把一部小说，变成一部漫剧</p>
+            <p className="text-xs text-gray-500 mt-1.5 max-w-[460px] mx-auto leading-relaxed">
+              粘贴章节 → AI 拆分镜 → 生成画面 / 配音 / 视频 → 一键导出剪映成片。新建项目后从「导入小说」开始。
+            </p>
+            <div className="flex justify-center gap-2 pt-5">
+              <button onClick={()=>setShowCreate(true)} className="px-6 py-2.5 rounded-full bg-brand text-white text-xs font-bold shadow-md shadow-brand/20 hover:bg-brand-light">新建项目</button>
+              <label className="px-5 py-2.5 rounded-full bg-surface border border-border text-xs font-medium cursor-pointer hover:border-border-active">导入项目包 <input type="file" accept=".json,.zip" className="hidden" onChange={handleImport} /></label>
+            </div>
+            {/* 模板即入口：点一下直接带风格建项进工作台，不给空白画布留机会 */}
+            <div className="pt-7">
+              <div className="text-[11px] text-gray-500 mb-2.5">或从风格模板开始 · 点一下直接建项</div>
+              <div className="flex flex-wrap justify-center gap-2.5">
+                {STYLE_TEMPLATES.map(t => (
+                  <button key={t.style} onClick={()=>createFromTemplate(t)}
+                    className="w-[172px] text-left p-3.5 rounded-2xl bg-surface border border-border hover:border-brand/50 hover:shadow-xl hover:shadow-brand/5 hover:-translate-y-0.5 transition-all group">
+                    <div className="text-lg leading-none mb-2">{t.emoji}</div>
+                    <div className="text-xs font-bold text-white group-hover:text-brand">{t.label}</div>
+                    <div className="text-[10.5px] text-gray-500 mt-0.5">{t.desc}</div>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         ) : (

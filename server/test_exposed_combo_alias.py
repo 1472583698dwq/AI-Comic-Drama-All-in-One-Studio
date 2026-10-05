@@ -43,6 +43,27 @@ style_fresh = fresh_by_key.get("1_style")
 assert style_fresh is not None and style_fresh["type"] == "combo" and "anime" in (style_fresh.get("options") or []), f"fresh 探测异常: {style_fresh}"
 print("PASS1.5 fresh 探测 combo:", style_fresh["type"], style_fresh.get("options"))
 
+# 1.6) 存量兼容：早期版本保存的白名单没有 exposed_source 标记（标记引入前的老数据）→
+#      非空即视为用户白名单生效；sync 迁移时补齐标记并强制重建生成源
+import json as _json
+_mpath = os.path.join(m.WORKFLOWS_DIR, f"{wid}.meta.json")
+with open(_mpath, "r", encoding="utf-8") as f:
+    _mdata = _json.load(f)
+_mdata["exposed_inputs"] = [style_fresh]
+_mdata.pop("exposed_source", None)
+with open(_mpath, "w", encoding="utf-8") as f:
+    _json.dump(_mdata, f, ensure_ascii=False)
+insp_legacy = mgr.inspect_workflow_nodes(wid)
+assert len(insp_legacy["exposed_inputs"]) == 1, f"存量无标记白名单应生效, got {insp_legacy['exposed_inputs']}"
+m.sync_workflow_provider(wid, force=False)
+with open(_mpath, "r", encoding="utf-8") as f:
+    _mdata2 = _json.load(f)
+assert _mdata2.get("exposed_source") == "user", f"迁移应补齐 user 标记, got {_mdata2.get('exposed_source')}"
+from app.providers.custom.manager import custom_provider_manager as _cpm
+_d2 = _cpm.get_definition(m._workflow_provider_id(wid))
+assert _d2 is not None and len(_d2.workflow_exposed or []) == 1, f"迁移应强制重建生成源白名单, got {_d2.workflow_exposed if _d2 else None}"
+print("PASS1.6 存量无标记白名单兼容 + 迁移重建")
+
 # 2) 用户显式保存别名 + 自定义 options → inspect 只返回用户勾选的项（未勾选不倒灌），
 #    fresh 真实枚举优先在前，用户自定义去重追加，type 仍为 combo
 user_exposed = [

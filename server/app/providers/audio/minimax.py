@@ -31,7 +31,7 @@ EMOTION_TAGS = {
 
 class MiniMaxTTSProvider(AudioProvider):
     id = "minimax"
-    display_name = "MiniMax Speech-01"
+    display_name = "MiniMax Speech"
     description = "MiniMax 超拟人语音，支持怒吼/低语/哭腔等情绪标签"
     icon = "Mic"
 

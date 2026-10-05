@@ -1,12 +1,12 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ReactFlow, Background, Controls, ControlButton, MiniMap, useNodesState, useEdgesState, addEdge, Connection, Edge, Node, ReactFlowProvider, useReactFlow
+  ReactFlow, Background, BackgroundVariant, ConnectionLineType, Controls, ControlButton, MiniMap, useNodesState, useEdgesState, addEdge, Connection, Edge, Node, ReactFlowProvider, useReactFlow, reconnectEdge, FinalConnectionState
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Search, Sparkles, Image as ImageIcon, Film, Box, Boxes, Library, Save, Download, Mic, Type, Plus, Wand2, Layers, PanelLeft, ChevronsUp, ArrowLeftRight, MoreHorizontal, Pencil, Trash2, Keyboard, X, FolderOpen } from 'lucide-react';
+import { Search, Sparkles, Image as ImageIcon, Film, Box, Boxes, Library, Save, Download, Mic, Type, Plus, Wand2, Layers, PanelLeft, ChevronsUp, ArrowLeftRight, MoreHorizontal, Pencil, Trash2, Keyboard, X, FolderOpen, Clapperboard, FileText } from 'lucide-react';
 import { useProjectListStore } from '../../stores/useProjectListStore';
 import { useThemeStore } from '../../stores/useThemeStore';
-import { useProjectStore } from '../../stores/useProjectStore';
+import { useProjectStore, selectSidebarCollapsed } from '../../stores/useProjectStore';
 import { useCanvasStore } from '../../stores/useCanvasStore';
 import { apiService } from '../../services/api';
 import { API_ORIGIN, resolveMediaUrl } from '../../utils/devOrigin';
@@ -24,13 +24,15 @@ import { TimelineExportNode } from './nodes/TimelineExportNode';
 import { ProviderNode, ProviderImageNode, ProviderVideoNode, ProviderAudioNode } from './nodes/ProviderNode';
 import { LoadImageNode, LoadImageBatchNode, LoadVideoNode, LoadAudioNode, TextPromptNode } from './nodes/LoaderNodes';
 import { PromptNode, ImageNode, VideoGenNode, AudioNode, Director3DMinimalNode, ExportNode } from './nodes/MinimalNodes';
+import { TimelineNode } from './nodes/TimelineNode';
 import { CustomNode } from './nodes/CustomNode';
 import { ExtNode } from './nodes/ExtNode';
 import { syncCanvasNodeSpecs, listCanvasNodeSpecs, getCanvasNodeSpec } from './canvasNodeSpecs';
-import { NodeControlBar } from './NodeControlBar';
+import { Rect, rectOf, estimateSize, placeUpstream, placeDownstream, placeNear, placeBlock, findFreeInColumn } from './autoLayout';
+import { ATTACH_EVENT, DETACH_EVENT, AttachInputsDetail, DetachInputDetail } from './inputCards';
 import { CanvasAgentSidebar } from './CanvasAgentSidebar';
+import { NodeAgentConsole } from './NodeAgentConsole';
 import { NodeContextMenu, type NodeMenuState } from './NodeContextMenu';
-import { WorkflowInspectorModal } from '../workflow/WorkflowInspectorModal';
 import { getNodeSpec } from './nodeRegistry';
 import { CanvasManagerModal } from './CanvasManagerModal';
 import { buildShotReferenceInputs } from '../storyboard/shotReference';
@@ -38,6 +40,7 @@ import { collectResources, planBinding } from '../storyboard/referenceBinder';
 import { extractSlotsFromProvider } from './providerSkills';
 import { writeBackToShot } from './shotWriteBack';
 import { useCanvasShortcuts } from './hooks/useCanvasShortcuts';
+import { useEscapeClose } from '../../hooks/useEscapeClose';
 
 const nodeTypes: any = {
   // 6 核心 Agent 节点
@@ -47,6 +50,7 @@ const nodeTypes: any = {
   'audio': AudioNode,
   'director3d': Director3DMinimalNode,
   'export': ExportNode,
+  'timeline': TimelineNode,
   // 兼容旧节点
   'shot-card': ShotCardNode,
   'comfy-workflow': ComfyWorkflowNode,
@@ -75,11 +79,13 @@ const genId = (p: string) => `${p}_${Date.now()}_${++idSeq}`;
 
 const CORE_LIBRARY = [
   { type: 'prompt', label: '剧本 / Prompt', desc: '剧本拆解与分镜策划', icon: Type, color: 'text-sky-400' },
+  { type: 'text-prompt', label: '提示词文本', desc: '纯文本资源 · 拖放/连线自动填充', icon: FileText, color: 'text-sky-400' },
   { type: 'image', label: '生图 Agent', desc: '多引擎文生图与垫图参考', icon: ImageIcon, color: 'text-violet-400' },
   { type: 'video', label: '视频 Agent', desc: '动态视频 / 首尾帧 / 参考生视频', icon: Film, color: 'text-orange-400' },
   { type: 'audio', label: '配音 Agent', desc: '多角色情感 TTS 配音', icon: Mic, color: 'text-pink-400' },
   { type: 'director3d', label: '3D导演台', desc: '机位规划与运镜指令', icon: Box, color: 'text-amber-500' },
   { type: 'export', label: '导出草稿', desc: '一键生成剪映工程', icon: Download, color: 'text-emerald-500' },
+  { type: 'timeline', label: '时间线', desc: '多段合片 · 轻剪辑（合视频）', icon: Clapperboard, color: 'text-brand' },
 ];
 
 const TEMPLATES = [
@@ -87,6 +93,24 @@ const TEMPLATES = [
   { id: 't2', label: '完整漫剧导演流', desc: '剧本 → 画面 → 视频 → 配音 → 导出', nodes: ['prompt', 'image', 'video', 'audio', 'export'] },
   { id: 't3', label: '连续镜头视频流', desc: '首帧 + 尾帧 → 连续动态视频', nodes: ['image', 'video'] },
 ];
+
+/** 拖线到空白处可创建的卡片：核心卡片 + 加载类。每项按 nodeRegistry 的端口类型判断能否接上 */
+const DROP_CREATE_TYPES: Array<{ type: string; label: string; icon: any; color: string }> = [
+  ...CORE_LIBRARY.map(({ type, label, icon, color }) => ({ type, label, icon, color })),
+  { type: 'load-image', label: '加载图片', icon: ImageIcon, color: 'text-violet-400' },
+  { type: 'load-video', label: '加载视频', icon: Film, color: 'text-orange-400' },
+  { type: 'load-audio', label: '加载音频', icon: Mic, color: 'text-pink-400' },
+];
+// 注册表与实际渲染的句柄 id 不一致处（配音卡的文本口渲染为 prompt）
+const renderedHandleId = (type: string, id: string) => (type === 'audio' && id === 'text' ? 'prompt' : id);
+
+type DropMenuState = {
+  x: number; y: number;
+  flow: { x: number; y: number };
+  /** 缺省 = 画布右键：只建卡不连线 */
+  from?: { nodeId: string; handleId: string | null; side: 'source' | 'target' };
+  items: Array<{ type: string; label: string; icon: any; color: string; handleId?: string }>;
+};
 
 /** 工作台分块：悬浮条上的小块，点块即展开面板并定位到该小节 */
 type WorkbenchSection = 'template' | 'mine' | 'nodes' | 'assets';
@@ -101,7 +125,7 @@ const WORKBENCH_TABS: Array<{ id: WorkbenchSection; label: string; icon: any }> 
 /** 顶部工具条「更多」菜单项样式（精简态使用） */
 const TOOLBAR_MENU_ITEM =
   'w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-[11.5px] ' +
-  '[color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] hover:bg-surface-secondary transition-colors';
+  '[color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06] transition-colors';
 
 /** 操作台小节标题 */
 const WorkbenchGroupTitle: React.FC<{ children: React.ReactNode }> = ({ children }) => (
@@ -136,9 +160,9 @@ const WorkbenchRow: React.FC<{
       if (onClick && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onClick(); }
     }}
     title={title}
-    className="group flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-transparent hover:border-border hover:bg-surface-secondary transition-colors cursor-pointer select-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand active:cursor-grabbing"
+    className="group flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-transparent hover:border-white/70 dark:border-white/12 hover:bg-white/55 dark:bg-white/[.06] transition-colors cursor-pointer select-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand active:cursor-grabbing"
   >
-    <span className="w-8 h-8 rounded-lg bg-surface-secondary border border-border flex items-center justify-center shrink-0">
+    <span className="w-8 h-8 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 flex items-center justify-center shrink-0">
       <Icon className={`w-4 h-4 ${iconCls || '[color:var(--color-text-secondary)]'}`} strokeWidth={1.7} />
     </span>
     <span className="min-w-0 flex-1">
@@ -149,7 +173,7 @@ const WorkbenchRow: React.FC<{
       <span
         title={actionLabel}
         aria-hidden="true"
-        className="w-6 h-6 rounded-md shrink-0 hidden group-hover:flex items-center justify-center [color:var(--color-text-muted)] group-hover:[color:var(--color-text-main)] group-hover:bg-surface-tertiary transition-colors"
+        className="w-6 h-6 rounded-md shrink-0 hidden group-hover:flex items-center justify-center [color:var(--color-text-muted)] group-hover:[color:var(--color-text-main)] group-hover:bg-white/65 dark:bg-white/[.09] transition-colors"
       >
         <Plus className="w-3.5 h-3.5" strokeWidth={1.7} />
       </span>
@@ -157,15 +181,85 @@ const WorkbenchRow: React.FC<{
   </div>
 );
 
+/**
+ * 底部「节点操作台」—— 只服务当前选中的生成节点（本地版观感：画布底部无常驻浮层）。
+ *
+ * ⚠ 适配说明：本地版这里 import 的是 `./NodeControlBar`，但新基线已删除该文件
+ * （上游改用 `FloatingAgentPromptBar` 常驻「全局导演 Agent GO + 快速添加」；该文件**已废弃**
+ * —— 全局编排入口由画布右侧 `CanvasAgentSidebar` 承担，见其文件头）。
+ * 本轮要求「只改点名的文件」，故把本地版 NodeControlBar 的实现**内联**在本文件，
+ * 逐行保持本地版的类名/文案/尺寸（682px 实色卡片、左上角节点身份标识、无说明栏、无快速添加条）。
+ * 若后续允许新增文件，应把它还原成 `client/src/components/canvas/NodeControlBar.tsx`。
+ */
+const AGENT_NODE_TYPES = ['image', 'video', 'audio'];
+
+/** 左上角身份标识：当前操作台正在控制哪一类节点 */
+const NODE_BAR_KIND_META: Record<string, { label: string; Icon: any; iconCls: string }> = {
+  image: { label: '分镜生图 Agent', Icon: ImageIcon, iconCls: 'text-violet-400' },
+  video: { label: '动态导演视频 Agent', Icon: Film, iconCls: 'text-orange-400' },
+  audio: { label: '配音 / 声音 Agent', Icon: Mic, iconCls: 'text-pink-400' },
+};
+
+const NodeControlBar: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
+  const selectedNodeId = useCanvasStore((s) => s.selectedNodeId);
+  const nodes = useCanvasStore((s) => s.nodes);
+  const setSelectedNodeId = useCanvasStore((s) => s.setSelectedNodeId);
+
+  const selectedNode = nodes.find((n) => n.id === selectedNodeId);
+  const isAgentNode = !!selectedNode && AGENT_NODE_TYPES.includes(selectedNode.type || '');
+  const close = React.useCallback(() => {
+    if (onClose) onClose();
+    else setSelectedNodeId(null);
+  }, [onClose, setSelectedNodeId]);
+  // Esc 关闭：与全站弹窗同一套栈管理（LIFO，不会一次关穿多层）
+  useEscapeClose(true, close);
+  if (!isAgentNode) return null;
+
+  const kind = selectedNode!.type as 'image' | 'video' | 'audio';
+  const meta = NODE_BAR_KIND_META[kind] || NODE_BAR_KIND_META.image;
+  const KindIcon = meta.Icon;
+
+  return (
+    // 宽度：内层输入框 656px + 左右 p-3(24) + 描边 2 = 682；高度由框内文本区 6 行决定 ≈ 175
+    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-40 w-[92vw] max-w-[682px] flex flex-col items-center gap-2 pointer-events-auto">
+      {/* 不用 overflow-hidden：生成源「上拉选择栏」需要越出卡片上沿浮在画布上 */}
+      <div className="w-full bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-[14px] shadow-xl">
+        {/* 左上角只标识当前节点；原「节点 Agent 控制台 · 只说人话…」说明栏整条删除 */}
+        <div className="h-9 px-3 flex items-center gap-2 border-b border-white/70 dark:border-white/12">
+          <span className="w-7 h-7 rounded-md bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 flex items-center justify-center shrink-0">
+            <KindIcon className={`w-3.5 h-3.5 ${meta.iconCls}`} strokeWidth={1.7} />
+          </span>
+          <span className="text-[13px] font-semibold [color:var(--color-text-main)] truncate">{meta.label}</span>
+          <span className="font-mono text-[10.5px] [color:var(--color-text-muted)] shrink-0">#{selectedNode!.id.slice(-4).trim()}</span>
+          <button
+            onClick={close}
+            aria-label="收起节点操作台"
+            title="收起（也可点画布空白 / Esc）"
+            className="ml-auto w-6 h-6 rounded-md flex items-center justify-center [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06] transition-colors"
+          >
+            <X className="w-3.5 h-3.5" strokeWidth={1.7} />
+          </button>
+        </div>
+        <div className="p-3">
+          <NodeAgentConsole nodeId={selectedNode!.id} kind={kind} />
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const InnerCanvas: React.FC = () => {
-  const { project, canvasRailOpen, setCanvasRailOpen } = useProjectStore();
+  const { project, toggleSidebar } = useProjectStore();
+  const sidebarCollapsed = useProjectStore(selectSidebarCollapsed);
   const { activeProjectId } = useProjectListStore();
   const { effectiveTheme } = useThemeStore();
   const { selectedNodeId, setSelectedNodeId } = useCanvasStore();
-  const pid = activeProjectId || project?.id || null;
+  // 以已加载的项目为准：切项目时 list store 会先于内容加载变更，若先取它，旧画布实例会在
+  // 重建前短暂挂到新 pid 上，把旧节点写进新项目。两个 store 在 setProject 里同步。
+  const pid = project?.id || activeProjectId || null;
   const isLight = effectiveTheme === 'light';
   const { loadCanvas, debouncedSave } = useCanvasSync(pid);
-  const { screenToFlowPosition, getViewport } = useReactFlow();
+  const { screenToFlowPosition, getViewport, fitView } = useReactFlow();
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [assets, setAssets] = useState<any[]>([]);
@@ -199,7 +293,6 @@ const InnerCanvas: React.FC = () => {
     return () => window.removeEventListener('canvasnode-list-refresh', h as any);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pid]);
-  const [inspectWfId, setInspectWfId] = useState('');
   const [saving, setSaving] = useState(false);
   const [executingNodeIds, setExecutingNodeIds] = useState<Set<string>>(new Set());
   const isGenerating = executingNodeIds.size > 0;
@@ -271,21 +364,23 @@ const InnerCanvas: React.FC = () => {
   }, [toolbarMenuOpen]);
   // 节点右键菜单（添加到会话 / 删除）
   const [nodeMenu, setNodeMenu] = useState<NodeMenuState | null>(null);
+  const [dropMenu, setDropMenu] = useState<DropMenuState | null>(null);
   const canvasIdRef = useRef<string>('default');
   useEffect(() => { canvasIdRef.current = canvasId; }, [canvasId]);
   // 切换/新建/删除清空时的单次保存抑制，避免空画布写回旧 id 复活已删画布
   const suppressSaveRef = useRef(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const loadedRef = useRef(false);
+  // 当前 pid/画布的内容是否已真正载入：载入完成前 nodes 还是空数组/旧画布，此时绝不能落盘，
+  // 否则会用空画布覆盖磁盘上的真实内容
+  const hydratedRef = useRef(false);
   const pidRef = useRef<string | null>(null);
   const canvasRef = useRef<string>('default');
   const [isDragging, setIsDragging] = useState(false);
 
-  useEffect(() => {
-    const h = (e: any) => setInspectWfId(e.detail?.workflowId || '');
-    window.addEventListener('open-workflow-inspector', h as any);
-    return () => window.removeEventListener('open-workflow-inspector', h as any);
-  }, []);
+  // open-workflow-inspector 已由 App 全局接管（任何页面可开槽位配置）：
+  // 本地版画布内还留着一份监听 + 自渲染弹窗，新基线 App 也渲染全局弹窗 →
+  // 同一次事件会弹出两个 WorkflowInspectorModal。此处按新基线收敛，只保留 App 那份。
 
   // 加载画布（项目/画布切换时重载）
   useEffect(() => {
@@ -294,6 +389,7 @@ const InnerCanvas: React.FC = () => {
       pidRef.current = pid;
       canvasRef.current = canvasId;
       loadedRef.current = false;
+      hydratedRef.current = false;
       setIsLoading(true);
       apiService.listProjectCanvases(pid).then(r => setCanvasList(r.canvases || [])).catch(() => {});
     }
@@ -301,7 +397,14 @@ const InnerCanvas: React.FC = () => {
     loadedRef.current = true;
     setIsLoading(true);
     const timer = setTimeout(() => setIsLoading(false), 3000);
+    const reqPid = pid, reqCanvas = canvasId;
     loadCanvas(canvasId).then(snap => {
+      // 已切到别的项目/画布：过期结果丢弃，不能覆盖当前画布
+      if (pidRef.current !== reqPid || canvasRef.current !== reqCanvas) return;
+      hydratedRef.current = true;
+      // 切画布时的单次抑制本为挡住「清空→落盘」；载入前的保存已被 hydratedRef 挡住，这里归零，
+      // 免得空画布（snap 为 null 不触发 setNodes）时吞掉用户的第一次编辑
+      suppressSaveRef.current = false;
       if (snap && Array.isArray(snap.nodes)) {
         const withHandlers = snap.nodes.map((n: any) => {
           const nd = { ...(n.data || {}) };
@@ -343,7 +446,7 @@ const InnerCanvas: React.FC = () => {
 
   // 800ms 防抖同步（带当前画布 id）
   useEffect(() => {
-    if (!pid || !loadedRef.current) return;
+    if (!pid || !loadedRef.current || !hydratedRef.current) return;
     if (suppressSaveRef.current) { suppressSaveRef.current = false; return; }
     let vp: any = {};
     try { vp = getViewport(); } catch {}
@@ -358,6 +461,50 @@ const InnerCanvas: React.FC = () => {
   const nodesRef = useRef(nodes);
   useEffect(() => { edgesRef.current = edges; }, [edges]);
   useEffect(() => { nodesRef.current = nodes; }, [nodes]);
+
+  // 连线渲染层（只影响显示，不写回 edges 状态 / 不落盘）：
+  // · 存量 smoothstep / step 折线统一画成平滑贝塞尔曲线
+  // · 选中卡片 → 其整条上游 + 下游链路上的连线高亮并流动（方向即数据流向），其余连线淡化
+  const renderedEdges = useMemo(() => {
+    const focus = new Set<string>(nodes.filter((n) => n.selected).map((n) => n.id));
+    if (selectedNodeId) focus.add(selectedNodeId);
+    const related = new Set<string>();
+    if (focus.size) {
+      const bySource = new Map<string, Edge[]>();
+      const byTarget = new Map<string, Edge[]>();
+      for (const e of edges) {
+        if (!bySource.has(e.source)) bySource.set(e.source, []);
+        bySource.get(e.source)!.push(e);
+        if (!byTarget.has(e.target)) byTarget.set(e.target, []);
+        byTarget.get(e.target)!.push(e);
+      }
+      const walk = (adj: Map<string, Edge[]>, nextOf: (e: Edge) => string) => {
+        const seen = new Set<string>(focus);
+        const stack = [...focus];
+        while (stack.length) {
+          for (const e of adj.get(stack.pop()!) || []) {
+            related.add(e.id);
+            const nx = nextOf(e);
+            if (!seen.has(nx)) { seen.add(nx); stack.push(nx); }
+          }
+        }
+      };
+      walk(bySource, (e) => e.target); // 下游
+      walk(byTarget, (e) => e.source); // 上游
+    }
+    return edges.map((e) => {
+      const hl = related.has(e.id);
+      const type = !e.type || e.type === 'smoothstep' || e.type === 'step' || e.type === 'straight' ? 'default' : e.type;
+      const cls = hl ? 'canvas-edge-hl' : focus.size ? 'canvas-edge-dim' : '';
+      return {
+        ...e,
+        type,
+        animated: hl,
+        zIndex: hl ? 1 : 0,
+        className: [e.className, cls].filter(Boolean).join(' ') || undefined,
+      };
+    });
+  }, [nodes, edges, selectedNodeId]);
   const handleNodeUpdate = useCallback((nodeId: string, patch: any) => {
     setNodes(nds => {
       let next = nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, ...patch, onUpdate: handleNodeUpdate, onExecute: handleNodeExecute } } : n);
@@ -380,8 +527,18 @@ const InnerCanvas: React.FC = () => {
           if (hType === 'image') {
             const img = patch.image_url || patch.result_url || patch.first_frame || patch.reference || (Array.isArray(patch.reference_images) ? patch.reference_images[0] : patch.reference_images) || srcData?.image_url || srcData?.result_url;
             const arr = Array.isArray(patch.reference_images) ? patch.reference_images : undefined;
-            if (arr && arr.length > 1 && (th || '').match(/images|reference/)) setKey(inDef!.id, arr);
-            else if (img) setKey(inDef!.id, img);
+            const curVal = (tgt.data as any)[inDef!.id];
+            if (Array.isArray(curVal) || /reference_images|(^|_)images$/.test(inDef!.id)) {
+              // 数组槽（参考集）可由多张卡片共同汇入：只替换本卡上一次贡献的那几项，不能整组覆盖
+              const prevSrc: any = nds.find(n => n.id === nodeId)?.data || {};
+              const oldVals = [prevSrc.image_url, prevSrc.result_url, prevSrc.image, prevSrc.url,
+                ...(Array.isArray(prevSrc.reference_images) ? prevSrc.reference_images : []),
+                ...(Array.isArray(prevSrc.images) ? prevSrc.images : [])].filter(Boolean);
+              const incoming: string[] = arr || (img ? [img] : []);
+              const merged: string[] = (Array.isArray(curVal) ? curVal : (curVal ? [curVal] : [])).filter((u: string) => !oldVals.includes(u));
+              for (const u of incoming) if (u && !merged.includes(u)) merged.push(u);
+              setKey(inDef!.id, merged);
+            } else if (img) setKey(inDef!.id, img);
           } else if (hType === 'video') {
             setKey(inDef!.id, patch.video_url || srcData?.video_url);
           } else if (hType === 'audio') {
@@ -505,6 +662,10 @@ const InnerCanvas: React.FC = () => {
     onSelect: setSelectedNodeId,
   });
 
+  // 从已连线的输入点「拎起」的那条线：松手连到别处 = 改接；松在空白 = 断开；被拒（类型不符）= 还原
+  const pickedEdge = useRef<{ edge: Edge | null; connected: boolean }>({ edge: null, connected: false });
+  const rfWrapRef = useRef<HTMLDivElement>(null);
+
   const isValidConnection: any = useCallback((connection: any) => {
     const c: Connection = connection;
     const src = nodes.find(n => n.id === c.source);
@@ -522,11 +683,13 @@ const InnerCanvas: React.FC = () => {
   }, [nodes]);
 
   const onConnect = useCallback((params: Connection) => {
+    pickedEdge.current.connected = true;
     if (!isValidConnection(params)) {
+      pickedEdge.current.connected = false;
       alert('连线类型不匹配');
       return;
     }
-    setEdges(es => addEdge({ ...params, type: 'smoothstep', animated: true } as any, es as any));
+    setEdges(es => addEdge({ ...params, type: 'default' } as any, es as any));
     setTimeout(() => {
       const sourceId = params.source;
       const targetId = params.target;
@@ -560,12 +723,15 @@ const InnerCanvas: React.FC = () => {
             patch.image_url = srcMedia;
           }
         }
-        if (srcType === 'video' && srcData.video_url) {
-          patch.video_url = srcData.video_url;
+        const srcVideo = srcData.video_url || (srcType === 'load-video' ? (srcData.video || srcData.url) : '');
+        if (['video', 'load-video'].includes(srcType) && srcVideo) {
+          patch.video_url = srcVideo;
+          if (ht === 'video' && tgtHandle && tgtHandle !== 'video_url') patch[tgtHandle] = srcVideo;
         }
-        if (['audio', 'tts'].includes(srcType) && srcData.audio_url) {
-          if (ht === 'audio' && tgtHandle) patch[tgtHandle] = srcData.audio_url;
-          else patch.audio_url = srcData.audio_url;
+        const srcAudio = srcData.audio_url || (srcType === 'load-audio' ? (srcData.audio || srcData.url) : '');
+        if (['audio', 'tts', 'load-audio'].includes(srcType) && srcAudio) {
+          if (ht === 'audio' && tgtHandle) patch[tgtHandle] = srcAudio;
+          else patch.audio_url = srcAudio;
         }
         if (srcType === 'director3d') {
           const cam = srcData.camera_prompt || '';
@@ -585,6 +751,136 @@ const InnerCanvas: React.FC = () => {
     }, 0);
   }, [isValidConnection]);
 
+  // ── 拖线松手在空白处：弹出「创建可接上的卡片」菜单 ──
+  const onConnectEnd = useCallback((event: MouseEvent | TouchEvent, state: FinalConnectionState) => {
+    const picked = pickedEdge.current;
+    if (picked.edge) {
+      const edge = picked.edge;
+      pickedEdge.current = { edge: null, connected: false };
+      // 松在某个口上但没连成（类型不符/同一个口）→ 还原原线；松在空白 → 即断开，不弹创建菜单
+      if (!picked.connected && state.toHandle) setEdges((es) => [...es, edge]);
+      return;
+    }
+    if (state.isValid || state.toNode || !state.fromNode || !state.fromHandle) return;
+    const fromNode = state.fromNode;
+    const side = state.fromHandle.type; // 'source' = 从输出拖出，'target' = 从输入拖出
+    const fromSpec = getNodeSpec(fromNode.type || '');
+    const fromList = side === 'source' ? fromSpec?.outputs : fromSpec?.inputs;
+    const hid = state.fromHandle.id || null;
+    const fromDef = fromList?.find((h) => renderedHandleId(fromNode.type || '', h.id) === hid) || fromList?.[0];
+    if (!fromDef) return;
+    const items = DROP_CREATE_TYPES.flatMap((c) => {
+      const spec = getNodeSpec(c.type);
+      const pool = (side === 'source' ? spec?.inputs : spec?.outputs) || [];
+      // 同类型端口里优先同名（如 机位→camera_prompt），否则取第一个
+      const match = pool.find((h) => h.type === fromDef.type && h.id === fromDef.id) || pool.find((h) => h.type === fromDef.type);
+      return match ? [{ ...c, handleId: renderedHandleId(c.type, match.id) }] : [];
+    });
+    if (!items.length) return;
+    const pt = 'changedTouches' in event ? event.changedTouches[0] : event;
+    setDropMenu({
+      x: pt.clientX, y: pt.clientY,
+      flow: screenToFlowPosition({ x: pt.clientX, y: pt.clientY }),
+      from: { nodeId: fromNode.id, handleId: hid, side },
+      items,
+    });
+  }, [screenToFlowPosition]);
+
+  const createFromDrop = (item: DropMenuState['items'][number]) => {
+    if (!dropMenu) return;
+    const { flow, from } = dropMenu;
+    const { w, h } = estimateSize(item.type);
+    if (!from) {
+      // 画布右键：左上角落在右键位置
+      const node = createNode(item.type, flow);
+      setNodes((nds) => [...nds, node]);
+      setSelectedNodeId(node.id);
+      setDropMenu(null);
+      return;
+    }
+    // 从输出拖出 → 新卡放在落点右侧；从输入拖出 → 新卡放在落点左侧
+    const node = createNode(item.type, { x: from.side === 'source' ? flow.x + 24 : flow.x - w - 24, y: flow.y - h / 2 });
+    setNodes((nds) => [...nds, node]);
+    setSelectedNodeId(node.id);
+    const params: Connection = from.side === 'source'
+      ? { source: from.nodeId, sourceHandle: from.handleId, target: node.id, targetHandle: item.handleId ?? null }
+      : { source: node.id, sourceHandle: item.handleId ?? null, target: from.nodeId, targetHandle: from.handleId };
+    onConnect(params); // 复用连线逻辑：建边 + 把上游数据灌进新卡
+    setDropMenu(null);
+  };
+
+  // ── 已连线的输入点按下 = 拎起这条线（而不是再拉一条新线）：
+  // 删掉原边，在其上游输出点上补发一次 mousedown，让 React Flow 从上游开始一次连线拖拽
+  useEffect(() => {
+    // 挂在 document 捕获阶段（画布可能晚于本 effect 挂载），只处理画布内的按下
+    const onDown = (e: MouseEvent) => {
+      const wrap = rfWrapRef.current;
+      if (!wrap || e.button !== 0 || (e as any).__picked || !wrap.contains(e.target as any)) return;
+      const h = (e.target as HTMLElement).closest?.('.react-flow__handle.target') as HTMLElement | null;
+      const nodeId = h?.closest('.react-flow__node')?.getAttribute('data-id');
+      if (!h || !nodeId) return;
+      const hid = h.getAttribute('data-handleid');
+      const edge = (edgesRef.current || []).find((ed) => ed.target === nodeId && (ed.targetHandle ?? null) === (hid ?? null));
+      if (!edge) return;
+      const srcNodeEl = wrap.querySelector(`.react-flow__node[data-id="${CSS.escape(edge.source)}"]`);
+      const srcHandle = (edge.sourceHandle
+        ? srcNodeEl?.querySelector(`.react-flow__handle.source[data-handleid="${CSS.escape(edge.sourceHandle)}"]`)
+        : srcNodeEl?.querySelector('.react-flow__handle.source')) as HTMLElement | null;
+      if (!srcHandle) return; // 上游不在画面里（被虚拟化等）→ 走默认行为
+      e.stopPropagation();
+      e.preventDefault();
+      pickedEdge.current = { edge, connected: false };
+      setEdges((es) => es.filter((x) => x.id !== edge.id));
+      const ev = new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: e.clientX, clientY: e.clientY, button: 0, buttons: 1 });
+      (ev as any).__picked = true;
+      srcHandle.dispatchEvent(ev);
+    };
+    document.addEventListener('mousedown', onDown, true);
+    return () => document.removeEventListener('mousedown', onDown, true);
+  }, [setEdges]);
+
+  // ── 拖动已有连线的端点：拖到别的口 = 改接，拖到空白处 = 断开 ──
+  const reconnectOk = useRef(true);
+  const onReconnectStart = useCallback(() => { reconnectOk.current = false; }, []);
+  const onReconnect = useCallback((oldEdge: Edge, conn: Connection) => {
+    reconnectOk.current = true;
+    if (!isValidConnection(conn)) { alert('连线类型不匹配'); return; }
+    setEdges((es) => reconnectEdge(oldEdge, conn, es));
+  }, [isValidConnection, setEdges]);
+  const onReconnectEnd = useCallback((_: MouseEvent | TouchEvent, edge: Edge) => {
+    if (!reconnectOk.current) setEdges((es) => es.filter((e) => e.id !== edge.id));
+    reconnectOk.current = true;
+  }, [setEdges]);
+
+  // ── 自动放置（规则见 autoLayout.ts）：所有「程序替用户放卡片」的入口都走这几个 helper，保证不重叠 ──
+  const occupiedRects = (extra: Node[] = []): Rect[] => [...((nodesRef.current as Node[]) || []), ...extra].map((n) => rectOf(n as any));
+  /** 视口中上部（落在用户眼前），作为独立卡的放置锚点 */
+  const viewportAnchor = (): { x: number; y: number } => {
+    const el = wrapperRef.current;
+    if (!el) return { x: 120, y: 120 };
+    const r = el.getBoundingClientRect();
+    const p = screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 3 });
+    return { x: p.x - 180, y: p.y - 120 };
+  };
+  /** 独立卡：视口锚点所在列向下找空位 */
+  const freePosition = (type: string): { x: number; y: number } => {
+    const { w, h } = estimateSize(type);
+    return placeNear(occupiedRects(), viewportAnchor(), w, h);
+  };
+  /** 成组卡：保持组内相对布局，整组放到现有内容下方 */
+  const placeNewBlock = (block: Node[]): Node[] => {
+    if (!block.length) return block;
+    const { dx, dy } = placeBlock(occupiedRects(), block.map((n) => rectOf(n as any)));
+    return block.map((n) => ({ ...n, position: { x: n.position.x + dx, y: n.position.y + dy } }));
+  };
+  /** 新放下的卡片可能在视口外：平移镜头让用户看到 */
+  const revealNodes = (ids: string[]) => {
+    if (!ids.length) return;
+    window.setTimeout(() => {
+      try { fitView({ nodes: ids.map((id) => ({ id })), padding: 0.25, duration: 300, maxZoom: 1 }); } catch { /* ignore */ }
+    }, 80);
+  };
+
   const createNode = (type: string, position: { x: number; y: number }, extraData?: Record<string, any>) => {
     const node: Node = {
       id: genId(type),
@@ -601,9 +897,13 @@ const InnerCanvas: React.FC = () => {
   };
 
   const addTemplate = (tpl: any) => {
-    const baseX = 120;
-    const baseY = 80;
-    const newNodes: Node[] = tpl.nodes.map((t: string, i: number) => createNode(t, { x: baseX + i * 400, y: baseY }));
+    // 组内横向排开（列间距同 autoLayout），整组放到现有内容下方，不压已有卡片
+    let colX = 0;
+    const newNodes: Node[] = placeNewBlock(tpl.nodes.map((t: string) => {
+      const n = createNode(t, { x: colX, y: 0 });
+      colX += estimateSize(t).w + 120;
+      return n;
+    }));
     const newEdges: Edge[] = [];
     // 智能模板连线：区分线性链与分支（video/audio 并行汇入 export）
     for (let i = 1; i < newNodes.length; i++) {
@@ -614,7 +914,7 @@ const InnerCanvas: React.FC = () => {
         // 改为 prompt 节点分叉到 audio
         const promptNode = newNodes.find(n => n.type === 'prompt');
         if (promptNode) {
-          newEdges.push({ id: `e_${promptNode.id}_${cur.id}`, source: promptNode.id, target: cur.id, sourceHandle: 'prompt', targetHandle: 'text', type: 'smoothstep', animated: true } as any);
+          newEdges.push({ id: `e_${promptNode.id}_${cur.id}`, source: promptNode.id, target: cur.id, sourceHandle: 'prompt', targetHandle: 'text', type: 'default' } as any);
         }
         continue;
       }
@@ -631,7 +931,7 @@ const InnerCanvas: React.FC = () => {
         const ts = getNodeSpec(cur.type || '');
         if (ps && ts && ps.outputs[0] && ts.inputs[0] && ps.outputs[0].type !== ts.inputs[0].type) continue;
       }
-      newEdges.push({ id: `e_${prev.id}_${cur.id}`, source: prev.id, target: cur.id, sourceHandle: sh, targetHandle: th, type: 'smoothstep', animated: true } as any);
+      newEdges.push({ id: `e_${prev.id}_${cur.id}`, source: prev.id, target: cur.id, sourceHandle: sh, targetHandle: th, type: 'default' } as any);
     }
     // 完整链路模板收尾：若同时存在 video 与 audio，共同汇入 export
     if (tpl.id === 't2') {
@@ -639,15 +939,16 @@ const InnerCanvas: React.FC = () => {
       const exportNode = newNodes.find(n => n.type === 'export');
       const audioNode = newNodes.find(n => n.type === 'audio');
       if (videoNode && exportNode && !newEdges.some(e => e.source === videoNode.id && e.target === exportNode.id)) {
-        newEdges.push({ id: `e_${videoNode.id}_${exportNode.id}`, source: videoNode.id, target: exportNode.id, sourceHandle: 'video', targetHandle: 'video', type: 'smoothstep', animated: true } as any);
+        newEdges.push({ id: `e_${videoNode.id}_${exportNode.id}`, source: videoNode.id, target: exportNode.id, sourceHandle: 'video', targetHandle: 'video', type: 'default' } as any);
       }
       if (audioNode && exportNode && !newEdges.some(e => e.source === audioNode.id && e.target === exportNode.id)) {
-        newEdges.push({ id: `e_${audioNode.id}_${exportNode.id}`, source: audioNode.id, target: exportNode.id, sourceHandle: 'audio', targetHandle: 'audio', type: 'smoothstep', animated: true } as any);
+        newEdges.push({ id: `e_${audioNode.id}_${exportNode.id}`, source: audioNode.id, target: exportNode.id, sourceHandle: 'audio', targetHandle: 'audio', type: 'default' } as any);
       }
     }
     setNodes(nds => [...nds, ...newNodes]);
     setEdges(es => [...es, ...newEdges]);
     if (newNodes.length > 0) setSelectedNodeId(newNodes[0].id);
+    revealNodes(newNodes.map(n => n.id));
   };
 
   // Creator 模板（Agent 创造模式产物，storage/canvas_templates）：从模板新建节点链
@@ -671,18 +972,19 @@ const InnerCanvas: React.FC = () => {
       prompt: 'prompt', text: 'prompt',
       director: 'director3d', director3d: 'director3d', export: 'export',
     };
-    const baseX = 120, baseY = 80;
     const idByKey: Record<string, string> = {};
-    const newNodes: Node[] = [];
+    let newNodes: Node[] = [];
     for (const n of (tpl.nodes || [])) {
       const key = String(n.key || '');
       const type = KEY2TYPE[key];
       if (!type) continue;
-      const node = createNode(type, { x: baseX + (Number(n.x) || 0), y: baseY + (Number(n.y) || 0) });
+      const node = createNode(type, { x: Number(n.x) || 0, y: Number(n.y) || 0 });
       idByKey[key] = node.id;
       newNodes.push(node);
     }
     if (newNodes.length === 0) { alert('该模板无可用节点（未知节点类型已跳过）'); return; }
+    // 模板自带相对布局，整组放到现有内容下方
+    newNodes = placeNewBlock(newNodes);
     const byId: Record<string, Node> = {};
     newNodes.forEach(n => { byId[n.id] = n; });
     const inferHandles = (prevType: string, curType: string): [string, string] | null => {
@@ -710,15 +1012,16 @@ const InnerCanvas: React.FC = () => {
       let pair = inferHandles(prev.type as string, cur.type as string);
       if (!pair && prev.type === 'video' && cur.type === 'audio' && promptNode) {
         pair = null;
-        newEdges.push({ id: `e_${promptNode.id}_${cur.id}`, source: promptNode.id, target: cur.id, sourceHandle: 'prompt', targetHandle: 'text', type: 'smoothstep', animated: true } as any);
+        newEdges.push({ id: `e_${promptNode.id}_${cur.id}`, source: promptNode.id, target: cur.id, sourceHandle: 'prompt', targetHandle: 'text', type: 'default' } as any);
         continue;
       }
       if (!pair) continue;
-      newEdges.push({ id: `e_${sid}_${tid}`, source: sid, target: tid, sourceHandle: pair[0], targetHandle: pair[1], type: 'smoothstep', animated: true } as any);
+      newEdges.push({ id: `e_${sid}_${tid}`, source: sid, target: tid, sourceHandle: pair[0], targetHandle: pair[1], type: 'default' } as any);
     }
     setNodes(nds => [...nds, ...newNodes]);
     setEdges(es => [...es, ...newEdges]);
     setSelectedNodeId(newNodes[0].id);
+    revealNodes(newNodes.map(n => n.id));
   };
 
   // 监听衍生 + 菜单（使用 ref 避免闭包陈旧）
@@ -727,12 +1030,17 @@ const InnerCanvas: React.FC = () => {
       const { sourceId, nextType } = e.detail;
       const curNodes = nodesRef.current || [];
       const src = curNodes.find((n: any) => n.id === sourceId);
-      const pos = src ? { x: src.position.x + 400, y: src.position.y } : { x: 120, y: 120 + curNodes.length * 40 };
+      // 下游衍生：源卡右侧一列，从源卡顶边向下找空位（连续衍生会竖排，不再叠在同一个位置）
+      const { w, h } = estimateSize(nextType);
+      // 源卡已有的下游卡：新衍生卡并入它们那一列
+      const downstream = src ? (edgesRef.current || []).filter((ed: any) => ed.source === src.id)
+        .map((ed: any) => curNodes.find((n: any) => n.id === ed.target)).filter(Boolean).map((n: any) => rectOf(n)) : [];
+      const pos = src ? placeDownstream(occupiedRects(), rectOf(src as any), w, h, downstream) : freePosition(nextType);
       const node = createNode(nextType, pos);
       setNodes(nds => [...nds, node]);
       setSelectedNodeId(node.id);
       if (src) {
-        const edge: Edge = { id: `e_${sourceId}_${node.id}`, source: sourceId, target: node.id, type: 'smoothstep', animated: true } as any;
+        const edge: Edge = { id: `e_${sourceId}_${node.id}`, source: sourceId, target: node.id, type: 'default' } as any;
         if (src.type === 'prompt' && nextType === 'image') { (edge as any).sourceHandle = 'prompt'; (edge as any).targetHandle = 'prompt'; }
         if (src.type === 'prompt' && nextType === 'video') { (edge as any).sourceHandle = 'prompt'; (edge as any).targetHandle = 'prompt'; }
         if (src.type === 'prompt' && nextType === 'audio') { (edge as any).sourceHandle = 'prompt'; (edge as any).targetHandle = 'text'; }
@@ -748,7 +1056,9 @@ const InnerCanvas: React.FC = () => {
       const curNodes = nodesRef.current || [];
       const src = curNodes.find((n: any) => n.id === nodeId);
       if (!src) return;
-      const newNode = createNode(src.type || 'prompt', { x: src.position.x + 40, y: src.position.y + 40 });
+      // 复制：与源卡同列，放到下方第一个空位
+      const sr = rectOf(src as any);
+      const newNode = createNode(src.type || 'prompt', findFreeInColumn(occupiedRects(), sr.x, sr.y, sr.w, sr.h));
       newNode.data = { ...(src.data as any), onUpdate: handleNodeUpdate, onExecute: handleNodeExecute };
       setNodes(nds => [...nds, newNode]);
       setSelectedNodeId(newNode.id);
@@ -759,6 +1069,123 @@ const InnerCanvas: React.FC = () => {
       window.removeEventListener('canvas-add-node', onAdd as any);
       window.removeEventListener('canvas-duplicate-node', onDuplicate as any);
     };
+  }, []);
+
+  // ── 输入卡片：控制台「选参考 / 添加到输入 / 一键绑定」→ 画布上放对应卡片并连到目标句柄 ──
+  // 插槽值由控制台照常写入目标节点；这里只负责「看得见」：
+  //  · 选的是画布上某卡片的产出 → 直接连那张卡，不重复建卡；
+  //  · 其余（素材库/角色库/上传/其他卡的输入）→ 在目标卡左侧一列竖排放「加载图像/视频/音频」卡并连线；
+  //  · 单值插槽替换原输入、多值插槽追加；已不在插槽取值里的旧连线（及无人再用的自动输入卡）清理掉。
+  useEffect(() => {
+    const LOADER_OF: Record<string, string> = { image: 'load-image', video: 'load-video', audio: 'load-audio' };
+    const mediaOf = (n: any, type: string): string => {
+      const d: any = n?.data || {};
+      if (type === 'image') return d.image_url || d.result_url || d.image || d.url || '';
+      if (type === 'video') return d.video_url || d.video || d.url || '';
+      return d.audio_url || d.audio || d.url || '';
+    };
+    const loaderData = (type: string, url: string) => (
+      type === 'image' ? { image: url, url, image_url: url }
+        : type === 'video' ? { video: url, url, video_url: url }
+        : { audio: url, url, audio_url: url }
+    );
+    /** 插槽键 → 目标卡上的真实句柄：同名句柄优先；否则同媒体类型里的参考集 / 参考 / 第一个 */
+    const resolveHandle = (tgtType: string, slotKey: string, mediaType: string): string | undefined => {
+      const inputs = getNodeSpec(tgtType || '')?.inputs || [];
+      if (inputs.some(h => h.id === slotKey)) return slotKey;
+      const same = inputs.filter(h => h.type === mediaType);
+      return same.find(h => h.id === 'reference_images')?.id || same.find(h => h.id === 'reference')?.id || same[0]?.id;
+    };
+    /** 进入该句柄的旧连线里，要拆掉的连线 / 连带删除的自动输入卡 */
+    const planRemoval = (nds: any[], eds: any[], targetId: string, th: string, mediaType: string, keep: Set<string> | null) => {
+      const edgeIds = new Set<string>();
+      const nodeIds = new Set<string>();
+      for (const ed of eds) {
+        if (ed.target !== targetId || (ed.targetHandle || '') !== th) continue;
+        const src = nds.find(n => n.id === ed.source);
+        if (keep && keep.has(mediaOf(src, mediaType))) continue;
+        edgeIds.add(ed.id);
+        if ((src?.data as any)?._autoInput && !eds.some(o => o.source === src.id && o.id !== ed.id)) nodeIds.add(src.id);
+      }
+      return { edgeIds, nodeIds };
+    };
+
+    const onAttach = (e: any) => {
+      const det: AttachInputsDetail = e?.detail;
+      if (!det?.targetId || !det.items?.length) return;
+      const nds: any[] = (nodesRef.current as any[]) || [];
+      const eds: any[] = (edgesRef.current as any[]) || [];
+      const target = nds.find(n => n.id === det.targetId);
+      if (!target) return;
+      const th = resolveHandle(target.type, det.slotKey, det.mediaType);
+      const keep = new Set<string>(det.keep && det.keep.length ? det.keep : det.items.map(i => i.url));
+      const { edgeIds, nodeIds } = th ? planRemoval(nds, eds, target.id, th, det.mediaType, keep) : { edgeIds: new Set<string>(), nodeIds: new Set<string>() };
+      // 已经连着的（多值插槽里保留的旧输入）不再重复放
+      const connected = new Set<string>(
+        eds.filter(ed => th && ed.target === target.id && (ed.targetHandle || '') === th && !edgeIds.has(ed.id))
+          .map(ed => mediaOf(nds.find(n => n.id === ed.source), det.mediaType)),
+      );
+      const occupied = nds.filter(n => !nodeIds.has(n.id)).map(n => rectOf(n));
+      const tRect = rectOf(target);
+      // 目标卡已有的上游卡：新输入卡并入它们那一列
+      const upstream: Rect[] = eds.filter(ed => ed.target === target.id && !edgeIds.has(ed.id))
+        .map(ed => nds.find(n => n.id === ed.source)).filter((n: any) => n && !nodeIds.has(n.id)).map((n: any) => rectOf(n));
+      const addNodes: Node[] = [];
+      const addEdges: Edge[] = [];
+      for (const it of det.items) {
+        if (!it.url || connected.has(it.url)) continue;
+        let srcId = '';
+        let sh: string | undefined;
+        const reuse = it.sourceNodeId && ['image', 'video', 'audio'].includes(it.sourceSlotKey || '')
+          ? nds.find(n => n.id === it.sourceNodeId && n.id !== target.id && !nodeIds.has(n.id))
+          : undefined;
+        if (reuse) {
+          srcId = reuse.id;
+          sh = getNodeSpec(reuse.type || '')?.outputs.find(h => h.type === det.mediaType)?.id;
+        } else {
+          const ltype = LOADER_OF[det.mediaType];
+          const { w, h } = estimateSize(ltype);
+          const pos = placeUpstream(occupied, tRect, w, h, upstream);
+          occupied.push({ x: pos.x, y: pos.y, w, h });
+          upstream.push({ x: pos.x, y: pos.y, w, h });
+          const card = createNode(ltype, pos, { ...loaderData(det.mediaType, it.url), _autoInput: true });
+          addNodes.push(card);
+          srcId = card.id;
+          sh = det.mediaType;
+        }
+        connected.add(it.url);
+        if (th && srcId) {
+          addEdges.push({ id: `e_${srcId}_${target.id}_${sh || 'out'}_${th}_${Date.now().toString(36)}${addEdges.length}`, source: srcId, target: target.id, sourceHandle: sh, targetHandle: th, type: 'default' } as any);
+        }
+      }
+      if (!addNodes.length && !addEdges.length && !edgeIds.size) return;
+      setNodes(cur => [...cur.filter(n => !nodeIds.has(n.id)), ...addNodes]);
+      setEdges(cur => [...cur.filter(ed => !edgeIds.has(ed.id)), ...addEdges]);
+      if (addNodes.length) toast.info(`已在画布放置 ${addNodes.length} 张输入卡片`);
+    };
+
+    const onDetach = (e: any) => {
+      const det: DetachInputDetail = e?.detail;
+      if (!det?.targetId) return;
+      const nds: any[] = (nodesRef.current as any[]) || [];
+      const eds: any[] = (edgesRef.current as any[]) || [];
+      const target = nds.find(n => n.id === det.targetId);
+      if (!target) return;
+      const th = resolveHandle(target.type, det.slotKey, det.mediaType);
+      if (!th) return;
+      const { edgeIds, nodeIds } = planRemoval(nds, eds, target.id, th, det.mediaType, null);
+      if (!edgeIds.size) return;
+      setNodes(cur => cur.filter(n => !nodeIds.has(n.id)));
+      setEdges(cur => cur.filter(ed => !edgeIds.has(ed.id)));
+    };
+
+    window.addEventListener(ATTACH_EVENT, onAttach as any);
+    window.addEventListener(DETACH_EVENT, onDetach as any);
+    return () => {
+      window.removeEventListener(ATTACH_EVENT, onAttach as any);
+      window.removeEventListener(DETACH_EVENT, onDetach as any);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
 
@@ -877,23 +1304,21 @@ const InnerCanvas: React.FC = () => {
     const vprompt = shot.video_prompt || shot.action_desc || shot.image_prompt || '';
     const camMatch = /\[(?:Camera|运镜):[^\]]+\]/.exec(vprompt);
     const camPrompt = camMatch ? camMatch[0] : '';
-    const curNodes = nodesRef.current || [];
-    const maxX = curNodes.reduce((m: number, n: any) => Math.max(m, n.position?.x || 0), 0);
-    const baseX = curNodes.length ? maxX + 320 : 120;
-    const baseY = 120 + (curNodes.length % 3) * 80;
+    // 子图内部按「输入列 → 视频列」相对布局（输入竖排不重叠），整组放到现有内容下方（placeNewBlock）
+    const inputColGap = estimateSize('image').h + 48;
     const mk = (type: string, dx: number, dy: number, data: any) => {
-      const n = createNode(type, { x: baseX + dx, y: baseY + dy });
+      const n = createNode(type, { x: dx, y: dy });
       n.data = { ...n.data, ...data };
       return n;
     };
-    const newNodes: Node[] = [];
+    let newNodes: Node[] = [];
     const newEdges: Edge[] = [];
     const edge = (s: Node, sh: string, t: Node, th: string) => {
-      newEdges.push({ id: `e_${s.id}_${t.id}_${sh}_${th}`, source: s.id, target: t.id, sourceHandle: sh, targetHandle: th, type: 'smoothstep', animated: true } as any);
+      newEdges.push({ id: `e_${s.id}_${t.id}_${sh}_${th}`, source: s.id, target: t.id, sourceHandle: sh, targetHandle: th, type: 'default' } as any);
     };
     const promptNode = mk('prompt', 0, 0, { prompt: vprompt, text: vprompt });
     newNodes.push(promptNode);
-    const dirNode = mk('director3d', 0, 240, {
+    const dirNode = mk('director3d', 0, estimateSize('prompt').h + 48, {
       framing: shot.camera_framing || 'medium',
       motion: shot.camera_motion || 'push_in',
       pose: shot.pose_preset || 'stand',
@@ -907,7 +1332,7 @@ const InnerCanvas: React.FC = () => {
     let imgNode: Node | null = null;
     if (!shot.image_url && shot.image_prompt) {
       const imgBind = await buildNodeSlotData(shot, 'image', shot.image_provider || '', shotDynamic, projectAssets);
-      imgNode = mk('image', 0, 480, {
+      imgNode = mk('image', 0, estimateSize('prompt').h + 48 + inputColGap, {
         prompt: shot.image_prompt,
         provider_id: shot.image_provider || undefined,
         // 分镜归属：节点可随时把结果回写该镜（底部控制台「回写到分镜」）
@@ -924,7 +1349,7 @@ const InnerCanvas: React.FC = () => {
       });
       newNodes.push(imgNode);
     }
-    const videoNode = mk('video', 420, 120, {
+    const videoNode = mk('video', estimateSize('prompt').w + 120, 0, {
       prompt: vprompt,
       duration: Math.round(shot.duration) || 5,
       provider_id: shot.video_provider || undefined,
@@ -956,7 +1381,9 @@ const InnerCanvas: React.FC = () => {
       edge(promptNode, 'prompt', imgNode, 'prompt');
       edge(imgNode, 'image', videoNode, 'first_frame');
     }
+    newNodes = placeNewBlock(newNodes);
     setNodes(nds => [...nds, ...newNodes]);
+    revealNodes(newNodes.map(n => n.id));
     setEdges(es => [...es, ...newEdges]);
     setSelectedNodeId(videoNode.id);
     // 隶属关系落盘 + 子图即时保存（含画布名）
@@ -1046,26 +1473,44 @@ const InnerCanvas: React.FC = () => {
       if (nonce) importedAssetNonce.current = nonce;
       let abs = asset.file_url || '';
       if (abs && abs.startsWith('/')) abs = 'http://127.0.0.1:8000' + abs;
+      // 文本/提示词素材：无文件也要能落画布（此前 if(!abs) 直接吞掉）
+      const label0 = asset.visual_prompt || asset.description || asset.name || '';
+      if (asset.category === 'text') {
+        const txt = String(asset.content || asset.visual_prompt || '');
+        const tn = createNode('text-prompt', freePosition('text-prompt'));
+        tn.data = { ...tn.data, prompt: txt, text: txt };
+        setNodes(nds => [...nds, tn]);
+        setSelectedNodeId(tn.id);
+        revealNodes([tn.id]);
+        return;
+      }
       if (!abs) return;
       const isVideo = /\.(mp4|webm|mov)$/i.test(abs);
       const isAudio = /\.(mp3|wav|ogg|m4a|flac)$/i.test(abs);
-      const label = asset.visual_prompt || asset.description || asset.name || '';
-      const curNodes = nodesRef.current || [];
-      const maxX = curNodes.reduce((m: number, n: any) => Math.max(m, n.position?.x || 0), 0);
-      const pos = { x: curNodes.length ? maxX + 320 : 120, y: 200 + (curNodes.length % 3) * 80 };
-      let node: Node;
-      if (isAudio) {
-        node = createNode('audio', pos);
-        node.data = { ...node.data, text: '', ref_audio: abs };
-      } else if (isVideo) {
-        node = createNode('video', pos);
-        node.data = { ...node.data, prompt: label, duration: 5, first_frame: abs };
-      } else {
-        node = createNode('image', pos);
-        node.data = { ...node.data, prompt: label, reference_images: [abs] };
+      const label = label0;
+      if (isVideo) {
+        // 视频素材：就是一张「加载视频」卡（视频卡的首帧句柄收的是图片，不能再把视频塞进首帧）
+        const vn = createNode('load-video', freePosition('load-video'), { video: abs, url: abs, video_url: abs, name: asset.name });
+        setNodes(nds => [...nds, vn]);
+        setSelectedNodeId(vn.id);
+        revealNodes([vn.id]);
+        return;
       }
-      setNodes(nds => [...nds, node]);
-      setSelectedNodeId(node.id);
+      // 图片/音频素材 →「素材卡 → 生成卡」：素材卡在左列、生成卡在右列并连线，输入了什么一目了然
+      const kindOf = isAudio ? 'audio' : 'image';
+      const loaderType = isAudio ? 'load-audio' : 'load-image';
+      const handleIn = isAudio ? 'ref_audio' : 'reference_images';
+      const src = createNode(loaderType, { x: 0, y: 0 }, {
+        ...(isAudio ? { audio: abs, url: abs, audio_url: abs } : { image: abs, url: abs, image_url: abs }),
+        _autoInput: true, name: asset.name,
+      });
+      const gen = createNode(kindOf, { x: estimateSize(loaderType).w + 120, y: 0 });
+      gen.data = isAudio ? { ...gen.data, text: '', ref_audio: abs } : { ...gen.data, prompt: label, reference_images: [abs] };
+      const placed = placeNewBlock([src, gen]);
+      setNodes(nds => [...nds, ...placed]);
+      setEdges(es => [...es, { id: `e_${src.id}_${gen.id}_${kindOf}_${handleIn}`, source: src.id, target: gen.id, sourceHandle: kindOf, targetHandle: handleIn, type: 'default' } as any]);
+      setSelectedNodeId(gen.id);
+      revealNodes(placed.map(n => n.id));
     };
     const onEvent = (e: any) => buildFromAsset(e?.detail);
     window.addEventListener('canvas-import-asset', onEvent as any);
@@ -1080,14 +1525,67 @@ const InnerCanvas: React.FC = () => {
     return () => window.removeEventListener('canvas-import-asset', onEvent as any);
   }, []);
 
+  /** 命中检测：返回指针正下方的节点（自上而下取最上层），用于「拖到节点上直接填充」 */
+  const findNodeAt = useCallback((clientX: number, clientY: number): Node | null => {
+    const p = screenToFlowPosition({ x: clientX, y: clientY });
+    const list: any[] = (nodesRef.current as any[]) || [];
+    for (let i = list.length - 1; i >= 0; i--) {
+      const n = list[i];
+      const w = n.measured?.width || n.width || 320;
+      const h = n.measured?.height || n.height || 200;
+      const x = n.position?.x || 0;
+      const y = n.position?.y || 0;
+      if (p.x >= x && p.x <= x + w && p.y >= y && p.y <= y + h) return n as Node;
+    }
+    return null;
+  }, [screenToFlowPosition]);
+
+  /** 文本投放：写入命中节点的首个 text 输入（走 handleNodeUpdate 保留级联传播）；节点无文本输入返回 false */
+  const fillNodeWithText = useCallback((nodeId: string, txt: string): boolean => {
+    const nds: any[] = (nodesRef.current as any[]) || [];
+    const n = nds.find(x => x.id === nodeId);
+    if (!n) return false;
+    const spec = getNodeSpec(n.type || '');
+    const inDef = spec?.inputs.find(h => h.type === 'text');
+    if (!inDef) return false;
+    const patch: any = { [inDef.id]: txt };
+    if ((n.type === 'prompt' || n.type === 'text-prompt') && inDef.id === 'prompt') patch.text = txt;
+    handleNodeUpdate(nodeId, patch);
+    setSelectedNodeId(nodeId);
+    return true;
+  }, [handleNodeUpdate]);
+
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     const type = e.dataTransfer.getData('application/canvas-nodetype');
     const droppedNodeId = e.dataTransfer.getData('application/canvas-nodeid');
     const assetId = e.dataTransfer.getData('application/canvas-assetid');
-    const assetUrl = e.dataTransfer.getData('text/plain');
-    if (!type && !assetId && !assetUrl) return;
+    const assetKind = e.dataTransfer.getData('application/canvas-assetkind');
+    const dragText = e.dataTransfer.getData('application/canvas-text');
+    const plain = e.dataTransfer.getData('text/plain');
+    if (!type && !assetId && !dragText && !plain) return;
     const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+
+    // ── 文本投放：文本素材 或 自由文本 → 命中节点即填充，落空则新建「提示词文本」节点 ──
+    let textContent: string | null = null;
+    if (dragText) textContent = dragText;
+    else if (assetKind === 'text') {
+      const a: any = assets.find(x => x.id === assetId);
+      textContent = String(a?.content || a?.visual_prompt || '');
+    } else if (!type && !assetId && plain && !/^https?:\/\//i.test(plain.trim()) && !plain.trim().startsWith('/storage/')) {
+      textContent = plain;
+    }
+    if (textContent !== null && !type) {
+      const txt = textContent;
+      const hit = findNodeAt(e.clientX, e.clientY);
+      if (txt.trim() && hit && fillNodeWithText(hit.id, txt)) return;
+      const node = createNode('text-prompt', position);
+      node.data = { ...node.data, prompt: txt, text: txt };
+      setNodes(nds => [...nds, node]);
+      setSelectedNodeId(node.id);
+      return;
+    }
+
     if (assetId) {
       const asset = assets.find(a => a.id === assetId);
       if (!asset) return;
@@ -1107,7 +1605,7 @@ const InnerCanvas: React.FC = () => {
       setNodes(nds => [...nds, node]);
       setSelectedNodeId(node.id);
     }
-  }, [screenToFlowPosition, assets]);
+  }, [screenToFlowPosition, assets, findNodeAt, fillNodeWithText]);
 
   const handleManualSave = async () => {
     if (!pid) { alert('请先在 项目看板 创建/打开项目'); return; }
@@ -1270,7 +1768,7 @@ const InnerCanvas: React.FC = () => {
       {/* 中间无限画布 */}
       <div ref={wrapperRef} className="flex-1 relative flex flex-col min-w-0" style={{ background: isLight ? '#E8ECF1' : '#08080B' }} onDrop={onDrop} onDragOver={onDragOver}>
         {/* 画布顶部工具条：完整态（wide/normal）与精简态（compact，窄屏时低频操作收入「更多」） */}
-        <div ref={toolbarRef} className="h-11 px-4 border-b border-border bg-surface flex items-center gap-2 shrink-0">
+        <div ref={toolbarRef} className="h-11 px-4 border-b border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] flex items-center gap-2 shrink-0">
           <div className="flex items-center gap-2 text-xs min-w-0">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow shadow-emerald-500/30 shrink-0" />
             <span className="[color:var(--color-text-secondary)] shrink-0">项目</span>
@@ -1281,11 +1779,11 @@ const InnerCanvas: React.FC = () => {
           </div>
           <div className="flex-1" />
           <div className="flex items-center gap-2 shrink-0">
-            <select value={canvasId} onChange={e=>switchCanvas(e.target.value)} title="隶属画布：分镜视频在此画布生成" className={`px-2 py-1 rounded-full bg-surface-secondary border border-border text-xs [color:var(--color-text-main)] focus:outline-none ${toolbarLevel === 'compact' ? 'max-w-[104px]' : 'max-w-[160px]'}`}>
+            <select value={canvasId} onChange={e=>switchCanvas(e.target.value)} title="隶属画布：分镜视频在此画布生成" className={`px-2 py-1 rounded-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-xs [color:var(--color-text-main)] focus:outline-none ${toolbarLevel === 'compact' ? 'max-w-[104px]' : 'max-w-[160px]'}`}>
               {canvasList.length === 0 && <option value={canvasId}>{currentCanvasName}</option>}
               {canvasList.map(c=> <option key={c.id} value={c.id}>{c.name}（{c.node_count}节点）</option>)}
             </select>
-            <button onClick={() => setShowManager(true)} className="px-3 py-1 rounded-full bg-surface-secondary border border-border text-xs font-medium [color:var(--color-text-main)] hover:bg-surface-tertiary transition-colors" title="查看全部画布：新建/打开/改名/删除/隶属分镜">管理</button>
+            <button onClick={() => setShowManager(true)} className="px-3 py-1 rounded-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-xs font-medium [color:var(--color-text-main)] hover:bg-white/65 dark:bg-white/[.09] transition-colors" title="查看全部画布：新建/打开/改名/删除/隶属分镜">管理</button>
             <CanvasManagerModal
               isOpen={showManager}
               onClose={() => setShowManager(false)}
@@ -1298,15 +1796,15 @@ const InnerCanvas: React.FC = () => {
             {/* 完整态：画布级低频操作直接铺开（快捷键提示仅在很宽时出现） */}
             {toolbarLevel !== 'compact' && (
               <>
-                <button onClick={handleCreateCanvas} className="px-3 py-1 rounded-full bg-surface-secondary border border-border text-xs font-medium [color:var(--color-text-main)] hover:bg-surface-tertiary transition-colors">+ 新画布</button>
-                <button onClick={handleRenameCanvas} aria-label="重命名当前画布" title="重命名当前画布" className="w-7 h-7 rounded-full bg-surface-secondary border border-border [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] flex items-center justify-center transition-colors">
+                <button onClick={handleCreateCanvas} className="px-3 py-1 rounded-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-xs font-medium [color:var(--color-text-main)] hover:bg-white/65 dark:bg-white/[.09] transition-colors">+ 新画布</button>
+                <button onClick={handleRenameCanvas} aria-label="重命名当前画布" title="重命名当前画布" className="w-7 h-7 rounded-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] flex items-center justify-center transition-colors">
                   <Pencil className="w-3.5 h-3.5" strokeWidth={1.7} />
                 </button>
-                <button onClick={handleDeleteCanvas} aria-label="删除当前画布" title="删除当前画布" className="w-7 h-7 rounded-full bg-surface-secondary border border-border [color:var(--color-text-muted)] hover:text-red-400 flex items-center justify-center transition-colors">
+                <button onClick={handleDeleteCanvas} aria-label="删除当前画布" title="删除当前画布" className="w-7 h-7 rounded-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 [color:var(--color-text-muted)] hover:text-red-400 flex items-center justify-center transition-colors">
                   <Trash2 className="w-3.5 h-3.5" strokeWidth={1.7} />
                 </button>
                 {toolbarLevel === 'wide' && (
-                  <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-secondary border border-border text-[10px] [color:var(--color-text-muted)] whitespace-nowrap"
+                  <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[10px] [color:var(--color-text-muted)] whitespace-nowrap"
                     title="Ctrl/⌘+C 复制 · Ctrl/⌘+V 粘贴 · Ctrl/⌘+Z 撤销 · Ctrl/⌘+Y 重做 · Delete 删除；Shift+拖 框选，Ctrl/⌘+点 多选">
                     <Keyboard className="w-3.5 h-3.5 shrink-0" strokeWidth={1.7} />
                     ⌘C/V 复制粘贴 · ⌘Z/Y 撤销重做 · Del 删除
@@ -1327,7 +1825,7 @@ const InnerCanvas: React.FC = () => {
                   className={`w-7 h-7 rounded-full border flex items-center justify-center transition-colors ${
                     toolbarMenuOpen
                       ? 'bg-brand/15 text-brand border-brand/40'
-                      : 'bg-surface-secondary border-border [color:var(--color-text-muted)] hover:[color:var(--color-text-main)]'
+                      : 'bg-white/55 dark:bg-white/[.06] border-white/70 dark:border-white/12 [color:var(--color-text-muted)] hover:[color:var(--color-text-main)]'
                   }`}
                 >
                   <MoreHorizontal className="w-3.5 h-3.5" strokeWidth={1.7} />
@@ -1336,7 +1834,7 @@ const InnerCanvas: React.FC = () => {
                   role="menu"
                   aria-label="更多画布操作"
                   aria-hidden={!toolbarMenuOpen}
-                  className={`absolute right-0 top-[calc(100%+6px)] w-[200px] p-1 rounded-[14px] bg-surface border border-border shadow-xl z-40 origin-top-right transition-all duration-[260ms] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none ${
+                  className={`absolute right-0 top-[calc(100%+6px)] w-[200px] p-1 rounded-[14px] bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 shadow-xl z-40 origin-top-right transition-all duration-[260ms] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none ${
                     toolbarMenuOpen
                       ? 'opacity-100 scale-100 visible pointer-events-auto'
                       : 'opacity-0 scale-[.98] invisible pointer-events-none'
@@ -1359,27 +1857,27 @@ const InnerCanvas: React.FC = () => {
               </div>
             )}
 
-            <button onClick={handleClearCanvas} aria-label="清空画布" title="清空画布" className="w-7 h-7 rounded-full bg-surface-secondary border border-border [color:var(--color-text-muted)] hover:text-red-400 flex items-center justify-center transition-colors">
+            <button onClick={handleClearCanvas} aria-label="清空画布" title="清空画布" className="w-7 h-7 rounded-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 [color:var(--color-text-muted)] hover:text-red-400 flex items-center justify-center transition-colors">
               <X className="w-3.5 h-3.5" strokeWidth={1.7} />
             </button>
           </div>
         </div>
 
         {/* ── 画布操作台条（左上角，left-3 / top-[52px]）──
-              · 第一条按钮 = 唤出系统左侧栏（画布内不再单独悬浮一个图标按钮）
+              · 第一个按钮 = 系统左侧栏 收起（仅图标）/ 展开（图标 + 文字）
               · 分块（模板 / 我的 / 节点 / 素材）：点块 → 展开操作台并直接滚到该小节 */}
         <div ref={workbenchRef} className="absolute left-3 top-[52px] bottom-3 z-30 flex flex-col items-start gap-2 pointer-events-none">
           {/* 悬浮条 */}
-          <div className="pointer-events-auto flex items-center gap-0.5 p-1 rounded-md bg-surface border border-border shadow-md select-none">
+          <div className="pointer-events-auto flex items-center gap-0.5 p-1 rounded-md bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 shadow-md select-none">
             <button
-              onClick={() => setCanvasRailOpen(!canvasRailOpen)}
-              aria-pressed={canvasRailOpen}
-              aria-label={canvasRailOpen ? '收起系统左侧栏' : '展开系统左侧栏'}
-              title={canvasRailOpen ? '收起系统左侧栏' : '展开系统左侧栏'}
+              onClick={toggleSidebar}
+              aria-pressed={!sidebarCollapsed}
+              aria-label={sidebarCollapsed ? '展开系统左侧栏' : '收起系统左侧栏'}
+              title={sidebarCollapsed ? '展开系统左侧栏（显示文字）' : '收起系统左侧栏（只显示图标）'}
               className={`w-7 h-7 inline-flex items-center justify-center rounded-md transition-colors ${
-                canvasRailOpen
+                !sidebarCollapsed
                   ? 'bg-brand/15 text-brand'
-                  : '[color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-secondary'
+                  : '[color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06]'
               }`}
             >
               <PanelLeft className="w-4 h-4" strokeWidth={1.7} />
@@ -1397,7 +1895,7 @@ const InnerCanvas: React.FC = () => {
                   className={`h-7 px-2 inline-flex items-center gap-1 rounded-md text-[11.5px] font-medium transition-colors ${
                     on
                       ? 'bg-brand/15 text-brand'
-                      : '[color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] hover:bg-surface-secondary'
+                      : '[color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06]'
                   }`}
                 >
                   <Icon className="w-3.5 h-3.5" strokeWidth={1.7} />
@@ -1412,20 +1910,20 @@ const InnerCanvas: React.FC = () => {
             role="dialog"
             aria-label="画布操作台"
             aria-hidden={!workbenchOpen}
-            className={`w-[248px] flex-1 min-h-0 flex flex-col rounded-[18px] bg-surface border border-border shadow-xl overflow-hidden origin-top-left transition-all duration-[260ms] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none ${
+            className={`w-[248px] flex-1 min-h-0 flex flex-col rounded-[18px] bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 shadow-xl overflow-hidden origin-top-left transition-all duration-[260ms] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none ${
               workbenchOpen
                 ? 'opacity-100 scale-100 visible pointer-events-auto'
                 : 'opacity-0 scale-[.98] invisible pointer-events-none'
             }`}
           >
-            <div className="h-9 px-2.5 flex items-center gap-2 border-b border-border shrink-0">
+            <div className="h-9 px-2.5 flex items-center gap-2 border-b border-white/70 dark:border-white/12 shrink-0">
               <Layers className="w-3.5 h-3.5 text-brand shrink-0" strokeWidth={1.7} />
               <span className="text-[13px] font-semibold [color:var(--color-text-main)]">画布操作台</span>
               <button
                 onClick={() => setWorkbenchOpen(false)}
                 aria-label="收起画布操作台"
                 title="收起画布操作台（向上折叠）"
-                className="ml-auto w-6 h-6 inline-flex items-center justify-center rounded-md [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-secondary transition-colors"
+                className="ml-auto w-6 h-6 inline-flex items-center justify-center rounded-md [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06] transition-colors"
               >
                 <ChevronsUp className="w-3.5 h-3.5" strokeWidth={1.7} />
               </button>
@@ -1491,8 +1989,7 @@ const InnerCanvas: React.FC = () => {
                     onDragStart={e => e.dataTransfer.setData('application/canvas-nodetype', n.type)}
                     title="拖入画布，或点击直接创建"
                     onClick={() => {
-                      const pos = { x: 120 + nodes.length * 40, y: 120 + nodes.length * 40 };
-                      const node = createNode(n.type, pos);
+                      const node = createNode(n.type, freePosition(n.type));
                       setNodes(nds => [...nds, node]);
                       setSelectedNodeId(node.id);
                     }}
@@ -1510,8 +2007,7 @@ const InnerCanvas: React.FC = () => {
                     onDragStart={e => e.dataTransfer.setData('application/canvas-nodetype', 'custom')}
                     title="自定义节点：拖入画布，或点击直接创建"
                     onClick={() => {
-                      const pos = { x: 120 + nodes.length * 40, y: 120 + nodes.length * 40 };
-                      const node = createNode('custom', pos, { custom_node_id: c.id });
+                      const node = createNode('custom', freePosition('custom'), { custom_node_id: c.id });
                       setNodes(nds => [...nds, node]);
                       setSelectedNodeId(node.id);
                     }}
@@ -1532,8 +2028,7 @@ const InnerCanvas: React.FC = () => {
                     }}
                     title={`扩展节点（canvas_nodes）· ${s.kind || 'utility'}：拖入画布，或点击直接创建`}
                     onClick={() => {
-                      const pos = { x: 120 + nodes.length * 40, y: 120 + nodes.length * 40 };
-                      const node = createNode('ext-node', pos, { canvas_node_id: s.id, definition: s });
+                      const node = createNode('ext-node', freePosition('ext-node'), { canvas_node_id: s.id, definition: s });
                       setNodes(nds => [...nds, node]);
                       setSelectedNodeId(node.id);
                     }}
@@ -1544,7 +2039,7 @@ const InnerCanvas: React.FC = () => {
                   <button
                     onClick={goPluginCenter}
                     title="去设置 → 插件中心安装插件包"
-                    className="w-full text-left px-3 py-2 rounded-lg text-[10.5px] [color:var(--color-text-muted)] hover:bg-surface-secondary transition-colors"
+                    className="w-full text-left px-3 py-2 rounded-lg text-[10.5px] [color:var(--color-text-muted)] hover:bg-white/55 dark:bg-white/[.06] transition-colors"
                   >
                     自定义 / 扩展节点：去设置 → 插件中心安装插件包
                   </button>
@@ -1570,7 +2065,7 @@ const InnerCanvas: React.FC = () => {
                           e.dataTransfer.setData('text/plain', abs || url);
                         }}
                         title={`拖入画布：${a.name}`}
-                        className="aspect-square rounded-md overflow-hidden border border-border bg-surface-secondary cursor-grab hover:border-brand/40 transition-colors"
+                        className="aspect-square rounded-md overflow-hidden border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06] cursor-grab hover:border-brand/40 transition-colors"
                       >
                         {abs ? (
                           <AutoRatioMedia src={abs} fallbackAspect="1/1" className="w-full h-full" mediaClassName="group-hover:scale-[1.03] transition-transform" />
@@ -1588,7 +2083,7 @@ const InnerCanvas: React.FC = () => {
             </div>
 
             {/* 底部动作：保存 / 导出 */}
-            <div className="p-2.5 border-t border-border flex items-center gap-2 shrink-0">
+            <div className="p-2.5 border-t border-white/70 dark:border-white/12 flex items-center gap-2 shrink-0">
               <button
                 onClick={handleManualSave}
                 disabled={saving}
@@ -1599,7 +2094,7 @@ const InnerCanvas: React.FC = () => {
               <button
                 onClick={() => window.dispatchEvent(new CustomEvent('canvas-export-shots'))}
                 title="导出为分镜工程"
-                className="h-8 px-2.5 rounded-md bg-surface-secondary border border-border inline-flex items-center justify-center gap-1.5 text-[11.5px] font-medium [color:var(--color-text-main)] hover:bg-surface-tertiary transition-colors"
+                className="h-8 px-2.5 rounded-md bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 inline-flex items-center justify-center gap-1.5 text-[11.5px] font-medium [color:var(--color-text-main)] hover:bg-white/65 dark:bg-white/[.09] transition-colors"
               >
                 <Download className="w-3.5 h-3.5" strokeWidth={1.7} />导出
               </button>
@@ -1615,7 +2110,7 @@ const InnerCanvas: React.FC = () => {
             </div>
           ) : isEmpty ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center p-8 gap-6 overflow-y-auto" style={{ background: isLight ? '#E8ECF1' : '#08080B' }}>
-              <div className="w-full max-w-[700px] bg-surface border border-border rounded-3xl shadow-2xl p-6 text-center space-y-4">
+              <div className="w-full max-w-[700px] bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-3xl shadow-2xl p-6 text-center space-y-4">
                 <div className="w-12 h-12 rounded-2xl bg-brand/10 border border-brand/20 text-brand flex items-center justify-center mx-auto shadow-lg">
                   <Wand2 className="w-6 h-6" />
                 </div>
@@ -1625,7 +2120,7 @@ const InnerCanvas: React.FC = () => {
                 </div>
                 <div className="grid grid-cols-3 gap-3 pt-2">
                   {TEMPLATES.map(t => (
-                    <button key={t.id} onClick={() => addTemplate(t)} className="p-4 rounded-2xl border border-border bg-surface-secondary hover:border-brand/40 hover:bg-surface-tertiary text-left transition-all group">
+                    <button key={t.id} onClick={() => addTemplate(t)} className="p-4 rounded-2xl border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06] hover:border-brand/40 hover:bg-white/65 dark:bg-white/[.09] text-left transition-all group">
                       <div className="text-xs font-bold [color:var(--color-text-main)] group-hover:text-brand">{t.label}</div>
                       <div className="text-[11px] [color:var(--color-text-muted)] mt-1">{t.desc}</div>
                     </button>
@@ -1641,11 +2136,20 @@ const InnerCanvas: React.FC = () => {
             </div>
           ) : (
             <ReactFlow
+              ref={rfWrapRef}
+              /* 画布内不弹浏览器右键菜单；输入框/文本域保留原生菜单，方便复制粘贴 */
+              onContextMenu={(e) => { if (!(e.target as HTMLElement).closest?.('input, textarea, [contenteditable="true"]')) e.preventDefault(); }}
               nodes={nodes}
-              edges={edges}
+              edges={renderedEdges}
+              defaultEdgeOptions={{ type: 'default' }}
+              connectionLineType={ConnectionLineType.Bezier}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}
+              onConnectEnd={onConnectEnd}
+              onReconnectStart={onReconnectStart}
+              onReconnect={onReconnect}
+              onReconnectEnd={onReconnectEnd}
               isValidConnection={isValidConnection}
               nodeTypes={nodeTypes}
               onNodeClick={(_, node) => setSelectedNodeId(node.id)}
@@ -1655,7 +2159,15 @@ const InnerCanvas: React.FC = () => {
                 setSelectedNodeId(node.id);
                 setNodeMenu({ nodeId: node.id, x: (e as React.MouseEvent).clientX, y: (e as React.MouseEvent).clientY });
               }}
-              onPaneClick={() => { setSelectedNodeId(null); setNodeMenu(null); }}
+              onPaneClick={() => { setSelectedNodeId(null); setNodeMenu(null); setDropMenu(null); }}
+              onPaneContextMenu={(e) => {
+                // 画布空白处右键：拦截浏览器菜单，改为「添加卡片」菜单
+                e.preventDefault();
+                setNodeMenu(null);
+                const pt = e as React.MouseEvent;
+                setDropMenu({ x: pt.clientX, y: pt.clientY, flow: screenToFlowPosition({ x: pt.clientX, y: pt.clientY }), items: DROP_CREATE_TYPES });
+              }}
+              onEdgeContextMenu={(e) => e.preventDefault()}
               onSelectionChange={handleSelectionChange}
               deleteKeyCode={null}  /* 删除交给 useCanvasShortcuts，统一处理节点+连线 */
               fitView
@@ -1663,14 +2175,30 @@ const InnerCanvas: React.FC = () => {
               className={isLight ? 'light' : 'dark'}
               style={{ background: isLight ? '#E8ECF1' : '#08080B', cursor: isDragging ? 'grabbing' : 'crosshair' }}
             >
-              <Background color={isLight ? '#CBD5E1' : '#1E1E2A'} gap={24} size={1.2} />
-              <Controls className="!bg-surface !border-border !rounded-2xl shadow-xl ![color:var(--color-text-main)] [&_button]:!bg-surface [&_button]:!border-border [&_button]:![color:var(--color-text-main)]">
+              {/* 淡色网格：细格 24px + 每 5 格一条稍深的主格线；颜色走主题变量（index.css --canvas-grid*） */}
+              <Background id="grid-minor" variant={BackgroundVariant.Lines} gap={24} lineWidth={1} color="var(--canvas-grid)" bgColor="var(--canvas-bg)" />
+              {/* 叠加层必须透明底：暗色模式下 Background 默认底色 #141414，会盖住下面的细格 */}
+              <Background id="grid-major" variant={BackgroundVariant.Lines} gap={120} lineWidth={1} color="var(--canvas-grid-major)" bgColor="transparent" />
+              <Controls className="!bg-white/60 dark:bg-white/[.05] !border-white/70 dark:border-white/12 !rounded-2xl shadow-xl ![color:var(--color-text-main)] [&_button]:!bg-white/60 dark:bg-white/[.05] [&_button]:!border-white/70 dark:border-white/12 [&_button]:![color:var(--color-text-main)]">
                 {/* 横向排布：原顶栏按钮，并入左下角缩放/适应竖条 */}
                 <ControlButton onClick={handleArrangeHorizontally} title="横向排布：把所有节点排成一行" aria-label="横向排布">
                   <ArrowLeftRight className="w-3.5 h-3.5" strokeWidth={1.7} />
                 </ControlButton>
               </Controls>
-              <MiniMap className="!bg-surface !border-border !rounded-xl" maskColor="rgba(10,10,12,0.8)" nodeColor={(n: any) => n.type === 'image' ? '#7C3AED' : n.type === 'video' ? '#F97316' : n.type === 'audio' ? '#EC4899' : n.type === 'prompt' ? '#06B6D4' : '#3F3F50'} />
+              {/* pannable / zoomable 必须显式打开：@xyflow/react 12.11 的 MiniMap 这两个 prop
+                  默认是 false，不传就是「鼠标放上去、拖动全都没反应」——小地图只是个静态缩略图。
+                  视野框描边：暗色主题下遮罩是 rgba(10,10,12,.8)，框线默认 transparent 看不出来，
+                  故给白色描边。maskStrokeWidth 不能省：内部会被 viewScale 乘算，不传时用的是
+                  CSS 默认值 1（SVG 用户单位 ≈ 亚像素），传了才是「1 个屏幕像素」的细白线。 */}
+              <MiniMap
+                className="!bg-white/60 dark:bg-white/[.05] !border-white/70 dark:border-white/12 !rounded-xl cursor-grab active:cursor-grabbing"
+                maskColor={isLight ? 'rgba(15,23,42,0.12)' : 'rgba(10,10,12,0.8)'}
+                maskStrokeColor={isLight ? '#7C3AED' : '#ffffff'}
+                maskStrokeWidth={1}
+                nodeColor={(n: any) => n.type === 'image' ? '#7C3AED' : n.type === 'video' ? '#F97316' : n.type === 'audio' ? '#EC4899' : (n.type === 'prompt' || n.type === 'text-prompt') ? '#06B6D4' : '#3F3F50'}
+                pannable
+                zoomable
+              />
             </ReactFlow>
           )}
         </div>
@@ -1685,6 +2213,11 @@ const InnerCanvas: React.FC = () => {
           合并了原先的悬浮胶囊/浮窗与底部全局编排栏，见 CanvasAgentSidebar 文件头注释。 */}
       <CanvasAgentSidebar />
 
+      {/* 拖线到空白处的创建菜单 */}
+      {dropMenu && (
+        <DropCreateMenu menu={dropMenu} onPick={createFromDrop} onClose={() => setDropMenu(null)} />
+      )}
+
       {/* 节点右键菜单（添加到会话 / 删除） */}
       <NodeContextMenu
         menu={nodeMenu}
@@ -1692,7 +2225,44 @@ const InnerCanvas: React.FC = () => {
         onDelete={handleDeleteNode}
       />
 
-      {inspectWfId && <WorkflowInspectorModal workflowId={inspectWfId} isOpen={!!inspectWfId} onClose={() => setInspectWfId('')} onSaved={() => {}} />}
+    </div>
+  );
+};
+
+/** 拖线松手菜单：只列出能接上这个口的卡片；点外部 / Esc 关闭 */
+const DropCreateMenu: React.FC<{
+  menu: DropMenuState;
+  onPick: (item: DropMenuState['items'][number]) => void;
+  onClose: () => void;
+}> = ({ menu, onPick, onClose }) => {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // 捕获阶段监听：画布（d3-zoom）会拦截 mousedown 冒泡
+    const down = (e: PointerEvent) => { if (!ref.current?.contains(e.target as any)) onClose(); };
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    // 推迟挂载，避免松手那一下的事件立刻把菜单关掉
+    const t = setTimeout(() => { document.addEventListener('pointerdown', down, true); document.addEventListener('keydown', key); });
+    return () => { clearTimeout(t); document.removeEventListener('pointerdown', down, true); document.removeEventListener('keydown', key); };
+  }, [onClose]);
+  return (
+    <div
+      ref={ref}
+      className="fixed z-50 w-48 bg-surface-secondary border border-white/15 rounded-2xl p-1.5 shadow-2xl flex flex-col gap-1 animate-in fade-in zoom-in-95 duration-150"
+      style={{ left: Math.min(menu.x + 8, window.innerWidth - 200), top: Math.max(8, Math.min(menu.y - 12, window.innerHeight - 48 - menu.items.length * 32)) }}
+    >
+      <div className="px-2.5 py-1 text-[10px] font-bold text-white/40 uppercase tracking-wider">
+        {!menu.from ? '添加卡片' : menu.from.side === 'source' ? '创建并连接下游' : '创建并连接上游'}
+      </div>
+      {menu.items.map((it) => (
+        <button
+          key={it.type}
+          onClick={() => onPick(it)}
+          className="w-full px-2.5 py-1.5 rounded-xl text-left text-xs text-white/90 hover:bg-white/10 flex items-center gap-2 transition-colors"
+        >
+          <it.icon className={`w-3.5 h-3.5 ${it.color}`} />
+          <span>{it.label}</span>
+        </button>
+      ))}
     </div>
   );
 };

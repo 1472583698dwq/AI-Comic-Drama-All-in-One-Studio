@@ -1,49 +1,86 @@
 /**
  * Agent 独立模式页 — 薄壳：会话侧栏 + 统一消息流 + 统一运行时 store
  * 运行时（会话/流式/计划/审批）全部收敛到 agentStore，与悬浮抽屉共用同一会话。
+ *
+ * 界面为两块圆角卡片（会话栏 / 对话主区），右栏已删除：模式选择在输入框左下角菜单，
+ * 输入框以「悬浮层」浮在消息流之上；能力面保持上游 —— 多模态附件、运行中 steer 插话、
+ * 行内审批与「始终允许」、子代理集群、自动执行警示齐备；清空记忆在页头图标按钮。
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Bot, Sparkles, ShieldAlert, Film, Trash2, PanelLeftClose, PanelLeft,
+  ShieldAlert, Trash2, PanelLeft, ArrowDown,
 } from 'lucide-react';
 import { useProjectStore } from '../stores/useProjectStore';
-import { useAgentStore, QUICK_ASK, QUICK_DO, QUICK_CREATE, QUICK_PLAN } from '../components/agent/agentStore';
+import { useAgentStore } from '../components/agent/agentStore';
 import { AgentMessageList } from '../components/agent/AgentMessageList';
 import { AgentComposer } from '../components/agent/AgentComposer';
+import { AgentSwarmPanel } from '../components/agent/AgentSwarmPanel';
+import { loadRoleMetas } from '../components/agent/swarmMeta';
 import { SessionSidebar } from '../components/agent/SessionSidebar';
-import { behaviorOfRunMode, composeRunMode, executionOfRunMode } from '../components/agent/agentTypes';
 
 export const AgentModeView: React.FC = () => {
   const { project, activeShotId } = useProjectStore();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [proposalBusy, setProposalBusy] = useState<Record<string, string>>({});
-  const bottomRef = useRef<HTMLDivElement>(null);
+  // 消息流容器：输入框改为悬浮层后不再占据独立区域，贴底/回到底部都由它自己算
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [atBottom, setAtBottom] = useState(true);
 
   const {
     sessions, activeSessionId, loadingSessions,
-    messages, isRunning, wsStatus, approvals,
-    mode, runMode,
-    bindProject, setMode, setRunMode, createSession, selectSession, deleteSession,
-    send, executePlan, abort, approve, clearAll, proposalAction, applyArtifact,
+    messages, isRunning, wsStatus, approvals, subagents, autoAllowTools,
+    runMode, permission,
+    bindProject, setRunMode, setPermission, setAutoAllow,
+    createSession, selectSession, deleteSession,
+    send, steer, executePlan, abort, approve, clearAll, proposalAction, applyArtifact,
   } = useAgentStore();
 
-  // 项目切换：绑定/加载该项目的会话（幂等，抽屉同时调用无副作用）
+  // 项目切换：绑定/加载该项目的页面版会话（与悬浮窗会话隔离）
   useEffect(() => {
     bindProject(project?.id || null);
   }, [project?.id, bindProject]);
 
+  // 拉取导演组扩展角色（自定义 icon/color）供集群面板使用
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isRunning]);
+    loadRoleMetas();
+  }, []);
+
+  // 只有用户本来就贴着底部时才跟随新消息；一旦向上翻看，就不把他拽回来（改用「回到底部」按钮）
+  useEffect(() => {
+    if (!atBottom) return;
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages, isRunning, atBottom]);
+
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 48);
+  };
+
+  const scrollToBottom = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  };
 
   const shots = project?.scenes.flatMap((s) => s.shots) || [];
   const activeShot = shots.find((s) => s.id === activeShotId);
   const pendingList = useMemo(() => Object.entries(approvals).filter(([, v]) => v.decided === undefined), [approvals]);
-  // 运行模式两维（与后端 app/agent/mode_policy.py 同口径）：行为决定提示词与工具门控，执行决定是否逐项人审
-  const behavior = behaviorOfRunMode(runMode);
-  const execution = executionOfRunMode(runMode);
-  const quickCommands = mode === 'chat' ? QUICK_ASK : behavior === 'plan' ? QUICK_PLAN : behavior === 'create' ? QUICK_CREATE : QUICK_DO;
   const activeSessionTitle = sessions.find((s) => s.id === activeSessionId)?.title || 'Agent 独立模式';
+  const runningSteps = useMemo(() => {
+    const cur = [...messages].reverse().find((m) => m.steps && m.steps.length > 0);
+    const steps = cur?.steps || [];
+    return { total: steps.length, done: steps.filter((s) => s.status === 'completed').length };
+  }, [messages]);
+
+  const handleApprove = (aid: string, ok: boolean, always: boolean) => {
+    if (always && ok) {
+      const a = approvals[aid];
+      if (a?.tool_name) setAutoAllow(a.tool_name, true);
+    }
+    approve(aid, ok);
+  };
 
   const handleProposalAction = async (msgId: string, proposalId: string, kind: 'start' | 'persist' | 'discard' | 'rollback') => {
     setProposalBusy((p) => ({ ...p, [proposalId]: kind }));
@@ -58,8 +95,8 @@ export const AgentModeView: React.FC = () => {
     return (
       <div className="flex-1 flex flex-col items-center justify-center bg-background p-8 text-center space-y-4">
         <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-brand to-accent-pink flex items-center justify-center text-3xl shadow-xl shadow-brand/20">🎬</div>
-        <h2 className="text-lg font-bold text-white">请先创建或打开一个项目</h2>
-        <p className="text-xs text-gray-400 max-w-md">Agent 模式使用项目级会话隔离，请先在项目看板创建或选择项目后再使用。</p>
+        <h2 className="text-lg font-bold [color:var(--color-text-main)]">请先创建或打开一个项目</h2>
+        <p className="text-xs [color:var(--color-text-main)] max-w-md">Agent 模式使用项目级会话隔离，请先在项目看板创建或选择项目后再使用。</p>
         <button
           onClick={() => useProjectStore.getState().setActiveTab('projects')}
           className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-brand to-brand-blue text-white text-xs font-semibold hover:opacity-90 shadow-lg shadow-brand/20 transition-all"
@@ -71,8 +108,15 @@ export const AgentModeView: React.FC = () => {
   }
 
   return (
-    <div className="flex-1 flex overflow-hidden">
-      {isSidebarOpen && (
+    <div className="flex-1 flex overflow-hidden p-2">
+      {/* 左：会话栏 —— 宽度过渡（而非条件渲染）才有展开收起的“一体感”，
+          外层容器吃掉溢出，内层整宽跟随；圆角裁切让三块区域各自成卡片。
+          间距用 margin 而非 gap：收起后不残留空档 */}
+      <div
+        className={`shrink-0 overflow-hidden rounded-2xl transition-[width,opacity,margin-right] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+          isSidebarOpen ? 'w-64 lg:w-72 opacity-100 mr-2' : 'w-0 opacity-0 mr-0'
+        }`}
+      >
         <SessionSidebar
           sessions={sessions}
           activeSessionId={activeSessionId}
@@ -81,132 +125,109 @@ export const AgentModeView: React.FC = () => {
           onCreate={createSession}
           onSelect={selectSession}
           onDelete={deleteSession}
+          onCollapse={() => setIsSidebarOpen(false)}
         />
-      )}
+      </div>
 
-      {/* 中间：对话主区 */}
-      <div className="flex-1 flex flex-col min-w-0">
-        <div className="px-5 py-3 border-b border-border bg-surface-secondary/60 flex items-center gap-3 shrink-0">
-          <button
-            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="p-1.5 rounded-lg border border-border hover:border-brand/40 bg-surface text-gray-400 hover:text-white transition-all shrink-0"
-            title={isSidebarOpen ? '收起会话列表' : '展开会话列表'}
-          >
-            {isSidebarOpen ? <PanelLeftClose className="w-4 h-4" /> : <PanelLeft className="w-4 h-4 text-brand" />}
-          </button>
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-brand to-accent-green flex items-center justify-center text-white shadow-md shrink-0">
-            <Bot className="w-5 h-5" />
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-bold text-white truncate max-w-[200px] sm:max-w-[280px]">{activeSessionTitle}</span>
-              <span className={`w-1.5 h-1.5 rounded-full ${wsStatus === 'open' ? 'bg-accent-green' : 'bg-amber-400'}`} title={wsStatus === 'open' ? 'WS 在线' : 'HTTP 通道（自动重连中）'} />
+      {/* 中间：对话主区（圆角描边卡片，与会话栏形成明确分隔） */}
+      <div className="flex-1 flex flex-col min-w-0 rounded-2xl border border-white/70 dark:border-white/12 overflow-hidden">
+        <div className="relative px-4 py-3 flex items-center shrink-0 border-b border-black/5 dark:border-white/10">
+          {/* 收起入口已移入会话栏标题行；这里只在收起后提供「展开」恢复入口 */}
+          {!isSidebarOpen && (
+            <button
+              onClick={() => setIsSidebarOpen(true)}
+              className="p-1.5 rounded-lg border border-white/70 dark:border-white/12 hover:border-brand/40 bg-white/60 dark:bg-white/[.05] [color:var(--color-text-main)] transition-all shrink-0"
+              title="展开会话列表"
+            >
+              <PanelLeft className="w-4 h-4 text-brand" />
+            </button>
+          )}
+          {/* 会话标题：绝对居中，不随左右两侧按钮宽度偏移 */}
+          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 max-w-[52%] text-center pointer-events-none">
+            <div className="flex items-center justify-center gap-1.5">
+              <span className="text-sm font-bold [color:var(--color-text-main)] truncate">{activeSessionTitle}</span>
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${wsStatus === 'open' ? 'bg-accent-green' : 'bg-amber-400'}`} title={wsStatus === 'open' ? 'WS 在线' : 'HTTP 通道（自动重连中）'} />
             </div>
-            <div className="text-[10px] text-gray-500 truncate">
+            <div className="text-[10px] [color:var(--color-text-muted)] truncate">
               {project.title || '当前项目'} · {shots.length}镜 · 会话: {activeSessionId.slice(0, 12) || '就绪'}
+              {isRunning && runningSteps.total > 0 && ` · 步骤 ${runningSteps.done}/${runningSteps.total}`}
+              {isRunning && ' · 运行中'}
             </div>
           </div>
           <div className="ml-auto flex items-center gap-2">
-            <div className="flex items-center rounded-xl bg-surface border border-border p-1" title="行为：能干什么 —— 标准 / 创造（缺能力先造） / 计划（只读侦察）">
-              <button onClick={() => setRunMode(composeRunMode('standard', execution))} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${behavior === 'standard' ? 'bg-brand/20 text-brand-light' : 'text-gray-500 hover:text-white'}`}>标准</button>
-              <button onClick={() => setRunMode(composeRunMode('create', execution))} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${behavior === 'create' ? 'bg-violet-500/20 text-violet-300' : 'text-gray-500 hover:text-white'}`}>创造</button>
-              <button onClick={() => setRunMode(composeRunMode('plan', execution))} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${behavior === 'plan' ? 'bg-sky-500/20 text-sky-300' : 'text-gray-500 hover:text-white'}`}>计划</button>
-            </div>
-            <div className="flex items-center rounded-xl bg-surface border border-border p-1" title="执行：要不要逐项人审 —— 审批=先审后干 / 自动=全部自动执行（含删源/写文件/跑命令）">
-              <button onClick={() => setRunMode(composeRunMode(behavior, 'approve'))} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${execution === 'approve' ? 'bg-amber-500/20 text-amber-300' : 'text-gray-500 hover:text-white'}`}>审批</button>
-              <button onClick={() => setRunMode(composeRunMode(behavior, 'auto'))} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${execution === 'auto' ? 'bg-red-500/20 text-red-300' : 'text-gray-500 hover:text-white'}`}>自动</button>
-            </div>
-            <div className="flex items-center rounded-xl bg-surface border border-border p-1">
-              <button onClick={() => setMode('chat')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${mode === 'chat' ? 'bg-accent-green/20 text-accent-green' : 'text-gray-500 hover:text-white'}`}>问答</button>
-              <button onClick={() => setMode('execute')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${mode === 'execute' ? 'bg-brand/20 text-brand-light' : 'text-gray-500 hover:text-white'}`}>执行</button>
-            </div>
+            <button
+              onClick={() => void clearAll()}
+              title="清空本会话的全部消息记忆（不影响项目文件）"
+              className="p-2 rounded-lg border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] [color:var(--color-text-main)] hover:border-red-400/50 hover:text-red-500 dark:hover:text-red-300 active:scale-95 transition-all shrink-0"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+            {pendingList.length > 0 && (
+              <button
+                onClick={scrollToBottom}
+                className="px-2.5 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-600 dark:text-amber-300 text-xs font-bold flex items-center gap-1 animate-pulse"
+                title="有工具待确认，点击定位到行内审批卡"
+              >
+                <ShieldAlert className="w-3.5 h-3.5" />{pendingList.length} 待确认
+              </button>
+            )}
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-5 space-y-4 custom-scrollbar">
-          <AgentMessageList
-            messages={messages}
-            isRunning={isRunning}
-            activeShotIndex={activeShot?.shot_index}
-            onSendSuggestion={(t) => void send(t)}
-            onExecutePlan={(id) => void executePlan(id)}
-            onProposalAction={handleProposalAction}
-            proposalBusy={proposalBusy}
-            onApplyArtifact={applyArtifact}
-          />
-          <div ref={bottomRef} />
-        </div>
+        <AgentSwarmPanel subagents={subagents} />
 
-        <AgentComposer
-          mode={mode}
-          runMode={runMode}
-          isRunning={isRunning}
-          wsStatus={wsStatus}
-          onSend={(t) => void send(t)}
-          onAbort={abort}
-        />
-      </div>
-
-      {/* 右：模式与上下文侧栏 */}
-      <div className="w-72 border-l border-border bg-surface-secondary/40 p-4 space-y-4 overflow-y-auto custom-scrollbar shrink-0 hidden md:block">
-        <div className="rounded-2xl border border-border bg-surface p-3 space-y-2">
-          <div className="text-xs font-bold text-white flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-brand-light" />模式说明</div>
-          <div className={`text-[11px] leading-4 p-2 rounded-xl ${mode === 'chat' ? 'bg-accent-green/10 text-accent-green' : 'bg-brand/10 text-brand-light'}`}>
-            {mode === 'chat'
-              ? '问答：纯 LLM 讲解，不进工具循环，零副作用不烧生成费用。'
-              : execution === 'auto'
-                ? '执行：ReAct 循环调全部工具；自动执行下不再逐项确认（可随时暂停）。'
-                : '执行：ReAct 循环调全部工具；删源/写文件/跑命令会弹窗确认，120s 超时自动拒绝。'}
-          </div>
-          <div className="text-[11px] leading-4 p-2 rounded-xl bg-surface-secondary border border-border text-gray-300 space-y-1">
-            <div>
-              {behavior === 'standard' && '行为=标准：常规工具集，按风险分级放行。'}
-              {behavior === 'create' && '行为=创造：缺能力先提案，Start 试跑→持久化/丢弃，默认不写生产。'}
-              {behavior === 'plan' && '行为=计划：只读侦察（不生成不执行），产出完整计划，批准后才执行。'}
-            </div>
-            <div>
-              {execution === 'approve' && '执行=审批：变异动作先审后干，120s 无人应答自动拒绝。'}
-              {execution === 'auto' && '执行=自动：全部工具自动执行、不再逐项确认（含删源/写文件/跑命令），可随时暂停。'}
+        {/* 消息流与输入框同处一个相对容器：输入框绝对定位浮在消息流之上，
+            滚动时内容从输入框底下穿过，不再有一条通栏的输入框占位 */}
+        <div className="flex-1 relative min-h-0">
+          <div ref={scrollRef} onScroll={handleScroll} className="absolute inset-0 overflow-y-auto custom-scrollbar">
+            <div className="max-w-3xl mx-auto px-6 pt-6 pb-44 space-y-5">
+              <AgentMessageList
+                messages={messages}
+                isRunning={isRunning}
+                activeShotIndex={activeShot?.shot_index}
+                onSendSuggestion={(t) => void send(t)}
+                onExecutePlan={(id) => void executePlan(id)}
+                onProposalAction={handleProposalAction}
+                proposalBusy={proposalBusy}
+                onApplyArtifact={applyArtifact}
+                approvals={approvals}
+                autoAllowTools={autoAllowTools}
+                onApprove={handleApprove}
+              />
             </div>
           </div>
-          <div className="flex gap-2">
-            <button onClick={() => void clearAll()} className="flex-1 py-1.5 rounded-lg bg-surface-secondary border border-border text-[11px] text-gray-300 hover:text-white flex items-center justify-center gap-1"><Trash2 className="w-3 h-3" />清空记忆</button>
-            <button onClick={abort} className="flex-1 py-1.5 rounded-lg bg-surface-secondary border border-border text-[11px] text-gray-300 hover:text-white">暂停</button>
-          </div>
-        </div>
 
-        {pendingList.length > 0 && (
-          <div className="rounded-2xl border border-amber-500/40 bg-amber-500/5 p-3 space-y-2">
-            <div className="text-xs font-bold text-amber-300 flex items-center gap-1.5"><ShieldAlert className="w-3.5 h-3.5" />待确认 {pendingList.length}</div>
-            {pendingList.map(([aid, v]) => (
-              <div key={aid} className="rounded-xl bg-surface-secondary border border-amber-500/20 p-2">
-                <div className="text-[11px] font-mono text-white truncate">{v.tool_name}</div>
-                <div className="text-[10px] font-mono text-gray-500 break-all max-h-20 overflow-y-auto custom-scrollbar">{JSON.stringify(v.args).slice(0, 400)}</div>
-                <div className="flex gap-1.5 mt-1.5">
-                  <button onClick={() => approve(aid, true)} className="flex-1 py-1 rounded-lg bg-amber-500 text-black text-[11px] font-bold">允许</button>
-                  <button onClick={() => approve(aid, false)} className="flex-1 py-1 rounded-lg border border-border text-[11px] text-gray-300">拒绝</button>
-                </div>
+          {/* 悬浮输入层：渐变蒙版只负责视觉过渡，pointer-events 交给内部，避免挡住消息操作 */}
+          <div className="absolute inset-x-0 bottom-0 px-5 pb-4 pt-12 bg-gradient-to-t from-background via-background/85 to-transparent pointer-events-none">
+            <div className="max-w-3xl mx-auto relative">
+              {!atBottom && (
+                <button
+                  onClick={scrollToBottom}
+                  title="回到底部"
+                  className="pointer-events-auto absolute -top-11 left-1/2 -translate-x-1/2 w-9 h-9 rounded-full border border-white/55 dark:border-white/10 bg-white/80 dark:bg-black/55 backdrop-blur-xl [color:var(--color-text-main)] shadow-lg shadow-black/30 flex items-center justify-center transition-colors"
+                >
+                  <ArrowDown className="w-4 h-4" />
+                </button>
+              )}
+              <div className="pointer-events-auto">
+                <AgentComposer
+                  floating
+                  runMode={runMode}
+                  permission={permission}
+                  isRunning={isRunning}
+                  wsStatus={wsStatus}
+                  onSend={(t, atts) => void send(t, atts)}
+                  onAbort={abort}
+                  onSteer={(t, atts) => void steer(t, atts)}
+                  onRunModeChange={setRunMode}
+                  onPermissionChange={setPermission}
+                />
               </div>
-            ))}
+            </div>
           </div>
-        )}
-
-        <div className="rounded-2xl border border-border bg-surface p-3 space-y-2">
-          <div className="text-xs font-bold text-white flex items-center gap-1.5"><Film className="w-3.5 h-3.5 text-accent-orange" />当前上下文</div>
-          <div className="text-[11px] text-gray-400 leading-5">
-            <div>项目：{project?.title || '未选择'}</div>
-            <div>镜头：{activeShot ? `#${activeShot.shot_index} ${activeShot.action_desc?.slice(0, 20) || ''}` : '无'}</div>
-            <div>通道：{wsStatus === 'open' ? 'WS 在线（可确认敏感操作）' : 'HTTP（敏感操作自动拒绝）'}</div>
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-border bg-surface p-3 space-y-2">
-          <div className="text-xs font-bold text-white">快捷指令{behavior === 'create' ? ' · 创造' : behavior === 'plan' ? ' · 计划' : ''}</div>
-          {quickCommands.map((q) => (
-            <button key={q} onClick={() => void send(q)} className="w-full text-left px-2.5 py-1.5 rounded-lg bg-surface-secondary border border-border text-[11px] text-gray-300 hover:border-brand hover:text-white">{q}</button>
-          ))}
         </div>
       </div>
+
     </div>
   );
 };

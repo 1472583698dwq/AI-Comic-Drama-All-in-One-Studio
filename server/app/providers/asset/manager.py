@@ -208,6 +208,7 @@ class AssetManager:
             description=data.get("description", ""),
             tags=data.get("tags", []) or [],
             visual_prompt=data.get("visual_prompt", "") or "",
+            content=data.get("content", "") or "",
             negative_prompt=data.get("negative_prompt"),
             style_preset=data.get("style_preset"),
             project_id=proj_id_val,
@@ -267,7 +268,7 @@ class AssetManager:
         if not asset:
             return None
         # 允许更新的字段
-        for k in ["name","category","subcategory","description","tags","visual_prompt","negative_prompt","style_preset","status","style_anchor_id","lora_trigger","voice_id","voice_name","three_views","extra","project_id","scope","shared_to"]:
+        for k in ["name","category","subcategory","description","tags","visual_prompt","content","negative_prompt","style_preset","status","style_anchor_id","lora_trigger","voice_id","voice_name","three_views","extra","project_id","scope","shared_to"]:
             if k in updates and updates[k] is not None:
                 if k == "category" and updates[k] not in ASSET_CATEGORIES:
                     continue

@@ -2,19 +2,16 @@
 /**
  * 画布右侧「导演 Agent」侧栏（可收起）—— 画布上唯一的 Agent 入口。
  *
- * 本次重构合并了原先画布上重复的三处入口：
+ * 与悬浮窗版本的区别：
  *   ① 悬浮胶囊 / 可拖拽浮窗（`AgentChatDrawer`）→ 画布页不再渲染（见 App.tsx 的 activeTab 闸门）
- *   ② 底部「全局导演 Agent GO」（原 `FloatingAgentPromptBar` 的全局态）→ 已撤销
- *   ③ 底部节点控制块 → 保留在底部（`NodeControlBar`），只服务选中的生成节点
+ *   ② 底部全局编排条（上游旧 `FloatingAgentPromptBar` 的全局态）**已废弃**：它与本侧栏同属
+ *      "一句话让 Agent 编排画布"的入口，而有会话能力的是本侧栏 → 全局输入统一走这里；
+ *      底部的"节点态"（选中生成节点 → `NodeAgentConsole`）改由本地版内联的 `NodeControlBar` 承接，
+ *      只服务当前选中的生成节点。
  *
- * 关于 ②：初版曾把「一句话编排 GO」搬进本侧栏，实测它是一条**无会话的一次性调用**
- * （走 `/agent/chat` 不带 sessionId，回复只回报一行摘要、不进历史），与同侧栏的
- * 会话流并列会让人误以为它也写入历史，且两套输入框只是重复。故按用户判断直接去掉：
- * **侧栏只做会话**，编排意图直接在会话里说即可（Agent 同样会走 canvas_* 工具建节点执行）。
- *
- * 会话仍是全局共享的 `agentStore` + `agentSocket` 单例：与「AI 导演」页、以及其它页面
- * 的悬浮抽屉**共用同一份会话**，所以在这里发的消息，切到 AI 导演页能看到完整后续。
- * `bindProject` / `agentSocket.ensure()` 都是幂等的，多处分别调用无副作用。
+ * 会话共用页面版 `useAgentStore`（与「AI 导演」页同一份会话），所以在这里发的消息，
+ * 切到 AI 导演页能看到完整后续。`bindProject` / `agentSocket.ensure()` 都是幂等的，
+ * 多处分别调用无副作用。
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -47,10 +44,10 @@ export const CanvasAgentSidebar: React.FC = () => {
   const clearAgentFocusNodes = useCanvasStore((s) => s.clearAgentFocusNodes);
 
   const {
-    messages, isRunning, wsStatus, approvals, mode, runMode,
-    bindProject, send, abort, clearAll, approve,
+    messages, isRunning, wsStatus, approvals, runMode, permission,
+    bindProject, send, steer, abort, clearAll, approve,
     executePlan, proposalAction, applyArtifact,
-    setMode, setRunMode,
+    setRunMode, setPermission,
   } = useAgentStore();
 
   const [collapsed, setCollapsed] = useState<boolean>(() => {
@@ -150,7 +147,7 @@ export const CanvasAgentSidebar: React.FC = () => {
   // ── 收起态：竖向图标轨（保留 WS 状态与待确认角标，不占画布宽度） ──
   if (collapsed) {
     return (
-      <aside className="w-12 shrink-0 bg-surface border-l border-border flex flex-col items-center py-3 gap-3">
+      <aside className="w-12 shrink-0 bg-white/60 dark:bg-white/[.05] border-l border-white/70 dark:border-white/12 flex flex-col items-center py-3 gap-3">
         <button
           onClick={() => setCollapsed(false)}
           title="展开导演 Agent"
@@ -186,7 +183,7 @@ export const CanvasAgentSidebar: React.FC = () => {
         <button
           onClick={() => setCollapsed(false)}
           title="展开导演 Agent"
-          className="mt-auto p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-secondary"
+          className="mt-auto p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06]"
         >
           <ChevronLeft className="w-4 h-4" />
         </button>
@@ -198,7 +195,7 @@ export const CanvasAgentSidebar: React.FC = () => {
   return (
     <aside
       style={{ width }}
-      className="relative shrink-0 bg-surface border-l border-border flex flex-col overflow-hidden"
+      className="relative shrink-0 bg-white/60 dark:bg-white/[.05] border-l border-white/70 dark:border-white/12 flex flex-col overflow-hidden"
     >
       {/* 左边界拖拽把手（贴在侧栏内侧，避免被 overflow-hidden 裁掉）：
           hover 显竖条，拖拽改宽（视口 40% 上限），双击复位默认宽度 */}
@@ -213,8 +210,10 @@ export const CanvasAgentSidebar: React.FC = () => {
         />
       </div>
 
-      {/* 头部 */}
-      <div className="h-12 px-3 border-b border-border flex items-center gap-2 shrink-0 bg-surface">
+      {/* 头部：高度必须与画布顶部工具条一致（h-11 = 44px），
+          否则两栏相交处会出现 4px 错位的双分隔线（接缝不齐）。
+          全站顶部栏 / 画布工具条 / 本侧栏头统一 44px。 */}
+      <div className="h-11 px-3 border-b border-white/70 dark:border-white/12 flex items-center gap-2 shrink-0 bg-white/60 dark:bg-white/[.05]">
         <div className="p-1.5 rounded-xl bg-gradient-to-tr from-brand to-brand-blue text-white shadow-md shadow-brand/30 shrink-0">
           <Bot className="w-3.5 h-3.5" />
         </div>
@@ -231,21 +230,21 @@ export const CanvasAgentSidebar: React.FC = () => {
         <div className="flex items-center gap-0.5 shrink-0">
           <button
             onClick={() => setActiveTab('agent')}
-            className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-secondary"
+            className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06]"
             title="全屏打开「AI 导演」页（同一份会话）"
           >
             <Maximize2 className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => void clearAll()}
-            className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-secondary"
+            className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06]"
             title="重置会话记忆"
           >
             <RefreshCw className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => setCollapsed(true)}
-            className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-secondary"
+            className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06]"
             title="收起侧栏"
           >
             <ChevronRight className="w-4 h-4" />
@@ -287,7 +286,7 @@ export const CanvasAgentSidebar: React.FC = () => {
             <div key={aid} className="flex items-center gap-1.5">
               <span className="text-[10px] font-mono [color:var(--color-text-main)] truncate flex-1">{v.tool_name}</span>
               <button onClick={() => approve(aid, true)} className="px-2 py-0.5 rounded-md bg-amber-500 text-black text-[10px] font-bold">允许</button>
-              <button onClick={() => approve(aid, false)} className="px-2 py-0.5 rounded-md border border-border text-[10px] [color:var(--color-text-secondary)]">拒绝</button>
+              <button onClick={() => approve(aid, false)} className="px-2 py-0.5 rounded-md border border-white/70 dark:border-white/12 text-[10px] [color:var(--color-text-secondary)]">拒绝</button>
             </div>
           ))}
         </div>
@@ -297,18 +296,19 @@ export const CanvasAgentSidebar: React.FC = () => {
           挂上来不对路；标了它选区润色浮标不会在选中文字时冒出来。
           「已加入会话」的节点 chip 直接包在输入框内（headerSlot），
           让"这次说话 Agent 会针对谁"和"你要说什么"在同一块区域里。 */}
-      <div className="p-3 border-t border-border bg-surface shrink-0">
+      <div className="p-3 border-t border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] shrink-0">
         <AgentComposer
           compact
           noPolish
-          mode={mode}
           runMode={runMode}
+          permission={permission}
           isRunning={isRunning}
           wsStatus={wsStatus}
-          onModeChange={setMode}
           onRunModeChange={setRunMode}
-          onSend={(t) => void send(t)}
+          onPermissionChange={setPermission}
+          onSend={(t, atts) => void send(t, atts)}
           onAbort={abort}
+          onSteer={(t, atts) => void steer(t, atts)}
           headerSlot={focusNodes.length > 0 ? (
             <div className="flex flex-wrap items-center gap-1 px-2.5 pt-2.5">
               {focusNodes.map((n) => (

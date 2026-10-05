@@ -27,8 +27,8 @@ _TASK_STORE: Dict[str, Dict[str, Any]] = {}
 
 class CloudVideoProvider(VideoProvider):
     id = "minimax_video"
-    display_name = "云端视频 (MiniMax / Kling)"
-    description = "MiniMax / 快手可灵等云端视频模型，支持参考生视频 (R2V) 与图生视频 (I2V)"
+    display_name = "云端视频（旧版 MiniMax v1）"
+    description = "旧版 v1 视频通道（video-01/Hailuo 世代）；可灵回退未实现，新项目建议改用 MiniMax H3 / 可灵 / Seedance / Wan3.0"
     icon = "CloudLightning"
 
     def is_configured(self) -> bool:
@@ -63,7 +63,7 @@ class CloudVideoProvider(VideoProvider):
         raise RuntimeError("云端视频调用失败，且无可用的回退通道")
 
     async def _generate_minimax(self, req: VideoGenerateRequest, started: float) -> VideoGenerateResult:
-        # 旧版 v1 通道（video-01/Hailuo 世代）：域名跟随配置，不再写死 api.minimax.chat
+        # 旧版 v1 通道（video-01/Hailuo 世代）：域名与模型名跟随配置，不再写死 api.minimax.chat
         base = (getattr(settings, "MINIMAX_BASE_URL", "") or "https://api.minimaxi.com/v1").rstrip("/")
         url = f"{base}/video_generation"
 
@@ -118,7 +118,7 @@ class CloudVideoProvider(VideoProvider):
                 "provider": self.id,
             }
 
-            # 启动后台轮询下载协程（把本次用的 base 传下去，避免轮询打到别的域名）
+            # 启动后台轮询下载协程
             asyncio.create_task(self._poll_and_download_minimax(task_id, settings.MINIMAX_API_KEY, base))
 
             out_filename = f"minimax_{task_id}.mp4"

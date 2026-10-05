@@ -21,7 +21,9 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   // ====== 新 6 核心（极简） ======
   'prompt': {
     type:'prompt', label:'提示词', desc:'文本/描述', color:'text-sky-500',
-    inputs: [], outputs: [H('prompt','提示词','text',true)],
+    // 输入句柄 id 与 MinimalNodes 渲染的 target handle 对齐（原为 prompt_in 且 spec 无输入，
+    // 导致连入的文本写进 data.prompt_in 看不见、也不再向下游传播）
+    inputs: [H('prompt','上游文本','text')], outputs: [H('prompt','提示词','text',true)],
     isCore: true,
   },
   'image': {
@@ -44,6 +46,7 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
       H('last_frame','尾帧','image'),
       H('reference_images','参考集','image'),
       H('camera_prompt','机位','text'),
+      H('ref_audio','参考音频','audio'),
     ],
     outputs: [H('video','视频','video',true)],
     providerKind:'video',
@@ -68,6 +71,14 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   },
   'export': {
     type:'export', label:'导出', desc:'剪映/成片', color:'text-emerald-600',
+    inputs: [H('video','视频','video'), H('audio','音频','audio')],
+    outputs: [],
+    isCore: true,
+  },
+  // 时间线（合视频·轻剪辑）：入边是素材，出边为空（产物直接落 exports/ 供下载）。
+  // 与下方兼容老节点 'timeline-export'（剪映导出）语义不同，勿混用。
+  'timeline': {
+    type:'timeline', label:'时间线', desc:'多段合片·轻剪辑', color:'text-brand',
     inputs: [H('video','视频','video'), H('audio','音频','audio')],
     outputs: [],
     isCore: true,
@@ -102,7 +113,11 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
   'load-image-batch': { type:'load-image-batch', label:'批量加载图像', desc:'兼容', color:'text-violet-400', inputs: [], outputs: [H('images','图像集','image',true)] },
   'load-video': { type:'load-video', label:'加载视频', desc:'兼容', color:'text-orange-400', inputs: [], outputs: [H('video','视频','video',true)] },
   'load-audio': { type:'load-audio', label:'加载音频', desc:'兼容', color:'text-pink-400', inputs: [], outputs: [H('audio','音频','audio',true)] },
-  'text-prompt': { type:'text-prompt', label:'文本提示词', desc:'兼容', color:'text-sky-400', inputs: [], outputs: [H('prompt','提示词','text',true)] },
+  'text-prompt': {
+    type:'text-prompt', label:'文本提示词', desc:'纯文本资源，连线/拖放自动填充下游', color:'text-sky-400',
+    inputs: [H('prompt','文本','text')], outputs: [H('prompt','提示词','text',true), H('text','文本','text')],
+    isCore: true,
+  },
   // 自定义代码节点：一段代码即一节点（视频超分/风格迁移…），输入输出按其 input_schema 动态解析，isCore 进工具栏
   'custom': {
     type:'custom', label:'自定义节点', desc:'代码节点（超分/处理）', color:'text-teal-400',

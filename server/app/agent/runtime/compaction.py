@@ -7,8 +7,8 @@
 """
 from __future__ import annotations
 
-import json
 import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 from app.agent.runtime import events as E
@@ -21,6 +21,68 @@ _SUMMARY_SYSTEM = (
     "必须保留：用户所有明确要求与约束、当前项目/镜头状态、已执行的工具及其关键结果（含 URL/ID/参数）、"
     "失败原因与未完成事项、下一步待办。不要编造。只输出摘要正文。"
 )
+
+# 上游"上下文超限"类错误特征：命中则强制压缩历史后重试本步（与配额/限流错误区分开）
+_CONTEXT_OVERFLOW_PHRASES = (
+    "context length", "context_length", "maximum context", "max context",
+    "context limit", "too many tokens", "tokens in the messages", "prompt is too long",
+    "input is too long", "reduce the length", "maximum number of tokens",
+    "上下文长度", "上下文超限", "输入过长", "长度超限",
+)
+
+
+def is_context_overflow_error(err: Any) -> bool:
+    """判断异常是否为"上下文超限"（强制压缩后重试的触发条件）。"""
+    s = f"{type(err).__name__}: {err}".lower()
+    if any(p in s for p in _CONTEXT_OVERFLOW_PHRASES):
+        return True
+    # 兜底：必须同时提到 context/上下文 且带超限语义，避免把配额/限流误判为超限
+    if ("context" in s or "上下文" in s):
+        return any(w in s for w in ("exceed", "too long", "limit", "length", "超", "过长"))
+    return False
+
+
+def spill_long_user_text(session_id: str, seq: int, text: str) -> Optional[str]:
+    """超长用户文本落盘，返回文件路径（模型可用 fs_read 分页读全文）。
+
+    与工具结果 spill 同一目录（storage/agent_spills/<session>/），只落一次；
+    日志里仍保留全文事件（保真），这里只是给模型的"分页窗口 + 定位符"。
+    """
+    if not text:
+        return None
+    import re as _re
+    try:
+        from app.core.config import settings
+        base = Path(settings.STORAGE_DIR) / "agent_spills" / _re.sub(r"[^A-Za-z0-9_.\-]", "_", session_id or "default")
+    except Exception:
+        base = Path("storage") / "agent_spills" / "default"
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+        p = base / f"user_{int(seq)}_text.md"
+        if not p.exists():
+            p.write_text(text, encoding="utf-8")
+        return str(p)
+    except Exception:
+        return None
+
+
+def maybe_fold_user_text(session_id: str, seq: int, text: str) -> str:
+    """超长用户文本（复制粘贴的长文）在模型历史里折成 头+尾+定位符。
+
+    阈值 AGENT_USER_TEXT_MAX（默认 6000 字符）；低于阈值原样返回。
+    """
+    try:
+        limit = int(os.environ.get("AGENT_USER_TEXT_MAX") or 6000)
+    except Exception:
+        limit = 6000
+    if limit <= 0 or len(text) <= limit:
+        return text
+    path = spill_long_user_text(session_id, seq, text)
+    head = max(200, min(limit // 2, 1500))
+    tail = max(150, min(limit // 3, 1000))
+    locator = f"\n\n……（已折叠 {len(text)} 字符；全文见 {path}，用 fs_read 分页读取）……\n\n" if path \
+        else f"\n\n……（已折叠 {len(text)} 字符；全文过长且未能落盘）……\n\n"
+    return text[:head] + locator + text[-tail:]
 
 
 def _shadow_info(session) -> tuple[Set[int], Dict[int, str]]:
@@ -39,8 +101,17 @@ def _shadow_info(session) -> tuple[Set[int], Dict[int, str]]:
     return shadowed, replacements
 
 
-def maybe_prune_tool_results(session, max_chars: int = 2000) -> int:
+def _prune_max_chars() -> int:
+    """剪裁兜底阈值：留出余量给管线已压好的结果（pipeline.SPILL_CHARS=8000），避免二次盲剪。"""
+    try:
+        return max(1000, int(os.environ.get("AGENT_PRUNE_MAX_CHARS") or 9000))
+    except Exception:
+        return 9000
+
+
+def maybe_prune_tool_results(session, max_chars: Optional[int] = None) -> int:
     """把过大的 tool/result 替换为头尾预览（append-only，原文仍在日志）。"""
+    max_chars = _prune_max_chars() if max_chars is None else int(max_chars)
     shadowed, _ = _shadow_info(session)
     replacements: Dict[str, str] = {}
     seqs: List[int] = []
@@ -50,13 +121,7 @@ def maybe_prune_tool_results(session, max_chars: int = 2000) -> int:
         seq = int(ev.get("seq") or 0)
         if seq in shadowed:
             continue
-        d = ev.get("data") or {}
-        content = d.get("result")
-        if not isinstance(content, str):
-            try:
-                content = json.dumps(content, ensure_ascii=False, default=str)
-            except Exception:
-                content = str(content)
+        content = E.tool_result_content_text(ev.get("data") or {})
         if len(content) <= max_chars:
             continue
         half = max_chars // 2
@@ -84,13 +149,8 @@ def _surface_sequence(session) -> List[Dict[str, Any]]:
             tok = estimate_text(str(d.get("text") or "")) + estimate_text(str(d.get("tool_calls") or ""))
             out.append({"seq": seq, "role": "assistant", "tokens": tok, "type": t})
         elif t == E.TOOL_RESULT:
-            c = d.get("result")
-            if not isinstance(c, str):
-                try:
-                    c = json.dumps(c, ensure_ascii=False, default=str)
-                except Exception:
-                    c = str(c)
-            out.append({"seq": seq, "role": "tool", "tokens": estimate_text(c), "type": t})
+            out.append({"seq": seq, "role": "tool",
+                        "tokens": estimate_text(E.tool_result_content_text(d)), "type": t})
         elif t == E.SYSTEM_MESSAGE:
             out.append({"seq": seq, "role": "system", "tokens": estimate_text(str(d.get("text") or "")), "type": t})
     return out
@@ -132,12 +192,7 @@ def _transcript_of(session, surface: List[Dict[str, Any]], cut: int, limit_chars
             names = ",".join((tc or {}).get("name") or "" for tc in tcs)
             lines.append(f"[导演] {text}" + (f"（调用工具: {names}）" if names else ""))
         elif item["type"] == E.TOOL_RESULT:
-            c = d.get("result")
-            if not isinstance(c, str):
-                try:
-                    c = json.dumps(c, ensure_ascii=False, default=str)
-                except Exception:
-                    c = str(c)
+            c = E.tool_result_content_text(d)
             status = d.get("status") or ""
             err = d.get("error") or ""
             lines.append(f"[工具 {d.get('name') or ''} {status}] {(err if status != 'success' else c)[:1200]}")
@@ -145,10 +200,11 @@ def _transcript_of(session, surface: List[Dict[str, Any]], cut: int, limit_chars
     return text[:limit_chars]
 
 
-async def maybe_compact(session, emit=None) -> Optional[Dict[str, Any]]:
-    """压力超阈值时摘要旧历史；失败不阻塞主流程（返回 None）。"""
+async def maybe_compact(session, emit=None, force: bool = False) -> Optional[Dict[str, Any]]:
+    """压力超阈值时摘要旧历史；force=True 时跳过阈值检查（上游报上下文超限后的应急压缩）。
+    失败不阻塞主流程（返回 None）。"""
     try:
-        if not should_compact(session):
+        if not force and not should_compact(session):
             return None
         window = context_window()
         try:

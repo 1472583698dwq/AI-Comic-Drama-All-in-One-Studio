@@ -14,6 +14,19 @@ import {
   type Capability, type Channel, type CapField,
 } from './capabilityCatalog';
 
+/**
+ * 代码源「隐式配置」的两个接口：后端有（GET /providers/{id}/effective-config、
+ * POST /providers/{id}/migrate-inline-key），但本基线 apiService 里没有声明。
+ * 用「可选调用」接住：方法在就照常工作；不在则退化成"读不到隐式配置"，
+ * 绝不因此挡住「填 Key / 测试连通 / 设为默认通道」这些主流程。
+ */
+type ProviderInlineApi = {
+  getProviderEffectiveConfig?: (providerId: string) => Promise<any>;
+  migrateProviderInlineKey?: (providerId: string, rewriteCode?: boolean) => Promise<any>;
+};
+const providerInlineApi = apiService as unknown as ProviderInlineApi;
+const inlineApiAvailable = typeof providerInlineApi.getProviderEffectiveConfig === 'function';
+
 /** 单通道测试结果。skipped = 该通道没有可一键跑的连通测试（不是失败） */
 type TestState = { running?: boolean; ok?: boolean; detail?: string; skipped?: boolean };
 
@@ -37,7 +50,7 @@ type ReadyState = 'ok' | 'fill' | 'none';
 const DOT_CLS: Record<ReadyState, string> = {
   ok: 'bg-emerald-400',
   fill: 'bg-amber-400',
-  none: 'bg-surface-tertiary',
+  none: 'bg-white/65 dark:bg-white/[.09]',
 };
 
 /**
@@ -157,7 +170,8 @@ export const CapabilitiesArea: React.FC<Props> = ({ tab, cfg, draft, setDraft, l
         st = { ok, detail: res?.detail || res?.error || (ok ? '连通正常' : '未通过') };
       } else {
         // 把当前草稿一并带上，这样不保存也能先测
-        const res = await apiService.testConfig(ch.test as any, merged);
+        // 上面的前置守卫已保证走到这里时 ch.test 必有值（无 test 且无 providerId 会提前 return）
+        const res = await apiService.testConfig(ch.test!, merged);
         st = { ok: !!res?.ok, detail: res?.detail || '' };
       }
     } catch (e: any) {
@@ -246,7 +260,7 @@ export const CapabilitiesArea: React.FC<Props> = ({ tab, cfg, draft, setDraft, l
     <button
       onClick={onClick}
       className={`w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-[11.5px] font-medium transition-all text-left ${
-        active ? 'bg-brand/15 text-[color:var(--color-text-main)] ring-1 ring-brand/30' : 'text-gray-400 hover:text-[color:var(--color-text-main)] hover:bg-surface-secondary'
+        active ? 'bg-brand/15 text-[color:var(--color-text-main)] ring-1 ring-brand/30' : 'text-gray-400 hover:text-[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06]'
       }`}
     >
       {dot ? <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${DOT_CLS[dot]}`} /> : <LayoutGrid className="w-3.5 h-3.5 shrink-0 text-brand-light" />}
@@ -258,14 +272,14 @@ export const CapabilitiesArea: React.FC<Props> = ({ tab, cfg, draft, setDraft, l
   return (
     <div className="flex-1 flex min-h-0">
       {/* ── 左侧：能力子导航 ── */}
-      <aside className="w-[200px] shrink-0 border-r border-border bg-surface/50 flex flex-col">
-        <div className="p-2.5 border-b border-border/70">
+      <aside className="w-[200px] shrink-0 border-r border-white/70 dark:border-white/12 bg-white/55 dark:bg-black/30 flex flex-col">
+        <div className="p-2.5 border-b border-white/60 dark:border-white/12">
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="搜通道 / 配置键…"
             spellCheck={false}
-            className="w-full bg-surface-secondary border border-border rounded-xl px-2.5 py-1.5 text-[11px] text-[color:var(--color-text-main)] placeholder-gray-600 focus:outline-none focus:border-brand/60"
+            className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-2.5 py-1.5 text-[11px] text-[color:var(--color-text-main)] placeholder-gray-600 focus:outline-none focus:border-brand/60"
           />
         </div>
         <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-0.5">
@@ -305,11 +319,11 @@ export const CapabilitiesArea: React.FC<Props> = ({ tab, cfg, draft, setDraft, l
             </>
           )}
         </div>
-        <div className="p-2 border-t border-border/70">
+        <div className="p-2 border-t border-white/60 dark:border-white/12">
           <button
             onClick={runAllTests}
             disabled={bulk.running || loading}
-            className="w-full px-2.5 py-1.5 rounded-xl bg-surface-secondary border border-border text-[11px] font-bold text-[color:var(--color-text-main)] hover:border-brand/50 disabled:opacity-40 flex items-center justify-center gap-1.5"
+            className="w-full px-2.5 py-1.5 rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11px] font-bold text-[color:var(--color-text-main)] hover:border-brand/50 disabled:opacity-40 flex items-center justify-center gap-1.5"
           >
             {bulk.running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FlaskConical className="w-3.5 h-3.5 text-brand-light" />}
             {bulk.running ? `${bulk.done}/${bulk.total}` : '一键测试全部'}
@@ -380,7 +394,7 @@ const OverviewPanel: React.FC<{
   onJump: (id: string) => void;
 }> = ({ caps, readyCount, essentialMissing, bulk, onRunAll, stateOf, defaultNameOf, channelCountOf, onJump }) => (
   <>
-    <div className="rounded-2xl border border-border bg-surface p-5">
+    <div className="rounded-2xl border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] p-5">
       <div className="flex items-baseline justify-between gap-3 flex-wrap">
         <div>
           <h2 className="text-sm font-bold text-[color:var(--color-text-main)]">配置进度</h2>
@@ -399,7 +413,7 @@ const OverviewPanel: React.FC<{
           <button
             onClick={onRunAll}
             disabled={bulk.running}
-            className="px-3 py-1.5 rounded-xl bg-surface-secondary border border-border text-[11.5px] font-bold text-[color:var(--color-text-main)] hover:border-brand/50 disabled:opacity-40 flex items-center gap-1.5"
+            className="px-3 py-1.5 rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11.5px] font-bold text-[color:var(--color-text-main)] hover:border-brand/50 disabled:opacity-40 flex items-center gap-1.5"
           >
             {bulk.running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FlaskConical className="w-3.5 h-3.5 text-brand-light" />}
             {bulk.running ? `测试中 ${bulk.done}/${bulk.total}` : '一键测试全部'}
@@ -416,7 +430,7 @@ const OverviewPanel: React.FC<{
           const st = stateOf(c);
           return (
             <div key={c.id} className="flex-1 space-y-1">
-              <div className={`h-1.5 rounded-full ${st === 'ok' ? 'bg-emerald-400' : st === 'fill' ? 'bg-amber-400/60' : 'bg-surface-tertiary'}`} />
+              <div className={`h-1.5 rounded-full ${st === 'ok' ? 'bg-emerald-400' : st === 'fill' ? 'bg-amber-400/60' : 'bg-white/65 dark:bg-white/[.09]'}`} />
               <div className={`text-[10px] truncate ${st === 'ok' ? 'text-emerald-400' : c.essential && st === 'none' ? 'text-amber-300' : 'text-gray-500'}`}>{c.name}</div>
             </div>
           );
@@ -447,8 +461,8 @@ const OverviewPanel: React.FC<{
     </div>
 
     {/* 能力一览：点一下直达（旧版这些卡全部堆在一页里） */}
-    <div className="rounded-2xl border border-border bg-surface overflow-hidden">
-      <div className="px-5 pt-4 pb-3 border-b border-border/70">
+    <div className="rounded-2xl border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] overflow-hidden">
+      <div className="px-5 pt-4 pb-3 border-b border-white/60 dark:border-white/12">
         <h3 className="text-sm font-bold text-[color:var(--color-text-main)]">能力一览</h3>
         <p className="text-[11px] text-gray-500 mt-0.5">点任意一项进入它的通道列表，逐个配置。</p>
       </div>
@@ -459,18 +473,18 @@ const OverviewPanel: React.FC<{
             <button
               key={c.id}
               onClick={() => onJump(c.id)}
-              className="text-left rounded-xl border border-border bg-surface-secondary/60 px-3.5 py-3 hover:border-brand/50 transition-all"
+              className="text-left rounded-xl border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.05] px-3.5 py-3 hover:border-brand/50 transition-all"
             >
               <div className="flex items-center gap-2">
                 <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${DOT_CLS[st]}`} />
                 <span className="text-[12px] font-bold text-[color:var(--color-text-main)]">{c.name}</span>
                 {c.essential
                   ? <span className="text-[9px] px-1.5 py-0.5 rounded bg-brand/20 text-brand-light font-bold">必需</span>
-                  : <span className="text-[9px] px-1.5 py-0.5 rounded bg-surface-tertiary text-gray-400">可选</span>}
+                  : <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/65 dark:bg-white/[.09] text-gray-400">可选</span>}
               </div>
               <div className="text-[10.5px] text-gray-500 mt-1 truncate">默认 {defaultNameOf(c)} · {channelCountOf(c)} 个通道</div>
-              <div className="mt-2 h-1 rounded-full bg-surface-tertiary overflow-hidden">
-                <div className={`h-full ${st === 'ok' ? 'bg-emerald-400' : st === 'fill' ? 'bg-amber-400' : 'bg-surface-tertiary'}`}
+              <div className="mt-2 h-1 rounded-full bg-white/65 dark:bg-white/[.09] overflow-hidden">
+                <div className={`h-full ${st === 'ok' ? 'bg-emerald-400' : st === 'fill' ? 'bg-amber-400' : 'bg-white/65 dark:bg-white/[.09]'}`}
                   style={{ width: st === 'ok' ? '100%' : st === 'fill' ? '55%' : '8%' }} />
               </div>
             </button>
@@ -529,14 +543,14 @@ const CapabilityDetail: React.FC<{
   const advFields = fields.filter((f) => f.advanced);
 
   return (
-    <section className="rounded-2xl border border-border bg-surface overflow-hidden">
+    <section className="rounded-2xl border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] overflow-hidden">
       {/* 卡头 */}
-      <div className="px-5 pt-4 pb-3 border-b border-border/70">
+      <div className="px-5 pt-4 pb-3 border-b border-white/60 dark:border-white/12">
         <div className="flex items-center gap-2 flex-wrap">
           <h3 className="text-sm font-bold text-[color:var(--color-text-main)]">{cap.name}</h3>
           {cap.essential
             ? <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-brand/20 text-brand-light font-bold">必需</span>
-            : <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-surface-tertiary text-gray-400">可选</span>}
+            : <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-white/65 dark:bg-white/[.09] text-gray-400">可选</span>}
           <span className="ml-auto">
             {t.running
               ? <span className="text-[10.5px] text-gray-400 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" />测试中</span>
@@ -572,7 +586,7 @@ const CapabilityDetail: React.FC<{
                   className={`w-full text-left rounded-xl px-3 py-2 border transition-all ${
                     active
                       ? 'bg-brand/15 border-brand/50 ring-1 ring-brand/30'
-                      : 'bg-surface-secondary/60 border-border hover:border-brand/40'
+                      : 'bg-white/55 dark:bg-white/[.05] border-white/70 dark:border-white/12 hover:border-brand/40'
                   }`}
                 >
                   <div className="flex items-center gap-1.5 min-w-0">
@@ -585,19 +599,19 @@ const CapabilityDetail: React.FC<{
                     {done && <Check className="w-3 h-3 shrink-0 text-emerald-400" />}
                   </div>
                   <div className="flex items-center gap-1 flex-wrap mt-1">
-                    <span className={`text-[9px] px-1 rounded ${done ? 'bg-emerald-500/15 text-emerald-300' : 'bg-surface-tertiary text-gray-500'}`}>
+                    <span className={`text-[9px] px-1 rounded ${done ? 'bg-emerald-500/15 text-emerald-300' : 'bg-white/65 dark:bg-white/[.09] text-gray-500'}`}>
                       {done ? '已填' : '未填'}
                     </span>
                     {isDef && <span className="text-[9px] px-1 rounded bg-brand text-white">默认</span>}
                     {c.custom && <span className="text-[9px] px-1 rounded bg-amber-500/15 text-amber-300">自定义</span>}
-                    {c.disabled && <span className="text-[9px] px-1 rounded bg-surface-tertiary text-gray-400">已停用</span>}
+                    {c.disabled && <span className="text-[9px] px-1 rounded bg-white/65 dark:bg-white/[.09] text-gray-400">已停用</span>}
                     {c.legacy && (
-                      <span className="text-[9px] px-1 rounded bg-surface-tertiary text-gray-400 flex items-center gap-0.5">
+                      <span className="text-[9px] px-1 rounded bg-white/65 dark:bg-white/[.09] text-gray-400 flex items-center gap-0.5">
                         <History className="w-2 h-2" />旧版
                       </span>
                     )}
                   </div>
-                  <div className="mt-1.5 h-[3px] rounded-full bg-surface-tertiary overflow-hidden">
+                  <div className="mt-1.5 h-[3px] rounded-full bg-white/65 dark:bg-white/[.09] overflow-hidden">
                     <div className="h-full bg-emerald-400" style={{ width: `${pctOf(c)}%` }} />
                   </div>
                 </button>
@@ -619,7 +633,7 @@ const CapabilityDetail: React.FC<{
                   : (
                     <button
                       onClick={() => p.onSetDefault(cap, ch)}
-                      className="px-2 py-0.5 rounded-lg bg-surface-secondary border border-border text-[10.5px] text-gray-300 hover:text-white hover:border-brand/50 flex items-center gap-1"
+                      className="px-2 py-0.5 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[10.5px] text-gray-300 hover:text-white hover:border-brand/50 flex items-center gap-1"
                     >
                       <ArrowLeftRight className="w-3 h-3" />设为默认通道
                     </button>
@@ -648,7 +662,7 @@ const CapabilityDetail: React.FC<{
             )}
 
             {ch.legacy && (
-              <div className="mt-2.5 flex items-start gap-2 rounded-xl border border-border bg-surface-secondary px-3 py-2">
+              <div className="mt-2.5 flex items-start gap-2 rounded-xl border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06] px-3 py-2">
                 <History className="w-3.5 h-3.5 text-gray-500 shrink-0 mt-0.5" />
                 <div className="text-[11px] text-gray-400 leading-relaxed">
                   <b className="text-gray-300">旧版通道</b> · {ch.legacy}
@@ -692,7 +706,7 @@ const CapabilityDetail: React.FC<{
               <>
                 <button
                   onClick={p.onToggleMore}
-                  className="mt-3 w-full flex items-center gap-1.5 text-[11px] text-gray-500 hover:text-[color:var(--color-text-main)] border-t border-dashed border-border pt-2.5"
+                  className="mt-3 w-full flex items-center gap-1.5 text-[11px] text-gray-500 hover:text-[color:var(--color-text-main)] border-t border-dashed border-white/70 dark:border-white/12 pt-2.5"
                 >
                   {p.moreOpen ? '▾' : '▸'} 选填 / 高级（{advFields.length} 项）
                 </button>
@@ -768,7 +782,7 @@ const CapabilityDetail: React.FC<{
         </div>
       </div>
 
-      <div className="border-t border-border/70 bg-surface-secondary/40 px-5 py-3 flex items-start gap-2.5">
+      <div className="border-t border-white/60 dark:border-white/12 bg-white/40 dark:bg-white/[.03] px-5 py-3 flex items-start gap-2.5">
         <ChevronRight className="w-4 h-4 text-brand-light shrink-0 mt-0.5" />
         <div className="text-[11.5px] text-gray-400 leading-relaxed">
           <b className="text-[color:var(--color-text-main)]">想接的厂商不在上面？</b>
@@ -797,7 +811,8 @@ const CustomSourceBox: React.FC<{
 
   const load = async () => {
     try {
-      const r = await apiService.getProviderEffectiveConfig(pid);
+      // 用可选调用：本基线 apiService 未声明该方法时返回 undefined，走 setEff(null)
+      const r = await providerInlineApi.getProviderEffectiveConfig?.(pid);
       setEff(r?.effective || null);
     } catch {
       setEff(null); // 接口不可用时不挡填 Key
@@ -815,9 +830,14 @@ const CustomSourceBox: React.FC<{
         : `只把代码里的内联 Key 复制到 ${eff?.env_name || '配置存储'}，不改代码。\n若代码没有读 ctx.get("api_key")，运行时仍然是代码里那一句生效。`,
     });
     if (!ok) return;
+    if (!providerInlineApi.migrateProviderInlineKey) {
+      // 与 load 同理：接口不在时明说，不假装成功
+      toast.error('当前基线的 apiService 未提供「迁移内联 Key」接口，无法执行迁移');
+      return;
+    }
     setMigrating(true);
     try {
-      const r = await apiService.migrateProviderInlineKey(pid, rewrite);
+      const r = await providerInlineApi.migrateProviderInlineKey(pid, rewrite);
       const notes: string[] = r?.notes || [];
       toast.success(`已写入 ${r?.env_name || '配置存储'}${notes.length ? `（${notes.join('；')}）` : ''}`);
       await load();
@@ -833,7 +853,7 @@ const CustomSourceBox: React.FC<{
     ? { text: 'Key 来自配置存储', cls: 'bg-emerald-500/15 text-emerald-300' }
     : eff?.key_source === 'inline'
       ? { text: 'Key 写在代码里', cls: 'bg-amber-500/15 text-amber-300' }
-      : { text: '未找到 Key', cls: 'bg-surface-tertiary text-gray-400' };
+      : { text: '未找到 Key', cls: 'bg-white/65 dark:bg-white/[.09] text-gray-400' };
 
   // 这块只列两类"写死的配置"：接口地址 + 密钥（其余常量如工作流 ID 不展示，保持一屏可读）
   const allRows: any[] = [
@@ -854,7 +874,7 @@ const CustomSourceBox: React.FC<{
   const hasImplicit = urlRows.length > 0 || !!keyRow;
 
   return (
-    <div className="mt-3.5 rounded-xl border border-border bg-surface-secondary/60 px-3 py-2.5">
+    <div className="mt-3.5 rounded-xl border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.05] px-3 py-2.5">
       {/* ── Key：配置存储这一侧 ── */}
       <div className="flex items-center gap-1.5 flex-wrap">
         <KeyRound className="w-3.5 h-3.5 text-brand-light" />
@@ -866,7 +886,7 @@ const CustomSourceBox: React.FC<{
           type="password" value={value} autoComplete="off" spellCheck={false}
           placeholder="留空不动已保存的 Key；填新值即覆盖"
           onChange={(e) => onChange(e.target.value)}
-          className="flex-1 bg-surface border border-border rounded-xl px-3 py-1.5 text-[11.5px] font-mono text-[color:var(--color-text-main)] placeholder-gray-600 focus:outline-none focus:border-brand/60"
+          className="flex-1 bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-xl px-3 py-1.5 text-[11.5px] font-mono text-[color:var(--color-text-main)] placeholder-gray-600 focus:outline-none focus:border-brand/60"
         />
         <button
           onClick={onSave} disabled={busy}
@@ -883,7 +903,7 @@ const CustomSourceBox: React.FC<{
 
       {/* ── 隐式配置：代码里写死的那一侧（只列 接口地址 + API Key） ── */}
       {hasImplicit && (
-        <div className="mt-3 border-t border-border/70 pt-2.5">
+        <div className="mt-3 border-t border-white/60 dark:border-white/12 pt-2.5">
           <div className="flex items-center gap-1.5 flex-wrap">
             <FileCode2 className="w-3.5 h-3.5 text-gray-400" />
             <span className="text-[11.5px] font-bold text-[color:var(--color-text-main)]">代码里写死的配置</span>
@@ -891,7 +911,7 @@ const CustomSourceBox: React.FC<{
             {keyRow && (
               <button
                 onClick={() => setRevealed((v) => !v)}
-                className="px-2 py-0.5 rounded-lg bg-surface text-[10.5px] text-gray-400 hover:text-white"
+                className="px-2 py-0.5 rounded-lg bg-white/60 dark:bg-white/[.05] text-[10.5px] text-gray-400 hover:text-white"
               >
                 {revealed ? '隐藏密钥' : '显示密钥'}
               </button>
@@ -900,7 +920,7 @@ const CustomSourceBox: React.FC<{
               <span className="ml-auto flex items-center gap-1.5">
                 <button
                   onClick={() => migrate(false)} disabled={migrating}
-                  className="px-2 py-0.5 rounded-lg bg-surface text-[10.5px] text-gray-300 hover:text-white disabled:opacity-40"
+                  className="px-2 py-0.5 rounded-lg bg-white/60 dark:bg-white/[.05] text-[10.5px] text-gray-300 hover:text-white disabled:opacity-40"
                 >
                   只写入配置存储
                 </button>
@@ -956,7 +976,9 @@ const CustomSourceBox: React.FC<{
 
       {!eff && (
         <div className="mt-2 text-[10.5px] text-gray-500">
-          没读到源码里的隐式配置（接口不可用，或该源确实没把 Key / 地址写死在代码里）。
+          {inlineApiAvailable
+            ? '没读到源码里的隐式配置（接口不可用，或该源确实没把 Key / 地址写死在代码里）。'
+            : '本基线前端未声明 effective-config 接口，暂时读不到代码里写死的配置（后端接口本身是有的）。填 Key、测试、设为默认通道都不受影响。'}
         </div>
       )}
     </div>
@@ -1002,7 +1024,7 @@ const FieldRow: React.FC<{
             list={opts.length ? `${listId}__opts` : undefined}
             onChange={(e) => onChange(e.target.value)}
             spellCheck={false}
-            className="w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-[12px] font-mono text-[color:var(--color-text-main)] placeholder-gray-600 focus:outline-none focus:border-brand/60 transition-colors pr-9"
+            className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-[12px] font-mono text-[color:var(--color-text-main)] placeholder-gray-600 focus:outline-none focus:border-brand/60 transition-colors pr-9"
           />
           {secret && (
             <button
@@ -1028,7 +1050,7 @@ const FieldRow: React.FC<{
                 <FolderSearch className="w-3 h-3" />选择目录
               </button>
               <button type="button" onClick={openDir} disabled={!value}
-                className="px-2 py-0.5 rounded-lg bg-surface-secondary border border-border text-[10.5px] text-gray-400 hover:text-white disabled:opacity-40 flex items-center gap-1">
+                className="px-2 py-0.5 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[10.5px] text-gray-400 hover:text-white disabled:opacity-40 flex items-center gap-1">
                 <FolderOpen className="w-3 h-3" />打开
               </button>
             </>
@@ -1042,7 +1064,7 @@ const FieldRow: React.FC<{
                   className={`px-2 py-0.5 rounded-lg border text-[10.5px] font-mono ${
                     value === o
                       ? 'bg-brand/20 border-brand/50 text-brand-light'
-                      : 'bg-surface-secondary border-border text-gray-400 hover:text-white'
+                      : 'bg-white/55 dark:bg-white/[.06] border-white/70 dark:border-white/12 text-gray-400 hover:text-white'
                   }`}
                 >
                   {o}
@@ -1052,7 +1074,7 @@ const FieldRow: React.FC<{
           )}
           {(field.quickFill || []).map((q) => (
             <button key={q.value} type="button" onClick={() => onChange(q.value)}
-              className="px-2 py-0.5 rounded-lg bg-surface-secondary border border-border text-[10.5px] text-gray-400 hover:text-white">
+              className="px-2 py-0.5 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[10.5px] text-gray-400 hover:text-white">
               {q.label}
             </button>
           ))}

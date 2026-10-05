@@ -73,8 +73,8 @@ export const DynamicControl: React.FC<{
       </div>
       {desc && <div className="text-[10px] [color:var(--color-text-muted)] leading-tight line-clamp-2">{desc}</div>}
       {isMedia ? (
-        <label className="flex items-center gap-2 p-2 rounded-xl border border-dashed border-border bg-surface-secondary hover:bg-surface-tertiary hover:border-brand/40 cursor-pointer transition-colors">
-          <div className="w-8 h-8 rounded bg-surface border border-border flex items-center justify-center shrink-0 overflow-hidden">
+        <label className="flex items-center gap-2 p-2 rounded-xl border border-dashed border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06] hover:bg-white/65 dark:bg-white/[.09] hover:border-brand/40 cursor-pointer transition-colors">
+          <div className="w-8 h-8 rounded bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 flex items-center justify-center shrink-0 overflow-hidden">
             {value ? (
               isImage ? <img src={value} alt="" className="w-full h-full object-cover"/> :
               isAudio ? <span className="text-[10px] font-mono truncate px-1 [color:var(--color-text-main)]">{String(value).slice(0,12)}…</span> :
@@ -102,17 +102,17 @@ export const DynamicControl: React.FC<{
           } else {
             onChange(v);
           }
-        }} className="w-full bg-surface-secondary border border-border rounded-xl px-2.5 py-1.5 text-sm [color:var(--color-text-main)] focus:outline-none focus:border-brand">
+        }} className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-2.5 py-1.5 text-sm [color:var(--color-text-main)] focus:outline-none focus:border-brand">
           <option value="">{spec.required?'请选择':'自动'}</option>
           {comboOptions.map(o=> <option key={o} value={o}>{o}</option>)}
         </select>
       ) : isCombo ? (
         // combo 无可选选项（如 ComfyUI 离线拿不到枚举）时退化为可编辑文本，避免空下拉无法输入
-        <input type="text" value={value ?? ''} onChange={e=> onChange(e.target.value)} placeholder={spec.description||''} className="w-full bg-surface-secondary border border-border rounded-xl px-2.5 py-1.5 text-sm [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand"/>
+        <input type="text" value={value ?? ''} onChange={e=> onChange(e.target.value)} placeholder={spec.description||''} className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-2.5 py-1.5 text-sm [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand"/>
       ) : isNumber ? (
         <div className="flex items-center gap-2">
           <input type="range" min={spec.min??0} max={spec.max??100} step={spec.step??1} value={value ?? spec.default_value ?? 0} onChange={e=> onChange(Number(e.target.value))} className="flex-1 accent-brand"/>
-          <input type="number" value={value ?? spec.default_value ?? ''} onChange={e=> onChange(e.target.value===''? '' : Number(e.target.value))} className="w-20 bg-surface-secondary border border-border rounded-lg px-2 py-1 text-sm [color:var(--color-text-main)] focus:outline-none focus:border-brand"/>
+          <input type="number" value={value ?? spec.default_value ?? ''} onChange={e=> onChange(e.target.value===''? '' : Number(e.target.value))} className="w-20 bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-lg px-2 py-1 text-sm [color:var(--color-text-main)] focus:outline-none focus:border-brand"/>
         </div>
       ) : isBool ? (
         <label className="flex items-center gap-2 cursor-pointer">
@@ -126,7 +126,7 @@ export const DynamicControl: React.FC<{
               <AiPolishButton value={String(value ?? '')} onPolish={(v: any) => onChange(v)} contextType={spec.role === 'dialogue' ? 'dialogue' : 'prompt'} size="xs" />
             </div>
           )}
-          <textarea value={value ?? ''} onChange={e=> onChange(e.target.value)} placeholder={spec.description||''} rows={spec.role === 'prompt' || spec.role === 'dialogue' ? 2 : 1} className="w-full bg-surface-secondary border border-border rounded-xl p-2 text-sm [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand resize-none"/>
+          <textarea value={value ?? ''} onChange={e=> onChange(e.target.value)} placeholder={spec.description||''} rows={spec.role === 'prompt' || spec.role === 'dialogue' ? 2 : 1} className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl p-2 text-sm [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand resize-none"/>
         </div>
       )}
     </div>

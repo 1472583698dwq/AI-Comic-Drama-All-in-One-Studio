@@ -17,6 +17,7 @@ import { API_ORIGIN } from '../../utils/devOrigin';
 import { apiService } from '../../services/api';
 import { syncExporterSpecs, listExporterSpecs, type ExporterInfo } from '../../services/exporterSpecs';
 import { useEscapeClose } from '../../hooks/useEscapeClose';
+import { AutoRatioMedia } from '../ui/AutoRatioMedia';
 import { AssetPickerModal } from '../asset/AssetPickerModal';
 
 interface ExportModalProps {
@@ -111,9 +112,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fade-in">
-      <div className="w-full max-w-2xl bg-surface rounded-2xl border border-border flex flex-col overflow-hidden shadow-2xl">
+      <div className="w-full max-w-2xl bg-white/60 dark:bg-white/[.05] rounded-2xl border border-white/70 dark:border-white/12 flex flex-col overflow-hidden shadow-2xl">
         {/* Header */}
-        <div className="h-14 px-6 border-b border-border flex items-center justify-between bg-surface-secondary/60">
+        <div className="h-14 px-6 border-b border-white/70 dark:border-white/12 flex items-center justify-between bg-white/55 dark:bg-white/[.05]">
           <div className="flex items-center space-x-2.5">
             <div className="p-2 rounded-xl bg-gradient-to-r from-brand to-brand-blue text-white shadow-sm">
               <Share2 className="w-4 h-4" />
@@ -127,7 +128,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-surface-tertiary"
+            className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/65 dark:bg-white/[.09]"
           >
             <X className="w-5 h-5" />
           </button>
@@ -136,19 +137,18 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
         {/* Content Body */}
         <div className="p-6 space-y-5">
           {/* Project Summary Card */}
-          <div className="bg-surface-secondary p-4 rounded-xl border border-border flex items-center justify-between">
+          <div className="bg-white/55 dark:bg-white/[.06] p-4 rounded-xl border border-white/70 dark:border-white/12 flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <div className="w-12 h-12 rounded-lg overflow-hidden bg-surface-secondary border border-border flex-shrink-0">
-                {project.scenes[0]?.shots[0]?.image_url ? (
-                  <img
-                    src={project.scenes[0].shots[0].image_url?.startsWith('/') ? API_ORIGIN + project.scenes[0].shots[0].image_url : project.scenes[0].shots[0].image_url}
-                    alt=""
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-[9px] text-gray-500">无图</div>
-                )}
-              </div>
+              {project.scenes[0]?.shots[0]?.image_url ? (
+                <AutoRatioMedia
+                  src={project.scenes[0].shots[0].image_url?.startsWith('/') ? API_ORIGIN + project.scenes[0].shots[0].image_url : project.scenes[0].shots[0].image_url}
+                  fallbackAspect="1/1"
+                  maxHeight={48}
+                  className="rounded-lg border border-white/70 dark:border-white/12 shrink-0"
+                />
+              ) : (
+                <div className="w-12 h-12 rounded-lg overflow-hidden bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 flex-shrink-0 flex items-center justify-center text-[9px] text-gray-500">无图</div>
+              )}
               <div>
                 <h3 className="text-xs font-bold text-white">{project.title}</h3>
                 <p className="text-[11px] text-gray-400 mt-0.5">
@@ -162,14 +162,14 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
           </div>
 
           {/* 全片 BGM 绑定：决定草稿里是否生成 bgm 轨 */}
-          <div className="flex items-center gap-2 text-[11px] bg-surface-secondary/60 border border-border rounded-xl px-3 py-2">
+          <div className="flex items-center gap-2 text-[11px] bg-white/55 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-xl px-3 py-2">
             <Music className="w-3.5 h-3.5 text-accent-orange shrink-0" />
             <span className="text-gray-400 shrink-0">全片 BGM</span>
             {project.bgm_url ? (
               <>
                 <span className="text-gray-200 truncate flex-1" title={project.bgm_url}>{project.bgm_name || project.bgm_url.split('/').pop()}</span>
-                <button onClick={() => setPickingBgm(true)} className="px-2 py-0.5 rounded-lg bg-surface-tertiary hover:bg-surface border border-border text-gray-300 shrink-0">更换</button>
-                <button onClick={clearBgm} className="px-2 py-0.5 rounded-lg hover:bg-surface-tertiary border border-border text-gray-500 hover:text-red-300 shrink-0">清除</button>
+                <button onClick={() => setPickingBgm(true)} className="px-2 py-0.5 rounded-lg bg-white/65 dark:bg-white/[.09] hover:bg-white/70 dark:hover:bg-white/[.09] border border-white/70 dark:border-white/12 text-gray-300 shrink-0">更换</button>
+                <button onClick={clearBgm} className="px-2 py-0.5 rounded-lg hover:bg-white/65 dark:bg-white/[.09] border border-white/70 dark:border-white/12 text-gray-500 hover:text-red-300 shrink-0">清除</button>
               </>
             ) : (
               <>
@@ -182,7 +182,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
           {/* Export Options Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Option 1: 剪映官方草稿导出 (Highlight!) */}
-            <div className="bg-surface-secondary/70 p-5 rounded-2xl border-2 border-brand/60 relative overflow-hidden flex flex-col justify-between shadow-lg">
+            <div className="bg-white/60 dark:bg-white/[.05] p-5 rounded-2xl border-2 border-brand/60 relative overflow-hidden flex flex-col justify-between shadow-lg">
               <span className="absolute top-2 right-2 px-2 py-0.5 rounded-full bg-brand text-[9px] font-bold text-white">
                 推荐首选
               </span>
@@ -209,9 +209,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
                   </div>
                   <div className="flex flex-wrap gap-1 text-[10px]">
                     {(exportedDraft.tracks || []).map((t: string) => (
-                      <span key={t} className="px-1.5 py-0.5 rounded bg-surface-tertiary border border-border text-gray-300 font-mono">{t}</span>
+                      <span key={t} className="px-1.5 py-0.5 rounded bg-white/65 dark:bg-white/[.09] border border-white/70 dark:border-white/12 text-gray-300 font-mono">{t}</span>
                     ))}
-                    <span className={`px-1.5 py-0.5 rounded border font-mono ${exportedDraft.bgm?.bound ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-surface-tertiary border-border text-gray-500'}`}>
+                    <span className={`px-1.5 py-0.5 rounded border font-mono ${exportedDraft.bgm?.bound ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-white/65 dark:bg-white/[.09] border-white/70 dark:border-white/12 text-gray-500'}`}>
                       {exportedDraft.bgm?.bound ? `bgm ×${exportedDraft.bgm.segments}` : 'bgm 未绑定'}
                     </span>
                   </div>
@@ -245,7 +245,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
                     {exportedDraft.export_dir && (
                       <button
                         onClick={() => apiService.openFolder(exportedDraft.export_dir)}
-                        className="flex-1 py-2 rounded-xl bg-surface-tertiary hover:bg-surface border border-border text-xs text-brand-light hover:text-white font-medium flex items-center justify-center space-x-1.5 transition-all"
+                        className="flex-1 py-2 rounded-xl bg-white/65 dark:bg-white/[.09] hover:bg-white/70 dark:hover:bg-white/[.09] border border-white/70 dark:border-white/12 text-xs text-brand-light hover:text-white font-medium flex items-center justify-center space-x-1.5 transition-all"
                       >
                         <FolderDown className="w-3.5 h-3.5" />
                         <span>在资源管理器中打开草稿箱</span>
@@ -256,7 +256,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
                         href={API_ORIGIN + exportedDraft.file_url}
                         target="_blank"
                         rel="noreferrer"
-                        className="px-3 py-2 rounded-xl bg-surface-tertiary hover:bg-surface border border-border text-xs text-gray-300 hover:text-white text-center"
+                        className="px-3 py-2 rounded-xl bg-white/65 dark:bg-white/[.09] hover:bg-white/70 dark:hover:bg-white/[.09] border border-white/70 dark:border-white/12 text-xs text-gray-300 hover:text-white text-center"
                       >
                         预览 JSON
                       </a>
@@ -292,7 +292,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
             </div>
 
             {/* Option 2: MP4 / SRT 视频合成与字幕 — 尚未接入真实渲染 */}
-            <div className="bg-surface-secondary/70 p-5 rounded-2xl border border-border flex flex-col justify-between opacity-80">
+            <div className="bg-white/60 dark:bg-white/[.05] p-5 rounded-2xl border border-white/70 dark:border-white/12 flex flex-col justify-between opacity-80">
               <div>
                 <div className="flex items-center space-x-2 mb-2">
                   <Film className="w-5 h-5 text-accent-orange" />
@@ -321,7 +321,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
                 {pluginExporters.map((ex) => {
                   const r: any = exporterResults[ex.id];
                   return (
-                    <div key={ex.id} className="bg-surface-secondary/70 p-4 rounded-2xl border border-border space-y-2">
+                    <div key={ex.id} className="bg-white/60 dark:bg-white/[.05] p-4 rounded-2xl border border-white/70 dark:border-white/12 space-y-2">
                       <div className="flex items-center gap-2">
                         <FileText className="w-4 h-4 text-accent-green" />
                         <div className="text-xs font-bold text-white truncate">{ex.name}</div>

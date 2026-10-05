@@ -29,7 +29,7 @@ export function substituteTpl(tpl: any, shot: any, projectId?: string): any {
 }
 
 const STORE_ACTIONS: Record<string, { label: string; run: (ctx: ShotSlotContext, args: Record<string, any>) => void }> = {
-  synthesizeShotPrompt: { label: '全要素合成', run: (ctx) => ctx.synthesizeShotPrompt(ctx.activeShot.id) },
+  synthesizeShotPrompt: { label: '合成提示词', run: (ctx) => ctx.synthesizeShotPrompt(ctx.activeShot.id) },
   autoFitShotDuration: {
     label: '智能吸附时长',
     run: (ctx, args) => {

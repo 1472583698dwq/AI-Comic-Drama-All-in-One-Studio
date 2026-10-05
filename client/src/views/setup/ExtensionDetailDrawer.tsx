@@ -80,16 +80,16 @@ export const ExtensionDetailDrawer: React.FC<Props> = ({ ext, onClose, onSaved }
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="w-full max-w-3xl max-h-[85vh] bg-surface rounded-2xl border border-border flex flex-col overflow-hidden">
-        <div className="h-12 px-4 border-b border-border flex items-center gap-2 shrink-0">
+      <div className="w-full max-w-3xl max-h-[85vh] bg-white/60 dark:bg-white/[.05] rounded-2xl border border-white/70 dark:border-white/12 flex flex-col overflow-hidden">
+        <div className="h-12 px-4 border-b border-white/70 dark:border-white/12 flex items-center gap-2 shrink-0">
           {isSkill ? <FileText className="w-4 h-4 text-amber-400" /> : <Cpu className="w-4 h-4 text-emerald-400" />}
           <span className="text-sm font-bold text-[color:var(--color-text-main)]">
             {isSkill ? '编辑技能' : isTool ? '工具预览' : '扩展详情'} {ext.local_id}
           </span>
           {!isSkill && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-tertiary border border-border text-gray-400">只读</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/65 dark:bg-white/[.09] border border-white/70 dark:border-white/12 text-gray-400">只读</span>
           )}
-          <button onClick={onClose} className="ml-auto p-1 rounded hover:bg-surface-tertiary">
+          <button onClick={onClose} className="ml-auto p-1 rounded hover:bg-white/65 dark:bg-white/[.09]">
             <X className="w-4 h-4 text-gray-400" />
           </button>
         </div>
@@ -104,7 +104,7 @@ export const ExtensionDetailDrawer: React.FC<Props> = ({ ext, onClose, onSaved }
               {filePath && <div className="text-[10.5px] font-mono text-gray-600 break-all">{filePath}</div>}
               <textarea
                 value={content} onChange={(e) => setContent(e.target.value)} spellCheck={false} rows={22}
-                className="w-full bg-surface-secondary border border-border rounded-xl p-3 text-[11.5px] font-mono text-[color:var(--color-text-main)] leading-relaxed focus:outline-none focus:border-brand/60 resize-none"
+                className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl p-3 text-[11.5px] font-mono text-[color:var(--color-text-main)] leading-relaxed focus:outline-none focus:border-brand/60 resize-none"
               />
               <div className="text-[10.5px] text-gray-500 leading-relaxed">
                 这是原始 SKILL.md 全文，上面的 <code className="font-mono">---</code> 之间是 frontmatter
@@ -134,7 +134,7 @@ export const ExtensionDetailDrawer: React.FC<Props> = ({ ext, onClose, onSaved }
                     {copied ? '已复制' : '复制'}
                   </button>
                 </div>
-                <pre className="rounded-xl bg-surface-secondary border border-border p-3 text-[11px] font-mono text-gray-300 overflow-auto max-h-80">
+                <pre className="rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 p-3 text-[11px] font-mono text-gray-300 overflow-auto max-h-80">
                   {JSON.stringify(tool.input_schema ?? {}, null, 2)}
                 </pre>
               </div>
@@ -149,9 +149,9 @@ export const ExtensionDetailDrawer: React.FC<Props> = ({ ext, onClose, onSaved }
         </div>
 
         {isSkill && (
-          <div className="h-12 px-4 border-t border-border flex items-center gap-2 shrink-0">
+          <div className="h-12 px-4 border-t border-white/70 dark:border-white/12 flex items-center gap-2 shrink-0">
             {dirty && <span className="text-[11px] text-amber-300">有未保存的修改</span>}
-            <button onClick={onClose} className="ml-auto px-3 py-1.5 rounded-lg bg-surface-secondary border border-border text-[11.5px] text-gray-300 hover:text-white">
+            <button onClick={onClose} className="ml-auto px-3 py-1.5 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11.5px] text-gray-300 hover:text-white">
               取消
             </button>
             <button onClick={save} disabled={!dirty || saving}
@@ -184,9 +184,9 @@ const GenericPreview: React.FC<{ ext: any }> = ({ ext }) => {
       {ext.description && (
         <div className="text-[12px] text-[color:var(--color-text-main)] leading-relaxed">{ext.description}</div>
       )}
-      <div className="rounded-xl border border-border overflow-hidden">
+      <div className="rounded-xl border border-white/70 dark:border-white/12 overflow-hidden">
         {rows.map(([k, v], i) => (
-          <div key={k} className={`px-3 py-1.5 flex items-baseline gap-3 ${i % 2 ? 'bg-surface-secondary/50' : 'bg-surface-secondary/20'}`}>
+          <div key={k} className={`px-3 py-1.5 flex items-baseline gap-3 ${i % 2 ? 'bg-white/50 dark:bg-white/[.04]' : 'bg-surface-secondary/20'}`}>
             <span className="text-[11px] text-gray-500 w-20 shrink-0">{k}</span>
             <span className="text-[11px] font-mono text-gray-300 break-all">{String(v)}</span>
           </div>
@@ -201,5 +201,5 @@ const GenericPreview: React.FC<{ ext: any }> = ({ ext }) => {
 };
 
 const Tag: React.FC<{ label: string }> = ({ label }) => (
-  <span className="px-2 py-0.5 rounded border border-border bg-surface-tertiary text-gray-400">{label}</span>
+  <span className="px-2 py-0.5 rounded border border-white/70 dark:border-white/12 bg-white/65 dark:bg-white/[.09] text-gray-400">{label}</span>
 );

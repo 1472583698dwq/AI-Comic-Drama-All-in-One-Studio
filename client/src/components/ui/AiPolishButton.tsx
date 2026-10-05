@@ -22,8 +22,7 @@ import {
 } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { useEscapeClose } from '../../hooks/useEscapeClose';
-// 技能清单加载与结果提取与「选区浮标」SelectionPolish 共用，避免两处各写一套口径
-import { loadPolishSkills, extractPolishResult } from './polishUtils';
+import { GLASS, GLASS_SOFT, T_MAIN, T_SEC, T_MUTED } from './designKit';
 
 export interface AiPolishButtonProps {
   value: string;
@@ -104,14 +103,17 @@ export const AiPolishButton: React.FC<AiPolishButtonProps> = ({
   const loadSystemSkills = async () => {
     setLoadingSkills(true);
     try {
-      const all = await loadPolishSkills();
-      setSkills(all);
-      if (!selectedSkill && all.length > 0) {
-        // 根据 contextType 挑选合适的初始技能
-        const defaultMatch = contextType === 'dialogue'
-          ? all.find(s => s.name.includes('dialogue') || s.name.includes('emotion'))
-          : all.find(s => s.name.includes('prompt') || s.category === 'prompt_optimization');
-        setSelectedSkill(defaultMatch ? defaultMatch.name : all[0].name);
+      const list = await apiService.listSkills();
+      const all: SkillItem[] = Array.isArray(list) ? list : (list as any)?.skills || [];
+      if (all && all.length > 0) {
+        setSkills(all);
+        if (!selectedSkill) {
+          // 根据 contextType 挑选合适的初始技能
+          const defaultMatch = contextType === 'dialogue'
+            ? all.find(s => s.name.includes('dialogue') || s.name.includes('emotion'))
+            : all.find(s => s.name.includes('prompt') || s.category === 'prompt_optimization');
+          setSelectedSkill(defaultMatch ? defaultMatch.name : all[0].name);
+        }
       }
     } catch (err) {
       console.error('Failed to load system skills:', err);
@@ -168,9 +170,31 @@ export const AiPolishButton: React.FC<AiPolishButtonProps> = ({
 
       const res = await apiService.executeSkill(selectedSkill, contextPayload, userInstruction.trim() || textToPolish);
 
-      // 结果提取收口到 polishUtils（各技能返回形态不一，统一口径后两处入口行为一致）
-      const { text: finalResult, suggestedEmotion: emo } = extractPolishResult(res);
-      setSuggestedEmotion(emo);
+      let finalResult = res?.modified_data?.polished_prompt || res?.modified_data?.polished_text || res?.result_message || '';
+
+      if (res?.modified_data?.suggested_emotion) {
+        setSuggestedEmotion(res.modified_data.suggested_emotion);
+      } else {
+        setSuggestedEmotion('');
+      }
+
+      // 如果返回为空尝试解析
+      if (!finalResult || finalResult === res?.result_message) {
+        if (res?.modified_data?.polished_prompt) finalResult = res.modified_data.polished_prompt;
+        else if (res?.modified_data?.polished_text) finalResult = res.modified_data.polished_text;
+      }
+
+      if (finalResult) {
+        finalResult = finalResult.trim();
+        // 清理 JSON 包裹
+        if (finalResult.startsWith('{') && finalResult.includes('polished_text')) {
+          try {
+            const j = JSON.parse(finalResult);
+            finalResult = j.polished_text || j.polished_prompt || finalResult;
+            if (j.suggested_emotion) setSuggestedEmotion(j.suggested_emotion);
+          } catch {}
+        }
+      }
 
       if (!finalResult) {
         throw new Error('未能生成润色结果，请重试');
@@ -215,7 +239,7 @@ export const AiPolishButton: React.FC<AiPolishButtonProps> = ({
         onClick={handleOpenModal}
         className={`inline-flex items-center gap-1.5 rounded-full border text-[11px] font-semibold transition-all shadow-sm
           ${size === 'xs' ? 'px-2.5 py-1' : 'px-3 py-1.5'}
-          bg-surface-secondary border-border [color:var(--color-text-main)] hover:border-brand hover:text-brand-light hover:bg-brand/10 ${className}
+          bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 [color:var(--color-text-main)] hover:border-[color:var(--color-brand)]/60 hover:[color:var(--color-brand-light)] hover:bg-[color:var(--color-brand)]/10 ${className}
         `}
         title="AI 定向润色：根据你的具体要求与技能风格智能重写"
       >
@@ -226,27 +250,27 @@ export const AiPolishButton: React.FC<AiPolishButtonProps> = ({
       {/* AI 定向润色全功能弹窗 */}
       {modalOpen && (
         <div className="fixed inset-0 z-[100] bg-black/75 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
-          <div className="w-full max-w-2xl bg-surface border border-border rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-scale-up">
+          <div className={`w-full max-w-2xl ${GLASS} rounded-[24px] overflow-hidden flex flex-col max-h-[90vh] animate-scale-up`}>
             
             {/* Header */}
-            <div className="px-5 py-3.5 border-b border-border bg-surface-secondary/60 flex items-center justify-between shrink-0">
+            <div className="px-5 py-3.5 border-b border-white/60 dark:border-white/10 bg-white/35 dark:bg-white/[.03] flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2.5">
-                <div className="p-1.5 rounded-xl bg-brand/20 border border-brand/40 text-brand-light">
+                <div className="p-1.5 rounded-xl bg-[color:var(--color-brand)]/20 border border-[color:var(--color-brand)]/40 text-[color:var(--color-brand-light)]">
                   <Wand2 className="w-4 h-4" />
                 </div>
                 <div>
-                  <div className="text-sm font-bold text-white flex items-center gap-2">
+                  <div className={`text-sm font-bold ${T_MAIN} flex items-center gap-2`}>
                     <span>✨ AI 智能定向润色</span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-brand/20 text-brand-light border border-brand/30 font-mono">
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-[color:var(--color-brand)]/20 text-[color:var(--color-brand-light)] border border-[color:var(--color-brand)]/30 font-mono">
                       {contextType === 'dialogue' ? '戏剧台词模式' : '视觉提示词模式'}
                     </span>
                   </div>
-                  <div className="text-[11px] text-gray-400">提出您的定制修改要求，AI 将结合所选技能生成高质量结果</div>
+                  <div className={`text-[11px] ${T_MUTED}`}>提出您的定制修改要求，AI 将结合所选技能生成高质量结果</div>
                 </div>
               </div>
               <button
                 onClick={() => setModalOpen(false)}
-                className="p-1.5 rounded-xl hover:bg-surface-tertiary text-gray-400 hover:text-white transition"
+                className={`p-1.5 rounded-xl ${T_MUTED} hover:${T_MAIN} hover:bg-white/60 dark:hover:bg-white/[.08] transition`}
               >
                 <X className="w-4 h-4" />
               </button>
@@ -257,30 +281,30 @@ export const AiPolishButton: React.FC<AiPolishButtonProps> = ({
               
               {/* 1. 当前原文 */}
               <div className="space-y-1.5">
-                <label className="text-[11px] font-bold text-gray-300 flex items-center justify-between">
+                <label className={`text-[11px] font-bold ${T_SEC} flex items-center justify-between`}>
                   <span className="flex items-center gap-1.5">
                     <Layers className="w-3.5 h-3.5 text-violet-400" />
                     <span>原始{contextType === 'dialogue' ? '台词 / 旁白' : '描述 / 提示词'}</span>
                   </span>
-                  <span className="text-[10px] text-gray-500 font-mono">{originalText.length} 字</span>
+                  <span className={`text-[10px] ${T_MUTED} font-mono`}>{originalText.length} 字</span>
                 </label>
                 <textarea
                   value={originalText}
                   onChange={(e) => setOriginalText(e.target.value)}
                   rows={2}
                   placeholder="输入或粘贴需要优化的原始内容..."
-                  className="w-full bg-surface-secondary border border-border rounded-xl p-2.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand font-mono resize-none leading-relaxed"
+                  className={`w-full bg-white/60 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl p-2.5 text-xs ${T_MAIN} placeholder-[color:var(--color-text-muted)] focus:outline-none focus:border-[color:var(--color-brand)]/60 font-mono resize-none leading-relaxed`}
                 />
               </div>
 
               {/* 2. 选择系统技能 Skill */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <label className="text-[11px] font-bold text-gray-300 flex items-center gap-1.5">
+                  <label className={`text-[11px] font-bold ${T_SEC} flex items-center gap-1.5`}>
                     <Sliders className="w-3.5 h-3.5 text-amber-400" />
                     <span>选择系统技能 (System Skill)</span>
                   </label>
-                  <span className="text-[10px] text-gray-400">已加载 {skills.length} 个系统技能</span>
+                  <span className={`text-[10px] ${T_MUTED}`}>已加载 {skills.length} 个系统技能</span>
                 </div>
 
                 {/* 分类过滤器 */}
@@ -304,7 +328,7 @@ export const AiPolishButton: React.FC<AiPolishButtonProps> = ({
                         className={`px-2 py-0.5 rounded-lg text-[10px] font-medium whitespace-nowrap transition ${
                           selectedCategory === tab.id
                             ? 'bg-brand text-white font-bold'
-                            : 'bg-surface-secondary text-gray-400 hover:text-gray-200 hover:bg-surface-tertiary'
+                            : `bg-white/55 dark:bg-white/[.06] ${T_MUTED} hover:${T_MAIN}`
                         }`}
                       >
                         {tab.label} ({count})
@@ -327,16 +351,16 @@ export const AiPolishButton: React.FC<AiPolishButtonProps> = ({
                           className={`p-2 rounded-xl text-left border transition-all flex flex-col justify-between gap-1 ${
                             isSelected
                               ? 'bg-brand/20 border-brand text-white shadow-sm ring-1 ring-brand/40'
-                              : 'bg-surface-secondary border-border/70 text-gray-300 hover:border-brand/40 hover:bg-surface-tertiary'
+                              : `bg-white/55 dark:bg-white/[.06] border-white/70 dark:border-white/12 ${T_SEC} hover:border-[color:var(--color-brand)]/40 hover:bg-white/75 dark:hover:bg-white/[.09]`
                           }`}
                         >
                           <div className="flex items-center justify-between w-full gap-1">
-                            <span className={`text-[11px] font-bold truncate ${isSelected ? 'text-brand-light' : 'text-gray-200'}`}>
+                            <span className={`text-[11px] font-bold truncate ${isSelected ? 'text-[color:var(--color-brand-light)]' : T_MAIN}`}>
                               {s.name}
                             </span>
                             {isSelected && <Check className="w-3 h-3 text-brand-light shrink-0" />}
                           </div>
-                          <span className="text-[9.5px] text-gray-400 line-clamp-1 leading-tight">
+                          <span className={`text-[9.5px] ${T_MUTED} line-clamp-1 leading-tight`}>
                             {s.description || s.name}
                           </span>
                         </button>
@@ -349,14 +373,14 @@ export const AiPolishButton: React.FC<AiPolishButtonProps> = ({
                   const curr = skills.find(s => s.name === selectedSkill);
                   if (!curr) return null;
                   return (
-                    <div className="p-2 rounded-xl bg-surface-secondary/70 border border-border text-[10px] text-gray-300 flex items-start gap-2">
-                      <div className="p-1 rounded-lg bg-brand/10 text-brand-light shrink-0 mt-0.5">
+                    <div className={`p-2 rounded-xl ${GLASS_SOFT} text-[10px] ${T_SEC} flex items-start gap-2`}>
+                      <div className="p-1 rounded-lg bg-[color:var(--color-brand)]/10 text-[color:var(--color-brand-light)] shrink-0 mt-0.5">
                         <FileCode className="w-3 h-3" />
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="font-bold text-white">{curr.name}</span>
-                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-surface-tertiary text-gray-400 font-mono">
+                          <span className={`font-bold ${T_MAIN}`}>{curr.name}</span>
+                          <span className={`text-[9px] px-1.5 py-0.2 rounded-md ${GLASS_SOFT} ${T_MUTED} font-mono`}>
                             {curr.category}
                           </span>
                           {curr.tools && curr.tools.length > 0 && (
@@ -365,7 +389,7 @@ export const AiPolishButton: React.FC<AiPolishButtonProps> = ({
                             </span>
                           )}
                         </div>
-                        <div className="text-gray-400 mt-0.5 leading-relaxed line-clamp-2">
+                        <div className={`${T_MUTED} mt-0.5 leading-relaxed line-clamp-2`}>
                           {curr.description}
                         </div>
                       </div>
@@ -375,13 +399,13 @@ export const AiPolishButton: React.FC<AiPolishButtonProps> = ({
               </div>
 
               {/* 3. 用户的具体定制要求 (核心交互) */}
-              <div className="p-3.5 rounded-2xl bg-brand/5 border border-brand/20 space-y-2.5">
+              <div className="p-3.5 rounded-2xl bg-[color:var(--color-brand)]/[.06] dark:bg-[color:var(--color-brand)]/[.1] border border-[color:var(--color-brand)]/20 space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <label className="text-[11px] font-bold text-brand-light flex items-center gap-1.5">
+                  <label className="text-[11px] font-bold text-[color:var(--color-brand-light)] flex items-center gap-1.5">
                     <MessageSquareQuote className="w-4 h-4 text-brand" />
                     <span>你的具体定制要求 (支持自然语言提出任何修改)</span>
                   </label>
-                  <span className="text-[10px] text-gray-400">AI 将严格按此要求重构</span>
+                  <span className={`text-[10px] ${T_MUTED}`}>AI 将严格按此要求重构</span>
                 </div>
 
                 <textarea
@@ -389,19 +413,19 @@ export const AiPolishButton: React.FC<AiPolishButtonProps> = ({
                   onChange={(e) => setUserInstruction(e.target.value)}
                   rows={2}
                   placeholder="💡 例如：改成暴雨夜景、人物眼神更有杀气、手持燃烧的青色长剑、镜头极速推向面部特写、增加电影逆光宽画幅..."
-                  className="w-full bg-surface border border-brand/30 rounded-xl p-2.5 text-xs text-white placeholder-gray-400 focus:outline-none focus:border-brand leading-relaxed resize-none"
+                  className={`w-full bg-white/60 dark:bg-white/[.06] border border-[color:var(--color-brand)]/30 rounded-xl p-2.5 text-xs ${T_MAIN} placeholder-[color:var(--color-text-muted)] focus:outline-none focus:border-[color:var(--color-brand)] leading-relaxed resize-none`}
                 />
 
                 {/* 快捷标签 */}
                 <div className="space-y-1">
-                  <div className="text-[10px] text-gray-400 font-medium">⚡ 快捷要求灵感词（点击即追加）：</div>
+                  <div className={`text-[10px] ${T_MUTED} font-medium`}>⚡ 快捷要求灵感词（点击即追加）：</div>
                   <div className="flex flex-wrap gap-1.5">
                     {quickList.map((tag) => (
                       <button
                         key={tag}
                         type="button"
                         onClick={() => handleAddQuickTag(tag)}
-                        className="px-2 py-0.5 rounded-lg bg-surface border border-border hover:border-brand/50 hover:bg-brand/10 text-[10px] text-gray-300 hover:text-brand-light transition"
+                        className={`px-2 py-0.5 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 hover:border-[color:var(--color-brand)]/50 hover:bg-[color:var(--color-brand)]/10 text-[10px] ${T_SEC} hover:text-[color:var(--color-brand-light)] transition`}
                       >
                         {tag}
                       </button>
@@ -412,25 +436,25 @@ export const AiPolishButton: React.FC<AiPolishButtonProps> = ({
 
               {/* 4. 润色结果呈现区 */}
               {polishedResult && (
-                <div className="p-3.5 rounded-2xl bg-emerald-500/5 border border-emerald-500/20 space-y-2 animate-fade-in">
+                <div className="p-3.5 rounded-2xl bg-emerald-500/[.06] dark:bg-emerald-500/[.08] border border-emerald-500/20 space-y-2 animate-fade-in">
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-bold text-emerald-300 flex items-center gap-1.5">
+                    <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-300 flex items-center gap-1.5">
                       <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
                       <span>✨ AI 定向润色产物</span>
                     </span>
                     <div className="flex items-center gap-2">
                       {suggestedEmotion && (
-                        <span className="px-2 py-0.5 rounded-md bg-pink-500/20 text-pink-300 border border-pink-500/30 text-[10px] font-semibold">
+                        <span className="px-2 py-0.5 rounded-md bg-pink-500/20 text-pink-600 dark:text-pink-300 border border-pink-500/30 text-[10px] font-semibold">
                           🎭 建议情绪: {suggestedEmotion}
                         </span>
                       )}
-                      <span className="text-[10px] text-emerald-400 font-mono font-bold">
+                      <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono font-bold">
                         {polishedResult.length} 字
                       </span>
                     </div>
                   </div>
 
-                  <div className="p-2.5 rounded-xl bg-surface border border-emerald-500/20 font-mono text-xs text-white leading-relaxed select-text whitespace-pre-wrap max-h-36 overflow-y-auto">
+                  <div className={`p-2.5 rounded-xl ${GLASS_SOFT} border-emerald-500/20 font-mono text-xs ${T_MAIN} leading-relaxed select-text whitespace-pre-wrap max-h-36 overflow-y-auto`}>
                     {polishedResult}
                   </div>
                 </div>
@@ -438,7 +462,7 @@ export const AiPolishButton: React.FC<AiPolishButtonProps> = ({
 
               {/* 错误提示 */}
               {errorMsg && (
-                <div className="p-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-300 flex items-center gap-2">
+                <div className="p-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-500 dark:text-red-300 flex items-center gap-2">
                   <X className="w-4 h-4 shrink-0 text-red-400" />
                   <span>{errorMsg}</span>
                 </div>
@@ -446,11 +470,11 @@ export const AiPolishButton: React.FC<AiPolishButtonProps> = ({
             </div>
 
             {/* Footer Buttons */}
-            <div className="px-5 py-3 border-t border-border bg-surface-secondary/40 flex items-center justify-between shrink-0">
+            <div className="px-5 py-3 border-t border-white/60 dark:border-white/10 bg-white/35 dark:bg-white/[.03] flex items-center justify-between shrink-0">
               <button
                 type="button"
                 onClick={() => setModalOpen(false)}
-                className="px-3.5 py-1.5 rounded-xl border border-border text-xs text-gray-300 hover:bg-surface-tertiary hover:text-white transition"
+                className={`px-3.5 py-1.5 rounded-xl ${GLASS_SOFT} text-xs ${T_SEC} hover:${T_MAIN} transition`}
               >
                 取消
               </button>
@@ -461,7 +485,7 @@ export const AiPolishButton: React.FC<AiPolishButtonProps> = ({
                     <button
                       type="button"
                       onClick={handleCopy}
-                      className="px-3 py-1.5 rounded-xl border border-border bg-surface hover:bg-surface-tertiary text-xs font-semibold text-gray-200 flex items-center gap-1 transition"
+                      className={`px-3 py-1.5 rounded-xl ${GLASS_SOFT} text-xs font-semibold ${T_SEC} hover:${T_MAIN} flex items-center gap-1 transition`}
                     >
                       {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                       <span>{copied ? '已复制' : '复制结果'}</span>
@@ -470,7 +494,7 @@ export const AiPolishButton: React.FC<AiPolishButtonProps> = ({
                       type="button"
                       onClick={handleExecutePolish}
                       disabled={isPolishing}
-                      className="px-3 py-1.5 rounded-xl border border-border bg-surface hover:bg-surface-tertiary text-xs font-semibold text-gray-200 flex items-center gap-1 transition disabled:opacity-40"
+                      className={`px-3 py-1.5 rounded-xl ${GLASS_SOFT} text-xs font-semibold ${T_SEC} hover:${T_MAIN} flex items-center gap-1 transition disabled:opacity-40`}
                     >
                       <RotateCcw className={`w-3.5 h-3.5 ${isPolishing ? 'animate-spin' : ''}`} />
                       <span>重新润色</span>

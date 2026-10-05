@@ -3,10 +3,11 @@ import { Layers, Plus, Film, Volume2, Users } from 'lucide-react';
 import type { ShotSlotContext } from './types';
 import { getVisibleActions } from './registry';
 import { SlotOutlet } from './PluginRender';
+import { AutoRatioMedia } from '../../ui/AutoRatioMedia';
 
 /**
  * 左栏：分镜场记（shot.list）。
- * 头部批量操作按钮经 actionRegistry 渲染（内置三个：批量生图/配音/视频）。
+ * 头部批量操作按钮经 actionRegistry 渲染（内置四个：批量生图/绑定参考/配音/生视频）。
  * （自 ShotInspector 原样搬移，标识符改为 ctx.*，零行为变化）
  */
 export const ShotListRail: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
@@ -74,49 +75,58 @@ export const ShotListRail: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
                 className="absolute top-2 left-2 w-3.5 h-3.5 rounded border border-white/30 bg-surface/85 accent-brand z-10"
               />
 
-              <div className="relative aspect-video rounded-lg overflow-hidden bg-surface-secondary mb-1.5 ml-5">
-                {shot.image_url ? (
-                  <img
-                    src={getMediaUrl(shot.image_url)}
-                    alt=""
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
+              {shot.image_url ? (
+                <AutoRatioMedia
+                  src={getMediaUrl(shot.image_url)}
+                  fallbackAspect="16/9"
+                  className="rounded-lg bg-surface-secondary mb-1.5 ml-5"
+                >
+                  <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-surface/85 text-[9px] font-mono text-brand-light font-bold">
+                    #{shot.shot_index}
+                  </span>
+
+                  {shot.candidates && shot.candidates.length > 1 && (
+                    <span className="absolute top-1 left-9 px-1 py-0.5 rounded bg-brand/80 text-[8px] font-mono text-white font-bold">
+                      {shot.candidates.length}抽
+                    </span>
+                  )}
+
+                  {hasVideo && (
+                    <span className="absolute top-1 right-1 px-1 py-0.5 rounded bg-accent-orange/90 text-[8px] font-bold text-white uppercase tracking-wider flex items-center space-x-0.5">
+                      <Film className="w-2.5 h-2.5" />
+                      <span>VID</span>
+                    </span>
+                  )}
+
+                  {hasAudio && !hasVideo && (
+                    <span className="absolute top-1 right-1 px-1 py-0.5 rounded bg-pink-500/90 text-[8px] font-bold text-white flex items-center space-x-0.5">
+                      <Volume2 className="w-2.5 h-2.5" />
+                      <span>TTS</span>
+                    </span>
+                  )}
+
+                  <span className="absolute bottom-1 right-1 px-1 rounded bg-surface/85 text-[9px] text-gray-300 font-mono">
+                    {shot.duration}s
+                  </span>
+
+                  {q && <span className={`absolute bottom-1 left-1 px-1 py-0.5 rounded text-[8px] font-bold ${q.status==='running'?'bg-brand text-white':q.status==='done'?'bg-emerald-500 text-white':q.status==='error'?'bg-red-500 text-white':'bg-zinc-600 text-white'}`}>{q.status}</span>}
+                </AutoRatioMedia>
+              ) : (
+                <div className="relative aspect-video rounded-lg overflow-hidden bg-surface-secondary mb-1.5 ml-5">
                   <div className="w-full h-full flex items-center justify-center text-[9px] text-gray-500 font-mono">
                     {shot.status === 'generating_image' ? '⚡ 画面生成中...' : (shot.status === 'generating_video' ? '🎬 视频生成中...' : q?.status==='running' ? '⏳ 队列排队...' : '📷 待生成')}
                   </div>
-                )}
-
-                <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-surface/85 text-[9px] font-mono text-brand-light font-bold">
-                  #{shot.shot_index}
-                </span>
-
-                {shot.candidates && shot.candidates.length > 1 && (
-                  <span className="absolute top-1 left-9 px-1 py-0.5 rounded bg-brand/80 text-[8px] font-mono text-white font-bold">
-                    {shot.candidates.length}抽
+                  <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-surface/85 text-[9px] font-mono text-brand-light font-bold">
+                    #{shot.shot_index}
                   </span>
-                )}
-
-                {hasVideo && (
-                  <span className="absolute top-1 right-1 px-1 py-0.5 rounded bg-accent-orange/90 text-[8px] font-bold text-white uppercase tracking-wider flex items-center space-x-0.5">
-                    <Film className="w-2.5 h-2.5" />
-                    <span>VID</span>
-                  </span>
-                )}
-
-                {hasAudio && !hasVideo && (
-                  <span className="absolute top-1 right-1 px-1 py-0.5 rounded bg-pink-500/90 text-[8px] font-bold text-white flex items-center space-x-0.5">
-                    <Volume2 className="w-2.5 h-2.5" />
-                    <span>TTS</span>
-                  </span>
-                )}
-
-                <span className="absolute bottom-1 right-1 px-1 rounded bg-surface/85 text-[9px] text-gray-300 font-mono">
-                  {shot.duration}s
-                </span>
-
-                {q && <span className={`absolute bottom-1 left-1 px-1 py-0.5 rounded text-[8px] font-bold ${q.status==='running'?'bg-brand text-white':q.status==='done'?'bg-emerald-500 text-white':q.status==='error'?'bg-red-500 text-white':'bg-zinc-600 text-white'}`}>{q.status}</span>}
-              </div>
+                  {hasVideo && (
+                    <span className="absolute top-1 right-1 px-1 py-0.5 rounded bg-accent-orange/90 text-[8px] font-bold text-white uppercase tracking-wider flex items-center space-x-0.5">
+                      <Film className="w-2.5 h-2.5" />
+                      <span>VID</span>
+                    </span>
+                  )}
+                </div>
+              )}
 
               <div className="ml-5 space-y-0.5">
                 <p className="text-[11px] text-gray-200 truncate font-medium">{shot.action_desc || shot.image_prompt}</p>

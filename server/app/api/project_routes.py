@@ -281,21 +281,21 @@ async def delete_project_canvas(project_id: str, canvas_id: str):
 
 
 @router.get("/projects/{project_id}/agent-sessions")
-async def get_project_agent_sessions(project_id: str):
+async def get_project_agent_sessions(project_id: str, scope: str = "all"):
     meta = project_manager.get_meta(project_id)
     if not meta:
         raise HTTPException(status_code=404, detail=f"项目不存在: {project_id}")
-    sessions = project_manager.get_agent_sessions(project_id)
-    return {"project_id": project_id, "sessions": sessions}
+    sessions = project_manager.get_agent_sessions(project_id, scope=scope)
+    return {"project_id": project_id, "sessions": sessions, "scope": scope}
 
 
 @router.put("/projects/{project_id}/agent-sessions")
-async def save_project_agent_sessions(project_id: str, body: dict):
+async def save_project_agent_sessions(project_id: str, body: dict, scope: str = ""):
     try:
         sessions = body.get("sessions") if isinstance(body, dict) and "sessions" in body else body
         if not isinstance(sessions, list):
             sessions = []
-        saved = project_manager.save_agent_sessions(project_id, sessions)
+        saved = project_manager.save_agent_sessions(project_id, sessions, scope=(scope or "").strip() or None)
         return {"status": "saved", "project_id": project_id, "sessions": saved}
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))

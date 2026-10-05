@@ -106,14 +106,36 @@ export const FirstRunWizard: React.FC = () => {
     try { setStatus(await apiService.setupStatus()); } catch { /* ignore */ }
   };
 
+  const openWizard = () => { setStep('welcome'); setResult(null); setPresetId(''); setValues({}); setOpen(true); };
+
   useEffect(() => {
-    // 不再自动弹出（安装引导只需“解压后双击运行”即可）；仅通过设置里的入口手动打开
-    const h = () => { setStep('welcome'); setResult(null); setPresetId(''); setValues({}); setOpen(true); };
+    // 事件入口：设置 → 系统 随时重开
+    const h = () => openWizard();
     window.addEventListener('open-first-run-wizard', h as any);
+    // 首启自动弹出：仅当「未完成引导 + 基础能力未就绪」（已就绪/已跳过均不打扰，且同会话只弹一次）
+    (async () => {
+      try {
+        const s = await apiService.setupStatus();
+        setStatus(s);
+        if (!s?.onboarding_done && !s?.minimal_ready && !sessionStorage.getItem('wizard_auto_shown')) {
+          sessionStorage.setItem('wizard_auto_shown', '1');
+          openWizard();
+        }
+      } catch { /* 后端未起则静默，不挡启动 */ }
+    })();
     return () => window.removeEventListener('open-first-run-wizard', h as any);
   }, []);
 
-  useEscapeClose(open, () => setOpen(false));
+  // 每次打开都拉取真实就绪状态（此前只在保存成功后拉，导致头部 chips 恒为未就绪）
+  useEffect(() => { if (open) refreshStatus(); }, [open]);
+
+  // Esc / 点遮罩 / 点 X = 跳过：标记已完成，之后不再自动打扰（设置里可随时重开）
+  const skip = async () => {
+    try { await apiService.setupComplete(true); } catch { /* ignore */ }
+    setOpen(false);
+    toast.info('已跳过 · 可在 设置 → 系统 随时重新打开向导');
+  };
+  useEscapeClose(open, skip);
   if (!open) return null;
 
   const currentList = step === 'llm' ? LLM_PRESETS : step === 'image' ? IMAGE_PRESETS : step === 'extra' ? (EXTRA_PRESETS as any) : [];
@@ -163,7 +185,19 @@ export const FirstRunWizard: React.FC = () => {
     toast.success('初始化完成，开始创作吧！');
   };
 
-  const goStep = (s: Step) => { setStep(s); setResult(null); setPresetId(''); };
+  const goStep = (s: Step) => {
+    setStep(s); setResult(null);
+    if (s === 'welcome' || s === 'done') {
+      setPresetId('');
+    } else if (s === 'llm' && !presetId) {
+      // 首次进入第 1 步才预选推荐项：MiniMax 一个 Key 打通 文本/配音/视频（来回切换不重置已选厂商）
+      setPresetId('minimax');
+      const init: Record<string, string> = {};
+      for (const f of LLM_PRESETS[0].fields) init[f.key] = values[f.key] ?? f.default ?? '';
+      setValues((prev) => ({ ...prev, ...init }));
+    }
+    if (s === 'done') refreshStatus(); // 完成页展示的是此刻真实状态
+  };
 
   const renderField = (f: Field) => (
     <label key={f.key} className="block">
@@ -173,28 +207,34 @@ export const FirstRunWizard: React.FC = () => {
         value={values[f.key] ?? f.default ?? ''}
         onChange={(e) => setVal(f.key, e.target.value)}
         placeholder={f.placeholder || ''}
-        className="mt-1 w-full bg-surface-secondary border border-border-active rounded-xl px-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-brand"
+        className="mt-1 w-full bg-white/55 dark:bg-white/[.06] border border-white/80 dark:border-white/20 rounded-xl px-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-brand"
       />
     </label>
   );
 
   const statusChip = (label: string, ready: boolean) => (
-    <span className={`text-[10px] px-2 py-0.5 rounded-full border ${ready ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300' : 'bg-surface-secondary border-border text-gray-500'}`}>
+    <span className={`text-[10px] px-2 py-0.5 rounded-full border ${ready ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300' : 'bg-white/55 dark:bg-white/[.06] border-white/70 dark:border-white/12 text-gray-500'}`}>
       {ready ? '✓ ' : '○ '}{label}
     </span>
   );
 
+  // 主按钮动态标签：本步测通过 = 下一步；没配 = 明示可跳过（跳过不藏在心里）
+  const stepTested = !!(preset && result?.ok);
+  const nextLabel = stepTested
+    ? (step === 'extra' ? '完成' : '下一步')
+    : (step === 'extra' ? '完成（跳过本步）' : '下一步（跳过本步）');
+
   return (
-    <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setOpen(false)}>
-      <div className="w-full max-w-2xl max-h-[88vh] bg-surface rounded-2xl border border-border flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={skip}>
+      <div className="w-full max-w-2xl max-h-[88vh] bg-white/60 dark:bg-white/[.05] rounded-2xl border border-white/70 dark:border-white/12 flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
-        <div className="h-12 px-4 border-b border-border flex items-center justify-between shrink-0 bg-surface-secondary">
+        <div className="h-12 px-4 border-b border-white/70 dark:border-white/12 flex items-center justify-between shrink-0 bg-white/55 dark:bg-white/[.06]">
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-brand to-brand-blue flex items-center justify-center"><Rocket className="w-4 h-4 text-white" /></div>
             <span className="text-sm font-bold text-white">安装向导</span>
             {status && <span className="text-[10px] text-gray-500">· {status.llm?.ready ? '文本✓' : '文本○'} {status.image?.ready ? '图像✓' : '图像○'} {status.video?.ready ? '视频✓' : '视频○'} {status.audio?.ready ? '配音✓' : '配音○'}</span>}
           </div>
-          <button onClick={() => setOpen(false)} title="稍后再说" className="p-1 rounded hover:bg-surface-secondary"><X className="w-4 h-4 text-zinc-400" /></button>
+          <button onClick={skip} title="跳过（可随时在 设置 → 系统 重开）" className="p-1 rounded hover:bg-white/55 dark:bg-white/[.06]"><X className="w-4 h-4 text-zinc-400" /></button>
         </div>
 
         {/* Body */}
@@ -203,9 +243,21 @@ export const FirstRunWizard: React.FC = () => {
 
           {step === 'welcome' && (
             <div className="space-y-3">
-              <div className="text-[12px] text-gray-400 leading-5">
-                这个向导会带你填好必要的 Key 并**测试联通**。完成后即可拥有完整功能；未联通的能力不会出现在工作台里，避免你点了却报错。
+              <div className="text-[12.5px] text-gray-300 leading-5">
+                <b className="text-white">AI 漫剧 Studio</b>：粘贴小说章节 → AI 拆分镜 → 生成画面 / 配音 / 视频 → 一键导出剪映成片。
               </div>
+              <div className="text-[12px] text-gray-400 leading-5">
+                开工前只需 2 分钟：填好 Key 并<b className="text-gray-200">测试联通</b>。没配通的能力不会出现在工作台，避免你点了却报错。
+                <span className="text-emerald-300/90"> 推荐 MiniMax：一个 Key 打通 文本 + 配音 + 视频，第 1 步已为你选好。</span>
+              </div>
+              {status && (
+                <div className="flex flex-wrap gap-1.5">
+                  {statusChip('文本理解', !!status.llm?.ready)}
+                  {statusChip('图像生成', !!status.image?.ready)}
+                  {statusChip('视频', !!status.video?.ready)}
+                  {statusChip('配音', !!status.audio?.ready)}
+                </div>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {[
                   { icon: Cpu, t: '文本理解', d: '把小说拆成分镜（必需）' },
@@ -213,7 +265,7 @@ export const FirstRunWizard: React.FC = () => {
                   { icon: Mic, t: '配音', d: '角色台词配音（可选）' },
                   { icon: Video, t: '视频', d: '图生视频 / 运镜（可选）' },
                 ].map((c) => { const I = c.icon; return (
-                  <div key={c.t} className="flex items-center gap-2.5 p-3 rounded-xl bg-surface-secondary/60 border border-border">
+                  <div key={c.t} className="flex items-center gap-2.5 p-3 rounded-xl bg-white/55 dark:bg-white/[.05] border border-white/70 dark:border-white/12">
                     <div className="w-8 h-8 rounded-lg bg-brand/15 border border-brand/30 flex items-center justify-center"><I className="w-4 h-4 text-brand-light" /></div>
                     <div><div className="text-xs font-bold text-white">{c.t}</div><div className="text-[10px] text-gray-500">{c.d}</div></div>
                   </div>
@@ -228,14 +280,14 @@ export const FirstRunWizard: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {currentList.map((p: Preset) => (
                   <button key={p.id} onClick={() => pickPreset(p)}
-                    className={`text-left p-3 rounded-xl border transition-all ${presetId === p.id ? 'bg-brand/15 border-brand ring-1 ring-brand/30' : 'bg-surface-secondary border-border hover:border-brand/50'}`}>
+                    className={`text-left p-3 rounded-xl border transition-all ${presetId === p.id ? 'bg-brand/15 border-brand ring-1 ring-brand/30' : 'bg-white/55 dark:bg-white/[.06] border-white/70 dark:border-white/12 hover:border-brand/50'}`}>
                     <div className="text-xs font-bold text-white">{p.label}</div>
                     {p.hint && <div className="text-[10px] text-gray-500 mt-0.5">{p.hint}</div>}
                   </button>
                 ))}
               </div>
               {preset && (
-                <div className="p-3 rounded-xl bg-surface-secondary border border-border space-y-2.5">
+                <div className="p-3 rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 space-y-2.5">
                   {preset.fields.map(renderField)}
                   {result && (
                     <div className={`text-[11px] px-2.5 py-1.5 rounded-lg border ${result.ok ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-red-500/10 border-red-500/30 text-red-300'}`}>
@@ -265,7 +317,7 @@ export const FirstRunWizard: React.FC = () => {
               <div className="text-[12px] text-gray-400 leading-5">
                 {status?.minimal_ready
                   ? '基础能力已就绪，可以开始拆解小说并生成分镜了。'
-                  : '还缺「文本理解」或「图像生成」，建议返回补齐后再开始，否则无法完整出片。'}
+                  : '还缺「文本理解」或「图像生成」——暂时出不了画面，可先完成，稍后到 设置 → 能力配置 补齐。'}
                 {status?.full_ready ? ' 视频与配音也已开启，功能完整。' : ' 视频/配音未开启时可随时在 设置 → 生成源 里配置。'}
               </div>
             </div>
@@ -273,16 +325,19 @@ export const FirstRunWizard: React.FC = () => {
         </div>
 
         {/* Footer */}
-        <div className="p-3 border-t border-border flex items-center justify-between shrink-0 bg-surface-secondary">
-          <button onClick={() => setOpen(false)} className="px-3 py-1.5 rounded-xl text-xs text-gray-400 hover:text-white">稍后再说</button>
+        <div className="p-3 border-t border-white/70 dark:border-white/12 flex items-center justify-between shrink-0 bg-white/55 dark:bg-white/[.06]">
+          <button onClick={skip} title="跳过配置，之后可在 设置 → 系统 重新打开" className="px-3 py-1.5 rounded-xl text-xs text-gray-400 hover:text-white">稍后再说</button>
           <div className="flex items-center gap-2">
             {step !== 'welcome' && step !== 'done' && (
-              <button onClick={() => goStep(step === 'extra' ? 'image' : step === 'image' ? 'llm' : 'welcome')} className="px-3 py-1.5 rounded-xl bg-surface-secondary border border-border text-xs text-gray-300">上一步</button>
+              <button onClick={() => goStep(step === 'extra' ? 'done' : step === 'image' ? 'extra' : 'image')} className="px-3 py-1.5 rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-xs text-gray-300">上一步</button>
+            )}
+            {step !== 'welcome' && step !== 'done' && (
+              <button onClick={() => goStep(step === 'extra' ? 'done' : step === 'image' ? 'extra' : 'image')}
+                className="px-4 py-1.5 rounded-xl bg-brand text-white text-xs font-bold flex items-center gap-1">
+                {nextLabel} <ChevronRight className="w-3.5 h-3.5" />
+              </button>
             )}
             {step === 'welcome' && <button onClick={() => goStep('llm')} className="px-4 py-1.5 rounded-xl bg-brand text-white text-xs font-bold flex items-center gap-1">开始配置 <ChevronRight className="w-3.5 h-3.5" /></button>}
-            {step === 'llm' && <button onClick={() => goStep('image')} className="px-4 py-1.5 rounded-xl bg-brand text-white text-xs font-bold flex items-center gap-1">下一步 <ChevronRight className="w-3.5 h-3.5" /></button>}
-            {step === 'image' && <button onClick={() => goStep('extra')} className="px-4 py-1.5 rounded-xl bg-brand text-white text-xs font-bold flex items-center gap-1">下一步 <ChevronRight className="w-3.5 h-3.5" /></button>}
-            {step === 'extra' && <button onClick={() => goStep('done')} className="px-4 py-1.5 rounded-xl bg-brand text-white text-xs font-bold flex items-center gap-1">下一步 <ChevronRight className="w-3.5 h-3.5" /></button>}
             {step === 'done' && <button onClick={finish} className="px-5 py-1.5 rounded-xl bg-gradient-to-r from-brand to-brand-blue text-white text-xs font-bold flex items-center gap-1.5"><Check className="w-3.5 h-3.5" />完成并进入工作台</button>}
           </div>
         </div>

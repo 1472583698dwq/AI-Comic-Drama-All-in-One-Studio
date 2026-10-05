@@ -1,5 +1,5 @@
 /**
- * 悬浮导演 Agent 抽屉 — 薄壳：拖拽外壳 + 统一消息流/运行时 store（与 Agent 页共用同一会话）
+ * 悬浮导演 Agent 抽屉 — 薄壳：拖拽外壳 + 独立会话 store（与 Agent 页各自独立、互不影响）
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -7,9 +7,11 @@ import {
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { agentSocket } from './agentSocket';
-import { useAgentStore } from './agentStore';
+import { useAgentFloatStore } from './agentStore';
 import { AgentMessageList } from './AgentMessageList';
 import { AgentComposer } from './AgentComposer';
+import { AgentSwarmPanel } from './AgentSwarmPanel';
+import { loadRoleMetas } from './swarmMeta';
 
 export const AgentChatDrawer: React.FC = () => {
   const { project, activeShotId, setActiveTab } = useProjectStore();
@@ -18,11 +20,18 @@ export const AgentChatDrawer: React.FC = () => {
   const [proposalBusy, setProposalBusy] = useState<Record<string, string>>({});
 
   const {
-    messages, isRunning, wsStatus, approvals, mode, runMode,
-    bindProject, send, abort, clearAll, approve,
+    messages, isRunning, wsStatus, approvals, subagents, runMode, permission, autoAllowTools,
+    bindProject, setRunMode, setPermission, send, steer, abort, clearAll, approve, setAutoAllow,
     executePlan, proposalAction, applyArtifact,
-    setMode, setRunMode,
-  } = useAgentStore();
+  } = useAgentFloatStore();
+
+  const handleApprove = useCallback((aid: string, ok: boolean, always: boolean) => {
+    if (always && ok) {
+      const a = approvals[aid];
+      if (a?.tool_name) setAutoAllow(a.tool_name, true);
+    }
+    approve(aid, ok);
+  }, [approvals, approve, setAutoAllow]);
 
   // 浮动按钮位置（可拖拽持久化）
   const [btnPos, setBtnPos] = useState<{ x: number; y: number }>(() => {
@@ -51,6 +60,11 @@ export const AgentChatDrawer: React.FC = () => {
   // 连接单例（自动重连）
   useEffect(() => {
     agentSocket.ensure();
+  }, []);
+
+  // 注册导演组扩展角色样式（自定义 icon/color，供集群面板使用）
+  useEffect(() => {
+    loadRoleMetas();
   }, []);
 
   // 打开时把窗口放到按钮附近
@@ -201,7 +215,7 @@ export const AgentChatDrawer: React.FC = () => {
           className={`group flex items-center space-x-2 px-3.5 py-2.5 rounded-full backdrop-blur-xl border transition-all shadow-xl cursor-grab active:cursor-grabbing ${
             isOpen
               ? 'bg-brand text-white border-brand-glow shadow-brand/40 ring-2 ring-brand/50'
-              : 'bg-surface/90 hover:bg-surface border-border hover:border-brand/60 text-white shadow-black/40 hover:scale-105'
+              : 'bg-white/80 dark:bg-black/55 hover:bg-white/70 dark:hover:bg-white/[.09] border-white/70 dark:border-white/12 hover:border-brand/60 [color:var(--color-text-main)] shadow-black/40 hover:scale-105'
           }`}
           title="点击展开/收起导演 Agent，按住可任意拖拽位置"
         >
@@ -229,11 +243,11 @@ export const AgentChatDrawer: React.FC = () => {
             height: isExpanded ? '680px' : '530px',
             zIndex: 55,
           }}
-          className="rounded-3xl border border-border bg-surface/95 backdrop-blur-2xl shadow-2xl flex flex-col overflow-hidden animate-fade-in"
+          className="rounded-3xl border border-white/70 dark:border-white/12 bg-white/85 dark:bg-[#101014]/90 backdrop-blur-2xl shadow-2xl flex flex-col overflow-hidden animate-fade-in"
         >
           <div
             onMouseDown={onHeaderMouseDown}
-            className="h-12 px-4 border-b border-border flex items-center justify-between bg-surface-secondary/80 shrink-0 cursor-grab active:cursor-grabbing select-none"
+            className="h-12 px-4 border-b border-white/70 dark:border-white/12 flex items-center justify-between bg-white/65 dark:bg-white/[.05] shrink-0 cursor-grab active:cursor-grabbing select-none"
             title="按住拖拽窗口位置"
           >
             <div className="flex items-center space-x-2.5">
@@ -249,28 +263,28 @@ export const AgentChatDrawer: React.FC = () => {
                 <div className="text-[9px] [color:var(--color-text-muted)] flex items-center gap-1">
                   <span>多模态感知</span>
                   <span>·</span>
-                  <span>与 Agent 页会话同步</span>
+                  <span>独立会话（与 Agent 页互不影响）</span>
                 </div>
               </div>
             </div>
             <div className="flex items-center space-x-1">
               <button
                 onClick={() => void clearAll()}
-                className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-tertiary transition-all"
+                className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/65 dark:bg-white/[.09] transition-all"
                 title="重置会话记忆"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
               </button>
               <button
                 onClick={() => setIsExpanded(!isExpanded)}
-                className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-tertiary transition-all"
+                className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/65 dark:bg-white/[.09] transition-all"
                 title={isExpanded ? '还原默认尺寸' : '放大窗口'}
               >
                 {isExpanded ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
               </button>
               <button
                 onClick={() => setIsOpen(false)}
-                className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-tertiary transition-all"
+                className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/65 dark:bg-white/[.09] transition-all"
                 title="收起悬浮窗"
               >
                 <X className="w-4 h-4" />
@@ -284,12 +298,13 @@ export const AgentChatDrawer: React.FC = () => {
                 <Film className="w-3.5 h-3.5 shrink-0" />
                 <span className="font-semibold truncate">镜头 #{activeShot.shot_index}: {activeShot.action_desc || activeShot.image_prompt?.slice(0, 30)}</span>
               </span>
-              {/* 精简链路：3D 片场视图已下线，机位调节改走画布的「3D导演台」节点 */}
-              <button onClick={() => setActiveTab('canvas')} className="text-[10px] text-brand hover:underline ml-2 shrink-0 font-bold flex items-center gap-0.5">
-                画布调机位 <ArrowUpRight className="w-2.5 h-2.5" />
+              <button onClick={() => setActiveTab('director3d')} className="text-[10px] text-brand hover:underline ml-2 shrink-0 font-bold flex items-center gap-0.5">
+                3D机位 <ArrowUpRight className="w-2.5 h-2.5" />
               </button>
             </div>
           )}
+
+          <AgentSwarmPanel subagents={subagents} compact />
 
           <div className="flex-1 overflow-y-auto p-4 space-y-3.5 custom-scrollbar text-xs">
             <AgentMessageList
@@ -302,37 +317,40 @@ export const AgentChatDrawer: React.FC = () => {
               onProposalAction={handleProposalAction}
               proposalBusy={proposalBusy}
               onApplyArtifact={applyArtifact}
+              approvals={approvals}
+              autoAllowTools={autoAllowTools}
+              onApprove={handleApprove}
             />
             <div ref={messagesEndRef} />
           </div>
 
           {pendingList.length > 0 && (
             <div className="px-3 py-2 border-t border-amber-500/30 bg-amber-500/5 space-y-1.5 shrink-0">
-              <div className="text-[10px] font-bold text-amber-300 flex items-center gap-1">
+              <div className="text-[10px] font-bold text-amber-600 dark:text-amber-300 flex items-center gap-1">
                 <ShieldAlert className="w-3 h-3" />待确认 {pendingList.length}
               </div>
               {pendingList.map(([aid, v]) => (
                 <div key={aid} className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-mono text-white truncate flex-1">{v.tool_name}</span>
+                  <span className="text-[10px] font-mono [color:var(--color-text-main)] truncate flex-1">{v.tool_name}</span>
                   <button onClick={() => approve(aid, true)} className="px-2 py-0.5 rounded-md bg-amber-500 text-black text-[10px] font-bold">允许</button>
-                  <button onClick={() => approve(aid, false)} className="px-2 py-0.5 rounded-md border border-border text-[10px] text-gray-300">拒绝</button>
+                  <button onClick={() => approve(aid, false)} className="px-2 py-0.5 rounded-md border border-white/70 dark:border-white/12 text-[10px] [color:var(--color-text-main)]">拒绝</button>
                 </div>
               ))}
             </div>
           )}
 
-          <div className="p-3 border-t border-border bg-surface shrink-0">
+          <div className="p-3 border-t border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] shrink-0">
             <AgentComposer
               compact
-              noPolish
-              onModeChange={setMode}
-              onRunModeChange={setRunMode}
-              mode={mode}
               runMode={runMode}
+              permission={permission}
               isRunning={isRunning}
               wsStatus={wsStatus}
-              onSend={(t) => void send(t)}
+              onSend={(t, atts) => void send(t, atts)}
               onAbort={abort}
+              onSteer={(t, atts) => void steer(t, atts)}
+              onRunModeChange={setRunMode}
+              onPermissionChange={setPermission}
             />
           </div>
         </div>

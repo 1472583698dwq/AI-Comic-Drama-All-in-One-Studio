@@ -1,18 +1,18 @@
 [
   {
-    "id": "proj_1e306eb8",
-    "title": "测试",
+    "id": "proj_67b93195",
+    "title": "AutoDL系统测试",
     "cover_url": null,
-    "style_preset": "cinematic_3d",
+    "style_preset": "donghua_xianxia",
     "aspect_ratio": "9:16",
     "status": "draft",
-    "created_at": "2026-08-26T16:04:53.230702",
-    "updated_at": "2026-09-16T10:33:20.293809",
-    "last_opened_at": "2026-09-16T10:33:20.017745",
+    "created_at": "2026-09-24T15:26:09.971608",
+    "updated_at": "2026-09-30T23:38:58.392336",
+    "last_opened_at": "2026-09-30T23:38:58.032582",
     "stats": {
-      "shots": 7,
-      "duration": 27.0,
-      "characters": 2
+      "shots": 6,
+      "duration": 21.0,
+      "characters": 0
     },
     "source": "blank",
     "description": "",
@@ -38,6 +38,63 @@
     "engine": null
   },
   {
+    "id": "proj_bc8d2bfb",
+    "title": "111",
+    "cover_url": null,
+    "style_preset": "dark_comic",
+    "aspect_ratio": "9:16",
+    "status": "draft",
+    "created_at": "2026-09-20T09:54:49.041765",
+    "updated_at": "2026-09-29T15:20:31.586404",
+    "last_opened_at": "2026-09-29T15:20:31.296180",
+    "stats": {
+      "shots": 0,
+      "duration": 0,
+      "characters": 0
+    },
+    "source": "blank",
+    "description": "",
+    "engine": null
+  },
+  {
+    "id": "proj_1e306eb8",
+    "title": "测试",
+    "cover_url": null,
+    "style_preset": "cinematic_3d",
+    "aspect_ratio": "9:16",
+    "status": "draft",
+    "created_at": "2026-08-26T16:04:53.230702",
+    "updated_at": "2026-09-30T09:21:13.853986",
+    "last_opened_at": "2026-09-30T09:21:13.542710",
+    "stats": {
+      "shots": 7,
+      "duration": 27.0,
+      "characters": 2
+    },
+    "source": "blank",
+    "description": "",
+    "engine": null
+  },
+  {
+    "id": "proj_0be82585",
+    "title": "你哦好",
+    "cover_url": null,
+    "style_preset": "donghua_xianxia",
+    "aspect_ratio": "9:16",
+    "status": "draft",
+    "created_at": "2026-09-18T20:59:18.230605",
+    "updated_at": "2026-09-18T21:12:17.078625",
+    "last_opened_at": "2026-09-18T21:11:43.303360",
+    "stats": {
+      "shots": 1,
+      "duration": 3.5,
+      "characters": 0
+    },
+    "source": "blank",
+    "description": "",
+    "engine": null
+  },
+  {
     "id": "proj_a5fce847",
     "title": "测试项目Alpha",
     "cover_url": null,
@@ -45,8 +102,46 @@
     "aspect_ratio": "9:16",
     "status": "draft",
     "created_at": "2026-09-10T11:27:24.489350",
-    "updated_at": "2026-09-16T15:30:43.743149",
-    "last_opened_at": "2026-09-16T15:30:42.160664",
+    "updated_at": "2026-09-29T15:27:25.438430",
+    "last_opened_at": "2026-09-29T15:27:25.077286",
+    "stats": {
+      "shots": 0,
+      "duration": 0,
+      "characters": 0
+    },
+    "source": "blank",
+    "description": "",
+    "engine": null
+  },
+  {
+    "id": "proj_48f29f6e",
+    "title": "测试项目Alpha",
+    "cover_url": null,
+    "style_preset": "donghua_xianxia",
+    "aspect_ratio": "9:16",
+    "status": "draft",
+    "created_at": "2026-09-10T11:27:48.371937",
+    "updated_at": "2026-09-30T23:11:00.030062",
+    "last_opened_at": "2026-09-30T23:10:59.663592",
+    "stats": {
+      "shots": 1,
+      "duration": 3.5,
+      "characters": 0
+    },
+    "source": "blank",
+    "description": "",
+    "engine": null
+  },
+  {
+    "id": "proj_338535d7",
+    "title": "测试项目Beta",
+    "cover_url": null,
+    "style_preset": "modern_shishang",
+    "aspect_ratio": "16:9",
+    "status": "draft",
+    "created_at": "2026-09-10T11:27:48.372868",
+    "updated_at": "2026-09-29T15:20:44.396590",
+    "last_opened_at": "2026-09-29T15:20:44.102669",
     "stats": {
       "shots": 0,
       "duration": 0,
@@ -76,34 +171,34 @@
     "engine": null
   },
   {
-    "id": "proj_48f29f6e",
-    "title": "测试项目Alpha",
+    "id": "proj_8f110548",
+    "title": "日漫热血项目",
+    "cover_url": null,
+    "style_preset": "japanese_anime",
+    "aspect_ratio": "9:16",
+    "status": "draft",
+    "created_at": "2026-09-29T15:18:01.895319",
+    "updated_at": "2026-09-29T15:41:19.664137",
+    "last_opened_at": "2026-09-29T15:41:19.236883",
+    "stats": {
+      "shots": 0,
+      "duration": 0,
+      "characters": 0
+    },
+    "source": "blank",
+    "description": "",
+    "engine": null
+  },
+  {
+    "id": "proj_e8cd6682",
+    "title": "测试",
     "cover_url": null,
     "style_preset": "donghua_xianxia",
     "aspect_ratio": "9:16",
     "status": "draft",
-    "created_at": "2026-09-10T11:27:48.371937",
-    "updated_at": "2026-09-13T23:47:40.312506",
-    "last_opened_at": "2026-09-13T23:47:40.041229",
-    "stats": {
-      "shots": 1,
-      "duration": 3.5,
-      "characters": 0
-    },
-    "source": "blank",
-    "description": "",
-    "engine": null
-  },
-  {
-    "id": "proj_338535d7",
-    "title": "测试项目Beta",
-    "cover_url": null,
-    "style_preset": "modern_shishang",
-    "aspect_ratio": "16:9",
-    "status": "draft",
-    "created_at": "2026-09-10T11:27:48.372868",
-    "updated_at": "2026-09-10T11:27:48.372873",
-    "last_opened_at": "2026-09-10T11:27:48.372874",
+    "created_at": "2026-09-30T09:58:28.840676",
+    "updated_at": "2026-09-30T23:11:06.215408",
+    "last_opened_at": "2026-09-30T23:11:05.813469",
     "stats": {
       "shots": 0,
       "duration": 0,
@@ -114,41 +209,22 @@
     "engine": null
   },
   {
-    "id": "proj_bc8d2bfb",
-    "title": "111",
+    "id": "proj_7e528eff",
+    "title": "樱花回眸 · ComfyUI 生图 → RunningHub 生视频",
     "cover_url": null,
-    "style_preset": "dark_comic",
+    "style_preset": "japanese_anime",
     "aspect_ratio": "9:16",
     "status": "draft",
-    "created_at": "2026-09-20T09:54:49.041765",
-    "updated_at": "2026-09-24T14:55:55.588554",
-    "last_opened_at": "2026-09-24T14:55:55.315620",
+    "created_at": "2026-09-30T17:45:54.734039",
+    "updated_at": "2026-09-30T18:28:25.323341",
+    "last_opened_at": "2026-09-30T18:28:24.362869",
     "stats": {
       "shots": 0,
       "duration": 0,
       "characters": 0
     },
     "source": "blank",
-    "description": "",
-    "engine": null
-  },
-  {
-    "id": "proj_67b93195",
-    "title": "AutoDL系统测试",
-    "cover_url": null,
-    "style_preset": "donghua_xianxia",
-    "aspect_ratio": "9:16",
-    "status": "draft",
-    "created_at": "2026-09-24T15:26:09.971608",
-    "updated_at": "2026-09-24T16:40:36.955308",
-    "last_opened_at": "2026-09-24T16:40:36.644952",
-    "stats": {
-      "shots": 0,
-      "duration": 0,
-      "characters": 0
-    },
-    "source": "blank",
-    "description": "",
+    "description": "工作流演示：本机 ComfyUI（SDXL NoobAI+DMD2）出首帧 → RunningHub AI App 图生视频",
     "engine": null
   }
 ]

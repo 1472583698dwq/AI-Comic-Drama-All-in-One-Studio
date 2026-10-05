@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
-import { Plug, Cpu, Globe, Mic, Video, Settings, Activity, Trash2, Edit3, Plus, Zap, Key } from 'lucide-react';
+import { Plug, Cpu, Globe, Mic, Video, Settings, Activity, Trash2, Plus, Key } from 'lucide-react';
 import { apiService } from '../../../services/api';
 import { confirmAsync, toast } from '../../../stores/useDialogStore';
 
@@ -19,7 +19,6 @@ export const ProviderNode: React.FC<NodeProps> = ({ data, id, type }) => {
   const [showKey, setShowKey] = useState(false);
   const [testing, setTesting] = useState(false);
   const [health, setHealth] = useState<any>(null);
-  const [showCreate, setShowCreate] = useState(false);
   const [paramValues, setParamValues] = useState<Record<string, any>>(d.default_params || d.params || selectedDef?.default_params || {});
   const [showParams, setShowParams] = useState(true);
   const [savingParams, setSavingParams] = useState(false);
@@ -46,6 +45,20 @@ export const ProviderNode: React.FC<NodeProps> = ({ data, id, type }) => {
   };
 
   useEffect(()=> { fetchProviders(); }, [nodeKind]);
+
+  // 新建自定义源成功且由本节点发起（贴文档/写代码/工作流）→ 自动选用新源
+  useEffect(() => {
+    const h = (e: any) => {
+      const det = e?.detail || {};
+      if (det.select && det.source === 'provider-node' && det.provider?.id) {
+        fetchProviders();
+        handleSelect(det.provider.id);
+      }
+    };
+    window.addEventListener('provider-created', h as any);
+    return () => window.removeEventListener('provider-created', h as any);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodeKind, providers]);
 
   useEffect(()=> {
     if (selectedId) {
@@ -97,23 +110,23 @@ export const ProviderNode: React.FC<NodeProps> = ({ data, id, type }) => {
     try {
       const res = await fetch(`${API_ORIGIN || ''}/api/v1/providers/${selectedId}/test`, { method: 'POST' }).then(r=>r.json());
       setHealth(res);
-      if (res.ok) alert(`✓ 连通正常`);
-      else alert(`✗ 检测结果: ${res.detail || JSON.stringify(res)}`);
-    } catch(e:any){ alert(e.message); } finally { setTesting(false); }
+      if (res.ok) toast.success(`✓ 连通正常`);
+      else toast.error(`✗ 检测结果: ${res.detail || JSON.stringify(res)}`);
+    } catch(e:any){ toast.error(e.message); } finally { setTesting(false); }
   };
 
   const handleSaveKey = async () => {
-    if (!selectedId || !apiKeyInput.trim()) { alert('请输入 API Key'); return; }
+    if (!selectedId || !apiKeyInput.trim()) { toast.error('请输入 API Key'); return; }
     try {
       const res = await fetch(`${API_ORIGIN || ''}/api/v1/providers/${selectedId}/api-key`, {
         method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ api_key: apiKeyInput.trim() })
       }).then(r=>r.json());
       if (res.status==='success' || res.has_key) {
-        alert('✓ API Key 已保存');
+        toast.success('✓ API Key 已保存');
         setApiKeyInput('');
-      } else alert(JSON.stringify(res));
-    } catch(e:any){ alert(e.message); }
+      } else toast.error(JSON.stringify(res));
+    } catch(e:any){ toast.error(e.message); }
   };
 
   const kindMeta = {
@@ -147,14 +160,14 @@ export const ProviderNode: React.FC<NodeProps> = ({ data, id, type }) => {
   };
 
   return (
-    <div className={`w-[340px] bg-surface border border-border rounded-2xl shadow-xl overflow-hidden`}>
-      <div className="px-3 py-2.5 bg-surface border-b border-border flex items-center gap-1.5">
-        <div className="w-6 h-6 rounded-lg bg-surface-secondary border border-border flex items-center justify-center"><Icon className={`w-3.5 h-3.5 ${kindMeta.color}`}/></div>
+    <div className={`w-[340px] bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-2xl shadow-xl overflow-hidden`}>
+      <div className="px-3 py-2.5 bg-white/60 dark:bg-white/[.05] border-b border-white/70 dark:border-white/12 flex items-center gap-1.5">
+        <div className="w-6 h-6 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 flex items-center justify-center"><Icon className={`w-3.5 h-3.5 ${kindMeta.color}`}/></div>
         <span className="text-xs font-bold [color:var(--color-text-main)]">{kindMeta.label}节点</span>
-        {selectedDef && <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-surface-secondary [color:var(--color-text-main)] truncate max-w-[110px] border border-border">{selectedDef.display_name || selectedDef.name || selectedId}</span>}
+        {selectedDef && <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-white/55 dark:bg-white/[.06] [color:var(--color-text-main)] truncate max-w-[110px] border border-white/70 dark:border-white/12">{selectedDef.display_name || selectedDef.name || selectedId}</span>}
         <span className="ml-auto flex items-center gap-1">
           {selectedDef && <span className={`w-2 h-2 rounded-full ${selectedDef.enabled===false ? 'bg-zinc-500' : health?.ok ? 'bg-emerald-500' : selectedDef.builtin ? 'bg-violet-500' : 'bg-amber-500'} animate-pulse`} title={health?.detail || (selectedDef.builtin?'内置':'自定义')}/>}
-          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-surface-secondary [color:var(--color-text-muted)] border border-border">{selectedDef?.builtin ? '内置' : selectedDef ? '自定义' : '未绑定'}</span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/55 dark:bg-white/[.06] [color:var(--color-text-muted)] border border-white/70 dark:border-white/12">{selectedDef?.builtin ? '内置' : selectedDef ? '自定义' : '未绑定'}</span>
         </span>
       </div>
 
@@ -181,7 +194,7 @@ export const ProviderNode: React.FC<NodeProps> = ({ data, id, type }) => {
             <span className="text-[11px] font-semibold [color:var(--color-text-main)]">选择生成源</span>
             <button onClick={fetchProviders} className="text-[10px] text-brand hover:underline font-medium">刷新</button>
           </div>
-          <select value={selectedId} onChange={e=>handleSelect(e.target.value)} className="w-full bg-surface-secondary border border-border rounded-xl px-2.5 py-2 text-xs [color:var(--color-text-main)] focus:outline-none focus:border-brand">
+          <select value={selectedId} onChange={e=>handleSelect(e.target.value)} className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-2.5 py-2 text-xs [color:var(--color-text-main)] focus:outline-none focus:border-brand">
             <option value="">— 请选择 —</option>
             {providers.map((p:any)=> (
               <option key={p.id} value={p.id}>{p.display_name || p.name || p.id} {p.builtin ? '· 内置' : '· 自定义'} {p.kind ? `· ${p.kind}`: ''}</option>
@@ -191,33 +204,33 @@ export const ProviderNode: React.FC<NodeProps> = ({ data, id, type }) => {
         </div>
 
         {selectedDef && (
-          <div className="rounded-xl bg-surface-secondary/50 border border-border p-2.5 space-y-2">
+          <div className="rounded-xl bg-white/50 dark:bg-white/[.04] border border-white/70 dark:border-white/12 p-2.5 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold [color:var(--color-text-main)] truncate">{selectedDef.display_name || selectedDef.name}</span>
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface border border-border [color:var(--color-text-muted)] font-mono">{selectedDef.id}</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 [color:var(--color-text-muted)] font-mono">{selectedDef.id}</span>
             </div>
             {selectedDef.description && <div className="text-[11px] [color:var(--color-text-muted)] line-clamp-2">{selectedDef.description}</div>}
             <div className="flex items-center gap-1.5 text-[10px] [color:var(--color-text-muted)]">
-              <span>类型</span><span className="px-1.5 py-0.5 rounded bg-surface border border-border [color:var(--color-text-secondary)]">{selectedDef.kind || nodeKind}</span>
-              <span className="ml-auto">来源</span><span className="px-1.5 py-0.5 rounded bg-surface border border-border [color:var(--color-text-secondary)]">{selectedDef.provider_type || (selectedDef.builtin?'builtin':'http')}</span>
+              <span>类型</span><span className="px-1.5 py-0.5 rounded bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 [color:var(--color-text-secondary)]">{selectedDef.kind || nodeKind}</span>
+              <span className="ml-auto">来源</span><span className="px-1.5 py-0.5 rounded bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 [color:var(--color-text-secondary)]">{selectedDef.provider_type || (selectedDef.builtin?'builtin':'http')}</span>
             </div>
             {selectedDef.transport?.url && <div className="text-[10px] font-mono [color:var(--color-text-muted)] truncate" title={selectedDef.transport.url}>URL: {selectedDef.transport.url}</div>}
             {/* Model 选择 */}
             <div className="space-y-1">
               <span className="text-[11px] font-medium [color:var(--color-text-main)]">模型</span>
               {selectedDef.models?.length ? (
-                <select value={model} onChange={e=>handleModelChange(e.target.value)} className="w-full bg-surface border border-border rounded-lg px-2.5 py-1.5 text-xs [color:var(--color-text-main)] focus:outline-none focus:border-brand">
+                <select value={model} onChange={e=>handleModelChange(e.target.value)} className="w-full bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-lg px-2.5 py-1.5 text-xs [color:var(--color-text-main)] focus:outline-none focus:border-brand">
                   {selectedDef.models.map((m:string)=> <option key={m} value={m}>{m}</option>)}
                   {model && !selectedDef.models.includes(model) && <option value={model}>{model} (自定义)</option>}
                   <option value="__custom__">— 手动输入 —</option>
                 </select>
               ) : (
-                <input value={model} onChange={e=>handleModelChange(e.target.value)} placeholder={selectedDef.default_model || "输入模型名，如 FLUX.1-schnell"} className="w-full bg-surface border border-border rounded-lg px-2.5 py-1.5 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] font-mono focus:outline-none focus:border-brand"/>
+                <input value={model} onChange={e=>handleModelChange(e.target.value)} placeholder={selectedDef.default_model || "输入模型名，如 FLUX.1-schnell"} className="w-full bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-lg px-2.5 py-1.5 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] font-mono focus:outline-none focus:border-brand"/>
               )}
             </div>
             {/* 参数配置 */}
             {selectedDef.params_schema?.properties && Object.keys(selectedDef.params_schema.properties).length>0 && (
-              <div className="space-y-2 rounded-lg bg-surface border border-border p-2">
+              <div className="space-y-2 rounded-lg bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 p-2">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-semibold [color:var(--color-text-main)] flex items-center gap-1"><Settings className="w-3 h-3 text-brand"/> 参数</span>
                   <button onClick={()=>setShowParams(v=>!v)} className="text-[10px] text-brand hover:underline font-medium">{showParams?'收起':'展开'}</button>
@@ -239,13 +252,13 @@ export const ProviderNode: React.FC<NodeProps> = ({ data, id, type }) => {
                               const next = {...paramValues, [pname]: v};
                               setParamValues(next);
                               (d.onUpdate as any)?.(id, { default_params: next, params: next });
-                            }} className="w-full bg-surface-secondary border border-border rounded-lg px-2 py-1 text-xs [color:var(--color-text-main)] focus:outline-none focus:border-brand"/>
+                            }} className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-lg px-2 py-1 text-xs [color:var(--color-text-main)] focus:outline-none focus:border-brand"/>
                           ) : (
                             <input type="text" value={val} onChange={e=>{
                               const next = {...paramValues, [pname]: e.target.value};
                               setParamValues(next);
                               (d.onUpdate as any)?.(id, { default_params: next, params: next });
-                            }} placeholder={pdef.description || `输入 ${pname}`} className="w-full bg-surface-secondary border border-border rounded-lg px-2 py-1 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand"/>
+                            }} placeholder={pdef.description || `输入 ${pname}`} className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-lg px-2 py-1 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand"/>
                           )}
                         </div>
                       );
@@ -261,11 +274,11 @@ export const ProviderNode: React.FC<NodeProps> = ({ data, id, type }) => {
                             body: JSON.stringify({ default_params: paramValues, default_model: model })
                           }).then(r=>r.json());
                           if (res.status==='success' || res.provider) {
-                            alert('✓ 参数已保存');
+                            toast.success('✓ 参数已保存');
                             setSelectedDef(res.provider || {...selectedDef, default_params: paramValues, default_model: model});
                             (d.onUpdate as any)?.(id, { default_params: paramValues, params: paramValues, model });
-                          } else alert('保存失败: '+JSON.stringify(res).slice(0,300));
-                        } catch(e:any){ alert(e.message); } finally { setSavingParams(false); }
+                          } else toast.error('保存失败: '+JSON.stringify(res).slice(0,300));
+                        } catch(e:any){ toast.error(e.message); } finally { setSavingParams(false); }
                       }}
                       disabled={savingParams || isBuiltin}
                       className="w-full py-1.5 rounded-lg bg-brand text-white text-xs font-bold disabled:opacity-40 hover:bg-brand-light shadow-sm"
@@ -282,14 +295,14 @@ export const ProviderNode: React.FC<NodeProps> = ({ data, id, type }) => {
               <div className="space-y-1">
                 <span className="text-[11px] font-medium [color:var(--color-text-main)] flex items-center gap-1"><Key className="w-3 h-3 text-brand"/> API Key</span>
                 <div className="flex gap-1.5">
-                  <input type={showKey?'text':'password'} value={apiKeyInput} onChange={e=>setApiKeyInput(e.target.value)} placeholder={selectedDef.auth?.has_key ? '已配置（输入新 Key 覆盖）' : '输入 API Key'} className="flex-1 bg-surface border border-border rounded-lg px-2 py-1.5 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] font-mono focus:outline-none focus:border-brand"/>
-                  <button onClick={()=>setShowKey(v=>!v)} className="px-2 py-1 rounded-lg bg-surface border border-border text-[11px] [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)]">{showKey?'隐藏':'显示'}</button>
+                  <input type={showKey?'text':'password'} value={apiKeyInput} onChange={e=>setApiKeyInput(e.target.value)} placeholder={selectedDef.auth?.has_key ? '已配置（输入新 Key 覆盖）' : '输入 API Key'} className="flex-1 bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-lg px-2 py-1.5 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] font-mono focus:outline-none focus:border-brand"/>
+                  <button onClick={()=>setShowKey(v=>!v)} className="px-2 py-1 rounded-lg bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 text-[11px] [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)]">{showKey?'隐藏':'显示'}</button>
                 </div>
                 <button onClick={handleSaveKey} className="w-full py-1.5 rounded-lg bg-brand/10 border border-brand/20 text-brand text-xs font-semibold hover:bg-brand/20">保存 Key</button>
               </div>
             )}
             <div className="flex gap-1.5">
-              <button onClick={handleTest} disabled={testing || !selectedId} className="flex-1 py-1.5 rounded-lg bg-surface border border-border text-xs [color:var(--color-text-main)] flex items-center justify-center gap-1 disabled:opacity-40 hover:bg-surface-secondary"><Activity className="w-3 h-3 text-brand"/>{testing?'检测中…':'测试连通'}</button>
+              <button onClick={handleTest} disabled={testing || !selectedId} className="flex-1 py-1.5 rounded-lg bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 text-xs [color:var(--color-text-main)] flex items-center justify-center gap-1 disabled:opacity-40 hover:bg-white/55 dark:bg-white/[.06]"><Activity className="w-3 h-3 text-brand"/>{testing?'检测中…':'测试连通'}</button>
               {!isBuiltin && <button onClick={async ()=>{
                 const ok = await confirmAsync({
                   title: '删除生成源',
@@ -316,55 +329,15 @@ export const ProviderNode: React.FC<NodeProps> = ({ data, id, type }) => {
           </div>
         )}
 
-        {/* 快捷创建入口 */}
+        {/* 快捷创建入口：统一走「新建自定义源」弹窗（贴文档 / 写代码 / ComfyUI 工作流），成功后自动选中到本节点 */}
         <div className="rounded-xl border border-dashed border-brand/30 bg-brand/5 p-2.5 space-y-2">
           <div className="flex items-center gap-1.5 text-xs font-semibold text-brand"><Plus className="w-3 h-3"/> 扩展新生成源</div>
-          <div className="text-[11px] [color:var(--color-text-muted)] leading-relaxed">粘贴 API 文档/cURL/OpenAPI，让导演自动接入。或手动创建。</div>
+          <div className="text-[11px] [color:var(--color-text-muted)] leading-relaxed">粘贴 API 文档让导演自动写代码接入，或手写代码 / 导入 ComfyUI 工作流。创建成功自动选用。</div>
           <div className="flex gap-1.5">
-            <button onClick={()=> setShowCreate(v=>!v)} className="flex-1 py-1.5 rounded-lg bg-brand text-white text-xs font-semibold hover:bg-brand-light shadow-sm">{showCreate?'收起':'新建Provider'}</button>
-            <button onClick={()=> {
-              window.dispatchEvent(new CustomEvent('open-provider-create', {detail:{kind: nodeKind}}));
-              alert('可在右侧 Agent 输入框粘贴 API 文档，例如：\n“帮我接入这个生图 API：https://... 文档：... Key是...”\n导演将自动调用 register_custom_provider');
-            }} className="px-3 py-1.5 rounded-lg bg-surface border border-border text-xs [color:var(--color-text-main)] hover:bg-surface-secondary">让导演接入</button>
+            <button onClick={() => window.dispatchEvent(new CustomEvent('open-provider-create', { detail: { tab: 'doc', kind: nodeKind, select: true, source: 'provider-node' } }))} className="flex-1 py-1.5 rounded-lg bg-brand text-white text-xs font-semibold hover:bg-brand-light shadow-sm">贴文档创建</button>
+            <button onClick={() => window.dispatchEvent(new CustomEvent('open-provider-create', { detail: { tab: 'code', kind: nodeKind, select: true, source: 'provider-node' } }))} className="px-2.5 py-1.5 rounded-lg bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 text-xs [color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06]">写代码</button>
+            <button onClick={() => window.dispatchEvent(new CustomEvent('open-provider-create', { detail: { tab: 'comfy', kind: nodeKind, select: true, source: 'provider-node' } }))} className="px-2.5 py-1.5 rounded-lg bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 text-xs [color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06]">工作流</button>
           </div>
-          {showCreate && (
-            <div className="space-y-2 pt-2 border-t border-brand/20">
-              <input id={`prov-name-${id}`} placeholder="名称，如 我的FLUX" className="w-full bg-surface border border-border rounded-lg px-2 py-1.5 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand"/>
-              <div className="flex items-center gap-1.5">
-                <span className="text-[10px] [color:var(--color-text-muted)]">代码模式（唯一）</span>
-                <select id={`prov-lang-${id}`} className="ml-auto bg-surface border border-border rounded-lg px-2 py-1 text-[11px] [color:var(--color-text-main)] focus:outline-none focus:border-brand">
-                  <option value="python">python</option>
-                  <option value="javascript">javascript</option>
-                </select>
-                <button type="button" onClick={async()=>{
-                  const lang = (document.getElementById(`prov-lang-${id}`) as HTMLSelectElement)?.value || 'python';
-                  try {
-                    const r = await fetch(`${API_ORIGIN || ''}/api/v1/providers/code/templates?language=${lang}&kind=${nodeKind}`).then(x=>x.json());
-                    if (r?.template) (document.getElementById(`prov-code-${id}`) as HTMLTextAreaElement).value = r.template;
-                    else toast.error('模板不存在');
-                  } catch { toast.error('模板加载失败'); }
-                }} className="px-2 py-1 rounded-lg bg-surface border border-border text-[11px] [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)]">加载模板</button>
-              </div>
-              <textarea id={`prov-code-${id}`} rows={8} placeholder="async def generate(ctx, api): ...  # 末尾可追加 # PARAMS_SCHEMA: {...}" className="w-full bg-surface border border-border rounded-lg px-2 py-1.5 font-mono text-[11px] [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand"/>
-              <input id={`prov-key-${id}`} placeholder="API Key (可选)" className="w-full bg-surface border border-border rounded-lg px-2 py-1.5 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] font-mono focus:outline-none focus:border-brand"/>
-              <button onClick={async()=>{
-                const name = (document.getElementById(`prov-name-${id}`) as HTMLInputElement)?.value?.trim() || `自定义${nodeKind}源`;
-                const lang = (document.getElementById(`prov-lang-${id}`) as HTMLSelectElement)?.value || 'python';
-                const code = (document.getElementById(`prov-code-${id}`) as HTMLTextAreaElement)?.value?.trim();
-                const key = (document.getElementById(`prov-key-${id}`) as HTMLInputElement)?.value?.trim();
-                if(!code || code.length < 20){ alert('代码模式为唯一方式：请粘贴或加载完整携程源码（async def generate(ctx, api)）'); return; }
-                try{
-                  const body:any = { name, kind: nodeKind, language: lang, code, description: '画布内快速创建（手动代码）' };
-                  const res = await fetch(`${API_ORIGIN || ''}/api/v1/providers`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...body, api_key: key || undefined})}).then(r=>r.json());
-                  if(res.status==='success' || res.provider){
-                    alert(`✓ 已创建 ${res.provider?.id || ''}`);
-                    fetchProviders();
-                    if(res.provider?.id) handleSelect(res.provider.id);
-                  } else alert(`失败: ${JSON.stringify(res).slice(0,400)}`);
-                }catch(e:any){ alert(e.message); }
-              }} className="w-full py-2 rounded-lg bg-brand text-white text-xs font-bold hover:bg-brand-light shadow-sm">快速创建</button>
-            </div>
-          )}
         </div>
 
         <div className="text-[10px] [color:var(--color-text-muted)] text-center leading-relaxed">

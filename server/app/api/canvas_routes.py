@@ -4,12 +4,14 @@ Canvas API Routes - 画布 DAG 执行与动态技能调度
 """
 import os
 from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.canvas.engine import canvas_engine, execute_node, collect_upstream_data
+from app.core import pages
 
-router = APIRouter()
+# 路由级守卫：创意画布（canvas）关闭时整族 404（运行期开关，路由始终挂载）
+router = APIRouter(dependencies=[Depends(pages.require("canvas"))])
 
 class CanvasExecuteRequest(BaseModel):
     nodes: List[Dict[str, Any]]

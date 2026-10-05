@@ -46,10 +46,9 @@ MANAGED_KEYS = [
     "SILICONFLOW_IMAGE_MODEL",
     "DASHSCOPE_API_KEY",
     "DASHSCOPE_IMAGE_MODEL",
-    # OpenAI 兼容生图（自定义通道：独立 Key / 地址 / 模型，与文本大模型互不影响）
-    "OPENAI_IMAGE_API_KEY",
     "OPENAI_IMAGE_MODEL",
     "OPENAI_IMAGE_BASE_URL",
+    "OPENAI_IMAGE_API_KEY",
     # Voice & TTS
     "TTS_PROVIDER",
     "COSYVOICE_URL",
@@ -208,10 +207,10 @@ class Settings(BaseModel):
     SILICONFLOW_IMAGE_MODEL: str = os.getenv("SILICONFLOW_IMAGE_MODEL", "black-forest-labs/FLUX.1-schnell")
     DASHSCOPE_API_KEY: str = os.getenv("DASHSCOPE_API_KEY", "")
     DASHSCOPE_IMAGE_MODEL: str = os.getenv("DASHSCOPE_IMAGE_MODEL", "wan2.6-t2i")
-    # OpenAI 兼容生图：OPENAI_IMAGE_API_KEY 为生图专用 Key；留空才回退复用文本大模型的 OPENAI_API_KEY
-    OPENAI_IMAGE_API_KEY: str = os.getenv("OPENAI_IMAGE_API_KEY", "")
     OPENAI_IMAGE_MODEL: str = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2.5-flare")
     OPENAI_IMAGE_BASE_URL: str = os.getenv("OPENAI_IMAGE_BASE_URL", "")
+    # 生图专用 Key：留空则回退到 OPENAI_API_KEY（沿用文本网关）
+    OPENAI_IMAGE_API_KEY: str = os.getenv("OPENAI_IMAGE_API_KEY", "")
 
     # Voice & TTS Providers
     TTS_PROVIDER: str = os.getenv("TTS_PROVIDER", "minimax")
@@ -255,14 +254,20 @@ class Settings(BaseModel):
     JIANYIN_DRAFT_PATH: str = os.getenv("JIANYIN_DRAFT_PATH", get_default_jianyin_draft_path())
 
     # ── 云端素材/工程同步（OpenList）──────────────────────────
-    # 开了之后 storage/ 下的素材与工程会异步镜像到 OpenList，换台机器按需拉回。
-    # 密码是登录凭据，和 API Key 一样不会明文回显给前端。
-    OPENLIST_SYNC_ENABLED: str = os.getenv("OPENLIST_SYNC_ENABLED", "0")
-    OPENLIST_BASE_URL: str = os.getenv("OPENLIST_BASE_URL", "")
-    OPENLIST_USERNAME: str = os.getenv("OPENLIST_USERNAME", "")
-    OPENLIST_PASSWORD: str = os.getenv("OPENLIST_PASSWORD", "")
-    # 远端根目录：必须落在 OpenList 已挂载的存储下，各人的挂载点不一样，按自己的填
-    OPENLIST_ROOT: str = os.getenv("OPENLIST_ROOT", "/comic-studio")
+    # storage/ 下的素材与工程异步镜像到共用的 OpenList，换台机器按需拉回。
+    #
+    # 下面这套是**团队共用**的默认值，拉下代码即可用，不用再配。
+    # 也就是说这个账号密码是随仓库分发的，任何拿到代码的人都能读写这块存储 ——
+    # 它只管素材与工程，API Key 那些配置不在同步范围内，不会跟着出去。
+    # 想收紧就在自己的 .env 里覆盖这几项（.env 不进仓库），或者换个受限账号。
+    OPENLIST_SYNC_ENABLED: str = os.getenv("OPENLIST_SYNC_ENABLED", "1")
+    # 默认走公网域名，换哪台机器都通；和 OpenList 同机跑的话在 .env 里
+    # 覆盖成 http://127.0.0.1:5244 会快很多（实测 3MB：本地 1.4s / 公网 11s）
+    OPENLIST_BASE_URL: str = os.getenv("OPENLIST_BASE_URL", "https://openlist.apeiria.cc.cd")
+    OPENLIST_USERNAME: str = os.getenv("OPENLIST_USERNAME", "admin")
+    OPENLIST_PASSWORD: str = os.getenv("OPENLIST_PASSWORD", "Autoword@773#")
+    # 远端根目录：必须落在 OpenList 已挂载的存储下（那台挂的是 /autoword）
+    OPENLIST_ROOT: str = os.getenv("OPENLIST_ROOT", "/autoword/comic-studio")
     # 以下三项只走 env，不进设置页：扫描间隔(秒) / 并发上传数 / 单次传输超时(秒)
     OPENLIST_SCAN_INTERVAL: str = os.getenv("OPENLIST_SCAN_INTERVAL", "20")
     OPENLIST_WORKERS: str = os.getenv("OPENLIST_WORKERS", "2")

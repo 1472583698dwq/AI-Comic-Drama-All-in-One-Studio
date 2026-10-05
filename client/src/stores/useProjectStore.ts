@@ -1,36 +1,11 @@
 import { create } from 'zustand';
 import { Project, StoryboardShot, Character, AspectRatio, StylePreset } from '../types';
 import { apiService } from '../services/api';
+import { resolveTab } from './usePageStore';
+import { useProjectListStore } from './useProjectListStore';
 
-/**
- * 页签类型。
- *
- * 精简链路（SLIM BUILD）：`studio`（分镜工作台）/ `director3d`（3D 片场）/
- * `timeline`（多轨剪辑）三个页签的宿主视图已下线。
- * `characters`（角色设定）**保留启用**：它是角色三视图与参考音频的唯一生产端，
- * 而画布链路仍在消费这两个字段（`referenceBinder.characterMainImage` /
- * `collectAudioResources`，经 `NodeAgentConsole` / `CreativeCanvas` 生效），
- * 下线会让角色一致性退化为「只有单张 avatar 兜底」。
- * 类型与历史 localStorage 值保留不动（避免波及所有跳转调用的类型），
- * 统一由 `normalizeTab` 在执行时重定向到保留页签 —— 这样旧缓存与残留跳转
- * 都不会落到空白页，也不需要逐个调用点做类型改造。
- */
-export type ActiveTab =
-  | 'home' | 'projects' | 'studio' | 'director3d' | 'timeline' | 'characters'
-  | 'assets' | 'mcp' | 'config' | 'canvas' | 'agent';
-
-/** 已下线页签 → 保留页签的重定向表 */
-const REMOVED_TAB_REDIRECT: Record<string, ActiveTab> = {
-  studio: 'canvas',
-  director3d: 'canvas',
-  timeline: 'canvas',
-};
-
-/** 把（可能来自旧缓存或已下线页签的）页签归一到当前保留链路。 */
-export function normalizeTab(tab: string | null | undefined): ActiveTab {
-  const t = String(tab || '');
-  return REMOVED_TAB_REDIRECT[t] || (t as ActiveTab) || 'projects';
-}
+/** 页签 id 与后端功能页 id（page）一一对应；'home' 为跨项目首页 */
+export type ActiveTab = 'home' | 'projects' | 'studio' | 'director3d' | 'timeline' | 'characters' | 'assets' | 'mcp' | 'config' | 'canvas' | 'agent' | 'onekey';
 
 interface ProjectState {
   project: Project | null;
@@ -45,21 +20,32 @@ interface ProjectState {
   isLoading: boolean;
   loadingMessage: string;
   apiError: string | null;
-  /** 画布态：系统左侧栏（图标轨）是否被唤出 —— 由画布左上角「画布操作台」条上的按钮控制 */
-  canvasRailOpen: boolean;
+  /**
+   * 系统左侧栏折叠偏好（非画布页）：true = 只显示图标（不显示文字），false = 图标 + 文字。
+   * 侧栏在任何页面都常驻，不会整条隐藏。
+   */
+  sidebarCollapsed: boolean;
+  /**
+   * 画布页的侧栏展开态：画布需要空间，每次进入画布都回到收起（false），
+   * 在画布上展开只作用于本次停留，不改写 sidebarCollapsed 偏好。
+   * 实际折叠态请用 selectSidebarCollapsed 取。
+   */
+  canvasSidebarExpanded: boolean;
 
   loadActiveProject: (projectId?: string) => Promise<void>;
   /**
    * 启动友好化：确保有可用项目。
-   * 'restored' 恢复了缓存项目 / 'adopted' 自动接管了最近项目 / 'empty' 无任何项目（落首页）。
+   * 'restored' 恢复了缓存项目；'empty' 无任何项目可恢复（落首页，不再落看板）。
+   * 注：新基线不自动接管最近项目 —— 最近项目入口在首页「最近项目」区。
    */
-  ensureActiveProject: () => Promise<'restored' | 'adopted' | 'empty'>;
+  ensureActiveProject: () => Promise<'restored' | 'empty'>;
   closeProject: () => void;
   // Actions
   setProject: (project: Project) => void;
   setActiveShotId: (shotId: string | null) => void;
   setActiveTab: (tab: ActiveTab) => void;
-  setCanvasRailOpen: (open: boolean) => void;
+  /** 切换系统左侧栏 收起（仅图标）/ 展开（图标 + 文字）：画布页只改本次画布态，其余页面改偏好 */
+  toggleSidebar: () => void;
   setWorkspace: (w: 'production'|'creative') => void;
   setPlatformMode: (mode: 'desktop' | 'mobile') => void;
   setIsPlaying: (isPlaying: boolean) => void;
@@ -68,7 +54,7 @@ interface ProjectState {
 
   // Script & Generation
   importNovelScript: (text: string, style?: StylePreset, ratio?: AspectRatio) => Promise<void>;
-  generateShotVideo: (shotId: string, options?: { mode?: 'i2v' | 'r2v' | 't2v'; prompt?: string; duration?: number; provider?: string; workflow_id?: string; dynamic_inputs?: Record<string, any>; omit_first_frame?: boolean }) => Promise<void>;
+  generateShotVideo: (shotId: string, options?: { mode?: 'i2v' | 'r2v' | 't2v'; prompt?: string; duration?: number; provider?: string; workflow_id?: string; dynamic_inputs?: Record<string, any>; omit_first_frame?: boolean; reference_videos?: string[] }) => Promise<void>;
   updateShot: (shotId: string, updates: Partial<StoryboardShot>) => void;
   updateCharacter: (charId: string, updates: Partial<Character>) => void;
   addCharacter: (character: Character) => void;
@@ -104,21 +90,51 @@ const persistProject = (proj: Project | null, activePid: string | null) => {
   }, 250);
 };
 
+/**
+ * 空白项目兜底：后端「新建空白项目」不落 content.json，`GET /projects/{id}` 返回的
+ * `content` 为 null 是**正常态**，不是"项目无效"。
+ * 形状与项目看板打开空白项目的既有兜底（ProjectDashboard.handleOpen）保持一致，
+ * 避免同一份空工程在两处长得不一样。
+ */
+const buildBlankProject = (id: string, meta?: any): any => ({
+  id,
+  title: meta?.title || '未命名项目',
+  original_novel: '',
+  style_preset: meta?.style_preset || 'donghua_xianxia',
+  aspect_ratio: meta?.aspect_ratio || '9:16',
+  characters: [],
+  scenes: [{ id: 'scene-1', scene_index: 1, title: '场景 1', location: '', time_of_day: 'day', atmosphere: 'epic', shots: [] }],
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+});
+
+/** 系统左侧栏当前是否处于收起（仅图标）态：画布页默认收起，其余页面按用户偏好 */
+export const selectSidebarCollapsed = (s: Pick<ProjectState, 'activeTab' | 'sidebarCollapsed' | 'canvasSidebarExpanded'>) =>
+  s.activeTab === 'canvas' ? !s.canvasSidebarExpanded : s.sidebarCollapsed;
+
 export const useProjectStore = create<ProjectState>((set, get) => ({
   project: null,
   activeProjectId: localStorage.getItem('activeProjectId') || null,
   activeShotId: null,
-  // 旧缓存里可能还留着已下线页签（studio/director3d/timeline/characters），启动即归一
-  activeTab: (localStorage.getItem('activeProjectId') ? normalizeTab(localStorage.getItem('app_active_tab')) : 'projects'),
+  activeTab: (localStorage.getItem('activeProjectId') ? ((localStorage.getItem('app_active_tab') as any) || 'projects') : 'projects'),
   workspace: (localStorage.getItem('app_workspace') as any) || 'production',
   platformMode: (localStorage.getItem('app_platform_mode') as any) || 'desktop',
   isPlaying: false,
-  canvasRailOpen: false,
   currentTime: 0,
   totalDuration: 0,
   isLoading: false,
   loadingMessage: '',
   apiError: null,
+  sidebarCollapsed: (() => {
+    try {
+      const saved = localStorage.getItem('studio_sidebar_collapsed');
+      if (saved !== null) return saved === '1';
+      return typeof window !== 'undefined' && window.innerWidth < 1180;
+    } catch {
+      return false;
+    }
+  })(),
+  canvasSidebarExpanded: false,
 
   loadActiveProject: async (projectId?: string) => {
     const pid = projectId || get().activeProjectId || localStorage.getItem('activeProjectId');
@@ -128,11 +144,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // open 仅更新 last_opened_at（返回 meta，无场景），内容以 getProject 的 content 为准
       try { await apiService.openProject(pid); } catch {}
       const p = await apiService.getProject(pid);
-      const content = (p as any)?.content ?? (p as any)?.project ?? p;
+      // 后端 /projects/{id} 形如 { meta, content }。content 为 null 表示「空白项目尚未落盘」，
+      // 此时按 meta 兜底成空工程 —— 绝不能走 closeProject()：那会清空 activeProjectId 并把
+      // 页签弹回项目看板，表现为"选了项目反而变成未选择项目"且每次重试都复现。
+      // 只有请求真的失败（404 / 后端未启动）才关项目，见下方 catch。
+      const meta = (p as any)?.meta ?? null;
+      const content = (p as any)?.content ?? (p as any)?.project ?? (meta ? null : p);
       if (content && Array.isArray(content.scenes)) {
-        get().setProject(content as any);
+        // 项目身份以目录 id（pid）为准：剧本导入等路径落盘的 content.id 可能是一个 UUID，
+        // 直接沿用会让 activeProjectId / 自动保存 / 会话绑定全部指向一个不存在的项目
+        get().setProject({ ...(content as any), id: pid });
       } else {
-        get().closeProject();
+        get().setProject(buildBlankProject(pid, meta || content));
       }
     } catch (e: any) {
       console.warn('Failed to auto-load active project:', e);
@@ -142,43 +165,34 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 
+  /**
+   * 启动位置：优先恢复缓存项目；一个项目都没有（含后端未启动）时落到首页 —— 
+   * 首页承担「快速创建 / 模板 / 最近项目」，是空环境唯一有意义的落点。
+   */
+  ensureActiveProject: async () => {
+    await get().loadActiveProject();
+    if (get().project) return 'restored';
+    localStorage.setItem('app_active_tab', 'home');
+    set({ activeTab: 'home' });
+    return 'empty';
+  },
+
   closeProject: () => {
     localStorage.removeItem('activeProjectId');
-    localStorage.setItem('app_active_tab', 'projects');
+    useProjectListStore.getState().setActiveProjectId(null);
+    // 项目看板可能已在功能开关里关掉 → 落在确实开启的页（首页兜底）
+    const backTab = (resolveTab('projects') || 'home') as ActiveTab;
+    localStorage.setItem('app_active_tab', backTab);
     set({
       project: null,
       activeProjectId: null,
       activeShotId: null,
-      activeTab: 'projects',
+      activeTab: backTab,
       isPlaying: false,
       currentTime: 0,
       totalDuration: 0,
       apiError: null,
     });
-  },
-
-  /**
-   * 启动友好化：优先恢复缓存项目，其次自动接管最近更新的项目；
-   * 全新环境不再自动创建项目 —— 落到首页（快速创建/模板入口在那里）。
-   * 全部失败（如后端未启动）同样视为 'empty'，由既有兜底逻辑留在安全页。
-   */
-  ensureActiveProject: async () => {
-    await get().loadActiveProject();
-    if (get().project) return 'restored';
-    try {
-      const res = await apiService.listProjects({ sort: 'updated_at' });
-      const list: any[] = (res.projects || []).slice().sort(
-        (a, b) => String(b?.updated_at || '').localeCompare(String(a?.updated_at || '')));
-      if (list.length > 0) {
-        await get().loadActiveProject(list[0].id);
-        if (get().project) return 'adopted';
-      }
-    } catch (e: any) {
-      console.warn('ensureActiveProject failed:', e);
-    }
-    localStorage.setItem('app_active_tab', 'home');
-    set({ activeTab: 'home' });
-    return 'empty';
   },
 
   setProject: (project) => {
@@ -195,9 +209,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const foundSaved = allShots.find(s => s.id === savedShotId);
     const firstShotId = foundSaved?.id || allShots[0]?.id || null;
 
-    // 同步 activeProjectId
+    // 同步 activeProjectId（两个 store 一起：画布/素材等视图从 useProjectListStore 取 pid）
     if (safe?.id) {
       localStorage.setItem('activeProjectId', safe.id);
+      if (useProjectListStore.getState().activeProjectId !== safe.id) {
+        useProjectListStore.getState().setActiveProjectId(safe.id);
+      }
       set({ project: safe, totalDuration: total, activeShotId: firstShotId, apiError: null, activeProjectId: safe.id });
     } else {
       set({ project: safe, totalDuration: total, activeShotId: firstShotId, apiError: null });
@@ -215,34 +232,51 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ activeShotId: shotId });
   },
   setActiveTab: (tab) => {
-    // 已下线页签在此统一重定向：分镜工作台/3D 片场/多轨剪辑 → 画布（角色设定保留启用，不再重定向）
-    const next = normalizeTab(tab);
-    // 未选择项目时，严禁切换到项目内部功能（首页/看板/设置属于全局页，放行）
-    if (!get().project && next !== 'home' && next !== 'projects' && next !== 'config') {
+    // 未选择项目时，严禁切换到项目内部功能（全局页 home / projects / config 放行）
+    if (!get().project && tab !== 'home' && tab !== 'projects' && tab !== 'config') {
       return;
     }
-    localStorage.setItem('app_active_tab', next);
-    if (next === 'canvas') {
+    localStorage.setItem('app_active_tab', tab);
+    if (tab === 'canvas') {
       localStorage.setItem('app_workspace', 'creative');
-      set({ activeTab: next, workspace: 'creative' });
-    } else if (['projects', 'assets', 'agent'].includes(next)) {
+      set({
+        activeTab: tab,
+        workspace: 'creative',
+        // 从别的页进入画布 → 侧栏回到收起；已在画布上（重复点）则保持当前展开态
+        ...(get().activeTab !== 'canvas' ? { canvasSidebarExpanded: false } : {}),
+      });
+    } else if (['home', 'projects', 'studio', 'director3d', 'timeline', 'characters', 'assets', 'agent'].includes(tab)) {
       localStorage.setItem('app_workspace', 'production');
-      set({ activeTab: next, workspace: 'production' });
+      set({ activeTab: tab, workspace: 'production' });
     } else {
-      set({ activeTab: next });
+      set({ activeTab: tab });
     }
   },
-  setCanvasRailOpen: (open) => set({ canvasRailOpen: !!open }),
+  toggleSidebar: () => {
+    if (get().activeTab === 'canvas') {
+      set({ canvasSidebarExpanded: !get().canvasSidebarExpanded });
+      return;
+    }
+    const next = !get().sidebarCollapsed;
+    try { localStorage.setItem('studio_sidebar_collapsed', next ? '1' : '0'); } catch { /* ignore */ }
+    set({ sidebarCollapsed: next });
+  },
   setWorkspace: (workspace) => {
     if (!get().project) return;
     localStorage.setItem('app_workspace', workspace);
     if (workspace === 'creative') {
       localStorage.setItem('app_active_tab', 'canvas');
-      set({ workspace, activeTab: 'canvas' });
+      set({
+        workspace,
+        activeTab: 'canvas',
+        ...(get().activeTab !== 'canvas' ? { canvasSidebarExpanded: false } : {}),
+      });
     } else {
-      // 离开创意画布时回落到保留的生产侧页签（原本回落分镜工作台，该页签已下线）
       const currentTab = get().activeTab;
-      const nextTab: ActiveTab = currentTab === 'canvas' ? 'agent' : currentTab;
+      // 离开创意画布时回落到「确实开启」的生产侧页（分镜台可能已在功能开关里被关掉）
+      const nextTab = currentTab === 'canvas'
+        ? ((resolveTab('studio') || 'home') as ActiveTab)
+        : currentTab;
       localStorage.setItem('app_active_tab', nextTab);
       set({ workspace, activeTab: nextTab });
     }
@@ -324,11 +358,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // （shotReference 唯一口径），不再把首帧重复塞进参考槽污染约束。
       // 直出（多参考 r2v）调用方传 omit_first_frame：旧首帧不再注入，纯绑定驱动。
       const diRefs = (options?.dynamic_inputs as any)?.reference_images ?? (options?.dynamic_inputs as any)?.reference_image;
+      // 白模动态预演自动作为参考视频：调用方没显式传时，取本镜 previz_video_url（有声明的源才消费）
+      const refVideos = options?.reference_videos
+        || ((shot as any).previz_video_url ? [(shot as any).previz_video_url] : undefined);
       const res: any = await apiService.generateShotVideo({
         prompt,
         mode,
         first_frame_url: options?.omit_first_frame ? undefined : (shot.image_url || undefined),
         reference_images: Array.isArray(diRefs) ? diRefs : (diRefs ? [diRefs] : undefined),
+        reference_videos: Array.isArray(refVideos) ? refVideos : undefined,
         duration,
         aspect_ratio: proj.aspect_ratio || '9:16',
         provider: options?.provider,

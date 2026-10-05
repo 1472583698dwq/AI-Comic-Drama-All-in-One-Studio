@@ -56,12 +56,12 @@ export const ShotCardNode: React.FC<NodeProps> = ({ data, id }) => {
   const allInputs = [...specInputs, ...extraHandles].slice(0,6);
 
   return (
-    <div className="w-[300px] bg-surface border border-border rounded-2xl shadow-xl overflow-hidden">
-      <div className="px-3 py-2.5 bg-surface border-b border-border flex items-center justify-between">
+    <div className="w-[300px] bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-2xl shadow-xl overflow-hidden">
+      <div className="px-3 py-2.5 bg-white/60 dark:bg-white/[.05] border-b border-white/70 dark:border-white/12 flex items-center justify-between">
         <span className="text-xs font-bold [color:var(--color-text-main)] flex items-center gap-1.5"><Film className="w-3.5 h-3.5 text-brand"/> 分镜卡 {localData.shot_index ? `#${localData.shot_index}`: ''}</span>
         <span className="flex items-center gap-1">
           {providerBadge && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-brand text-white font-mono truncate max-w-[90px] shadow-sm" title={String(providerBadge)}>{String(providerBadge).slice(0,12)}</span>}
-          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-surface-secondary [color:var(--color-text-muted)] border border-border font-mono">{localData.camera_framing || 'medium'} · {localData.camera_motion || 'push_in'}</span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/55 dark:bg-white/[.06] [color:var(--color-text-muted)] border border-white/70 dark:border-white/12 font-mono">{localData.camera_framing || 'medium'} · {localData.camera_motion || 'push_in'}</span>
         </span>
       </div>
       {/* 输入：左侧动态 */}
@@ -75,7 +75,7 @@ export const ShotCardNode: React.FC<NodeProps> = ({ data, id }) => {
 
       {/* 挂载的人物与场景徽章 */}
       {(liveShot?.character_ids?.length || liveShot?.scene_name || liveShot?.prop_prompts) && (
-        <div className="px-2.5 py-1.5 bg-surface-secondary/80 border-b border-border flex items-center gap-1.5 flex-wrap">
+        <div className="px-2.5 py-1.5 bg-white/65 dark:bg-white/[.05] border-b border-white/70 dark:border-white/12 flex items-center gap-1.5 flex-wrap">
           {(liveShot.character_ids || []).map((cid: string) => {
             const char = project?.characters.find(c => c.id === cid);
             if (!char) return null;
@@ -102,19 +102,19 @@ export const ShotCardNode: React.FC<NodeProps> = ({ data, id }) => {
       )}
 
       {imgUrl ? (
-        <AutoRatioMedia src={imgUrl} fallbackAspect="9/16" maxHeight={220} className="bg-surface-secondary border-b border-border">
-          {localData.subtitle_text && <div className="absolute bottom-2 left-2 right-2 bg-surface/85 backdrop-blur px-2 py-1 rounded text-[11px] text-white text-center border border-white/10">{localData.subtitle_text}</div>}
+        <AutoRatioMedia src={imgUrl} fallbackAspect="9/16" maxHeight={220} className="bg-white/55 dark:bg-white/[.06] border-b border-white/70 dark:border-white/12">
+          {localData.subtitle_text && <div className="absolute bottom-2 left-2 right-2 bg-white/75 dark:bg-black/50 backdrop-blur px-2 py-1 rounded text-[11px] text-white text-center border border-white/10">{localData.subtitle_text}</div>}
         </AutoRatioMedia>
       ) : (
-        <div className="aspect-[9/16] max-h-[220px] bg-surface-secondary relative overflow-hidden flex items-center justify-center border-b border-border">
+        <div className="aspect-[9/16] max-h-[220px] bg-white/55 dark:bg-white/[.06] relative overflow-hidden flex items-center justify-center border-b border-white/70 dark:border-white/12">
           <div className="text-xs [color:var(--color-text-muted)] flex flex-col items-center gap-1"><ImageIcon className="w-6 h-6 opacity-50"/><span>{generating ? '生成中…' : '暂无画面'}</span></div>
-          {localData.subtitle_text && <div className="absolute bottom-2 left-2 right-2 bg-surface/85 backdrop-blur px-2 py-1 rounded text-[11px] text-white text-center border border-white/10">{localData.subtitle_text}</div>}
+          {localData.subtitle_text && <div className="absolute bottom-2 left-2 right-2 bg-white/75 dark:bg-black/50 backdrop-blur px-2 py-1 rounded text-[11px] text-white text-center border border-white/10">{localData.subtitle_text}</div>}
         </div>
       )}
 
-      <div className="p-2.5 space-y-2 bg-surface">
-        <textarea value={localData.action_desc || ''} onChange={e=>{ const v=e.target.value; setLocalData((p:any)=>({...p, action_desc:v})); (d.onUpdate as any)?.(id,{action_desc:v}); }} placeholder="画面动作描述…（支持多行）" rows={2} className="w-full bg-surface-secondary border border-border rounded-xl p-2 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand resize-none"/>
-        <textarea value={localData.image_prompt || ''} onChange={e=>{ const v=e.target.value; setLocalData((p:any)=>({...p,image_prompt:v})); (d.onUpdate as any)?.(id,{image_prompt:v}); }} placeholder="英文画面提示词…（可粘贴长段）" rows={2} className="w-full bg-surface-secondary border border-border rounded-xl p-2 text-xs font-mono [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand resize-none"/>
+      <div className="p-2.5 space-y-2 bg-white/60 dark:bg-white/[.05]">
+        <textarea value={localData.action_desc || ''} onChange={e=>{ const v=e.target.value; setLocalData((p:any)=>({...p, action_desc:v})); (d.onUpdate as any)?.(id,{action_desc:v}); }} placeholder="画面动作描述…（支持多行）" rows={2} className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl p-2 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand resize-none"/>
+        <textarea value={localData.image_prompt || ''} onChange={e=>{ const v=e.target.value; setLocalData((p:any)=>({...p,image_prompt:v})); (d.onUpdate as any)?.(id,{image_prompt:v}); }} placeholder="英文画面提示词…（可粘贴长段）" rows={2} className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl p-2 text-xs font-mono [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand resize-none"/>
         {allInputs.length>0 && <div className="text-[10px] text-brand bg-brand/10 border border-brand/20 rounded-lg px-2 py-1 font-medium">已接入 {allInputs.map((h:any)=>h.label).join('、')} · 多模态输入就绪</div>}
         <div className="flex gap-1.5">
           <button onClick={handleGenerate} disabled={generating} className="flex-1 py-1.5 rounded-xl bg-brand hover:bg-brand-light text-white text-xs font-semibold flex items-center justify-center gap-1 disabled:opacity-40 shadow-sm">{generating ? <RefreshCw className="w-3 h-3 animate-spin"/> : <Sparkles className="w-3 h-3"/>}{generating ? '生成中' : '生成首帧'}</button>

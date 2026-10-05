@@ -23,21 +23,21 @@ export interface ModeSlotDef extends ModeDef {
 
 export const BUILTIN_MODES: ModeSlotDef[] = [
   {
-    id: 'comic', label: '🎨 漫画制作', desc: '纯生图流 · 1/4抽定版', order: 10,
+    id: 'comic', label: '🎨 漫画制作', desc: '只出图 · 单张/4张选优', order: 10,
     caps: { canImage: true, canVideo: false, canTts: false, direct: false, needsFirstFrame: false, lockPreview: 'image' },
     inspectorTitle: '漫画分镜参数',
     renderStatus: (ctx) => <StatusComic ctx={ctx} />,
     renderAction: (ctx) => <ActionComic ctx={ctx} />,
   },
   {
-    id: 'motion_comic', label: '🎬 漫剧制作', desc: '角色立绘直出视频', order: 20,
+    id: 'motion_comic', label: '🎬 漫剧制作', desc: '立绘直接生成视频', order: 20,
     caps: { canImage: false, canVideo: true, canTts: true, direct: true, needsFirstFrame: false, lockPreview: 'video' },
-    inspectorTitle: '漫剧直出参数',
+    inspectorTitle: '漫剧视频参数',
     renderAction: (ctx) => <ActionMotionComic ctx={ctx} />,
     renderStatus: (ctx) => <StatusMotionComic ctx={ctx} />,
   },
   {
-    id: 'image_to_video', label: '⚡ 图生视频', desc: '首帧精控+I2V演化', order: 30,
+    id: 'image_to_video', label: '⚡ 图生视频', desc: '先出首帧，再生成视频', order: 30,
     caps: { canImage: true, canVideo: true, canTts: true, direct: false, needsFirstFrame: true, lockPreview: null },
     inspectorTitle: '图生视频参数',
     renderStatus: (ctx) => <StatusImageToVideo ctx={ctx} />,

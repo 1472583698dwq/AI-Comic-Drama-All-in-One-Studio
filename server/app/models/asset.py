@@ -4,7 +4,7 @@ from datetime import datetime
 import uuid
 
 # 类别枚举：与前端保持一致
-ASSET_CATEGORIES = ["character", "scene", "prop", "background", "effect", "ui", "previz", "other"]
+ASSET_CATEGORIES = ["character", "scene", "prop", "background", "effect", "ui", "previz", "text", "other"]
 ASSET_STATUS = ["draft", "approved", "archived"]
 
 class Asset(BaseModel):
@@ -21,6 +21,8 @@ class Asset(BaseModel):
     # 视觉与一致性
     visual_prompt: str = ""  # 用于生成/一致性召回
     negative_prompt: Optional[str] = None
+    # 文本/提示词素材正文（category=text 时使用；无文件资源也能入库、可拖入画布填充）
+    content: str = ""
     style_preset: Optional[str] = None  # donghua_xianxia 等
     # 关联资源
     file_url: Optional[str] = None  # /assets/library/{id}/original.png 或 /storage/...
@@ -57,6 +59,7 @@ class AssetCreateRequest(BaseModel):
     description: Optional[str] = None
     tags: Optional[List[str]] = None
     visual_prompt: Optional[str] = None
+    content: Optional[str] = None
     style_preset: Optional[str] = None
     project_id: Optional[str] = None
     status: Optional[str] = "approved"
@@ -73,6 +76,7 @@ class AssetUpdateRequest(BaseModel):
     description: Optional[str] = None
     tags: Optional[List[str]] = None
     visual_prompt: Optional[str] = None
+    content: Optional[str] = None
     style_preset: Optional[str] = None
     status: Optional[str] = None
     file_url: Optional[str] = None

@@ -8,12 +8,14 @@
 - DELETE /storyboard/slots/custom/{slot}/{sid}  删除裸件槽
 """
 from typing import Any, Dict, List
-from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from app.core import pages
 from app.storyboard import slots as slot_store
 
-router = APIRouter()
+# 路由级守卫：分镜台（studio）关闭时整族 404（运行期开关，路由始终挂载）
+router = APIRouter(dependencies=[Depends(pages.require("studio"))])
 
 
 @router.get("/storyboard/slots")

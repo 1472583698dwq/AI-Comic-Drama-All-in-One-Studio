@@ -128,13 +128,6 @@ def _build_context_block(context: Dict[str, Any]) -> str:
     ws = context.get("workspace")
     if ws:
         parts.append(f"【工作区模式】{ws}")
-    # 「加入会话」的画布节点：与 v2 引擎同一份实现（见 runtime/prompt.focus_nodes_section），
-    # 避免两条引擎对同一条上下文各自解释、行为不一致
-    try:
-        from app.agent.runtime.prompt import focus_nodes_section
-        parts.extend(focus_nodes_section(context))
-    except Exception:
-        pass
     return "\n\n".join(parts)[:16000]
 
 # ─── ChatModel 构造 ─────────────────────────────────────
@@ -476,7 +469,7 @@ async def run_agent_with_langchain(
         except Exception:
             pass
         return {"reply": clean_reply, "thinking": th, "suggested_actions": ["切换到执行模式让我直接做"], "executed_tools": [], "mode": "chat"}
-    # 运行模式两维（行为 × 执行）：plan 硬门控看行为维，破坏性确认看执行维
+    # 计划模式：只读侦察 + 产出计划（工具在绑定层硬门控，模型无变更工具可用）
     try:
         from app.agent.mode_policy import behavior_of as _behavior_of, execution_of as _execution_of
     except Exception:
@@ -484,7 +477,6 @@ async def run_agent_with_langchain(
         _execution_of = lambda m: "auto" if str(m or "").endswith("auto") else "approve"  # noqa: E731
     _behavior = _behavior_of((context or {}).get("run_mode"))
     _execution = _execution_of((context or {}).get("run_mode"))
-    # 计划模式：只读侦察 + 产出计划（工具在绑定层硬门控，模型无变更工具可用）
     _plan_mode = bool((context or {}).get("plan_mode")) or _behavior == "plan"
     # 轮次预算：plan 模式 60，execute 模式 200（均可用 AGENT_MAX_ITERATIONS 覆盖）
     try:
