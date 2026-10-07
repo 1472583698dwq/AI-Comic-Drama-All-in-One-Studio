@@ -2171,6 +2171,15 @@ const InnerCanvas: React.FC = () => {
               onSelectionChange={handleSelectionChange}
               deleteKeyCode={null}  /* 删除交给 useCanvasShortcuts，统一处理节点+连线 */
               fitView
+              /* 左下角 Controls 内置按钮的悬停/无障碍文案：库默认是英文，这里覆盖为中文
+                 （Partial 会与默认值合并，其余键保持库默认） */
+              ariaLabelConfig={{
+                'controls.ariaLabel': '画布控制栏',
+                'controls.zoomIn.ariaLabel': '放大',
+                'controls.zoomOut.ariaLabel': '缩小',
+                'controls.fitView.ariaLabel': '适应视图',
+                'controls.interactive.ariaLabel': '锁定/解锁画布交互',
+              }}
               colorMode={isLight ? 'light' : 'dark'}
               className={isLight ? 'light' : 'dark'}
               style={{ background: isLight ? '#E8ECF1' : '#08080B', cursor: isDragging ? 'grabbing' : 'crosshair' }}
