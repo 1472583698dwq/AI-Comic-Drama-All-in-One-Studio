@@ -1,7 +1,7 @@
 /**
  * 会话历史侧栏 — 从 AgentModeView 抽出（项目级持久化隔离）
  */
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Clock, History, MessageSquare, PanelLeftClose, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { confirmAsync } from '../../stores/useDialogStore';
 import type { AgentSession } from './agentTypes';
@@ -54,6 +54,12 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     if (ok) onDelete(id);
   };
 
+  // 已归档会话不在页内列表展示（侧栏聊天历史的归档视图负责）
+  const visibleSessions = useMemo(
+    () => (sessions || []).filter((s: AgentSession) => !s.archived),
+    [sessions]
+  );
+
   return (
     <aside className="w-full h-full bg-white/60 dark:bg-white/[.05] flex flex-col select-none">
       <div className="p-3 pb-2 flex items-center justify-between gap-2 shrink-0">
@@ -93,12 +99,12 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       </div>
 
       <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-1.5 custom-scrollbar">
-        {loading && sessions.length === 0 ? (
+        {loading && visibleSessions.length === 0 ? (
           <div className="py-8 text-center text-xs [color:var(--color-text-main)] flex flex-col items-center gap-2">
             <RefreshCw className="w-4 h-4 animate-spin text-brand" />
             <span>加载会话中…</span>
           </div>
-        ) : sessions.length === 0 ? (
+        ) : visibleSessions.length === 0 ? (
           <div className="py-12 text-center text-xs [color:var(--color-text-main)] space-y-2">
             <MessageSquare className="w-8 h-8 mx-auto text-gray-600 opacity-50" />
             <div>暂无会话记录</div>
@@ -107,7 +113,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
             </button>
           </div>
         ) : (
-          sessions.map((s) => {
+          visibleSessions.map((s) => {
             const isActive = s.id === activeSessionId;
             return (
               <div
@@ -154,7 +160,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
           <History className="w-3 h-3 text-emerald-500 dark:text-emerald-400" />
           <span>本工程专属持久化</span>
         </span>
-        <span className="font-mono">{sessions.length}个会话</span>
+        <span className="font-mono">{visibleSessions.length}个会话</span>
       </div>
     </aside>
   );

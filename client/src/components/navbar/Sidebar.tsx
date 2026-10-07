@@ -1,12 +1,18 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Settings, Sun, Moon, PanelLeftClose, PanelLeft, Lock, Plug, type LucideIcon,
+  Settings, PanelLeftClose, PanelLeft, Lock, Plug, MessageCirclePlus, type LucideIcon,
 } from 'lucide-react';
 import { useProjectStore, selectSidebarCollapsed } from '../../stores/useProjectStore';
 import { usePageStore } from '../../stores/usePageStore';
-import { useThemeStore } from '../../stores/useThemeStore';
+import { useProjectListStore } from '../../stores/useProjectListStore';
+import { useChatHistoryStore } from '../../stores/useChatHistoryStore';
+import { useAgentStore } from '../agent/agentStore';
 import { toast } from '../../stores/useDialogStore';
 import { pageIcon } from '../../utils/pageIcons';
+import { ChatHistory } from './ChatHistory';
+import { NewProjectModal } from '../project/NewProjectModal';
+import type { ChatHistoryEntry } from '../../stores/useChatHistoryStore';
+import type { ProjectMeta } from '../../stores/useProjectListStore';
 
 interface SidebarProps {
   /** 设置页内仍会用到这三个弹窗，App 统一持有开关 */
@@ -20,53 +26,50 @@ interface NavItem {
   label: string;
   icon: LucideIcon;
   count?: number;
-  accent?: 'pink' | 'purple' | 'amber';
   pulse?: boolean;
 }
 
-/** 无项目时也能进的全局页（其余条目需要先有项目） */
-const GLOBAL_TABS = ['home', 'projects', 'config'];
+/** 无项目时也能进的页（其余条目需要先有项目）；home 已删除，config 沉到底部 */
+const GLOBAL_TABS = ['projects', 'config'];
 
 /** 未分组页面的兜底分组名 */
 const OTHER_GROUP = 'other';
 
 /**
- * 左侧主导航（SaaS 惯例：主导航常驻侧栏 + 设置沉到底部工具区）。
+ * 左侧导航栏（ZCode WorkspaceSidebar 同构）：
+ * 顶部「新建任务」→ 功能导航（后端页开关驱动，排除 home/config/agent——对话入口即新建任务与聊天历史）→
+ * 下半部聊天历史（会话/项目双视图 + 筛选 + 归档，ChatHistory）→ 底部「生成源/设置/收起」。
  *
- * 观感与结构以**本地版**为准：
- * - 顶栏只保留全局上下文；本项目主频道全部收敛到这里，支持折叠成图标轨（60px ⇄ 218px），
- *   宽度动画期间内容不参与压缩（内层定宽 + overflow 裁切，右侧发丝边框随内容一起被裁掉）。
- * - **无限画布（activeTab=canvas）：侧栏默认整条隐藏**；唤出按钮在画布左上角
- *   「画布操作台」条的第一个按钮上，点击滑出「缩小态」图标轨，底部按钮可再次收起。
- * - 底部工具区固定放「生成源 / 主题 / 设置」，设置永远可见、不进分组。
- *
- * 唯一与本地版不同的是**数据来源**（本地版是硬编码分组，这里是功能页开关驱动）：
- * 分组与条目取自 `usePageStore`（GET /api/v1/pages 的 group/order/label/icon），
- * **只渲染 enabled 的页** —— 关掉某页后侧栏入口立即消失，不留半开启入口。
- * 图标走 `pageIcons` 统一映射；强调色 / 角标 / 呼吸点按页 id 决定
- * （assets→粉、canvas→紫、agent→呼吸点、studio→分镜数、characters→角色数），
- * 后端新增未知页面时退化为普通条目。
- * 点击一律 `setActiveTab`（工作区与页签准入由 store / App 归一，不在侧栏自造跳转逻辑）。
+ * - 新建任务：无项目时静默创建「新任务」项目承接；已有项目且当前会话未开始则直接复用，
+ *   否则新建一段会话 —— 对应 ZCode 的 draft 语义（空会话不重复堆积）。
+ * - 聊天历史点击 → 切项目（双 store 同步）→ 选中目标会话 → 进 AI 对话页。
+ * - 宽度 264px ⇄ 60px 图标轨；画布页默认收起的行为不变。
  */
 export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
   const { project, activeTab, setActiveTab, toggleSidebar } = useProjectStore();
   const sidebarCollapsed = useProjectStore(selectSidebarCollapsed);
-  const { effectiveTheme, toggleTheme } = useThemeStore();
   const pages = usePageStore((s) => s.items);
   const values = usePageStore((s) => s.values);
   const groupMeta = usePageStore((s) => s.groups);
+  const refreshHistory = useChatHistoryStore((s) => s.refresh);
+  const agentActiveSessionId = useAgentStore((s) => s.activeSessionId);
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
 
   const shotsCount = (project?.scenes || []).reduce(
     (n: number, s: any) => n + (s?.shots?.length || 0), 0);
   const charactersCount = project?.characters?.length || 0;
 
-  // 收起 = 只显示图标（不显示文字），展开 = 图标 + 文字；侧栏在所有页面（含画布）都常驻，不整条隐藏。
-  // 画布页每次进入默认收起；画布操作台条的第一个按钮与这里底部的按钮走同一个 toggleSidebar。
   const effectiveCollapsed = sidebarCollapsed;
 
-  /** 分组 → 条目（只含开启的页；设置不进分组） */
+  // 进入对话页 / 挂载时刷新一次历史（会话增删归档后由动作方就地刷新）
+  useEffect(() => {
+    void refreshHistory();
+  }, [refreshHistory, activeTab === 'agent']);
+
+  /** 分组 → 条目（只含开启的页；home 已删除、config 沉底、projects 看板保留） */
   const groups = useMemo(() => {
-    const enabled = pages.filter((p) => p.id !== 'config' && values[p.id] === true);
+    // agent（AI 对话）不进导航：入口已上移为顶部「新建任务」+ 聊天历史，避免重复
+    const enabled = pages.filter((p) => p.id !== 'config' && p.id !== 'home' && p.id !== 'agent' && values[p.id] === true);
     const labelOf = (gid: string) => groupMeta.find((g) => g.id === gid)?.label
       || (gid === OTHER_GROUP ? '其他' : gid);
     const orderOf = (gid: string) => groupMeta.find((g) => g.id === gid)?.order ?? 9999;
@@ -75,10 +78,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
     enabled.forEach((p) => {
       const gid = p.group || OTHER_GROUP;
       const decorate: Partial<NavItem> =
-        p.id === 'assets' ? { accent: 'pink' }
-        : p.id === 'canvas' ? { accent: 'purple' }
-        : p.id === 'onekey' ? { accent: 'amber' }
-        : p.id === 'agent' ? { pulse: true }
+        p.id === 'agent' ? { pulse: true }
         : p.id === 'studio' ? { count: shotsCount }
         : p.id === 'characters' ? { count: charactersCount }
         : {};
@@ -90,113 +90,153 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
     return [...buckets.entries()]
       .sort(([a], [b]) => orderOf(a) - orderOf(b) || a.localeCompare(b))
       .map(([gid, items]) => ({
-        // 分组内条目沿用后端 order（pages 已按 order 排序）
         title: labelOf(gid),
         items,
       }));
   }, [pages, values, groupMeta, shotsCount, charactersCount]);
 
   const go = (id: string) => {
-    // 首页/看板/设置在无项目时也能进；其余条目要求先有项目
     if (!GLOBAL_TABS.includes(id) && !project) {
       toast.info('请先在看板创建或打开项目');
       return;
     }
-    // 工作区（creative / production）与页签准入统一由 store 的 setActiveTab 处理
     setActiveTab(id as any);
   };
 
-  const activeCls = (item: NavItem, locked: boolean, active: boolean) => {
-    if (locked) return 'opacity-35 cursor-not-allowed text-gray-500';
-    if (active) {
-      if (item.accent === 'pink') return 'bg-accent-pink/15 text-white ring-1 ring-accent-pink/40';
-      if (item.accent === 'purple') return 'bg-brand/20 text-white ring-1 ring-brand/40';
-      if (item.accent === 'amber') return 'bg-amber-500/15 text-white ring-1 ring-amber-500/40';
-      return 'bg-brand/15 text-white ring-1 ring-brand/40';
+  /** 新建任务：有项目直接进对话（空会话复用不堆积）；无项目先走「名称+风格模板」引导弹窗 */
+  const handleNewTask = () => {
+    if (!project) {
+      setNewProjectOpen(true);
+      return;
     }
-    return 'text-gray-400 hover:text-white hover:bg-white/70 dark:hover:bg-white/[.09]';
+    setActiveTab('agent');
+    const agent = useAgentStore.getState();
+    if (agent.projectId !== project.id) {
+      // 换了项目：绑定后由 bindProject 在空项目上自建「新会话」草稿
+      agent.bindProject(project.id);
+    } else {
+      const cur = agent.sessions.find((s) => s.id === agent.activeSessionId);
+      const started = (cur?.messages || []).some((m) => m.sender === 'user');
+      if (started) agent.createSession();
+    }
+    void refreshHistory();
   };
 
-  const iconColor = (item: NavItem, active: boolean) => {
-    if (item.accent === 'pink') return 'text-accent-pink';
-    if (item.accent === 'purple') return 'text-purple-400';
-    return active ? 'text-brand-light' : 'text-gray-400';
+  const handleTaskProjectCreated = async (meta: ProjectMeta) => {
+    setNewProjectOpen(false);
+    await useProjectStore.getState().loadActiveProject(meta.id);
+    setActiveTab('agent');
+    useAgentStore.getState().bindProject(meta.id);
+    void refreshHistory();
+  };
+
+  /** 历史行点击：切项目（双 store 同步）→ 绑定并选中目标会话 → 进对话页 */
+  const openHistoryEntry = async (e: ChatHistoryEntry) => {
+    const cur = useProjectStore.getState().project;
+    if (cur?.id !== e.projectId) {
+      useProjectListStore.getState().setActiveProjectId(e.projectId);
+      await useProjectStore.getState().loadActiveProject(e.projectId);
+    }
+    setActiveTab('agent');
+    useAgentStore.getState().bindProject(e.projectId, e.session.id);
+  };
+
+  const activeCls = (item: NavItem, locked: boolean, active: boolean) => {
+    if (locked) return 'opacity-35 cursor-not-allowed';
+    if (active) return 'bg-surface-tertiary [color:var(--color-text-main)] font-semibold';
+    return '[color:var(--color-text-main)] hover:bg-surface-hover';
   };
 
   return (
     <aside
       className={`relative shrink-0 h-full bg-white/60 dark:bg-white/[.04] backdrop-blur-2xl flex flex-col z-20 overflow-hidden transition-[width] duration-[260ms] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none ${
-        effectiveCollapsed ? 'w-[60px]' : 'w-[218px]'
+        effectiveCollapsed ? 'w-[60px]' : 'w-[264px]'
       }`}
     >
       {/* 固定宽度内层：宽度动画期间内容不参与压缩 */}
       <div
-        className={`h-full flex flex-col border-r border-white/60 dark:border-white/10 ${effectiveCollapsed ? 'w-[60px]' : 'w-[218px]'}`}
+        className={`h-full flex flex-col border-r border-white/60 dark:border-white/10 ${effectiveCollapsed ? 'w-[60px]' : 'w-[264px]'}`}
       >
-        {/* 主导航区 */}
-        <nav className="flex-1 overflow-y-auto custom-scrollbar py-3 space-y-3">
-          {groups.map((g) => (
-            <div key={g.title} className="px-2">
-              {!effectiveCollapsed && (
-                <div className="px-2.5 pb-1 text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                  {g.title}
-                </div>
-              )}
-              <div className="space-y-0.5">
-                {g.items.map((item) => {
-                  const locked = !GLOBAL_TABS.includes(item.id) && !project;
-                  const active = activeTab === item.id;
-                  const Icon = item.icon;
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => go(item.id)}
-                      title={locked ? '请先创建或打开项目' : item.label}
-                      className={`w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-xs font-medium transition-all ${activeCls(item, locked, active)} ${
-                        effectiveCollapsed ? 'justify-center px-0' : ''
-                      }`}
-                    >
-                      {locked ? (
-                        <Lock className="w-4 h-4 shrink-0 text-gray-500" />
-                      ) : (
-                        <Icon className={`w-4 h-4 shrink-0 ${iconColor(item, active)}`} />
-                      )}
-                      {!effectiveCollapsed && <span className="truncate flex-1 text-left">{item.label}</span>}
-                      {!effectiveCollapsed && !locked && typeof item.count === 'number' && item.count > 0 && (
-                        <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-mono font-bold ${
-                          active ? 'bg-brand text-white' : 'bg-white/65 dark:bg-white/[.09] text-gray-400'
-                        }`}>{item.count}</span>
-                      )}
-                      {!effectiveCollapsed && item.pulse && !locked && (
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-                      )}
-                      {effectiveCollapsed && item.pulse && !locked && (
-                        <span className="absolute right-2 w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </nav>
+        {/* 顶部按钮堆栈：新建任务 + 功能导航 */}
+        <div className="shrink-0 px-2 pt-3 pb-1 space-y-0.5">
+          <button
+            onClick={handleNewTask}
+            title="新建任务：开始一段新的 AI 对话"
+            className={`w-full h-8 rounded-lg inline-flex items-center gap-2 px-2.5 text-xs font-semibold [color:var(--color-text-main)] hover:bg-surface-hover active:scale-[0.99] transition-all ${
+              effectiveCollapsed ? 'justify-center px-0' : ''
+            }`}
+          >
+            <MessageCirclePlus className="w-4 h-4 shrink-0 text-brand" />
+            {!effectiveCollapsed && <span className="truncate text-left">新建任务</span>}
+          </button>
 
-        {/* 底部工具区：设置永远可见 */}
-        <div className="p-2 border-t border-white/60 dark:border-white/10 space-y-0.5 bg-white/70 dark:bg-black/45 backdrop-blur-xl">
+          <div className="space-y-0.5">
+            {groups.map((g) => (
+              <div key={g.title} className="pt-1">
+                {!effectiveCollapsed && (
+                  <div className="px-2.5 pb-1 text-[10px] font-bold tracking-wider [color:var(--color-text-main)] opacity-50">
+                    {g.title}
+                  </div>
+                )}
+                <div className="space-y-0.5">
+                  {g.items.map((item) => {
+                    const locked = !GLOBAL_TABS.includes(item.id) && !project;
+                    const active = activeTab === item.id;
+                    const Icon = item.icon;
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => go(item.id)}
+                        title={locked ? '请先创建或打开项目' : item.label}
+                        className={`relative w-full h-8 flex items-center gap-2.5 rounded-lg pl-2.5 pr-1 text-xs font-medium transition-all ${activeCls(item, locked, active)} ${
+                          effectiveCollapsed ? 'justify-center px-0' : ''
+                        }`}
+                      >
+                        {locked ? (
+                          <Lock className="w-4 h-4 shrink-0 [color:var(--color-text-main)] opacity-50" />
+                        ) : (
+                          <Icon className="w-4 h-4 shrink-0" />
+                        )}
+                        {!effectiveCollapsed && <span className="truncate flex-1 text-left">{item.label}</span>}
+                        {!effectiveCollapsed && !locked && typeof item.count === 'number' && item.count > 0 && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-full font-mono font-bold bg-surface-tertiary [color:var(--color-text-main)] opacity-70">
+                            {item.count}
+                          </span>
+                        )}
+                        {!effectiveCollapsed && item.pulse && !locked && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                        )}
+                        {effectiveCollapsed && item.pulse && !locked && (
+                          <span className="absolute right-2 w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* 下半部：聊天历史（收起态隐藏） */}
+        {!effectiveCollapsed && (
+          <>
+            <div className="mx-3 my-1.5 h-px bg-border shrink-0" />
+            <ChatHistory
+              activeSessionId={agentActiveSessionId}
+              onOpenEntry={(e) => { void openHistoryEntry(e); }}
+            />
+          </>
+        )}
+
+        {/* 底部工具区：生成源 / 设置 / 收起（主题切换已按需求移除） */}
+        <div className="shrink-0 p-2 border-t border-white/60 dark:border-white/10 space-y-0.5 bg-white/70 dark:bg-black/45 backdrop-blur-xl">
           <UtilButton
             icon={Plug}
             label="生成源"
             collapsed={effectiveCollapsed}
             onClick={() => onOpenProvider?.()}
             iconCls="text-brand-light"
-          />
-
-          <UtilButton
-            icon={effectiveTheme === 'dark' ? Sun : Moon}
-            label="切换主题"
-            collapsed={effectiveCollapsed}
-            onClick={toggleTheme}
-            iconCls={effectiveTheme === 'dark' ? 'text-amber-400' : 'text-indigo-400'}
           />
 
           <button
@@ -207,10 +247,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
             } ${
               activeTab === 'config'
                 ? 'bg-brand text-white shadow-sm shadow-brand/25'
-                : 'text-gray-400 hover:text-white hover:bg-white/70 dark:hover:bg-white/[.09]'
+                : '[color:var(--color-text-main)] hover:bg-surface-hover'
             }`}
           >
-            <Settings className={`w-4 h-4 shrink-0 ${activeTab === 'config' ? 'text-white' : 'text-gray-400'}`} />
+            <Settings className="w-4 h-4 shrink-0" />
             {!effectiveCollapsed && <span className="truncate">设置</span>}
           </button>
 
@@ -218,7 +258,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
           <button
             onClick={toggleSidebar}
             title={effectiveCollapsed ? '展开侧栏' : '收起侧栏'}
-            className={`w-full flex items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-[11px] text-gray-500 hover:text-gray-300 hover:bg-white/70 dark:hover:bg-white/[.09] transition-all ${
+            className={`w-full flex items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-[11px] [color:var(--color-text-main)] opacity-70 hover:opacity-100 hover:bg-surface-hover transition-all ${
               effectiveCollapsed ? 'justify-center px-0' : ''
             }`}
           >
@@ -227,6 +267,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
           </button>
         </div>
       </div>
+
+      <NewProjectModal
+        open={newProjectOpen}
+        onClose={() => setNewProjectOpen(false)}
+        onCreated={(meta) => { void handleTaskProjectCreated(meta); }}
+        hint="起个项目名、挑个风格模板，创建后直接开始 AI 对话。"
+      />
     </aside>
   );
 };
@@ -237,22 +284,15 @@ const UtilButton: React.FC<{
   collapsed: boolean;
   onClick: () => void;
   iconCls?: string;
-  badge?: number;
-}> = ({ icon: Icon, label, collapsed, onClick, iconCls, badge }) => (
+}> = ({ icon: Icon, label, collapsed, onClick, iconCls }) => (
   <button
     onClick={onClick}
     title={label}
-    className={`relative w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-xs font-medium text-gray-400 hover:text-white hover:bg-white/70 dark:hover:bg-white/[.09] transition-all ${
+    className={`w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-xs font-medium [color:var(--color-text-main)] hover:bg-surface-hover transition-all ${
       collapsed ? 'justify-center px-0' : ''
     }`}
   >
-    <Icon className={`w-4 h-4 shrink-0 ${iconCls || 'text-gray-400'}`} />
+    <Icon className={`w-4 h-4 shrink-0 ${iconCls || ''}`} />
     {!collapsed && <span className="truncate flex-1 text-left">{label}</span>}
-    {!collapsed && badge && badge > 0 ? (
-      <span className="text-[9px] font-mono text-emerald-400 font-bold">{badge}</span>
-    ) : null}
-    {collapsed && badge && badge > 0 ? (
-      <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-emerald-400" />
-    ) : null}
   </button>
 );

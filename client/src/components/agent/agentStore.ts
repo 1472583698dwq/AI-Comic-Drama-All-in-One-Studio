@@ -165,7 +165,7 @@ interface AgentStoreState {
   /** 本会话始终自动允许的工具（行内审批"始终允许"持久化于此，IDE 式免打扰） */
   autoAllowTools: Record<string, boolean>;
 
-  bindProject(projectId: string | null): void;
+  bindProject(projectId: string | null, preferSessionId?: string): void;
   setMode(m: AgentMode): void;
   setRunMode(r: RunMode): void;
   /** 切换权限（三选一）：计划进行中仅记录、不退出计划；其余情况直接切换 run_mode */
@@ -414,14 +414,19 @@ export function createAgentStore(scope: AgentScope) {
         : executionOfRunMode(prefs.runMode),
       autoAllowTools: loadAutoAllow(),
 
-      bindProject(projectId) {
+      bindProject(projectId, preferSessionId) {
         if (!projectId) {
           set({ projectId: null, sessions: [], activeSessionId: '', messages: [], isRunning: false, streamingMsgId: null, approvals: {} });
           clearAgentDraft();
           return;
         }
-        // 幂等早退：切 tab 会重复调用，这里必须原样返回，否则会把草稿一起清掉
-        if (get().projectId === projectId && get().sessions.length > 0) return;
+        // 幂等早退：切 tab 会重复调用，这里必须原样返回，否则会把草稿一起清掉。
+        // 带 preferSessionId（侧栏历史点击）时不早退，需要重新选中目标会话。
+        if (get().projectId === projectId && get().sessions.length > 0 && !preferSessionId) return;
+        if (get().projectId === projectId && get().sessions.length > 0 && preferSessionId) {
+          const target = get().sessions.find((s) => s.id === preferSessionId);
+          if (target) { get().selectSession(preferSessionId); return; }
+        }
         clearAgentDraft();
         if (get().projectId !== projectId && get().isRunning) get().abort();
         set({
@@ -444,7 +449,8 @@ export function createAgentStore(scope: AgentScope) {
               // 最近活跃会话优先：保证重开项目恢复到上次所在会话（其 run_mode/mode 才是用户刚设的）
               .sort((a: AgentSession, b: AgentSession) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
             if (list.length > 0) {
-              const first = list[0];
+              const prefer = preferSessionId ? list.find((s) => s.id === preferSessionId) : undefined;
+              const first = prefer || list[0];
               const token = composeRunMode(behaviorOfRunMode(first.run_mode || runMode), executionOfRunMode(first.run_mode || runMode));
               set({
                 sessions: list,

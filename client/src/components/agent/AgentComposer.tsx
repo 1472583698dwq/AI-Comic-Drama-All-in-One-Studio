@@ -13,10 +13,11 @@
  *   组件内 state 一卸载就丢；草稿独立订阅也不会让整棵会话流跟着每次按键重渲染。
  * - 附件支持三个来源（上传 / 画布产物 / 素材库）+ 剪贴板粘贴；发送时随消息一并交给后端。
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Send, Square, MessageSquarePlus, ChevronUp, Check, Paperclip, X, Loader2,
-  Image as ImageIcon, Film, Music,
+  Image as ImageIcon, Film, Music, Hand, ShieldAlert, Lightbulb, FlaskConical,
+  type LucideIcon,
 } from 'lucide-react';
 import { useAgentDraftStore, MAX_ATTACHMENTS } from './agentDraftStore';
 import { AgentAttachmentPicker, kindOfUrl } from './AgentAttachmentPicker';
@@ -58,111 +59,164 @@ export interface AgentComposerProps {
 
 /** 计划预设（独立开关，置顶显示）：只读出方案，同意后按所选权限执行 */
 const AGENT_PLAN_PRESET = {
-  key: 'plan', label: '计划',
+  key: 'plan', label: '计划', icon: Lightbulb,
   hint: '只读侦察先出完整方案，同意后按所选权限执行；不生成不花钱',
 };
 
-/** 权限三选一（与计划不冲突）：映射到现有 run_mode token，后端零改动 */
-const AGENT_PERMISSION_PRESETS: Array<{ key: RunMode; label: string; hint: string }> = [
-  { key: 'approve', label: '变更前确认', hint: '正常干活；删源/写文件/跑命令等危险操作逐个问你' },
-  { key: 'auto', label: '完全访问', hint: '全部工具自动执行、不再逐项确认（含删源/写文件/跑命令），可随时暂停' },
-  { key: 'create', label: '造能力', hint: '缺能力先提案：试跑验证后由你决定转正/丢弃，默认不写生产' },
+/** 权限三选一（与计划不冲突）：映射到现有 run_mode token，后端零改动。
+ *  图标口径对齐 ZCode：确认=手形、自动=盾牌勾、高权限=盾牌警示。 */
+const AGENT_PERMISSION_PRESETS: Array<{ key: RunMode; label: string; hint: string; icon: LucideIcon }> = [
+  { key: 'approve', label: '变更前确认', icon: Hand, hint: '正常干活；删源/写文件/跑命令等危险操作逐个问你' },
+  { key: 'auto', label: '完全访问', icon: ShieldAlert, hint: '全部工具自动执行、不再逐项确认（含删源/写文件/跑命令），可随时暂停' },
+  { key: 'create', label: '造能力', icon: FlaskConical, hint: '缺能力先提案：试跑验证后由你决定转正/丢弃，默认不写生产' },
 ];
 
-/** 菜单条目：标签 + 一句描述，选中打勾 */
+/** 菜单条目：图标 + 标签 + 一句描述，选中打勾（行高与 ZCode 一致，两行文案不挤） */
 const ModeMenuItem: React.FC<{
+  icon: LucideIcon;
   label: string;
   hint?: string;
   checked?: boolean;
   title?: string;
   onClick: () => void;
-}> = ({ label, hint, checked, title, onClick }) => (
+}> = ({ icon: Icon, label, hint, checked, title, onClick }) => (
   <button
     type="button"
     onClick={onClick}
     title={title || hint}
-    className={`w-full px-2 py-1.5 rounded-lg text-left hover:bg-surface-hover flex items-start gap-1.5 transition-colors ${
+    className={`w-full min-h-[52px] px-2 py-2 rounded-lg text-left hover:bg-surface-hover flex items-start gap-2.5 transition-colors ${
       checked ? 'bg-surface-tertiary' : ''
     }`}
   >
+    <Icon className="w-4 h-4 shrink-0 mt-0.5 [color:var(--color-text-main)]" />
     <span className="flex-1 min-w-0">
       <span className="block text-[11px] font-semibold [color:var(--color-text-main)]">{label}</span>
-      {hint && <span className="block text-[9px] leading-3 [color:var(--color-text-main)] mt-0.5">{hint}</span>}
+      {hint && <span className="block text-[10px] leading-4 [color:var(--color-text-muted)] mt-0.5">{hint}</span>}
     </span>
-    {checked && <Check className="w-3 h-3 text-brand shrink-0 mt-0.5" />}
+    {checked && <Check className="w-3.5 h-3.5 text-brand shrink-0 mt-0.5" />}
   </button>
 );
 
 /**
- * 模式菜单（ZCode 式，背景不透明随主题明暗变化）：
- * 计划置顶（独立开关，再点一次退出）—— 横线分隔 —— 权限三选一。
- * 计划与权限不冲突：计划进行中切权限只记录，同意计划后按该权限执行。
+ * 模式菜单 + 计划标记（ZCode 式，背景不透明随主题明暗变化）：
+ * - 胶囊只承载**权限**（变更前确认 / 完全访问 / 造能力），带图标；选中「完全访问」时图标与文字转黄警示。
+ * - 计划是菜单里的独立勾选项；勾上后胶囊右侧另起一个「计划」chip（竖线分隔，hover 变 ✕ 一键取消），
+ *   因此「计划」与「权限」两个状态同时可见，而不是互相顶掉。
+ * - `iconOnly`（容器实测宽度不够时由调用方置位）：胶囊与计划 chip 都退化成纯图标，靠 title 提示当前值。
+ * - 任何方式关闭菜单后都把焦点交回输入框，可以接着打字（对齐 ZCode 的 onCloseAutoFocus）。
  */
 const ModeMenuPill: React.FC<{
   planOn: boolean;
   permission: RunMode;
   disabled?: boolean;
+  /** 容器太窄：胶囊与计划 chip 只显示图标 */
+  iconOnly?: boolean;
   onSelectPlan: () => void;
   onSelectPermission: (p: RunMode) => void;
-}> = ({ planOn, permission, disabled, onSelectPlan, onSelectPermission }) => {
+  /** 菜单关闭时回调（用于把焦点还给输入框） */
+  onClosed?: () => void;
+}> = ({ planOn, permission, iconOnly, disabled, onSelectPlan, onSelectPermission, onClosed }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const permMeta = AGENT_PERMISSION_PRESETS.find((p) => p.key === permission) || AGENT_PERMISSION_PRESETS[0];
-  const current = planOn ? AGENT_PLAN_PRESET : permMeta;
-  // 选中「完全访问」时胶囊文字与箭头黄色警示
-  const activeIsAuto = !planOn && permission === 'auto';
+  const PermIcon = permMeta.icon;
+  // 选中「完全访问」时胶囊文字与图标黄色警示
+  const activeIsAuto = permission === 'auto';
+
+  /** 关闭菜单并交回焦点：选中 / Esc / 点外部都走这里 */
+  const close = useCallback(() => {
+    setOpen(false);
+    onClosed?.();
+  }, [onClosed]);
 
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node)) close();
     };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
     return () => {
       document.removeEventListener('mousedown', onDown);
       document.removeEventListener('keydown', onKey);
     };
-  }, [open]);
+  }, [open, close]);
+
+  /** 选中条目：先应用选择，再关闭并把焦点交回输入框 */
+  const pick = (fn: () => void) => { fn(); close(); };
+
+  /** 窄容器下的统一尺寸：正方形图标按钮（与附件按钮同宽） */
+  const iconOnlyCls = 'w-7 px-0 justify-center';
 
   return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        disabled={disabled}
-        title="工作模式：计划（先出方案）+ 权限（变更前确认 / 完全访问 / 造能力）"
-        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface border border-border hover:border-brand/50 text-[11px] font-semibold [color:var(--color-text-main)] transition-colors disabled:opacity-40"
-      >
-        <span className={activeIsAuto ? 'text-amber-500' : '[color:var(--color-text-main)]'}>{current.label}</span>
-        <ChevronUp className={`w-3 h-3 ${activeIsAuto ? 'text-amber-500' : '[color:var(--color-text-main)]'} transition-transform ${open ? '' : 'rotate-180'}`} />
-      </button>
-      {open && (
-        <div className="absolute bottom-full mb-1.5 left-0 z-50 w-[280px] bg-surface border border-border rounded-xl p-1 animate-fade-in">
-          <ModeMenuItem
-            label={AGENT_PLAN_PRESET.label}
-            hint={AGENT_PLAN_PRESET.hint}
-            checked={planOn}
-            onClick={() => { onSelectPlan(); setOpen(false); }}
-          />
-          {/* 计划（工作阶段）与权限（授权级别）分组 */}
-          <div className="my-1 h-px bg-border" />
-          {AGENT_PERMISSION_PRESETS.map((p) => (
-            <ModeMenuItem
-              key={p.key}
-              label={p.label}
-              hint={p.hint}
-              checked={!planOn && p.key === permission}
-              onClick={() => { onSelectPermission(p.key); setOpen(false); }}
-            />
-          ))}
-          {planOn && (
-            <div className="px-2 pt-1.5 pb-1 text-[9px] leading-3 [color:var(--color-text-main)]">
-              计划进行中：切换权限不会退出计划，同意计划后按所选权限执行
-            </div>
+    <div className="shrink-0 flex items-center">
+      <div ref={ref} className="relative">
+        <button
+          type="button"
+          onClick={() => (open ? close() : setOpen(true))}
+          disabled={disabled}
+          title={`权限模式：变更前确认 / 完全访问 / 造能力（当前：${permMeta.label}）`}
+          className={`flex items-center gap-1 h-7 rounded-lg bg-surface border border-border hover:border-brand/50 text-[11px] font-semibold [color:var(--color-text-main)] transition-colors disabled:opacity-40 ${
+            iconOnly ? iconOnlyCls : 'px-2'
+          }`}
+        >
+          <PermIcon className={`w-3.5 h-3.5 shrink-0 ${activeIsAuto ? 'text-amber-500' : ''}`} />
+          {!iconOnly && (
+            <>
+              <span className={activeIsAuto ? 'text-amber-500' : '[color:var(--color-text-main)]'}>{permMeta.label}</span>
+              <ChevronUp className={`w-3 h-3 ${activeIsAuto ? 'text-amber-500' : '[color:var(--color-text-main)]'} transition-transform ${open ? '' : 'rotate-180'}`} />
+            </>
           )}
-        </div>
+        </button>
+        {open && (
+          <div className="absolute bottom-full mb-1 left-0 z-50 w-64 bg-surface border border-border rounded-xl p-1 animate-fade-in">
+            <ModeMenuItem
+              icon={AGENT_PLAN_PRESET.icon}
+              label={AGENT_PLAN_PRESET.label}
+              hint={AGENT_PLAN_PRESET.hint}
+              checked={planOn}
+              onClick={() => pick(onSelectPlan)}
+            />
+            {/* 计划（工作阶段）与权限（授权级别）分组 */}
+            <div className="my-1 h-px bg-border" />
+            {AGENT_PERMISSION_PRESETS.map((p) => (
+              <ModeMenuItem
+                key={p.key}
+                icon={p.icon}
+                label={p.label}
+                hint={p.hint}
+                checked={!planOn && p.key === permission}
+                onClick={() => pick(() => onSelectPermission(p.key))}
+              />
+            ))}
+            {planOn && (
+              <div className="px-2 pt-1.5 pb-1 text-[10px] leading-4 [color:var(--color-text-muted)]">
+                计划进行中：切换权限不会退出计划，同意计划后按所选权限执行
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* 计划标记：与权限胶囊并列的独立状态，hover 时灯泡变 ✕ 表示「点一下取消」 */}
+      {planOn && (
+        <span className="flex items-center gap-1 ml-1">
+          <span role="separator" aria-orientation="vertical" className="h-3 w-px shrink-0 bg-border" />
+          <button
+            type="button"
+            onClick={onSelectPlan}
+            disabled={disabled}
+            title="取消计划模式（只读侦察）"
+            className={`group/plan flex items-center gap-1 h-7 rounded-lg text-[11px] font-semibold [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] transition-colors disabled:opacity-40 ${
+              iconOnly ? iconOnlyCls : 'px-2'
+            }`}
+          >
+            <Lightbulb className="w-3.5 h-3.5 shrink-0 group-hover/plan:hidden" />
+            <X className="hidden w-3.5 h-3.5 shrink-0 group-hover/plan:block" />
+            {!iconOnly && <span>{AGENT_PLAN_PRESET.label}</span>}
+          </button>
+        </span>
       )}
     </div>
   );
@@ -172,6 +226,16 @@ const ATT_ICON: Record<string, any> = { image: ImageIcon, video: Film, audio: Mu
 
 /** 粘贴文本超过该长度：消息列表里默认折叠为摘要（可展开全文） */
 const BULK_PASTE_CHARS = 1200;
+
+/**
+ * 底部工具条的「固定控件」宽度预算：附件 28 + 权限胶囊 ~105 + 发送 32 + 间距 ~15。
+ * 计划标记另加约 70。ZCode 是在隐藏副本里逐档实测溢出再收起，我们控件少，
+ * 用等价的预算判断：工具条宽度放不下「固定控件 + 一段可读的提示文字」时，
+ * 就把模式胶囊收成纯图标，而不是按容器类型（抽屉/侧栏）一刀切。
+ */
+const TOOLBAR_FIXED_W = 180;
+const TOOLBAR_PLAN_EXTRA_W = 70;
+const TOOLBAR_MIN_HINT_W = 100;
 
 const resolveMediaUrl = (u?: string) => (!u ? '' : (u.startsWith('/') ? API_ORIGIN + u : u));
 
@@ -200,6 +264,11 @@ export const AgentComposer: React.FC<AgentComposerProps> = ({
   const removeAttachment = useAgentDraftStore((s) => s.removeAttachment);
   const clearAttachments = useAgentDraftStore((s) => s.clearAttachments);
   const ref = useRef<HTMLTextAreaElement>(null);
+  /** 模式菜单关闭（选中 / Esc）后把焦点交回输入框，选完模式可以直接接着打字 */
+  const focusInput = useCallback(() => ref.current?.focus(), []);
+  /** 底部工具条：实测宽度决定模式胶囊是否收成纯图标 */
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const [pillIconOnly, setPillIconOnly] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pasting, setPasting] = useState(false);
 
@@ -282,6 +351,19 @@ export const AgentComposer: React.FC<AgentComposerProps> = ({
 
   const hasMenu = !!(onRunModeChange && runMode != null);
 
+  // 工具条宽度实测（ResizeObserver）：放不下「固定控件 + 一段可读提示」时胶囊收成纯图标。
+  // 计划标记会额外占位，所以预算随 planOn 变化。
+  useEffect(() => {
+    const el = toolbarRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const need = TOOLBAR_FIXED_W + (planOn ? TOOLBAR_PLAN_EXTRA_W : 0) + TOOLBAR_MIN_HINT_W;
+    const measure = () => setPillIconOnly(el.getBoundingClientRect().width < need);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [planOn]);
+
   return (
     <div className={compact || floating ? '' : 'p-4 border-t border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] shrink-0'}>
       <div
@@ -349,7 +431,7 @@ export const AgentComposer: React.FC<AgentComposerProps> = ({
         />
 
         {/* 底部工具条 */}
-        <div className="flex items-center gap-1.5 px-2.5 pb-2.5 pt-0.5">
+        <div ref={toolbarRef} className="flex items-center gap-1.5 px-2.5 pb-2.5 pt-0.5">
           {/* 附件入口 */}
           <div className="relative shrink-0">
             <button
@@ -378,14 +460,16 @@ export const AgentComposer: React.FC<AgentComposerProps> = ({
             )}
           </div>
 
-          {/* 模式菜单（ZCode 式）：计划置顶（开关）+ 横线 + 权限三选一；计划与权限不冲突 */}
+          {/* 权限模式胶囊（带图标）+ 计划独立标记；计划与权限不冲突、可同时可见 */}
           {hasMenu && (
             <ModeMenuPill
               planOn={planOn}
               permission={perm}
+              iconOnly={pillIconOnly}
               disabled={isRunning}
               onSelectPlan={() => onRunModeChange?.(planOn ? perm : 'plan')}
               onSelectPermission={(p) => (planOn ? onPermissionChange?.(p) : onRunModeChange?.(p))}
+              onClosed={focusInput}
             />
           )}
 

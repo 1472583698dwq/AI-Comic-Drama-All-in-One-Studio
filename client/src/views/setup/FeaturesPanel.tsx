@@ -9,7 +9,9 @@ import { toast } from '../../stores/useDialogStore';
 import { pageIcon } from '../../utils/pageIcons';
 
 /** 无项目时也能进的全局页（其余页面需要先有项目才能前往） */
-const GLOBAL_TABS = ['home', 'projects', 'config'];
+const GLOBAL_TABS = ['projects', 'config'];
+/** 核心界面不作为可关闭的功能页：AI 对话（agent）的入口是「新建任务」与聊天历史 */
+const HIDDEN_PAGE_IDS = ['agent'];
 
 /**
  * 功能开关面板按 id 关键词挑图标（功能项契约里没有 icon 字段），
@@ -147,7 +149,7 @@ export const FeaturesPanel: React.FC = () => {
             </div>
           )}
 
-          {items.map((it) => {
+          {items.filter((it) => !HIDDEN_PAGE_IDS.includes(it.id)).map((it) => {
             const Icon = pageIcon(it.id, it.icon);
             const enabled = values[it.id] === true;
             const working = busy === it.id;
