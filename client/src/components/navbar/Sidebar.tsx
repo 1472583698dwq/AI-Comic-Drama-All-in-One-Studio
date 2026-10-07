@@ -29,15 +29,15 @@ interface NavItem {
   pulse?: boolean;
 }
 
-/** 无项目时也能进的页（其余条目需要先有项目）；home 已删除，config 沉到底部 */
-const GLOBAL_TABS = ['projects', 'config'];
+/** 无项目时也能进的页（其余条目需要先有项目）；config 沉到底部 */
+const GLOBAL_TABS = ['home', 'projects', 'config'];
 
 /** 未分组页面的兜底分组名 */
 const OTHER_GROUP = 'other';
 
 /**
  * 左侧导航栏（ZCode WorkspaceSidebar 同构）：
- * 顶部「新建任务」→ 功能导航（后端页开关驱动，排除 home/config/agent——对话入口即新建任务与聊天历史）→
+ * 顶部「新建任务」→ 功能导航（后端页开关驱动，排除 config/agent——对话入口即新建任务与聊天历史；首页保留）→
  * 下半部聊天历史（会话/项目双视图 + 筛选 + 归档，ChatHistory）→ 底部「生成源/设置/收起」。
  *
  * - 新建任务：无项目时静默创建「新任务」项目承接；已有项目且当前会话未开始则直接复用，
@@ -66,10 +66,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
     void refreshHistory();
   }, [refreshHistory, activeTab === 'agent']);
 
-  /** 分组 → 条目（只含开启的页；home 已删除、config 沉底、projects 看板保留） */
+  /** 分组 → 条目（只含开启的页；config 沉底、projects 看板保留，首页保留在导航） */
   const groups = useMemo(() => {
     // agent（AI 对话）不进导航：入口已上移为顶部「新建任务」+ 聊天历史，避免重复
-    const enabled = pages.filter((p) => p.id !== 'config' && p.id !== 'home' && p.id !== 'agent' && values[p.id] === true);
+    const enabled = pages.filter((p) => p.id !== 'config' && p.id !== 'agent' && values[p.id] === true);
     const labelOf = (gid: string) => groupMeta.find((g) => g.id === gid)?.label
       || (gid === OTHER_GROUP ? '其他' : gid);
     const orderOf = (gid: string) => groupMeta.find((g) => g.id === gid)?.order ?? 9999;

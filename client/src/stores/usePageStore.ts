@@ -61,6 +61,7 @@ interface PageState {
  * 内容与契约里的内置默认集一致：开 = home/assets/characters/agent/canvas/config。
  */
 const FALLBACK_PAGES: PageItem[] = [
+  { id: 'home', label: '首页', icon: 'home', group: '工作区', order: 10, enabled: true, host: 'home' },
   { id: 'projects', label: '项目看板', icon: 'folder-kanban', group: '工作区', order: 20, enabled: true, host: 'projects' },
   { id: 'assets', label: '素材库', icon: 'library', group: '工作区', order: 30, enabled: true, host: 'assets' },
   { id: 'characters', label: '角色设定', icon: 'users', group: '工作区', order: 40, enabled: true, host: 'characters' },
@@ -148,8 +149,7 @@ export const usePageStore = create<PageState>((set, get) => ({
     set({ loading: true, error: null });
     try {
       const res = await apiService.getPages();
-      // 首页已删除：后端 /pages 里的 home 条目在前端整体过滤掉
-      const items = normalizeItems(res).filter((it) => it.id !== 'home');
+      const items = normalizeItems(res);
       set({
         items,
         values: valuesOf(items),
@@ -174,7 +174,7 @@ export const usePageStore = create<PageState>((set, get) => ({
   /** 写后端成功后以返回值为准刷新本地（后端可能纠正值，如拒绝停用 config） */
   setPage: async (id, enabled) => {
     const res: any = await apiService.setPageEnabled(id, enabled);
-    const items = normalizeItems(res).filter((it) => it.id !== 'home');
+    const items = normalizeItems(res);
     if (items.length > 0) {
       set({
         items,

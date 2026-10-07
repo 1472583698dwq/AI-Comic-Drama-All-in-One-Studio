@@ -14,6 +14,7 @@ import { McpToolsModal } from './components/mcp/McpToolsModal';
 import { SkillStudioModal } from './components/skills/SkillStudioModal';
 import { SetupView } from './views/setup/SetupView';
 import { ProjectDashboard } from './views/ProjectDashboard';
+import { HomeView } from './views/HomeView';
 import { AgentModeView } from './views/AgentModeView';
 import { NoPageEnabled } from './components/ui/NoPageEnabled';
 import { usePageStore, resolveTab } from './stores/usePageStore';
@@ -57,6 +58,7 @@ import { useMcpStore } from './stores/useMcpStore';
  * 大组件（画布）继续走 lazyView，主包只装首页 / 看板 / 设置这类秒开页。
  */
 const PAGE_HOSTS: Record<string, React.ComponentType<any>> = {
+  home: HomeView,
   projects: ProjectDashboard,
   canvas: CreativeCanvas,
   agent: AgentModeView,
@@ -73,7 +75,7 @@ const PAGE_HOSTS: Record<string, React.ComponentType<any>> = {
 const STAGE_HOSTS = ['studio', 'timeline', 'director3d'];
 
 /** 无项目时仍可停留的全局页（其余都是项目内部页，需要先有项目 —— 既有准入规则） */
-const GLOBAL_TABS = ['projects', 'config'];
+const GLOBAL_TABS = ['home', 'projects', 'config'];
 
 /** 历史页签的展示名（归一提示用；查不到的页签不提示，免得给用户念一串 id） */
 const LEGACY_TAB_LABEL: Record<string, string> = { mcp: 'MCP 工具' };
@@ -172,7 +174,7 @@ export function App() {
   useEffect(() => {
     if (isLoading || !pagesLoaded) return;
     if (!project && !GLOBAL_TABS.includes(activeTab)) {
-      useProjectStore.getState().setActiveTab((resolveTab('agent') || 'projects') as any);
+      useProjectStore.getState().setActiveTab((resolveTab('home') || 'projects') as any);
     }
   }, [project, activeTab, isLoading, pagesLoaded]);
 

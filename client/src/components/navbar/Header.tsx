@@ -75,10 +75,10 @@ export const Header: React.FC<HeaderProps> = ({
    * 统一入口跳转：目标页可能已在 设置 → 功能开关 里被关掉（如「项目看板」），
    * 一律经 resolveTab 取一个确实开启的页（首页兜底），免得点了没反应或落到已关闭页。
    */
-  const goTab = (id: 'projects' | 'agent' | 'canvas') =>
-    setActiveTab((resolveTab(id) || 'agent') as any);
+  const goTab = (id: 'home' | 'projects' | 'canvas') =>
+    setActiveTab((resolveTab(id) || 'home') as any);
   const goProjects = () => goTab('projects');
-  const goAgent = () => goTab('agent');
+  const goHome = () => goTab('home');
   const goCanvas = () => {
     if (!project) { toast.info('请先在项目看板创建或打开项目'); return; }
     goTab('canvas');
@@ -136,11 +136,13 @@ export const Header: React.FC<HeaderProps> = ({
         { label: project.title || '未命名项目', onClick: toggleProjMenu },
         { label: viewLabel, current: true },
       ]
-    : activeTab === 'agent'
-      ? [{ label: 'AI 对话', current: true }]
-      : activeTab === 'config'
-        ? [{ label: '设置', current: true }]
-        : [{ label: '未选择项目', onClick: toggleProjMenu, warn: true }];
+    : activeTab === 'home'
+      ? [{ label: '首页', current: true }]
+      : activeTab === 'agent'
+        ? [{ label: 'AI 对话', current: true }]
+        : activeTab === 'config'
+          ? [{ label: '设置', current: true }]
+          : [{ label: '未选择项目', onClick: toggleProjMenu, warn: true }];
 
   // 层级：顶栏自身必须 ≥ 画布「画布操作台」悬浮条（CreativeCanvas 里 z-30）。
   // z-index 会建立堆叠上下文，面板写再大的 z-40 也越不出顶栏这一层，
@@ -149,7 +151,7 @@ export const Header: React.FC<HeaderProps> = ({
     <header className="h-11 bg-white/65 dark:bg-black/50 backdrop-blur-2xl border-b border-white/60 dark:border-white/10 px-3.5 flex items-center gap-3 select-none z-40 relative shrink-0">
       {/* ── 左：品牌 22px + 名称 ── */}
       <button
-        onClick={goAgent}
+        onClick={goHome}
         title="返回首页"
         aria-label="返回首页"
         className="flex items-center gap-2 shrink-0 rounded-md focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand"

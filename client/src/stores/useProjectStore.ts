@@ -4,8 +4,8 @@ import { apiService } from '../services/api';
 import { resolveTab } from './usePageStore';
 import { useProjectListStore } from './useProjectListStore';
 
-/** 页签 id 与后端功能页 id（page）一一对应；'home' 首页已删除，遗留值在初始化时归一为 'agent' */
-export type ActiveTab = 'projects' | 'studio' | 'director3d' | 'timeline' | 'characters' | 'assets' | 'mcp' | 'config' | 'canvas' | 'agent' | 'onekey';
+/** 页签 id 与后端功能页 id（page）一一对应；'home' 为跨项目首页 */
+export type ActiveTab = 'home' | 'projects' | 'studio' | 'director3d' | 'timeline' | 'characters' | 'assets' | 'mcp' | 'config' | 'canvas' | 'agent' | 'onekey';
 
 interface ProjectState {
   project: Project | null;
@@ -116,11 +116,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   project: null,
   activeProjectId: localStorage.getItem('activeProjectId') || null,
   activeShotId: null,
-  activeTab: ((() => {
-    const saved = localStorage.getItem('app_active_tab') as string | null;
-    // 首页已删除：遗留的 'home' 与无项目时的默认都落 AI 对话（新首屏）
-    return saved === 'home' || !saved ? 'agent' : (saved as ActiveTab);
-  })()),
+  activeTab: (localStorage.getItem('activeProjectId') ? ((localStorage.getItem('app_active_tab') as any) || 'projects') : 'projects'),
   workspace: (localStorage.getItem('app_workspace') as any) || 'production',
   platformMode: (localStorage.getItem('app_platform_mode') as any) || 'desktop',
   isPlaying: false,
@@ -170,14 +166,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   /**
-   * 启动位置：优先恢复缓存项目；一个项目都没有（含后端未启动）时进入 AI 对话 ——
-   * 「新建任务」承担快速创建，首页已删除。
+   * 启动位置：优先恢复缓存项目；一个项目都没有（含后端未启动）时进首页。
    */
   ensureActiveProject: async () => {
     await get().loadActiveProject();
     if (get().project) return 'restored';
-    localStorage.setItem('app_active_tab', 'agent');
-    set({ activeTab: 'agent' });
+    localStorage.setItem('app_active_tab', 'home');
+    set({ activeTab: 'home' });
     return 'empty';
   },
 
@@ -185,7 +180,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     localStorage.removeItem('activeProjectId');
     useProjectListStore.getState().setActiveProjectId(null);
     // 项目看板可能已在功能开关里关掉 → 落在确实开启的页（首页兜底）
-    const backTab = (resolveTab('projects') || 'agent') as ActiveTab;
+    const backTab = (resolveTab('projects') || 'home') as ActiveTab;
     localStorage.setItem('app_active_tab', backTab);
     set({
       project: null,
@@ -237,7 +232,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   setActiveTab: (tab) => {
     // 未选择项目时，严禁切换到项目内部功能（全局页 home / projects / config 放行）
-    if (!get().project && tab !== 'projects' && tab !== 'config') {
+    if (!get().project && tab !== 'home' && tab !== 'projects' && tab !== 'config') {
       return;
     }
     localStorage.setItem('app_active_tab', tab);
@@ -249,7 +244,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         // 从别的页进入画布 → 侧栏回到收起；已在画布上（重复点）则保持当前展开态
         ...(get().activeTab !== 'canvas' ? { canvasSidebarExpanded: false } : {}),
       });
-    } else if (['projects', 'studio', 'director3d', 'timeline', 'characters', 'assets', 'agent'].includes(tab)) {
+    } else if (['home', 'projects', 'studio', 'director3d', 'timeline', 'characters', 'assets', 'agent'].includes(tab)) {
       localStorage.setItem('app_workspace', 'production');
       set({ activeTab: tab, workspace: 'production' });
     } else {
@@ -279,7 +274,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const currentTab = get().activeTab;
       // 离开创意画布时回落到「确实开启」的生产侧页（分镜台可能已在功能开关里被关掉）
       const nextTab = currentTab === 'canvas'
-        ? ((resolveTab('studio') || 'agent') as ActiveTab)
+        ? ((resolveTab('studio') || 'home') as ActiveTab)
         : currentTab;
       localStorage.setItem('app_active_tab', nextTab);
       set({ workspace, activeTab: nextTab });

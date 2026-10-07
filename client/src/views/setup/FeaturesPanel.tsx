@@ -9,7 +9,7 @@ import { toast } from '../../stores/useDialogStore';
 import { pageIcon } from '../../utils/pageIcons';
 
 /** 无项目时也能进的全局页（其余页面需要先有项目才能前往） */
-const GLOBAL_TABS = ['projects', 'config'];
+const GLOBAL_TABS = ['home', 'projects', 'config'];
 /** 核心界面不作为可关闭的功能页：AI 对话（agent）的入口是「新建任务」与聊天历史 */
 const HIDDEN_PAGE_IDS = ['agent'];
 
