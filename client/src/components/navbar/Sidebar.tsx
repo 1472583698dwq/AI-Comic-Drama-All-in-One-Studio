@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Settings, PanelLeftClose, PanelLeft, Lock, Plug, MessageCirclePlus, type LucideIcon,
+  Settings, PanelLeftClose, PanelLeft, Lock, Plug, MessageCirclePlus, Sun, Moon, type LucideIcon,
 } from 'lucide-react';
 import { useProjectStore, selectSidebarCollapsed } from '../../stores/useProjectStore';
 import { usePageStore } from '../../stores/usePageStore';
 import { useProjectListStore } from '../../stores/useProjectListStore';
 import { useChatHistoryStore } from '../../stores/useChatHistoryStore';
+import { useUiPrefsStore } from '../../stores/useUiPrefsStore';
+import { useThemeStore } from '../../stores/useThemeStore';
 import { useAgentStore } from '../agent/agentStore';
 import { toast } from '../../stores/useDialogStore';
 import { pageIcon } from '../../utils/pageIcons';
@@ -43,6 +45,9 @@ const OTHER_GROUP = 'other';
  * - 新建任务：无项目时静默创建「新任务」项目承接；已有项目且当前会话未开始则直接复用，
  *   否则新建一段会话 —— 对应 ZCode 的 draft 语义（空会话不重复堆积）。
  * - 聊天历史点击 → 切项目（双 store 同步）→ 选中目标会话 → 进 AI 对话页。
+ * - 聊天历史受 UI 开关控制（设置 → 功能开关 → UI 开关首项「会话与项目快捷侧栏」）：
+ *   关掉后侧栏只剩功能导航 + 底部工具，满足「只要导航、要简洁」的用户。
+ * - 底部工具区永远贴底（mt-auto），收起成图标轨时按钮位置与展开态一致，不会跑到导航下面去。
  * - 宽度 264px ⇄ 60px 图标轨；画布页默认收起的行为不变。
  */
 export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
@@ -53,6 +58,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
   const groupMeta = usePageStore((s) => s.groups);
   const refreshHistory = useChatHistoryStore((s) => s.refresh);
   const agentActiveSessionId = useAgentStore((s) => s.activeSessionId);
+  /** UI 开关（设置 → 功能开关 → UI 开关，首项）：会话与项目快捷侧栏默认显示，关掉后侧栏只剩导航与底部工具 */
+  const historyVisible = useUiPrefsStore((s) => s.values.sidebar_chat_history !== false);
+  const effectiveTheme = useThemeStore((s) => s.effectiveTheme);
+  const toggleTheme = useThemeStore((s) => s.toggleTheme);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
 
   const shotsCount = (project?.scenes || []).reduce(
@@ -61,10 +70,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
 
   const effectiveCollapsed = sidebarCollapsed;
 
-  // 进入对话页 / 挂载时刷新一次历史（会话增删归档后由动作方就地刷新）
+  // 进入对话页 / 挂载时刷新一次历史（会话增删归档后由动作方就地刷新）；
+  // UI 开关关掉快捷侧栏时不拉取 —— 没人看的数据不占请求
   useEffect(() => {
+    if (!historyVisible) return;
     void refreshHistory();
-  }, [refreshHistory, activeTab === 'agent']);
+  }, [refreshHistory, activeTab === 'agent', historyVisible]);
 
   /** 分组 → 条目（只含开启的页；config 沉底、projects 看板保留，首页保留在导航） */
   const groups = useMemo(() => {
@@ -157,8 +168,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
       <div
         className={`h-full flex flex-col border-r border-white/60 dark:border-white/10 ${effectiveCollapsed ? 'w-[60px]' : 'w-[264px]'}`}
       >
-        {/* 顶部按钮堆栈：新建任务 + 功能导航 */}
-        <div className="shrink-0 px-2 pt-3 pb-1 space-y-0.5">
+        {/* 顶部按钮堆栈：新建任务 + 功能导航。
+            快捷侧栏（UI 开关）关掉时本区块接管剩余高度并可滚动，
+            免得导航项一多就把底部工具区挤出视野 */}
+        <div className={`px-2 pt-3 pb-1 space-y-0.5 ${
+          historyVisible ? 'shrink-0' : 'flex-1 min-h-0 overflow-y-auto'
+        }`}>
           <button
             onClick={handleNewTask}
             title="新建任务：开始一段新的 AI 对话"
@@ -218,8 +233,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
           </div>
         </div>
 
-        {/* 下半部：聊天历史（收起态隐藏） */}
-        {!effectiveCollapsed && (
+        {/* 下半部：聊天历史（收起态隐藏；UI 开关关掉快捷侧栏后整块不渲染） */}
+        {!effectiveCollapsed && historyVisible && (
           <>
             <div className="mx-3 my-1.5 h-px bg-border shrink-0" />
             <ChatHistory
@@ -229,14 +244,25 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
           </>
         )}
 
-        {/* 底部工具区：生成源 / 设置 / 收起（主题切换已按需求移除） */}
-        <div className="shrink-0 p-2 border-t border-white/60 dark:border-white/10 space-y-0.5 bg-white/70 dark:bg-black/45 backdrop-blur-xl">
+        {/* 底部工具区：生成源 / 主题 / 设置 / 收起。
+            mt-auto 把本区块顶到侧栏最底部 —— 收起成图标轨时没有下方的聊天历史撑高度，
+            少了它按钮会紧贴导航堆栈往上跑 */}
+        <div className="shrink-0 mt-auto p-2 border-t border-white/60 dark:border-white/10 space-y-0.5 bg-white/70 dark:bg-black/45 backdrop-blur-xl">
           <UtilButton
             icon={Plug}
             label="生成源"
             collapsed={effectiveCollapsed}
             onClick={() => onOpenProvider?.()}
             iconCls="text-brand-light"
+          />
+
+          {/* 白天 / 黑夜切换：收起态同样在底部第三格，位置与展开态一致 */}
+          <UtilButton
+            icon={effectiveTheme === 'dark' ? Sun : Moon}
+            label={effectiveTheme === 'dark' ? '切换白天模式' : '切换黑夜模式'}
+            collapsed={effectiveCollapsed}
+            onClick={toggleTheme}
+            iconCls={effectiveTheme === 'dark' ? 'text-amber-400' : 'text-indigo-400'}
           />
 
           <button

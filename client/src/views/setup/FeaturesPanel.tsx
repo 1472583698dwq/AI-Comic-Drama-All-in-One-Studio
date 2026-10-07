@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import {
   Loader2, RefreshCw, Lock, ArrowRight, Power, Layers, ImagePlus, GitBranch, UsersRound, Puzzle,
+  PanelLeft,
 } from 'lucide-react';
 import { usePageStore, resolveTab } from '../../stores/usePageStore';
 import { useFeatureStore, type FeatureItem } from '../../stores/useFeatureStore';
+import { UI_SWITCH_DEFS, useUiPrefsStore, type UiSwitchItem } from '../../stores/useUiPrefsStore';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { toast } from '../../stores/useDialogStore';
 import { pageIcon } from '../../utils/pageIcons';
@@ -29,8 +31,18 @@ const featureIcon = (it: FeatureItem) => {
   return FEATURE_ICON_RULES.find(([re]) => re.test(k))?.[1] || Puzzle;
 };
 
+/** UI 开关项按 id 关键词挑图标，认不出来一律回落侧栏图标（新增开关项不会崩） */
+const UI_ICON_RULES: Array<[RegExp, any]> = [
+  [/sidebar|侧栏|panel|history|chat/, PanelLeft],
+];
+
+const uiSwitchIcon = (it: UiSwitchItem) => {
+  const k = `${it.id} ${it.label}`.toLowerCase();
+  return UI_ICON_RULES.find(([re]) => re.test(k))?.[1] || PanelLeft;
+};
+
 /**
- * 功能开关（设置 → 功能开关）：两层开关一个面板。
+ * 功能开关（设置 → 功能开关）：三层开关一个面板。
  *
  * 分区一「页面开关」—— 管「看不看得见这一页」。数据源与准入唯一口径都是后端 `/api/v1/pages`
  * （前端不缓存、不猜默认值）：打开即生效 —— 侧栏出现入口、页签可直达、后端对应能力族接口恢复；
@@ -40,6 +52,9 @@ const featureIcon = (it: FeatureItem) => {
  * （非页面级进阶能力，默认全关）：关闭 `agent_teams` → agent-teams / agent-profiles 接口 404；
  * 关闭 `agent_multimodal` → Agent 附件退化为纯文本；关闭 `agent_subagent` → 子代理委派直接失败。
  * 影响范围文案只取后端 description，前端不自行编造。
+ *
+ * 分区三「UI 开关」—— 管「界面元素显不显示」。纯前端呈现偏好（useUiPrefsStore，落 localStorage），
+ * 不碰任何后端能力与接口准入：比如关掉「会话与项目快捷侧栏」，侧栏就只剩功能导航与底部工具。
  */
 export const FeaturesPanel: React.FC = () => {
   const items = usePageStore((s) => s.items);
@@ -57,6 +72,9 @@ export const FeaturesPanel: React.FC = () => {
   const featureError = useFeatureStore((s) => s.error);
   const loadFeatures = useFeatureStore((s) => s.load);
   const setFeature = useFeatureStore((s) => s.setFeature);
+
+  const uiValues = useUiPrefsStore((s) => s.values);
+  const setUiSwitch = useUiPrefsStore((s) => s.setUiSwitch);
 
   const activeTab = useProjectStore((s) => s.activeTab);
   const project = useProjectStore((s) => s.project);
@@ -113,14 +131,25 @@ export const FeaturesPanel: React.FC = () => {
     useProjectStore.getState().setActiveTab(id as any);
   };
 
+  /** UI 开关：纯本机界面偏好，写 localStorage 即生效 —— 没有失败路径，也不必回滚 */
+  const toggleUiSwitch = (id: string, label: string, next: boolean) => {
+    setUiSwitch(id, next);
+    if (next) {
+      toast.success(`已开启「${label}」，界面元素已显示`);
+    } else {
+      toast.info(`已关闭「${label}」，界面元素已隐藏`);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-5">
       <div>
         <h3 className="text-[13.5px] font-bold text-[color:var(--color-text-main)]">功能开关</h3>
         <p className="mt-1 text-[11.5px] text-gray-400 leading-relaxed">
-          两层开关：<span className="text-gray-300">页面开关</span>管「看不看得见这一页」，关掉后左侧栏没有入口、接口也进不去；
-          <span className="text-gray-300">功能开关</span>管「这一页里的进阶能力开不开」，页面照常在，只是页内的某些能力按开关走。
-          两者都是改完即时生效、无需重启。
+          三层开关：<span className="text-gray-300">页面开关</span>管「看不看得见这一页」，关掉后左侧栏没有入口、接口也进不去；
+          <span className="text-gray-300">功能开关</span>管「这一页里的进阶能力开不开」，页面照常在，只是页内的某些能力按开关走；
+          <span className="text-gray-300">UI 开关</span>管「界面元素显不显示」，只改本机界面，不动任何能力与接口。
+          三者都是改完即时生效、无需重启。
         </p>
       </div>
 
@@ -299,7 +328,59 @@ export const FeaturesPanel: React.FC = () => {
         </div>
       </section>
 
-      {/* 脚注：两处落盘位置写明，改配置出问题时知道去哪儿看 */}
+      {/* ── 分区三：UI 开关（纯前端界面元素显隐） ── */}
+      <section className="flex flex-col gap-2.5">
+        <div className="flex items-baseline gap-2 flex-wrap">
+          <span className="inline-flex items-center gap-1.5 text-[12.5px] font-bold text-[color:var(--color-text-main)]">
+            <PanelLeft className="w-3.5 h-3.5 text-gray-500" />UI 开关
+          </span>
+          <span className="text-[10.5px] text-gray-500">管「界面元素显不显示」—— 只改本机界面，不影响能力与接口</span>
+        </div>
+
+        <div className="flex flex-col gap-2.5">
+          {UI_SWITCH_DEFS.map((it) => {
+            const Icon = uiSwitchIcon(it);
+            const enabled = uiValues[it.id] === true;
+            return (
+              <div key={it.id}
+                className="rounded-xl border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06] px-3.5 py-3 flex items-start gap-3">
+                <div className={`w-8 h-8 shrink-0 rounded-lg flex items-center justify-center ${enabled ? 'bg-brand/15 text-brand-light' : 'bg-white/65 dark:bg-white/[.09] text-gray-500'}`}>
+                  <Icon className="w-4 h-4" />
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[12.5px] font-bold text-[color:var(--color-text-main)]">{it.label}</span>
+                    <span className={`px-1.5 py-0.5 rounded border text-[10px] ${
+                      enabled ? 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10'
+                              : 'text-gray-400 border-white/70 dark:border-white/12 bg-white/65 dark:bg-white/[.09]'
+                    }`}>{enabled ? '已显示' : '已隐藏'}</span>
+                    <span className="text-[10px] text-gray-500">出厂默认{it.default ? '显示' : '隐藏'}</span>
+                  </div>
+
+                  {it.description && (
+                    <p className="mt-1 text-[10.5px] text-gray-500 leading-relaxed">关闭后：{it.description}</p>
+                  )}
+                </div>
+
+                <button
+                  onClick={() => toggleUiSwitch(it.id, it.label, !enabled)}
+                  role="switch"
+                  aria-checked={enabled}
+                  className={`shrink-0 mt-0.5 w-11 h-6 rounded-full relative transition-colors ${
+                    enabled ? 'bg-brand' : 'bg-white/65 dark:bg-white/[.09] border border-white/70 dark:border-white/12'
+                  }`}
+                  title={enabled ? '点击隐藏' : '点击显示'}
+                >
+                  <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${enabled ? 'left-[22px]' : 'left-0.5'}`} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* 脚注：三处落盘位置写明，改配置出问题时知道去哪儿看 */}
       <div className="flex flex-col gap-1">
         <p className="text-[10.5px] text-gray-500 leading-relaxed">
           页面开关存储：{file || 'state.json'}（改完即时生效，无需重启）
@@ -309,6 +390,9 @@ export const FeaturesPanel: React.FC = () => {
             功能开关存储：{featureFile}（改完即时生效，无需重启）
           </p>
         )}
+        <p className="text-[10.5px] text-gray-500 leading-relaxed">
+          UI 开关存储：本机 localStorage（只作用于当前这台设备的界面，改完即时生效）
+        </p>
       </div>
     </div>
   );
