@@ -1,0 +1,86 @@
+[
+  {
+    "case": "empty prompt",
+    "status": 400,
+    "body": "{\"detail\": \"视频生成需要非空 prompt（运动/运镜描述）\"}",
+    "verdict": "OK"
+  },
+  {
+    "case": "blank prompt",
+    "status": 400,
+    "body": "{\"detail\": \"视频生成需要非空 prompt（运动/运镜描述）\"}",
+    "verdict": "OK"
+  },
+  {
+    "case": "unknown provider",
+    "status": 400,
+    "body": "{\"detail\": \"未找到视频Provider: nonexistent_provider，已注册: ['comfyui_video', 'minimax_h3', 'seedance', 'kling', 'wan3', 'minimax_video', 'openai_video', 'prov_e3a19229', 'prov_6131876a']\"}",
+    "verdict": "OK"
+  },
+  {
+    "case": "duration=16 comfyui_video(上限10)",
+    "status": 200,
+    "body": "{\"video_url\": \"/storage/videos/mock_675419a4.mp4\", \"local_path\": \"D:\\\\file\\\\aivedio\\\\storage\\\\videos\\\\mock_675419a4.mp4\", \"provider\": \"comfyui_video\", \"engine\": \"comfyui_video (mock-ffmpeg)\", \"duration\": 10, \"elapsed_ms\"",
+    "verdict": "OK"
+  },
+  {
+    "case": "duration=0",
+    "status": 200,
+    "body": "{\"video_url\": \"/storage/videos/mock_4ee1779b.mp4\", \"local_path\": \"D:\\\\file\\\\aivedio\\\\storage\\\\videos\\\\mock_4ee1779b.mp4\", \"provider\": \"comfyui_video\", \"engine\": \"comfyui_video (mock-ffmpeg)\", \"duration\": 5, \"elapsed_ms\":",
+    "verdict": "OK"
+  },
+  {
+    "case": "duration=-5",
+    "status": 200,
+    "body": "{\"video_url\": \"/storage/videos/mock_84c69da9.mp4\", \"local_path\": \"D:\\\\file\\\\aivedio\\\\storage\\\\videos\\\\mock_84c69da9.mp4\", \"provider\": \"comfyui_video\", \"engine\": \"comfyui_video (mock-ffmpeg)\", \"duration\": 5, \"elapsed_ms\":",
+    "verdict": "OK"
+  },
+  {
+    "case": "duration=3 回归",
+    "status": 200,
+    "body": "{\"video_url\": \"/storage/videos/mock_3bc744a1.mp4\", \"local_path\": \"D:\\\\file\\\\aivedio\\\\storage\\\\videos\\\\mock_3bc744a1.mp4\", \"provider\": \"comfyui_video\", \"engine\": \"comfyui_video (mock-ffmpeg)\", \"duration\": 3, \"elapsed_ms\":",
+    "verdict": "OK"
+  },
+  {
+    "case": "auto i2v (曾 500)",
+    "status": 200,
+    "body": "{\"video_url\": \"\", \"local_path\": null, \"provider\": \"prov_6131876a\", \"engine\": \"code:prov_6131876a (python)\", \"duration\": 5, \"elapsed_ms\": 1331, \"task_id\": \"e53b47ed-c338-49d2-bfc3-56c9154cadc5\", \"first_frame_url\": null, \"",
+    "verdict": "OK"
+  },
+  {
+    "case": "显式纯文本源 i2v (应 4xx)",
+    "status": 400,
+    "body": "{\"detail\": \"视频Provider「prov_e3a19229」不支持当前请求（mode=i2v/首帧），请更换视频源或调整参数\"}",
+    "verdict": "OK"
+  },
+  {
+    "case": "正常回归 provider=comfyui_video",
+    "status": 200,
+    "body": "{\"video_url\": \"/storage/videos/mock_349f1c97.mp4\", \"local_path\": \"D:\\\\file\\\\aivedio\\\\storage\\\\videos\\\\mock_349f1c97.mp4\", \"provider\": \"comfyui_video\", \"engine\": \"comfyui_video (mock-image-copy, 前端将降级显示首帧)\", \"duration\": 5",
+    "verdict": "OK"
+  },
+  {
+    "case": "tts empty text",
+    "status": 400,
+    "body": "{\"detail\": \"TTS 文本为空：请提供非空文本\"}",
+    "verdict": ""
+  },
+  {
+    "case": "tts 正常（未配 Key 应 503）",
+    "status": 503,
+    "body": "{\"detail\": \"MINIMAX_API_KEY 未配置：请在系统配置中填入密钥\"}",
+    "verdict": ""
+  },
+  {
+    "case": "status missing",
+    "status": 404,
+    "body": "{\"status\": \"not_found\", \"task_id\": \"not_exist_zzz\"}",
+    "verdict": ""
+  },
+  {
+    "case": "character-3views",
+    "status": 500,
+    "body": "{\"detail\": \"Client error '404 Not Found' for url 'https://example.com/test.png'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404; Client error '404 Not Found' for url 'https://exa",
+    "verdict": ""
+  }
+]

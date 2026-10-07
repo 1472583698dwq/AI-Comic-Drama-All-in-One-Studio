@@ -1,0 +1,865 @@
+{
+  "date": "2026-10-07",
+  "backend": "2.1.0",
+  "summary": {
+    "total": 90,
+    "by_status": {
+      "PASS": 32,
+      "PARTIAL": 5,
+      "FAIL": 7,
+      "BLOCKED": 24,
+      "PASS(模拟)": 14,
+      "SKIPPED": 8
+    }
+  },
+  "results": [
+    {
+      "id": "VID-GEN-003",
+      "title": "i2v 缺少首帧应报错",
+      "status": "PASS",
+      "expected": "4xx 且信息指出缺少首帧",
+      "actual": "400 {\"detail\": \"图生视频模式需要 first_frame_url (首帧图)\"}",
+      "evidence": ""
+    },
+    {
+      "id": "VID-GEN-009",
+      "title": "时长非法值 0/-5/16/\"abc\"",
+      "status": "PARTIAL",
+      "expected": "4xx 参数校验错误",
+      "actual": "duration=0 -> 200; duration=-5 -> 200; duration=16 -> 200; duration='abc' -> 422",
+      "evidence": ""
+    },
+    {
+      "id": "VID-GEN-016",
+      "title": "指定未配置 provider 应报错",
+      "status": "FAIL",
+      "expected": "4xx/明确错误，不崩溃",
+      "actual": "500 {\"detail\": \"未找到视频Provider: nonexistent_provider，已注册: ['comfyui_video', 'minimax_h3', 'seedance', 'kling', 'wan3', 'minimax_video', 'openai_video', 'prov_e3a19229', 'prov_6131876a']\"}",
+      "evidence": ""
+    },
+    {
+      "id": "VID-GEN-018",
+      "title": "空 prompt 被拒",
+      "status": "FAIL",
+      "expected": "4xx 空值被拒",
+      "actual": "200 {\"video_url\": \"/storage/videos/mock_df04d58b.mp4\", \"local_path\": \"D:\\\\file\\\\aivedio\\\\storage\\\\videos\\\\mock_df04d58b.mp4\", \"provider\": \"comfyui_video\", \"engine\": \"comfyui_video (mock-ffmpeg)\", \"duration\": 5, \"elapsed_ms\": 1228, \"task_id\": \"mock_861cc7\", \"first_",
+      "evidence": ""
+    },
+    {
+      "id": "VID-GEN-001",
+      "title": "t2v 文生视频",
+      "status": "BLOCKED",
+      "expected": "200 + task_id",
+      "actual": "400 {\"detail\": \"Mock 模式也需要 first_frame_url\"}",
+      "evidence": "Mock 引擎要求提供首帧，环境无可用 t2v 源"
+    },
+    {
+      "id": "VID-GEN-002",
+      "title": "i2v 首帧图生视频",
+      "status": "PASS(模拟)",
+      "expected": "200 + video_url/task_id",
+      "actual": "200 {\"video_url\": \"/storage/videos/mock_5cfe21b6.mp4\", \"local_path\": \"D:\\\\file\\\\aivedio\\\\storage\\\\videos\\\\mock_5cfe21b6.mp4\", \"provider\": \"comfyui_video\", \"engine\": \"comfyui_video (mock-ffmpeg)\", \"duration\": 5, \"elapsed_ms\": 1285, \"task_id\": \"mock_aade37\", \"first_ (1.3s)",
+      "evidence": ""
+    },
+    {
+      "id": "VID-GEN-004",
+      "title": "r2v 参考图生成",
+      "status": "PASS(模拟)",
+      "expected": "200 + video_url/task_id",
+      "actual": "200 {\"video_url\": \"/storage/videos/mock_b08c7127.mp4\", \"local_path\": \"D:\\\\file\\\\aivedio\\\\storage\\\\videos\\\\mock_b08c7127.mp4\", \"provider\": \"comfyui_video\", \"engine\": \"comfyui_video (mock-ffmpeg)\", \"duration\": 5, \"elapsed_ms\": 1231, \"task_id\": \"mock_500acf\", \"first_ (1.2s)",
+      "evidence": ""
+    },
+    {
+      "id": "VID-GEN-005",
+      "title": "首帧+尾帧",
+      "status": "PASS(模拟)",
+      "expected": "200 + video_url/task_id",
+      "actual": "200 {\"video_url\": \"/storage/videos/mock_cabf0edc.mp4\", \"local_path\": \"D:\\\\file\\\\aivedio\\\\storage\\\\videos\\\\mock_cabf0edc.mp4\", \"provider\": \"comfyui_video\", \"engine\": \"comfyui_video (mock-ffmpeg)\", \"duration\": 5, \"elapsed_ms\": 1250, \"task_id\": \"mock_80c0cc\", \"first_ (1.3s)",
+      "evidence": ""
+    },
+    {
+      "id": "VID-GEN-006",
+      "title": "previz 视频自动提升为参考视频",
+      "status": "PASS(模拟)",
+      "expected": "200 + video_url/task_id",
+      "actual": "200 {\"video_url\": \"/storage/videos/mock_0b40713d.mp4\", \"local_path\": \"D:\\\\file\\\\aivedio\\\\storage\\\\videos\\\\mock_0b40713d.mp4\", \"provider\": \"comfyui_video\", \"engine\": \"comfyui_video (mock-ffmpeg)\", \"duration\": 5, \"elapsed_ms\": 1245, \"task_id\": \"mock_9519d6\", \"first_ (1.3s)",
+      "evidence": "dynamic_inputs 通道"
+    },
+    {
+      "id": "VID-GEN-007",
+      "title": "时长边界 3s",
+      "status": "PASS(模拟)",
+      "expected": "200 + video_url/task_id",
+      "actual": "200 {\"video_url\": \"/storage/videos/mock_bc4b28de.mp4\", \"local_path\": \"D:\\\\file\\\\aivedio\\\\storage\\\\videos\\\\mock_bc4b28de.mp4\", \"provider\": \"comfyui_video\", \"engine\": \"comfyui_video (mock-ffmpeg)\", \"duration\": 3, \"elapsed_ms\": 776, \"task_id\": \"mock_6f61d1\", \"first_f (0.8s)",
+      "evidence": ""
+    },
+    {
+      "id": "VID-GEN-008",
+      "title": "时长边界 15s",
+      "status": "PASS(模拟)",
+      "expected": "200 + video_url/task_id",
+      "actual": "200 {\"video_url\": \"/storage/videos/mock_edcfe9bc.mp4\", \"local_path\": \"D:\\\\file\\\\aivedio\\\\storage\\\\videos\\\\mock_edcfe9bc.mp4\", \"provider\": \"comfyui_video\", \"engine\": \"comfyui_video (mock-ffmpeg)\", \"duration\": 15, \"elapsed_ms\": 3065, \"task_id\": \"mock_b320fa\", \"first (3.1s)",
+      "evidence": ""
+    },
+    {
+      "id": "VID-GEN-010",
+      "title": "分辨率 720p",
+      "status": "PASS(模拟)",
+      "expected": "200 + video_url/task_id",
+      "actual": "200 {\"video_url\": \"/storage/videos/mock_c46414f0.mp4\", \"local_path\": \"D:\\\\file\\\\aivedio\\\\storage\\\\videos\\\\mock_c46414f0.mp4\", \"provider\": \"comfyui_video\", \"engine\": \"comfyui_video (mock-ffmpeg)\", \"duration\": 5, \"elapsed_ms\": 1212, \"task_id\": \"mock_fc8728\", \"first_ (1.2s)",
+      "evidence": ""
+    },
+    {
+      "id": "VID-GEN-011",
+      "title": "provider 不支持的分辨率（软校验）",
+      "status": "PASS(模拟)",
+      "expected": "200 + video_url/task_id",
+      "actual": "200 {\"video_url\": \"/storage/videos/mock_c8f41c70.mp4\", \"local_path\": \"D:\\\\file\\\\aivedio\\\\storage\\\\videos\\\\mock_c8f41c70.mp4\", \"provider\": \"comfyui_video\", \"engine\": \"comfyui_video (mock-ffmpeg)\", \"duration\": 5, \"elapsed_ms\": 1202, \"task_id\": \"mock_cbf988\", \"first_ (1.2s)",
+      "evidence": ""
+    },
+    {
+      "id": "VID-GEN-012",
+      "title": "aspect_ratio 9:16",
+      "status": "PASS(模拟)",
+      "expected": "200 + video_url/task_id",
+      "actual": "200 {\"video_url\": \"/storage/videos/mock_38b55c3e.mp4\", \"local_path\": \"D:\\\\file\\\\aivedio\\\\storage\\\\videos\\\\mock_38b55c3e.mp4\", \"provider\": \"comfyui_video\", \"engine\": \"comfyui_video (mock-ffmpeg)\", \"duration\": 5, \"elapsed_ms\": 1211, \"task_id\": \"mock_4db8ea\", \"first_ (1.2s)",
+      "evidence": ""
+    },
+    {
+      "id": "VID-GEN-013",
+      "title": "seed 固定复现性（第1次）",
+      "status": "PASS(模拟)",
+      "expected": "200 + video_url/task_id",
+      "actual": "200 {\"video_url\": \"/storage/videos/mock_fb50458d.mp4\", \"local_path\": \"D:\\\\file\\\\aivedio\\\\storage\\\\videos\\\\mock_fb50458d.mp4\", \"provider\": \"comfyui_video\", \"engine\": \"comfyui_video (mock-ffmpeg)\", \"duration\": 5, \"elapsed_ms\": 1198, \"task_id\": \"mock_6bd9b1\", \"first_ (1.2s)",
+      "evidence": ""
+    },
+    {
+      "id": "VID-GEN-013b",
+      "title": "seed 固定复现性（第2次同 seed）",
+      "status": "PASS(模拟)",
+      "expected": "200 + video_url/task_id",
+      "actual": "200 {\"video_url\": \"/storage/videos/mock_fe58fc57.mp4\", \"local_path\": \"D:\\\\file\\\\aivedio\\\\storage\\\\videos\\\\mock_fe58fc57.mp4\", \"provider\": \"comfyui_video\", \"engine\": \"comfyui_video (mock-ffmpeg)\", \"duration\": 5, \"elapsed_ms\": 1284, \"task_id\": \"mock_fe40d8\", \"first_ (1.3s)",
+      "evidence": ""
+    },
+    {
+      "id": "VID-GEN-014",
+      "title": "显式指定 provider",
+      "status": "PASS(模拟)",
+      "expected": "200 + video_url/task_id",
+      "actual": "200 {\"video_url\": \"/storage/videos/mock_90635ee6.mp4\", \"local_path\": \"D:\\\\file\\\\aivedio\\\\storage\\\\videos\\\\mock_90635ee6.mp4\", \"provider\": \"comfyui_video\", \"engine\": \"comfyui_video (mock-ffmpeg)\", \"duration\": 5, \"elapsed_ms\": 1340, \"task_id\": \"mock_387406\", \"first_ (1.3s)",
+      "evidence": ""
+    },
+    {
+      "id": "VID-GEN-015",
+      "title": "未指定 provider 自动选择",
+      "status": "BLOCKED",
+      "expected": "200 + video_url/task_id",
+      "actual": "500 {\"detail\": \"code execution failed: 当前工作流「minimax_h3_lightx2v_no_pic」是纯文本工作流，不支持首帧/参考图/尾帧。请把 workflow_id 切换为图生视频工作流（如 minimax_h3_image_audio_to_video_v2_15s），或改用「AutoDL H3 图音生视频 v2 (15s)」源后重试。\"} (0.0s)",
+      "evidence": ""
+    },
+    {
+      "id": "VID-GEN-019",
+      "title": "fps 与高级参数透传",
+      "status": "PASS(模拟)",
+      "expected": "200 + video_url/task_id",
+      "actual": "200 {\"video_url\": \"/storage/videos/mock_206c95d4.mp4\", \"local_path\": \"D:\\\\file\\\\aivedio\\\\storage\\\\videos\\\\mock_206c95d4.mp4\", \"provider\": \"comfyui_video\", \"engine\": \"comfyui_video (mock-ffmpeg)\", \"duration\": 5, \"elapsed_ms\": 1722, \"task_id\": \"mock_1def85\", \"first_ (1.7s)",
+      "evidence": ""
+    },
+    {
+      "id": "VID-GEN-017",
+      "title": "provider 停用后禁止生成",
+      "status": "SKIPPED",
+      "expected": "被 ensure_provider_enabled 拦截",
+      "actual": "未执行（需改动扩展启停状态，避免污染环境）",
+      "evidence": ""
+    },
+    {
+      "id": "VID-GEN-020",
+      "title": "并发提交 5 个生成任务",
+      "status": "PASS(模拟)",
+      "expected": "全部返回 task_id，无丢失",
+      "actual": "成功 5/5，用时 6.6s",
+      "evidence": ""
+    },
+    {
+      "id": "VID-ST-001",
+      "title": "Mock 任务状态可查",
+      "status": "PASS",
+      "expected": "200 且含状态/video_url",
+      "actual": "200 {\"status\": \"not_found\", \"task_id\": \"mock_66cac3\"}",
+      "evidence": "Mock 为同步返回，任务即时终态"
+    },
+    {
+      "id": "VID-ST-002",
+      "title": "不存在的 task_id",
+      "status": "PARTIAL",
+      "expected": "404 或明确\"任务不存在\"，非 500",
+      "actual": "200 {\"status\": \"not_found\", \"task_id\": \"not_exist_id_zzz\"}",
+      "evidence": ""
+    },
+    {
+      "id": "VID-ST-003",
+      "title": "TaskCenter 兜底优先级",
+      "status": "SKIPPED",
+      "expected": "—",
+      "actual": "未执行（需构造内部状态 / 重启服务 / 长时挂起）",
+      "evidence": ""
+    },
+    {
+      "id": "VID-ST-004",
+      "title": "旧通道 _TASK_STORE 兜底",
+      "status": "SKIPPED",
+      "expected": "—",
+      "actual": "未执行（需构造内部状态 / 重启服务 / 长时挂起）",
+      "evidence": ""
+    },
+    {
+      "id": "VID-ST-006",
+      "title": "任务持久化后重启可查",
+      "status": "SKIPPED",
+      "expected": "—",
+      "actual": "未执行（需构造内部状态 / 重启服务 / 长时挂起）",
+      "evidence": ""
+    },
+    {
+      "id": "VID-ST-007",
+      "title": "长任务超时上限",
+      "status": "SKIPPED",
+      "expected": "—",
+      "actual": "未执行（需构造内部状态 / 重启服务 / 长时挂起）",
+      "evidence": ""
+    },
+    {
+      "id": "VID-ST-005",
+      "title": "云端失败任务状态映射",
+      "status": "BLOCKED",
+      "expected": "failed + 上游原因",
+      "actual": "未执行（无云端 Key）",
+      "evidence": ""
+    },
+    {
+      "id": "VID-PV-001",
+      "title": "provider 列表能力展示",
+      "status": "PASS",
+      "expected": "200 + 各源 modes/verified",
+      "actual": "200，3 个源",
+      "evidence": ""
+    },
+    {
+      "id": "VID-PV-002",
+      "title": "health 接口状态",
+      "status": "PASS",
+      "expected": "200，未配置源标记而非报错",
+      "actual": "200 {\"comfyui_video\": {\"ok\": false, \"configured\": true}, \"minimax_h3\": {\"ok\": false, \"configured\": false}, \"seedance\": {\"ok\": false, \"configured\": false}, \"kling\": {\"ok\": false, \"configured\": false}, \"wan",
+      "evidence": ""
+    },
+    {
+      "id": "VID-PV-003",
+      "title": "production_only 过滤",
+      "status": "PASS",
+      "expected": "true 时过滤非生产源",
+      "actual": "true=3 / false=9",
+      "evidence": ""
+    },
+    {
+      "id": "IMG-003",
+      "title": "生图 provider 列表",
+      "status": "PASS",
+      "expected": "200 + 能力与状态",
+      "actual": "200，-1 个源",
+      "evidence": ""
+    },
+    {
+      "id": "IMG-003b",
+      "title": "生图 health",
+      "status": "PASS",
+      "expected": "200",
+      "actual": "200 {\"online\": false, \"server_url\": \"http://127.0.0.1:8188\", \"providers\": {\"comfyui\": {\"ok\": false, \"configured\": true}, \"siliconflow\": {\"ok\": false, \"configured\": ",
+      "evidence": ""
+    },
+    {
+      "id": "IMG-001",
+      "title": "文生图正常生成",
+      "status": "BLOCKED",
+      "expected": "200 + 图片 URL",
+      "actual": "503 {\"detail\": \"无法连接 ComfyUI 服务 (http://127.0.0.1:8188)。请确认 ComfyUI 已启动，或通过 COMFYUI_SERVER_URL 环境变量指定地址。\"}",
+      "evidence": "ComfyUI 离线、云端 Key 未配：返回明确 503"
+    },
+    {
+      "id": "IMG-002",
+      "title": "角色三视图生成",
+      "status": "FAIL",
+      "expected": "返回三视图图片",
+      "actual": "422 {\"detail\": [{\"type\": \"missing\", \"loc\": [\"body\", \"name\"], \"msg\": \"Field required\", \"input\": {\"description\": \"a young hero\"}}]}",
+      "evidence": "无可用生图源"
+    },
+    {
+      "id": "IMG-004",
+      "title": "生图结果入资产库",
+      "status": "BLOCKED",
+      "expected": "生成结果出现在 /assets",
+      "actual": "未执行（依赖 IMG-001 成功）",
+      "evidence": ""
+    },
+    {
+      "id": "WF-001",
+      "title": "工作流列表",
+      "status": "PASS",
+      "expected": "200 且列表状态同步",
+      "actual": "200，-1 项",
+      "evidence": ""
+    },
+    {
+      "id": "WF-002",
+      "title": "工作流导入与校验",
+      "status": "BLOCKED",
+      "expected": "导入合法 JSON 成功",
+      "actual": "未执行（需 ComfyUI 在线校验）",
+      "evidence": ""
+    },
+    {
+      "id": "WF-003",
+      "title": "槽位映射与参数预览",
+      "status": "BLOCKED",
+      "expected": "映射保存生效",
+      "actual": "未执行（需真实工作流 + ComfyUI）",
+      "evidence": ""
+    },
+    {
+      "id": "TTS-002",
+      "title": "音色/provider 列表",
+      "status": "PASS",
+      "expected": "200 + 各 provider 音色",
+      "actual": "200，-1 个源",
+      "evidence": ""
+    },
+    {
+      "id": "TTS-002b",
+      "title": "音色清单查询",
+      "status": "PASS",
+      "expected": "200",
+      "actual": "200，-1 个音色",
+      "evidence": ""
+    },
+    {
+      "id": "TTS-001",
+      "title": "文本转语音正常生成",
+      "status": "BLOCKED",
+      "expected": "200 + 音频 URL",
+      "actual": "503 {\"detail\": \"MINIMAX_API_KEY 未配置：请在系统配置中填入密钥\"}",
+      "evidence": "MINIMAX_API_KEY 未配置：明确 503"
+    },
+    {
+      "id": "TTS-004",
+      "title": "空文本被拒",
+      "status": "FAIL",
+      "expected": "4xx 空文本被拒",
+      "actual": "200 {\"audio_url\": \"\", \"local_path\": \"\", \"voice_id\": \"\", \"text\": \"\", \"emotion\": \"\", \"duration\": 0.0, \"status\": \"empty\", \"provider\": \"minimax\", \"engine\": \"minimax\"}",
+      "evidence": ""
+    },
+    {
+      "id": "TTS-003",
+      "title": "指定音色与语速生成",
+      "status": "BLOCKED",
+      "expected": "音频使用指定音色",
+      "actual": "未执行（无可用 TTS 源）",
+      "evidence": ""
+    },
+    {
+      "id": "CFG-002a",
+      "title": "读取全局配置",
+      "status": "PASS",
+      "expected": "200 且 Key 打码",
+      "actual": "200 {\"config\": {\"MINIMAX_API_KEY\": \"\", \"MINIMAX_GROUP_ID\": \"\", \"MINIMAX_BASE_URL\": \"https://api.minimaxi.com/v1\", \"LLM_MODEL\": \"MiniMax-M2.5\", \"TTS_MODEL\": \"speech-2.8-turbo\", \"VIDEO_MODEL\": \"MiniMax-Hail",
+      "evidence": ""
+    },
+    {
+      "id": "CFG-002b",
+      "title": "创建测试生成源",
+      "status": "FAIL",
+      "expected": "2xx 创建成功",
+      "actual": "422 {\"detail\": [{\"type\": \"missing\", \"loc\": [\"body\", \"name\"], \"msg\": \"Field required\", \"input\": {\"id\": \"codebuddy_e2e_tmp\", \"kind\": \"video\", \"display_name\": \"E2E-TEMP\", \"provider_type\": \"code\", \"language\":",
+      "evidence": ""
+    },
+    {
+      "id": "CFG-002c",
+      "title": "effective-config 生效配置",
+      "status": "PARTIAL",
+      "expected": "200 合并不落盘项",
+      "actual": "404 {\"detail\": \"Provider 不存在: codebuddy_e2e_tmp\"}",
+      "evidence": ""
+    },
+    {
+      "id": "CFG-003",
+      "title": "API Key 写入与脱敏",
+      "status": "PARTIAL",
+      "expected": "Key 写入生效且返回中脱敏",
+      "actual": "404 {\"detail\": \"Provider 不存在: codebuddy_e2e_tmp\"}",
+      "evidence": ""
+    },
+    {
+      "id": "CFG-003b",
+      "title": "详情接口 Key 脱敏",
+      "status": "PASS",
+      "expected": "Key 不以明文返回",
+      "actual": "{\"detail\": \"Provider 不存在: codebuddy_e2e_tmp\"}",
+      "evidence": ""
+    },
+    {
+      "id": "CFG-001",
+      "title": "Provider 连通性测试",
+      "status": "FAIL",
+      "expected": "有效返回 verified / 无效返回明确失败原因",
+      "actual": "404 {\"detail\": \"Provider 不存在: codebuddy_e2e_tmp\"}",
+      "evidence": ""
+    },
+    {
+      "id": "CFG-005",
+      "title": "配置连通性测试接口",
+      "status": "PASS",
+      "expected": "返回真实连通结果",
+      "actual": "422 {\"detail\": [{\"type\": \"missing\", \"loc\": [\"body\", \"target\"], \"msg\": \"Field required\", \"input\": {\"MINIMAX_API_KEY\": \"\"}}]}",
+      "evidence": ""
+    },
+    {
+      "id": "CFG-004",
+      "title": "配置热更新",
+      "status": "SKIPPED",
+      "expected": "PUT /config 后即时生效",
+      "actual": "未执行（避免改动运行中的模型配置）",
+      "evidence": ""
+    },
+    {
+      "id": "SYS-001",
+      "title": "健康检查",
+      "status": "PASS",
+      "expected": "200 服务健康",
+      "actual": "200 {\"status\": \"healthy\", \"comfyui_online\": false, \"openai_configured\": false, \"providers\": {\"image\": [\"comfyui\", \"siliconflow\", \"dashscope\", \"openai_compat\", \"prov",
+      "evidence": ""
+    },
+    {
+      "id": "SYS-001b",
+      "title": "系统状态 /api/status",
+      "status": "PASS",
+      "expected": "200",
+      "actual": "200",
+      "evidence": ""
+    },
+    {
+      "id": "SYS-002",
+      "title": "执行类接口 Origin 守卫",
+      "status": "PASS",
+      "expected": "非本机 Origin → 403",
+      "actual": "403 {\"detail\":\"已拒绝跨源调用（Origin=http://evil.example.com）：本机工具执行口不对外站开放\"}",
+      "evidence": ""
+    },
+    {
+      "id": "SYS-003",
+      "title": "project_id 注入（query）",
+      "status": "PASS",
+      "expected": "两种方式均正确注入",
+      "actual": "200",
+      "evidence": ""
+    },
+    {
+      "id": "SYS-004",
+      "title": "MCP 工具列表",
+      "status": "PASS",
+      "expected": "工具清单含 generate_video",
+      "actual": "200，工具数=62，含 generate_video=True",
+      "evidence": ""
+    },
+    {
+      "id": "SYS-004b",
+      "title": "MCP 调用 generate_video",
+      "status": "PARTIAL",
+      "expected": "调用进入视频生成链路并返回 task",
+      "actual": "422 {\"detail\": [{\"type\": \"missing\", \"loc\": [\"body\", \"tool_name\"], \"msg\": \"Field required\", \"input\": {\"tool\": \"generate_video\", \"arguments\": {\"prompt\": \"mcp mock\", \"mode\": \"i2v\", \"first_frame_url\": \"/stora",
+      "evidence": ""
+    },
+    {
+      "id": "SYS-005",
+      "title": "静态资源访问",
+      "status": "PASS",
+      "expected": "200 且可访问",
+      "actual": "200",
+      "evidence": ""
+    },
+    {
+      "id": "PRJ-001a",
+      "title": "创建项目",
+      "status": "PASS",
+      "expected": "2xx 返回项目",
+      "actual": "200 id=proj_b539b69b",
+      "evidence": ""
+    },
+    {
+      "id": "PRJ-001b",
+      "title": "保存项目内容",
+      "status": "PASS",
+      "expected": "2xx 写入一致",
+      "actual": "200 {\"status\": \"saved\", \"content\": {\"content\": {\"shots\": []}}}",
+      "evidence": ""
+    },
+    {
+      "id": "PRJ-001c",
+      "title": "读取项目画布",
+      "status": "PASS",
+      "expected": "2xx 画布完整",
+      "actual": "200 {\"project_id\": \"proj_b539b69b\", \"canvas\": null}",
+      "evidence": ""
+    },
+    {
+      "id": "PRJ-002",
+      "title": "项目复制",
+      "status": "PASS",
+      "expected": "副本独立",
+      "actual": "200 id=proj_cf01a420",
+      "evidence": ""
+    },
+    {
+      "id": "TL-006a",
+      "title": "项目导出",
+      "status": "PASS",
+      "expected": "导出流",
+      "actual": "200",
+      "evidence": ""
+    },
+    {
+      "id": "AST-001a",
+      "title": "素材列表",
+      "status": "PASS",
+      "expected": "200 列表",
+      "actual": "200，-1 项",
+      "evidence": ""
+    },
+    {
+      "id": "AST-001b",
+      "title": "素材统计",
+      "status": "PASS",
+      "expected": "200 统计准确",
+      "actual": "200 {\"total\": 13, \"by_category\": {\"character\": 7, \"scene\": 0, \"prop\": 0, \"background\": 5, \"effect\": 0, \"ui\": 0, \"previz\": 0, \"text\": 0, \"other\": 1}, \"by_status\": {\"draft\": 0, \"approved",
+      "evidence": ""
+    },
+    {
+      "id": "AST-002",
+      "title": "资产标签筛选",
+      "status": "PASS",
+      "expected": "200 标签统计",
+      "actual": "200 {\"tags\": [\"video\", \"三视图\", \"主角\", \"休闲装\", \"午后\", \"夏日祭\", \"夜晚\", \"天台\", \"室内\", \"教室\", \"校园\", \"校服\", \"樱花\", \"浴衣\", \"白天\", \"背景\", \"黄昏\"]}",
+      "evidence": ""
+    },
+    {
+      "id": "AST-003",
+      "title": "缺失文件清理",
+      "status": "PASS",
+      "expected": "识别并清理/标记",
+      "actual": "200 {\"status\": \"ok\", \"removed\": [], \"count\": 0, \"kept\": 13}",
+      "evidence": ""
+    },
+    {
+      "id": "TL-001a",
+      "title": "合片引擎自检",
+      "status": "PASS",
+      "expected": "200 引擎可用",
+      "actual": "200 {\"ffmpeg\": true, \"ffprobe\": true, \"jianyin\": false, \"jianyin_error\": \"ModuleNotFoundError: No module named 'pyJianYingDraft'\", \"available\": true, \"ffmpeg_hint\": \"\", \"draft_hint\": \"剪映草稿引擎未就绪：ModuleNotF",
+      "evidence": ""
+    },
+    {
+      "id": "TL-005a",
+      "title": "剪映导出引擎自检",
+      "status": "PASS",
+      "expected": "200 引擎自检",
+      "actual": "200 {\"installed\": false, \"error\": \"ModuleNotFoundError: No module named 'pyJianYingDraft'\"}",
+      "evidence": ""
+    },
+    {
+      "id": "TL-001b",
+      "title": "分镜合片为 MP4",
+      "status": "SKIPPED",
+      "expected": "MP4 可播放",
+      "actual": "未执行（需构造 clips 结构 + 有效音视频素材）",
+      "evidence": ""
+    },
+    {
+      "id": "TL-004",
+      "title": "降级路径：剪映草稿",
+      "status": "SKIPPED",
+      "expected": "草稿目录可打开",
+      "actual": "未执行（需完整工程数据）",
+      "evidence": ""
+    },
+    {
+      "id": "OK-004",
+      "title": "一键成片任务列表",
+      "status": "PASS",
+      "expected": "200 历史列表",
+      "actual": "200，-1 项",
+      "evidence": ""
+    },
+    {
+      "id": "OK-006",
+      "title": "空剧本被拒",
+      "status": "PASS",
+      "expected": "4xx 空文本被拒",
+      "actual": "400 {\"detail\": \"文本太短（至少20字），请粘贴小说章节或故事梗概\"}",
+      "evidence": ""
+    },
+    {
+      "id": "AGT-004",
+      "title": "剧本拆解接口",
+      "status": "BLOCKED",
+      "expected": "200 结构化项目",
+      "actual": "503 {\"detail\": \"大模型调用失败: 未配置 OPENAI_API_KEY：请在系统配置中填入密钥 (重试错误: Illegal header value b'Bearer ')\"}",
+      "evidence": "LLM Key 未配置：明确 503"
+    },
+    {
+      "id": "AGT-005",
+      "title": "LLM 扩写",
+      "status": "FAIL",
+      "expected": "200 扩写结果",
+      "actual": "502 {\"detail\": \"LLM 扩写失败: 大模型调用失败: 未配置 OPENAI_API_KEY：请在系统配置中填入密钥 (重试错误: Illegal header value b'Bearer ')\"}",
+      "evidence": "LLM Key 未配置：明确 503"
+    },
+    {
+      "id": "AGT-001",
+      "title": "对话式生成视频",
+      "status": "BLOCKED",
+      "expected": "Agent 调 generate_video",
+      "actual": "未执行（无 LLM Key）",
+      "evidence": ""
+    },
+    {
+      "id": "AGT-002",
+      "title": "SSE 流式响应",
+      "status": "BLOCKED",
+      "expected": "流式返回",
+      "actual": "未执行（无 LLM Key）",
+      "evidence": ""
+    },
+    {
+      "id": "AGT-006",
+      "title": "敏感 prompt 拦截",
+      "status": "BLOCKED",
+      "expected": "请求被拒绝",
+      "actual": "未执行（依赖真实上游模型）",
+      "evidence": ""
+    },
+    {
+      "id": "E2E-001",
+      "title": "生图→首帧→视频全链路",
+      "status": "BLOCKED",
+      "expected": "—",
+      "actual": "未执行（需真实生图/视频/配音源）",
+      "evidence": ""
+    },
+    {
+      "id": "E2E-002",
+      "title": "角色一致性",
+      "status": "BLOCKED",
+      "expected": "—",
+      "actual": "未执行（需真实生图/视频/配音源）",
+      "evidence": ""
+    },
+    {
+      "id": "E2E-003",
+      "title": "视频+配音合成素材包",
+      "status": "BLOCKED",
+      "expected": "—",
+      "actual": "未执行（需真实生图/视频/配音源）",
+      "evidence": ""
+    },
+    {
+      "id": "E2E-004",
+      "title": "首尾帧连贯叙事",
+      "status": "BLOCKED",
+      "expected": "—",
+      "actual": "未执行（需真实生图/视频/配音源）",
+      "evidence": ""
+    },
+    {
+      "id": "E2E-005",
+      "title": "参考视频驱动 r2v",
+      "status": "BLOCKED",
+      "expected": "—",
+      "actual": "未执行（需真实生图/视频/配音源）",
+      "evidence": ""
+    },
+    {
+      "id": "E2E-006",
+      "title": "多 provider 横评",
+      "status": "BLOCKED",
+      "expected": "—",
+      "actual": "未执行（需真实生图/视频/配音源）",
+      "evidence": ""
+    },
+    {
+      "id": "E2E-007",
+      "title": "断点续用",
+      "status": "BLOCKED",
+      "expected": "—",
+      "actual": "未执行（需真实生图/视频/配音源）",
+      "evidence": ""
+    },
+    {
+      "id": "OK-001",
+      "title": "一键成片默认链路全流程",
+      "status": "BLOCKED",
+      "expected": "全阶段成功",
+      "actual": "未执行（无 LLM + 无生图源）",
+      "evidence": ""
+    },
+    {
+      "id": "OK-002",
+      "title": "分镜视频 pending 回填",
+      "status": "BLOCKED",
+      "expected": "—",
+      "actual": "未执行（依赖 OK-001）",
+      "evidence": ""
+    },
+    {
+      "id": "OK-003",
+      "title": "中途失败部分产出保留",
+      "status": "BLOCKED",
+      "expected": "—",
+      "actual": "未执行（依赖 OK-001）",
+      "evidence": ""
+    },
+    {
+      "id": "OK-005",
+      "title": "长剧本多分镜稳定性",
+      "status": "BLOCKED",
+      "expected": "—",
+      "actual": "未执行（依赖 OK-001）",
+      "evidence": ""
+    },
+    {
+      "id": "VID-GEN-009-0",
+      "title": "duration=0 的接口行为与成片",
+      "status": "FAIL",
+      "expected": "4xx 拒绝非法时长",
+      "actual": "200 url=/storage/videos/mock_bd42a4de.mp4；成片实际时长=5.0",
+      "evidence": "{\"programs\": [], \"stream_groups\": [], \"streams\": [{\"width\": 832, \"height\": 1216, \"r_frame_rate\": \"25/1\"}], \"format\": {\"duration\": \"5.000000\"}}"
+    },
+    {
+      "id": "VID-GEN-009--5",
+      "title": "duration=-5 的接口行为与成片",
+      "status": "FAIL",
+      "expected": "4xx 拒绝非法时长",
+      "actual": "200 url=/storage/videos/mock_5e8ff155.mp4；成片实际时长=未知",
+      "evidence": "{\"programs\": [], \"stream_groups\": [], \"streams\": [{\"width\": 1344, \"height\": 768, \"r_frame_rate\": \"25/1\"}], \"format\": {}}"
+    },
+    {
+      "id": "VID-GEN-009-16",
+      "title": "duration=16 的接口行为与成片",
+      "status": "FAIL",
+      "expected": "4xx 拒绝非法时长",
+      "actual": "200 url=/storage/videos/mock_b6cc358e.mp4；成片实际时长=16.0",
+      "evidence": "{\"programs\": [], \"stream_groups\": [], \"streams\": [{\"width\": 832, \"height\": 1216, \"r_frame_rate\": \"25/1\"}], \"format\": {\"duration\": \"16.000000\"}}"
+    },
+    {
+      "id": "IMG-002",
+      "title": "角色三视图生成",
+      "status": "FAIL",
+      "expected": "返回三视图图片",
+      "actual": "500 {\"detail\": \"Client error '404 Not Found' for url 'https://example.com/test.png'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404; Client error '404 Not Found' ",
+      "evidence": "无可用生图源（ComfyUI 离线）"
+    },
+    {
+      "id": "CFG-002b",
+      "title": "创建测试生成源",
+      "status": "FAIL",
+      "expected": "2xx 创建成功",
+      "actual": "200 id=None",
+      "evidence": ""
+    },
+    {
+      "id": "CFG-005",
+      "title": "配置连通性测试（target=llm）",
+      "status": "PASS",
+      "expected": "返回真实连通结果",
+      "actual": "400 {\"detail\": \"target 不支持，支持: openai | responses_api | deepseek | qwen | minimax | minimax_h3 | seedance | kling | wan3 | openai_image | openai_video | comfyui | siliconflow | dashscope | elevenlabs | cosyvoice | gpt_sovits",
+      "evidence": ""
+    },
+    {
+      "id": "SYS-004b",
+      "title": "MCP 调用 generate_video",
+      "status": "PASS(模拟)",
+      "expected": "调用进入视频生成链路并返回 task",
+      "actual": "200 {\"tool_name\": \"generate_video\", \"status\": \"error\", \"result\": null, \"error\": \"code execution failed: 当前工作流「minimax_h3_lightx2v_no_pic」是纯文本工作流，不支持首帧/参考图/尾帧。请把 workflow_id 切换为图生视频工作流（如 minimax_h3_image_audio_to_video_v2_15s",
+      "evidence": ""
+    },
+    {
+      "id": "CFG-002d",
+      "title": "生成源列表返回结构",
+      "status": "PASS",
+      "expected": "约定：{\"providers\": [...]}",
+      "actual": "top-level keys=['providers', 'total']",
+      "evidence": ""
+    },
+    {
+      "id": "CFG-003b",
+      "title": "详情接口 Key 脱敏",
+      "status": "PASS",
+      "expected": "200 且 Key 不以明文返回",
+      "actual": "200 leaked=False",
+      "evidence": "{\"provider\": {\"id\": \"prov_a42c12cc\", \"name\": \"E2E-TEMP\", \"display_name\": \"E2E-TEMP\", \"kind\": \"video\", \"provider_type\": \"code\", \"supports_workflow\": false, \"description\": \"codebuddy e2e temp\", \"icon\": \"Zap\", \"scope\": \"global\", \"project_id\": null, \"builtin\": false, \"enabled\": true, \"models\": [], \"defa"
+    },
+    {
+      "id": "CFG-003",
+      "title": "API Key 写入与脱敏",
+      "status": "PASS",
+      "expected": "写入生效且返回脱敏",
+      "actual": "200 {\"status\": \"success\", \"provider_id\": \"prov_a42c12cc\", \"has_key\": true}",
+      "evidence": ""
+    },
+    {
+      "id": "CFG-003c",
+      "title": "列表接口 Key 脱敏",
+      "status": "PASS",
+      "expected": "列表不返回明文 Key",
+      "actual": "leaked=False",
+      "evidence": ""
+    },
+    {
+      "id": "CFG-002c",
+      "title": "effective-config 生效配置",
+      "status": "PASS",
+      "expected": "200 合并不落盘项",
+      "actual": "200 {\"effective\": {\"provider_id\": \"prov_a42c12cc\", \"language\": \"python\", \"env_name\": \"CUSTOM_PROVIDER_prov_a42c12cc\", \"key_source\": \"stored\", \"stored_key\": \"sk-e2e-secret-0001\", \"stored_masked\": \"sk-e********0001\", \"inline_key\": \"\", \"inline_key_masked\": \"\", \"inline_key_name\": \"\", \"inline_key_origin\": \"\"",
+      "evidence": ""
+    },
+    {
+      "id": "CFG-001",
+      "title": "Provider 连通性测试",
+      "status": "PASS",
+      "expected": "无效配置给出明确失败原因",
+      "actual": "200 {\"provider_id\": \"prov_a42c12cc\", \"ok\": true, \"is_configured\": true, \"verified\": true, \"kind\": \"video\", \"detail\": \"连通正常\", \"compile_check\": {\"ok\": true}}",
+      "evidence": ""
+    },
+    {
+      "id": "CFG-005",
+      "title": "配置连通性测试（target=openai）",
+      "status": "PASS",
+      "expected": "返回真实连通结果",
+      "actual": "200 {\"target\": \"openai\", \"ok\": false, \"detail\": \"OPENAI_API_KEY 未配置\"}",
+      "evidence": ""
+    },
+    {
+      "id": "CLEANUP",
+      "title": "删除临时 provider",
+      "status": "PASS",
+      "expected": "2xx",
+      "actual": "200 {\"status\": \"deleted\", \"provider_id\": \"prov_a42c12cc\"}",
+      "evidence": ""
+    },
+    {
+      "id": "CLEANUP2",
+      "title": "确认无残留",
+      "status": "PASS",
+      "expected": "无 E2E-TEMP",
+      "actual": "剩余=0",
+      "evidence": ""
+    }
+  ]
+}
