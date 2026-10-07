@@ -327,6 +327,9 @@ async def list_voices_by_provider(provider_id: str):
 @router.post("/tts/generate")
 async def generate_speech(req: TTSGenerateRequest):
     """[TTS] 动态Provider生成配音（返回可播放的 /storage mp3 地址）"""
+    # 入口校验：空/纯空白文本直接 4xx（不产生任务）；emoji/换行等非空白内容不受影响
+    if not (req.text or "").strip():
+        raise HTTPException(status_code=400, detail="TTS 文本为空：请提供非空文本")
     try:
         from app.providers.audio.base import AudioGenerateRequest
         reg = get_audio_registry()
@@ -511,6 +514,7 @@ async def generate_character_3views(req: Character3ViewsRequest):
     prompts = consistency_engine.build_character_3views_prompts(char, req.style_preset)
     views: Dict[str, str] = {}
     errors: Dict[str, str] = {}
+    upstream_invalid = False  # 源返回的结果 URL 不可下载（4xx/5xx/连不上）→ 502 而非裸 500
     from app.providers.image.base import ImageGenerateRequest as ImgReq
     reg = get_image_registry()
     for view_key, prompt in prompts.items():
@@ -520,10 +524,12 @@ async def generate_character_3views(req: Character3ViewsRequest):
             views[view_key] = res.image_url
         except Exception as e:
             errors[view_key] = str(e)
+            if isinstance(e, httpx.HTTPError):
+                upstream_invalid = True
 
     if not views and errors:
         detail = "; ".join(errors.values())
-        status = 503 if "无法连接" in detail else 500
+        status = 503 if "无法连接" in detail else (502 if upstream_invalid else 500)
         raise HTTPException(status_code=status, detail=detail)
 
     return {
@@ -916,6 +922,12 @@ async def get_video_task_status(task_id: str):
                        provider=str((resp or {}).get("provider") or ""))
     except Exception:
         pass
+    # 不存在/无记录的任务返回 404（保持响应体字段结构不变，仅改状态码）
+    if not resp or (isinstance(resp, dict) and str(resp.get("status") or "").lower() in ("not_found", "")):
+        from fastapi.encoders import jsonable_encoder
+        from fastapi.responses import JSONResponse
+        body = resp if isinstance(resp, dict) and resp else {"status": "not_found", "task_id": task_id}
+        return JSONResponse(status_code=404, content=jsonable_encoder(body))
     return resp
 
 @router.post("/videos/generate")
@@ -954,7 +966,7 @@ async def generate_video(req: VideoGenerateRequestPayload):
             reference_images=req.reference_images,
             reference_videos=ref_videos or None,
             reference_audios=getattr(req, 'reference_audios', None),
-            duration=req.duration or 5,
+            duration=req.duration if req.duration is not None else 5,
             resolution=req.resolution or extra.get("resolution") or "720p",
             aspect_ratio=req.aspect_ratio or extra.get("aspect_ratio") or "9:16",
             fps=getattr(req, 'fps', None) or extra.get('fps'),

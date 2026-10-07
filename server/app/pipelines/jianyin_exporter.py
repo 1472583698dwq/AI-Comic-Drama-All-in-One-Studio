@@ -66,6 +66,19 @@ def engine_status() -> Dict[str, Any]:
     return {"installed": HAS_PYJIANYING, "error": DRAFT_IMPORT_ERROR}
 
 
+def _require_engine() -> None:
+    """素材/草稿构建都依赖 pyJianYingDraft；缺失时给出明确安装指引，而不是裸 NameError。
+
+    模块级 `import pyJianYingDraft as draft` 失败时不会绑定 `draft` 名字，任何直接引用
+    `draft.XXX` 的路径都会抛 `NameError`。这里把"引擎缺失"统一收敛成一个可读的业务异常。
+    """
+    if not HAS_PYJIANYING:
+        raise DraftExportError(
+            "剪映引擎未就绪（pyJianYingDraft/pymediainfo 未安装）："
+            f"{DRAFT_IMPORT_ERROR}；开发环境执行 pip install pyJianYingDraft pymediainfo 后重启服务"
+        )
+
+
 def assets_dir() -> str:
     # 延迟取 settings.EXPORTS_DIR：打包态与测试用例都会改写它
     path = os.path.join(settings.EXPORTS_DIR, "_assets")
@@ -267,6 +280,7 @@ class AssetStore:
             list(pool.map(worker, list(dict.fromkeys(uniq))))
 
     def video_material(self, url: str) -> Any:
+        _require_engine()
         path = self.local_path(url, "video")
         with self._lock:
             cached = self._videos.get(path)
@@ -278,6 +292,7 @@ class AssetStore:
         return material
 
     def audio_material(self, url: str) -> Any:
+        _require_engine()
         path = self.local_path(url, "audio")
         with self._lock:
             cached = self._audios.get(path)
@@ -293,11 +308,7 @@ class JianYingDraftExporter:
 
     def export_project_to_jianyin_draft(self, project: Project) -> Dict[str, Any]:
         """同步导出（内部含网络下载，建议经 export_project_to_jianyin_draft_async 在线程池中调用）"""
-        if not HAS_PYJIANYING:
-            raise DraftExportError(
-                "剪映引擎未就绪（pyJianYingDraft/pymediainfo 未安装）："
-                f"{DRAFT_IMPORT_ERROR}；开发环境执行 pip install pyJianYingDraft pymediainfo 后重启服务"
-            )
+        _require_engine()
 
         all_shots = [sh for sc in project.scenes for sh in sc.shots]
         if not all_shots:

@@ -402,9 +402,12 @@ def extract_video_frames(ref: str, count: int = 3) -> List[str]:
                                 "-frames:v", "1", "-q:v", "3", outp],
                                capture_output=True, timeout=60)
         else:
+            # 注意：输出文件名必须与上面 outs 的命名（{key}_{i+1}.jpg，无零填充）一致，
+            # 否则 ffmpeg 确实产出了帧、却在下面的 in 校验里被当成"不存在"而返回空列表。
             subprocess.run([exe, "-y", "-i", input_arg, "-vf", "fps=1/2",
                             "-frames:v", str(count), "-q:v", "3",
-                            os.path.join(root, f"{key}_%02d.jpg")],
+                            "-start_number", "1",
+                            os.path.join(root, f"{key}_%d.jpg")],
                            capture_output=True, timeout=90)
     except Exception:
         pass

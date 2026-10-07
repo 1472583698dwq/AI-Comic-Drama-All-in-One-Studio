@@ -998,6 +998,58 @@ class _CodeSourceBase:
                 or (definition.models[0] if definition.models else "") or "")
 
 
+def _video_caps_from_definition(definition) -> Dict[str, Any]:
+    """从代码源定义推断视频能力（modes / 首尾帧 / 参考 / 时长区间），供注册表自动选源按需过滤。
+
+    仅当定义提供了 input_schema.properties（显式契约）时才做硬判断；无法判断时返回空 dict，
+    调用方沿用基类默认（全部支持），避免误伤没有声明插槽的存量源。
+    """
+    props = ((getattr(definition, "input_schema", None) or {}).get("properties") or {})
+    if not props:
+        return {}
+    slots = set()
+    for key, v in props.items():
+        if not isinstance(v, dict):
+            continue
+        s = v.get("x-slot") or key
+        if s:
+            slots.add(str(s))
+        if v.get("x-handle") == "image":
+            slots.add(str(key))
+    declared = [str(c) for c in (getattr(definition, "capabilities", None) or [])]
+    supports_first = bool(slots & {"first_frame", "first_frame_url"})
+    supports_last = bool(slots & {"last_frame", "last_frame_url"})
+    supports_ref = bool(slots & {"reference_images", "reference_image", "reference_videos",
+                                 "reference_video", "reference_audios", "ref_audio", "reference_audio"})
+    modes = []
+    for m in ("t2v", "i2v", "r2v", "start_end"):
+        if m in declared:
+            modes.append(m)
+    if not modes:
+        modes.append("t2v")
+        if supports_first:
+            modes.append("i2v")
+        if supports_ref:
+            modes.append("r2v")
+        if supports_last:
+            modes.append("start_end")
+    out: Dict[str, Any] = {
+        "modes": modes,
+        "supports_first_frame": supports_first,
+        "supports_last_frame": supports_last,
+        "supports_reference": supports_ref,
+    }
+    ps = ((getattr(definition, "params_schema", None) or {}).get("properties") or {})
+    dur = ps.get("duration") if isinstance(ps, dict) else None
+    if isinstance(dur, dict):
+        mn, mx = dur.get("minimum"), dur.get("maximum")
+        if isinstance(mn, (int, float)):
+            out["min_duration"] = int(mn)
+        if isinstance(mx, (int, float)):
+            out["max_duration"] = int(mx)
+    return out
+
+
 class GenericCodeImageProvider(_CodeSourceBase, ImageProvider):
     kind = "image"
 
@@ -1068,6 +1120,13 @@ class GenericCodeImageProvider(_CodeSourceBase, ImageProvider):
 
 class GenericCodeVideoProvider(_CodeSourceBase, VideoProvider):
     kind = "video"
+
+    def get_capabilities(self) -> Dict[str, Any]:
+        cap = super().get_capabilities()
+        inferred = _video_caps_from_definition(self.definition)
+        if inferred:
+            cap.update(inferred)
+        return cap
 
     async def generate(self, req: VideoGenerateRequest) -> VideoGenerateResult:
         # 不再硬拦缺失 API Key：代码源可能内联 Key（如 AutoDL 源），由用户代码自行校验。
