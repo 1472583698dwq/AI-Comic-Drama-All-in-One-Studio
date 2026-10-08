@@ -2789,13 +2789,17 @@ async def storage_sync_status():
 
 
 @router.post("/storage-sync/scan")
-async def storage_sync_scan():
-    """立刻扫一遍本地 storage，把没传过的排进上传队列（不等它传完）。"""
+async def storage_sync_scan(force: bool = False):
+    """
+    立刻扫一遍本地 storage，把没传过的排进上传队列（不等它传完）。
+
+    force=true 连之前传失败、还在退避期里的一起重排 —— 远端刚修好时用。
+    """
     from app.storage_sync.mirror import mirror
     if not mirror.enabled():
         raise HTTPException(status_code=400, detail="云端同步未开启")
-    n = await run_in_threadpool(mirror.scan_once)
-    return {"queued": n, "queue": mirror.queue.qsize()}
+    n = await run_in_threadpool(mirror.scan_once, force)
+    return {"queued": n, "queue": mirror.queue.qsize(), "forced": force}
 
 
 @router.post("/storage-sync/pull")

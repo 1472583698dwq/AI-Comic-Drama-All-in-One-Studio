@@ -238,8 +238,12 @@ class StorageMirror:
                         out.append(rel)
         return out
 
-    def scan_once(self) -> int:
-        """把「和上次记录不一样」的文件排进上传队列，返回排了几条。"""
+    def scan_once(self, force: bool = False) -> int:
+        """
+        把「和上次记录不一样」的文件排进上传队列，返回排了几条。
+
+        force=True 时无视失败退避 —— 远端刚修好时用，不然得干等到退避期满。
+        """
         n = 0
         for rel in self._walk():
             local = os.path.join(settings.STORAGE_DIR, rel)
@@ -250,7 +254,7 @@ class StorageMirror:
             j = self.journal.get(rel)
             if j.get("size") == st.st_size and abs(float(j.get("mtime") or 0) - st.st_mtime) < 1e-6:
                 continue
-            if _in_backoff(j):
+            if not force and _in_backoff(j):
                 # 上次传失败还在退避期内。没有这道闸，一个传不上去的文件
                 # 会被每轮扫描重新排队，服务端挂掉时就成了死循环。
                 continue

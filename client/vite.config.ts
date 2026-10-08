@@ -15,6 +15,10 @@ export default defineConfig({
     // 本机 5173 空闲；被占时 strictPort 会明确报错而不是悄悄漂移，届时再改端口即可。
     port: 5173,
     strictPort: true,
+    // 同时监听 IPv4，供 cloudflared 以 127.0.0.1 回源（默认只绑 ::1）
+    host: '127.0.0.1',
+    // Cloudflare 隧道公网域名，否则 Vite 主机校验会拒绝
+    allowedHosts: ['minimax.apeiria.cc.cd'],
   },
   build: {
     emptyOutDir: true,
