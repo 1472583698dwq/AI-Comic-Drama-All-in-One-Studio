@@ -161,7 +161,7 @@ const ToolStepRow: React.FC<{
           </span>
         )}
         {media && (
-          <span className="w-8 h-8 rounded-md overflow-hidden bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 shrink-0 flex items-center justify-center" title="结果预览">
+          <span className="w-8 h-8 rounded-md overflow-hidden bg-surface/80 border border-white/70 dark:border-white/12 shrink-0 flex items-center justify-center" title="结果预览">
             {media.kind === 'image' ? (
               <img src={resolveMediaUrl(media.url)} alt="" className="w-full h-full object-cover" loading="lazy" />
             ) : media.kind === 'video' ? (

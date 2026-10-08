@@ -251,7 +251,7 @@ export const GlobalAiPolish: React.FC = () => {
           }}
           disabled={!!polishing}
           className={`inline-flex items-center gap-1 rounded-full border shadow-lg backdrop-blur-md text-[11px] font-medium transition-all
-            ${open ? 'bg-brand text-white border-brand shadow-brand/20' : 'bg-white/60 dark:bg-white/[.05] border-white/70 dark:border-white/12 text-gray-300 hover:text-white hover:border-brand/40 hover:bg-brand/10'}
+            ${open ? 'bg-brand text-white border-brand shadow-brand/20' : 'bg-surface/80 border-white/70 dark:border-white/12 text-gray-300 hover:text-white hover:border-brand/40 hover:bg-brand/10'}
             px-2.5 py-1 disabled:opacity-40
           `}
           title="AI 润色：选择不同 Skill 优化提示词"
@@ -261,8 +261,8 @@ export const GlobalAiPolish: React.FC = () => {
         </button>
 
         {open && (
-          <div className="w-64 bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-xl shadow-2xl overflow-hidden animate-fade-in">
-            <div className="px-3 py-2 border-b border-white/70 dark:border-white/12 bg-white/50 dark:bg-white/[.04]">
+          <div className="w-64 bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl shadow-2xl overflow-hidden animate-fade-in">
+            <div className="px-3 py-2 border-b border-white/70 dark:border-white/12 bg-surface/80">
               <div className="text-[11px] font-bold text-white flex items-center gap-1.5">
                 <Wand2 className="w-3.5 h-3.5 text-brand" /> 选择润色技能
               </div>

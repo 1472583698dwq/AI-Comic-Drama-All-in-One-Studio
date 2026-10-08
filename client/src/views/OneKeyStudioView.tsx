@@ -52,7 +52,7 @@ const Switch: React.FC<{ checked: boolean; onChange: (v: boolean) => void; label
       <span className="block text-[11.5px] [color:var(--color-text-main)] group-hover:text-brand-light transition-colors">{label}</span>
       {hint && <span className="block text-[9.5px] [color:var(--color-text-muted)] truncate">{hint}</span>}
     </span>
-    <span className={`w-8 h-[18px] rounded-full relative shrink-0 transition-colors ${checked ? 'bg-brand' : 'bg-white/65 dark:bg-white/[.09] border border-white/70 dark:border-white/12'}`}>
+    <span className={`w-8 h-[18px] rounded-full relative shrink-0 transition-colors ${checked ? 'bg-brand' : 'bg-surface-hover/80 border border-white/70 dark:border-white/12'}`}>
       <span className={`absolute top-[2px] w-[13px] h-[13px] rounded-full bg-white shadow transition-all ${checked ? 'left-[16px]' : 'left-[2px]'}`} />
     </span>
   </button>
@@ -62,7 +62,7 @@ const Switch: React.FC<{ checked: boolean; onChange: (v: boolean) => void; label
 const Card: React.FC<{ title: string; icon?: React.ReactNode; right?: React.ReactNode; children: React.ReactNode }> = ({
   title, icon, right, children,
 }) => (
-  <div className="rounded-2xl border border-white/70 dark:border-white/12 bg-white/65 dark:bg-black/40 p-3.5 space-y-2.5">
+  <div className="rounded-2xl border border-white/70 dark:border-white/12 bg-surface-hover/80 dark:bg-black/40 p-3.5 space-y-2.5">
     <div className="flex items-center gap-1.5">
       {icon}
       <span className="text-[11px] font-bold [color:var(--color-text-main)]">{title}</span>
@@ -81,13 +81,13 @@ const TabBtn: React.FC<{ active: boolean; onClick: () => void; icon?: React.Reac
     type="button" onClick={onClick}
     className={`px-3 h-8 rounded-lg text-[11.5px] font-medium inline-flex items-center gap-1.5 transition-colors ${
       active
-        ? 'bg-white/60 dark:bg-white/[.05] text-brand-light border border-brand/30 shadow-sm'
-        : 'border border-transparent [color:var(--color-text-muted)] hover:bg-white/55 dark:bg-white/[.06]'
+        ? 'bg-surface/80 text-brand-light border border-brand/30 shadow-sm'
+        : 'border border-transparent [color:var(--color-text-muted)] hover:bg-surface/80'
     }`}
   >
     {icon}{label}
     {typeof count === 'number' && count > 0 && (
-      <span className={`text-[9.5px] px-1.5 rounded-full ${active ? 'bg-brand/15 text-brand-light' : 'bg-white/65 dark:bg-white/[.09]'}`}>{count}</span>
+      <span className={`text-[9.5px] px-1.5 rounded-full ${active ? 'bg-brand/15 text-brand-light' : 'bg-surface-hover/80'}`}>{count}</span>
     )}
   </button>
 );
@@ -103,7 +103,7 @@ const Thumb: React.FC<{
       tone === 'video' ? 'border-emerald-500/45 hover:border-emerald-400'
         : tone === 'image' ? 'border-sky-500/35 hover:border-sky-400'
           : 'border-white/70 dark:border-white/12 hover:border-brand/50'
-    } bg-white/55 dark:bg-white/[.06] hover:ring-2 hover:ring-brand/25`}
+    } bg-surface/80 hover:ring-2 hover:ring-brand/25`}
   >
     {url
       ? <img src={resolveMediaUrl(url)} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover group-hover:scale-[1.04] transition-transform duration-300" />
@@ -309,7 +309,7 @@ export const OneKeyStudioView: React.FC = () => {
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-background">
       {/* ══ 顶栏 ══ */}
-      <header className="h-14 px-4 border-b border-white/70 dark:border-white/12 bg-white/70 dark:bg-black/45 backdrop-blur flex items-center gap-3 shrink-0">
+      <header className="h-14 px-4 border-b border-white/70 dark:border-white/12 bg-surface/80 dark:bg-black/45 backdrop-blur flex items-center gap-3 shrink-0">
         <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400 to-brand flex items-center justify-center shadow-lg shadow-amber-500/20 shrink-0">
           <Clapperboard className="w-4.5 h-4.5 text-white" />
         </div>
@@ -324,14 +324,14 @@ export const OneKeyStudioView: React.FC = () => {
         </div>
         <div className="flex-1" />
         {taskId && (
-          <span className={`text-[10.5px] px-2.5 py-1 rounded-full border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06] inline-flex items-center gap-1.5 ${sm.tone}`}>
+          <span className={`text-[10.5px] px-2.5 py-1 rounded-full border border-white/70 dark:border-white/12 bg-surface/80 inline-flex items-center gap-1.5 ${sm.tone}`}>
             <span className={`w-1.5 h-1.5 rounded-full ${sm.dot}`} />{sm.label} · {progress}%
           </span>
         )}
         <div className="relative">
           <button
             onClick={() => { setShowHistory((v) => !v); refreshHistory(); }}
-            className="h-8 px-3 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11.5px] font-medium [color:var(--color-text-main)] hover:bg-white/65 dark:bg-white/[.09] inline-flex items-center gap-1.5"
+            className="h-8 px-3 rounded-lg bg-surface/80 border border-white/70 dark:border-white/12 text-[11.5px] font-medium [color:var(--color-text-main)] hover:bg-surface-hover/80 inline-flex items-center gap-1.5"
           >
             <History className="w-3.5 h-3.5" />历史
             <span className="text-[10px] [color:var(--color-text-muted)]">{history.length}</span>
@@ -340,7 +340,7 @@ export const OneKeyStudioView: React.FC = () => {
           {showHistory && (
             <>
               <div className="fixed inset-0 z-30" onClick={() => setShowHistory(false)} />
-              <div className="absolute right-0 top-[calc(100%+8px)] w-[340px] max-h-[380px] overflow-y-auto custom-scrollbar z-40 bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-2xl shadow-2xl p-2">
+              <div className="absolute right-0 top-[calc(100%+8px)] w-[340px] max-h-[380px] overflow-y-auto custom-scrollbar z-40 bg-surface/80 border border-white/70 dark:border-white/12 rounded-2xl shadow-2xl p-2">
                 {history.length === 0 && <div className="px-3 py-6 text-[11px] text-center [color:var(--color-text-muted)]">暂无历史任务</div>}
                 {history.map((t) => {
                   const hm = statusMeta(t.status || '');
@@ -353,7 +353,7 @@ export const OneKeyStudioView: React.FC = () => {
                         setStatus(t.status || 'running'); setProgress(t.progress || 0);
                         setTodos([]); setCenterTab('shots');
                       }}
-                      className={`w-full text-left px-2.5 py-2 rounded-xl hover:bg-white/55 dark:bg-white/[.06] flex items-center gap-2.5 ${taskId === t.task_id ? 'bg-brand/10' : ''}`}
+                      className={`w-full text-left px-2.5 py-2 rounded-xl hover:bg-surface/80 flex items-center gap-2.5 ${taskId === t.task_id ? 'bg-brand/10' : ''}`}
                     >
                       <span className={`w-2 h-2 rounded-full shrink-0 ${hm.dot}`} />
                       <span className="flex-1 min-w-0">
@@ -379,17 +379,17 @@ export const OneKeyStudioView: React.FC = () => {
 
       <div className="flex-1 flex overflow-hidden">
         {/* ══ 左：创作配置 ══ */}
-        <aside className="w-[300px] shrink-0 border-r border-white/70 dark:border-white/12 bg-white/55 dark:bg-black/30 flex flex-col overflow-hidden">
+        <aside className="w-[300px] shrink-0 border-r border-white/70 dark:border-white/12 bg-surface/80 dark:bg-black/30 flex flex-col overflow-hidden">
           <div className="flex-1 overflow-y-auto custom-scrollbar p-3.5 space-y-3">
             <Card title="故事" icon={<Sparkles className="w-3.5 h-3.5 text-amber-400" />}>
               <input
                 value={title} onChange={(e) => setTitle(e.target.value)} placeholder="成片标题（可选）"
-                className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs [color:var(--color-text-main)] placeholder-[color:var(--color-text-muted)] focus:outline-none focus:border-brand/60"
+                className="w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs [color:var(--color-text-main)] placeholder-[color:var(--color-text-muted)] focus:outline-none focus:border-brand/60"
               />
               <textarea
                 value={text} onChange={(e) => setText(e.target.value)} rows={9}
                 placeholder="粘贴小说章节 / 故事梗概（≥20字）。总导演 Agent 会先写下 todolist 计划，然后自主编排全流程（流程不写死，计划实时可见）。"
-                className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl p-3 text-xs leading-relaxed [color:var(--color-text-main)] placeholder-[color:var(--color-text-muted)] focus:outline-none focus:border-brand/60 resize-y custom-scrollbar"
+                className="w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl p-3 text-xs leading-relaxed [color:var(--color-text-main)] placeholder-[color:var(--color-text-muted)] focus:outline-none focus:border-brand/60 resize-y custom-scrollbar"
               />
               <div className="flex justify-between text-[9.5px] [color:var(--color-text-muted)]">
                 <span>整章粘贴效果最好</span>
@@ -420,7 +420,7 @@ export const OneKeyStudioView: React.FC = () => {
             <Card title="导演组" icon={<Users className="w-3.5 h-3.5 text-accent-purple" />}>
               <select
                 value={teamId} onChange={(e) => applyTeam(e.target.value)}
-                className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-2.5 py-2 text-xs [color:var(--color-text-main)] focus:outline-none focus:border-brand/60"
+                className="w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl px-2.5 py-2 text-xs [color:var(--color-text-main)] focus:outline-none focus:border-brand/60"
               >
                 <option value="studio-default">默认简化剧组（资产复用 + 多参考 + 风格锁定 + 产物验收）</option>
                 {teams.filter((t) => t.id !== 'studio-default').map((t) => (
@@ -436,12 +436,12 @@ export const OneKeyStudioView: React.FC = () => {
             <Card title="成片选项" icon={<LayoutGrid className="w-3.5 h-3.5 text-brand-light" />}>
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[10.5px] [color:var(--color-text-muted)]">画幅</span>
-                <div className="inline-flex rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 p-0.5">
+                <div className="inline-flex rounded-lg bg-surface/80 border border-white/70 dark:border-white/12 p-0.5">
                   {[['9:16', '竖屏'], ['16:9', '横屏'], ['1:1', '方形']].map(([v, label]) => (
                     <button
                       key={v} type="button" onClick={() => setAspect(v)}
                       className={`px-2.5 py-1 rounded-md text-[10.5px] font-medium transition-colors ${
-                        aspect === v ? 'bg-white/60 dark:bg-white/[.05] text-brand-light shadow-sm' : '[color:var(--color-text-muted)] hover:text-[color:var(--color-text-main)]'
+                        aspect === v ? 'bg-surface/80 text-brand-light shadow-sm' : '[color:var(--color-text-muted)] hover:text-[color:var(--color-text-main)]'
                       }`}
                     >{label}</button>
                   ))}
@@ -461,7 +461,7 @@ export const OneKeyStudioView: React.FC = () => {
                 <select
                   value={promptSkill} onChange={(e) => setPromptSkill(e.target.value)}
                   title="指定模型写提示词时使用的技能：视频首选 minimax-h3-prompt（H3 三字段），通用兜底 prompt-basics（六要素）；不指定则由导演自选"
-                  className="flex-1 min-w-0 bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-lg px-2 py-1 text-[10.5px] [color:var(--color-text-main)] focus:outline-none focus:border-brand/60"
+                  className="flex-1 min-w-0 bg-surface/80 border border-white/70 dark:border-white/12 rounded-lg px-2 py-1 text-[10.5px] [color:var(--color-text-main)] focus:outline-none focus:border-brand/60"
                 >
                   <option value="">自动（导演自选，六要素兜底）</option>
                   {[
@@ -494,7 +494,7 @@ export const OneKeyStudioView: React.FC = () => {
           </div>
 
           {/* 发起按钮（吸底） */}
-          <div className="p-3 border-t border-white/70 dark:border-white/12 bg-white/70 dark:bg-black/45 shrink-0">
+          <div className="p-3 border-t border-white/70 dark:border-white/12 bg-surface/80 dark:bg-black/45 shrink-0">
             <button
               onClick={() => void handleRun()}
               disabled={running}
@@ -516,7 +516,7 @@ export const OneKeyStudioView: React.FC = () => {
             <div className="rounded-2xl border border-white/70 dark:border-white/12 bg-gradient-to-r from-brand/12 via-amber-500/6 to-transparent p-4">
               <div className="flex items-center gap-3">
                 <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${
-                  running ? 'bg-brand/15 border-brand/30' : done ? 'bg-emerald-500/15 border-emerald-500/30' : status === 'failed' ? 'bg-red-500/15 border-red-500/30' : 'bg-white/55 dark:bg-white/[.06] border-white/70 dark:border-white/12'
+                  running ? 'bg-brand/15 border-brand/30' : done ? 'bg-emerald-500/15 border-emerald-500/30' : status === 'failed' ? 'bg-red-500/15 border-red-500/30' : 'bg-surface/80 border-white/70 dark:border-white/12'
                 }`}>
                   {running && <Loader2 className="w-5 h-5 text-brand-light animate-spin" />}
                   {done && <CheckCircle2 className="w-5 h-5 text-emerald-400" />}
@@ -542,7 +542,7 @@ export const OneKeyStudioView: React.FC = () => {
                   <div className={`text-xl font-bold font-mono ${running ? 'text-brand-light' : done ? 'text-emerald-400' : '[color:var(--color-text-main)]'}`}>{progress}<span className="text-[11px] opacity-60">%</span></div>
                 </div>
               </div>
-              <div className="h-1.5 rounded-full bg-white/70 dark:bg-white/[.09] overflow-hidden mt-3">
+              <div className="h-1.5 rounded-full bg-surface/80 overflow-hidden mt-3">
                 <div
                   className={`h-full rounded-full transition-all duration-700 ${done ? 'bg-emerald-400' : 'bg-gradient-to-r from-brand to-amber-400'}`}
                   style={{ width: `${progress}%` }}
@@ -556,7 +556,7 @@ export const OneKeyStudioView: React.FC = () => {
                     ['分镜成片', videoDone, shots.length],
                     ['配音', shots.filter((s: any) => s?.audio_url).length, summary.voice_needed ?? '—'],
                   ].map(([label, a, b]) => (
-                    <div key={String(label)} className="rounded-xl bg-white/65 dark:bg-black/40 border border-white/50 dark:border-white/10 px-2.5 py-1.5">
+                    <div key={String(label)} className="rounded-xl bg-surface-hover/80 dark:bg-black/40 border border-white/50 dark:border-white/10 px-2.5 py-1.5">
                       <div className="text-[12px] font-bold font-mono [color:var(--color-text-main)]">
                         {a}<span className="text-[10px] opacity-50">/{b}</span>
                       </div>
@@ -569,7 +569,7 @@ export const OneKeyStudioView: React.FC = () => {
 
             {/* 导演计划 / 工具活动 */}
             {(todos.length > 0 || (stageList.length > 0 && running)) && (
-              <div className="mt-2.5 rounded-2xl border border-white/70 dark:border-white/12 bg-white/60 dark:bg-black/35 px-3.5 py-2.5">
+              <div className="mt-2.5 rounded-2xl border border-white/70 dark:border-white/12 bg-surface/80 dark:bg-black/35 px-3.5 py-2.5">
                 {todos.length > 0 ? (
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-[10px] font-bold text-brand-light flex items-center gap-1 shrink-0">
@@ -596,7 +596,7 @@ export const OneKeyStudioView: React.FC = () => {
                       <Loader2 className="w-3 h-3 animate-spin" />进行中
                     </span>
                     {stageList.slice(-8).map((s) => (
-                      <span key={s.stage} className="text-[10px] px-2 py-0.5 rounded-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 [color:var(--color-text-muted)]">
+                      <span key={s.stage} className="text-[10px] px-2 py-0.5 rounded-full bg-surface/80 border border-white/70 dark:border-white/12 [color:var(--color-text-muted)]">
                         {s.stage}
                       </span>
                     ))}
@@ -650,7 +650,7 @@ export const OneKeyStudioView: React.FC = () => {
             {centerTab === 'swarm' && <OneKeySwarmBoard subagents={subagentMap} />}
 
             {centerTab === 'logs' && (
-              <div ref={logRef} className="h-full min-h-[300px] max-h-full overflow-y-auto rounded-2xl bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 p-3.5 space-y-1 custom-scrollbar font-mono">
+              <div ref={logRef} className="h-full min-h-[300px] max-h-full overflow-y-auto rounded-2xl bg-surface/80 border border-white/70 dark:border-white/12 p-3.5 space-y-1 custom-scrollbar font-mono">
                 {logs.length === 0 && <div className="text-[11px] [color:var(--color-text-muted)] font-sans">等待 Agent 上报进度…</div>}
                 {logs.map((l: any, i: number) => (
                   <div key={i} className="text-[10.5px] leading-relaxed flex gap-2">
@@ -664,7 +664,7 @@ export const OneKeyStudioView: React.FC = () => {
         </main>
 
         {/* ══ 右：产物廊 ══ */}
-        <aside className="w-[340px] shrink-0 border-l border-white/70 dark:border-white/12 bg-white/55 dark:bg-black/30 flex flex-col overflow-hidden">
+        <aside className="w-[340px] shrink-0 border-l border-white/70 dark:border-white/12 bg-surface/80 dark:bg-black/30 flex flex-col overflow-hidden">
           <div className="p-3.5 pb-2 shrink-0">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold [color:var(--color-text-main)] flex items-center gap-1.5">
@@ -683,7 +683,7 @@ export const OneKeyStudioView: React.FC = () => {
                   ['成片', `${videoDone}`],
                   ['配音', `${shots.filter((s: any) => s?.audio_url).length}`],
                 ].map(([k, v]) => (
-                  <div key={k} className="rounded-xl bg-white/60 dark:bg-white/[.05] border border-white/50 dark:border-white/10 py-1.5 text-center">
+                  <div key={k} className="rounded-xl bg-surface/80 border border-white/50 dark:border-white/10 py-1.5 text-center">
                     <div className="text-[13px] font-bold font-mono [color:var(--color-text-main)]">{v}</div>
                     <div className="text-[9px] [color:var(--color-text-muted)]">{k}</div>
                   </div>
@@ -695,7 +695,7 @@ export const OneKeyStudioView: React.FC = () => {
           {!result ? (
             <div className="flex-1 flex items-center justify-center px-8">
               <div className="text-center space-y-3">
-                <div className="w-14 h-14 rounded-2xl bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 flex items-center justify-center mx-auto">
+                <div className="w-14 h-14 rounded-2xl bg-surface/80 border border-white/70 dark:border-white/12 flex items-center justify-center mx-auto">
                   <ImageIcon className="w-6 h-6 [color:var(--color-text-muted)]" />
                 </div>
                 <div className="text-[11px] leading-relaxed [color:var(--color-text-muted)]">
@@ -757,7 +757,7 @@ export const OneKeyStudioView: React.FC = () => {
                       {shots.map((s: any, i: number) => {
                         const has = !!(s?.video_url || s?.image_url);
                         return (
-                          <div key={s?.id || s?.shot_index || i} className="flex items-center gap-2.5 rounded-xl border border-white/70 dark:border-white/12 bg-white/65 dark:bg-black/40 p-2">
+                          <div key={s?.id || s?.shot_index || i} className="flex items-center gap-2.5 rounded-xl border border-white/70 dark:border-white/12 bg-surface-hover/80 dark:bg-black/40 p-2">
                             <button
                               type="button"
                               title={s?.video_url ? '播放成片' : s?.image_url ? '预览成图' : '待生成'}
@@ -766,7 +766,7 @@ export const OneKeyStudioView: React.FC = () => {
                                 else if (s?.image_url) openPreview('image', s.image_url, `分镜 #${s.shot_index} 成图`);
                               }}
                               className={`relative w-16 h-10 rounded-lg overflow-hidden border shrink-0 cursor-pointer ${
-                                s?.video_url ? 'border-emerald-500/45' : has ? 'border-white/70 dark:border-white/12' : 'border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06]'
+                                s?.video_url ? 'border-emerald-500/45' : has ? 'border-white/70 dark:border-white/12' : 'border-white/70 dark:border-white/12 bg-surface/80'
                               }`}
                             >
                               {s?.image_url
@@ -794,7 +794,7 @@ export const OneKeyStudioView: React.FC = () => {
                               <button
                                 type="button" title="试听配音"
                                 onClick={() => openPreview('audio', s.audio_url, `分镜 #${s.shot_index} 配音`)}
-                                className="w-7 h-7 rounded-lg border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] hover:border-pink-400/50 flex items-center justify-center shrink-0"
+                                className="w-7 h-7 rounded-lg border border-white/70 dark:border-white/12 bg-surface/80 hover:border-pink-400/50 flex items-center justify-center shrink-0"
                               >
                                 <Music className="w-3 h-3 text-pink-400" />
                               </button>
@@ -829,7 +829,7 @@ export const OneKeyStudioView: React.FC = () => {
 
               {/* 底部动作 */}
               {result?.project && (
-                <div className="p-3 border-t border-white/70 dark:border-white/12 bg-white/70 dark:bg-black/45 shrink-0 space-y-1.5">
+                <div className="p-3 border-t border-white/70 dark:border-white/12 bg-surface/80 dark:bg-black/45 shrink-0 space-y-1.5">
                   <div className="grid grid-cols-2 gap-1.5">
                     <button
                       onClick={() => void handleOpenProject('studio')}
@@ -841,14 +841,14 @@ export const OneKeyStudioView: React.FC = () => {
                     <button
                       onClick={() => void handleOpenProject('canvas')}
                       disabled={saving}
-                      className="h-9 rounded-xl bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 text-[11px] font-bold [color:var(--color-text-main)] inline-flex items-center justify-center gap-1.5 hover:bg-white/55 dark:bg-white/[.06] disabled:opacity-50"
+                      className="h-9 rounded-xl bg-surface/80 border border-white/70 dark:border-white/12 text-[11px] font-bold [color:var(--color-text-main)] inline-flex items-center justify-center gap-1.5 hover:bg-surface/80 disabled:opacity-50"
                     >
                       <ImageIcon className="w-3.5 h-3.5" />画布编辑
                     </button>
                   </div>
                   <button
                     onClick={() => window.dispatchEvent(new CustomEvent('open-export-modal'))}
-                    className="w-full h-9 rounded-xl bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 text-[11px] font-bold [color:var(--color-text-main)] inline-flex items-center justify-center gap-1.5 hover:bg-white/55 dark:bg-white/[.06]"
+                    className="w-full h-9 rounded-xl bg-surface/80 border border-white/70 dark:border-white/12 text-[11px] font-bold [color:var(--color-text-main)] inline-flex items-center justify-center gap-1.5 hover:bg-surface/80"
                   >
                     <Download className="w-3.5 h-3.5" />再导出剪映
                   </button>
@@ -880,7 +880,7 @@ export const OneKeyStudioView: React.FC = () => {
               <img src={resolveMediaUrl(preview.url)} alt={preview.title} className="max-w-[92vw] max-h-[88vh] object-contain rounded-xl" />
             )}
             {preview.kind === 'audio' && (
-              <div className="bg-white/60 dark:bg-white/[.05] rounded-xl p-4">
+              <div className="bg-surface/80 rounded-xl p-4">
                 <audio src={resolveMediaUrl(preview.url)} controls autoPlay className="w-[420px] max-w-[80vw]" />
               </div>
             )}
@@ -896,7 +896,7 @@ export const OneKeyStudioView: React.FC = () => {
 const EmptyState: React.FC<{ running: boolean; text: string }> = ({ running, text }) => (
   <div className="h-full min-h-[220px] flex items-center justify-center">
     <div className="text-center space-y-3">
-      <div className="w-12 h-12 rounded-2xl bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 flex items-center justify-center mx-auto">
+      <div className="w-12 h-12 rounded-2xl bg-surface/80 border border-white/70 dark:border-white/12 flex items-center justify-center mx-auto">
         {running ? <Loader2 className="w-5 h-5 text-brand-light animate-spin" /> : <Clapperboard className="w-5 h-5 [color:var(--color-text-muted)]" />}
       </div>
       <div className="text-[11px] [color:var(--color-text-muted)] max-w-[280px] leading-relaxed">{text}</div>

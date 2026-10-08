@@ -82,13 +82,13 @@ const ToastCard: React.FC<{ toast: ToastItem; onClose: () => void }> = ({ toast,
   const getBorderColor = () => {
     switch (toast.type) {
       case 'success':
-        return 'border-emerald-500/30 bg-white/85 dark:bg-[#141419]/95 backdrop-blur-2xl shadow-emerald-500/5';
+        return 'border-emerald-500/30 bg-surface/80 dark:bg-[#141419]/95 backdrop-blur-2xl shadow-emerald-500/5';
       case 'error':
-        return 'border-red-500/30 bg-white/85 dark:bg-[#141419]/95 backdrop-blur-2xl shadow-red-500/5';
+        return 'border-red-500/30 bg-surface/80 dark:bg-[#141419]/95 backdrop-blur-2xl shadow-red-500/5';
       case 'warning':
-        return 'border-amber-500/30 bg-white/85 dark:bg-[#141419]/95 backdrop-blur-2xl shadow-amber-500/5';
+        return 'border-amber-500/30 bg-surface/80 dark:bg-[#141419]/95 backdrop-blur-2xl shadow-amber-500/5';
       default:
-        return 'border-brand/30 bg-white/85 dark:bg-[#141419]/95 backdrop-blur-2xl shadow-brand/5';
+        return 'border-brand/30 bg-surface/80 dark:bg-[#141419]/95 backdrop-blur-2xl shadow-brand/5';
     }
   };
 
@@ -109,7 +109,7 @@ const ToastCard: React.FC<{ toast: ToastItem; onClose: () => void }> = ({ toast,
       </div>
       <button
         onClick={onClose}
-        className="p-1 rounded-lg text-gray-400 hover:text-white hover:bg-white/70 dark:hover:bg-white/[.09] transition-colors shrink-0 -mr-1 -mt-1"
+        className="p-1 rounded-lg text-gray-400 hover:text-white hover:bg-surface/80 transition-colors shrink-0 -mr-1 -mt-1"
       >
         <X className="w-3.5 h-3.5" />
       </button>
@@ -148,7 +148,7 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-[99999] bg-black/65 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150">
-      <div className="w-full max-w-md bg-white/85 dark:bg-[#141419]/95 backdrop-blur-2xl border border-white/70 dark:border-white/12 rounded-3xl p-6 shadow-[0_30px_70px_-28px_rgba(15,23,42,.7)] flex flex-col gap-4 animate-in zoom-in-95 duration-150">
+      <div className="w-full max-w-md bg-surface/80 dark:bg-[#141419]/95 backdrop-blur-2xl border border-white/70 dark:border-white/12 rounded-3xl p-6 shadow-[0_30px_70px_-28px_rgba(15,23,42,.7)] flex flex-col gap-4 animate-in zoom-in-95 duration-150">
         <div className="flex items-start gap-3.5">
           <div
             className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 ${
@@ -168,7 +168,7 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({
         <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-white/60 dark:border-white/10">
           <button
             onClick={onCancel}
-            className="px-4 py-2 rounded-xl bg-white/60 dark:bg-white/[.06] hover:bg-white/75 dark:hover:bg-white/[.1] border border-white/70 dark:border-white/12 text-xs font-semibold text-gray-300 hover:text-white transition-all"
+            className="px-4 py-2 rounded-xl bg-surface/80 hover:bg-surface/80 border border-white/70 dark:border-white/12 text-xs font-semibold text-gray-300 hover:text-white transition-all"
           >
             {cancelText}
           </button>
@@ -227,7 +227,7 @@ const PromptModal: React.FC<PromptModalProps> = ({
     <div className="fixed inset-0 z-[99999] bg-black/65 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150">
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-md bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-3xl p-6 shadow-2xl flex flex-col gap-4 animate-in zoom-in-95 duration-150"
+        className="w-full max-w-md bg-surface/80 border border-white/70 dark:border-white/12 rounded-3xl p-6 shadow-2xl flex flex-col gap-4 animate-in zoom-in-95 duration-150"
       >
         <div>
           <h3 className="text-sm font-bold text-white tracking-tight">{title}</h3>
@@ -243,14 +243,14 @@ const PromptModal: React.FC<PromptModalProps> = ({
           onKeyDown={(e) => {
             if (e.key === 'Escape') onCancel();
           }}
-          className="w-full px-3.5 py-2.5 rounded-xl bg-white/60 dark:bg-white/[.06] border border-white/70 dark:border-white/12 focus:border-brand focus:outline-none text-xs text-white placeholder-gray-500 shadow-inner"
+          className="w-full px-3.5 py-2.5 rounded-xl bg-surface/80 border border-white/70 dark:border-white/12 focus:border-brand focus:outline-none text-xs text-white placeholder-gray-500 shadow-inner"
         />
 
         <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-white/60 dark:border-white/10">
           <button
             type="button"
             onClick={onCancel}
-            className="px-4 py-2 rounded-xl bg-white/60 dark:bg-white/[.06] hover:bg-white/75 dark:hover:bg-white/[.1] border border-white/70 dark:border-white/12 text-xs font-semibold text-gray-300 hover:text-white transition-all"
+            className="px-4 py-2 rounded-xl bg-surface/80 hover:bg-surface/80 border border-white/70 dark:border-white/12 text-xs font-semibold text-gray-300 hover:text-white transition-all"
           >
             {cancelText}
           </button>

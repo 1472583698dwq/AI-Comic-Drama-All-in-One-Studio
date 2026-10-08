@@ -16,16 +16,16 @@ import React from 'react';
 
 /** 磨砂面板（大卡片） */
 export const GLASS =
-  'border border-white/70 bg-white/55 backdrop-blur-2xl '
+  'border border-white/70 bg-surface/80 backdrop-blur-2xl '
   + 'shadow-[0_0_0_1px_rgba(15,23,42,.045),0_1px_0_0_rgba(255,255,255,.9)_inset,0_26px_54px_-32px_rgba(15,23,42,.38)] '
-  + 'dark:border-white/12 dark:bg-white/[.06] '
+  + 'dark:border-white/12 '
   + 'dark:shadow-[0_0_0_1px_rgba(255,255,255,.05),0_1px_0_0_rgba(255,255,255,.06)_inset,0_26px_54px_-32px_rgba(0,0,0,.85)]';
 
 /** 磨砂面板（小控件/工具条） */
 export const GLASS_SOFT =
-  'border border-white/65 bg-white/45 backdrop-blur-xl '
+  'border border-white/65 bg-surface/80 backdrop-blur-xl '
   + 'shadow-[0_1px_0_0_rgba(255,255,255,.7)_inset,0_18px_36px_-28px_rgba(15,23,42,.35)] '
-  + 'dark:border-white/10 dark:bg-white/[.05] '
+  + 'dark:border-white/10 '
   + 'dark:shadow-[0_1px_0_0_rgba(255,255,255,.05)_inset,0_18px_36px_-28px_rgba(0,0,0,.8)]';
 
 export const T_MAIN = '[color:var(--color-text-main)]';
@@ -34,8 +34,8 @@ export const T_MUTED = '[color:var(--color-text-muted)]';
 
 /** 徽标胶囊 */
 export const PILL =
-  'inline-flex items-center gap-1 h-6 px-2.5 rounded-full border border-white/70 bg-white/60 backdrop-blur-md '
-  + 'text-[10.5px] font-semibold dark:border-white/10 dark:bg-white/[.08]';
+  'inline-flex items-center gap-1 h-6 px-2.5 rounded-full border border-white/70 bg-surface/80 backdrop-blur-md '
+  + 'text-[10.5px] font-semibold dark:border-white/10 ';
 
 /** 主按钮（品牌渐变） */
 export const CTA_GRADIENT =
@@ -46,9 +46,9 @@ export const CTA_GRADIENT =
 
 /** 次按钮（磨砂幽灵） */
 export const BTN_GHOST =
-  'inline-flex items-center justify-center gap-2 rounded-2xl border border-white/70 bg-white/55 backdrop-blur-xl '
-  + `${T_SEC} hover:[color:var(--color-text-main)] hover:bg-white/80 active:scale-[.98] transition-all `
-  + 'dark:border-white/10 dark:bg-white/[.05] dark:hover:bg-white/[.09] '
+  'inline-flex items-center justify-center gap-2 rounded-2xl border border-white/70 bg-surface/80 backdrop-blur-xl '
+  + `${T_SEC} hover:[color:var(--color-text-main)] hover:bg-surface/80 active:scale-[.98] transition-all `
+  + 'dark:border-white/10 dark:hover:bg-white/[.09] '
   + 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-brand-glow)]';
 
 /** 分区标题：品牌短竖线 + 图标 + 标题 + 右侧动作 */

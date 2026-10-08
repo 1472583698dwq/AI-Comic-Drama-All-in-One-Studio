@@ -19,10 +19,10 @@ function MobileApp() {
   return (
     <div className="h-screen w-screen flex flex-col bg-background text-gray-100 overflow-hidden">
       {/* Top bar — minimal for standalone */}
-      <header className="h-12 px-4 flex items-center justify-between bg-white/60 dark:bg-white/[.05] border-b border-white/70 dark:border-white/12 shrink-0">
+      <header className="h-12 px-4 flex items-center justify-between bg-surface/80 border-b border-white/70 dark:border-white/12 shrink-0">
         <span className="text-xs font-bold text-white">🎬 AI 漫剧 · 移动端</span>
         <div className="flex items-center space-x-2">
-          <button onClick={() => setIsImportOpen(true)} className="px-3 py-1 rounded-lg text-xs font-medium bg-white/65 dark:bg-white/[.09] border border-white/70 dark:border-white/12 text-white">导入小说</button>
+          <button onClick={() => setIsImportOpen(true)} className="px-3 py-1 rounded-lg text-xs font-medium bg-surface-hover/80 border border-white/70 dark:border-white/12 text-white">导入小说</button>
           <button onClick={() => setIsExportOpen(true)} className="px-3 py-1 rounded-lg text-xs font-semibold bg-brand text-white">导出</button>
         </div>
       </header>

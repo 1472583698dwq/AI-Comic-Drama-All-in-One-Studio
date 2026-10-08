@@ -239,7 +239,7 @@ export const AiPolishButton: React.FC<AiPolishButtonProps> = ({
         onClick={handleOpenModal}
         className={`inline-flex items-center gap-1.5 rounded-full border text-[11px] font-semibold transition-all shadow-sm
           ${size === 'xs' ? 'px-2.5 py-1' : 'px-3 py-1.5'}
-          bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 [color:var(--color-text-main)] hover:border-[color:var(--color-brand)]/60 hover:[color:var(--color-brand-light)] hover:bg-[color:var(--color-brand)]/10 ${className}
+          bg-surface/80 border border-white/70 dark:border-white/12 [color:var(--color-text-main)] hover:border-[color:var(--color-brand)]/60 hover:[color:var(--color-brand-light)] hover:bg-[color:var(--color-brand)]/10 ${className}
         `}
         title="AI 定向润色：根据你的具体要求与技能风格智能重写"
       >
@@ -270,7 +270,7 @@ export const AiPolishButton: React.FC<AiPolishButtonProps> = ({
               </div>
               <button
                 onClick={() => setModalOpen(false)}
-                className={`p-1.5 rounded-xl ${T_MUTED} hover:${T_MAIN} hover:bg-white/60 dark:hover:bg-white/[.08] transition`}
+                className={`p-1.5 rounded-xl ${T_MUTED} hover:${T_MAIN} hover:bg-surface/80 transition`}
               >
                 <X className="w-4 h-4" />
               </button>
@@ -293,7 +293,7 @@ export const AiPolishButton: React.FC<AiPolishButtonProps> = ({
                   onChange={(e) => setOriginalText(e.target.value)}
                   rows={2}
                   placeholder="输入或粘贴需要优化的原始内容..."
-                  className={`w-full bg-white/60 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl p-2.5 text-xs ${T_MAIN} placeholder-[color:var(--color-text-muted)] focus:outline-none focus:border-[color:var(--color-brand)]/60 font-mono resize-none leading-relaxed`}
+                  className={`w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl p-2.5 text-xs ${T_MAIN} placeholder-[color:var(--color-text-muted)] focus:outline-none focus:border-[color:var(--color-brand)]/60 font-mono resize-none leading-relaxed`}
                 />
               </div>
 
@@ -328,7 +328,7 @@ export const AiPolishButton: React.FC<AiPolishButtonProps> = ({
                         className={`px-2 py-0.5 rounded-lg text-[10px] font-medium whitespace-nowrap transition ${
                           selectedCategory === tab.id
                             ? 'bg-brand text-white font-bold'
-                            : `bg-white/55 dark:bg-white/[.06] ${T_MUTED} hover:${T_MAIN}`
+                            : `bg-surface/80 ${T_MUTED} hover:${T_MAIN}`
                         }`}
                       >
                         {tab.label} ({count})
@@ -351,7 +351,7 @@ export const AiPolishButton: React.FC<AiPolishButtonProps> = ({
                           className={`p-2 rounded-xl text-left border transition-all flex flex-col justify-between gap-1 ${
                             isSelected
                               ? 'bg-brand/20 border-brand text-white shadow-sm ring-1 ring-brand/40'
-                              : `bg-white/55 dark:bg-white/[.06] border-white/70 dark:border-white/12 ${T_SEC} hover:border-[color:var(--color-brand)]/40 hover:bg-white/75 dark:hover:bg-white/[.09]`
+                              : `bg-surface/80 border-white/70 dark:border-white/12 ${T_SEC} hover:border-[color:var(--color-brand)]/40 hover:bg-surface/80`
                           }`}
                         >
                           <div className="flex items-center justify-between w-full gap-1">
@@ -413,7 +413,7 @@ export const AiPolishButton: React.FC<AiPolishButtonProps> = ({
                   onChange={(e) => setUserInstruction(e.target.value)}
                   rows={2}
                   placeholder="💡 例如：改成暴雨夜景、人物眼神更有杀气、手持燃烧的青色长剑、镜头极速推向面部特写、增加电影逆光宽画幅..."
-                  className={`w-full bg-white/60 dark:bg-white/[.06] border border-[color:var(--color-brand)]/30 rounded-xl p-2.5 text-xs ${T_MAIN} placeholder-[color:var(--color-text-muted)] focus:outline-none focus:border-[color:var(--color-brand)] leading-relaxed resize-none`}
+                  className={`w-full bg-surface/80 border border-[color:var(--color-brand)]/30 rounded-xl p-2.5 text-xs ${T_MAIN} placeholder-[color:var(--color-text-muted)] focus:outline-none focus:border-[color:var(--color-brand)] leading-relaxed resize-none`}
                 />
 
                 {/* 快捷标签 */}
@@ -425,7 +425,7 @@ export const AiPolishButton: React.FC<AiPolishButtonProps> = ({
                         key={tag}
                         type="button"
                         onClick={() => handleAddQuickTag(tag)}
-                        className={`px-2 py-0.5 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 hover:border-[color:var(--color-brand)]/50 hover:bg-[color:var(--color-brand)]/10 text-[10px] ${T_SEC} hover:text-[color:var(--color-brand-light)] transition`}
+                        className={`px-2 py-0.5 rounded-lg bg-surface/80 border border-white/70 dark:border-white/12 hover:border-[color:var(--color-brand)]/50 hover:bg-[color:var(--color-brand)]/10 text-[10px] ${T_SEC} hover:text-[color:var(--color-brand-light)] transition`}
                       >
                         {tag}
                       </button>

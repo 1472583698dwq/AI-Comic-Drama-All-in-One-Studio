@@ -104,7 +104,7 @@ export const SkillVersionDiff: React.FC<{ skillName: string }> = ({ skillName })
   const snapshots = vers.filter(v => v.vid !== 'current');
 
   return (
-    <div className="bg-white/55 dark:bg-white/[.06] rounded-xl border border-white/60 dark:border-white/12 overflow-hidden">
+    <div className="bg-surface/80 rounded-xl border border-white/60 dark:border-white/12 overflow-hidden">
       <button
         onClick={() => { if (!open && vers.length === 0) load(); setOpen(!open); }}
         className="w-full px-4 py-2.5 flex items-center gap-1.5 text-xs font-semibold text-violet-300 hover:bg-white/5"
@@ -124,7 +124,7 @@ export const SkillVersionDiff: React.FC<{ skillName: string }> = ({ skillName })
             <>
               <select
                 value={vid} onChange={(e) => switchVer(e.target.value)}
-                className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-lg px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-violet-500"
+                className="w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-lg px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-violet-500"
               >
                 {snapshots.map(v => (
                   <option key={v.vid} value={v.vid}>{fmtTime(v.mtime)} · {v.source} · {(v.size / 1024).toFixed(1)}KB</option>
@@ -135,7 +135,7 @@ export const SkillVersionDiff: React.FC<{ skillName: string }> = ({ skillName })
                 快照 → 现行：<span className="text-emerald-400 font-mono">+{stat.add}</span>
                 <span className="text-red-400 font-mono">-{stat.del}</span>
               </div>
-              <pre className="text-[11px] font-mono leading-relaxed max-h-64 overflow-y-auto custom-scrollbar rounded-lg border border-white/10 bg-white/55 dark:bg-white/[.06] p-2 whitespace-pre-wrap break-words">
+              <pre className="text-[11px] font-mono leading-relaxed max-h-64 overflow-y-auto custom-scrollbar rounded-lg border border-white/10 bg-surface/80 p-2 whitespace-pre-wrap break-words">
                 {ops.filter(o => o.t !== 'eq').length === 0
                   ? <span className="text-gray-500">与现行完全一致。</span>
                   : ops.filter(o => o.t !== 'eq').slice(0, 400).map((o, i) => (

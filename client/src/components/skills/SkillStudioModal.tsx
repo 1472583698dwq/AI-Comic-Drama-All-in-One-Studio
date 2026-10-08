@@ -131,9 +131,9 @@ export const SkillStudioModal: React.FC<SkillStudioModalProps> = ({ isOpen, onCl
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fade-in">
-      <div className="w-full max-w-4xl h-[82vh] bg-white/60 dark:bg-white/[.05] rounded-2xl border border-white/70 dark:border-white/12 flex flex-col overflow-hidden shadow-2xl">
+      <div className="w-full max-w-4xl h-[82vh] bg-surface/80 rounded-2xl border border-white/70 dark:border-white/12 flex flex-col overflow-hidden shadow-2xl">
         {/* Header */}
-        <div className="h-14 px-6 border-b border-white/70 dark:border-white/12 flex items-center justify-between bg-white/55 dark:bg-white/[.05]">
+        <div className="h-14 px-6 border-b border-white/70 dark:border-white/12 flex items-center justify-between bg-surface/80">
           <div className="flex items-center space-x-3">
             <div className="p-2 rounded-xl bg-gradient-to-r from-accent-orange to-brand text-white shadow-sm">
               <Wand2 className="w-5 h-5" />
@@ -154,7 +154,7 @@ export const SkillStudioModal: React.FC<SkillStudioModalProps> = ({ isOpen, onCl
           <div className="flex items-center gap-1.5">
             <button
               onClick={handleReload}
-              className="px-3 py-1.5 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-xs text-gray-300 hover:text-white hover:border-brand flex items-center gap-1.5"
+              className="px-3 py-1.5 rounded-lg bg-surface/80 border border-white/70 dark:border-white/12 text-xs text-gray-300 hover:text-white hover:border-brand flex items-center gap-1.5"
               title="重载所有 Skills"
             >
               <RefreshIcon className="w-3.5 h-3.5" /> 重载
@@ -167,7 +167,7 @@ export const SkillStudioModal: React.FC<SkillStudioModalProps> = ({ isOpen, onCl
             </button>
             <button
               onClick={onClose}
-              className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/65 dark:bg-white/[.09] transition-all"
+              className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-surface-hover/80 transition-all"
             >
               <X className="w-5 h-5" />
             </button>
@@ -186,8 +186,8 @@ export const SkillStudioModal: React.FC<SkillStudioModalProps> = ({ isOpen, onCl
                   onClick={() => setSelectedSkill(skill)}
                   className={`p-3.5 rounded-xl border cursor-pointer transition-all relative group ${
                     isSelected
-                      ? 'bg-white/65 dark:bg-white/[.09] border-accent-orange glow-border'
-                      : 'bg-white/60 dark:bg-white/[.05] border-white/70 dark:border-white/12 hover:border-white/80 dark:border-white/20'
+                      ? 'bg-surface-hover/80 border-accent-orange glow-border'
+                      : 'bg-surface/80 border-white/70 dark:border-white/12 hover:border-white/80 dark:border-white/20'
                   }`}
                 >
                   <button
@@ -195,13 +195,13 @@ export const SkillStudioModal: React.FC<SkillStudioModalProps> = ({ isOpen, onCl
                       e.stopPropagation();
                       handleDelete(skill.name);
                     }}
-                    className="absolute top-2 right-2 p-1 rounded-lg bg-white/75 dark:bg-black/50 text-gray-400 hover:text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all"
+                    className="absolute top-2 right-2 p-1 rounded-lg bg-surface/80 dark:bg-black/50 text-gray-400 hover:text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all"
                     title="删除此 Skill"
                   >
                     <Trash2 className="w-3 h-3" />
                   </button>
                   <div className="flex items-center space-x-2 mb-1.5 pr-6">
-                    <div className="p-1.5 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/5">
+                    <div className="p-1.5 rounded-lg bg-surface/80 border border-white/5">
                       {getSkillIcon(skill.category)}
                     </div>
                     <span className="text-xs font-bold text-white truncate">{skill.name}</span>
@@ -211,7 +211,7 @@ export const SkillStudioModal: React.FC<SkillStudioModalProps> = ({ isOpen, onCl
                   {/* Tools Badge */}
                   <div className="mt-2.5 flex flex-wrap gap-1">
                     {skill.tools?.map((t) => (
-                      <span key={t} className="text-[9px] px-1.5 py-0.2 rounded bg-white/55 dark:bg-white/[.06] text-accent-green font-mono border border-accent-green/20">
+                      <span key={t} className="text-[9px] px-1.5 py-0.2 rounded bg-surface/80 text-accent-green font-mono border border-accent-green/20">
                         {t}
                       </span>
                     ))}
@@ -225,7 +225,7 @@ export const SkillStudioModal: React.FC<SkillStudioModalProps> = ({ isOpen, onCl
           <div className="flex-1 p-6 flex flex-col space-y-4 overflow-y-auto custom-scrollbar">
             {selectedSkill && (
               <>
-                <div className="bg-white/55 dark:bg-white/[.06] p-4 rounded-xl border border-white/70 dark:border-white/12">
+                <div className="bg-surface/80 p-4 rounded-xl border border-white/70 dark:border-white/12">
                   <div className="flex items-center justify-between mb-1">
                     <div className="flex items-center space-x-2">
                       {getSkillIcon(selectedSkill.category)}
@@ -247,7 +247,7 @@ export const SkillStudioModal: React.FC<SkillStudioModalProps> = ({ isOpen, onCl
                 </div>
 
                 {/* Skill SOP Instructions Preview */}
-                <div className="bg-white/55 dark:bg-white/[.06] p-4 rounded-xl border border-white/60 dark:border-white/12 flex flex-col space-y-2">
+                <div className="bg-surface/80 p-4 rounded-xl border border-white/60 dark:border-white/12 flex flex-col space-y-2">
                   <div className="flex items-center space-x-1.5 text-xs font-semibold text-brand-light">
                     <FileCode className="w-3.5 h-3.5" />
                     <span>SKILL.md 导演指导规范 (Instructions)</span>
@@ -274,7 +274,7 @@ export const SkillStudioModal: React.FC<SkillStudioModalProps> = ({ isOpen, onCl
                     {/* Tool Calls */}
                     <div className="flex flex-wrap gap-1.5 mt-1">
                       {lastResult.tool_calls.map((tc, i) => (
-                        <span key={i} className="text-[10px] px-2 py-0.5 rounded bg-white/55 dark:bg-white/[.06] text-accent-green font-mono flex items-center space-x-1 border border-accent-green/30">
+                        <span key={i} className="text-[10px] px-2 py-0.5 rounded bg-surface/80 text-accent-green font-mono flex items-center space-x-1 border border-accent-green/30">
                           <Cpu className="w-3 h-3" />
                           <span>{tc.tool} (OK)</span>
                         </span>
@@ -306,14 +306,14 @@ export const SkillStudioModal: React.FC<SkillStudioModalProps> = ({ isOpen, onCl
 
       {/* Import Skill Modal */}
       {showImport && (
-        <div className="absolute inset-0 bg-white/75 dark:bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowImport(false)}>
-          <div className="bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-2xl w-full max-w-lg p-5 space-y-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="absolute inset-0 bg-surface/80 dark:bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowImport(false)}>
+          <div className="bg-surface/80 border border-white/70 dark:border-white/12 rounded-2xl w-full max-w-lg p-5 space-y-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-white flex items-center gap-2">
                 <Upload className="w-4 h-4 text-brand" /> 导入 Skill
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-brand/20 text-brand-light border border-brand/30">SKILL.md / .zip</span>
               </h3>
-              <button onClick={() => setShowImport(false)} className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/65 dark:bg-white/[.09]">
+              <button onClick={() => setShowImport(false)} className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-surface-hover/80">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -339,7 +339,7 @@ export const SkillStudioModal: React.FC<SkillStudioModalProps> = ({ isOpen, onCl
                   onChange={(e) => setImportContent(e.target.value)}
                   placeholder={`---\nname: my-awesome-skill\ndescription: 描述\nversion: 1.0.0\ncategory: general\ntools:\n  - generate_image\n---\n\n# 技能说明\n...`}
                   rows={8}
-                  className="mt-1 w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl p-3 text-xs font-mono text-white placeholder-gray-500 focus:outline-none focus:border-brand resize-none"
+                  className="mt-1 w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl p-3 text-xs font-mono text-white placeholder-gray-500 focus:outline-none focus:border-brand resize-none"
                 />
               </div>
 
@@ -349,13 +349,13 @@ export const SkillStudioModal: React.FC<SkillStudioModalProps> = ({ isOpen, onCl
                   value={importName}
                   onChange={(e) => setImportName(e.target.value)}
                   placeholder="如: my-skill-name"
-                  className="mt-1 w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand"
+                  className="mt-1 w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand"
                 />
               </div>
             </div>
 
             <div className="flex justify-end gap-2">
-              <button onClick={() => setShowImport(false)} className="px-4 py-2 rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-xs text-gray-300 hover:text-white">
+              <button onClick={() => setShowImport(false)} className="px-4 py-2 rounded-xl bg-surface/80 border border-white/70 dark:border-white/12 text-xs text-gray-300 hover:text-white">
                 取消
               </button>
               <button

@@ -61,10 +61,10 @@ export const ComfyWorkflowNode: React.FC<NodeProps> = ({ data, id }) => {
   };
 
   return (
-    <div className="w-[340px] bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-2xl shadow-xl overflow-hidden">
-      <div className="px-3 py-2.5 bg-white/60 dark:bg-white/[.05] border-b border-white/70 dark:border-white/12 flex items-center justify-between">
+    <div className="w-[340px] bg-surface/80 border border-white/70 dark:border-white/12 rounded-2xl shadow-xl overflow-hidden">
+      <div className="px-3 py-2.5 bg-surface/80 border-b border-white/70 dark:border-white/12 flex items-center justify-between">
         <span className="text-xs font-bold [color:var(--color-text-main)] flex items-center gap-1.5"><Cpu className="w-3.5 h-3.5 text-brand"/> ComfyUI 工作流</span>
-        <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 [color:var(--color-text-muted)] font-mono">{selectedId ? '已绑定' : '未选择'}</span>
+        <span className="text-[10px] px-2 py-0.5 rounded-full bg-surface/80 border border-white/70 dark:border-white/12 [color:var(--color-text-muted)] font-mono">{selectedId ? '已绑定' : '未选择'}</span>
       </div>
 
       <Handle type="target" position={Position.Left} className="!bg-violet-500 !w-3 !h-3 !border-2 !border-surface" />
@@ -73,7 +73,7 @@ export const ComfyWorkflowNode: React.FC<NodeProps> = ({ data, id }) => {
       <Handle type="source" position={Position.Bottom} id="image" className="!bg-violet-500 !w-3 !h-3 !border-2 !border-surface" />
 
       <div className="p-3 space-y-3">
-        <select value={selectedId} onChange={e=>handleSelect(e.target.value)} className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-2.5 py-2 text-xs [color:var(--color-text-main)] focus:outline-none focus:border-brand">
+        <select value={selectedId} onChange={e=>handleSelect(e.target.value)} className="w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl px-2.5 py-2 text-xs [color:var(--color-text-main)] focus:outline-none focus:border-brand">
           <option value="">— 选择工作流 (内部/外部直读) —</option>
           {workflows.map((w:any)=> <option key={w.id} value={w.id}>{w.name||w.id} {w.source==='external' ? '(外部)' : '(内部)'} · {w.node_count}节点</option>)}
         </select>
@@ -87,7 +87,7 @@ export const ComfyWorkflowNode: React.FC<NodeProps> = ({ data, id }) => {
 
         {/* 动态端口区 */}
         {exposed.length>0 && (
-          <div className="space-y-2 max-h-[220px] overflow-y-auto border border-white/70 dark:border-white/12 rounded-xl p-2 bg-white/50 dark:bg-white/[.04]">
+          <div className="space-y-2 max-h-[220px] overflow-y-auto border border-white/70 dark:border-white/12 rounded-xl p-2 bg-surface/80">
             {exposed.map((exp:any)=>{
               const key = exp.id || exp.node_id;
               const val = dynamicInputs[key];
@@ -100,7 +100,7 @@ export const ComfyWorkflowNode: React.FC<NodeProps> = ({ data, id }) => {
                   {exp.type==='image' ? (
                     <div className="flex items-center gap-2">
                       {val ? <AutoRatioMedia src={val.startsWith('/')? API_ORIGIN+val : val} fallbackAspect="1/1" maxHeight={48} className="rounded border border-brand" /> : null}
-                      <label className="flex-1 border border-dashed border-white/70 dark:border-white/12 hover:border-brand rounded-lg px-2 py-1.5 text-[11px] [color:var(--color-text-secondary)] cursor-pointer text-center bg-white/60 dark:bg-white/[.05] transition-colors">
+                      <label className="flex-1 border border-dashed border-white/70 dark:border-white/12 hover:border-brand rounded-lg px-2 py-1.5 text-[11px] [color:var(--color-text-secondary)] cursor-pointer text-center bg-surface/80 transition-colors">
                         <input type="file" accept="image/*" className="hidden" onChange={e=>{
                           const f=e.target.files?.[0]; if(!f) return;
                           const reader=new FileReader(); reader.onload=()=> handleDynamicChange(key, reader.result as string); reader.readAsDataURL(f);
@@ -110,15 +110,15 @@ export const ComfyWorkflowNode: React.FC<NodeProps> = ({ data, id }) => {
                       {val && <button onClick={()=>handleDynamicChange(key,'')} className="text-[10px] text-red-500">移除</button>}
                     </div>
                   ) : exp.type==='number' ? (
-                    <input type="number" value={val ?? ''} onChange={e=> handleDynamicChange(key, parseFloat(e.target.value)||0)} className="w-full bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-lg px-2.5 py-1 text-xs [color:var(--color-text-main)] focus:outline-none focus:border-brand"/>
+                    <input type="number" value={val ?? ''} onChange={e=> handleDynamicChange(key, parseFloat(e.target.value)||0)} className="w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-lg px-2.5 py-1 text-xs [color:var(--color-text-main)] focus:outline-none focus:border-brand"/>
                   ) : (exp.type==='select' || exp.type==='combo') ? (
-                    <select value={String(val ?? exp.default_value ?? '')} onChange={e=> handleDynamicChange(key, e.target.value)} className="w-full bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-lg px-2.5 py-1 text-xs [color:var(--color-text-main)] focus:outline-none focus:border-brand">
+                    <select value={String(val ?? exp.default_value ?? '')} onChange={e=> handleDynamicChange(key, e.target.value)} className="w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-lg px-2.5 py-1 text-xs [color:var(--color-text-main)] focus:outline-none focus:border-brand">
                       <option value="">-- 请选择 --</option>
                       {(exp.options||exp.choices||[]).map((c:string)=>(<option key={c} value={c}>{c}</option>))}
                       {String(val ?? '') && !(exp.options||exp.choices||[]).includes(String(val)) && <option value={String(val)}>{String(val)}</option>}
                     </select>
                   ) : (
-                    <input type="text" value={val ?? ''} onChange={e=> handleDynamicChange(key, e.target.value)} placeholder={exp.description || ''} className="w-full bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-lg px-2.5 py-1 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand"/>
+                    <input type="text" value={val ?? ''} onChange={e=> handleDynamicChange(key, e.target.value)} placeholder={exp.description || ''} className="w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-lg px-2.5 py-1 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand"/>
                   )}
                 </div>
               );
@@ -126,9 +126,9 @@ export const ComfyWorkflowNode: React.FC<NodeProps> = ({ data, id }) => {
           </div>
         )}
 
-        <textarea value={d.prompt || ''} onChange={e=> (d.onUpdate as any)?.(id,{prompt:e.target.value})} placeholder="主提示词 (将注入 workflow 的 prompt_node)…" rows={2} className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl p-2 text-xs font-mono [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand resize-none"/>
+        <textarea value={d.prompt || ''} onChange={e=> (d.onUpdate as any)?.(id,{prompt:e.target.value})} placeholder="主提示词 (将注入 workflow 的 prompt_node)…" rows={2} className="w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl p-2 text-xs font-mono [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand resize-none"/>
 
-        {resultUrl && <div className="rounded-xl overflow-hidden border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06]"><img src={resultUrl.startsWith('/')? API_ORIGIN+resultUrl : resultUrl} alt="result" className="w-full"/></div>}
+        {resultUrl && <div className="rounded-xl overflow-hidden border border-white/70 dark:border-white/12 bg-surface/80"><img src={resultUrl.startsWith('/')? API_ORIGIN+resultUrl : resultUrl} alt="result" className="w-full"/></div>}
 
         <button onClick={handleGenerate} disabled={generating || !selectedId} className="w-full py-2.5 rounded-xl bg-brand hover:bg-brand-light text-white text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-40 shadow-sm transition-colors">
           {generating ? <><div className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin"/> 生成中…</> : <><Check className="w-3.5 h-3.5"/> 使用此工作流生成</>}

@@ -28,7 +28,7 @@ const KIND_META: Record<string, { label: string; desc: string }> = {
 };
 
 const SOURCE_META: Record<string, { label: string; cls: string }> = {
-  builtin:    { label: '内置',     cls: 'text-gray-400 border-white/70 dark:border-white/12 bg-white/65 dark:bg-white/[.09]' },
+  builtin:    { label: '内置',     cls: 'text-gray-400 border-white/70 dark:border-white/12 bg-surface-hover/80' },
   standalone: { label: '自建',     cls: 'text-sky-300 border-sky-500/40 bg-sky-500/10' },
   plugin:     { label: '来自插件', cls: 'text-violet-300 border-violet-500/40 bg-violet-500/10' },
 };
@@ -214,7 +214,7 @@ export const ExtensionsPanel: React.FC = () => {
   return (
     <div className="space-y-5">
       <div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-white/50 dark:bg-white/20 rounded-2xl overflow-hidden border border-white/70 dark:border-white/12">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-surface/80 rounded-2xl overflow-hidden border border-white/70 dark:border-white/12">
           <Stat label="扩展总数" value={counts.total ?? exts.length} />
           <Stat label="生成源" value={counts.provider ?? 0} />
           <Stat label="MCP 工具" value={counts.mcp_tool ?? 0} />
@@ -224,7 +224,7 @@ export const ExtensionsPanel: React.FC = () => {
       </div>
 
       {/* ── 插件包 ── */}
-      <section className="rounded-2xl border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] overflow-hidden">
+      <section className="rounded-2xl border border-white/70 dark:border-white/12 bg-surface/80 overflow-hidden">
         <div className="px-5 pt-4 pb-3 border-b border-white/60 dark:border-white/12 flex items-center gap-2">
           <Package className="w-4 h-4 text-violet-400" />
           <h3 className="text-sm font-bold text-[color:var(--color-text-main)]">插件包</h3>
@@ -251,14 +251,14 @@ export const ExtensionsPanel: React.FC = () => {
           ) : (
             <div className="space-y-2">
               {plugins.map((p) => (
-                <div key={p.id} className="rounded-xl border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06] px-4 py-3 flex items-center gap-3 flex-wrap">
+                <div key={p.id} className="rounded-xl border border-white/70 dark:border-white/12 bg-surface/80 px-4 py-3 flex items-center gap-3 flex-wrap">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="text-[12.5px] font-bold text-[color:var(--color-text-main)] truncate">{p.name}</span>
                       <span className="text-[10px] font-mono text-gray-500">v{p.version}</span>
                       {p.enabled
                         ? <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/40 text-emerald-300">已启用</span>
-                        : <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-white/65 dark:bg-white/[.09] border border-white/70 dark:border-white/12 text-gray-400">已停用</span>}
+                        : <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-surface-hover/80 border border-white/70 dark:border-white/12 text-gray-400">已停用</span>}
                     </div>
                     {p.description && <div className="text-[11px] text-gray-500 mt-0.5 truncate">{p.description}</div>}
                   </div>
@@ -276,7 +276,7 @@ export const ExtensionsPanel: React.FC = () => {
       </section>
 
       {/* ── 自己造一个 ── */}
-      <section className="rounded-2xl border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] p-5">
+      <section className="rounded-2xl border border-white/70 dark:border-white/12 bg-surface/80 p-5">
         <div className="flex items-center gap-2 mb-3">
           <Puzzle className="w-4 h-4 text-brand-light" />
           <h3 className="text-sm font-bold text-[color:var(--color-text-main)]">自己造一个</h3>
@@ -299,12 +299,12 @@ export const ExtensionsPanel: React.FC = () => {
       </section>
 
       {/* ── 全部扩展 ── */}
-      <section className="rounded-2xl border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] overflow-hidden">
+      <section className="rounded-2xl border border-white/70 dark:border-white/12 bg-surface/80 overflow-hidden">
         <div className="px-5 pt-4 pb-3 border-b border-white/60 dark:border-white/12">
           <div className="flex items-center gap-2 flex-wrap">
             <Boxes className="w-4 h-4 text-brand-light" />
             <h3 className="text-sm font-bold text-[color:var(--color-text-main)]">全部扩展</h3>
-            <button onClick={load} className="ml-auto px-2.5 py-1 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:text-white flex items-center gap-1">
+            <button onClick={load} className="ml-auto px-2.5 py-1 rounded-lg bg-surface/80 border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:text-white flex items-center gap-1">
               <RefreshCw className="w-3 h-3" />刷新
             </button>
           </div>
@@ -314,7 +314,7 @@ export const ExtensionsPanel: React.FC = () => {
               <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
               <input
                 value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜索名称 / id"
-                className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl pl-8 pr-3 py-1.5 text-[11.5px] text-[color:var(--color-text-main)] placeholder-gray-600 focus:outline-none focus:border-brand/60"
+                className="w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl pl-8 pr-3 py-1.5 text-[11.5px] text-[color:var(--color-text-main)] placeholder-gray-600 focus:outline-none focus:border-brand/60"
               />
             </div>
           </div>
@@ -327,7 +327,7 @@ export const ExtensionsPanel: React.FC = () => {
             ))}
             <button onClick={() => setShowBuiltin((v) => !v)}
               className={`px-2.5 py-1 rounded-lg text-[11px] border transition-colors flex items-center gap-1 ${
-                showBuiltin ? 'bg-brand/15 border-brand/50 text-[color:var(--color-text-main)]' : 'bg-white/55 dark:bg-white/[.06] border-white/70 dark:border-white/12 text-gray-400 hover:text-[color:var(--color-text-main)]'
+                showBuiltin ? 'bg-brand/15 border-brand/50 text-[color:var(--color-text-main)]' : 'bg-surface/80 border-white/70 dark:border-white/12 text-gray-400 hover:text-[color:var(--color-text-main)]'
               }`}>
               {showBuiltin ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}内置
             </button>
@@ -358,11 +358,11 @@ export const ExtensionsPanel: React.FC = () => {
                     onClick={() => openPrimary(e)}
                     onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); openPrimary(e); } }}
                     title={EDITABLE_KINDS.has(e.kind) && !isBuiltin ? '点击编辑' : '点击预览'}
-                    className="rounded-xl border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06] px-3.5 py-2.5 cursor-pointer hover:border-brand/45 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-brand"
+                    className="rounded-xl border border-white/70 dark:border-white/12 bg-surface/80 px-3.5 py-2.5 cursor-pointer hover:border-brand/45 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-brand"
                   >
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-[12px] font-bold text-[color:var(--color-text-main)] truncate">{e.name || e.local_id}</span>
-                      <span className="text-[9.5px] px-1.5 py-0.5 rounded border border-white/70 dark:border-white/12 bg-white/65 dark:bg-white/[.09] text-gray-400">
+                      <span className="text-[9.5px] px-1.5 py-0.5 rounded border border-white/70 dark:border-white/12 bg-surface-hover/80 text-gray-400">
                         {KIND_META[e.kind]?.label || e.kind}
                       </span>
                       <span className={`text-[9.5px] px-1.5 py-0.5 rounded border ${src.cls}`}
@@ -461,19 +461,19 @@ const CodeTemplateButton: React.FC = () => {
   return (
     <>
       <button onClick={() => { const n = !open; setOpen(n); if (n && !tpl) fetchTpl(lang, k); }}
-        className="ml-auto px-2.5 py-1 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:text-white flex items-center gap-1">
+        className="ml-auto px-2.5 py-1 rounded-lg bg-surface/80 border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:text-white flex items-center gap-1">
         <FileCode2 className="w-3 h-3" />代码模板
       </button>
       {open && (
-        <div className="w-full mt-2 rounded-xl border border-white/70 dark:border-white/12 bg-white/50 dark:bg-white/[.04] p-3">
+        <div className="w-full mt-2 rounded-xl border border-white/70 dark:border-white/12 bg-surface/80 p-3">
           <div className="flex items-center gap-2 flex-wrap mb-2">
             <select value={lang} onChange={(e) => { setLang(e.target.value); fetchTpl(e.target.value, k); }}
-              className="bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-lg px-2 py-1 text-[11.5px] text-[color:var(--color-text-main)]">
+              className="bg-surface/80 border border-white/70 dark:border-white/12 rounded-lg px-2 py-1 text-[11.5px] text-[color:var(--color-text-main)]">
               <option value="python">python</option>
               <option value="javascript">javascript</option>
             </select>
             <select value={k} onChange={(e) => { setK(e.target.value); fetchTpl(lang, e.target.value); }}
-              className="bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-lg px-2 py-1 text-[11.5px] text-[color:var(--color-text-main)]">
+              className="bg-surface/80 border border-white/70 dark:border-white/12 rounded-lg px-2 py-1 text-[11.5px] text-[color:var(--color-text-main)]">
               <option value="image">生图</option>
               <option value="video">视频</option>
               <option value="audio">语音</option>
@@ -484,7 +484,7 @@ const CodeTemplateButton: React.FC = () => {
               {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}{copied ? '已复制' : '复制'}
             </button>
           </div>
-          <pre className="max-h-52 overflow-auto rounded-lg bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 p-3 text-[11px] font-mono text-gray-300 leading-relaxed">
+          <pre className="max-h-52 overflow-auto rounded-lg bg-surface/80 border border-white/70 dark:border-white/12 p-3 text-[11px] font-mono text-gray-300 leading-relaxed">
             {loading ? '取模板中…' : (tpl || '（空）')}
           </pre>
           <div className="mt-2 text-[10.5px] text-gray-500 leading-relaxed">
@@ -500,7 +500,7 @@ const CodeTemplateButton: React.FC = () => {
 const EntryCard: React.FC<{ icon: any; iconCls: string; title: string; desc: string; onClick: () => void }> =
 ({ icon: Icon, iconCls, title, desc, onClick }) => (
   <button onClick={onClick}
-    className="text-left rounded-xl border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06] hover:border-brand/50 transition-colors px-4 py-3">
+    className="text-left rounded-xl border border-white/70 dark:border-white/12 bg-surface/80 hover:border-brand/50 transition-colors px-4 py-3">
     <div className="flex items-center gap-1.5 text-[12.5px] font-bold text-[color:var(--color-text-main)]">
       <Icon className={`w-3.5 h-3.5 ${iconCls}`} />{title}
     </div>
@@ -516,7 +516,7 @@ const Act: React.FC<{
     ? 'bg-red-500/10 border-red-500/30 text-red-300 hover:text-white'
     : accent === 'brand'
       ? 'bg-brand/20 border-brand/50 text-brand-light'
-      : 'bg-white/60 dark:bg-white/[.05] border-white/70 dark:border-white/12 text-gray-200 hover:border-brand';
+      : 'bg-surface/80 border-white/70 dark:border-white/12 text-gray-200 hover:border-brand';
   return (
     <button onClick={onClick} disabled={disabled}
       className={`px-2.5 py-1 rounded-lg border text-[11px] flex items-center gap-1 disabled:opacity-40 transition-colors ${cls}`}>
@@ -526,7 +526,7 @@ const Act: React.FC<{
 };
 
 const Stat: React.FC<{ label: string; value: number }> = ({ label, value }) => (
-  <div className="bg-white/60 dark:bg-white/[.05] px-4 py-3">
+  <div className="bg-surface/80 px-4 py-3">
     <div className="text-xl font-bold font-mono text-brand-light leading-tight">{value}</div>
     <div className="text-[10.5px] text-gray-500">{label}</div>
   </div>
@@ -535,7 +535,7 @@ const Stat: React.FC<{ label: string; value: number }> = ({ label, value }) => (
 const Chip: React.FC<{ active: boolean; onClick: () => void; label: string; title?: string }> = ({ active, onClick, label, title }) => (
   <button onClick={onClick} title={title}
     className={`px-2.5 py-1 rounded-lg text-[11px] border transition-colors ${
-      active ? 'bg-brand/15 border-brand/50 text-[color:var(--color-text-main)]' : 'bg-white/55 dark:bg-white/[.06] border-white/70 dark:border-white/12 text-gray-400 hover:text-[color:var(--color-text-main)]'
+      active ? 'bg-brand/15 border-brand/50 text-[color:var(--color-text-main)]' : 'bg-surface/80 border-white/70 dark:border-white/12 text-gray-400 hover:text-[color:var(--color-text-main)]'
     }`}>
     {label}
   </button>

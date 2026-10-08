@@ -215,7 +215,7 @@ export const AgentChatDrawer: React.FC = () => {
           className={`group flex items-center space-x-2 px-3.5 py-2.5 rounded-full backdrop-blur-xl border transition-all shadow-xl cursor-grab active:cursor-grabbing ${
             isOpen
               ? 'bg-brand text-white border-brand-glow shadow-brand/40 ring-2 ring-brand/50'
-              : 'bg-white/80 dark:bg-black/55 hover:bg-white/70 dark:hover:bg-white/[.09] border-white/70 dark:border-white/12 hover:border-brand/60 [color:var(--color-text-main)] shadow-black/40 hover:scale-105'
+              : 'bg-surface/80 dark:bg-black/55 hover:bg-surface/80 border-white/70 dark:border-white/12 hover:border-brand/60 [color:var(--color-text-main)] shadow-black/40 hover:scale-105'
           }`}
           title="点击展开/收起导演 Agent，按住可任意拖拽位置"
         >
@@ -243,11 +243,11 @@ export const AgentChatDrawer: React.FC = () => {
             height: isExpanded ? '680px' : '530px',
             zIndex: 55,
           }}
-          className="rounded-3xl border border-white/70 dark:border-white/12 bg-white/85 dark:bg-[#101014]/90 backdrop-blur-2xl shadow-2xl flex flex-col overflow-hidden animate-fade-in"
+          className="rounded-3xl border border-white/70 dark:border-white/12 bg-surface/80 dark:bg-[#101014]/90 backdrop-blur-2xl shadow-2xl flex flex-col overflow-hidden animate-fade-in"
         >
           <div
             onMouseDown={onHeaderMouseDown}
-            className="h-12 px-4 border-b border-white/70 dark:border-white/12 flex items-center justify-between bg-white/65 dark:bg-white/[.05] shrink-0 cursor-grab active:cursor-grabbing select-none"
+            className="h-12 px-4 border-b border-white/70 dark:border-white/12 flex items-center justify-between bg-surface-hover/80 shrink-0 cursor-grab active:cursor-grabbing select-none"
             title="按住拖拽窗口位置"
           >
             <div className="flex items-center space-x-2.5">
@@ -270,21 +270,21 @@ export const AgentChatDrawer: React.FC = () => {
             <div className="flex items-center space-x-1">
               <button
                 onClick={() => void clearAll()}
-                className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/65 dark:bg-white/[.09] transition-all"
+                className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-hover/80 transition-all"
                 title="重置会话记忆"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
               </button>
               <button
                 onClick={() => setIsExpanded(!isExpanded)}
-                className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/65 dark:bg-white/[.09] transition-all"
+                className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-hover/80 transition-all"
                 title={isExpanded ? '还原默认尺寸' : '放大窗口'}
               >
                 {isExpanded ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
               </button>
               <button
                 onClick={() => setIsOpen(false)}
-                className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/65 dark:bg-white/[.09] transition-all"
+                className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface-hover/80 transition-all"
                 title="收起悬浮窗"
               >
                 <X className="w-4 h-4" />
@@ -339,7 +339,7 @@ export const AgentChatDrawer: React.FC = () => {
             </div>
           )}
 
-          <div className="p-3 border-t border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] shrink-0">
+          <div className="p-3 border-t border-white/70 dark:border-white/12 bg-surface/80 shrink-0">
             <AgentComposer
               compact
               runMode={runMode}

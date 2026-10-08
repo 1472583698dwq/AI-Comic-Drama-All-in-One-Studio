@@ -528,20 +528,20 @@ export const AssetLibrary: React.FC = () => {
 
   return (
     <div className="flex-1 flex h-[calc(100vh-56px)] bg-background overflow-hidden">
-      <div className="w-[260px] bg-white/60 dark:bg-white/[.05] border-r border-white/70 dark:border-white/12 flex flex-col shrink-0">
+      <div className="w-[260px] bg-surface/80 border-r border-white/70 dark:border-white/12 flex flex-col shrink-0">
         <div className="h-12 px-3 border-b border-white/70 dark:border-white/12 flex items-center gap-2 shrink-0">
           <div className="w-7 h-7 rounded-lg bg-brand/10 border border-brand/20 flex items-center justify-center"><Library className="w-3.5 h-3.5 text-brand" /></div>
           <span className="text-xs font-bold tracking-tight text-white">素材库</span>
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-gray-400">{total}</span>
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-surface/80 border border-white/70 dark:border-white/12 text-gray-400">{total}</span>
           <span className="ml-auto text-[10px] px-2 py-1 rounded-full bg-brand/10 text-brand border border-brand/20">{(useProjectListStore as any)?.getState?.()?.activeProjectId ? '项目' : '全局'}</span>
         </div>
         <div className="p-3 border-b border-white/70 dark:border-white/12 space-y-2">
-          <div className="flex rounded-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 p-1 gap-1">
+          <div className="flex rounded-full bg-surface/80 border border-white/70 dark:border-white/12 p-1 gap-1">
             {(['all','project','global'] as const).map(s=> (
               <button key={s} onClick={()=>fetchAssets({ scope: s, page: 1 })} className={`flex-1 py-1 rounded-full text-[11px] font-bold transition-all ${((useAssetStore as any).getState?.().scope||'all')===s ? 'bg-brand text-white shadow-sm' : 'text-gray-500 hover:text-white'}`}>{s==='all'?'全部':s==='project'?'项目':'全局'}</button>
             ))}
           </div>
-          <div className="flex items-center gap-2 rounded-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 px-3 py-1.5 focus-within:border-brand/40">
+          <div className="flex items-center gap-2 rounded-full bg-surface/80 border border-white/70 dark:border-white/12 px-3 py-1.5 focus-within:border-brand/40">
             <Search className="w-3.5 h-3.5 text-gray-500 shrink-0" />
             <input value={searchInput} onChange={e=>setSearchInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleSearch()} placeholder="搜索名称/标签" className="flex-1 bg-transparent text-xs text-white placeholder-gray-500 focus:outline-none min-w-0" />
             <button onClick={handleSearch} className="text-[11px] font-bold text-brand hover:text-brand-light">搜索</button>
@@ -549,10 +549,10 @@ export const AssetLibrary: React.FC = () => {
         </div>
         <div className="p-2 space-y-1 flex-1 overflow-y-auto">
           {CATEGORY_TABS.map(t => (
-            <button key={t.key} onClick={()=>setCategory(t.key as any)} className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-all ${category===t.key ? 'bg-brand/15 border border-brand text-white' : 'text-gray-400 hover:bg-white/55 dark:bg-white/[.06] hover:text-white border border-transparent'}`}>
+            <button key={t.key} onClick={()=>setCategory(t.key as any)} className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-all ${category===t.key ? 'bg-brand/15 border border-brand text-white' : 'text-gray-400 hover:bg-surface/80 hover:text-white border border-transparent'}`}>
               <span className="flex items-center space-x-2">{t.icon}<span>{t.label}</span></span>
-              {stats?.by_category?.[t.key] != null && t.key!=='all' && <span className="text-[10px] bg-white/65 dark:bg-white/[.09] px-1.5 py-0.5 rounded">{stats.by_category[t.key]}</span>}
-              {t.key==='all' && <span className="text-[10px] bg-white/65 dark:bg-white/[.09] px-1.5 py-0.5 rounded">{stats?.total||total}</span>}
+              {stats?.by_category?.[t.key] != null && t.key!=='all' && <span className="text-[10px] bg-surface-hover/80 px-1.5 py-0.5 rounded">{stats.by_category[t.key]}</span>}
+              {t.key==='all' && <span className="text-[10px] bg-surface-hover/80 px-1.5 py-0.5 rounded">{stats?.total||total}</span>}
             </button>
           ))}
         </div>
@@ -561,21 +561,21 @@ export const AssetLibrary: React.FC = () => {
             <button onClick={()=>setShowImport(true)} className="flex items-center justify-center space-x-1.5 py-2.5 rounded-xl bg-gradient-to-r from-brand to-accent-pink text-white text-xs font-bold shadow-lg shadow-brand/20">
               <Upload className="w-3.5 h-3.5" /><span>导入</span>
             </button>
-            <button onClick={openGenerate} className="flex items-center justify-center space-x-1.5 py-2.5 rounded-xl bg-white/55 dark:bg-white/[.06] border border-brand/40 text-xs text-white font-semibold hover:bg-brand/10">
+            <button onClick={openGenerate} className="flex items-center justify-center space-x-1.5 py-2.5 rounded-xl bg-surface/80 border border-brand/40 text-xs text-white font-semibold hover:bg-brand/10">
               <Wand2 className="w-3.5 h-3.5" /><span>生成</span>
             </button>
           </div>
           <p className="text-[10px] text-gray-500 text-center leading-4">导入：本地批量上传 · 生成：AI 直出入库</p>
-          <button onClick={handleMigrate} className="w-full flex items-center justify-center space-x-1.5 py-2 rounded-xl bg-white/65 dark:bg-white/[.09] border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:text-white">
+          <button onClick={handleMigrate} className="w-full flex items-center justify-center space-x-1.5 py-2 rounded-xl bg-surface-hover/80 border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:text-white">
             <Sparkles className="w-3 h-3" /><span>一键迁移角色</span>
           </button>
         </div>
       </div>
 
       <div className="flex-1 flex flex-col overflow-hidden relative min-w-0">
-        <div className="h-11 px-4 border-b border-white/70 dark:border-white/12 bg-white/60 dark:bg-black/35 backdrop-blur flex items-center gap-3 shrink-0">
+        <div className="h-11 px-4 border-b border-white/70 dark:border-white/12 bg-surface/80 dark:bg-black/35 backdrop-blur flex items-center gap-3 shrink-0">
           <div className="flex items-center gap-2 text-xs min-w-0">
-            <span className="w-7 h-7 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 flex items-center justify-center shrink-0"><Filter className="w-3.5 h-3.5 text-gray-400" /></span>
+            <span className="w-7 h-7 rounded-lg bg-surface/80 border border-white/70 dark:border-white/12 flex items-center justify-center shrink-0"><Filter className="w-3.5 h-3.5 text-gray-400" /></span>
             <span className="text-white font-medium truncate">{category==='all'?'全部素材':CATEGORY_TABS.find(c=>c.key===category)?.label}</span>
             <span className="text-gray-500">·</span>
             <span className="text-gray-400">{total} 个</span>
@@ -583,10 +583,10 @@ export const AssetLibrary: React.FC = () => {
           </div>
           <div className="flex-1" />
           <div className="flex items-center gap-1.5 shrink-0">
-            <select value={(useAssetStore as any).getState?.()?.sort || 'updated_at'} onChange={e=>fetchAssets({ sort: e.target.value, page: 1 })} className="hidden sm:block bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-full px-3 py-1 text-xs text-white focus:outline-none">
+            <select value={(useAssetStore as any).getState?.()?.sort || 'updated_at'} onChange={e=>fetchAssets({ sort: e.target.value, page: 1 })} className="hidden sm:block bg-surface/80 border border-white/70 dark:border-white/12 rounded-full px-3 py-1 text-xs text-white focus:outline-none">
               <option value="updated_at">最近更新</option><option value="created_at">创建时间</option><option value="name">名称</option>
             </select>
-            <button onClick={()=>importInputRef.current?.click()} className="hidden md:flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 text-xs font-medium text-[color:var(--color-text-main)] hover:border-white/80 dark:border-white/20">
+            <button onClick={()=>importInputRef.current?.click()} className="hidden md:flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface/80 border border-white/70 dark:border-white/12 text-xs font-medium text-[color:var(--color-text-main)] hover:border-white/80 dark:border-white/20">
               <Files className="w-3.5 h-3.5" /><span>批量</span>
             </button>
             <input ref={importInputRef} type="file" multiple accept="image/*,audio/*,video/*,.glb,.fbx" className="hidden" onChange={e=>{ onDropFiles(e.target.files); if(e.target) e.target.value=''; }} />
@@ -615,8 +615,8 @@ export const AssetLibrary: React.FC = () => {
               <span className="text-xs">拖拽文件到此处导入，或点击「生成」AI 创作</span>
               <div className="flex space-x-2 pt-1">
                 <button onClick={()=>setShowImport(true)} className="px-4 py-2 rounded-xl bg-brand text-white text-xs font-bold flex items-center space-x-1"><Upload className="w-3.5 h-3.5" /><span>导入素材</span></button>
-                <button onClick={()=>setShowText(true)} className="px-4 py-2 rounded-xl bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 text-xs text-white flex items-center space-x-1 hover:border-brand" title="新建纯文本/提示词素材（可拖入画布自动填充）"><FileText className="w-3.5 h-3.5" /><span>新建文本</span></button>
-                <button onClick={openGenerate} className="px-4 py-2 rounded-xl bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 text-xs text-white flex items-center space-x-1"><Wand2 className="w-3.5 h-3.5" /><span>AI 生成</span></button>
+                <button onClick={()=>setShowText(true)} className="px-4 py-2 rounded-xl bg-surface/80 border border-white/70 dark:border-white/12 text-xs text-white flex items-center space-x-1 hover:border-brand" title="新建纯文本/提示词素材（可拖入画布自动填充）"><FileText className="w-3.5 h-3.5" /><span>新建文本</span></button>
+                <button onClick={openGenerate} className="px-4 py-2 rounded-xl bg-surface/80 border border-white/70 dark:border-white/12 text-xs text-white flex items-center space-x-1"><Wand2 className="w-3.5 h-3.5" /><span>AI 生成</span></button>
               </div>
             </div>
             ) : (
@@ -626,9 +626,9 @@ export const AssetLibrary: React.FC = () => {
                   const url = a.file_url || a.thumb_url;
                   const abs = url && url.startsWith('/') ? `http://127.0.0.1:8000${url}` : url;
                   return (
-                  <div key={a.id} draggable onDragStart={e=>{ e.dataTransfer.setData('text/plain', abs||url||''); e.dataTransfer.setData('application/canvas-assetid', a.id); e.dataTransfer.setData('application/asset-category', a.category||''); if (a.category==='text') { e.dataTransfer.setData('application/canvas-assetkind','text'); e.dataTransfer.setData('application/canvas-text', a.content || a.visual_prompt || ''); } e.dataTransfer.effectAllowed='copy'; }} onClick={()=>{selectAsset(a.id); setDetailAsset(a);}} title={a.category==='text' ? '拖入画布：填充到命中的节点，或新建文本节点' : '拖拽到分镜垫图槽或画布'} className={`group bg-white/60 dark:bg-white/[.05] border rounded-2xl overflow-hidden cursor-grab active:cursor-grabbing transition-all hover:shadow-lg ${selectedId===a.id ? 'border-brand ring-1 ring-brand/30' : 'border-white/70 dark:border-white/12 hover:border-white/80 dark:border-white/20'}`}>
+                  <div key={a.id} draggable onDragStart={e=>{ e.dataTransfer.setData('text/plain', abs||url||''); e.dataTransfer.setData('application/canvas-assetid', a.id); e.dataTransfer.setData('application/asset-category', a.category||''); if (a.category==='text') { e.dataTransfer.setData('application/canvas-assetkind','text'); e.dataTransfer.setData('application/canvas-text', a.content || a.visual_prompt || ''); } e.dataTransfer.effectAllowed='copy'; }} onClick={()=>{selectAsset(a.id); setDetailAsset(a);}} title={a.category==='text' ? '拖入画布：填充到命中的节点，或新建文本节点' : '拖拽到分镜垫图槽或画布'} className={`group bg-surface/80 border rounded-2xl overflow-hidden cursor-grab active:cursor-grabbing transition-all hover:shadow-lg ${selectedId===a.id ? 'border-brand ring-1 ring-brand/30' : 'border-white/70 dark:border-white/12 hover:border-white/80 dark:border-white/20'}`}>
                     {a.category === 'text' ? (
-                      <div className="aspect-square bg-white/55 dark:bg-white/[.06] relative overflow-hidden p-3">
+                      <div className="aspect-square bg-surface/80 relative overflow-hidden p-3">
                         <div className="absolute top-2 left-2 flex items-center space-x-1 z-10">
                           <span className="text-[9px] px-1.5 py-0.5 rounded-full border font-medium bg-sky-500/15 text-sky-400 border-sky-500/30">text</span>
                         </div>
@@ -646,7 +646,7 @@ export const AssetLibrary: React.FC = () => {
                         src={resolveUrl(a.thumb_url||a.file_url) || ''}
                         alt={a.name}
                         fallbackAspect="1/1"
-                        className="bg-white/55 dark:bg-white/[.06]"
+                        className="bg-surface/80"
                         mediaClassName="group-hover:scale-105 transition-transform"
                       >
                       <div className="absolute top-2 left-2 flex items-center space-x-1">
@@ -662,14 +662,14 @@ export const AssetLibrary: React.FC = () => {
                       </div>
                       </AutoRatioMedia>
                     ) : (
-                      <div className="aspect-square bg-white/55 dark:bg-white/[.06] relative overflow-hidden flex flex-col items-center justify-center text-gray-600">
+                      <div className="aspect-square bg-surface/80 relative overflow-hidden flex flex-col items-center justify-center text-gray-600">
                         <ImageIcon className="w-6 h-6 mb-1" /><span className="text-[10px]">{a.category}</span>
                       </div>
                     )}
                     <div className="p-2.5">
                       <div className="text-xs font-semibold text-white truncate">{a.name}</div>
                       <div className="text-[10px] text-gray-400 truncate mt-0.5">{a.description || a.visual_prompt?.slice(0,40) || '—'}</div>
-                      {a.tags?.length>0 && <div className="flex flex-wrap gap-1 mt-1.5">{a.tags.slice(0,3).map((t:string)=><span key={t} className="text-[9px] px-1 py-0.5 rounded bg-white/65 dark:bg-white/[.09] text-gray-400 flex items-center space-x-0.5"><Tag className="w-2.5 h-2.5" /><span>{t}</span></span>)}{a.tags.length>3 && <span className="text-[9px] text-gray-500">+{a.tags.length-3}</span>}</div>}
+                      {a.tags?.length>0 && <div className="flex flex-wrap gap-1 mt-1.5">{a.tags.slice(0,3).map((t:string)=><span key={t} className="text-[9px] px-1 py-0.5 rounded bg-surface-hover/80 text-gray-400 flex items-center space-x-0.5"><Tag className="w-2.5 h-2.5" /><span>{t}</span></span>)}{a.tags.length>3 && <span className="text-[9px] text-gray-500">+{a.tags.length-3}</span>}</div>}
                     </div>
                   </div>
                   );
@@ -677,9 +677,9 @@ export const AssetLibrary: React.FC = () => {
               </div>
               {total > 24 && (
                 <div className="mt-4 flex items-center justify-center gap-2 text-xs">
-                  <button disabled={(useAssetStore as any).getState().page <= 1} onClick={()=>fetchAssets({ page: Math.max(1, (useAssetStore as any).getState().page - 1) })} className="px-3 py-1.5 rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-white disabled:opacity-40">上一页</button>
+                  <button disabled={(useAssetStore as any).getState().page <= 1} onClick={()=>fetchAssets({ page: Math.max(1, (useAssetStore as any).getState().page - 1) })} className="px-3 py-1.5 rounded-xl bg-surface/80 border border-white/70 dark:border-white/12 text-white disabled:opacity-40">上一页</button>
                   <span className="text-gray-400 font-mono">第 {(useAssetStore as any).getState().page} 页 / 共 {Math.ceil(total/24)} 页 · {total} 条</span>
-                  <button disabled={(useAssetStore as any).getState().page >= Math.ceil(total/24)} onClick={()=>fetchAssets({ page: (useAssetStore as any).getState().page + 1 })} className="px-3 py-1.5 rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-white disabled:opacity-40">下一页</button>
+                  <button disabled={(useAssetStore as any).getState().page >= Math.ceil(total/24)} onClick={()=>fetchAssets({ page: (useAssetStore as any).getState().page + 1 })} className="px-3 py-1.5 rounded-xl bg-surface/80 border border-white/70 dark:border-white/12 text-white disabled:opacity-40">下一页</button>
                 </div>
               )}
             </>
@@ -688,16 +688,16 @@ export const AssetLibrary: React.FC = () => {
       </div>
 
       {selected && (
-        <div className="w-80 bg-white/60 dark:bg-white/[.05] border-l border-white/70 dark:border-white/12 flex flex-col overflow-hidden">
+        <div className="w-80 bg-surface/80 border-l border-white/70 dark:border-white/12 flex flex-col overflow-hidden">
           <div className="p-4 border-b border-white/70 dark:border-white/12 flex items-center justify-between">
             <span className="text-sm font-bold text-white">素材详情</span>
             <button onClick={()=>{selectAsset(null); setDetailAsset(null);}} className="text-gray-400 hover:text-white"><X className="w-4 h-4" /></button>
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             {selected.file_url ? (
-              <AutoRatioMedia src={resolveUrl(selected.file_url) || ''} fallbackAspect="1/1" className="rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12" />
+              <AutoRatioMedia src={resolveUrl(selected.file_url) || ''} fallbackAspect="1/1" className="rounded-xl bg-surface/80 border border-white/70 dark:border-white/12" />
             ) : (
-              <div className="aspect-square rounded-xl overflow-hidden bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 flex items-center justify-center text-gray-500">无预览</div>
+              <div className="aspect-square rounded-xl overflow-hidden bg-surface/80 border border-white/70 dark:border-white/12 flex items-center justify-center text-gray-500">无预览</div>
             )}
             <div>
               <div className="text-sm font-bold text-white">{selected.name}</div>
@@ -706,35 +706,35 @@ export const AssetLibrary: React.FC = () => {
               {selected.category === 'text' && (
                 <div className="mt-2">
                   <label className="text-xs font-semibold text-white block mb-1">正文</label>
-                  <div className="bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl p-2.5 text-xs text-gray-300 max-h-40 overflow-y-auto whitespace-pre-wrap break-words leading-5">{selected.content || selected.visual_prompt || '—'}</div>
+                  <div className="bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl p-2.5 text-xs text-gray-300 max-h-40 overflow-y-auto whitespace-pre-wrap break-words leading-5">{selected.content || selected.visual_prompt || '—'}</div>
                 </div>
               )}
             </div>
             <div>
               <label className="text-xs font-semibold text-white block mb-1">视觉提示词</label>
-              <div className="bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl p-2.5 text-xs font-mono text-gray-300 max-h-24 overflow-y-auto break-words">{selected.visual_prompt || '—'}</div>
+              <div className="bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl p-2.5 text-xs font-mono text-gray-300 max-h-24 overflow-y-auto break-words">{selected.visual_prompt || '—'}</div>
               <button onClick={()=>handleApplyToShot(selected)} className="mt-2 w-full py-2 rounded-xl bg-brand text-white text-xs font-bold flex items-center justify-center space-x-1">
                 <Sparkles className="w-3.5 h-3.5" /><span>应用到当前镜头</span>
               </button>
               <div className="mt-1.5 grid grid-cols-2 gap-1.5">
-                <button onClick={()=>handleSendToCanvas(selected)} className="py-2 rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-xs text-white hover:border-brand flex items-center justify-center space-x-1">
+                <button onClick={()=>handleSendToCanvas(selected)} className="py-2 rounded-xl bg-surface/80 border border-white/70 dark:border-white/12 text-xs text-white hover:border-brand flex items-center justify-center space-x-1">
                   <Send className="w-3.5 h-3.5" /><span>发送到画布</span>
                 </button>
-                <button onClick={()=>handleSetAsPreviz(selected)} className="py-2 rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-xs text-white hover:border-brand flex items-center justify-center space-x-1" title="图进 previz_url，视频进 previz_video_url，生成参考装配直接消费">
+                <button onClick={()=>handleSetAsPreviz(selected)} className="py-2 rounded-xl bg-surface/80 border border-white/70 dark:border-white/12 text-xs text-white hover:border-brand flex items-center justify-center space-x-1" title="图进 previz_url，视频进 previz_video_url，生成参考装配直接消费">
                   <Clapperboard className="w-3.5 h-3.5" /><span>设为白模参考</span>
                 </button>
               </div>
-              <button onClick={()=>handleAddAsCharacter(selected)} className="mt-1.5 w-full py-2 rounded-xl bg-white/55 dark:bg-white/[.06] border border-brand/30 text-xs text-brand-light hover:text-white hover:bg-brand/10 flex items-center justify-center space-x-1">
+              <button onClick={()=>handleAddAsCharacter(selected)} className="mt-1.5 w-full py-2 rounded-xl bg-surface/80 border border-brand/30 text-xs text-brand-light hover:text-white hover:bg-brand/10 flex items-center justify-center space-x-1">
                 <Users className="w-3.5 h-3.5" /><span>添加为项目角色</span>
               </button>
               <div className="mt-1.5 text-[10px] text-gray-500 flex items-center gap-1"><span>💡 拖拽卡片到分镜垫图槽可直接作为参考图</span></div>
             </div>
             {selected.tags?.length>0 && <div className="flex flex-wrap gap-1.5">{selected.tags.map((t:string)=><span key={t} className="text-xs px-2 py-1 rounded-full bg-brand/15 text-brand-light border border-brand/30">{t}</span>)}</div>}
             <div className="grid grid-cols-2 gap-2 text-xs">
-              <div className="bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl p-2">
+              <div className="bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl p-2">
                 <div className="text-gray-500">尺寸</div><div className="text-white font-mono">{selected.width && selected.height ? `${selected.width}×${selected.height}` : '—'}</div>
               </div>
-              <div className="bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl p-2">
+              <div className="bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl p-2">
                 <div className="text-gray-500">来源</div><div className="text-white flex items-center space-x-1">{selected.source==='generate' && <Sparkles className="w-3 h-3 text-violet-400" />}<span>{selected.source}</span></div>
               </div>
             </div>
@@ -767,7 +767,7 @@ export const AssetLibrary: React.FC = () => {
 
       {showEdit && selected && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={()=>setShowEdit(false)}>
-          <div className="bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-2xl w-full max-w-lg p-5 space-y-4 max-h-[90vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+          <div className="bg-surface/80 border border-white/70 dark:border-white/12 rounded-2xl w-full max-w-lg p-5 space-y-4 max-h-[90vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-white flex items-center space-x-2"><Edit3 className="w-4 h-4 text-brand" /><span>编辑素材</span><span className="text-[10px] px-2 py-0.5 rounded-full bg-brand/15 text-brand-light border border-brand/20">更新</span></h3>
               <button onClick={()=>setShowEdit(false)} className="text-gray-400 hover:text-white"><X className="w-4 h-4" /></button>
@@ -775,37 +775,37 @@ export const AssetLibrary: React.FC = () => {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-gray-300">名称 *</label>
-                <input value={editForm.name} onChange={e=>setEditForm({...editForm, name:e.target.value})} placeholder="素材名称" className="mt-1 w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-brand" />
+                <input value={editForm.name} onChange={e=>setEditForm({...editForm, name:e.target.value})} placeholder="素材名称" className="mt-1 w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-brand" />
               </div>
               <div>
                 <label className="text-xs text-gray-300">分类</label>
-                <select value={editForm.category} onChange={e=>setEditForm({...editForm, category: e.target.value as any})} className="mt-1 w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white">
+                <select value={editForm.category} onChange={e=>setEditForm({...editForm, category: e.target.value as any})} className="mt-1 w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white">
                   <option value="character">人物</option><option value="scene">场景</option><option value="prop">道具</option><option value="background">背景</option><option value="effect">特效</option><option value="other">其他</option>
                 </select>
               </div>
             </div>
             <div>
               <label className="text-xs text-gray-300">描述</label>
-              <textarea value={editForm.description} onChange={e=>setEditForm({...editForm, description:e.target.value})} rows={2} placeholder="素材描述" className="mt-1 w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white font-mono" />
+              <textarea value={editForm.description} onChange={e=>setEditForm({...editForm, description:e.target.value})} rows={2} placeholder="素材描述" className="mt-1 w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white font-mono" />
             </div>
             {(editForm.category === 'text' || selected.category === 'text') && (
               <div>
                 <label className="text-xs text-gray-300">正文（文本/提示词素材）</label>
-                <textarea value={editForm.content} onChange={e=>setEditForm({...editForm, content:e.target.value})} rows={5} placeholder="提示词 / 剧本片段正文" className="mt-1 w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white font-mono" />
+                <textarea value={editForm.content} onChange={e=>setEditForm({...editForm, content:e.target.value})} rows={5} placeholder="提示词 / 剧本片段正文" className="mt-1 w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white font-mono" />
               </div>
             )}
             <div>
               <label className="text-xs text-gray-300">视觉提示词</label>
-              <textarea value={editForm.visual_prompt} onChange={e=>setEditForm({...editForm, visual_prompt:e.target.value})} rows={3} placeholder="英文提示词，用于一致性生成" className="mt-1 w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs font-mono text-white" />
+              <textarea value={editForm.visual_prompt} onChange={e=>setEditForm({...editForm, visual_prompt:e.target.value})} rows={3} placeholder="英文提示词，用于一致性生成" className="mt-1 w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs font-mono text-white" />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-gray-300">标签（逗号分隔）</label>
-                <input value={editForm.tags} onChange={e=>setEditForm({...editForm, tags:e.target.value})} placeholder="如：主角, 玄幻" className="mt-1 w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white" />
+                <input value={editForm.tags} onChange={e=>setEditForm({...editForm, tags:e.target.value})} placeholder="如：主角, 玄幻" className="mt-1 w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white" />
               </div>
               <div>
                 <label className="text-xs text-gray-300">状态</label>
-                <select value={editForm.status} onChange={e=>setEditForm({...editForm, status:e.target.value})} className="mt-1 w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white">
+                <select value={editForm.status} onChange={e=>setEditForm({...editForm, status:e.target.value})} className="mt-1 w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white">
                   <option value="approved">已审核</option><option value="draft">草稿</option><option value="archived">归档</option>
                 </select>
               </div>
@@ -814,7 +814,7 @@ export const AssetLibrary: React.FC = () => {
               <label className="text-xs text-gray-300">替换预览图（可选）</label>
               <div className="mt-1 flex items-center gap-3">
                 <input ref={editFileRef} type="file" accept="image/*" hidden onChange={e=>{ const f=e.target.files?.[0]||null; setEditFile(f); }} />
-                <button type="button" onClick={()=>editFileRef.current?.click()} className="px-3 py-2 rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-xs text-white flex items-center gap-2">
+                <button type="button" onClick={()=>editFileRef.current?.click()} className="px-3 py-2 rounded-xl bg-surface/80 border border-white/70 dark:border-white/12 text-xs text-white flex items-center gap-2">
                   <Upload className="w-3.5 h-3.5" /><span>{editFile ? editFile.name : '选择图片'}</span>
                 </button>
                 {editFile && <button type="button" onClick={()=>{ setEditFile(null); if(editFileRef.current) editFileRef.current.value=''; }} className="text-xs text-gray-400 hover:text-white">清空</button>}
@@ -822,7 +822,7 @@ export const AssetLibrary: React.FC = () => {
               </div>
             </div>
             <div className="flex justify-end gap-2 pt-1">
-              <button onClick={()=>setShowEdit(false)} className="px-4 py-2 rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-xs text-white">取消</button>
+              <button onClick={()=>setShowEdit(false)} className="px-4 py-2 rounded-xl bg-surface/80 border border-white/70 dark:border-white/12 text-xs text-white">取消</button>
               <button onClick={handleUpdate} disabled={updating} className="px-5 py-2 rounded-xl bg-brand text-white text-xs font-bold disabled:opacity-40 flex items-center gap-1.5">{updating ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span>保存中…</span></> : <><Save className="w-3.5 h-3.5" /><span>保存更新</span></>}</button>
             </div>
           </div>
@@ -831,13 +831,13 @@ export const AssetLibrary: React.FC = () => {
 
       {showImport && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={()=>setShowImport(false)}>
-          <div className="bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-2xl w-full max-w-lg p-5 space-y-4 max-h-[90vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+          <div className="bg-surface/80 border border-white/70 dark:border-white/12 rounded-2xl w-full max-w-lg p-5 space-y-4 max-h-[90vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-white flex items-center space-x-2"><Upload className="w-4 h-4 text-brand" /><span>导入素材</span><span className="text-[10px] px-2 py-0.5 rounded-full bg-brand/15 text-brand-light border border-brand/20">批量</span></h3>
               <button onClick={()=>setShowImport(false)} className="text-gray-400 hover:text-white"><X className="w-4 h-4" /></button>
             </div>
 
-            <div onDragOver={e=>e.preventDefault()} onDrop={e=>{ e.preventDefault(); const f=Array.from(e.dataTransfer.files||[]); if(f.length) setImportFiles(f); }} className="border-2 border-dashed border-white/70 dark:border-white/12 rounded-2xl p-5 text-center bg-white/50 dark:bg-white/[.04] hover:border-brand/40 transition-colors cursor-pointer" onClick={()=>importInputRef.current?.click()}>
+            <div onDragOver={e=>e.preventDefault()} onDrop={e=>{ e.preventDefault(); const f=Array.from(e.dataTransfer.files||[]); if(f.length) setImportFiles(f); }} className="border-2 border-dashed border-white/70 dark:border-white/12 rounded-2xl p-5 text-center bg-surface/80 hover:border-brand/40 transition-colors cursor-pointer" onClick={()=>importInputRef.current?.click()}>
               <Upload className="w-7 h-7 text-gray-500 mx-auto mb-2" />
               <div className="text-xs text-white font-semibold">点击选择或拖拽文件到此处</div>
               <div className="text-[11px] text-gray-500 mt-1">图片 / 音频 / 视频 / 模型 · 单次最多20个 · 已选 {importFiles.length} 个</div>
@@ -853,22 +853,22 @@ export const AssetLibrary: React.FC = () => {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-gray-300">类别</label>
-                <select value={importMeta.category} onChange={e=>setImportMeta({...importMeta, category: e.target.value as any})} className="mt-1 w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white">
+                <select value={importMeta.category} onChange={e=>setImportMeta({...importMeta, category: e.target.value as any})} className="mt-1 w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white">
                   <option value="character">人物</option><option value="scene">场景</option><option value="prop">道具</option><option value="background">背景</option><option value="effect">特效</option><option value="other">其他</option>
                 </select>
               </div>
               <div>
                 <label className="text-xs text-gray-300">标签（逗号分隔）</label>
-                <input value={importMeta.tags} onChange={e=>setImportMeta({...importMeta, tags:e.target.value})} placeholder="如：主角, 玄幻" className="mt-1 w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white" />
+                <input value={importMeta.tags} onChange={e=>setImportMeta({...importMeta, tags:e.target.value})} placeholder="如：主角, 玄幻" className="mt-1 w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white" />
               </div>
             </div>
             <div>
               <label className="text-xs text-gray-300">视觉提示词（可选，批量时统一应用）</label>
-              <textarea value={importMeta.visual_prompt} onChange={e=>setImportMeta({...importMeta, visual_prompt:e.target.value})} rows={2} placeholder="英文提示词，用于后续一致性生成" className="mt-1 w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs font-mono text-white" />
+              <textarea value={importMeta.visual_prompt} onChange={e=>setImportMeta({...importMeta, visual_prompt:e.target.value})} rows={2} placeholder="英文提示词，用于后续一致性生成" className="mt-1 w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs font-mono text-white" />
             </div>
             {importFiles.length>0 && <button onClick={()=>setImportFiles([])} className="text-[11px] text-gray-400 hover:text-white flex items-center space-x-1"><X className="w-3 h-3" /><span>清空已选</span></button>}
             <div className="flex justify-end space-x-2 pt-1">
-              <button onClick={()=>setShowImport(false)} className="px-4 py-2 rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-xs text-white">取消</button>
+              <button onClick={()=>setShowImport(false)} className="px-4 py-2 rounded-xl bg-surface/80 border border-white/70 dark:border-white/12 text-xs text-white">取消</button>
               <button onClick={handleImport} disabled={importing || importFiles.length===0} className="px-5 py-2 rounded-xl bg-brand text-white text-xs font-bold disabled:opacity-40 flex items-center space-x-1.5">{importing? <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span>导入中…</span></> : <><Check className="w-3.5 h-3.5" /><span>确认导入{importFiles.length?` · ${importFiles.length}个`:''}</span></>}</button>
             </div>
           </div>
@@ -877,26 +877,26 @@ export const AssetLibrary: React.FC = () => {
 
       {showText && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={()=>setShowText(false)}>
-          <div className="bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-2xl w-full max-w-lg p-5 space-y-4 max-h-[90vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+          <div className="bg-surface/80 border border-white/70 dark:border-white/12 rounded-2xl w-full max-w-lg p-5 space-y-4 max-h-[90vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-white flex items-center space-x-2"><FileText className="w-4 h-4 text-sky-400" /><span>新建文本 / 提示词素材</span><span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-400 border border-sky-500/20">可拖入画布</span></h3>
               <button onClick={()=>setShowText(false)} className="text-gray-400 hover:text-white"><X className="w-4 h-4" /></button>
             </div>
             <div>
               <label className="text-xs text-gray-300">名称 *</label>
-              <input value={textForm.name} onChange={e=>setTextForm({...textForm, name:e.target.value})} placeholder="如：玄幻打斗运镜提示词" className="mt-1 w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-brand" />
+              <input value={textForm.name} onChange={e=>setTextForm({...textForm, name:e.target.value})} placeholder="如：玄幻打斗运镜提示词" className="mt-1 w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-brand" />
             </div>
             <div>
               <label className="text-xs text-gray-300">正文 *（提示词 / 剧本片段）</label>
-              <textarea value={textForm.content} onChange={e=>setTextForm({...textForm, content:e.target.value})} rows={8} placeholder="粘贴提示词或文本，创建后可拖入画布填充到任意生成节点，或连线自动填充下游" className="mt-1 w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-brand resize-y" />
+              <textarea value={textForm.content} onChange={e=>setTextForm({...textForm, content:e.target.value})} rows={8} placeholder="粘贴提示词或文本，创建后可拖入画布填充到任意生成节点，或连线自动填充下游" className="mt-1 w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-brand resize-y" />
               <div className="text-[10px] text-gray-500 mt-1">{textForm.content.length} 字符</div>
             </div>
             <div>
               <label className="text-xs text-gray-300">标签（逗号分隔）</label>
-              <input value={textForm.tags} onChange={e=>setTextForm({...textForm, tags:e.target.value})} placeholder="如：运镜, 打斗" className="mt-1 w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white" />
+              <input value={textForm.tags} onChange={e=>setTextForm({...textForm, tags:e.target.value})} placeholder="如：运镜, 打斗" className="mt-1 w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white" />
             </div>
             <div className="flex justify-end space-x-2 pt-1">
-              <button onClick={()=>setShowText(false)} className="px-4 py-2 rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-xs text-white">取消</button>
+              <button onClick={()=>setShowText(false)} className="px-4 py-2 rounded-xl bg-surface/80 border border-white/70 dark:border-white/12 text-xs text-white">取消</button>
               <button onClick={handleCreateText} disabled={creatingText} className="px-5 py-2 rounded-xl bg-brand text-white text-xs font-bold disabled:opacity-40 flex items-center space-x-1.5">{creatingText ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span>创建中…</span></> : <><Check className="w-3.5 h-3.5" /><span>创建素材</span></>}</button>
             </div>
           </div>
@@ -905,7 +905,7 @@ export const AssetLibrary: React.FC = () => {
 
       {showGenerate && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={()=>setShowGenerate(false)}>
-          <div className="bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-2xl w-full max-w-lg p-5 space-y-4 max-h-[90vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+          <div className="bg-surface/80 border border-white/70 dark:border-white/12 rounded-2xl w-full max-w-lg p-5 space-y-4 max-h-[90vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-white flex items-center space-x-2"><Wand2 className="w-4 h-4 text-violet-400" /><span>AI 生成素材</span><span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-300 border border-violet-500/20">入库</span></h3>
               <button onClick={()=>setShowGenerate(false)} className="text-gray-400 hover:text-white"><X className="w-4 h-4" /></button>
@@ -914,11 +914,11 @@ export const AssetLibrary: React.FC = () => {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-gray-300">名称 *</label>
-                <input value={genForm.name} onChange={e=>setGenForm({...genForm, name:e.target.value})} placeholder="如：雪山神殿-夜景" className="mt-1 w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-brand" />
+                <input value={genForm.name} onChange={e=>setGenForm({...genForm, name:e.target.value})} placeholder="如：雪山神殿-夜景" className="mt-1 w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-brand" />
               </div>
               <div>
                 <label className="text-xs text-gray-300">类别</label>
-                <select value={genForm.category} onChange={e=>setGenForm({...genForm, category: e.target.value as any})} className="mt-1 w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white">
+                <select value={genForm.category} onChange={e=>setGenForm({...genForm, category: e.target.value as any})} className="mt-1 w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white">
                   <option value="character">人物</option><option value="scene">场景</option><option value="prop">道具</option><option value="background">背景</option><option value="effect">特效</option><option value="other">其他</option>
                 </select>
               </div>
@@ -926,7 +926,7 @@ export const AssetLibrary: React.FC = () => {
             {!isWfSrc && (
             <div>
               <label className="text-xs text-gray-300">提示词 Prompt *</label>
-              <textarea value={genForm.prompt} onChange={e=>setGenForm({...genForm, prompt:e.target.value})} rows={3} placeholder="英文提示词，如：ancient temple in snow mountain, cinematic lighting, ultra detailed" className="mt-1 w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs font-mono text-white" />
+              <textarea value={genForm.prompt} onChange={e=>setGenForm({...genForm, prompt:e.target.value})} rows={3} placeholder="英文提示词，如：ancient temple in snow mountain, cinematic lighting, ultra detailed" className="mt-1 w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs font-mono text-white" />
             </div>
             )}
             {isWfSrc && (
@@ -949,7 +949,7 @@ export const AssetLibrary: React.FC = () => {
                   setShowAdvParams(false);
                   setWfInputs([]);
                 }}
-                className="mt-1 w-full bg-white/55 dark:bg-white/[.06] border border-brand/40 rounded-xl px-3 py-2 text-xs text-white focus:border-brand"
+                className="mt-1 w-full bg-surface/80 border border-brand/40 rounded-xl px-3 py-2 text-xs text-white focus:border-brand"
               >
                 <option value="">— 请选择生成源 —</option>
                 {genProviders.map((p: any) => (
@@ -968,7 +968,7 @@ export const AssetLibrary: React.FC = () => {
               {hasAspect && (
               <div>
                 <label className="text-xs text-gray-300">比例</label>
-                <select value={aspectEnum.includes(genForm.aspect_ratio) ? genForm.aspect_ratio : (aspectEnum[0] || '1:1')} onChange={e=>setGenForm({...genForm, aspect_ratio:e.target.value})} className="mt-1 w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white">
+                <select value={aspectEnum.includes(genForm.aspect_ratio) ? genForm.aspect_ratio : (aspectEnum[0] || '1:1')} onChange={e=>setGenForm({...genForm, aspect_ratio:e.target.value})} className="mt-1 w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white">
                   {aspectEnum.map(v => <option key={v} value={v}>{v}</option>)}
                 </select>
               </div>
@@ -976,13 +976,13 @@ export const AssetLibrary: React.FC = () => {
               {hasSeed && (
               <div>
                 <label className="text-xs text-gray-300">种子（可选）</label>
-                <input type="number" value={genForm.seed} onChange={e=>setGenForm({...genForm, seed:e.target.value})} placeholder="留空随机" className="mt-1 w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white font-mono" />
+                <input type="number" value={genForm.seed} onChange={e=>setGenForm({...genForm, seed:e.target.value})} placeholder="留空随机" className="mt-1 w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white font-mono" />
               </div>
               )}
               {hasNegative && (
               <div>
                 <label className="text-xs text-gray-300">负提示词（可选）</label>
-                <input value={genForm.negative_prompt} onChange={e=>setGenForm({...genForm, negative_prompt:e.target.value})} placeholder="不想要的元素" className="mt-1 w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white" />
+                <input value={genForm.negative_prompt} onChange={e=>setGenForm({...genForm, negative_prompt:e.target.value})} placeholder="不想要的元素" className="mt-1 w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white" />
               </div>
               )}
             </div>
@@ -991,12 +991,12 @@ export const AssetLibrary: React.FC = () => {
             <div>
               <label className="text-xs text-gray-300">参考图 / 垫图（可选）</label>
               <div className="mt-1 flex items-center gap-2">
-                <label className="flex-1 border border-dashed border-white/70 dark:border-white/12 hover:border-brand rounded-lg p-2 text-center cursor-pointer bg-white/55 dark:bg-black/30 text-[11px] text-gray-300 hover:text-white transition flex items-center justify-center gap-1.5">
+                <label className="flex-1 border border-dashed border-white/70 dark:border-white/12 hover:border-brand rounded-lg p-2 text-center cursor-pointer bg-surface/80 dark:bg-black/30 text-[11px] text-gray-300 hover:text-white transition flex items-center justify-center gap-1.5">
                   <input type="file" accept="image/*" className="hidden" onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; const r=new FileReader(); r.onload=()=>setRefImage(String(r.result||'')); r.readAsDataURL(f); e.target.value=''; }} />
                   <Upload className="w-3.5 h-3.5 text-brand" />
                   <span>{refImage ? '更换参考图' : '上传参考图 / 角色垫图'}</span>
                 </label>
-                {refImage && <button type="button" onClick={()=>setRefImage('')} className="px-2.5 py-1.5 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11px] text-gray-400 hover:text-white">移除</button>}
+                {refImage && <button type="button" onClick={()=>setRefImage('')} className="px-2.5 py-1.5 rounded-lg bg-surface/80 border border-white/70 dark:border-white/12 text-[11px] text-gray-400 hover:text-white">移除</button>}
               </div>
               {refImage && <img src={refImage} alt="参考图" className="mt-1.5 h-14 rounded-lg border border-white/70 dark:border-white/12 object-cover" />}
             </div>
@@ -1004,7 +1004,7 @@ export const AssetLibrary: React.FC = () => {
 
             {/* 生成源专属参数：派生源按工作流分析清单渲染（含图片/文本/数值/下拉全类型），其余源按 params_schema */}
             {(isWfSrc ? wfParamEntries.length : paramEntries.length) > 0 && (
-              <div className="bg-white/55 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-xl p-3 space-y-2.5">
+              <div className="bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl p-3 space-y-2.5">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-gray-200">生成源参数 · {provLabel}</span>
                   {isWfSrc ? (
@@ -1040,15 +1040,15 @@ export const AssetLibrary: React.FC = () => {
                             {val ? (
                               <div className="relative shrink-0">
                                 <img src={preview} alt="" className="h-12 rounded-lg border border-white/70 dark:border-white/12 object-cover" />
-                                <button type="button" onClick={clear} className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 text-gray-400 hover:text-white text-[9px] leading-none" title="移除">×</button>
+                                <button type="button" onClick={clear} className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-surface/80 border border-white/70 dark:border-white/12 text-gray-400 hover:text-white text-[9px] leading-none" title="移除">×</button>
                               </div>
                             ) : null}
-                            <label className="flex-1 border border-dashed border-white/70 dark:border-white/12 hover:border-brand rounded-lg p-1.5 text-center cursor-pointer bg-white/55 dark:bg-black/30 text-[11px] text-gray-300 hover:text-white transition flex items-center justify-center gap-1.5">
+                            <label className="flex-1 border border-dashed border-white/70 dark:border-white/12 hover:border-brand rounded-lg p-1.5 text-center cursor-pointer bg-surface/80 dark:bg-black/30 text-[11px] text-gray-300 hover:text-white transition flex items-center justify-center gap-1.5">
                               <input type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (!f) return; const r = new FileReader(); r.onload = () => setVal(String(r.result || '')); r.readAsDataURL(f); e.target.value = ''; }} />
                               <Upload className="w-3.5 h-3.5 text-brand" />
                               <span>{val ? '更换' : '上传图片'}</span>
                             </label>
-                            <select onChange={e => { if (e.target.value) setVal(e.target.value); e.target.value = ''; }} className="bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-lg px-2 py-1.5 text-[11px] text-gray-400 focus:outline-none focus:border-brand max-w-[120px]">
+                            <select onChange={e => { if (e.target.value) setVal(e.target.value); e.target.value = ''; }} className="bg-surface/80 border border-white/70 dark:border-white/12 rounded-lg px-2 py-1.5 text-[11px] text-gray-400 focus:outline-none focus:border-brand max-w-[120px]">
                               <option value="">素材库选…</option>
                               {libOpts.map((a: any) => <option key={a.id} value={a.file_url || a.thumb_url}>{a.name}</option>)}
                             </select>
@@ -1060,7 +1060,7 @@ export const AssetLibrary: React.FC = () => {
                       return (
                         <div key={key} className={rowCls} title={titleAttr}>
                           <label className={lblCls}>{title}</label>
-                          <input type="number" value={val === '' ? '' : val} onChange={e => { const v = e.target.value; if (v === '') clear(); else setVal(Number(v)); }} placeholder={exp.default_value != null ? String(exp.default_value) : '默认'} className="flex-1 max-w-[110px] bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-lg px-2 py-1.5 text-[11px] text-white font-mono focus:outline-none focus:border-brand" />
+                          <input type="number" value={val === '' ? '' : val} onChange={e => { const v = e.target.value; if (v === '') clear(); else setVal(Number(v)); }} placeholder={exp.default_value != null ? String(exp.default_value) : '默认'} className="flex-1 max-w-[110px] bg-surface/80 border border-white/70 dark:border-white/12 rounded-lg px-2 py-1.5 text-[11px] text-white font-mono focus:outline-none focus:border-brand" />
                         </div>
                       );
                     }
@@ -1068,7 +1068,7 @@ export const AssetLibrary: React.FC = () => {
                       return (
                         <div key={key} className={rowCls} title={titleAttr}>
                           <label className={lblCls}>{title}</label>
-                          <select value={String(val)} onChange={e => { const v = e.target.value; if (v === '') clear(); else setVal(v); }} className="flex-1 max-w-[150px] bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-lg px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-brand">
+                          <select value={String(val)} onChange={e => { const v = e.target.value; if (v === '') clear(); else setVal(v); }} className="flex-1 max-w-[150px] bg-surface/80 border border-white/70 dark:border-white/12 rounded-lg px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-brand">
                             <option value="">默认{exp.default_value != null && exp.default_value !== '' ? `（${exp.default_value}）` : ''}</option>
                             {exp.options.map((o: any) => <option key={String(o)} value={String(o)}>{String(o)}</option>)}
                           </select>
@@ -1079,7 +1079,7 @@ export const AssetLibrary: React.FC = () => {
                       return (
                         <div key={key} className={rowCls} title={titleAttr}>
                           <label className={lblCls}>{title}</label>
-                          <select value={val === '' ? '' : String(val)} onChange={e => { const v = e.target.value; if (v === '') clear(); else setVal(v === 'true'); }} className="flex-1 max-w-[150px] bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-lg px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-brand">
+                          <select value={val === '' ? '' : String(val)} onChange={e => { const v = e.target.value; if (v === '') clear(); else setVal(v === 'true'); }} className="flex-1 max-w-[150px] bg-surface/80 border border-white/70 dark:border-white/12 rounded-lg px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-brand">
                             <option value="">默认{exp.default_value != null && exp.default_value !== '' ? `（${exp.default_value}）` : ''}</option>
                             <option value="true">是</option>
                             <option value="false">否</option>
@@ -1091,7 +1091,7 @@ export const AssetLibrary: React.FC = () => {
                     return (
                       <div key={key} className="col-span-2 space-y-1" title={titleAttr}>
                         <label className="text-[11px] text-gray-300 truncate block">{title}</label>
-                        <textarea rows={2} value={val === '' ? '' : String(val)} onChange={e => { const v = e.target.value; if (v === '') clear(); else setVal(v); }} placeholder={exp.default_value != null && exp.default_value !== '' ? String(exp.default_value) : (exp.description || `输入 ${title}`)} className="w-full bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-lg px-2 py-1.5 text-[11px] text-white resize-none focus:outline-none focus:border-brand" />
+                        <textarea rows={2} value={val === '' ? '' : String(val)} onChange={e => { const v = e.target.value; if (v === '') clear(); else setVal(v); }} placeholder={exp.default_value != null && exp.default_value !== '' ? String(exp.default_value) : (exp.description || `输入 ${title}`)} className="w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-lg px-2 py-1.5 text-[11px] text-white resize-none focus:outline-none focus:border-brand" />
                       </div>
                     );
                   })}
@@ -1109,7 +1109,7 @@ export const AssetLibrary: React.FC = () => {
                         <select
                           value={val === '' ? '' : String(val)}
                           onChange={e => { const v = e.target.value; if (v === '') clear(); else setVal((typ === 'integer' || typ === 'number') ? Number(v) : v); }}
-                          className="flex-1 max-w-[190px] bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-lg px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-brand"
+                          className="flex-1 max-w-[190px] bg-surface/80 border border-white/70 dark:border-white/12 rounded-lg px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-brand"
                         >
                           <option value="">默认{def?.default != null && def.default !== '' ? `（${def.default}）` : ''}</option>
                           {def.enum.map((o: any) => <option key={String(o)} value={String(o)}>{String(o)}</option>)}
@@ -1127,7 +1127,7 @@ export const AssetLibrary: React.FC = () => {
                           min={def?.minimum} max={def?.maximum} step={def?.step || (typ === 'number' ? 'any' : 1)}
                           onChange={e => { const v = e.target.value; if (v === '') clear(); else setVal(Number(v)); }}
                           placeholder={def?.default != null ? String(def.default) : '默认'}
-                          className="flex-1 max-w-[140px] bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-lg px-2 py-1.5 text-[11px] text-white font-mono focus:outline-none focus:border-brand"
+                          className="flex-1 max-w-[140px] bg-surface/80 border border-white/70 dark:border-white/12 rounded-lg px-2 py-1.5 text-[11px] text-white font-mono focus:outline-none focus:border-brand"
                         />
                       </div>
                     );
@@ -1148,7 +1148,7 @@ export const AssetLibrary: React.FC = () => {
                         value={val === '' ? '' : String(val)}
                         onChange={e => { const v = e.target.value; if (v === '') clear(); else setVal(v); }}
                         placeholder={def?.default != null && def.default !== '' ? String(def.default) : '默认'}
-                        className="flex-1 max-w-[190px] bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-lg px-2 py-1.5 text-[11px] text-white font-mono focus:outline-none focus:border-brand"
+                        className="flex-1 max-w-[190px] bg-surface/80 border border-white/70 dark:border-white/12 rounded-lg px-2 py-1.5 text-[11px] text-white font-mono focus:outline-none focus:border-brand"
                       />
                     </div>
                   );
@@ -1158,10 +1158,10 @@ export const AssetLibrary: React.FC = () => {
 
             <div>
               <label className="text-xs text-gray-300">标签（可选，逗号分隔）</label>
-              <input value={genForm.tags} onChange={e=>setGenForm({...genForm, tags:e.target.value})} placeholder="如：主角, 玄幻, 古风" className="mt-1 w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white" />
+              <input value={genForm.tags} onChange={e=>setGenForm({...genForm, tags:e.target.value})} placeholder="如：主角, 玄幻, 古风" className="mt-1 w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs text-white" />
             </div>
             <div className="flex justify-end space-x-2 pt-1">
-              <button onClick={()=>setShowGenerate(false)} className="px-4 py-2 rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-xs text-white">取消</button>
+              <button onClick={()=>setShowGenerate(false)} className="px-4 py-2 rounded-xl bg-surface/80 border border-white/70 dark:border-white/12 text-xs text-white">取消</button>
               <button
                 onClick={handleGenerate}
                 disabled={generating || !genForm.provider}

@@ -41,13 +41,13 @@ interface Crumb {
  */
 const ICON_BTN =
   'relative w-9 h-9 inline-flex items-center justify-center rounded-md text-gray-400 ' +
-  'hover:text-white hover:bg-white/70 dark:hover:bg-white/[.09] transition-colors ' +
+  'hover:text-white hover:bg-surface/80 transition-colors ' +
   'after:absolute after:-inset-1 after:content-[""] ' +
   'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand';
 
 const MENU_ITEM =
   'w-full flex items-center gap-2 px-2.5 py-2 rounded-md text-left text-[11.5px] ' +
-  'text-gray-300 hover:text-white hover:bg-white/70 dark:hover:bg-white/[.09] transition-colors';
+  'text-gray-300 hover:text-white hover:bg-surface/80 transition-colors';
 
 /**
  * 顶部栏（设计基线 §4 / §5.1）：高 44px，只承担「全局上下文 + 全局动作」。
@@ -148,7 +148,7 @@ export const Header: React.FC<HeaderProps> = ({
   // z-index 会建立堆叠上下文，面板写再大的 z-40 也越不出顶栏这一层，
   // 所以下拉要压住悬浮条，只能把顶栏整体抬到 z-40。
   return (
-    <header className="h-11 bg-white/65 dark:bg-black/50 backdrop-blur-2xl border-b border-white/60 dark:border-white/10 px-3.5 flex items-center gap-3 select-none z-40 relative shrink-0">
+    <header className="h-11 bg-surface-hover/80 dark:bg-black/50 backdrop-blur-2xl border-b border-white/60 dark:border-white/10 px-3.5 flex items-center gap-3 select-none z-40 relative shrink-0">
       {/* ── 左：品牌 22px + 名称 ── */}
       <button
         onClick={goHome}
@@ -180,8 +180,8 @@ export const Header: React.FC<HeaderProps> = ({
                   aria-expanded={i === 0 ? projOpen : undefined}
                   className={`flex items-center gap-1 min-w-0 px-1.5 py-0.5 -mx-1.5 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand ${
                     c.warn
-                      ? 'text-amber-400 hover:text-amber-300 hover:bg-white/70 dark:hover:bg-white/[.09]'
-                      : 'text-gray-300 hover:text-white hover:bg-white/70 dark:hover:bg-white/[.09]'
+                      ? 'text-amber-400 hover:text-amber-300 hover:bg-surface/80'
+                      : 'text-gray-300 hover:text-white hover:bg-surface/80'
                   }`}
                 >
                   {c.warn && <FolderKanban className="w-3.5 h-3.5 shrink-0" strokeWidth={1.7} />}
@@ -217,7 +217,7 @@ export const Header: React.FC<HeaderProps> = ({
                             role="menuitem"
                             onClick={() => switchProject(p.id, p.title)}
                             className={`${MENU_ITEM} ${
-                              p.id === project?.id ? 'text-white bg-white/70 dark:bg-white/[.09]' : ''
+                              p.id === project?.id ? 'text-white bg-surface/80' : ''
                             }`}
                           >
                             <FolderKanban className="w-4 h-4 shrink-0 opacity-70" strokeWidth={1.7} />
@@ -258,7 +258,7 @@ export const Header: React.FC<HeaderProps> = ({
             aria-expanded={moreOpen}
             aria-label="更多"
             title="更多"
-            className={`${ICON_BTN} ${moreOpen ? 'text-white bg-white/70 dark:bg-white/[.09]' : ''}`}
+            className={`${ICON_BTN} ${moreOpen ? 'text-white bg-surface/80' : ''}`}
           >
             <MoreHorizontal className="w-4 h-4" strokeWidth={1.7} />
           </button>
@@ -352,7 +352,7 @@ export const Header: React.FC<HeaderProps> = ({
             onOpenExport();
           }}
           title={!project ? '请先创建或打开项目以导出剪映工程' : '导出剪映 / CapCut 草稿工程'}
-          className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-md border border-white/60 dark:border-white/12 text-[11.5px] font-medium text-gray-300 hover:text-white hover:bg-white/70 dark:hover:bg-white/[.09] transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand"
+          className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-md border border-white/60 dark:border-white/12 text-[11.5px] font-medium text-gray-300 hover:text-white hover:bg-surface/80 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand"
         >
           {project
             ? <Film className="w-4 h-4" strokeWidth={1.7} />

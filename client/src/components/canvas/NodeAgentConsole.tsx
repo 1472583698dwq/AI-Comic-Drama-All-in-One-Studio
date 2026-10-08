@@ -27,7 +27,7 @@ const chipCls = (on: boolean) =>
   'px-2.5 py-1 rounded-full text-[11.5px] font-medium border transition-colors ' +
   (on
     ? 'bg-brand/15 text-brand border-brand/40'
-    : 'bg-white/55 dark:bg-white/[.06] border-white/70 dark:border-white/12 [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)]');
+    : 'bg-surface/80 border-white/70 dark:border-white/12 [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)]');
 
 /** 生成源上拉选择栏的一行（主流「选模型」样式：图标 + 名称/说明 + 选中勾） */
 const SourceOption: React.FC<{
@@ -43,9 +43,9 @@ const SourceOption: React.FC<{
     aria-selected={selected}
     onClick={onClick}
     title={hint || title}
-    className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-left hover:bg-white/55 dark:bg-white/[.06] transition-colors"
+    className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-left hover:bg-surface/80 transition-colors"
   >
-    <span className="w-6 h-6 rounded-md bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 flex items-center justify-center shrink-0">{icon}</span>
+    <span className="w-6 h-6 rounded-md bg-surface/80 border border-white/70 dark:border-white/12 flex items-center justify-center shrink-0">{icon}</span>
     <span className="min-w-0 flex-1">
       <span className={`block text-[13px] truncate ${selected ? 'font-semibold [color:var(--color-text-main)]' : '[color:var(--color-text-secondary)]'}`}>{title}</span>
       {desc && <span className="block text-[10.5px] [color:var(--color-text-muted)] truncate">{desc}</span>}
@@ -330,7 +330,7 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
         type="button"
         onClick={() => setPickerSlot({ key: spec.param_name, label: spec.label, type: spec.type as any, maxCount: 1, originalKey: spec.param_name, asParam: true })}
         title="从画布产出 / 角色库 / 素材库选择并填入该参数（点「应用」后生效）"
-        className="w-full h-6 rounded-md border border-dashed border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] hover:border-brand/50 text-[10.5px] [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] flex items-center justify-center gap-1 transition-colors"
+        className="w-full h-6 rounded-md border border-dashed border-white/70 dark:border-white/12 bg-surface/80 hover:border-brand/50 text-[10.5px] [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] flex items-center justify-center gap-1 transition-colors"
       >
         <FolderOpen className="w-3 h-3" strokeWidth={1.7} />从画布 / 素材库添加
       </button>
@@ -412,7 +412,7 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
     <div className="w-full flex flex-col gap-2" onClick={(e) => e.stopPropagation()}>
       {/* 主流 chat 风格 Composer：输入区与「源 / 参数 / 发送」同在一个圆角框内，
           聚焦时整框描边（focus-within），操作台内不再有任何常驻参数控件 */}
-      <div className="rounded-[18px] bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 transition-colors focus-within:border-brand">
+      <div className="rounded-[18px] bg-surface/80 border border-white/70 dark:border-white/12 transition-colors focus-within:border-brand">
         <textarea value={idea} onChange={(e) => handleIdeaChange(e.target.value)} onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} onFocus={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} onPaste={(e) => { e.stopPropagation(); const text = (e.clipboardData as any)?.getData('text/plain') || (e.clipboardData as any)?.getData('text') || ''; if (text) { e.preventDefault(); const t = e.target as HTMLTextAreaElement; const s = t.selectionStart ?? idea.length; const en = t.selectionEnd ?? idea.length; const nv = idea.slice(0, s) + text + idea.slice(en); handleIdeaChange(nv); requestAnimationFrame(() => { try { t.selectionStart = t.selectionEnd = s + text.length; } catch {} }); } }} onCopy={(e) => e.stopPropagation()} onCut={(e) => e.stopPropagation()} placeholder={kind === 'image' ? '用人话说你的画面想法，Agent 会润色成专业描述并按所选生成源组参数后调用…  例：JK 少女在樱花校园的电影感肖像' : kind === 'video' ? '描述镜头运动与主体动作，Agent 自动选首尾帧/参考模式并调用…  例：猫咪向前冲刺，镜头缓慢推入' : '输入台词，Agent 自动选配音源与情绪并调用…  例：她压低声音说，别回头'} rows={6} className="w-full bg-transparent border-0 rounded-[18px] px-3 pt-2 pb-1 text-[13px] leading-relaxed [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none resize-none nodrag select-text" />
 
         {/* 框内底部工具行：源 · 参数 —— 发送 */}
@@ -425,8 +425,8 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
               title={`生成源：${sourceLabel}（点击选择）`}
               className={`h-7 w-full px-2 rounded-full border flex items-center gap-1.5 transition-colors ${
                 sourcePickerOpen
-                  ? 'bg-white/65 dark:bg-white/[.09] border-white/80 dark:border-white/20'
-                  : 'bg-white/60 dark:bg-white/[.05] border-white/70 dark:border-white/12 hover:[color:var(--color-text-main)]'
+                  ? 'bg-surface-hover/80 border-white/80 dark:border-white/20'
+                  : 'bg-surface/80 border-white/70 dark:border-white/12 hover:[color:var(--color-text-main)]'
               }`}
             >
               <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${providerId ? 'bg-emerald-400' : 'bg-amber-400'}`} />
@@ -439,7 +439,7 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
               <div
                 role="listbox"
                 aria-label="选择生成源"
-                className="absolute left-0 bottom-[calc(100%+8px)] w-[300px] max-w-[86vw] max-h-[320px] flex flex-col rounded-[14px] bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 shadow-xl overflow-hidden z-30"
+                className="absolute left-0 bottom-[calc(100%+8px)] w-[300px] max-w-[86vw] max-h-[320px] flex flex-col rounded-[14px] bg-surface/80 border border-white/70 dark:border-white/12 shadow-xl overflow-hidden z-30"
               >
                 <div className="h-9 px-2.5 flex items-center gap-2 border-b border-white/70 dark:border-white/12 shrink-0">
                   <span className="text-[10.5px] font-semibold tracking-wider [color:var(--color-text-muted)]">生成源</span>
@@ -501,7 +501,7 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
           <button
             onClick={openParams}
             title={`参数设置（共 ${paramSpecs.length} 项）${configHint ? `：${configHint}` : ''}`}
-            className="h-7 px-2 rounded-full flex items-center gap-1 min-w-0 transition-colors [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] hover:bg-white/65 dark:bg-white/[.09]"
+            className="h-7 px-2 rounded-full flex items-center gap-1 min-w-0 transition-colors [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] hover:bg-surface-hover/80"
           >
             <SlidersHorizontal className="w-3.5 h-3.5 shrink-0" strokeWidth={1.7} />
             <span className="text-[11.5px] font-medium shrink-0">参数</span>
@@ -518,8 +518,8 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
             title={executing ? 'Agent 执行中…' : '让 Agent 执行'}
             className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-colors ${
               executing
-                ? 'bg-white/65 dark:bg-white/[.09] [color:var(--color-text-muted)] cursor-progress'
-                : 'bg-brand text-white hover:bg-brand-light shadow-sm shadow-brand/25 disabled:bg-white/65 dark:bg-white/[.09] disabled:[color:var(--color-text-muted)] disabled:shadow-none disabled:cursor-not-allowed'
+                ? 'bg-surface-hover/80 [color:var(--color-text-muted)] cursor-progress'
+                : 'bg-brand text-white hover:bg-brand-light shadow-sm shadow-brand/25 disabled:bg-surface-hover/80 disabled:[color:var(--color-text-muted)] disabled:shadow-none disabled:cursor-not-allowed'
             }`}
           >
             {executing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowUp className="w-4 h-4" strokeWidth={1.7} />}
@@ -543,7 +543,7 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
             role="dialog"
             aria-label="节点参数设置"
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-[520px] max-h-[82vh] flex flex-col rounded-[18px] bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 shadow-2xl overflow-hidden"
+            className="w-full max-w-[520px] max-h-[82vh] flex flex-col rounded-[18px] bg-surface/80 border border-white/70 dark:border-white/12 shadow-2xl overflow-hidden"
           >
             <div className="h-11 px-3.5 flex items-center gap-2 border-b border-white/70 dark:border-white/12 shrink-0">
               <Settings2 className="w-4 h-4 text-brand shrink-0" strokeWidth={1.7} />
@@ -553,7 +553,7 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
                 onClick={() => setParamsOpen(false)}
                 aria-label="关闭参数设置"
                 title="关闭（Esc）"
-                className="ml-auto w-7 h-7 rounded-md flex items-center justify-center [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06] transition-colors shrink-0"
+                className="ml-auto w-7 h-7 rounded-md flex items-center justify-center [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface/80 transition-colors shrink-0"
               >
                 <X className="w-4 h-4" strokeWidth={1.7} />
               </button>
@@ -602,11 +602,11 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
                               ? 'bg-brand/10 border-brand/40 [color:var(--color-text-main)]'
                               : slot.required
                                 ? 'bg-red-500/10 border-dashed border-red-500/50 text-red-400'
-                                : 'bg-white/55 dark:bg-white/[.06] border-dashed border-white/70 dark:border-white/12 [color:var(--color-text-muted)]'
+                                : 'bg-surface/80 border-dashed border-white/70 dark:border-white/12 [color:var(--color-text-muted)]'
                           }`}
                         >
                           {populated && thumb ? (
-                            <div className="w-5 h-5 rounded overflow-hidden border border-white/70 dark:border-white/12 shrink-0 bg-white/55 dark:bg-white/[.06]">
+                            <div className="w-5 h-5 rounded overflow-hidden border border-white/70 dark:border-white/12 shrink-0 bg-surface/80">
                               {slot.type === 'video'
                                 ? <video src={thumb} className="w-full h-full object-cover" />
                                 : slot.type === 'audio'
@@ -639,7 +639,7 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
                     {basic.length > 0 && (
                       <div className="space-y-1.5">
                         <div className="text-[10.5px] [color:var(--color-text-muted)]">基础 · Agent 可自动代填</div>
-                        <div className="grid grid-cols-2 gap-2 p-2 rounded-[10px] bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12">
+                        <div className="grid grid-cols-2 gap-2 p-2 rounded-[10px] bg-surface/80 border border-white/70 dark:border-white/12">
                           {basic.map((spec) => (
                             <div key={spec.param_name} className="space-y-1 min-w-0">
                               <DynamicControl spec={spec} value={draftParams[spec.param_name] ?? spec.default_value} onChange={(v) => changeDraft(spec.param_name, v)} />
@@ -652,7 +652,7 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
                     {advanced.length > 0 && Array.from(new Set(advanced.map(s => s.category || 'advanced'))).map(cat => (
                       <div key={cat} className="space-y-1.5">
                         <div className="text-[10.5px] [color:var(--color-text-muted)]">{CATEGORY_LABEL[cat] || cat}</div>
-                        <div className="grid grid-cols-2 gap-2 p-2 rounded-[10px] bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12">
+                        <div className="grid grid-cols-2 gap-2 p-2 rounded-[10px] bg-surface/80 border border-white/70 dark:border-white/12">
                           {advanced.filter(s => (s.category || 'advanced') === cat).map((spec) => (
                             <div key={spec.param_name} className="space-y-1 min-w-0">
                               <DynamicControl spec={spec} value={draftParams[spec.param_name] ?? spec.default_value} onChange={(v) => changeDraft(spec.param_name, v)} />
@@ -670,7 +670,7 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
               {lastPlan && (
                 <section className="space-y-1.5">
                   <div className="text-[10.5px] font-semibold tracking-wider [color:var(--color-text-muted)]">上次规划</div>
-                  <div className="px-2.5 py-2 rounded-[10px] bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[10.5px] leading-relaxed [color:var(--color-text-secondary)]">
+                  <div className="px-2.5 py-2 rounded-[10px] bg-surface/80 border border-white/70 dark:border-white/12 text-[10.5px] leading-relaxed [color:var(--color-text-secondary)]">
                     <div className="flex items-center gap-1.5"><Sparkles className="w-3 h-3 shrink-0 text-violet-400" strokeWidth={1.7} /><span className="truncate">skill {lastPlan.skill_id} · 源 {(providers.find((p) => p.id === lastPlan.provider_id)?.display_name) || lastPlan.provider_id} · 模型 {lastPlan.model || '默认'}</span></div>
                     {lastPlan.reasoning && <div className="[color:var(--color-text-muted)] mt-0.5">{lastPlan.reasoning}</div>}
                     {lastPlan.plan_source === 'rule' && <div className="text-amber-400 mt-0.5">规则规划结果（LLM 不可用/超时自动降级）</div>}
@@ -686,12 +686,12 @@ export const NodeAgentConsole: React.FC<{ nodeId: string; kind: GenKind }> = ({ 
                 onClick={resetDraftToDefaults}
                 disabled={paramSpecs.length === 0}
                 title="把参数恢复到各生成源的默认值（仍需点「应用」）"
-                className="h-8 px-2.5 rounded-md bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11.5px] font-medium [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] hover:bg-white/65 dark:bg-white/[.09] disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 transition-colors"
+                className="h-8 px-2.5 rounded-md bg-surface/80 border border-white/70 dark:border-white/12 text-[11.5px] font-medium [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] hover:bg-surface-hover/80 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 transition-colors"
               >
                 <RotateCcw className="w-3.5 h-3.5" strokeWidth={1.7} />恢复默认
               </button>
               <div className="flex-1" />
-              <button onClick={() => setParamsOpen(false)} className="h-8 px-3 rounded-md bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11.5px] font-medium [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] hover:bg-white/65 dark:bg-white/[.09] transition-colors">取消</button>
+              <button onClick={() => setParamsOpen(false)} className="h-8 px-3 rounded-md bg-surface/80 border border-white/70 dark:border-white/12 text-[11.5px] font-medium [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] hover:bg-surface-hover/80 transition-colors">取消</button>
               <button
                 onClick={applyDraftParams}
                 disabled={paramSpecs.length === 0}

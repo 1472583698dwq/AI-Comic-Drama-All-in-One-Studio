@@ -91,9 +91,9 @@ export const ScriptImportView: React.FC<ScriptImportViewProps> = ({ isOpen, onCl
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fade-in">
-      <div className="w-full max-w-3xl bg-white/60 dark:bg-white/[.05] rounded-2xl border border-white/70 dark:border-white/12 flex flex-col overflow-hidden shadow-2xl">
+      <div className="w-full max-w-3xl bg-surface/80 rounded-2xl border border-white/70 dark:border-white/12 flex flex-col overflow-hidden shadow-2xl">
         {/* Header */}
-        <div className="h-14 px-6 border-b border-white/70 dark:border-white/12 flex items-center justify-between bg-white/55 dark:bg-white/[.05]">
+        <div className="h-14 px-6 border-b border-white/70 dark:border-white/12 flex items-center justify-between bg-surface/80">
           <div className="flex items-center space-x-2.5">
             <div className="p-2 rounded-xl bg-gradient-to-r from-brand to-accent-orange text-white shadow-sm">
               <BookOpen className="w-4 h-4" />
@@ -107,7 +107,7 @@ export const ScriptImportView: React.FC<ScriptImportViewProps> = ({ isOpen, onCl
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/65 dark:bg-white/[.09]"
+            className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-surface-hover/80"
           >
             <X className="w-5 h-5" />
           </button>
@@ -129,7 +129,7 @@ export const ScriptImportView: React.FC<ScriptImportViewProps> = ({ isOpen, onCl
                   className={`px-3 py-1.5 rounded-xl text-xs font-medium border whitespace-nowrap transition-all ${
                     novelText === t.text
                       ? 'bg-brand/20 border-brand text-brand-light shadow-sm'
-                      : 'bg-white/55 dark:bg-white/[.06] border-white/70 dark:border-white/12 text-gray-400 hover:border-white/80 dark:border-white/20'
+                      : 'bg-surface/80 border-white/70 dark:border-white/12 text-gray-400 hover:border-white/80 dark:border-white/20'
                   }`}
                 >
                   {t.title}
@@ -148,7 +148,7 @@ export const ScriptImportView: React.FC<ScriptImportViewProps> = ({ isOpen, onCl
               onChange={(e) => setNovelText(e.target.value)}
               rows={6}
               placeholder="在此粘贴您的小说章节或剧本文本..."
-              className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl p-3.5 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-brand custom-scrollbar leading-relaxed"
+              className="w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl p-3.5 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-brand custom-scrollbar leading-relaxed"
             />
           </div>
 
@@ -166,7 +166,7 @@ export const ScriptImportView: React.FC<ScriptImportViewProps> = ({ isOpen, onCl
                   className={`p-3 rounded-xl border cursor-pointer transition-all ${
                     stylePreset === st.id
                       ? 'bg-brand/20 border-brand shadow-sm glow-border'
-                      : 'bg-white/55 dark:bg-white/[.06] border-white/70 dark:border-white/12 hover:border-white/80 dark:border-white/20'
+                      : 'bg-surface/80 border-white/70 dark:border-white/12 hover:border-white/80 dark:border-white/20'
                   }`}
                 >
                   <div className="flex items-center justify-between mb-1">
@@ -190,7 +190,7 @@ export const ScriptImportView: React.FC<ScriptImportViewProps> = ({ isOpen, onCl
                 className={`p-3 rounded-xl border flex items-center space-x-3 transition-all ${
                   aspectRatio === '9:16'
                     ? 'bg-brand/20 border-brand text-white'
-                    : 'bg-white/55 dark:bg-white/[.06] border-white/70 dark:border-white/12 text-gray-400 hover:border-white/80 dark:border-white/20'
+                    : 'bg-surface/80 border-white/70 dark:border-white/12 text-gray-400 hover:border-white/80 dark:border-white/20'
                 }`}
               >
                 <Smartphone className="w-5 h-5 text-brand-light" />
@@ -205,7 +205,7 @@ export const ScriptImportView: React.FC<ScriptImportViewProps> = ({ isOpen, onCl
                 className={`p-3 rounded-xl border flex items-center space-x-3 transition-all ${
                   aspectRatio === '16:9'
                     ? 'bg-brand/20 border-brand text-white'
-                    : 'bg-white/55 dark:bg-white/[.06] border-white/70 dark:border-white/12 text-gray-400 hover:border-white/80 dark:border-white/20'
+                    : 'bg-surface/80 border-white/70 dark:border-white/12 text-gray-400 hover:border-white/80 dark:border-white/20'
                 }`}
               >
                 <Monitor className="w-5 h-5 text-accent-orange" />
@@ -219,7 +219,7 @@ export const ScriptImportView: React.FC<ScriptImportViewProps> = ({ isOpen, onCl
         </div>
 
         {/* Footer Action */}
-        <div className="h-16 px-6 border-t border-white/70 dark:border-white/12 bg-white/50 dark:bg-white/[.04] flex items-center justify-between">
+        <div className="h-16 px-6 border-t border-white/70 dark:border-white/12 bg-surface/80 flex items-center justify-between">
           <div className="flex flex-col space-y-1">
             <span className="text-[11px] text-gray-400 flex items-center gap-2">
               {isLoading ? loadingMessage : '⚡ 调用 AI 大模型拆解角色/分镜/配音'}

@@ -81,9 +81,9 @@ export const McpToolsModal: React.FC<McpToolsModalProps> = ({ isOpen, onClose })
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fade-in">
-      <div className="w-full max-w-4xl h-[80vh] bg-white/60 dark:bg-white/[.05] rounded-2xl border border-white/70 dark:border-white/12 flex flex-col overflow-hidden shadow-2xl">
+      <div className="w-full max-w-4xl h-[80vh] bg-surface/80 rounded-2xl border border-white/70 dark:border-white/12 flex flex-col overflow-hidden shadow-2xl">
         {/* Header */}
-        <div className="h-14 px-6 border-b border-white/70 dark:border-white/12 flex items-center justify-between bg-white/50 dark:bg-white/[.04]">
+        <div className="h-14 px-6 border-b border-white/70 dark:border-white/12 flex items-center justify-between bg-surface/80">
           <div className="flex items-center space-x-3">
             <div className="p-2 rounded-xl bg-accent-green/20 border border-accent-green/40 text-accent-green">
               <Cpu className="w-5 h-5" />
@@ -103,7 +103,7 @@ export const McpToolsModal: React.FC<McpToolsModalProps> = ({ isOpen, onClose })
 
           <div className="flex items-center space-x-3">
             {/* Tab Switcher */}
-            <div className="flex bg-white/60 dark:bg-white/[.05] p-1 rounded-lg border border-white/70 dark:border-white/12 text-xs">
+            <div className="flex bg-surface/80 p-1 rounded-lg border border-white/70 dark:border-white/12 text-xs">
               <button
                 onClick={() => setActiveTab('tools')}
                 className={`px-3 py-1 rounded-md font-medium transition-all ${
@@ -125,7 +125,7 @@ export const McpToolsModal: React.FC<McpToolsModalProps> = ({ isOpen, onClose })
 
             <button
               onClick={onClose}
-              className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/65 dark:bg-white/[.09] transition-all"
+              className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-surface-hover/80 transition-all"
             >
               <X className="w-5 h-5" />
             </button>
@@ -146,13 +146,13 @@ export const McpToolsModal: React.FC<McpToolsModalProps> = ({ isOpen, onClose })
                       onClick={() => handleSelectTool(tool)}
                       className={`p-3 rounded-xl border cursor-pointer transition-all ${
                         isSelected
-                          ? 'bg-white/65 dark:bg-white/[.09] border-brand glow-border'
-                          : 'bg-white/60 dark:bg-white/[.05] border-white/70 dark:border-white/12 hover:border-white/80 dark:border-white/20'
+                          ? 'bg-surface-hover/80 border-brand glow-border'
+                          : 'bg-surface/80 border-white/70 dark:border-white/12 hover:border-white/80 dark:border-white/20'
                       }`}
                     >
                       <div className="flex items-center justify-between mb-1.5">
                         <div className="flex items-center space-x-2">
-                          <div className="p-1 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/5">
+                          <div className="p-1 rounded-lg bg-surface/80 border border-white/5">
                             {getToolIcon(tool.icon)}
                           </div>
                           <span className="text-xs font-bold text-white">{tool.name}</span>
@@ -170,7 +170,7 @@ export const McpToolsModal: React.FC<McpToolsModalProps> = ({ isOpen, onClose })
                       <p className="text-[11px] text-gray-400 line-clamp-2">{tool.description}</p>
                       <div className="mt-2 flex items-center justify-between text-[10px] text-gray-500">
                         <span>作者: {tool.author}</span>
-                        <span className="px-1.5 py-0.2 rounded bg-white/55 dark:bg-white/[.06] text-brand-light font-mono">
+                        <span className="px-1.5 py-0.2 rounded bg-surface/80 text-brand-light font-mono">
                           {tool.category}
                         </span>
                       </div>
@@ -183,7 +183,7 @@ export const McpToolsModal: React.FC<McpToolsModalProps> = ({ isOpen, onClose })
               <div className="flex-1 p-6 flex flex-col space-y-4 overflow-y-auto custom-scrollbar">
                 {selectedTool && (
                   <>
-                    <div className="bg-white/55 dark:bg-white/[.06] p-4 rounded-xl border border-white/70 dark:border-white/12">
+                    <div className="bg-surface/80 p-4 rounded-xl border border-white/70 dark:border-white/12">
                       <div className="flex items-center space-x-2 mb-1">
                         {getToolIcon(selectedTool.icon)}
                         <h3 className="text-sm font-bold text-white">{selectedTool.name}</h3>
@@ -204,7 +204,7 @@ export const McpToolsModal: React.FC<McpToolsModalProps> = ({ isOpen, onClose })
                         value={testArgsJson}
                         onChange={(e) => setTestArgsJson(e.target.value)}
                         rows={7}
-                        className="w-full flex-1 bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl p-3 font-mono text-xs text-accent-green focus:outline-none focus:border-brand custom-scrollbar"
+                        className="w-full flex-1 bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl p-3 font-mono text-xs text-accent-green focus:outline-none focus:border-brand custom-scrollbar"
                       />
                     </div>
 
@@ -235,7 +235,7 @@ export const McpToolsModal: React.FC<McpToolsModalProps> = ({ isOpen, onClose })
                 logs.map((log) => (
                   <div
                     key={log.id}
-                    className="p-4 rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 space-y-2 font-mono text-xs"
+                    className="p-4 rounded-xl bg-surface/80 border border-white/70 dark:border-white/12 space-y-2 font-mono text-xs"
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-2">
@@ -256,7 +256,7 @@ export const McpToolsModal: React.FC<McpToolsModalProps> = ({ isOpen, onClose })
                       </div>
                     </div>
 
-                    <div className="bg-white/55 dark:bg-white/[.06] p-2.5 rounded-lg border border-white/55 dark:border-white/10 text-gray-300 text-[11px] overflow-x-auto">
+                    <div className="bg-surface/80 p-2.5 rounded-lg border border-white/55 dark:border-white/10 text-gray-300 text-[11px] overflow-x-auto">
                       <div className="text-gray-500 text-[10px] mb-1">Arguments:</div>
                       <pre>{JSON.stringify(log.arguments, null, 2)}</pre>
                       {log.result && (

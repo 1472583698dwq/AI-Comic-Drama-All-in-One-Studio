@@ -154,7 +154,7 @@ export const TimelineStudioModal: React.FC<Props> = ({ open, onClose, clips, onC
                     exporter.exportMp4();
                   }}
                   title={ffmpegReady ? '服务端 ffmpeg 合成为一条 MP4' : exporter.engine?.ffmpeg_hint || 'ffmpeg 未就绪'}
-                  className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-[11.5px] [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-[11.5px] [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] hover:bg-surface/80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
                   <Download className="w-3.5 h-3.5" strokeWidth={1.8} />
                   导出为 MP4
@@ -167,7 +167,7 @@ export const TimelineStudioModal: React.FC<Props> = ({ open, onClose, clips, onC
                     setMenuOpen(false);
                     exporter.exportDraft();
                   }}
-                  className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-[11.5px] [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06] disabled:opacity-40 transition-colors"
+                  className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-[11.5px] [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] hover:bg-surface/80 disabled:opacity-40 transition-colors"
                 >
                   <Film className="w-3.5 h-3.5" strokeWidth={1.8} />
                   导出到剪映草稿
@@ -296,7 +296,7 @@ export const TimelineStudioModal: React.FC<Props> = ({ open, onClose, clips, onC
             aria-label="裁剪模式"
             title="裁剪：打开后片段的左右把手常显，拖两端改入出点"
             className={`w-6 h-6 rounded-md flex items-center justify-center transition-colors ${
-              trimMode ? 'bg-brand/15 text-brand' : '[color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06]'
+              trimMode ? 'bg-brand/15 text-brand' : '[color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface/80'
             }`}
           >
             <Scissors className="w-3.5 h-3.5" strokeWidth={1.7} />
@@ -380,7 +380,7 @@ export const TimelineStudioModal: React.FC<Props> = ({ open, onClose, clips, onC
                 setPropsClipId(ctxMenu.clip.id);
                 setCtxMenu(null);
               }}
-              className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-[11.5px] [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06] transition-colors"
+              className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-[11.5px] [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] hover:bg-surface/80 transition-colors"
             >
               <SlidersHorizontal className="w-3.5 h-3.5" strokeWidth={1.8} />
               属性

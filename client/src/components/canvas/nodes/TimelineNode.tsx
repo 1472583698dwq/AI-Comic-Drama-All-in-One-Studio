@@ -178,7 +178,7 @@ export const TimelineNode: React.FC<NodeProps> = ({ id, data, selected }) => {
           onClick={() => updateRef.current({ collapsed: !collapsed })}
           aria-label={collapsed ? '展开时间线' : '折叠时间线'}
           title={collapsed ? '展开' : '折叠'}
-          className="nodrag ml-auto w-6 h-6 rounded-lg flex items-center justify-center shrink-0 [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06] transition-colors"
+          className="nodrag ml-auto w-6 h-6 rounded-lg flex items-center justify-center shrink-0 [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface/80 transition-colors"
         >
           {collapsed ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
         </button>
@@ -221,7 +221,7 @@ export const TimelineNode: React.FC<NodeProps> = ({ id, data, selected }) => {
                 className={`w-6 h-6 rounded-md flex items-center justify-center transition-colors ${
                   trimMode
                     ? 'bg-brand/15 text-brand'
-                    : '[color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06]'
+                    : '[color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface/80'
                 }`}
               >
                 <Scissors className="w-3.5 h-3.5" strokeWidth={1.7} />
@@ -270,7 +270,7 @@ export const TimelineNode: React.FC<NodeProps> = ({ id, data, selected }) => {
                 disabled={busy || !clips.length}
                 aria-label="导出成片"
                 title={exporter.engine && !exporter.engine.available ? 'ffmpeg 未就绪' : '合成 MP4 并在导出文件夹中打开'}
-                className="w-6 h-6 rounded-md flex items-center justify-center [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06] disabled:opacity-35 transition-colors"
+                className="w-6 h-6 rounded-md flex items-center justify-center [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface/80 disabled:opacity-35 transition-colors"
               >
                 {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" strokeWidth={1.7} />}
               </button>

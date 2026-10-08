@@ -38,7 +38,7 @@ const STYLE_TEMPLATES = [
 
 /** 磨砂面板底色：浅色=半透明白 + 1px 深色外描边；暗色=6% 白 + 浅描边 */
 const GLASS =
-  'border border-white/70 bg-white/55 backdrop-blur-2xl '
+  'border border-white/70 bg-surface/80 backdrop-blur-2xl '
   + 'shadow-[0_0_0_1px_rgba(15,23,42,.045),0_1px_0_0_rgba(255,255,255,.9)_inset,0_26px_54px_-32px_rgba(15,23,42,.38)] '
   + 'dark:border-white/12 dark:bg-white/[.06] '
   + 'dark:shadow-[0_0_0_1px_rgba(255,255,255,.05),0_1px_0_0_rgba(255,255,255,.06)_inset,0_26px_54px_-32px_rgba(0,0,0,.85)]';
@@ -219,7 +219,7 @@ export const HomeView: React.FC = () => {
 
             <div className="relative flex flex-col gap-7 lg:flex-row lg:items-end lg:justify-between lg:gap-12">
               <div className="min-w-0">
-                <span className={`inline-flex items-center h-6 px-2.5 rounded-full border border-white/70 bg-white/60 gap-1.5 text-[10.5px] font-semibold tracking-wide ${T_SEC} dark:border-white/10 dark:bg-white/[.06]`}>
+                <span className={`inline-flex items-center h-6 px-2.5 rounded-full border border-white/70 bg-surface/80 gap-1.5 text-[10.5px] font-semibold tracking-wide ${T_SEC} dark:border-white/10`}>
                   <Sparkles className="w-3 h-3 text-[color:var(--color-brand)]" strokeWidth={2} />
                   AI 漫剧 Studio
                 </span>
@@ -247,13 +247,13 @@ export const HomeView: React.FC = () => {
                 </button>
                 <button
                   onClick={handleNewProject}
-                  className={`h-11 px-4 inline-flex items-center gap-2 rounded-2xl border border-white/70 bg-white/55 backdrop-blur-xl text-[12.5px] font-semibold ${T_SEC} hover:[color:var(--color-text-main)] hover:bg-white/80 active:scale-[.98] transition-all dark:border-white/10 dark:bg-white/[.05] dark:hover:bg-white/[.09] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-brand-glow)]`}
+                  className={`h-11 px-4 inline-flex items-center gap-2 rounded-2xl border border-white/70 bg-surface/80 backdrop-blur-xl text-[12.5px] font-semibold ${T_SEC} hover:[color:var(--color-text-main)] hover:bg-surface/80 active:scale-[.98] transition-all dark:border-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-brand-glow)]`}
                 >
                   <Plus className="w-4 h-4" strokeWidth={2} />新建项目
                 </button>
                 <button
                   onClick={handleImportScript}
-                  className={`h-11 px-4 inline-flex items-center gap-2 rounded-2xl border border-white/70 bg-white/55 backdrop-blur-xl text-[12.5px] font-semibold ${T_SEC} hover:bg-white/80 active:scale-[.98] transition-all dark:border-white/10 dark:bg-white/[.05] dark:hover:bg-white/[.09] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-brand-glow)]`}
+                  className={`h-11 px-4 inline-flex items-center gap-2 rounded-2xl border border-white/70 bg-surface/80 backdrop-blur-xl text-[12.5px] font-semibold ${T_SEC} hover:bg-surface/80 active:scale-[.98] transition-all dark:border-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-brand-glow)]`}
                 >
                   <BookOpen className="w-4 h-4" strokeWidth={2} />导入剧本
                 </button>
@@ -270,7 +270,7 @@ export const HomeView: React.FC = () => {
                 <button
                   onClick={goBoard}
                   title={boardOn ? '进入项目看板' : BOARD_OFF_HINT}
-                  className={`inline-flex items-center gap-1 h-7 px-2.5 rounded-lg text-[11px] ${T_MUTED} hover:[color:var(--color-text-main)] hover:bg-white/60 dark:hover:bg-white/[.07] transition-colors ${boardCls}`}
+                  className={`inline-flex items-center gap-1 h-7 px-2.5 rounded-lg text-[11px] ${T_MUTED} hover:[color:var(--color-text-main)] hover:bg-surface/80 transition-colors ${boardCls}`}
                 >
                   全部项目<ChevronRight className="w-3 h-3" strokeWidth={2} />
                 </button>
@@ -285,7 +285,7 @@ export const HomeView: React.FC = () => {
               </div>
             ) : recents.length === 0 ? (
               <div className={`h-[212px] rounded-[24px] border border-dashed border-white/70 dark:border-white/10 bg-white/35 dark:bg-white/[.02] backdrop-blur-xl flex flex-col items-center justify-center gap-2.5 ${T_MUTED}`}>
-                <span className="w-11 h-11 rounded-2xl border border-white/70 dark:border-white/10 bg-white/60 dark:bg-white/[.05] flex items-center justify-center">
+                <span className="w-11 h-11 rounded-2xl border border-white/70 dark:border-white/10 bg-surface/80 flex items-center justify-center">
                   <FolderKanban className="w-5 h-5" strokeWidth={1.6} />
                 </span>
                 <span className="text-[11.5px]">还没有项目，从上方新建或选个风格模板开始</span>
@@ -296,19 +296,19 @@ export const HomeView: React.FC = () => {
                   <button
                     key={p.id}
                     onClick={() => openProject(p.id, p.title)}
-                    className={`group relative text-left rounded-[24px] ${GLASS} p-2 transition-all duration-300 hover:-translate-y-1 hover:bg-white/75 hover:shadow-[0_0_0_1px_rgba(124,58,237,.35),0_1px_0_0_rgba(255,255,255,.95)_inset,0_30px_60px_-28px_rgba(76,29,149,.5)] dark:hover:bg-white/[.075] dark:hover:shadow-[0_0_0_1px_rgba(168,85,247,.35),0_1px_0_0_rgba(255,255,255,.08)_inset,0_30px_60px_-28px_rgba(0,0,0,.9)] active:scale-[.995] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-brand-glow)]`}
+                    className={`group relative text-left rounded-[24px] ${GLASS} p-2 transition-all duration-300 hover:-translate-y-1 hover:bg-surface/80 hover:shadow-[0_0_0_1px_rgba(124,58,237,.35),0_1px_0_0_rgba(255,255,255,.95)_inset,0_30px_60px_-28px_rgba(76,29,149,.5)] dark:hover:shadow-[0_0_0_1px_rgba(168,85,247,.35),0_1px_0_0_rgba(255,255,255,.08)_inset,0_30px_60px_-28px_rgba(0,0,0,.9)] active:scale-[.995] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-brand-glow)]`}
                   >
                     {/* 缩略区：品牌渐变 + 斜向光带 + 点阵纹理，占满卡片上半（大方块） */}
                     <div className="relative h-[118px] rounded-[17px] overflow-hidden bg-gradient-to-br from-[#7C3AED]/30 via-[#38BDF8]/20 to-transparent dark:from-[#7C3AED]/45 dark:via-[#38BDF8]/25">
                       <div aria-hidden="true" className="absolute -inset-y-10 -left-1/3 w-2/3 rotate-[18deg] bg-white/25 blur-2xl" />
                       <div aria-hidden="true" className="absolute inset-0 opacity-30 [background-image:radial-gradient(rgba(255,255,255,.55)_1px,transparent_1px)] [background-size:15px_15px]" />
                       <div className="absolute inset-0 flex items-center justify-center">
-                        <span className="w-12 h-12 rounded-2xl border border-white/60 bg-white/55 backdrop-blur-md flex items-center justify-center shadow-[0_8px_20px_-10px_rgba(15,23,42,.4)] dark:border-white/15 dark:bg-white/10">
+                        <span className="w-12 h-12 rounded-2xl border border-white/60 bg-surface/80 backdrop-blur-md flex items-center justify-center shadow-[0_8px_20px_-10px_rgba(15,23,42,.4)] dark:border-white/15">
                           <Film className="w-5 h-5 text-[color:var(--color-brand-glow)] group-hover:scale-110 transition-transform duration-300" strokeWidth={1.7} />
                         </span>
                       </div>
                       {/* 序号 + 当前标记 */}
-                      <span className={`absolute top-2.5 left-2.5 h-5 min-w-[22px] px-1.5 rounded-md border border-white/60 bg-white/60 backdrop-blur-md flex items-center justify-center text-[10px] font-bold tabular-nums ${T_MAIN} dark:border-white/12 dark:bg-white/10`}>
+                      <span className={`absolute top-2.5 left-2.5 h-5 min-w-[22px] px-1.5 rounded-md border border-white/60 bg-surface/80 backdrop-blur-md flex items-center justify-center text-[10px] font-bold tabular-nums ${T_MAIN} dark:border-white/12`}>
                         {String(i + 1).padStart(2, '0')}
                       </span>
                       {p.id === project?.id && (
@@ -391,7 +391,7 @@ export const HomeView: React.FC = () => {
               <button
                 key={it.evt}
                 onClick={() => dispatchOpen(it.evt)}
-                className={`h-8 px-3.5 inline-flex items-center gap-1.5 rounded-xl border border-white/70 bg-white/50 text-[11.5px] font-medium ${T_SEC} hover:[color:var(--color-text-main)] hover:bg-white/80 transition-colors dark:border-white/10 dark:bg-white/[.05] dark:hover:bg-white/[.09]`}
+                className={`h-8 px-3.5 inline-flex items-center gap-1.5 rounded-xl border border-white/70 bg-surface/80 text-[11.5px] font-medium ${T_SEC} hover:[color:var(--color-text-main)] hover:bg-surface/80 transition-colors dark:border-white/10`}
               >
                 {it.icon}{it.label}
               </button>
@@ -399,7 +399,7 @@ export const HomeView: React.FC = () => {
             <button
               onClick={goBoard}
               title={boardOn ? '进入项目看板' : BOARD_OFF_HINT}
-              className={`h-8 px-3.5 inline-flex items-center gap-1.5 rounded-xl border border-white/70 bg-white/50 text-[11.5px] font-medium ${T_SEC} hover:bg-white/80 transition-colors dark:border-white/10 dark:bg-white/[.05] dark:hover:bg-white/[.09] ${boardCls}`}
+              className={`h-8 px-3.5 inline-flex items-center gap-1.5 rounded-xl border border-white/70 bg-surface/80 text-[11.5px] font-medium ${T_SEC} hover:bg-surface/80 transition-colors dark:border-white/10 ${boardCls}`}
             >
               <LayoutGrid className="w-3.5 h-3.5" strokeWidth={1.9} />项目看板
             </button>

@@ -160,7 +160,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
 
   return (
     <aside
-      className={`relative shrink-0 h-full bg-white/60 dark:bg-white/[.04] backdrop-blur-2xl flex flex-col z-20 overflow-hidden transition-[width] duration-[260ms] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none ${
+      className={`relative shrink-0 h-full bg-surface/80 backdrop-blur-2xl flex flex-col z-20 overflow-hidden transition-[width] duration-[260ms] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none ${
         effectiveCollapsed ? 'w-[60px]' : 'w-[264px]'
       }`}
     >
@@ -247,7 +247,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
         {/* 底部工具区：生成源 / 主题 / 设置 / 收起。
             mt-auto 把本区块顶到侧栏最底部 —— 收起成图标轨时没有下方的聊天历史撑高度，
             少了它按钮会紧贴导航堆栈往上跑 */}
-        <div className="shrink-0 mt-auto p-2 border-t border-white/60 dark:border-white/10 space-y-0.5 bg-white/70 dark:bg-black/45 backdrop-blur-xl">
+        <div className="shrink-0 mt-auto p-2 border-t border-white/60 dark:border-white/10 space-y-0.5 bg-surface/80 dark:bg-black/45 backdrop-blur-xl">
           <UtilButton
             icon={Plug}
             label="生成源"

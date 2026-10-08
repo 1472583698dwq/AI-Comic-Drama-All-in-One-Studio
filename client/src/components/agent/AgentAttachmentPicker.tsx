@@ -131,10 +131,10 @@ export const AgentAttachmentPicker: React.FC<AgentAttachmentPickerProps> = ({ se
         onClick={() => !picked && addFromUrl(url, name, kind, source, extra)}
         title={picked ? '已添加' : '添加到会话'}
         className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left transition-colors ${
-          picked ? 'bg-emerald-500/10 border border-emerald-500/30' : 'hover:bg-white/65 dark:bg-white/[.09] border border-transparent'
+          picked ? 'bg-emerald-500/10 border border-emerald-500/30' : 'hover:bg-surface-hover/80 border border-transparent'
         }`}
       >
-        <span className="w-9 h-9 rounded-md overflow-hidden bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 shrink-0 flex items-center justify-center">
+        <span className="w-9 h-9 rounded-md overflow-hidden bg-surface/80 border border-white/70 dark:border-white/12 shrink-0 flex items-center justify-center">
           {kind === 'image'
             ? <img src={resolveUrl(url)} alt="" className="w-full h-full object-cover" loading="lazy" />
             : <Icon className="w-4 h-4 [color:var(--color-text-muted)]" />}

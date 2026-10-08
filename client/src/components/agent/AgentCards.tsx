@@ -30,8 +30,8 @@ export const ArtifactCard: React.FC<{
         {applied && <span className="ml-1 px-1.5 py-px rounded bg-emerald-500/20 text-[10px]">已应用{shotLabel || ''}</span>}
       </div>
       <div className="px-2.5 pb-2">
-        {kind === 'image' && <img src={full} alt={label} className="w-full rounded-lg border border-white/10 max-h-56 object-contain bg-white/55 dark:bg-white/[.06]" loading="lazy" />}
-        {kind === 'video' && <video src={full} controls className="w-full rounded-lg border border-white/10 max-h-56 bg-white/55 dark:bg-white/[.06]" />}
+        {kind === 'image' && <img src={full} alt={label} className="w-full rounded-lg border border-white/10 max-h-56 object-contain bg-surface/80" loading="lazy" />}
+        {kind === 'video' && <video src={full} controls className="w-full rounded-lg border border-white/10 max-h-56 bg-surface/80" />}
         {kind === 'audio' && <audio src={full} controls className="w-full h-8" />}
         <div className="flex gap-1.5 mt-1.5">
           {onApply && !applied && (

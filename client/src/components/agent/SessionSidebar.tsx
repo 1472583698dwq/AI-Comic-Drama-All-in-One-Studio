@@ -61,7 +61,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   );
 
   return (
-    <aside className="w-full h-full bg-white/60 dark:bg-white/[.05] flex flex-col select-none">
+    <aside className="w-full h-full bg-surface/80 flex flex-col select-none">
       <div className="p-3 pb-2 flex items-center justify-between gap-2 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <div className="w-7 h-7 rounded-lg bg-brand/15 border border-brand/30 flex items-center justify-center text-brand shrink-0">
@@ -79,7 +79,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         </div>
         <button
           onClick={onCollapse}
-          className="p-1.5 rounded-lg [color:var(--color-text-main)] hover:bg-white/65 dark:bg-black/40 transition-colors shrink-0"
+          className="p-1.5 rounded-lg [color:var(--color-text-main)] hover:bg-surface-hover/80 dark:bg-black/40 transition-colors shrink-0"
           title="收起会话列表"
         >
           <PanelLeftClose className="w-4 h-4" />
@@ -122,7 +122,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                 className={`group relative p-2.5 rounded-2xl transition-colors cursor-pointer flex flex-col gap-1 ${
                   isActive
                     ? 'bg-brand/15 [color:var(--color-text-main)]'
-                    : 'hover:bg-white/65 dark:bg-black/40 [color:var(--color-text-main)]'
+                    : 'hover:bg-surface-hover/80 dark:bg-black/40 [color:var(--color-text-main)]'
                 }`}
               >
                 <div className="flex items-center justify-between gap-1.5">
@@ -145,7 +145,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                     <Clock className="w-2.5 h-2.5" />
                     <span>{formatSessionTime(s.updated_at || s.created_at)}</span>
                   </span>
-                  <span className="font-mono [color:var(--color-text-main)] bg-white/55 dark:bg-white/[.06] px-1.5 py-0.2 rounded text-[9px]">
+                  <span className="font-mono [color:var(--color-text-main)] bg-surface/80 px-1.5 py-0.2 rounded text-[9px]">
                     {s.messages?.length || 0}条
                   </span>
                 </div>

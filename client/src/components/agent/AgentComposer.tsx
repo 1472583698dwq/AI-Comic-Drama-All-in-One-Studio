@@ -365,12 +365,12 @@ export const AgentComposer: React.FC<AgentComposerProps> = ({
   }, [planOn]);
 
   return (
-    <div className={compact || floating ? '' : 'p-4 border-t border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] shrink-0'}>
+    <div className={compact || floating ? '' : 'p-4 border-t border-white/70 dark:border-white/12 bg-surface/80 shrink-0'}>
       <div
         className={`transition-colors focus-within:border-brand/60 ${
           floating
-            ? 'rounded-[26px] border border-white/55 dark:border-white/10 bg-white/80 dark:bg-black/55 backdrop-blur-xl shadow-2xl shadow-black/30'
-            : 'rounded-2xl border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.05]'
+            ? 'rounded-[26px] border border-white/55 dark:border-white/10 bg-surface/80 dark:bg-black/55 backdrop-blur-xl shadow-2xl shadow-black/30'
+            : 'rounded-2xl border border-white/70 dark:border-white/12 bg-surface/80'
         } ${compact ? '' : 'max-w-4xl mx-auto'}`}
       >
         {/* 顶部：上下文 chip（由调用方决定语义，如画布「已加入会话」的节点） */}
@@ -404,7 +404,7 @@ export const AgentComposer: React.FC<AgentComposerProps> = ({
               );
             })}
             {pasting && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 text-[10px] [color:var(--color-text-main)]">
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg bg-surface/80 border border-white/70 dark:border-white/12 text-[10px] [color:var(--color-text-main)]">
                 <Loader2 className="w-2.5 h-2.5 animate-spin" />粘贴上传中…
               </span>
             )}
@@ -441,7 +441,7 @@ export const AgentComposer: React.FC<AgentComposerProps> = ({
               className={`w-7 h-7 rounded-lg border flex items-center justify-center transition-colors ${
                 pickerOpen || attachments.length
                   ? 'bg-brand/15 border-brand/40 text-brand'
-                  : 'bg-white/60 dark:bg-white/[.05] border-white/70 dark:border-white/12 [color:var(--color-text-main)] hover:border-brand/50'
+                  : 'bg-surface/80 border-white/70 dark:border-white/12 [color:var(--color-text-main)] hover:border-brand/50'
               }`}
             >
               <Paperclip className="w-3.5 h-3.5" />

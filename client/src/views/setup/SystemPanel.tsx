@@ -113,7 +113,7 @@ export const SystemPanel: React.FC<Props> = ({ cfg, draft, setDraft, envFile, js
   return (
     <div className="space-y-5">
       {/* ── 安全总闸 ── */}
-      <section className={`rounded-2xl border overflow-hidden ${trusted ? 'border-red-500/50 bg-red-500/[0.04]' : 'border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05]'}`}>
+      <section className={`rounded-2xl border overflow-hidden ${trusted ? 'border-red-500/50 bg-red-500/[0.04]' : 'border-white/70 dark:border-white/12 bg-surface/80'}`}>
         <div className="px-5 pt-4 pb-3 border-b border-white/60 dark:border-white/12 flex items-center gap-2">
           <ShieldAlert className={`w-4 h-4 ${trusted ? 'text-red-400' : 'text-amber-400'}`} />
           <h3 className="text-sm font-bold text-[color:var(--color-text-main)]">可信模式总闸</h3>
@@ -124,7 +124,7 @@ export const SystemPanel: React.FC<Props> = ({ cfg, draft, setDraft, envFile, js
             <button
               onClick={() => setDraft((d) => ({ ...d, STUDIO_TRUSTED_MODE: trusted ? '0' : '1' }))}
               className={`shrink-0 w-11 h-6 rounded-full border transition-colors relative ${
-                trusted ? 'bg-red-500/70 border-red-400' : 'bg-white/65 dark:bg-white/[.09] border-white/70 dark:border-white/12'
+                trusted ? 'bg-red-500/70 border-red-400' : 'bg-surface-hover/80 border-white/70 dark:border-white/12'
               }`}
               role="switch" aria-checked={trusted}
             >
@@ -149,7 +149,7 @@ export const SystemPanel: React.FC<Props> = ({ cfg, draft, setDraft, envFile, js
       </section>
 
       {/* ── Agent 内核：只读 ── */}
-      <section className="rounded-2xl border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] overflow-hidden">
+      <section className="rounded-2xl border border-white/70 dark:border-white/12 bg-surface/80 overflow-hidden">
         <div className="px-5 pt-4 pb-3 border-b border-white/60 dark:border-white/12 flex items-center gap-2 flex-wrap">
           <Terminal className="w-4 h-4 text-sky-400" />
           <h3 className="text-sm font-bold text-[color:var(--color-text-main)]">Agent 与任务中心参数</h3>
@@ -157,7 +157,7 @@ export const SystemPanel: React.FC<Props> = ({ cfg, draft, setDraft, envFile, js
             <Lock className="w-2.5 h-2.5" />只能改 .env
           </span>
           <button onClick={copyEnvBlock}
-            className="ml-auto px-2.5 py-1 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:text-white flex items-center gap-1">
+            className="ml-auto px-2.5 py-1 rounded-lg bg-surface/80 border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:text-white flex items-center gap-1">
             {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
             {copied ? '已复制' : '复制默认值'}
           </button>
@@ -170,7 +170,7 @@ export const SystemPanel: React.FC<Props> = ({ cfg, draft, setDraft, envFile, js
           </p>
           <div className="rounded-xl border border-white/70 dark:border-white/12 overflow-hidden">
             {ENV_ONLY.map((e, i) => (
-              <div key={e.key} className={`px-3.5 py-2 flex items-baseline gap-3 flex-wrap ${i % 2 ? 'bg-white/50 dark:bg-white/[.04]' : 'bg-surface-secondary/20'}`}>
+              <div key={e.key} className={`px-3.5 py-2 flex items-baseline gap-3 flex-wrap ${i % 2 ? 'bg-surface/80' : 'bg-surface-secondary/20'}`}>
                 <code className="font-mono text-[11px] text-[color:var(--color-text-main)] shrink-0">{e.key}</code>
                 <code className="font-mono text-[11px] text-brand-light shrink-0">{e.def}</code>
                 <span className="text-[11px] text-gray-500 flex-1 min-w-[160px]">{e.desc}</span>
@@ -181,12 +181,12 @@ export const SystemPanel: React.FC<Props> = ({ cfg, draft, setDraft, envFile, js
       </section>
 
       {/* ── 诊断 ── */}
-      <section className="rounded-2xl border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] overflow-hidden">
+      <section className="rounded-2xl border border-white/70 dark:border-white/12 bg-surface/80 overflow-hidden">
         <div className="px-5 pt-4 pb-3 border-b border-white/60 dark:border-white/12 flex items-center gap-2">
           <Activity className="w-4 h-4 text-emerald-400" />
           <h3 className="text-sm font-bold text-[color:var(--color-text-main)]">运行状态</h3>
           <button onClick={fetchHealth} disabled={loadingHealth}
-            className="ml-auto px-2.5 py-1 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:text-white flex items-center gap-1 disabled:opacity-40">
+            className="ml-auto px-2.5 py-1 rounded-lg bg-surface/80 border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:text-white flex items-center gap-1 disabled:opacity-40">
             {loadingHealth ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}刷新
           </button>
         </div>
@@ -205,7 +205,7 @@ export const SystemPanel: React.FC<Props> = ({ cfg, draft, setDraft, envFile, js
                 {testingAll ? '逐个测试中…' : '一键测试全部通道'}
               </button>
               <button onClick={() => copyText(JSON.stringify(health, null, 2), setCopiedHealth)}
-                className="px-2.5 py-1 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:text-white flex items-center gap-1">
+                className="px-2.5 py-1 rounded-lg bg-surface/80 border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:text-white flex items-center gap-1">
                 {copiedHealth ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
                 {copiedHealth ? '已复制' : '复制健康 JSON'}
               </button>
@@ -230,15 +230,15 @@ export const SystemPanel: React.FC<Props> = ({ cfg, draft, setDraft, envFile, js
           </div>
           <div className="pt-1 flex flex-wrap gap-2">
             <a href={`${API_ORIGIN}/docs`} target="_blank" rel="noreferrer"
-              className="px-2.5 py-1 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:text-white">
+              className="px-2.5 py-1 rounded-lg bg-surface/80 border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:text-white">
               打开接口文档 /docs
             </a>
             <button onClick={() => window.dispatchEvent(new Event('open-first-run-wizard'))}
-              className="px-2.5 py-1 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11px] text-brand-light hover:text-white">
+              className="px-2.5 py-1 rounded-lg bg-surface/80 border border-white/70 dark:border-white/12 text-[11px] text-brand-light hover:text-white">
               重新运行安装向导
             </button>
             <button onClick={() => { resetContextTips(); toast.success('已重置：下次进入画布 / 分镜台会重新显示新手提示'); }}
-              className="px-2.5 py-1 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:text-white">
+              className="px-2.5 py-1 rounded-lg bg-surface/80 border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:text-white">
               重置新手提示
             </button>
           </div>
@@ -246,7 +246,7 @@ export const SystemPanel: React.FC<Props> = ({ cfg, draft, setDraft, envFile, js
       </section>
 
       {/* ── 数据位置 ── */}
-      <section className="rounded-2xl border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] overflow-hidden">
+      <section className="rounded-2xl border border-white/70 dark:border-white/12 bg-surface/80 overflow-hidden">
         <div className="px-5 pt-4 pb-3 border-b border-white/60 dark:border-white/12 flex items-center gap-2">
           <FolderOpen className="w-4 h-4 text-amber-400" />
           <h3 className="text-sm font-bold text-[color:var(--color-text-main)]">配置与数据存在哪</h3>

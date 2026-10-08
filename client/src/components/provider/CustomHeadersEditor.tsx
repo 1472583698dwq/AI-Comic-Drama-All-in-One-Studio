@@ -135,7 +135,7 @@ export const CustomHeadersEditor: React.FC<CustomHeadersEditorProps> = ({
   const hasOpenCodeSession = pairs.some(p => p.key.toLowerCase() === 'x-opencode-session' && p.value.trim());
 
   return (
-    <div className={`space-y-3 rounded-2xl border-2 border-brand/30 bg-white/55 dark:bg-white/[.06] p-3.5 text-xs shadow-lg shadow-brand/5 ${className}`}>
+    <div className={`space-y-3 rounded-2xl border-2 border-brand/30 bg-surface/80 p-3.5 text-xs shadow-lg shadow-brand/5 ${className}`}>
       {/* 标题栏与模式切换 */}
       <div className="flex items-center justify-between pb-2 border-b border-white/55 dark:border-white/10">
         <div className="flex items-center gap-2">
@@ -161,7 +161,7 @@ export const CustomHeadersEditor: React.FC<CustomHeadersEditorProps> = ({
           <button
             type="button"
             onClick={() => setIsJsonMode(!isJsonMode)}
-            className="flex items-center gap-1 rounded-lg bg-white/55 dark:bg-white/[.06] hover:bg-white/65 dark:bg-white/[.09] px-2.5 py-1 text-[11px] font-semibold text-gray-300 hover:text-white border border-white/70 dark:border-white/12 transition-all"
+            className="flex items-center gap-1 rounded-lg bg-surface/80 hover:bg-surface-hover/80 px-2.5 py-1 text-[11px] font-semibold text-gray-300 hover:text-white border border-white/70 dark:border-white/12 transition-all"
           >
             {isJsonMode ? <List className="h-3.5 w-3.5 text-brand-light" /> : <FileJson className="h-3.5 w-3.5 text-brand-light" />}
             <span>{isJsonMode ? '切换为键值列表' : '切换为 JSON 代码'}</span>
@@ -171,7 +171,7 @@ export const CustomHeadersEditor: React.FC<CustomHeadersEditorProps> = ({
 
       {/* 快捷预设标签 - 高亮显眼设计 */}
       {!disabled && (
-        <div className="p-2.5 rounded-xl bg-white/60 dark:bg-white/[.05] border border-white/60 dark:border-white/12 space-y-1.5">
+        <div className="p-2.5 rounded-xl bg-surface/80 border border-white/60 dark:border-white/12 space-y-1.5">
           <div className="text-[11px] font-medium text-gray-300 flex items-center justify-between">
             <span className="flex items-center gap-1">
               <Sparkles className="h-3.5 w-3.5 text-amber-400" />
@@ -190,7 +190,7 @@ export const CustomHeadersEditor: React.FC<CustomHeadersEditorProps> = ({
                   title={preset.hint}
                   className={`rounded-xl px-2.5 py-1 text-[11px] font-bold border transition-all flex items-center gap-1 ${
                     hasKey
-                      ? 'border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06] text-zinc-600 cursor-not-allowed opacity-50'
+                      ? 'border-white/70 dark:border-white/12 bg-surface/80 text-zinc-600 cursor-not-allowed opacity-50'
                       : preset.isPrimary
                       ? 'border-amber-400/60 bg-amber-500/20 text-amber-200 hover:bg-amber-500/30 hover:border-amber-300 shadow-sm shadow-amber-500/20 ring-1 ring-amber-400/30'
                       : 'border-brand/40 bg-brand/10 text-brand-light hover:bg-brand/20 hover:border-brand'
@@ -208,7 +208,7 @@ export const CustomHeadersEditor: React.FC<CustomHeadersEditorProps> = ({
       {!isJsonMode ? (
         <div className="space-y-2">
           {pairs.length === 0 ? (
-            <div className="p-4 rounded-xl border border-dashed border-white/80 dark:border-white/20 text-center space-y-2 bg-white/55 dark:bg-white/[.06]">
+            <div className="p-4 rounded-xl border border-dashed border-white/80 dark:border-white/20 text-center space-y-2 bg-surface/80">
               <div className="text-xs text-gray-300 font-medium">当前未配置自定义请求头（可选）</div>
               <div className="text-[11px] text-gray-500">
                 如果您的模型网关要求携带鉴权令牌或 Session（如 OpenCode.ai、OpenRouter），请点击上方快捷标签或下方按钮添加。
@@ -229,7 +229,7 @@ export const CustomHeadersEditor: React.FC<CustomHeadersEditorProps> = ({
               {pairs.map((p, idx) => (
                 <div
                   key={p.id}
-                  className="p-2 rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/60 dark:border-white/12 flex items-center gap-2 hover:border-brand/50 transition-colors"
+                  className="p-2 rounded-xl bg-surface/80 border border-white/60 dark:border-white/12 flex items-center gap-2 hover:border-brand/50 transition-colors"
                 >
                   <span className="text-[10px] font-mono text-gray-500 w-4 text-center">#{idx + 1}</span>
                   <div className="flex-1 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
@@ -239,7 +239,7 @@ export const CustomHeadersEditor: React.FC<CustomHeadersEditorProps> = ({
                       value={p.key}
                       onChange={e => handleChangeRow(p.id, 'key', e.target.value)}
                       placeholder="Header Key (如 x-opencode-session)"
-                      className="w-full sm:w-5/12 rounded-lg border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06] px-3 py-1.5 font-mono text-xs text-white placeholder-gray-500 focus:border-brand focus:outline-none"
+                      className="w-full sm:w-5/12 rounded-lg border border-white/70 dark:border-white/12 bg-surface/80 px-3 py-1.5 font-mono text-xs text-white placeholder-gray-500 focus:border-brand focus:outline-none"
                     />
                     <input
                       type="text"
@@ -247,7 +247,7 @@ export const CustomHeadersEditor: React.FC<CustomHeadersEditorProps> = ({
                       value={p.value}
                       onChange={e => handleChangeRow(p.id, 'value', e.target.value)}
                       placeholder="Header Value (如 session_12345)"
-                      className="w-full sm:w-7/12 rounded-lg border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06] px-3 py-1.5 font-mono text-xs text-white placeholder-gray-500 focus:border-brand focus:outline-none"
+                      className="w-full sm:w-7/12 rounded-lg border border-white/70 dark:border-white/12 bg-surface/80 px-3 py-1.5 font-mono text-xs text-white placeholder-gray-500 focus:border-brand focus:outline-none"
                     />
                   </div>
                   {!disabled && (
@@ -287,7 +287,7 @@ export const CustomHeadersEditor: React.FC<CustomHeadersEditorProps> = ({
             onChange={e => handleJsonChange(e.target.value)}
             rows={5}
             placeholder='{\n  "x-opencode-session": "session_xxxx",\n  "HTTP-Referer": "https://..."\n}'
-            className="w-full rounded-xl border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06] p-3 font-mono text-xs text-white placeholder-gray-500 focus:border-brand focus:outline-none leading-relaxed"
+            className="w-full rounded-xl border border-white/70 dark:border-white/12 bg-surface/80 p-3 font-mono text-xs text-white placeholder-gray-500 focus:border-brand focus:outline-none leading-relaxed"
           />
           {jsonError && <div className="text-[11px] text-red-400 font-medium">⚠️ {jsonError}</div>}
         </div>

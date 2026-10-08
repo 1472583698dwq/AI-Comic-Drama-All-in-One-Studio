@@ -24,8 +24,8 @@ export const NoPageEnabled: React.FC = () => {
 
   return (
     <div className="flex-1 flex items-center justify-center px-6 py-10 overflow-y-auto custom-scrollbar">
-      <div className="w-full max-w-[540px] rounded-2xl border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] px-6 py-7 text-center">
-        <span className="mx-auto w-12 h-12 rounded-2xl border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06] flex items-center justify-center">
+      <div className="w-full max-w-[540px] rounded-2xl border border-white/70 dark:border-white/12 bg-surface/80 px-6 py-7 text-center">
+        <span className="mx-auto w-12 h-12 rounded-2xl border border-white/70 dark:border-white/12 bg-surface/80 flex items-center justify-center">
           <PowerOff className="w-5 h-5 text-gray-400" />
         </span>
 
@@ -39,11 +39,11 @@ export const NoPageEnabled: React.FC = () => {
         )}
 
         {disabled.length > 0 && (
-          <div className="mt-4 rounded-xl border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06] px-3.5 py-3 text-left">
+          <div className="mt-4 rounded-xl border border-white/70 dark:border-white/12 bg-surface/80 px-3.5 py-3 text-left">
             <div className="text-[10.5px] font-bold uppercase tracking-wider text-gray-500">已关闭的页面</div>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {disabled.map((it) => (
-                <span key={it.id} className="px-2 py-0.5 rounded-lg border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] text-[11px] text-gray-400">
+                <span key={it.id} className="px-2 py-0.5 rounded-lg border border-white/70 dark:border-white/12 bg-surface/80 text-[11px] text-gray-400">
                   {it.label}
                 </span>
               ))}

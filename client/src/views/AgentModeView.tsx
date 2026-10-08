@@ -247,7 +247,7 @@ export const AgentModeView: React.FC = () => {
             <button
               onClick={() => void clearAll()}
               title="清空本会话的全部消息记忆（不影响项目文件）"
-              className="p-2 rounded-lg border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] [color:var(--color-text-main)] hover:border-red-400/50 hover:text-red-500 dark:hover:text-red-300 active:scale-95 transition-all shrink-0"
+              className="p-2 rounded-lg border border-white/70 dark:border-white/12 bg-surface/80 [color:var(--color-text-main)] hover:border-red-400/50 hover:text-red-500 dark:hover:text-red-300 active:scale-95 transition-all shrink-0"
             >
               <Trash2 className="w-3.5 h-3.5" />
             </button>
@@ -293,7 +293,7 @@ export const AgentModeView: React.FC = () => {
                 <button
                   onClick={scrollToBottom}
                   title="回到底部"
-                  className="pointer-events-auto absolute -top-11 left-1/2 -translate-x-1/2 w-9 h-9 rounded-full border border-white/55 dark:border-white/10 bg-white/80 dark:bg-black/55 backdrop-blur-xl [color:var(--color-text-main)] shadow-lg shadow-black/30 flex items-center justify-center transition-colors"
+                  className="pointer-events-auto absolute -top-11 left-1/2 -translate-x-1/2 w-9 h-9 rounded-full border border-white/55 dark:border-white/10 bg-surface/80 dark:bg-black/55 backdrop-blur-xl [color:var(--color-text-main)] shadow-lg shadow-black/30 flex items-center justify-center transition-colors"
                 >
                   <ArrowDown className="w-4 h-4" />
                 </button>

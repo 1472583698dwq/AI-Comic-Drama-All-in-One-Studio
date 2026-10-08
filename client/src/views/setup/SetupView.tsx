@@ -112,7 +112,7 @@ export const SetupView: React.FC = () => {
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-background">
       {/* ── 顶栏（唯一的保存入口） ── */}
-      <div className="h-12 shrink-0 bg-white/60 dark:bg-white/[.05] border-b border-white/70 dark:border-white/12 px-5 flex items-center gap-3">
+      <div className="h-12 shrink-0 bg-surface/80 border-b border-white/70 dark:border-white/12 px-5 flex items-center gap-3">
         {/* 左侧主导航常驻，这里不再放重复的返回入口 */}
         <span className="text-[12.5px] font-bold text-[color:var(--color-text-main)]">设置</span>
 
@@ -131,7 +131,7 @@ export const SetupView: React.FC = () => {
           <button
             onClick={save} disabled={!dirty || saving}
             className={`px-4 py-1.5 rounded-xl text-[11.5px] font-bold flex items-center gap-1.5 transition-colors ${
-              dirty ? 'bg-brand text-white hover:bg-brand-light' : 'bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-gray-500 cursor-default'
+              dirty ? 'bg-brand text-white hover:bg-brand-light' : 'bg-surface/80 border border-white/70 dark:border-white/12 text-gray-500 cursor-default'
             } disabled:opacity-60`}
           >
             {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : dirty ? <Save className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />}
@@ -141,7 +141,7 @@ export const SetupView: React.FC = () => {
       </div>
 
       {/* ── 一级页签 ── */}
-      <div className="shrink-0 bg-white/60 dark:bg-white/[.05] border-b border-white/70 dark:border-white/12 px-5">
+      <div className="shrink-0 bg-surface/80 border-b border-white/70 dark:border-white/12 px-5">
         <div className="flex gap-1 overflow-x-auto">
           {TABS.map((t) => {
             const Icon = t.icon;

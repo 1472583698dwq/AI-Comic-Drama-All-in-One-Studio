@@ -593,7 +593,7 @@ export const TimelineStrip: React.FC<TimelineStripProps> = ({
                       title="拖动改入点"
                     >
                       <span
-                        className={`w-[3px] h-7 rounded-full bg-white/80 transition-opacity pointer-events-none ${
+                        className={`w-[3px] h-7 rounded-full bg-surface/80 transition-opacity pointer-events-none ${
                           showTrimHandles ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
                         }`}
                       />
@@ -608,7 +608,7 @@ export const TimelineStrip: React.FC<TimelineStripProps> = ({
                       title="拖动改出点"
                     >
                       <span
-                        className={`w-[3px] h-7 rounded-full bg-white/80 transition-opacity pointer-events-none ${
+                        className={`w-[3px] h-7 rounded-full bg-surface/80 transition-opacity pointer-events-none ${
                           showTrimHandles ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
                         }`}
                       />

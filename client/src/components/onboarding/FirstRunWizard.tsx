@@ -207,13 +207,13 @@ export const FirstRunWizard: React.FC = () => {
         value={values[f.key] ?? f.default ?? ''}
         onChange={(e) => setVal(f.key, e.target.value)}
         placeholder={f.placeholder || ''}
-        className="mt-1 w-full bg-white/55 dark:bg-white/[.06] border border-white/80 dark:border-white/20 rounded-xl px-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-brand"
+        className="mt-1 w-full bg-surface/80 border border-white/80 dark:border-white/20 rounded-xl px-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-brand"
       />
     </label>
   );
 
   const statusChip = (label: string, ready: boolean) => (
-    <span className={`text-[10px] px-2 py-0.5 rounded-full border ${ready ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300' : 'bg-white/55 dark:bg-white/[.06] border-white/70 dark:border-white/12 text-gray-500'}`}>
+    <span className={`text-[10px] px-2 py-0.5 rounded-full border ${ready ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300' : 'bg-surface/80 border-white/70 dark:border-white/12 text-gray-500'}`}>
       {ready ? '✓ ' : '○ '}{label}
     </span>
   );
@@ -226,15 +226,15 @@ export const FirstRunWizard: React.FC = () => {
 
   return (
     <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={skip}>
-      <div className="w-full max-w-2xl max-h-[88vh] bg-white/60 dark:bg-white/[.05] rounded-2xl border border-white/70 dark:border-white/12 flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-2xl max-h-[88vh] bg-surface/80 rounded-2xl border border-white/70 dark:border-white/12 flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
-        <div className="h-12 px-4 border-b border-white/70 dark:border-white/12 flex items-center justify-between shrink-0 bg-white/55 dark:bg-white/[.06]">
+        <div className="h-12 px-4 border-b border-white/70 dark:border-white/12 flex items-center justify-between shrink-0 bg-surface/80">
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-brand to-brand-blue flex items-center justify-center"><Rocket className="w-4 h-4 text-white" /></div>
             <span className="text-sm font-bold text-white">安装向导</span>
             {status && <span className="text-[10px] text-gray-500">· {status.llm?.ready ? '文本✓' : '文本○'} {status.image?.ready ? '图像✓' : '图像○'} {status.video?.ready ? '视频✓' : '视频○'} {status.audio?.ready ? '配音✓' : '配音○'}</span>}
           </div>
-          <button onClick={skip} title="跳过（可随时在 设置 → 系统 重开）" className="p-1 rounded hover:bg-white/55 dark:bg-white/[.06]"><X className="w-4 h-4 text-zinc-400" /></button>
+          <button onClick={skip} title="跳过（可随时在 设置 → 系统 重开）" className="p-1 rounded hover:bg-surface/80"><X className="w-4 h-4 text-zinc-400" /></button>
         </div>
 
         {/* Body */}
@@ -265,7 +265,7 @@ export const FirstRunWizard: React.FC = () => {
                   { icon: Mic, t: '配音', d: '角色台词配音（可选）' },
                   { icon: Video, t: '视频', d: '图生视频 / 运镜（可选）' },
                 ].map((c) => { const I = c.icon; return (
-                  <div key={c.t} className="flex items-center gap-2.5 p-3 rounded-xl bg-white/55 dark:bg-white/[.05] border border-white/70 dark:border-white/12">
+                  <div key={c.t} className="flex items-center gap-2.5 p-3 rounded-xl bg-surface/80 border border-white/70 dark:border-white/12">
                     <div className="w-8 h-8 rounded-lg bg-brand/15 border border-brand/30 flex items-center justify-center"><I className="w-4 h-4 text-brand-light" /></div>
                     <div><div className="text-xs font-bold text-white">{c.t}</div><div className="text-[10px] text-gray-500">{c.d}</div></div>
                   </div>
@@ -280,14 +280,14 @@ export const FirstRunWizard: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {currentList.map((p: Preset) => (
                   <button key={p.id} onClick={() => pickPreset(p)}
-                    className={`text-left p-3 rounded-xl border transition-all ${presetId === p.id ? 'bg-brand/15 border-brand ring-1 ring-brand/30' : 'bg-white/55 dark:bg-white/[.06] border-white/70 dark:border-white/12 hover:border-brand/50'}`}>
+                    className={`text-left p-3 rounded-xl border transition-all ${presetId === p.id ? 'bg-brand/15 border-brand ring-1 ring-brand/30' : 'bg-surface/80 border-white/70 dark:border-white/12 hover:border-brand/50'}`}>
                     <div className="text-xs font-bold text-white">{p.label}</div>
                     {p.hint && <div className="text-[10px] text-gray-500 mt-0.5">{p.hint}</div>}
                   </button>
                 ))}
               </div>
               {preset && (
-                <div className="p-3 rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 space-y-2.5">
+                <div className="p-3 rounded-xl bg-surface/80 border border-white/70 dark:border-white/12 space-y-2.5">
                   {preset.fields.map(renderField)}
                   {result && (
                     <div className={`text-[11px] px-2.5 py-1.5 rounded-lg border ${result.ok ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-red-500/10 border-red-500/30 text-red-300'}`}>
@@ -325,11 +325,11 @@ export const FirstRunWizard: React.FC = () => {
         </div>
 
         {/* Footer */}
-        <div className="p-3 border-t border-white/70 dark:border-white/12 flex items-center justify-between shrink-0 bg-white/55 dark:bg-white/[.06]">
+        <div className="p-3 border-t border-white/70 dark:border-white/12 flex items-center justify-between shrink-0 bg-surface/80">
           <button onClick={skip} title="跳过配置，之后可在 设置 → 系统 重新打开" className="px-3 py-1.5 rounded-xl text-xs text-gray-400 hover:text-white">稍后再说</button>
           <div className="flex items-center gap-2">
             {step !== 'welcome' && step !== 'done' && (
-              <button onClick={() => goStep(step === 'extra' ? 'done' : step === 'image' ? 'extra' : 'image')} className="px-3 py-1.5 rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-xs text-gray-300">上一步</button>
+              <button onClick={() => goStep(step === 'extra' ? 'done' : step === 'image' ? 'extra' : 'image')} className="px-3 py-1.5 rounded-xl bg-surface/80 border border-white/70 dark:border-white/12 text-xs text-gray-300">上一步</button>
             )}
             {step !== 'welcome' && step !== 'done' && (
               <button onClick={() => goStep(step === 'extra' ? 'done' : step === 'image' ? 'extra' : 'image')}

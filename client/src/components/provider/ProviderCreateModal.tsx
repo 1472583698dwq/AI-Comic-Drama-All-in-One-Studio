@@ -199,7 +199,7 @@ export const ProviderCreateModal: React.FC<Props> = ({
       <div
         role="dialog"
         aria-label="新建自定义生成源"
-        className="w-full max-w-2xl max-h-[88vh] bg-white/60 dark:bg-white/[.05] rounded-2xl border border-white/70 dark:border-white/12 flex flex-col overflow-hidden shadow-2xl"
+        className="w-full max-w-2xl max-h-[88vh] bg-surface/80 rounded-2xl border border-white/70 dark:border-white/12 flex flex-col overflow-hidden shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -214,7 +214,7 @@ export const ProviderCreateModal: React.FC<Props> = ({
           <button
             onClick={() => { if (!importBusy && !codeBusy) { resetDoc(); onClose(); } }}
             aria-label="关闭"
-            className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06] disabled:opacity-40"
+            className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface/80 disabled:opacity-40"
             disabled={importBusy || codeBusy}
           ><X className="w-4.5 h-4.5" /></button>
         </div>
@@ -230,7 +230,7 @@ export const ProviderCreateModal: React.FC<Props> = ({
               key={k}
               onClick={() => setTab(k)}
               className={`px-3 py-1.5 rounded-full text-[11.5px] font-medium border flex items-center gap-1.5 transition-colors ${
-                tab === k ? 'bg-brand/15 text-brand border-brand/40' : 'bg-white/55 dark:bg-white/[.06] border-white/70 dark:border-white/12 [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)]'
+                tab === k ? 'bg-brand/15 text-brand border-brand/40' : 'bg-surface/80 border-white/70 dark:border-white/12 [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)]'
               }`}
             ><Icon className="w-3.5 h-3.5" strokeWidth={1.7} />{label}</button>
           ))}
@@ -242,21 +242,21 @@ export const ProviderCreateModal: React.FC<Props> = ({
           <div className="grid grid-cols-2 gap-2">
             <select
               value={kind} onChange={(e) => setKind(e.target.value as CreateKind)}
-              className="bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-lg px-2.5 py-2 text-xs [color:var(--color-text-main)] focus:outline-none focus:border-brand"
+              className="bg-surface/80 border border-white/70 dark:border-white/12 rounded-lg px-2.5 py-2 text-xs [color:var(--color-text-main)] focus:outline-none focus:border-brand"
             >
               {(Object.keys(KIND_LABEL) as CreateKind[]).map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
             </select>
             <input
               value={name} onChange={(e) => setName(e.target.value)}
               placeholder="名称（可选，如 我的FLUX）"
-              className="bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-lg px-3 py-2 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand"
+              className="bg-surface/80 border border-white/70 dark:border-white/12 rounded-lg px-3 py-2 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand"
             />
           </div>
           {tab !== 'comfy' && (
             <input
               type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} autoComplete="off"
               placeholder="API Key（可选；代码里用 api.get('api_key') 取）"
-              className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-lg px-3 py-2 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] font-mono focus:outline-none focus:border-brand"
+              className="w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-lg px-3 py-2 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] font-mono focus:outline-none focus:border-brand"
             />
           )}
 
@@ -268,18 +268,18 @@ export const ProviderCreateModal: React.FC<Props> = ({
                 placeholder={'粘贴 API 文档 / cURL / OpenAPI 片段…\n例：POST https://api.xxx.com/v1/images/generations  Authorization: Bearer <key>  body: {prompt, size}…'}
                 rows={7}
                 disabled={importBusy}
-                className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-xl p-3 text-[11px] font-mono [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand resize-none disabled:opacity-60"
+                className="w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl p-3 text-[11px] font-mono [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand resize-none disabled:opacity-60"
               />
               <div className="flex items-center gap-2">
                 <input
                   value={docUrl} onChange={(e) => setDocUrl(e.target.value)}
                   placeholder="或文档 / OpenAPI URL（可选）"
                   disabled={importBusy}
-                  className="flex-1 bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-lg px-3 py-2 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand disabled:opacity-60"
+                  className="flex-1 bg-surface/80 border border-white/70 dark:border-white/12 rounded-lg px-3 py-2 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand disabled:opacity-60"
                 />
                 <select
                   value={language} onChange={(e) => setLanguage(e.target.value)} disabled={importBusy}
-                  className="bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-lg px-2 py-2 text-[11px] [color:var(--color-text-main)] focus:outline-none focus:border-brand disabled:opacity-60"
+                  className="bg-surface/80 border border-white/70 dark:border-white/12 rounded-lg px-2 py-2 text-[11px] [color:var(--color-text-main)] focus:outline-none focus:border-brand disabled:opacity-60"
                 >
                   <option value="python">python</option>
                   <option value="javascript">javascript</option>
@@ -288,7 +288,7 @@ export const ProviderCreateModal: React.FC<Props> = ({
 
               {/* 任务进度：阶段步骤条 + 实时阶段文案 */}
               {task && (
-                <div className="p-3 rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 space-y-2">
+                <div className="p-3 rounded-xl bg-surface/80 border border-white/70 dark:border-white/12 space-y-2">
                   <div className="flex items-center gap-1.5">
                     {DOC_STAGES.map((s, i) => {
                       const done = !failed && curStageIdx > i;
@@ -350,7 +350,7 @@ export const ProviderCreateModal: React.FC<Props> = ({
                     return (
                       <button
                         key={o.id} type="button" title={o.desc} onClick={() => toggleCap(o.id)}
-                        className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition-all ${on ? 'bg-brand/20 border-brand text-white' : 'bg-white/55 dark:bg-white/[.06] border-white/70 dark:border-white/12 [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)]'}`}
+                        className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition-all ${on ? 'bg-brand/20 border-brand text-white' : 'bg-surface/80 border-white/70 dark:border-white/12 [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)]'}`}
                       >{o.label}</button>
                     );
                   })}
@@ -359,7 +359,7 @@ export const ProviderCreateModal: React.FC<Props> = ({
               <textarea
                 value={description} onChange={(e) => setDescription(e.target.value)}
                 placeholder="描述" rows={2}
-                className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-lg p-2 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand"
+                className="w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-lg p-2 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand"
               />
               <div className="space-y-1">
                 <label className="text-[11px] font-semibold [color:var(--color-text-secondary)]">自定义请求头 (Custom Headers)</label>
@@ -370,25 +370,25 @@ export const ProviderCreateModal: React.FC<Props> = ({
                   <span className="text-[11px] font-semibold [color:var(--color-text-secondary)]">代码（async def generate(ctx, api)）</span>
                   <button
                     type="button" onClick={loadTemplate} disabled={tplBusy}
-                    className="ml-auto px-2.5 py-1 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[11px] [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] disabled:opacity-40 flex items-center gap-1"
+                    className="ml-auto px-2.5 py-1 rounded-lg bg-surface/80 border border-white/70 dark:border-white/12 text-[11px] [color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] disabled:opacity-40 flex items-center gap-1"
                   >{tplBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Code2 className="w-3 h-3" />}{tplBusy ? '加载中…' : '加载模板'}</button>
                 </div>
                 <textarea
                   value={code} onChange={(e) => setCode(e.target.value)} rows={10}
                   placeholder="async def generate(ctx, api): ...  # 末尾可追加 # PARAMS_SCHEMA: {...}"
-                  className="w-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-lg p-2 font-mono text-[11px] [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand resize-none"
+                  className="w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-lg p-2 font-mono text-[11px] [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand resize-none"
                 />
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <input
                   value={models} onChange={(e) => setModels(e.target.value)}
                   placeholder="models 逗号分隔，可空"
-                  className="bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-lg px-3 py-2 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand"
+                  className="bg-surface/80 border border-white/70 dark:border-white/12 rounded-lg px-3 py-2 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand"
                 />
                 <input
                   value={defaultModel} onChange={(e) => setDefaultModel(e.target.value)}
                   placeholder="default_model，可空"
-                  className="bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-lg px-3 py-2 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand"
+                  className="bg-surface/80 border border-white/70 dark:border-white/12 rounded-lg px-3 py-2 text-xs [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand"
                 />
               </div>
               <div className="flex justify-end">
@@ -416,7 +416,7 @@ export const ProviderCreateModal: React.FC<Props> = ({
                   ['粘贴 JSON 文本', '从剪贴板直接导入'],
                   ['外部目录直读', 'COMFYUI_WORKFLOWS_DIR'],
                 ].map(([t, d]) => (
-                  <div key={t} className="p-3 rounded-xl bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12">
+                  <div key={t} className="p-3 rounded-xl bg-surface/80 border border-white/70 dark:border-white/12">
                     <div className="text-[11.5px] font-semibold [color:var(--color-text-main)]">{t}</div>
                     <div className="text-[10px] [color:var(--color-text-muted)] mt-0.5">{d}</div>
                   </div>

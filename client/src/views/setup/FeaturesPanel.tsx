@@ -173,7 +173,7 @@ export const FeaturesPanel: React.FC = () => {
 
         <div className="flex flex-col gap-2.5">
           {items.length === 0 && (
-            <div className="rounded-xl border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06] px-3.5 py-3 text-[11.5px] text-gray-500 flex items-center gap-2">
+            <div className="rounded-xl border border-white/70 dark:border-white/12 bg-surface/80 px-3.5 py-3 text-[11.5px] text-gray-500 flex items-center gap-2">
               {loading ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />读取中…</> : '没有可切换的页面'}
             </div>
           )}
@@ -185,8 +185,8 @@ export const FeaturesPanel: React.FC = () => {
             const locked = it.locked === true;
             return (
               <div key={it.id}
-                className="rounded-xl border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06] px-3.5 py-3 flex items-start gap-3">
-                <div className={`w-8 h-8 shrink-0 rounded-lg flex items-center justify-center ${enabled ? 'bg-brand/15 text-brand-light' : 'bg-white/65 dark:bg-white/[.09] text-gray-500'}`}>
+                className="rounded-xl border border-white/70 dark:border-white/12 bg-surface/80 px-3.5 py-3 flex items-start gap-3">
+                <div className={`w-8 h-8 shrink-0 rounded-lg flex items-center justify-center ${enabled ? 'bg-brand/15 text-brand-light' : 'bg-surface-hover/80 text-gray-500'}`}>
                   <Icon className="w-4 h-4" />
                 </div>
 
@@ -195,10 +195,10 @@ export const FeaturesPanel: React.FC = () => {
                     <span className="text-[12.5px] font-bold text-[color:var(--color-text-main)]">{it.label}</span>
                     <span className={`px-1.5 py-0.5 rounded border text-[10px] ${
                       enabled ? 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10'
-                              : 'text-gray-400 border-white/70 dark:border-white/12 bg-white/65 dark:bg-white/[.09]'
+                              : 'text-gray-400 border-white/70 dark:border-white/12 bg-surface-hover/80'
                     }`}>{enabled ? '已开启' : '已关闭'}</span>
                     {locked && (
-                      <span className="px-1.5 py-0.5 rounded border border-white/70 dark:border-white/12 bg-white/65 dark:bg-white/[.09] text-[10px] text-gray-400 inline-flex items-center gap-1">
+                      <span className="px-1.5 py-0.5 rounded border border-white/70 dark:border-white/12 bg-surface-hover/80 text-[10px] text-gray-400 inline-flex items-center gap-1">
                         <Lock className="w-2.5 h-2.5" />系统页，不可关闭
                       </span>
                     )}
@@ -221,7 +221,7 @@ export const FeaturesPanel: React.FC = () => {
                   ) : (
                     <span
                       title="开启后才能进入该页"
-                      className="mt-2 px-2.5 py-1 rounded-lg text-[11px] border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] text-gray-500 inline-flex items-center gap-1 cursor-not-allowed"
+                      className="mt-2 px-2.5 py-1 rounded-lg text-[11px] border border-white/70 dark:border-white/12 bg-surface/80 text-gray-500 inline-flex items-center gap-1 cursor-not-allowed"
                     >
                       <Lock className="w-3 h-3" />开启后可前往
                     </span>
@@ -242,7 +242,7 @@ export const FeaturesPanel: React.FC = () => {
                     role="switch"
                     aria-checked={enabled}
                     className={`shrink-0 mt-0.5 w-11 h-6 rounded-full relative transition-colors disabled:opacity-60 ${
-                      enabled ? 'bg-brand' : 'bg-white/65 dark:bg-white/[.09] border border-white/70 dark:border-white/12'
+                      enabled ? 'bg-brand' : 'bg-surface-hover/80 border border-white/70 dark:border-white/12'
                     }`}
                     title={enabled ? '点击关闭' : '点击开启'}
                   >
@@ -276,7 +276,7 @@ export const FeaturesPanel: React.FC = () => {
 
         <div className="flex flex-col gap-2.5">
           {features.length === 0 && (
-            <div className="rounded-xl border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06] px-3.5 py-3 text-[11.5px] text-gray-500 flex items-center gap-2">
+            <div className="rounded-xl border border-white/70 dark:border-white/12 bg-surface/80 px-3.5 py-3 text-[11.5px] text-gray-500 flex items-center gap-2">
               {featureLoading
                 ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />读取中…</>
                 : featureError ? '读取失败，暂无可切换的功能' : '没有可切换的功能'}
@@ -289,8 +289,8 @@ export const FeaturesPanel: React.FC = () => {
             const working = featBusy === it.id;
             return (
               <div key={it.id}
-                className="rounded-xl border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06] px-3.5 py-3 flex items-start gap-3">
-                <div className={`w-8 h-8 shrink-0 rounded-lg flex items-center justify-center ${enabled ? 'bg-brand/15 text-brand-light' : 'bg-white/65 dark:bg-white/[.09] text-gray-500'}`}>
+                className="rounded-xl border border-white/70 dark:border-white/12 bg-surface/80 px-3.5 py-3 flex items-start gap-3">
+                <div className={`w-8 h-8 shrink-0 rounded-lg flex items-center justify-center ${enabled ? 'bg-brand/15 text-brand-light' : 'bg-surface-hover/80 text-gray-500'}`}>
                   <Icon className="w-4 h-4" />
                 </div>
 
@@ -299,7 +299,7 @@ export const FeaturesPanel: React.FC = () => {
                     <span className="text-[12.5px] font-bold text-[color:var(--color-text-main)]">{it.label}</span>
                     <span className={`px-1.5 py-0.5 rounded border text-[10px] ${
                       enabled ? 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10'
-                              : 'text-gray-400 border-white/70 dark:border-white/12 bg-white/65 dark:bg-white/[.09]'
+                              : 'text-gray-400 border-white/70 dark:border-white/12 bg-surface-hover/80'
                     }`}>{enabled ? '已开启' : '已关闭'}</span>
                     <span className="text-[10px] text-gray-500">出厂默认{it.default ? '开启' : '关闭'}</span>
                   </div>
@@ -315,7 +315,7 @@ export const FeaturesPanel: React.FC = () => {
                   role="switch"
                   aria-checked={enabled}
                   className={`shrink-0 mt-0.5 w-11 h-6 rounded-full relative transition-colors disabled:opacity-60 ${
-                    enabled ? 'bg-brand' : 'bg-white/65 dark:bg-white/[.09] border border-white/70 dark:border-white/12'
+                    enabled ? 'bg-brand' : 'bg-surface-hover/80 border border-white/70 dark:border-white/12'
                   }`}
                   title={enabled ? '点击关闭' : '点击开启'}
                 >
@@ -343,8 +343,8 @@ export const FeaturesPanel: React.FC = () => {
             const enabled = uiValues[it.id] === true;
             return (
               <div key={it.id}
-                className="rounded-xl border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06] px-3.5 py-3 flex items-start gap-3">
-                <div className={`w-8 h-8 shrink-0 rounded-lg flex items-center justify-center ${enabled ? 'bg-brand/15 text-brand-light' : 'bg-white/65 dark:bg-white/[.09] text-gray-500'}`}>
+                className="rounded-xl border border-white/70 dark:border-white/12 bg-surface/80 px-3.5 py-3 flex items-start gap-3">
+                <div className={`w-8 h-8 shrink-0 rounded-lg flex items-center justify-center ${enabled ? 'bg-brand/15 text-brand-light' : 'bg-surface-hover/80 text-gray-500'}`}>
                   <Icon className="w-4 h-4" />
                 </div>
 
@@ -353,7 +353,7 @@ export const FeaturesPanel: React.FC = () => {
                     <span className="text-[12.5px] font-bold text-[color:var(--color-text-main)]">{it.label}</span>
                     <span className={`px-1.5 py-0.5 rounded border text-[10px] ${
                       enabled ? 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10'
-                              : 'text-gray-400 border-white/70 dark:border-white/12 bg-white/65 dark:bg-white/[.09]'
+                              : 'text-gray-400 border-white/70 dark:border-white/12 bg-surface-hover/80'
                     }`}>{enabled ? '已显示' : '已隐藏'}</span>
                     <span className="text-[10px] text-gray-500">出厂默认{it.default ? '显示' : '隐藏'}</span>
                   </div>
@@ -368,7 +368,7 @@ export const FeaturesPanel: React.FC = () => {
                   role="switch"
                   aria-checked={enabled}
                   className={`shrink-0 mt-0.5 w-11 h-6 rounded-full relative transition-colors ${
-                    enabled ? 'bg-brand' : 'bg-white/65 dark:bg-white/[.09] border border-white/70 dark:border-white/12'
+                    enabled ? 'bg-brand' : 'bg-surface-hover/80 border border-white/70 dark:border-white/12'
                   }`}
                   title={enabled ? '点击隐藏' : '点击显示'}
                 >

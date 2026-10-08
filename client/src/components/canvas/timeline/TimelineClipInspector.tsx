@@ -84,7 +84,7 @@ export const TimelineClipInspector: React.FC<Props> = ({ clip, clips, total, onC
             onClick={onClose}
             aria-label="关闭属性弹窗"
             title="关闭"
-            className="ml-auto w-6 h-6 rounded-md flex items-center justify-center [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06] transition-colors"
+            className="ml-auto w-6 h-6 rounded-md flex items-center justify-center [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface/80 transition-colors"
           >
             <X className="w-3.5 h-3.5" strokeWidth={1.8} />
           </button>
@@ -111,7 +111,7 @@ export const TimelineClipInspector: React.FC<Props> = ({ clip, clips, total, onC
               <span className={LABEL}>片段</span>
               <div className="text-[11px] [color:var(--color-text-main)] break-all">{clip.name}</div>
               <div className="flex items-center gap-1.5 text-[10px] [color:var(--color-text-muted)]">
-                <span className="px-1.5 py-0.5 rounded bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12">{clip.kind === 'audio' ? '音频' : '视频'}</span>
+                <span className="px-1.5 py-0.5 rounded bg-surface/80 border border-white/70 dark:border-white/12">{clip.kind === 'audio' ? '音频' : '视频'}</span>
                 <span className="font-mono">源 {formatTimecode(clip.duration)}</span>
               </div>
             </div>

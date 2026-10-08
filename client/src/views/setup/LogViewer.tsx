@@ -121,7 +121,7 @@ export const LogViewer: React.FC = () => {
   };
 
   return (
-    <section className="rounded-2xl border border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] overflow-hidden">
+    <section className="rounded-2xl border border-white/70 dark:border-white/12 bg-surface/80 overflow-hidden">
       <div className="px-5 pt-4 pb-3 border-b border-white/60 dark:border-white/12 flex items-center gap-2 flex-wrap">
         <ScrollText className="w-4 h-4 text-brand-light" />
         <h3 className="text-sm font-bold [color:var(--color-text-main)]">日志</h3>
@@ -132,43 +132,43 @@ export const LogViewer: React.FC = () => {
           <select
             value={runLevel} onChange={(e) => changeRunLevel(e.target.value)}
             title="运行级别（DEBUG 记录每个 API 请求流水）"
-            className="bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-lg px-2 py-1 text-[11px] [color:var(--color-text-main)] focus:outline-none focus:border-brand"
+            className="bg-surface/80 border border-white/70 dark:border-white/12 rounded-lg px-2 py-1 text-[11px] [color:var(--color-text-main)] focus:outline-none focus:border-brand"
           >
             {RUN_LEVELS.map((l) => <option key={l} value={l}>运行: {l}</option>)}
           </select>
           <select
             value={level} onChange={(e) => setLevel(e.target.value)}
             title="显示最低级别"
-            className="bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-lg px-2 py-1 text-[11px] [color:var(--color-text-main)] focus:outline-none focus:border-brand"
+            className="bg-surface/80 border border-white/70 dark:border-white/12 rounded-lg px-2 py-1 text-[11px] [color:var(--color-text-main)] focus:outline-none focus:border-brand"
           >
             {LEVELS.map((l) => <option key={l.key} value={l.key}>显示: {l.label}</option>)}
           </select>
           <input
             value={q} onChange={(e) => setQ(e.target.value)}
             placeholder="搜索关键词…"
-            className="w-36 bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 rounded-lg px-2.5 py-1 text-[11px] [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand"
+            className="w-36 bg-surface/80 border border-white/70 dark:border-white/12 rounded-lg px-2.5 py-1 text-[11px] [color:var(--color-text-main)] placeholder:[color:var(--color-text-muted)] focus:outline-none focus:border-brand"
           />
           <button
             onClick={() => setAuto((v) => !v)}
             title={auto ? '暂停自动刷新' : '开启自动刷新（3s）'}
-            className={`px-2 py-1 rounded-lg border text-[11px] flex items-center gap-1 ${auto ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-white/55 dark:bg-white/[.06] border-white/70 dark:border-white/12 text-gray-400 hover:text-white'}`}
+            className={`px-2 py-1 rounded-lg border text-[11px] flex items-center gap-1 ${auto ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-surface/80 border-white/70 dark:border-white/12 text-gray-400 hover:text-white'}`}
           >
             {auto ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}{auto ? '自动' : '暂停'}
           </button>
           <button onClick={() => void load(true)} disabled={loading} title="立即刷新"
-            className="px-2 py-1 rounded-lg border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06] text-[11px] text-gray-300 hover:text-white flex items-center gap-1 disabled:opacity-40">
+            className="px-2 py-1 rounded-lg border border-white/70 dark:border-white/12 bg-surface/80 text-[11px] text-gray-300 hover:text-white flex items-center gap-1 disabled:opacity-40">
             {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}刷新
           </button>
           <button onClick={copyAll} title="复制当前全部"
-            className="px-2 py-1 rounded-lg border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06] text-[11px] text-gray-300 hover:text-white flex items-center gap-1">
+            className="px-2 py-1 rounded-lg border border-white/70 dark:border-white/12 bg-surface/80 text-[11px] text-gray-300 hover:text-white flex items-center gap-1">
             <Copy className="w-3 h-3" />复制
           </button>
           <button onClick={download} title="下载 studio.log"
-            className="px-2 py-1 rounded-lg border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06] text-[11px] text-gray-300 hover:text-white flex items-center gap-1">
+            className="px-2 py-1 rounded-lg border border-white/70 dark:border-white/12 bg-surface/80 text-[11px] text-gray-300 hover:text-white flex items-center gap-1">
             <Download className="w-3 h-3" />下载
           </button>
           <button onClick={openFolder} title="打开日志文件夹"
-            className="px-2 py-1 rounded-lg border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06] text-[11px] text-gray-300 hover:text-white flex items-center gap-1">
+            className="px-2 py-1 rounded-lg border border-white/70 dark:border-white/12 bg-surface/80 text-[11px] text-gray-300 hover:text-white flex items-center gap-1">
             <FolderOpen className="w-3 h-3" />文件夹
           </button>
         </div>

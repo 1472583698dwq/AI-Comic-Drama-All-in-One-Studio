@@ -116,7 +116,7 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
             <div
               className={`relative group/msg leading-[1.7] ${
                 compact
-                  ? `max-w-[92%] p-3 rounded-2xl text-[13px] ${isAgent ? 'bg-white/55 dark:bg-white/[.05] [color:var(--color-text-main)]' : 'bg-brand/15 border border-brand/25 [color:var(--color-text-main)]'}`
+                  ? `max-w-[92%] p-3 rounded-2xl text-[13px] ${isAgent ? 'bg-surface/80 [color:var(--color-text-main)]' : 'bg-brand/15 border border-brand/25 [color:var(--color-text-main)]'}`
                   : isAgent
                     // 页面版：助手回复去气泡化——通栏正文直接铺在背景上（ChatGPT/Claude 式），
                     // 只有用户的输入保留一个浅色块，让「谁说的」靠位置和底色就能区分。
@@ -171,7 +171,7 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
                     </span>
                   </button>
                   {thinkingOpen && (
-                    <div className="px-3 py-2 border-t border-brand/15 text-[11px] leading-relaxed [color:var(--color-text-main)] font-mono whitespace-pre-wrap max-h-60 overflow-y-auto custom-scrollbar select-text bg-white/55 dark:bg-white/[.06]">
+                    <div className="px-3 py-2 border-t border-brand/15 text-[11px] leading-relaxed [color:var(--color-text-main)] font-mono whitespace-pre-wrap max-h-60 overflow-y-auto custom-scrollbar select-text bg-surface/80">
                       {m.thinking || (m.isThinkingStreaming ? '正在感知导演意图与分析分镜机位…' : '')}
                       {m.isThinkingStreaming && <span className="inline-block w-1.5 h-3.5 bg-brand ml-1 animate-pulse align-middle" />}
                     </div>
@@ -198,7 +198,7 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
                     onChange={(e) => setEditText(e.target.value)}
                     rows={Math.min(8, Math.max(2, editText.split('\n').length))}
                     autoFocus
-                    className="w-full bg-white/60 dark:bg-white/[.05] border border-brand/50 rounded-lg px-2 py-1.5 text-xs [color:var(--color-text-main)] focus:outline-none resize-none"
+                    className="w-full bg-surface/80 border border-brand/50 rounded-lg px-2 py-1.5 text-xs [color:var(--color-text-main)] focus:outline-none resize-none"
                   />
                   <div className="flex gap-1.5 justify-end">
                     <button
@@ -309,7 +309,7 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
                     <button
                       key={s}
                       onClick={() => onSendSuggestion(s)}
-                      className="px-2 py-1 rounded-full bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 text-[10px] [color:var(--color-text-main)] hover:border-brand"
+                      className="px-2 py-1 rounded-full bg-surface/80 border border-white/70 dark:border-white/12 text-[10px] [color:var(--color-text-main)] hover:border-brand"
                     >
                       {s}
                     </button>

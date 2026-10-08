@@ -147,7 +147,7 @@ export const CanvasAgentSidebar: React.FC = () => {
   // ── 收起态：竖向图标轨（保留 WS 状态与待确认角标，不占画布宽度） ──
   if (collapsed) {
     return (
-      <aside className="w-12 shrink-0 bg-white/60 dark:bg-white/[.05] border-l border-white/70 dark:border-white/12 flex flex-col items-center py-3 gap-3">
+      <aside className="w-12 shrink-0 bg-surface/80 border-l border-white/70 dark:border-white/12 flex flex-col items-center py-3 gap-3">
         <button
           onClick={() => setCollapsed(false)}
           title="展开导演 Agent"
@@ -183,7 +183,7 @@ export const CanvasAgentSidebar: React.FC = () => {
         <button
           onClick={() => setCollapsed(false)}
           title="展开导演 Agent"
-          className="mt-auto p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06]"
+          className="mt-auto p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface/80"
         >
           <ChevronLeft className="w-4 h-4" />
         </button>
@@ -195,7 +195,7 @@ export const CanvasAgentSidebar: React.FC = () => {
   return (
     <aside
       style={{ width }}
-      className="relative shrink-0 bg-white/60 dark:bg-white/[.05] border-l border-white/70 dark:border-white/12 flex flex-col overflow-hidden"
+      className="relative shrink-0 bg-surface/80 border-l border-white/70 dark:border-white/12 flex flex-col overflow-hidden"
     >
       {/* 左边界拖拽把手（贴在侧栏内侧，避免被 overflow-hidden 裁掉）：
           hover 显竖条，拖拽改宽（视口 40% 上限），双击复位默认宽度 */}
@@ -213,7 +213,7 @@ export const CanvasAgentSidebar: React.FC = () => {
       {/* 头部：高度必须与画布顶部工具条一致（h-11 = 44px），
           否则两栏相交处会出现 4px 错位的双分隔线（接缝不齐）。
           全站顶部栏 / 画布工具条 / 本侧栏头统一 44px。 */}
-      <div className="h-11 px-3 border-b border-white/70 dark:border-white/12 flex items-center gap-2 shrink-0 bg-white/60 dark:bg-white/[.05]">
+      <div className="h-11 px-3 border-b border-white/70 dark:border-white/12 flex items-center gap-2 shrink-0 bg-surface/80">
         <div className="p-1.5 rounded-xl bg-gradient-to-tr from-brand to-brand-blue text-white shadow-md shadow-brand/30 shrink-0">
           <Bot className="w-3.5 h-3.5" />
         </div>
@@ -230,21 +230,21 @@ export const CanvasAgentSidebar: React.FC = () => {
         <div className="flex items-center gap-0.5 shrink-0">
           <button
             onClick={() => setActiveTab('agent')}
-            className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06]"
+            className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface/80"
             title="全屏打开「AI 导演」页（同一份会话）"
           >
             <Maximize2 className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => void clearAll()}
-            className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06]"
+            className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface/80"
             title="重置会话记忆"
           >
             <RefreshCw className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => setCollapsed(true)}
-            className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06]"
+            className="p-1.5 rounded-lg [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface/80"
             title="收起侧栏"
           >
             <ChevronRight className="w-4 h-4" />
@@ -296,7 +296,7 @@ export const CanvasAgentSidebar: React.FC = () => {
           挂上来不对路；标了它选区润色浮标不会在选中文字时冒出来。
           「已加入会话」的节点 chip 直接包在输入框内（headerSlot），
           让"这次说话 Agent 会针对谁"和"你要说什么"在同一块区域里。 */}
-      <div className="p-3 border-t border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] shrink-0">
+      <div className="p-3 border-t border-white/70 dark:border-white/12 bg-surface/80 shrink-0">
         <AgentComposer
           compact
           noPolish

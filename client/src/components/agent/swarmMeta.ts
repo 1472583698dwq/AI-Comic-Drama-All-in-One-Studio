@@ -27,7 +27,7 @@ export const ROLE_META: Record<string, RoleMeta> = {
   voice_operator: { label: '配音', Icon: Mic, cls: 'text-emerald-600 dark:text-emerald-300 border-emerald-500/30 bg-emerald-500/10' },
   editor: { label: '剪辑', Icon: Scissors, cls: 'text-orange-600 dark:text-orange-300 border-orange-500/30 bg-orange-500/10' },
   qa_reviewer: { label: '质检', Icon: SearchCheck, cls: 'text-cyan-600 dark:text-cyan-300 border-cyan-500/30 bg-cyan-500/10' },
-  generalist: { label: '通用', Icon: Users, cls: '[color:var(--color-text-main)] border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06]' },
+  generalist: { label: '通用', Icon: Users, cls: '[color:var(--color-text-main)] border-white/70 dark:border-white/12 bg-surface/80' },
 };
 
 /** 后端 icon 名 → lucide 组件（白名单，未知回退 Bot） */
@@ -48,7 +48,7 @@ const COLOR_MAP: Record<string, string> = {
   cyan: 'text-cyan-600 dark:text-cyan-300 border-cyan-500/30 bg-cyan-500/10',
   orange: 'text-orange-600 dark:text-orange-300 border-orange-500/30 bg-orange-500/10',
   red: 'text-red-600 dark:text-red-300 border-red-500/30 bg-red-500/10',
-  gray: '[color:var(--color-text-main)] border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06]',
+  gray: '[color:var(--color-text-main)] border-white/70 dark:border-white/12 bg-surface/80',
 };
 
 let _dynamic: Record<string, RoleMeta> = {};

@@ -163,7 +163,7 @@ export const TimelinePreview: React.FC<Props> = ({
               title={masterMuted ? '开启声音（视频/音频轨一起）' : '静音（视频/音频轨一起）'}
               className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${
                 masterMuted
-                  ? '[color:var(--color-text-muted)] hover:bg-white/55 dark:bg-white/[.06]'
+                  ? '[color:var(--color-text-muted)] hover:bg-surface/80'
                   : 'text-brand hover:bg-brand/10'
               }`}
             >
@@ -174,7 +174,7 @@ export const TimelinePreview: React.FC<Props> = ({
             onClick={enterFullscreen}
             aria-label="全屏播放画面"
             title="全屏播放画面"
-            className="w-7 h-7 rounded-lg flex items-center justify-center [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06] transition-colors"
+            className="w-7 h-7 rounded-lg flex items-center justify-center [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface/80 transition-colors"
           >
             <Maximize className="w-4 h-4" strokeWidth={1.8} />
           </button>

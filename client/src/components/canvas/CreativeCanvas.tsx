@@ -125,7 +125,7 @@ const WORKBENCH_TABS: Array<{ id: WorkbenchSection; label: string; icon: any }> 
 /** 顶部工具条「更多」菜单项样式（精简态使用） */
 const TOOLBAR_MENU_ITEM =
   'w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-[11.5px] ' +
-  '[color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06] transition-colors';
+  '[color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] hover:bg-surface/80 transition-colors';
 
 /** 操作台小节标题 */
 const WorkbenchGroupTitle: React.FC<{ children: React.ReactNode }> = ({ children }) => (
@@ -160,9 +160,9 @@ const WorkbenchRow: React.FC<{
       if (onClick && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onClick(); }
     }}
     title={title}
-    className="group flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-transparent hover:border-white/70 dark:border-white/12 hover:bg-white/55 dark:bg-white/[.06] transition-colors cursor-pointer select-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand active:cursor-grabbing"
+    className="group flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-transparent hover:border-white/70 dark:border-white/12 hover:bg-surface/80 transition-colors cursor-pointer select-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand active:cursor-grabbing"
   >
-    <span className="w-8 h-8 rounded-lg bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 flex items-center justify-center shrink-0">
+    <span className="w-8 h-8 rounded-lg bg-surface/80 border border-white/70 dark:border-white/12 flex items-center justify-center shrink-0">
       <Icon className={`w-4 h-4 ${iconCls || '[color:var(--color-text-secondary)]'}`} strokeWidth={1.7} />
     </span>
     <span className="min-w-0 flex-1">
@@ -173,7 +173,7 @@ const WorkbenchRow: React.FC<{
       <span
         title={actionLabel}
         aria-hidden="true"
-        className="w-6 h-6 rounded-md shrink-0 hidden group-hover:flex items-center justify-center [color:var(--color-text-muted)] group-hover:[color:var(--color-text-main)] group-hover:bg-white/65 dark:bg-white/[.09] transition-colors"
+        className="w-6 h-6 rounded-md shrink-0 hidden group-hover:flex items-center justify-center [color:var(--color-text-muted)] group-hover:[color:var(--color-text-main)] group-hover:bg-surface-hover/80 transition-colors"
       >
         <Plus className="w-3.5 h-3.5" strokeWidth={1.7} />
       </span>
@@ -223,10 +223,10 @@ const NodeControlBar: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
     // 宽度：内层输入框 656px + 左右 p-3(24) + 描边 2 = 682；高度由框内文本区 6 行决定 ≈ 175
     <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-40 w-[92vw] max-w-[682px] flex flex-col items-center gap-2 pointer-events-auto">
       {/* 不用 overflow-hidden：生成源「上拉选择栏」需要越出卡片上沿浮在画布上 */}
-      <div className="w-full bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-[14px] shadow-xl">
+      <div className="w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-[14px] shadow-xl">
         {/* 左上角只标识当前节点；原「节点 Agent 控制台 · 只说人话…」说明栏整条删除 */}
         <div className="h-9 px-3 flex items-center gap-2 border-b border-white/70 dark:border-white/12">
-          <span className="w-7 h-7 rounded-md bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 flex items-center justify-center shrink-0">
+          <span className="w-7 h-7 rounded-md bg-surface/80 border border-white/70 dark:border-white/12 flex items-center justify-center shrink-0">
             <KindIcon className={`w-3.5 h-3.5 ${meta.iconCls}`} strokeWidth={1.7} />
           </span>
           <span className="text-[13px] font-semibold [color:var(--color-text-main)] truncate">{meta.label}</span>
@@ -235,7 +235,7 @@ const NodeControlBar: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
             onClick={close}
             aria-label="收起节点操作台"
             title="收起（也可点画布空白 / Esc）"
-            className="ml-auto w-6 h-6 rounded-md flex items-center justify-center [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06] transition-colors"
+            className="ml-auto w-6 h-6 rounded-md flex items-center justify-center [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface/80 transition-colors"
           >
             <X className="w-3.5 h-3.5" strokeWidth={1.7} />
           </button>
@@ -1768,7 +1768,7 @@ const InnerCanvas: React.FC = () => {
       {/* 中间无限画布 */}
       <div ref={wrapperRef} className="flex-1 relative flex flex-col min-w-0" style={{ background: isLight ? '#E8ECF1' : '#08080B' }} onDrop={onDrop} onDragOver={onDragOver}>
         {/* 画布顶部工具条：完整态（wide/normal）与精简态（compact，窄屏时低频操作收入「更多」） */}
-        <div ref={toolbarRef} className="h-11 px-4 border-b border-white/70 dark:border-white/12 bg-white/60 dark:bg-white/[.05] flex items-center gap-2 shrink-0">
+        <div ref={toolbarRef} className="h-11 px-4 border-b border-white/70 dark:border-white/12 bg-surface/80 flex items-center gap-2 shrink-0">
           <div className="flex items-center gap-2 text-xs min-w-0">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow shadow-emerald-500/30 shrink-0" />
             <span className="[color:var(--color-text-secondary)] shrink-0">项目</span>
@@ -1779,11 +1779,11 @@ const InnerCanvas: React.FC = () => {
           </div>
           <div className="flex-1" />
           <div className="flex items-center gap-2 shrink-0">
-            <select value={canvasId} onChange={e=>switchCanvas(e.target.value)} title="隶属画布：分镜视频在此画布生成" className={`px-2 py-1 rounded-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-xs [color:var(--color-text-main)] focus:outline-none ${toolbarLevel === 'compact' ? 'max-w-[104px]' : 'max-w-[160px]'}`}>
+            <select value={canvasId} onChange={e=>switchCanvas(e.target.value)} title="隶属画布：分镜视频在此画布生成" className={`px-2 py-1 rounded-full bg-surface/80 border border-white/70 dark:border-white/12 text-xs [color:var(--color-text-main)] focus:outline-none ${toolbarLevel === 'compact' ? 'max-w-[104px]' : 'max-w-[160px]'}`}>
               {canvasList.length === 0 && <option value={canvasId}>{currentCanvasName}</option>}
               {canvasList.map(c=> <option key={c.id} value={c.id}>{c.name}（{c.node_count}节点）</option>)}
             </select>
-            <button onClick={() => setShowManager(true)} className="px-3 py-1 rounded-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-xs font-medium [color:var(--color-text-main)] hover:bg-white/65 dark:bg-white/[.09] transition-colors" title="查看全部画布：新建/打开/改名/删除/隶属分镜">管理</button>
+            <button onClick={() => setShowManager(true)} className="px-3 py-1 rounded-full bg-surface/80 border border-white/70 dark:border-white/12 text-xs font-medium [color:var(--color-text-main)] hover:bg-surface-hover/80 transition-colors" title="查看全部画布：新建/打开/改名/删除/隶属分镜">管理</button>
             <CanvasManagerModal
               isOpen={showManager}
               onClose={() => setShowManager(false)}
@@ -1796,15 +1796,15 @@ const InnerCanvas: React.FC = () => {
             {/* 完整态：画布级低频操作直接铺开（快捷键提示仅在很宽时出现） */}
             {toolbarLevel !== 'compact' && (
               <>
-                <button onClick={handleCreateCanvas} className="px-3 py-1 rounded-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-xs font-medium [color:var(--color-text-main)] hover:bg-white/65 dark:bg-white/[.09] transition-colors">+ 新画布</button>
-                <button onClick={handleRenameCanvas} aria-label="重命名当前画布" title="重命名当前画布" className="w-7 h-7 rounded-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] flex items-center justify-center transition-colors">
+                <button onClick={handleCreateCanvas} className="px-3 py-1 rounded-full bg-surface/80 border border-white/70 dark:border-white/12 text-xs font-medium [color:var(--color-text-main)] hover:bg-surface-hover/80 transition-colors">+ 新画布</button>
+                <button onClick={handleRenameCanvas} aria-label="重命名当前画布" title="重命名当前画布" className="w-7 h-7 rounded-full bg-surface/80 border border-white/70 dark:border-white/12 [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] flex items-center justify-center transition-colors">
                   <Pencil className="w-3.5 h-3.5" strokeWidth={1.7} />
                 </button>
-                <button onClick={handleDeleteCanvas} aria-label="删除当前画布" title="删除当前画布" className="w-7 h-7 rounded-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 [color:var(--color-text-muted)] hover:text-red-400 flex items-center justify-center transition-colors">
+                <button onClick={handleDeleteCanvas} aria-label="删除当前画布" title="删除当前画布" className="w-7 h-7 rounded-full bg-surface/80 border border-white/70 dark:border-white/12 [color:var(--color-text-muted)] hover:text-red-400 flex items-center justify-center transition-colors">
                   <Trash2 className="w-3.5 h-3.5" strokeWidth={1.7} />
                 </button>
                 {toolbarLevel === 'wide' && (
-                  <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 text-[10px] [color:var(--color-text-muted)] whitespace-nowrap"
+                  <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface/80 border border-white/70 dark:border-white/12 text-[10px] [color:var(--color-text-muted)] whitespace-nowrap"
                     title="Ctrl/⌘+C 复制 · Ctrl/⌘+V 粘贴 · Ctrl/⌘+Z 撤销 · Ctrl/⌘+Y 重做 · Delete 删除；Shift+拖 框选，Ctrl/⌘+点 多选">
                     <Keyboard className="w-3.5 h-3.5 shrink-0" strokeWidth={1.7} />
                     ⌘C/V 复制粘贴 · ⌘Z/Y 撤销重做 · Del 删除
@@ -1825,7 +1825,7 @@ const InnerCanvas: React.FC = () => {
                   className={`w-7 h-7 rounded-full border flex items-center justify-center transition-colors ${
                     toolbarMenuOpen
                       ? 'bg-brand/15 text-brand border-brand/40'
-                      : 'bg-white/55 dark:bg-white/[.06] border-white/70 dark:border-white/12 [color:var(--color-text-muted)] hover:[color:var(--color-text-main)]'
+                      : 'bg-surface/80 border-white/70 dark:border-white/12 [color:var(--color-text-muted)] hover:[color:var(--color-text-main)]'
                   }`}
                 >
                   <MoreHorizontal className="w-3.5 h-3.5" strokeWidth={1.7} />
@@ -1834,7 +1834,7 @@ const InnerCanvas: React.FC = () => {
                   role="menu"
                   aria-label="更多画布操作"
                   aria-hidden={!toolbarMenuOpen}
-                  className={`absolute right-0 top-[calc(100%+6px)] w-[200px] p-1 rounded-[14px] bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 shadow-xl z-40 origin-top-right transition-all duration-[260ms] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none ${
+                  className={`absolute right-0 top-[calc(100%+6px)] w-[200px] p-1 rounded-[14px] bg-surface/80 border border-white/70 dark:border-white/12 shadow-xl z-40 origin-top-right transition-all duration-[260ms] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none ${
                     toolbarMenuOpen
                       ? 'opacity-100 scale-100 visible pointer-events-auto'
                       : 'opacity-0 scale-[.98] invisible pointer-events-none'
@@ -1857,7 +1857,7 @@ const InnerCanvas: React.FC = () => {
               </div>
             )}
 
-            <button onClick={handleClearCanvas} aria-label="清空画布" title="清空画布" className="w-7 h-7 rounded-full bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 [color:var(--color-text-muted)] hover:text-red-400 flex items-center justify-center transition-colors">
+            <button onClick={handleClearCanvas} aria-label="清空画布" title="清空画布" className="w-7 h-7 rounded-full bg-surface/80 border border-white/70 dark:border-white/12 [color:var(--color-text-muted)] hover:text-red-400 flex items-center justify-center transition-colors">
               <X className="w-3.5 h-3.5" strokeWidth={1.7} />
             </button>
           </div>
@@ -1868,7 +1868,7 @@ const InnerCanvas: React.FC = () => {
               · 分块（模板 / 我的 / 节点 / 素材）：点块 → 展开操作台并直接滚到该小节 */}
         <div ref={workbenchRef} className="absolute left-3 top-[52px] bottom-3 z-30 flex flex-col items-start gap-2 pointer-events-none">
           {/* 悬浮条 */}
-          <div className="pointer-events-auto flex items-center gap-0.5 p-1 rounded-md bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 shadow-md select-none">
+          <div className="pointer-events-auto flex items-center gap-0.5 p-1 rounded-md bg-surface/80 border border-white/70 dark:border-white/12 shadow-md select-none">
             <button
               onClick={toggleSidebar}
               aria-pressed={!sidebarCollapsed}
@@ -1877,7 +1877,7 @@ const InnerCanvas: React.FC = () => {
               className={`w-7 h-7 inline-flex items-center justify-center rounded-md transition-colors ${
                 !sidebarCollapsed
                   ? 'bg-brand/15 text-brand'
-                  : '[color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06]'
+                  : '[color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface/80'
               }`}
             >
               <PanelLeft className="w-4 h-4" strokeWidth={1.7} />
@@ -1895,7 +1895,7 @@ const InnerCanvas: React.FC = () => {
                   className={`h-7 px-2 inline-flex items-center gap-1 rounded-md text-[11.5px] font-medium transition-colors ${
                     on
                       ? 'bg-brand/15 text-brand'
-                      : '[color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06]'
+                      : '[color:var(--color-text-secondary)] hover:[color:var(--color-text-main)] hover:bg-surface/80'
                   }`}
                 >
                   <Icon className="w-3.5 h-3.5" strokeWidth={1.7} />
@@ -1910,7 +1910,7 @@ const InnerCanvas: React.FC = () => {
             role="dialog"
             aria-label="画布操作台"
             aria-hidden={!workbenchOpen}
-            className={`w-[248px] flex-1 min-h-0 flex flex-col rounded-[18px] bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 shadow-xl overflow-hidden origin-top-left transition-all duration-[260ms] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none ${
+            className={`w-[248px] flex-1 min-h-0 flex flex-col rounded-[18px] bg-surface/80 border border-white/70 dark:border-white/12 shadow-xl overflow-hidden origin-top-left transition-all duration-[260ms] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none ${
               workbenchOpen
                 ? 'opacity-100 scale-100 visible pointer-events-auto'
                 : 'opacity-0 scale-[.98] invisible pointer-events-none'
@@ -1923,7 +1923,7 @@ const InnerCanvas: React.FC = () => {
                 onClick={() => setWorkbenchOpen(false)}
                 aria-label="收起画布操作台"
                 title="收起画布操作台（向上折叠）"
-                className="ml-auto w-6 h-6 inline-flex items-center justify-center rounded-md [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-white/55 dark:bg-white/[.06] transition-colors"
+                className="ml-auto w-6 h-6 inline-flex items-center justify-center rounded-md [color:var(--color-text-muted)] hover:[color:var(--color-text-main)] hover:bg-surface/80 transition-colors"
               >
                 <ChevronsUp className="w-3.5 h-3.5" strokeWidth={1.7} />
               </button>
@@ -2039,7 +2039,7 @@ const InnerCanvas: React.FC = () => {
                   <button
                     onClick={goPluginCenter}
                     title="去设置 → 插件中心安装插件包"
-                    className="w-full text-left px-3 py-2 rounded-lg text-[10.5px] [color:var(--color-text-muted)] hover:bg-white/55 dark:bg-white/[.06] transition-colors"
+                    className="w-full text-left px-3 py-2 rounded-lg text-[10.5px] [color:var(--color-text-muted)] hover:bg-surface/80 transition-colors"
                   >
                     自定义 / 扩展节点：去设置 → 插件中心安装插件包
                   </button>
@@ -2065,7 +2065,7 @@ const InnerCanvas: React.FC = () => {
                           e.dataTransfer.setData('text/plain', abs || url);
                         }}
                         title={`拖入画布：${a.name}`}
-                        className="aspect-square rounded-md overflow-hidden border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06] cursor-grab hover:border-brand/40 transition-colors"
+                        className="aspect-square rounded-md overflow-hidden border border-white/70 dark:border-white/12 bg-surface/80 cursor-grab hover:border-brand/40 transition-colors"
                       >
                         {abs ? (
                           <AutoRatioMedia src={abs} fallbackAspect="1/1" className="w-full h-full" mediaClassName="group-hover:scale-[1.03] transition-transform" />
@@ -2094,7 +2094,7 @@ const InnerCanvas: React.FC = () => {
               <button
                 onClick={() => window.dispatchEvent(new CustomEvent('canvas-export-shots'))}
                 title="导出为分镜工程"
-                className="h-8 px-2.5 rounded-md bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 inline-flex items-center justify-center gap-1.5 text-[11.5px] font-medium [color:var(--color-text-main)] hover:bg-white/65 dark:bg-white/[.09] transition-colors"
+                className="h-8 px-2.5 rounded-md bg-surface/80 border border-white/70 dark:border-white/12 inline-flex items-center justify-center gap-1.5 text-[11.5px] font-medium [color:var(--color-text-main)] hover:bg-surface-hover/80 transition-colors"
               >
                 <Download className="w-3.5 h-3.5" strokeWidth={1.7} />导出
               </button>
@@ -2110,7 +2110,7 @@ const InnerCanvas: React.FC = () => {
             </div>
           ) : isEmpty ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center p-8 gap-6 overflow-y-auto" style={{ background: isLight ? '#E8ECF1' : '#08080B' }}>
-              <div className="w-full max-w-[700px] bg-white/60 dark:bg-white/[.05] border border-white/70 dark:border-white/12 rounded-3xl shadow-2xl p-6 text-center space-y-4">
+              <div className="w-full max-w-[700px] bg-surface/80 border border-white/70 dark:border-white/12 rounded-3xl shadow-2xl p-6 text-center space-y-4">
                 <div className="w-12 h-12 rounded-2xl bg-brand/10 border border-brand/20 text-brand flex items-center justify-center mx-auto shadow-lg">
                   <Wand2 className="w-6 h-6" />
                 </div>
@@ -2120,7 +2120,7 @@ const InnerCanvas: React.FC = () => {
                 </div>
                 <div className="grid grid-cols-3 gap-3 pt-2">
                   {TEMPLATES.map(t => (
-                    <button key={t.id} onClick={() => addTemplate(t)} className="p-4 rounded-2xl border border-white/70 dark:border-white/12 bg-white/55 dark:bg-white/[.06] hover:border-brand/40 hover:bg-white/65 dark:bg-white/[.09] text-left transition-all group">
+                    <button key={t.id} onClick={() => addTemplate(t)} className="p-4 rounded-2xl border border-white/70 dark:border-white/12 bg-surface/80 hover:border-brand/40 hover:bg-surface-hover/80 text-left transition-all group">
                       <div className="text-xs font-bold [color:var(--color-text-main)] group-hover:text-brand">{t.label}</div>
                       <div className="text-[11px] [color:var(--color-text-muted)] mt-1">{t.desc}</div>
                     </button>
@@ -2188,7 +2188,7 @@ const InnerCanvas: React.FC = () => {
               <Background id="grid-minor" variant={BackgroundVariant.Lines} gap={24} lineWidth={1} color="var(--canvas-grid)" bgColor="var(--canvas-bg)" />
               {/* 叠加层必须透明底：暗色模式下 Background 默认底色 #141414，会盖住下面的细格 */}
               <Background id="grid-major" variant={BackgroundVariant.Lines} gap={120} lineWidth={1} color="var(--canvas-grid-major)" bgColor="transparent" />
-              <Controls className="!bg-white/60 dark:bg-white/[.05] !border-white/70 dark:border-white/12 !rounded-2xl shadow-xl ![color:var(--color-text-main)] [&_button]:!bg-white/60 dark:bg-white/[.05] [&_button]:!border-white/70 dark:border-white/12 [&_button]:![color:var(--color-text-main)]">
+              <Controls className="!bg-surface/80 !border-white/70 dark:border-white/12 !rounded-2xl shadow-xl ![color:var(--color-text-main)] [&_button]:!bg-surface/80 [&_button]:!border-white/70 dark:border-white/12 [&_button]:![color:var(--color-text-main)]">
                 {/* 横向排布：原顶栏按钮，并入左下角缩放/适应竖条 */}
                 <ControlButton onClick={handleArrangeHorizontally} title="横向排布：把所有节点排成一行" aria-label="横向排布">
                   <ArrowLeftRight className="w-3.5 h-3.5" strokeWidth={1.7} />
@@ -2200,7 +2200,7 @@ const InnerCanvas: React.FC = () => {
                   故给白色描边。maskStrokeWidth 不能省：内部会被 viewScale 乘算，不传时用的是
                   CSS 默认值 1（SVG 用户单位 ≈ 亚像素），传了才是「1 个屏幕像素」的细白线。 */}
               <MiniMap
-                className="!bg-white/60 dark:bg-white/[.05] !border-white/70 dark:border-white/12 !rounded-xl cursor-grab active:cursor-grabbing"
+                className="!bg-surface/80 !border-white/70 dark:border-white/12 !rounded-xl cursor-grab active:cursor-grabbing"
                 maskColor={isLight ? 'rgba(15,23,42,0.12)' : 'rgba(10,10,12,0.8)'}
                 maskStrokeColor={isLight ? '#7C3AED' : '#ffffff'}
                 maskStrokeWidth={1}

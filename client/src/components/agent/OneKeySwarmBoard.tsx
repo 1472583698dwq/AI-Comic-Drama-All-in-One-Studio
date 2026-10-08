@@ -75,7 +75,7 @@ export const OneKeySwarmBoard: React.FC<{ subagents: Record<string, SubRec> }> =
     return (
       <div className="h-full min-h-[220px] flex items-center justify-center">
         <div className="text-center space-y-3">
-          <div className="w-12 h-12 rounded-2xl bg-white/55 dark:bg-white/[.06] border border-white/70 dark:border-white/12 flex items-center justify-center mx-auto">
+          <div className="w-12 h-12 rounded-2xl bg-surface/80 border border-white/70 dark:border-white/12 flex items-center justify-center mx-auto">
             <Bot className="w-5 h-5 [color:var(--color-text-muted)]" />
           </div>
           <div className="text-[11px] [color:var(--color-text-muted)]">任务运行中，总导演委派的子代理会出现在这里</div>
@@ -93,7 +93,7 @@ export const OneKeySwarmBoard: React.FC<{ subagents: Record<string, SubRec> }> =
   return (
     <div className="space-y-3">
       {/* 汇总条 */}
-      <div className="flex items-center gap-3 flex-wrap rounded-2xl border border-white/70 dark:border-white/12 bg-white/60 dark:bg-black/35 px-3.5 py-2.5">
+      <div className="flex items-center gap-3 flex-wrap rounded-2xl border border-white/70 dark:border-white/12 bg-surface/80 dark:bg-black/35 px-3.5 py-2.5">
         <span className="text-[11px] font-bold [color:var(--color-text-main)] flex items-center gap-1.5">
           <Bot className="w-3.5 h-3.5 text-accent-purple" />子代理集群
           <span className="[color:var(--color-text-muted)] font-normal">{list.length} 个</span>
@@ -113,7 +113,7 @@ export const OneKeySwarmBoard: React.FC<{ subagents: Record<string, SubRec> }> =
         const meta = roleMeta(batchAgent);
         const isBatch = g.items.length > 1 || !!g.batchId;
         return (
-          <div key={gi} className="rounded-2xl border border-white/70 dark:border-white/12 bg-white/55 dark:bg-black/30 overflow-hidden">
+          <div key={gi} className="rounded-2xl border border-white/70 dark:border-white/12 bg-surface/80 dark:bg-black/30 overflow-hidden">
             {isBatch && (
               <div className="px-3 py-1.5 border-b border-white/50 dark:border-white/10 bg-white/40 dark:bg-white/[.03] flex items-center gap-2">
                 <span className={`text-[9.5px] px-1.5 py-0.5 rounded-full border inline-flex items-center gap-1 ${meta.cls}`}>
@@ -151,7 +151,7 @@ export const OneKeySwarmBoard: React.FC<{ subagents: Record<string, SubRec> }> =
 
                     {open && (
                       <div className="px-3 pb-2.5">
-                        <div className="rounded-xl border border-white/50 dark:border-white/10 bg-white/50 dark:bg-white/[.04] p-2 max-h-52 overflow-y-auto custom-scrollbar space-y-0.5 font-mono">
+                        <div className="rounded-xl border border-white/50 dark:border-white/10 bg-surface/80 p-2 max-h-52 overflow-y-auto custom-scrollbar space-y-0.5 font-mono">
                           {steps.length === 0 && (
                             <div className="text-[9.5px] [color:var(--color-text-muted)] font-sans py-1">等待工具调用…</div>
                           )}
