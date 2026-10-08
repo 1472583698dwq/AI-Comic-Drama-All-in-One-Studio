@@ -84,22 +84,68 @@ const MODEL_URLS: Record<string, string> = {
 };
 const gltfLoader = new GLTFLoader();
 const modelCache = new Map<string, THREE.Group>();
-async function loadGLBModel(url: string, scale = 1): Promise<THREE.Group | null> {
-  if (modelCache.has(url)) {
-    const cached = modelCache.get(url)!;
-    const clone = cached.clone(true) as THREE.Group;
-    // 深拷贝材质避免共享
-    clone.traverse((obj) => {
-      if ((obj as THREE.Mesh).isMesh) {
-        const m = obj as THREE.Mesh;
-        if (Array.isArray(m.material)) m.material = (m.material as any[]).map((mat: any) => mat.clone());
-        else if (m.material) m.material = (m.material as any).clone();
-      }
-    });
-    return clone;
+/** 正在加载中的 URL → 同一个 Promise。缓存是 await 之后才写的，没有这张表的话
+ *  同一个模型的并发请求会各自完整下载+解析一遍（实测 BoomBox 被拉了两次）。 */
+const modelInflight = new Map<string, Promise<THREE.Group | null>>();
+/** 加载失败过的 URL。坏文件不记下来的话，每放一次道具都会重试一轮，
+ *  一个坏 GLB 能刷出 8 次解析失败 + 30 条贴图报错。 */
+const modelFailed = new Set<string>();
+
+function cloneWithOwnMaterials(src: THREE.Group): THREE.Group {
+  const clone = src.clone(true) as THREE.Group;
+  // 深拷贝材质避免共享
+  clone.traverse((obj) => {
+    if ((obj as THREE.Mesh).isMesh) {
+      const m = obj as THREE.Mesh;
+      if (Array.isArray(m.material)) m.material = (m.material as any[]).map((mat: any) => mat.clone());
+      else if (m.material) m.material = (m.material as any).clone();
+    }
+  });
+  return clone;
+}
+
+/** GLB 完整性预检：文件头第 8 字节起是声明的总长度，和实际字节数对不上就是下载被截断。
+ *  不先验的话 GLTFLoader 只会抛一句没头没尾的 `Invalid typed array length`。 */
+async function assertGlbIntact(url: string): Promise<ArrayBuffer> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const buf = await res.arrayBuffer();
+  if (buf.byteLength < 12) throw new Error(`文件只有 ${buf.byteLength} 字节，不是合法 GLB`);
+  const dv = new DataView(buf);
+  const magic = String.fromCharCode(dv.getUint8(0), dv.getUint8(1), dv.getUint8(2), dv.getUint8(3));
+  if (magic !== 'glTF') throw new Error(`不是 GLB（文件头为 ${JSON.stringify(magic)}）`);
+  const declared = dv.getUint32(8, true);
+  if (declared !== buf.byteLength) {
+    throw new Error(
+      `GLB 文件不完整：实际 ${buf.byteLength} 字节，文件头声明 ${declared} 字节`
+      + `（缺 ${declared - buf.byteLength}）。这份模型下载时被截断了，需要重新下载。`,
+    );
   }
+  return buf;
+}
+
+async function loadGLBModel(url: string, scale = 1): Promise<THREE.Group | null> {
+  if (modelCache.has(url)) return cloneWithOwnMaterials(modelCache.get(url)!);
+  if (modelFailed.has(url)) return null;
+  const pending = modelInflight.get(url);
+  if (pending) {
+    const root = await pending;
+    return root ? cloneWithOwnMaterials(root) : null;
+  }
+  const task = loadGLBModelOnce(url, scale);
+  modelInflight.set(url, task);
   try {
-    const gltf = await gltfLoader.loadAsync(url);
+    const root = await task;
+    return root ? cloneWithOwnMaterials(root) : null;
+  } finally {
+    modelInflight.delete(url);
+  }
+}
+
+async function loadGLBModelOnce(url: string, scale = 1): Promise<THREE.Group | null> {
+  try {
+    const buf = await assertGlbIntact(url);
+    const gltf = await gltfLoader.parseAsync(buf, '');
     const root = gltf.scene as THREE.Group;
     root.traverse((obj) => {
       if ((obj as THREE.Mesh).isMesh) {
@@ -133,9 +179,10 @@ async function loadGLBModel(url: string, scale = 1): Promise<THREE.Group | null>
       if ((obj as any).isMesh) (obj as THREE.Mesh).userData.isRealModel = true;
     });
     modelCache.set(url, root);
-    return root.clone(true) as THREE.Group;
+    return root;
   } catch (e) {
-    console.warn(`[Director3D] GLB 加载失败 ${url}:`, e);
+    modelFailed.add(url);
+    console.warn(`[Director3D] GLB 加载失败 ${url}:`, e instanceof Error ? e.message : e);
     return null;
   }
 }
@@ -849,6 +896,12 @@ export const Director3DStage: React.FC = () => {
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.15;
+    // 挂载前先清掉容器里的残留 canvas。
+    // 必须这么做：本 effect 体里一旦有语句抛异常，React 就拿不到 return 的清理函数，
+    // 上一次挂上去的 canvas 会永久留在 DOM 里。两个 canvas 都是 position:static 的兄弟节点，
+    // 于是上下堆叠——活着的那个被顶出视口，看起来就是「3D 片场一片黑」。
+    // PiP 渲染器一直用 innerHTML='' 所以从没出过这个问题，照它的做法来。
+    for (const stale of Array.from(containerRef.current.querySelectorAll('canvas'))) stale.remove();
     containerRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
     // 基础光（会被环境光覆盖，保留兜底；灯光面板通过 ref 实时控制）
@@ -964,7 +1017,10 @@ export const Director3DStage: React.FC = () => {
       window.removeEventListener('resize', handleResize);
       try { (transformControlsRef.current as any)?.dispose?.(); } catch {}
       transformControlsRef.current = null;
-      if (containerRef.current && renderer.domElement) containerRef.current.removeChild(renderer.domElement);
+      // removeChild 在「容器已换、canvas 不是它的子节点」时会抛 NotFoundError，
+      // 抛出去就会连带掐掉后面的 dispose；remove() 不依赖父节点，再包一层兜底。
+      try { renderer.domElement?.remove(); } catch {}
+      if (rendererRef.current === renderer) rendererRef.current = null;
       renderer.dispose();
     };
   }, [updateMainCameraPosition]);
