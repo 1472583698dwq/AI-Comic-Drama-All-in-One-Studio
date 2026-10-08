@@ -209,13 +209,14 @@ export const CAPABILITIES: Capability[] = [
         id: 'l0veyou_web',
         name: 'l0veyou（GPT Image 2）',
         where: 'cloud',
-        summary: '走 l0veyou.com 网页同款的生图通道。它家 sk- Key 的分组没开生图，这里用网页登录令牌。出图约 20 秒，结果会立刻存到本地。',
+        summary: '走 l0veyou.com 网页同款的生图通道（它家 sk- Key 的分组没开生图，这里用网页登录令牌）。已预置团队共用的登录令牌，拉下代码即可用。出图约 20 秒，结果立刻存到本地。',
         test: 'l0veyou',
         docUrl: 'https://l0veyou.com/chat',
-        warn: '登录令牌 24 小时过期。填了续期令牌才能自动续，但它每续一次都会轮换——和浏览器共用同一个登录会话会互相挤掉线，建议给这里单独登录一次。',
+        warn: '预置令牌是多台机器共用的，而续期令牌只能用一次：第一台续期的机器会让其他机器的预置令牌失效（最多撑约 24 小时）。测试报「令牌失效」时，填你自己的令牌即可覆盖预置值。',
         fields: [
           KEY('L0VEYOU_ACCESS_TOKEN', '登录令牌', {
-            hint: '浏览器登录后，开发者工具 → Application → Local Storage → auth_token',
+            required: false,
+            hint: '留空用预置的。要换就填：浏览器登录后，开发者工具 → 应用程序 → 本地存储 → auth_token',
           }),
           KEY('L0VEYOU_REFRESH_TOKEN', '续期令牌', {
             required: false,

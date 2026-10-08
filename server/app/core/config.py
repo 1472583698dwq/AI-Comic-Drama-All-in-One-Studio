@@ -218,12 +218,20 @@ class Settings(BaseModel):
     OPENAI_IMAGE_BASE_URL: str = os.getenv("OPENAI_IMAGE_BASE_URL", "")
     # 生图专用 Key：留空则回退到 OPENAI_API_KEY（沿用文本网关）
     OPENAI_IMAGE_API_KEY: str = os.getenv("OPENAI_IMAGE_API_KEY", "")
-    # l0veyou 网页生图：access_token 寿命 24 小时；配了 refresh_token 才能自动续期。
-    # refresh_token 每续一次就轮换，新值会被自动写回这里。
-    L0VEYOU_BASE_URL: str = os.getenv("L0VEYOU_BASE_URL", "https://l0veyou.com")
-    L0VEYOU_ACCESS_TOKEN: str = os.getenv("L0VEYOU_ACCESS_TOKEN", "")
-    L0VEYOU_REFRESH_TOKEN: str = os.getenv("L0VEYOU_REFRESH_TOKEN", "")
-    L0VEYOU_IMAGE_MODEL: str = os.getenv("L0VEYOU_IMAGE_MODEL", "gpt-image-2")
+    # l0veyou 网页生图：团队共用的默认登录会话，拉下代码即用（同 OPENLIST_* 的做法）。
+    #
+    # ⚠️ 这对令牌和普通 API Key 不一样，共用有硬限制：
+    #   - access_token 寿命 24 小时，到期要用 refresh_token 续；
+    #   - refresh_token 是一次性的——谁先续期，它就作废，新的一对只写进**续期那台机器**的本地配置。
+    #   所以写在这里的默认值，对其他机器来说只在「第一台机器续期之前」有效（最多约 24 小时）。
+    #   之后其他机器设置页的「测试」会报令牌失效，需要各自填自己的令牌（填了就覆盖这里的默认值）。
+    #
+    # 用 `getenv(...) or 默认值` 而不是 getenv 的第二个参数：设置页保存时会把没填的项写成空串，
+    # 那样 getenv 拿到的是 ""，默认值会被悄悄盖掉。
+    L0VEYOU_BASE_URL: str = os.getenv("L0VEYOU_BASE_URL") or "https://l0veyou.com"
+    L0VEYOU_ACCESS_TOKEN: str = os.getenv("L0VEYOU_ACCESS_TOKEN") or "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjo0NzcwLCJlbWFpbCI6ImxpbnV4ZG8tMTMxNzkzQGxpbnV4ZG8tY29ubmVjdC5pbnZhbGlkIiwicm9sZSI6InVzZXIiLCJ0b2tlbl92ZXJzaW9uIjo1OTk1OTYwODgyMjkwNDYwMzY5LCJzaWQiOiI5ZmY0NzgxNzEzNzgwYzZkMjQ0MzJlZWRkYWY1ZGU4NyIsImJuZCI6ImQ1ZDk2YTEyYjFhMmJlYjZhNzBiNzUzNzI5ZjRlYWY2IiwiZXhwIjoxNzkxNTMxMjc4LCJuYmYiOjE3OTE0NDQ4NzgsImlhdCI6MTc5MTQ0NDg3OH0.qRN9xgRwi6NCyV4ydfD2I3CITD3BtI17RprbC2K1HzA"
+    L0VEYOU_REFRESH_TOKEN: str = os.getenv("L0VEYOU_REFRESH_TOKEN") or "rt_f59521488512e2edc87a467cc985e839d8dea42a690ea39dc9d608466c477f60"
+    L0VEYOU_IMAGE_MODEL: str = os.getenv("L0VEYOU_IMAGE_MODEL") or "gpt-image-2"
     L0VEYOU_TIMEOUT: str = os.getenv("L0VEYOU_TIMEOUT", "180")
 
     # Voice & TTS Providers
