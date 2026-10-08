@@ -49,6 +49,11 @@ MANAGED_KEYS = [
     "OPENAI_IMAGE_MODEL",
     "OPENAI_IMAGE_BASE_URL",
     "OPENAI_IMAGE_API_KEY",
+    # l0veyou 网页生图（网页登录令牌，会轮换，见 providers/image/l0veyou_web.py）
+    "L0VEYOU_BASE_URL",
+    "L0VEYOU_ACCESS_TOKEN",
+    "L0VEYOU_REFRESH_TOKEN",
+    "L0VEYOU_IMAGE_MODEL",
     # Voice & TTS
     "TTS_PROVIDER",
     "COSYVOICE_URL",
@@ -92,7 +97,9 @@ MANAGED_KEYS = [
 
 def _is_secret_key(key: str) -> bool:
     """要打码后才能回显给前端的键。"""
-    return key.endswith("_API_KEY") or key in ("MINIMAX_API_KEY", "OPENLIST_PASSWORD")
+    return key.endswith("_API_KEY") or key in (
+        "MINIMAX_API_KEY", "OPENLIST_PASSWORD", "L0VEYOU_ACCESS_TOKEN", "L0VEYOU_REFRESH_TOKEN",
+    )
 
 
 def _mask_value(value: str) -> str:
@@ -211,6 +218,13 @@ class Settings(BaseModel):
     OPENAI_IMAGE_BASE_URL: str = os.getenv("OPENAI_IMAGE_BASE_URL", "")
     # 生图专用 Key：留空则回退到 OPENAI_API_KEY（沿用文本网关）
     OPENAI_IMAGE_API_KEY: str = os.getenv("OPENAI_IMAGE_API_KEY", "")
+    # l0veyou 网页生图：access_token 寿命 24 小时；配了 refresh_token 才能自动续期。
+    # refresh_token 每续一次就轮换，新值会被自动写回这里。
+    L0VEYOU_BASE_URL: str = os.getenv("L0VEYOU_BASE_URL", "https://l0veyou.com")
+    L0VEYOU_ACCESS_TOKEN: str = os.getenv("L0VEYOU_ACCESS_TOKEN", "")
+    L0VEYOU_REFRESH_TOKEN: str = os.getenv("L0VEYOU_REFRESH_TOKEN", "")
+    L0VEYOU_IMAGE_MODEL: str = os.getenv("L0VEYOU_IMAGE_MODEL", "gpt-image-2")
+    L0VEYOU_TIMEOUT: str = os.getenv("L0VEYOU_TIMEOUT", "180")
 
     # Voice & TTS Providers
     TTS_PROVIDER: str = os.getenv("TTS_PROVIDER", "minimax")

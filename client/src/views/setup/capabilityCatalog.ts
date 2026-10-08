@@ -16,7 +16,7 @@ export type TestTarget =
   | 'openai' | 'responses_api' | 'minimax' | 'minimax_h3' | 'seedance'
   | 'kling' | 'wan3' | 'comfyui' | 'siliconflow' | 'dashscope'
   | 'openai_image' | 'openai_video'
-  | 'elevenlabs' | 'cosyvoice' | 'gpt_sovits' | 'indextts' | 'jianyin' | 'openlist';
+  | 'elevenlabs' | 'cosyvoice' | 'gpt_sovits' | 'indextts' | 'jianyin' | 'openlist' | 'l0veyou';
 
 export interface CapField {
   key: string;
@@ -202,6 +202,32 @@ export const CAPABILITIES: Capability[] = [
           KEY('SILICONFLOW_IMAGE_MODEL', '模型名', {
             kind: 'text', placeholder: 'black-forest-labs/FLUX.1-schnell', required: false,
             options: ['black-forest-labs/FLUX.1-schnell', 'black-forest-labs/FLUX.1-dev', 'black-forest-labs/FLUX.1-Kontext-dev', 'Qwen/Qwen-Image', 'Kwai-Kolors/Kolors'],
+          }),
+        ],
+      },
+      {
+        id: 'l0veyou_web',
+        name: 'l0veyou（GPT Image 2）',
+        where: 'cloud',
+        summary: '走 l0veyou.com 网页同款的生图通道。它家 sk- Key 的分组没开生图，这里用网页登录令牌。出图约 20 秒，结果会立刻存到本地。',
+        test: 'l0veyou',
+        docUrl: 'https://l0veyou.com/chat',
+        warn: '登录令牌 24 小时过期。填了续期令牌才能自动续，但它每续一次都会轮换——和浏览器共用同一个登录会话会互相挤掉线，建议给这里单独登录一次。',
+        fields: [
+          KEY('L0VEYOU_ACCESS_TOKEN', '登录令牌', {
+            hint: '浏览器登录后，开发者工具 → Application → Local Storage → auth_token',
+          }),
+          KEY('L0VEYOU_REFRESH_TOKEN', '续期令牌', {
+            required: false,
+            hint: '同一处的 refresh_token。不填也能用，只是 24 小时后要手动换登录令牌',
+          }),
+          KEY('L0VEYOU_IMAGE_MODEL', '模型', {
+            kind: 'text', required: false, placeholder: 'gpt-image-2',
+            hint: '网页自己标注 2.5 不稳定，建议用 2；多张参考图只有 2.5 支持',
+            options: ['gpt-image-2', 'gpt-image-2-5-flare', 'gpt-image-2-5-full'],
+          }),
+          KEY('L0VEYOU_BASE_URL', '站点地址', {
+            kind: 'url', required: false, placeholder: 'https://l0veyou.com', advanced: true,
           }),
         ],
       },

@@ -246,6 +246,8 @@ def init_all_providers():
     image_registry.register(SiliconFlowProvider())
     image_registry.register(DashScopeProvider())
     image_registry.register(OpenAICompatProvider())
+    from .image.l0veyou_web import L0veyouWebProvider
+    image_registry.register(L0veyouWebProvider())
 
     # 注册音频
     audio_registry.register(MiniMaxTTSProvider())

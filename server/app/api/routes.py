@@ -1953,6 +1953,29 @@ async def test_config_connection(req: ConfigTestRequest):
         except Exception as e:
             return {"target": "indextts", "ok": False, "url": url, "detail": f"无法连接 IndexTTS: {e}"}
 
+    if target in ("l0veyou", "l0veyou_web"):
+        import time as _t
+        from app.providers.image.l0veyou_web import _jwt_exp
+        base = (cfg.get("L0VEYOU_BASE_URL") or settings.L0VEYOU_BASE_URL or "https://l0veyou.com").rstrip("/")
+        tok = (cfg.get("L0VEYOU_ACCESS_TOKEN") or settings.L0VEYOU_ACCESS_TOKEN or "").strip()
+        has_rt = bool((cfg.get("L0VEYOU_REFRESH_TOKEN") or settings.L0VEYOU_REFRESH_TOKEN or "").strip())
+        if not tok and not has_rt:
+            return {"target": "l0veyou", "ok": False, "detail": "登录令牌未配置"}
+        exp = _jwt_exp(tok) if tok else None
+        left_h = (exp - _t.time()) / 3600 if exp else None
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                r = await client.get(f"{base}/api/v1/auth/me", headers={"Authorization": f"Bearer {tok}"})
+            body = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+        except Exception as e:
+            return {"target": "l0veyou", "ok": False, "url": base, "detail": f"连不上 {base}：{e}"}
+        if r.status_code == 401 or (body or {}).get("code") not in (0, None):
+            hint = "，配了 refresh_token 的话首次生图会自动续期" if has_rt else "，请重新登录取一次令牌"
+            return {"target": "l0veyou", "ok": has_rt, "url": base, "detail": f"登录令牌已失效{hint}"}
+        life = (f"令牌还剩约 {left_h:.1f} 小时" if left_h is not None and left_h > 0 else "令牌有效")
+        life += "，到期会自动续期" if has_rt else "，没配 refresh_token，到期后需要手动换"
+        return {"target": "l0veyou", "ok": True, "url": base, "detail": f"登录有效（用户 {((body or {}).get('data') or {}).get('id')}）；{life}"}
+
     if target == "openlist":
         base = (cfg.get("OPENLIST_BASE_URL") or settings.OPENLIST_BASE_URL or "").strip().rstrip("/")
         user = (cfg.get("OPENLIST_USERNAME") or settings.OPENLIST_USERNAME or "").strip()
