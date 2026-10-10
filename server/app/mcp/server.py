@@ -1360,10 +1360,19 @@ class MCPServerRegistry:
             print(f"[MCP] refresh_provider_tools failed: {e}")
 
     def refresh_customnode_tools(self):
-        """自定义代码节点 → customnode_<id> MCP Tool（一节点一Tool，Agent/节点可直接调度）"""
+        """自定义代码节点 → customnode_<id> MCP Tool（一节点一Tool，Agent/节点可直接调度）
+
+        闸门（审查 M1）：本能力会执行用户代码，页内能力闸 ``canvas_custom_nodes`` 关掉时
+        **一个工具都不注册**（并清掉既有）—— 与 HTTP 侧 ``/api/v1/custom-nodes`` 的端点级闸
+        同源（``app/api/custom_node_routes.py``），不再出现「HTTP 404 但 MCP / Agent 照样能跑」
+        的假闸。
+        """
         for k in list(self.tools.keys()):
             if k.startswith("customnode_"):
                 del self.tools[k]
+        from app.core import features
+        if not features.is_enabled("canvas_custom_nodes"):
+            return
         try:
             from app.custom_nodes.manager import custom_node_manager
             for d in custom_node_manager.list_nodes():
@@ -1442,6 +1451,13 @@ class MCPServerRegistry:
                 return MCPToolCallResponse(tool_name=tool_name, status="success", result=result, error=None, execution_time_ms=int((time.time()-start_time)*1000))
             # 自定义代码节点：customnode_<id>，inputs 按 input_schema 键收集，其余进 params
             if tool_name.startswith("customnode_"):
+                # 闸门（审查 M1）：工具清单可能因闸的变更而陈旧（没走到 refresh），
+                # 这里再判一次 —— 「关掉就真的跑不了」不依赖清单的及时性。
+                from app.core import features as _feature_guard
+                if not _feature_guard.is_enabled("canvas_custom_nodes"):
+                    return MCPToolCallResponse(tool_name=tool_name, status="error", result=None,
+                                               error="自定义代码节点已在 设置 → 功能开关 里关闭",
+                                               execution_time_ms=int((time.time()-start_time)*1000))
                 try:
                     from app.custom_nodes.manager import custom_node_manager, run_custom_node
                     cnid = tool_name[len("customnode_"):]

@@ -362,3 +362,32 @@ input::placeholder, textarea::placeholder {
   inset: -8px;
   border-radius: 9999px;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   最小形态 · 开关注册台（设置 → 功能开关）
+   只新增两条**纯呈现**规则：标注模式描边、锁定卡片斑纹。
+   不新增也不修改任何 Token 变量（设计 §9.1：颜色/画布 Token 与双主题机制是插件主题契约，不可动），
+   也不往浅色主题白名单里加东西（§9.3：那份白名单冻结，只减不增——这里全用语义色与 rgba）。
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* 标注模式：锁定=琥珀实线 / 可插拔=天蓝虚线 / 插件来源=橙色（属性由 markAttrs 写在条目根元素上） */
+body[data-ui-annot="1"] [data-ui-mark] {
+  outline: 1.5px dashed rgba(56, 189, 248, .85);
+  outline-offset: 2px;
+}
+body[data-ui-annot="1"] [data-ui-mark][data-ui-locked="1"] {
+  outline-style: solid;
+  outline-color: rgba(251, 191, 36, .95);
+}
+body[data-ui-annot="1"] [data-ui-mark][data-ui-source^="plugin:"] {
+  outline-color: rgba(249, 115, 22, .95);
+}
+
+/* 锁定卡片斑纹：与卡片上的「锁定」标签一起构成最小形态的视觉标识 */
+.ui-locked-stripe {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent 0 12px,
+    rgba(251, 191, 36, .07) 12px 24px
+  );
+}

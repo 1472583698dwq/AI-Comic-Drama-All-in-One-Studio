@@ -1,21 +1,24 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Sparkles, FolderKanban, Film, ChevronDown, ChevronRight, Lock, LogOut,
-  Sun, Moon, MoreHorizontal, Wand2, Wrench, Server, Check, LayoutGrid, BookOpen,
+  MoreHorizontal, Wand2, Check, LayoutGrid,
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { useProjectListStore } from '../../stores/useProjectListStore';
 import { resolveTab } from '../../stores/usePageStore';
 import { toast } from '../../stores/useDialogStore';
+import { UISlot } from '../../ui-registry/UISlot';
+import { ToolbarChromeContext } from '../../ui-registry/toolbarContext';
+import { HEADER_MENU_HOST, HEADER_TOOLS_HOST } from '../../ui-registry/types';
+import { MENU_ITEM } from './toolbarAtoms';
 
 interface HeaderProps {
-  /** 导入小说：入口收进「更多」菜单（弹窗由 App 持有），上游能力保留 */
-  onOpenImport?: () => void;
+  /** 导出剪映工程（顶栏常驻按钮；动作本体是全局弹窗） */
   onOpenExport: () => void;
-  /** 扩展工具不再常驻顶栏，统一收入「更多」菜单 */
-  onOpenMcp?: () => void;
-  onOpenSkills?: () => void;
-  onOpenProvider?: () => void;
+  /**
+   * 注意：导入小说 / 技能工坊 / MCP 工具 / 生成源管理**已条目化**（未完成清单第 2 条），
+   * 由 `header.menu` / `header.tools` 两个 toolbar 挂载点渲染，宿主不再持有这些回调。
+   */
 }
 
 /** 面包屑第二段：当前视图名 */
@@ -45,10 +48,6 @@ const ICON_BTN =
   'after:absolute after:-inset-1 after:content-[""] ' +
   'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand';
 
-const MENU_ITEM =
-  'w-full flex items-center gap-2 px-2.5 py-2 rounded-md text-left text-[11.5px] ' +
-  'text-gray-300 hover:text-white hover:bg-surface/80 transition-colors';
-
 /**
  * 顶部栏（设计基线 §4 / §5.1）：高 44px，只承担「全局上下文 + 全局动作」。
  * - 左：品牌（logo 22px + 名称）· 面包屑（项目 / 视图，可点击）
@@ -56,14 +55,18 @@ const MENU_ITEM =
  * - 低频信息（镜数/时长）、扩展工具（技能/MCP/生成源）、退出项目一律收入「更多」，
  *   不再以胶囊形式常驻（基线禁用项）。
  */
-export const Header: React.FC<HeaderProps> = ({
-  onOpenImport, onOpenExport, onOpenMcp, onOpenSkills, onOpenProvider,
-}) => {
+export const Header: React.FC<HeaderProps> = ({ onOpenExport }) => {
   const { project, closeProject, activeTab, setActiveTab, totalDuration } = useProjectStore();
   const { projects: projectList, fetchProjects, isLoading: isLoadingProjects } = useProjectListStore();
 
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
+  /**
+   * 注入给 toolbar 条目的宿主 chrome（「声明进注册表、回调由宿主注入」的最小形态）：
+   * 动作执行前先收起「更多」菜单 —— 与改造前 `setMoreOpen(false); onOpenSkills()` 的顺序一致。
+   * `setMoreOpen` 是 useState 的稳定 setter，故依赖数组为空即可。
+   */
+  const toolbarChrome = useMemo(() => ({ closeMenu: () => setMoreOpen(false) }), []);
   // 项目下拉切换器（logo 右侧面包屑第一位）：点击展开项目列表，可一键切换
   const [projOpen, setProjOpen] = useState(false);
   const projRef = useRef<HTMLDivElement>(null);
@@ -263,7 +266,9 @@ export const Header: React.FC<HeaderProps> = ({
             <MoreHorizontal className="w-4 h-4" strokeWidth={1.7} />
           </button>
 
-          {/* 常驻 DOM + 显隐过渡：保证面板开合有 260ms 动效，且关闭时不进入 Tab 序列 */}
+          {/* 常驻 DOM + 显隐过渡：保证面板开合有 260ms 动效，且关闭时不进入 Tab 序列。
+              Provider 向 toolbar 条目注入「先收菜单再执行」的回调（未完成清单第 2 条）。 */}
+          <ToolbarChromeContext.Provider value={toolbarChrome}>
           <div
             role="menu"
             aria-label="更多"
@@ -274,21 +279,11 @@ export const Header: React.FC<HeaderProps> = ({
                 : 'opacity-0 scale-[.97] invisible pointer-events-none'
             }`}
           >
-            {/* 导入小说：上游入口，收进菜单而非常驻顶栏 */}
-            {onOpenImport && (
-              <>
-                <button
-                  role="menuitem"
-                  className={MENU_ITEM}
-                  onClick={() => { setMoreOpen(false); onOpenImport(); }}
-                >
-                  <BookOpen className="w-4 h-4 shrink-0" strokeWidth={1.7} />导入小说
-                </button>
-                <div className="h-px bg-border-subtle mx-1 my-1" />
-              </>
-            )}
+            {/* 低频动作条目（host=header.menu）：导入小说 */}
+            <UISlot host={HEADER_MENU_HOST} />
+            <div className="h-px bg-border-subtle mx-1 my-1" />
 
-            {/* 项目信息：低频信息收入菜单，不常驻顶栏 */}
+            {/* 项目信息：低频信息收入菜单，不常驻顶栏（宿主 chrome，不进注册表） */}
             {project && (
               <>
                 <div className="px-2.5 pt-1.5 pb-2 flex items-center gap-3 text-[10.5px] text-gray-500">
@@ -304,27 +299,8 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="px-2.5 pt-1 pb-1 text-[10.5px] font-semibold tracking-wider text-gray-500">
               扩展工具
             </div>
-            <button
-              role="menuitem"
-              className={MENU_ITEM}
-              onClick={() => { setMoreOpen(false); onOpenSkills?.(); }}
-            >
-              <Wand2 className="w-4 h-4 shrink-0" strokeWidth={1.7} />技能工坊
-            </button>
-            <button
-              role="menuitem"
-              className={MENU_ITEM}
-              onClick={() => { setMoreOpen(false); onOpenMcp?.(); }}
-            >
-              <Wrench className="w-4 h-4 shrink-0" strokeWidth={1.7} />MCP 工具
-            </button>
-            <button
-              role="menuitem"
-              className={MENU_ITEM}
-              onClick={() => { setMoreOpen(false); onOpenProvider?.(); }}
-            >
-              <Server className="w-4 h-4 shrink-0" strokeWidth={1.7} />生成源管理
-            </button>
+            {/* 扩展工具组条目（host=header.tools）：技能工坊 / MCP 工具 / 生成源管理（插件可继续加） */}
+            <UISlot host={HEADER_TOOLS_HOST} />
 
             {project && (
               <>
@@ -343,6 +319,7 @@ export const Header: React.FC<HeaderProps> = ({
               </>
             )}
           </div>
+          </ToolbarChromeContext.Provider>
         </div>
 
         <button

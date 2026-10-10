@@ -1,17 +1,24 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-  Loader2, RefreshCw, Lock, ArrowRight, Power, Layers, ImagePlus, GitBranch, UsersRound, Puzzle,
-  PanelLeft,
+  ArrowRight, Activity, Eye, GitBranch, Languages, Layers, ListTree, Lock, Package, Power, SlidersHorizontal,
 } from 'lucide-react';
+import { apiService } from '../../services/api';
 import { usePageStore, resolveTab } from '../../stores/usePageStore';
+import { isGlobalPage } from '../../ui-registry/pageTabs';
 import { useFeatureStore, type FeatureItem } from '../../stores/useFeatureStore';
-import { UI_SWITCH_DEFS, useUiPrefsStore, type UiSwitchItem } from '../../stores/useUiPrefsStore';
+import { UI_SWITCH_DEFS, useUiPrefsStore, PAGE_VARIANT_PREFIX, type UiSwitchItem } from '../../stores/useUiPrefsStore';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { toast } from '../../stores/useDialogStore';
 import { pageIcon } from '../../utils/pageIcons';
+import { T_MAIN } from '../../components/ui/designKit';
+import { usePageVariants } from '../../ui-registry/entries/pageVariants';
+import { DEFAULT_VARIANT, SETTINGS_PANELS_HOST } from '../../ui-registry/types';
+import { variantDescription, variantLabel, VARIANT_ORDER } from '../../ui-registry/entries/variants';
+import { useT } from '../../ui-registry/i18n';
+import { UISlot } from '../../ui-registry/UISlot';
+import { CardTag, ConsoleCard, ConsoleSection, SectionEmpty, SectionError } from './ConsoleCard';
 
-/** 无项目时也能进的全局页（其余页面需要先有项目才能前往） */
-const GLOBAL_TABS = ['home', 'projects', 'config'];
+/** 无项目时也能进的全局页见 ui-registry/pageTabs 的 globalPageIds() */
 /** 核心界面不作为可关闭的功能页：AI 对话（agent）的入口是「新建任务」与聊天历史 */
 const HIDDEN_PAGE_IDS = ['agent'];
 
@@ -21,42 +28,124 @@ const HIDDEN_PAGE_IDS = ['agent'];
  * 注意：页面图标映射（utils/pageIcons）不在这里改。
  */
 const FEATURE_ICON_RULES: Array<[RegExp, any]> = [
-  [/multimodal|vision|image|attach|media/, ImagePlus],
+  [/multimodal|vision|image|attach|media/, SlidersHorizontal],
   [/subagent|sub_agent|delegat|branch/, GitBranch],
-  [/team|cluster|group|profile/, UsersRound],
+  [/team|cluster|group|profile/, Package],
 ];
 
 const featureIcon = (it: FeatureItem) => {
   const k = String(it.id || '').toLowerCase();
-  return FEATURE_ICON_RULES.find(([re]) => re.test(k))?.[1] || Puzzle;
+  return FEATURE_ICON_RULES.find(([re]) => re.test(k))?.[1] || Package;
 };
 
 /** UI 开关项按 id 关键词挑图标，认不出来一律回落侧栏图标（新增开关项不会崩） */
 const UI_ICON_RULES: Array<[RegExp, any]> = [
-  [/sidebar|侧栏|panel|history|chat/, PanelLeft],
+  [/settings_registry|registry|注册表/, ListTree],
+  [/settings_diagnostics|diagnos|诊断/, Activity],
+  [/annotate|annot|标注/, Eye],
+  [/sidebar|侧栏|panel|history|chat/, Layers],
 ];
 
 const uiSwitchIcon = (it: UiSwitchItem) => {
   const k = `${it.id} ${it.label}`.toLowerCase();
-  return UI_ICON_RULES.find(([re]) => re.test(k))?.[1] || PanelLeft;
+  return UI_ICON_RULES.find(([re]) => re.test(k))?.[1] || Layers;
+};
+
+/** 插件贡献清单：`contributions`（带数量的 6 类）+ `deferred`（其余 6 类的声明） */
+const CONTRIB_LABEL: Record<string, string> = {
+  providers: '生成源', skills: '技能', workflows: '工作流', mcp_tools: 'MCP 工具',
+  custom_nodes: '代码节点', storyboard_slots: '分镜槽', canvas_nodes: '画布节点',
+  director_packs: '导演包', exporters: '导出器', themes: '主题',
+  agent_profiles: '导演组成员', agent_teams: '导演组',
+};
+
+const contribTags = (p: any): string[] => {
+  const out: string[] = [];
+  Object.entries(p?.contributions || {}).forEach(([k, v]) => {
+    const n = Array.isArray(v) ? v.length : Number(v) || 0;
+    if (n > 0) out.push(`${CONTRIB_LABEL[k] || k} ${n}`);
+  });
+  Object.keys(p?.deferred || {}).forEach((k) => out.push(CONTRIB_LABEL[k] || k));
+  return out;
 };
 
 /**
- * 功能开关（设置 → 功能开关）：三层开关一个面板。
+ * 前端版本卡片：一个页面 = 一张卡，页脚是版本单选。
  *
- * 分区一「页面开关」—— 管「看不看得见这一页」。数据源与准入唯一口径都是后端 `/api/v1/pages`
- * （前端不缓存、不猜默认值）：打开即生效 —— 侧栏出现入口、页签可直达、后端对应能力族接口恢复；
- * 关闭即关干净 —— 入口隐藏、页签归一回落、接口返回 404。设置（config）是 locked 系统页，只展示不可切。
+ * 版本列表读**注册表**（`usePageVariants`），不是读常量表 —— 列出来的永远是「真的有条目的版本」，
+ * 不会出现「切了没反应」。只有一个版本的页面直接不展示（没有可选项）。
+ */
+const VariantCard: React.FC<{ index: number; pageId: string; label: string; icon?: string }> = ({ index, pageId, label, icon }) => {
+  const t = useT();
+  const options = usePageVariants(pageId);
+  const variants = useUiPrefsStore((s) => s.variants);
+  const setPageVariant = useUiPrefsStore((s) => s.setPageVariant);
+  if (options.length < 2) return null;
+
+  const active = variants[pageId] || DEFAULT_VARIANT;
+
+  const pick = (id: string) => {
+    if (id === active) return;
+    setPageVariant(pageId, id);
+    toast.success(id === DEFAULT_VARIANT
+      ? t('toast.variantFallback', { page: label })
+      : t('toast.variantSwitched', { page: label, v: variantLabel(id) }));
+  };
+
+  return (
+    <ConsoleCard
+      index={index}
+      icon={React.createElement(pageIcon(pageId, icon), { className: 'w-5 h-5' })}
+      title={label}
+      sub={`${t('variant.of')} · ${active}`}
+      desc={`${t('card.current')}: ${variantLabel(active)}`}
+      tags={<CardTag text={variantLabel(active)} tone={active === DEFAULT_VARIANT ? 'lock' : 'plugin'} />}
+      footer={(
+        <div className="flex gap-1.5 flex-wrap justify-end">
+          {[...options].sort((a, b) => VARIANT_ORDER.indexOf(a.id) - VARIANT_ORDER.indexOf(b.id)).map((v) => {
+            const on = v.id === active;
+            return (
+              <button
+                key={v.id}
+                onClick={() => pick(v.id)}
+                title={v.description || variantDescription(v.id)}
+                aria-pressed={on}
+                className={`px-2.5 py-1 rounded-lg text-[11px] border transition-colors whitespace-nowrap ${
+                  on ? 'bg-brand text-white border-brand'
+                     : 'bg-surface/80 border-white/70 dark:border-white/12 text-gray-400 hover:text-[color:var(--color-text-main)]'
+                }`}
+              >
+                {v.label}
+                {v.id === DEFAULT_VARIANT && <Lock className="ml-1 w-2.5 h-2.5 inline" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    />
+  );
+};
+
+/**
+ * 功能开关（设置 → 功能开关）：**开关注册台**——五类开关一个面板，全部大卡片。
  *
- * 分区二「功能开关」—— 管「这一页里的进阶能力开不开」。数据源是后端 `/api/v1/features`
- * （非页面级进阶能力，默认全关）：关闭 `agent_teams` → agent-teams / agent-profiles 接口 404；
- * 关闭 `agent_multimodal` → Agent 附件退化为纯文本；关闭 `agent_subagent` → 子代理委派直接失败。
- * 影响范围文案只取后端 description，前端不自行编造。
+ * ① 页面开关 —— 管「看不看得见这一页」。真相源是后端 `/api/v1/pages`（前端不缓存、不猜默认值）：
+ *    打开即生效（侧栏入口出现、后端接口恢复），关闭即关干净（入口隐藏、页签归一回落、接口 404）。
+ * ② 功能开关 —— 管「这一页里的进阶能力开不开」。真相源后端 `/api/v1/features`，出厂默认全关。
+ * ③ UI 偏好 —— 纯本机呈现偏好（localStorage），不碰后端能力与接口准入。
+ * ④ 插件 —— 第 4 类开关：一个包的全部贡献整体上下线。列表读 `/extensions` 的插件发现结果，
+ *    开关走后端 enable/disable（与「设置 → 扩展」是同一份真相源，互不新增契约）。
+ * ⑤ 前端版本 —— 管「这一页用哪一版界面」。本机单选（`page_variant.<页面 id>`），
+ *    当前实现登记为「测试初期版本（保底）」默认激活，重构新版以占位条目登记。
  *
- * 分区三「UI 开关」—— 管「界面元素显不显示」。纯前端呈现偏好（useUiPrefsStore，落 localStorage），
- * 不碰任何后端能力与接口准入：比如关掉「会话与项目快捷侧栏」，侧栏就只剩功能导航与底部工具。
+ * ⑥ 注册表视图 / 诊断面板：两个 prefs 层的可插拔面板（默认关），由 `UISlot` 渲染 ——
+ *    它们是注册表条目（`panel.registry` / `panel.diagnostics`），面板自己开不开也走开关。
+ *
+ * 界面语言（中 / EN）只覆盖本面板与它引入的面板 / toast / 空态自救页；顶栏、侧栏与各功能页
+ * 的既有文案不在本轮范围。
  */
 export const FeaturesPanel: React.FC = () => {
+  const t = useT();
   const items = usePageStore((s) => s.items);
   const values = usePageStore((s) => s.values);
   const file = usePageStore((s) => s.file);
@@ -75,31 +164,62 @@ export const FeaturesPanel: React.FC = () => {
 
   const uiValues = useUiPrefsStore((s) => s.values);
   const setUiSwitch = useUiPrefsStore((s) => s.setUiSwitch);
+  const lang = useUiPrefsStore((s) => s.lang);
+  const setLang = useUiPrefsStore((s) => s.setLang);
 
   const activeTab = useProjectStore((s) => s.activeTab);
   const project = useProjectStore((s) => s.project);
   const [busy, setBusy] = useState<string | null>(null);
   const [featBusy, setFeatBusy] = useState<string | null>(null);
 
+  // 插件分区：列表与开关都走后端插件端点（与「设置 → 扩展」同一真相源）
+  const [plugins, setPlugins] = useState<any[]>([]);
+  const [pluginLoading, setPluginLoading] = useState(true);
+  const [pluginError, setPluginError] = useState<string | null>(null);
+  const [pluginBusy, setPluginBusy] = useState<string | null>(null);
+
   useEffect(() => { load(); }, [load]);
   useEffect(() => { loadFeatures(); }, [loadFeatures]);
+
+  // 注意：状态更新全部发生在 await 之后，函数开头不同步置 loading
+  //（初始值就是 true；重试时由点击事件自己置位）——effect 里不产生同步状态更新
+  const loadPlugins = useCallback(async () => {
+    try {
+      const p: any = await apiService.listPlugins();
+      setPlugins(Array.isArray(p?.plugins) ? p.plugins : []);
+      setPluginError(null);
+    } catch (e: any) {
+      // 后端不可达时不写假状态：清空列表 + 明示错误 + 给重试
+      setPlugins([]);
+      setPluginError(e?.message || 'failed');
+    }
+    setPluginLoading(false);
+  }, []);
+
+  /** 手动重试：先亮「读取中」再拉（事件里改状态，不触发上面的规则） */
+  const retryPlugins = () => { setPluginLoading(true); void loadPlugins(); };
+
+  useEffect(() => {
+    void loadPlugins();
+    const h = () => { void loadPlugins(); };
+    window.addEventListener('plugin-list-refresh', h);
+    return () => window.removeEventListener('plugin-list-refresh', h);
+  }, [loadPlugins]);
 
   const toggle = async (id: string, label: string, next: boolean) => {
     setBusy(id);
     try {
       await setPage(id, next);
-      if (next) {
-        toast.success(`已开启「${label}」，左侧栏入口已出现`);
-      } else {
-        toast.info(`已关闭「${label}」，入口已隐藏且对应接口返回 404`);
-        // 关掉的正好是当前所在页 → 立刻按可用性回落（App 侧还有一层归一兜底）
-        if (activeTab === id) {
-          const nextTab = resolveTab(activeTab);
-          if (nextTab) useProjectStore.getState().setActiveTab(nextTab as any);
-        }
+      toast[next ? 'success' : 'info'](next
+        ? t('toast.pageOn', { label })
+        : t('toast.pageOff', { label }));
+      // 关掉的正好是当前所在页 → 立刻按可用性回落（App 侧还有一层归一兜底）
+      if (!next && activeTab === id) {
+        const nextTab = resolveTab(activeTab);
+        if (nextTab) useProjectStore.getState().setActiveTab(nextTab as any);
       }
     } catch (e: any) {
-      toast.error(e?.message || '切换失败');
+      toast.error(e?.message || t('toast.toggleFailed'));
     } finally {
       setBusy(null);
     }
@@ -110,288 +230,289 @@ export const FeaturesPanel: React.FC = () => {
     setFeatBusy(id);
     try {
       await setFeature(id, next);
-      if (next) {
-        toast.success(`已开启「${label}」，该能力即时生效`);
-      } else {
-        toast.info(`已关闭「${label}」，相关能力已停用`);
-      }
+      toast[next ? 'success' : 'info'](next
+        ? t('toast.featureOn', { label })
+        : t('toast.featureOff', { label }));
     } catch (e: any) {
-      toast.error(e?.message || '切换失败');
+      toast.error(e?.message || t('toast.toggleFailed'));
       try { await loadFeatures(); } catch { /* 回滚失败仍保留错误提示 */ }
     } finally {
       setFeatBusy(null);
     }
   };
 
+  /** UI 开关：纯本机界面偏好，写 localStorage 即生效 —— 没有失败路径，也不必回滚 */
+  const toggleUiSwitch = (id: string, label: string, next: boolean) => {
+    setUiSwitch(id, next);
+    toast[next ? 'success' : 'info'](next
+      ? t('toast.prefOn', { label })
+      : t('toast.prefOff', { label }));
+  };
+
+  /** 插件启停：后端是唯一真相源，成功后重拉列表 + 通知其它宿主（扩展页 / 主题 / 画布节点等） */
+  const togglePlugin = async (p: any) => {
+    setPluginBusy(p.id);
+    try {
+      await apiService.setPluginEnabled(p.id, !p.enabled);
+      toast[!p.enabled ? 'success' : 'info'](t(!p.enabled ? 'plugin.on' : 'plugin.off', { name: p.name }));
+      await loadPlugins();
+      try { window.dispatchEvent(new Event('plugin-list-refresh')); } catch { /* ignore */ }
+    } catch (e: any) {
+      toast.error(e?.message || t('toast.toggleFailed'));
+    } finally {
+      setPluginBusy(null);
+    }
+  };
+
   const go = (id: string) => {
-    if (!GLOBAL_TABS.includes(id) && !project) {
-      toast.info('请先在项目看板创建或打开项目');
+    if (!isGlobalPage(id) && !project) {
+      toast.info(t('toast.needProject'));
       return;
     }
     useProjectStore.getState().setActiveTab(id as any);
   };
 
-  /** UI 开关：纯本机界面偏好，写 localStorage 即生效 —— 没有失败路径，也不必回滚 */
-  const toggleUiSwitch = (id: string, label: string, next: boolean) => {
-    setUiSwitch(id, next);
-    if (next) {
-      toast.success(`已开启「${label}」，界面元素已显示`);
-    } else {
-      toast.info(`已关闭「${label}」，界面元素已隐藏`);
-    }
-  };
+  const pageCards = items.filter((it) => !HIDDEN_PAGE_IDS.includes(it.id));
 
   return (
-    <div className="flex flex-col gap-5">
-      <div>
-        <h3 className="text-[13.5px] font-bold text-[color:var(--color-text-main)]">功能开关</h3>
-        <p className="mt-1 text-[11.5px] text-gray-400 leading-relaxed">
-          三层开关：<span className="text-gray-300">页面开关</span>管「看不看得见这一页」，关掉后左侧栏没有入口、接口也进不去；
-          <span className="text-gray-300">功能开关</span>管「这一页里的进阶能力开不开」，页面照常在，只是页内的某些能力按开关走；
-          <span className="text-gray-300">UI 开关</span>管「界面元素显不显示」，只改本机界面，不动任何能力与接口。
-          三者都是改完即时生效、无需重启。
-        </p>
-      </div>
-
-      {/* ── 分区一：页面开关（页面级，管入口可见性） ── */}
-      <section className="flex flex-col gap-2.5">
-        <div className="flex items-baseline gap-2 flex-wrap">
-          <span className="inline-flex items-center gap-1.5 text-[12.5px] font-bold text-[color:var(--color-text-main)]">
-            <Layers className="w-3.5 h-3.5 text-gray-500" />页面开关
-          </span>
-          <span className="text-[10.5px] text-gray-500">管「看不看得见这一页」—— 入口、页签与接口准入</span>
+    <div className="flex flex-col gap-6">
+      {/* ── 注册台抬头（原型：标题 + 英文小标 + 语言切换） ── */}
+      <header className="flex flex-col gap-2">
+        <div className="flex items-end gap-3 flex-wrap">
+          <h1 className={`text-[21px] font-bold ${T_MAIN} leading-none`}>{t('console.title')}</h1>
+          <span className="font-mono text-[9.5px] uppercase tracking-[.2em] text-gray-500 pb-0.5">{t('console.sub')}</span>
+          <div className="ml-auto flex items-center gap-1.5">
+            <Languages className="w-3.5 h-3.5 text-gray-500" />
+            {(['zh', 'en'] as const).map((l) => (
+              <button
+                key={l}
+                onClick={() => setLang(l)}
+                aria-pressed={lang === l}
+                className={`h-6 px-2.5 rounded-lg text-[11px] font-mono border transition-colors ${
+                  lang === l ? 'bg-brand text-white border-brand'
+                             : 'bg-surface/80 border-white/70 dark:border-white/12 text-gray-400 hover:text-[color:var(--color-text-main)]'
+                }`}
+              >
+                {l === 'zh' ? '中' : 'EN'}
+              </button>
+            ))}
+          </div>
         </div>
+        <p className="text-[11.5px] text-gray-400 leading-relaxed">{t('console.intro')}</p>
+      </header>
 
+      {/* ── ① 页面开关 ── */}
+      <ConsoleSection
+        icon={<Layers className="w-3.5 h-3.5 text-gray-500" />}
+        title={t('sec.page.label')}
+        sub={t('sec.page.sub')}
+        count={`${pageCards.filter((it) => values[it.id] === true).length}/${pageCards.length}`}
+      >
         {error && (
-          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5 text-[11.5px] text-amber-300 flex items-center justify-between gap-3">
-            <span>读取页面开关失败：{error}（当前按内置默认集显示，可能与你上次保存的状态不一致）</span>
-            <button onClick={() => load()} className="shrink-0 px-2 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 flex items-center gap-1">
-              <RefreshCw className="w-3 h-3" />重试
-            </button>
+          <div className="[grid-column:1/-1]">
+            <SectionError text={`${t('common.readFailed')}${error}`} onRetry={() => load()} retryText={t('common.retry')} />
           </div>
         )}
+        {pageCards.length === 0 && !error && (
+          <div className="[grid-column:1/-1]">
+            <SectionEmpty text={t('common.none')} spinning={loading} />
+          </div>
+        )}
+        {pageCards.map((it, i) => {
+          const enabled = values[it.id] === true;
+          const locked = it.locked === true;
+          return (
+            <ConsoleCard
+              key={it.id}
+              index={i + 1}
+              icon={React.createElement(pageIcon(it.id, it.icon), { className: 'w-5 h-5' })}
+              title={it.label}
+              sub={`page · ${it.id}${it.host && it.host !== it.id ? ` (host: ${it.host})` : ''}`}
+              desc={it.description || undefined}
+              checked={enabled}
+              locked={locked}
+              busy={busy === it.id}
+              toggleTitle={enabled ? `${t('card.on')} · ${it.id}` : `${t('card.off')} · ${it.id}`}
+              onToggle={(next) => toggle(it.id, it.label, next)}
+              tags={(
+                <>
+                  <CardTag text={enabled ? t('card.on') : t('card.off')} tone={enabled ? 'on' : 'off'} />
+                  {locked && <CardTag text={t('card.lockedHint')} tone="lock" />}
+                  {it.default && !locked && <CardTag text={enabled ? t('card.defaultOn') : t('card.defaultOff')} />}
+                </>
+              )}
+              extra={enabled ? (
+                <button
+                  onClick={() => go(it.id)}
+                  className="self-start px-2.5 py-1 rounded-lg text-[11px] bg-brand text-white hover:bg-brand-light inline-flex items-center gap-1"
+                >
+                  {t('card.goto')}{it.label}<ArrowRight className="w-3 h-3" />
+                </button>
+              ) : (
+                <span
+                  title={t('card.gotoBlocked')}
+                  className="self-start px-2.5 py-1 rounded-lg text-[11px] border border-white/70 dark:border-white/12 bg-surface/80 text-gray-500 inline-flex items-center gap-1 cursor-not-allowed"
+                >
+                  <Lock className="w-3 h-3" />{t('card.gotoBlocked')}
+                </span>
+              )}
+            />
+          );
+        })}
+      </ConsoleSection>
 
-        <div className="flex flex-col gap-2.5">
-          {items.length === 0 && (
-            <div className="rounded-xl border border-white/70 dark:border-white/12 bg-surface/80 px-3.5 py-3 text-[11.5px] text-gray-500 flex items-center gap-2">
-              {loading ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />读取中…</> : '没有可切换的页面'}
-            </div>
-          )}
-
-          {items.filter((it) => !HIDDEN_PAGE_IDS.includes(it.id)).map((it) => {
-            const Icon = pageIcon(it.id, it.icon);
-            const enabled = values[it.id] === true;
-            const working = busy === it.id;
-            const locked = it.locked === true;
-            return (
-              <div key={it.id}
-                className="rounded-xl border border-white/70 dark:border-white/12 bg-surface/80 px-3.5 py-3 flex items-start gap-3">
-                <div className={`w-8 h-8 shrink-0 rounded-lg flex items-center justify-center ${enabled ? 'bg-brand/15 text-brand-light' : 'bg-surface-hover/80 text-gray-500'}`}>
-                  <Icon className="w-4 h-4" />
-                </div>
-
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[12.5px] font-bold text-[color:var(--color-text-main)]">{it.label}</span>
-                    <span className={`px-1.5 py-0.5 rounded border text-[10px] ${
-                      enabled ? 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10'
-                              : 'text-gray-400 border-white/70 dark:border-white/12 bg-surface-hover/80'
-                    }`}>{enabled ? '已开启' : '已关闭'}</span>
-                    {locked && (
-                      <span className="px-1.5 py-0.5 rounded border border-white/70 dark:border-white/12 bg-surface-hover/80 text-[10px] text-gray-400 inline-flex items-center gap-1">
-                        <Lock className="w-2.5 h-2.5" />系统页，不可关闭
-                      </span>
-                    )}
-                    {it.default && !locked && (
-                      <span className="text-[10px] text-gray-500">出厂默认{enabled ? '开启' : '关闭'}</span>
-                    )}
-                  </div>
-
-                  <p className="mt-1 text-[11px] text-gray-400 leading-relaxed">
-                    {it.description || `页面：${it.id}${it.host && it.host !== it.id ? `（host: ${it.host}）` : ''}`}
-                  </p>
-
-                  {enabled ? (
-                    <button
-                      onClick={() => go(it.id)}
-                      className="mt-2 px-2.5 py-1 rounded-lg text-[11px] bg-brand text-white hover:bg-brand-light inline-flex items-center gap-1"
-                    >
-                      前往{it.label}<ArrowRight className="w-3 h-3" />
-                    </button>
-                  ) : (
-                    <span
-                      title="开启后才能进入该页"
-                      className="mt-2 px-2.5 py-1 rounded-lg text-[11px] border border-white/70 dark:border-white/12 bg-surface/80 text-gray-500 inline-flex items-center gap-1 cursor-not-allowed"
-                    >
-                      <Lock className="w-3 h-3" />开启后可前往
-                    </span>
-                  )}
-                </div>
-
-                {locked ? (
-                  <span
-                    title="系统页，不可关闭"
-                    className="shrink-0 mt-0.5 w-11 h-6 rounded-full relative bg-brand/40 border border-white/70 dark:border-white/12 flex items-center justify-center"
-                  >
-                    <Lock className="w-3 h-3 text-white/80" />
-                  </span>
-                ) : (
-                  <button
-                    onClick={() => toggle(it.id, it.label, !enabled)}
-                    disabled={working}
-                    role="switch"
-                    aria-checked={enabled}
-                    className={`shrink-0 mt-0.5 w-11 h-6 rounded-full relative transition-colors disabled:opacity-60 ${
-                      enabled ? 'bg-brand' : 'bg-surface-hover/80 border border-white/70 dark:border-white/12'
-                    }`}
-                    title={enabled ? '点击关闭' : '点击开启'}
-                  >
-                    <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${enabled ? 'left-[22px]' : 'left-0.5'}`} />
-                    {working && <Loader2 className="absolute inset-0 m-auto w-3 h-3 animate-spin text-white/80" />}
-                  </button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </section>
-
-      {/* ── 分区二：功能开关（能力级，管页内进阶能力） ── */}
-      <section className="flex flex-col gap-2.5">
-        <div className="flex items-baseline gap-2 flex-wrap">
-          <span className="inline-flex items-center gap-1.5 text-[12.5px] font-bold text-[color:var(--color-text-main)]">
-            <Power className="w-3.5 h-3.5 text-gray-500" />功能开关
-          </span>
-          <span className="text-[10.5px] text-gray-500">管「这一页里的进阶能力开不开」—— 非页面级能力，默认全关</span>
-        </div>
-
+      {/* ── ② 功能开关 ── */}
+      <ConsoleSection
+        icon={<Power className="w-3.5 h-3.5 text-gray-500" />}
+        title={t('sec.feature.label')}
+        sub={t('sec.feature.sub')}
+        count={`${features.filter((it) => featureValues[it.id] === true).length}/${features.length}`}
+      >
         {featureError && (
-          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5 text-[11.5px] text-amber-300 flex items-center justify-between gap-3">
-            <span>读取功能开关失败：{featureError}（当前按「全部关闭」显示，与你上次保存的状态可能不一致）</span>
-            <button onClick={() => loadFeatures()} className="shrink-0 px-2 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 flex items-center gap-1">
-              <RefreshCw className="w-3 h-3" />重试
-            </button>
+          <div className="[grid-column:1/-1]">
+            <SectionError
+              text={`${t('common.readFailed')}${featureError}`}
+              onRetry={() => loadFeatures()}
+              retryText={t('common.retry')}
+            />
           </div>
         )}
+        {features.length === 0 && (
+          <div className="[grid-column:1/-1]">
+            <SectionEmpty text={t('common.none')} spinning={featureLoading} />
+          </div>
+        )}
+        {features.map((it, i) => {
+          const enabled = featureValues[it.id] === true;
+          return (
+            <ConsoleCard
+              key={it.id}
+              index={i + 1}
+              icon={React.createElement(featureIcon(it), { className: 'w-5 h-5' })}
+              title={it.label}
+              sub={`feature · ${it.id}`}
+              desc={it.description ? `${t('card.off')} → ${it.description}` : undefined}
+              checked={enabled}
+              busy={featBusy === it.id}
+              onToggle={(next) => toggleFeature(it.id, it.label, next)}
+              tags={(
+                <>
+                  <CardTag text={enabled ? t('card.on') : t('card.off')} tone={enabled ? 'on' : 'off'} />
+                  <CardTag text={enabled ? t('card.defaultOn') : t('card.defaultOff')} />
+                </>
+              )}
+            />
+          );
+        })}
+      </ConsoleSection>
 
-        <div className="flex flex-col gap-2.5">
-          {features.length === 0 && (
-            <div className="rounded-xl border border-white/70 dark:border-white/12 bg-surface/80 px-3.5 py-3 text-[11.5px] text-gray-500 flex items-center gap-2">
-              {featureLoading
-                ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />读取中…</>
-                : featureError ? '读取失败，暂无可切换的功能' : '没有可切换的功能'}
-            </div>
-          )}
+      {/* ── ③ UI 偏好 ── */}
+      <ConsoleSection
+        icon={<Eye className="w-3.5 h-3.5 text-gray-500" />}
+        title={t('sec.prefs.label')}
+        sub={t('sec.prefs.sub')}
+        count={`${UI_SWITCH_DEFS.filter((it) => uiValues[it.id] === true).length}/${UI_SWITCH_DEFS.length}`}
+      >
+        {UI_SWITCH_DEFS.map((it, i) => {
+          const enabled = uiValues[it.id] === true;
+          return (
+            <ConsoleCard
+              key={it.id}
+              index={i + 1}
+              icon={React.createElement(uiSwitchIcon(it), { className: 'w-5 h-5' })}
+              title={it.label}
+              sub={`prefs · ${it.id}`}
+              desc={it.description ? `${t('card.off')} → ${it.description}` : undefined}
+              checked={enabled}
+              onToggle={(next) => toggleUiSwitch(it.id, it.label, next)}
+              tags={(
+                <>
+                  <CardTag text={enabled ? t('card.shown') : t('card.hidden')} tone={enabled ? 'on' : 'off'} />
+                  <CardTag text={enabled ? t('card.defaultShown') : t('card.defaultHidden')} />
+                </>
+              )}
+            />
+          );
+        })}
+      </ConsoleSection>
 
-          {features.map((it) => {
-            const Icon = featureIcon(it);
-            const enabled = featureValues[it.id] === true;
-            const working = featBusy === it.id;
-            return (
-              <div key={it.id}
-                className="rounded-xl border border-white/70 dark:border-white/12 bg-surface/80 px-3.5 py-3 flex items-start gap-3">
-                <div className={`w-8 h-8 shrink-0 rounded-lg flex items-center justify-center ${enabled ? 'bg-brand/15 text-brand-light' : 'bg-surface-hover/80 text-gray-500'}`}>
-                  <Icon className="w-4 h-4" />
-                </div>
+      {/* ── ④ 插件（第 4 类开关：一个包的全部贡献整体上下线） ── */}
+      <ConsoleSection
+        icon={<Package className="w-3.5 h-3.5 text-gray-500" />}
+        title={t('sec.plugin.label')}
+        sub={t('sec.plugin.sub')}
+        count={`${plugins.filter((p) => p.enabled).length}/${plugins.length}`}
+      >
+        {pluginError && (
+          <div className="[grid-column:1/-1]">
+            <SectionError
+              text={`${t('plugin.failed')}：${pluginError}`}
+              onRetry={retryPlugins}
+              retryText={t('common.retry')}
+            />
+          </div>
+        )}
+        {!pluginError && plugins.length === 0 && (
+          <div className="[grid-column:1/-1]">
+            <SectionEmpty
+              text={pluginLoading ? t('plugin.loading') : `${t('plugin.empty')} —— ${t('plugin.emptyHint')}`}
+              spinning={pluginLoading}
+            />
+          </div>
+        )}
+        {plugins.map((p, i) => (
+          <ConsoleCard
+            key={p.id}
+            index={i + 1}
+            icon={<Package className="w-5 h-5" />}
+            title={p.name || p.id}
+            sub={`plugin · v${p.version || '?'}${p.author ? ` · ${p.author}` : ''}`}
+            desc={p.description || p.id}
+            checked={!!p.enabled}
+            busy={pluginBusy === p.id}
+            onToggle={() => { void togglePlugin(p); }}
+            tags={(
+              <>
+                <CardTag text={p.enabled ? t('plugin.enabled') : t('plugin.disabled')} tone={p.enabled ? 'on' : 'off'} />
+                <CardTag text={p.id} tone="plugin" />
+                {contribTags(p).map((c) => <CardTag key={c} text={c} tone="plugin" />)}
+              </>
+            )}
+          />
+        ))}
+      </ConsoleSection>
 
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[12.5px] font-bold text-[color:var(--color-text-main)]">{it.label}</span>
-                    <span className={`px-1.5 py-0.5 rounded border text-[10px] ${
-                      enabled ? 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10'
-                              : 'text-gray-400 border-white/70 dark:border-white/12 bg-surface-hover/80'
-                    }`}>{enabled ? '已开启' : '已关闭'}</span>
-                    <span className="text-[10px] text-gray-500">出厂默认{it.default ? '开启' : '关闭'}</span>
-                  </div>
+      {/* ── ⑤ 前端版本 ── */}
+      <ConsoleSection
+        icon={<GitBranch className="w-3.5 h-3.5 text-gray-500" />}
+        title={t('sec.variant.label')}
+        sub={t('sec.variant.sub')}
+        count={`${items.length}`}
+        hint={t('variant.hint')}
+      >
+        {items.map((it, i) => (
+          <VariantCard key={it.id} index={i + 1} pageId={it.id} label={it.label} icon={it.icon} />
+        ))}
+      </ConsoleSection>
 
-                  {it.description && (
-                    <p className="mt-1 text-[10.5px] text-gray-500 leading-relaxed">关闭后：{it.description}</p>
-                  )}
-                </div>
-
-                <button
-                  onClick={() => toggleFeature(it.id, it.label, !enabled)}
-                  disabled={working}
-                  role="switch"
-                  aria-checked={enabled}
-                  className={`shrink-0 mt-0.5 w-11 h-6 rounded-full relative transition-colors disabled:opacity-60 ${
-                    enabled ? 'bg-brand' : 'bg-surface-hover/80 border border-white/70 dark:border-white/12'
-                  }`}
-                  title={enabled ? '点击关闭' : '点击开启'}
-                >
-                  <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${enabled ? 'left-[22px]' : 'left-0.5'}`} />
-                  {working && <Loader2 className="absolute inset-0 m-auto w-3 h-3 animate-spin text-white/80" />}
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      </section>
-
-      {/* ── 分区三：UI 开关（纯前端界面元素显隐） ── */}
-      <section className="flex flex-col gap-2.5">
-        <div className="flex items-baseline gap-2 flex-wrap">
-          <span className="inline-flex items-center gap-1.5 text-[12.5px] font-bold text-[color:var(--color-text-main)]">
-            <PanelLeft className="w-3.5 h-3.5 text-gray-500" />UI 开关
-          </span>
-          <span className="text-[10.5px] text-gray-500">管「界面元素显不显示」—— 只改本机界面，不影响能力与接口</span>
-        </div>
-
-        <div className="flex flex-col gap-2.5">
-          {UI_SWITCH_DEFS.map((it) => {
-            const Icon = uiSwitchIcon(it);
-            const enabled = uiValues[it.id] === true;
-            return (
-              <div key={it.id}
-                className="rounded-xl border border-white/70 dark:border-white/12 bg-surface/80 px-3.5 py-3 flex items-start gap-3">
-                <div className={`w-8 h-8 shrink-0 rounded-lg flex items-center justify-center ${enabled ? 'bg-brand/15 text-brand-light' : 'bg-surface-hover/80 text-gray-500'}`}>
-                  <Icon className="w-4 h-4" />
-                </div>
-
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[12.5px] font-bold text-[color:var(--color-text-main)]">{it.label}</span>
-                    <span className={`px-1.5 py-0.5 rounded border text-[10px] ${
-                      enabled ? 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10'
-                              : 'text-gray-400 border-white/70 dark:border-white/12 bg-surface-hover/80'
-                    }`}>{enabled ? '已显示' : '已隐藏'}</span>
-                    <span className="text-[10px] text-gray-500">出厂默认{it.default ? '显示' : '隐藏'}</span>
-                  </div>
-
-                  {it.description && (
-                    <p className="mt-1 text-[10.5px] text-gray-500 leading-relaxed">关闭后：{it.description}</p>
-                  )}
-                </div>
-
-                <button
-                  onClick={() => toggleUiSwitch(it.id, it.label, !enabled)}
-                  role="switch"
-                  aria-checked={enabled}
-                  className={`shrink-0 mt-0.5 w-11 h-6 rounded-full relative transition-colors ${
-                    enabled ? 'bg-brand' : 'bg-surface-hover/80 border border-white/70 dark:border-white/12'
-                  }`}
-                  title={enabled ? '点击隐藏' : '点击显示'}
-                >
-                  <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${enabled ? 'left-[22px]' : 'left-0.5'}`} />
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      </section>
+      {/* ── ⑥ 可插拔面板（prefs 层，默认关）：注册表视图 / 诊断与演练 ── */}
+      <UISlot host={SETTINGS_PANELS_HOST} />
 
       {/* 脚注：三处落盘位置写明，改配置出问题时知道去哪儿看 */}
       <div className="flex flex-col gap-1">
         <p className="text-[10.5px] text-gray-500 leading-relaxed">
-          页面开关存储：{file || 'state.json'}（改完即时生效，无需重启）
+          {t('common.storageNote')}{file || 'state.json'}{t('common.instant')}
         </p>
         {featureFile && (
           <p className="text-[10.5px] text-gray-500 leading-relaxed">
-            功能开关存储：{featureFile}（改完即时生效，无需重启）
+            {t('common.storageNote')}{featureFile}{t('common.instant')}
           </p>
         )}
         <p className="text-[10.5px] text-gray-500 leading-relaxed">
-          UI 开关存储：本机 localStorage（只作用于当前这台设备的界面，改完即时生效）
+          {t('common.storageNote')}{t('common.thisDevice')}{t('common.instant')}
+        </p>
+        <p className="text-[10.5px] text-gray-500 leading-relaxed">
+          {t('common.storageNote')}{PAGE_VARIANT_PREFIX}&lt;pageId&gt;
         </p>
       </div>
     </div>

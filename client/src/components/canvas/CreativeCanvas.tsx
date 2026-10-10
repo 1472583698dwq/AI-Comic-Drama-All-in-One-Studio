@@ -8,6 +8,7 @@ import { useProjectListStore } from '../../stores/useProjectListStore';
 import { useThemeStore } from '../../stores/useThemeStore';
 import { useProjectStore, selectSidebarCollapsed } from '../../stores/useProjectStore';
 import { useCanvasStore } from '../../stores/useCanvasStore';
+import { useFeatureStore } from '../../stores/useFeatureStore';
 import { apiService } from '../../services/api';
 import { API_ORIGIN, resolveMediaUrl } from '../../utils/devOrigin';
 import { confirmAsync, promptAsync, toast } from '../../stores/useDialogStore';
@@ -27,6 +28,12 @@ import { PromptNode, ImageNode, VideoGenNode, AudioNode, Director3DMinimalNode, 
 import { TimelineNode } from './nodes/TimelineNode';
 import { CustomNode } from './nodes/CustomNode';
 import { ExtNode } from './nodes/ExtNode';
+import { WorkbenchRow } from './WorkbenchRow';
+import { UISlot } from '../../ui-registry/UISlot';
+import { CanvasPaletteBridgeContext, type PaletteNodeType } from '../../ui-registry/canvasPaletteBridge';
+import { syncCanvasPaletteEntries, clearCanvasPaletteEntries } from '../../ui-registry/adapters/canvasPalette';
+import { useUIEntries } from '../../ui-registry/resolveEnabled';
+import { CANVAS_PALETTE_HOST } from '../../ui-registry/types';
 import { syncCanvasNodeSpecs, listCanvasNodeSpecs, getCanvasNodeSpec } from './canvasNodeSpecs';
 import { Rect, rectOf, estimateSize, placeUpstream, placeDownstream, placeNear, placeBlock, findFreeInColumn } from './autoLayout';
 import { ATTACH_EVENT, DETACH_EVENT, AttachInputsDetail, DetachInputDetail } from './inputCards';
@@ -138,48 +145,7 @@ const WorkbenchGroupTitle: React.FC<{ children: React.ReactNode }> = ({ children
  * 操作台条目（参考主流操作台样式）：图标方块 + 名称/说明两行 + 悬停出现的主操作。
  * 整条可点击创建、可拖入画布；不用卡片盒子包裹。
  */
-const WorkbenchRow: React.FC<{
-  icon: any;
-  iconCls?: string;
-  label: string;
-  desc?: string;
-  title?: string;
-  /** 悬停时右侧出现的主操作（默认「添加」） */
-  actionLabel?: string;
-  onClick?: () => void;
-  draggable?: boolean;
-  onDragStart?: (e: React.DragEvent) => void;
-}> = ({ icon: Icon, iconCls, label, desc, title, actionLabel = '添加', onClick, draggable, onDragStart }) => (
-  <div
-    role={onClick ? 'button' : undefined}
-    tabIndex={onClick ? 0 : undefined}
-    draggable={draggable}
-    onDragStart={onDragStart}
-    onClick={onClick}
-    onKeyDown={(e) => {
-      if (onClick && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onClick(); }
-    }}
-    title={title}
-    className="group flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-transparent hover:border-white/70 dark:border-white/12 hover:bg-surface/80 transition-colors cursor-pointer select-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand active:cursor-grabbing"
-  >
-    <span className="w-8 h-8 rounded-lg bg-surface/80 border border-white/70 dark:border-white/12 flex items-center justify-center shrink-0">
-      <Icon className={`w-4 h-4 ${iconCls || '[color:var(--color-text-secondary)]'}`} strokeWidth={1.7} />
-    </span>
-    <span className="min-w-0 flex-1">
-      <span className="block text-[13px] font-medium [color:var(--color-text-main)] truncate">{label}</span>
-      {desc && <span className="block text-[10.5px] [color:var(--color-text-muted)] truncate">{desc}</span>}
-    </span>
-    {onClick && (
-      <span
-        title={actionLabel}
-        aria-hidden="true"
-        className="w-6 h-6 rounded-md shrink-0 hidden group-hover:flex items-center justify-center [color:var(--color-text-muted)] group-hover:[color:var(--color-text-main)] group-hover:bg-surface-hover/80 transition-colors"
-      >
-        <Plus className="w-3.5 h-3.5" strokeWidth={1.7} />
-      </span>
-    )}
-  </div>
-);
+// `WorkbenchRow` 已抽到 ./WorkbenchRow（宿主与「插件节点行条目」共用同一份，设计 §12）
 
 /**
  * 底部「节点操作台」—— 只服务当前选中的生成节点（本地版观感：画布底部无常驻浮层）。
@@ -264,25 +230,39 @@ const InnerCanvas: React.FC = () => {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [assets, setAssets] = useState<any[]>([]);
   const [assetQuery, setAssetQuery] = useState('');
+  /**
+   * 页内能力闸（功能开关，设计 §2.3.2 的页内候选拆分）：
+   * `canvas_custom_nodes` = 自定义代码节点（沙箱执行，安全敏感）。关掉后画布不给入口，
+   * 后端 `/api/v1/custom-nodes` 整族同时 404（同一开关，不做「后端还能跑但不显示」的假闸）。
+   *
+   * 读法与 `useFeatureStore` 的既定口径一致：未加载 / 拉取失败一律**当作关**（fail-closed）；
+   * 出厂默认也是关（features.py 的「默认全关」契约），所以调色板里会明写一行
+   *「自定义代码节点已在 设置 → 功能开关 里关闭」，避免用户以为功能坏了。
+   */
+  const customNodesOn = useFeatureStore((s) => s.loaded && s.values['canvas_custom_nodes'] === true);
+
   const [customNodes, setCustomNodes] = useState<any[]>([]);
   const refreshCustomNodes = async () => {
+    if (!customNodesOn) { setCustomNodes([]); return; }  // 关掉就不拉：没人看的列表不占请求
     try {
       const r: any = await apiService.listCustomNodes();
       setCustomNodes(r.nodes || []);
     } catch {}
   };
-  useEffect(() => { refreshCustomNodes(); }, []);
+  useEffect(() => { refreshCustomNodes(); }, [customNodesOn]);
   useEffect(() => {
     const h = () => refreshCustomNodes();
     window.addEventListener('customnode-list-refresh', h as any);
     return () => window.removeEventListener('customnode-list-refresh', h as any);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [customNodesOn]);
   // 声明式扩展节点（canvas_nodes）：插件前端扩展点，spec 驱动通用渲染
   const [extNodes, setExtNodes] = useState<any[]>([]);
   const refreshExtNodes = async () => {
     try {
       await syncCanvasNodeSpecs(pid || undefined);
+      // 声明只有一份来源：`syncCanvasNodeSpecs` 整体重载全局注册表（第 26 条：原先 ExtNode
+      // 另有一份节点侧 defCache、需在此额外清；现两份缓存已合并为注册表一份，重拉即全部生效）
       setExtNodes(listCanvasNodeSpecs());
     } catch {}
   };
@@ -895,6 +875,30 @@ const InnerCanvas: React.FC = () => {
     if (type === 'director3d') node.data = { ...node.data, framing: 'medium', motion: 'push_in' };
     return node;
   };
+
+  /* ── 插件节点行（custom_nodes / canvas_nodes）的桥接与注册（设计 §12）─────────────────
+     宿主注入 `createNode`（视口位置、节点 state、选中逻辑只有宿主知道），条目只声明「创建哪种节点」。
+     实现走 ref：`createNode` / `freePosition` 每次渲染都会重建，ref 让 context 值保持稳定，
+     调色板里的每一行就不会跟着画布重渲染。 */
+  const paletteCreateRef = useRef<(type: PaletteNodeType, data?: Record<string, any>) => void>(() => {});
+  useEffect(() => {
+    paletteCreateRef.current = (type, data) => {
+      const node = createNode(type, freePosition(type), data);
+      setNodes((nds) => [...nds, node]);
+      setSelectedNodeId(node.id);
+    };
+  });
+  const paletteBridge = useMemo(
+    () => ({
+      createNode: (type: PaletteNodeType, data?: Record<string, any>) => paletteCreateRef.current(type, data),
+    }),
+    [],
+  );
+  /** 当前插件节点行（宿主据此决定「去插件中心安装」空态是否显示） */
+  const paletteEntries = useUIEntries(CANVAS_PALETTE_HOST);
+  // 两张清单任一变化 → 重新把声明送进注册表（行增删立即可见）；画布卸载 → 清空，不留陈旧行
+  useEffect(() => { syncCanvasPaletteEntries(customNodes, extNodes); }, [customNodes, extNodes]);
+  useEffect(() => () => clearCanvasPaletteEntries(), []);
 
   const addTemplate = (tpl: any) => {
     // 组内横向排开（列间距同 autoLayout），整组放到现有内容下方，不压已有卡片
@@ -1996,46 +2000,23 @@ const InnerCanvas: React.FC = () => {
                   />
                 ))}
 
-                {customNodes.map((c: any) => (
-                  <WorkbenchRow
-                    key={c.id}
-                    icon={Boxes}
-                    iconCls="text-teal-400"
-                    label={c.name}
-                    desc={`${c.kind}/${c.language}`}
-                    draggable
-                    onDragStart={e => e.dataTransfer.setData('application/canvas-nodetype', 'custom')}
-                    title="自定义节点：拖入画布，或点击直接创建"
-                    onClick={() => {
-                      const node = createNode('custom', freePosition('custom'), { custom_node_id: c.id });
-                      setNodes(nds => [...nds, node]);
-                      setSelectedNodeId(node.id);
-                    }}
-                  />
-                ))}
+                {/* 插件贡献的两类节点行（自定义代码节点 / 扩展节点）已条目化（设计 §12）：
+                    宿主注入 createNode，条目只声明「创建哪种节点」。
+                    自定义代码节点受 `canvas_custom_nodes` 页内能力闸控制（出厂**默认关** ——
+                    契约「feature 出厂全关」，见 server/app/core/features.py 与
+                    tests/test_features.py::TestDefaults）；关掉时后端 /custom-nodes 同族 404、
+                    MCP/Agent 路径也跑不了（同闸），所以调色板里不给入口，只留一行明示
+                    （不提示「去装插件」—— 不是缺少插件）。 */}
+                <CanvasPaletteBridgeContext.Provider value={paletteBridge}>
+                  <UISlot host={CANVAS_PALETTE_HOST} />
+                </CanvasPaletteBridgeContext.Provider>
 
-                {extNodes.map((s: any) => (
-                  <WorkbenchRow
-                    key={s.id}
-                    icon={Wand2}
-                    iconCls="text-cyan-400"
-                    label={s.name}
-                    desc={`${(s.inputs || []).length}入/${(s.outputs || []).length}出`}
-                    draggable
-                    onDragStart={e => {
-                      e.dataTransfer.setData('application/canvas-nodetype', 'ext-node');
-                      e.dataTransfer.setData('application/canvas-nodeid', s.id);
-                    }}
-                    title={`扩展节点（canvas_nodes）· ${s.kind || 'utility'}：拖入画布，或点击直接创建`}
-                    onClick={() => {
-                      const node = createNode('ext-node', freePosition('ext-node'), { canvas_node_id: s.id, definition: s });
-                      setNodes(nds => [...nds, node]);
-                      setSelectedNodeId(node.id);
-                    }}
-                  />
-                ))}
-
-                {customNodes.length === 0 && extNodes.length === 0 && (
+                {!customNodesOn && (
+                  <div className="px-3 py-1.5 text-[10.5px] [color:var(--color-text-muted)]">
+                    自定义代码节点已在 设置 → 功能开关 里关闭
+                  </div>
+                )}
+                {customNodesOn && paletteEntries.length === 0 && (
                   <button
                     onClick={goPluginCenter}
                     title="去设置 → 插件中心安装插件包"

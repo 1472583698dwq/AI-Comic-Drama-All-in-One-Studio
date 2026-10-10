@@ -220,3 +220,14 @@ export const resolveTab = (requested?: string | null): string | null => {
   }
   return firstEnabledPageId();
 };
+
+/* ─────── 页签准入的共用真源已迁入注册表（设计 §9.2 / 未完成清单第 15 条） ─────── */
+
+/**
+ * 原 `GLOBAL_TABS` / `LEGACY_TAB_LABEL` 已删除：两张表的真相改为**页面条目自带**
+ * （`ui-registry/entries/pages.tsx` 的 `meta.global` 与 `variant: 'retired'` 条目），
+ * 消费方一律从 `ui-registry/pageTabs.ts` 读：
+ *   · `globalPageIds()` / `isGlobalPage(id)` —— 无项目也能停留的全局页；
+ *   · `legacyTabLabel(id)`                  —— 已下线页签的展示名。
+ * 这样加页 / 下线页只改条目，不再有第二张表需要同步。
+ */

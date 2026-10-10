@@ -6,13 +6,15 @@
 - ``pages``：整页可开关，状态落在扩展覆盖层 ``storage/extensions/state.json``，
   关掉即整族路由 404；
 - ``features``（本模块）：**非页面级**的进阶能力（多模态附件、子代理委派、导演组），
-  这些能力混在「AI 导演」等页里，没法靠关页面来关，故单独一层开关，
-  **出厂默认全关**，在 设置 → 功能开关 里逐个打开。
+  这些能力混在「AI 导演」等页里，没法靠关页面来关，故单独一层开关。
+  默认值**逐条由 ``default`` 显式声明**（设计 §2.3.2 定稿口径：链路必需的能力默认开、
+  安全敏感 / 可选进阶的默认关），**不再有「出厂一律全关」这条总契约**；
+  用户仍可在 设置 → 功能开关 里逐个改。
 
 设计：
 
 - 存储 ``storage/features.json``：扁平 ``{"<id>": true/false}``，无嵌套、无 schema 版本号；
-  文件缺失 = 全部取 ``FEATURE_DEFS`` 的 ``default``（当前全 False=关闭）。
+  文件缺失 = 全部取 ``FEATURE_DEFS`` 的 ``default``（逐条见下表，不是一律 False）。
 - 原子写：先写 ``features.json.tmp`` 再 ``os.replace``，外部读到的永远是完整 JSON。
 - 读带 mtime/size 缓存：外部直接改文件（手改、云同步回拉、另一个进程写）即时生效，
   无需重启、无需显式刷新。
@@ -34,23 +36,40 @@ from fastapi import HTTPException
 #: 存储文件名（位于 ``settings.STORAGE_DIR`` 下）
 FILE_NAME = "features.json"
 
-#: 内置功能清单；``default`` 一律 False（出厂全关），``group``/``order`` 供前端开关页分组排序。
+#: 内置功能清单；``default`` **逐条显式声明**（设计 §2.3.2 定稿口径），
+#: ``group``/``order`` 供前端开关页分组排序。
 FEATURE_DEFS: List[Dict[str, Any]] = [
+    # 默认**开**（设计 §2.3.2：属「开箱完整链路」必需 —— 视频链路要看参考图与产物回投）
     {
         "id": "agent_multimodal", "label": "多模态附件与看图",
-        "group": "AI 导演", "order": 10, "default": False,
+        "group": "AI 导演", "order": 10, "default": True,
         # description 前端按「关闭后：<description>」展示，故写成「受影响的能力」口吻
         "description": "AI 导演的图片/视频附件、生成产物自动回投与《看画布产物》view_media 均不可用（纯文本对话不受影响）",
     },
+    # 默认**开**（设计 §2.3.2：一键成片依赖子代理集群，属链路必需）
     {
         "id": "agent_subagent", "label": "子代理委派",
-        "group": "AI 导演", "order": 20, "default": False,
+        "group": "AI 导演", "order": 20, "default": True,
         "description": "同步 / 异步 / 批量委派子代理与集群并行执行均不可用（主代理单进程照常工作）",
     },
     {
         "id": "agent_teams", "label": "导演组",
         "group": "扩展能力", "order": 30, "default": False,
         "description": "导演组成员 / 团队（/api/v1/agent-teams）与插件贡献的 agent_profile / agent_team 接口均返回 404",
+    },
+    # ── 页内进阶能力（画布）──────────────────────────────────────────────
+    # 显式白名单里**默认关**的两条之一（设计 §2.3.2 定稿：安全敏感 → 用户自行开启）：
+    # 关掉时画布不给「自定义节点」入口、/api/v1/custom-nodes 整族 404
+    # （安全敏感：那一族会执行用户代码，沙箱与 trusted 闸另有一层，见 custom_nodes/manager.py）。
+    # 界面上是**可发现**的：调色板里会明确写「自定义代码节点已在 设置 → 功能开关 里关闭」。
+    # 设计 §2.3.2 同处提过的「画布时间线节点」按定稿**不升 feature**：它与多轨剪辑页共用
+    # /api/v1/timeline（后端 require_any(["canvas","timeline"])），由页面开关 + 注册表
+    # 「任一宿主页开即渲染」表达，不另设 feature id。
+    {
+        "id": "canvas_custom_nodes", "label": "自定义代码节点",
+        "group": "创意画布", "order": 40, "default": False,
+        # description 前端按「关闭后：<description>」展示，故写成「受影响的能力」口吻
+        "description": "画布不再提供「自定义节点」入口，/api/v1/custom-nodes 整族返回 404（已在画布上的节点无法再执行；沙箱与 trusted 闸不受影响）",
     },
 ]
 

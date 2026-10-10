@@ -15,14 +15,15 @@ import { apiService } from '../services/api';
  *   - agent_multimodal 关闭 → Agent 附件退化为纯文本；
  *   - agent_subagent 关闭 → 子代理委派直接失败。
  *
- * 不缓存到 localStorage：功能开关的真相只有后端一份（后端默认全关），避免本地与后端漂移。
+ * 不缓存到 localStorage：功能开关的真相只有后端一份（默认值由后端 FEATURE_DEFS 逐条声明），
+ * 避免本地与后端漂移。
  */
 export interface FeatureItem {
   id: string;
   label: string;
   /** 能力说明（同时是「关闭后」影响范围的唯一文案来源，前端不自行编造） */
   description: string;
-  /** 出厂默认值（后端标记，当前契约全部为 false） */
+  /** 出厂默认值（后端逐条声明，见 `server/app/core/features.py` 的 FEATURE_DEFS） */
   default?: boolean;
   enabled: boolean;
 }
@@ -128,5 +129,5 @@ export const useFeatureStore = create<FeatureState>((set, get) => ({
   },
 }));
 
-/** 某功能是否开启（读 getState 快照，不订阅；未加载一律 false —— 与后端默认全关一致） */
+/** 某功能是否开启（读 getState 快照，不订阅；未加载一律 false —— 前端 fail-closed，不猜后端默认值） */
 export const isFeatureEnabled = (id: string): boolean => useFeatureStore.getState().values[id] === true;

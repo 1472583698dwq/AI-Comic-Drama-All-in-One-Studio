@@ -1,27 +1,20 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Settings, PanelLeftClose, PanelLeft, Lock, Plug, MessageCirclePlus, Sun, Moon, type LucideIcon,
+  Lock, MessageCirclePlus, type LucideIcon,
 } from 'lucide-react';
 import { useProjectStore, selectSidebarCollapsed } from '../../stores/useProjectStore';
 import { usePageStore } from '../../stores/usePageStore';
-import { useProjectListStore } from '../../stores/useProjectListStore';
+import { isGlobalPage } from '../../ui-registry/pageTabs';
+
 import { useChatHistoryStore } from '../../stores/useChatHistoryStore';
 import { useUiPrefsStore } from '../../stores/useUiPrefsStore';
-import { useThemeStore } from '../../stores/useThemeStore';
 import { useAgentStore } from '../agent/agentStore';
 import { toast } from '../../stores/useDialogStore';
 import { pageIcon } from '../../utils/pageIcons';
-import { ChatHistory } from './ChatHistory';
 import { NewProjectModal } from '../project/NewProjectModal';
-import type { ChatHistoryEntry } from '../../stores/useChatHistoryStore';
+import { UISlot } from '../../ui-registry/UISlot';
+import { SIDEBAR_HOST, SIDEBAR_FOOTER_HOST } from '../../ui-registry/types';
 import type { ProjectMeta } from '../../stores/useProjectListStore';
-
-interface SidebarProps {
-  /** 设置页内仍会用到这三个弹窗，App 统一持有开关 */
-  onOpenMcp?: () => void;
-  onOpenSkills?: () => void;
-  onOpenProvider?: () => void;
-}
 
 interface NavItem {
   id: string;
@@ -31,8 +24,7 @@ interface NavItem {
   pulse?: boolean;
 }
 
-/** 无项目时也能进的页（其余条目需要先有项目）；config 沉到底部 */
-const GLOBAL_TABS = ['home', 'projects', 'config'];
+/** 无项目时也能进的页（其余条目需要先有项目）；config 沉到底部 —— 常量见 stores/usePageStore */
 
 /** 未分组页面的兜底分组名 */
 const OTHER_GROUP = 'other';
@@ -50,18 +42,16 @@ const OTHER_GROUP = 'other';
  * - 底部工具区永远贴底（mt-auto），收起成图标轨时按钮位置与展开态一致，不会跑到导航下面去。
  * - 宽度 264px ⇄ 60px 图标轨；画布页默认收起的行为不变。
  */
-export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
-  const { project, activeTab, setActiveTab, toggleSidebar } = useProjectStore();
+export const Sidebar: React.FC = () => {
+  const { project, activeTab, setActiveTab } = useProjectStore();
   const sidebarCollapsed = useProjectStore(selectSidebarCollapsed);
   const pages = usePageStore((s) => s.items);
   const values = usePageStore((s) => s.values);
   const groupMeta = usePageStore((s) => s.groups);
   const refreshHistory = useChatHistoryStore((s) => s.refresh);
-  const agentActiveSessionId = useAgentStore((s) => s.activeSessionId);
+
   /** UI 开关（设置 → 功能开关 → UI 开关，首项）：会话与项目快捷侧栏默认显示，关掉后侧栏只剩导航与底部工具 */
   const historyVisible = useUiPrefsStore((s) => s.values.sidebar_chat_history !== false);
-  const effectiveTheme = useThemeStore((s) => s.effectiveTheme);
-  const toggleTheme = useThemeStore((s) => s.toggleTheme);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
 
   const shotsCount = (project?.scenes || []).reduce(
@@ -107,7 +97,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
   }, [pages, values, groupMeta, shotsCount, charactersCount]);
 
   const go = (id: string) => {
-    if (!GLOBAL_TABS.includes(id) && !project) {
+    if (!isGlobalPage(id) && !project) {
       toast.info('请先在看板创建或打开项目');
       return;
     }
@@ -139,17 +129,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
     setActiveTab('agent');
     useAgentStore.getState().bindProject(meta.id);
     void refreshHistory();
-  };
-
-  /** 历史行点击：切项目（双 store 同步）→ 绑定并选中目标会话 → 进对话页 */
-  const openHistoryEntry = async (e: ChatHistoryEntry) => {
-    const cur = useProjectStore.getState().project;
-    if (cur?.id !== e.projectId) {
-      useProjectListStore.getState().setActiveProjectId(e.projectId);
-      await useProjectStore.getState().loadActiveProject(e.projectId);
-    }
-    setActiveTab('agent');
-    useAgentStore.getState().bindProject(e.projectId, e.session.id);
   };
 
   const activeCls = (item: NavItem, locked: boolean, active: boolean) => {
@@ -195,7 +174,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
                 )}
                 <div className="space-y-0.5">
                   {g.items.map((item) => {
-                    const locked = !GLOBAL_TABS.includes(item.id) && !project;
+                    const locked = !isGlobalPage(item.id) && !project;
                     const active = activeTab === item.id;
                     const Icon = item.icon;
                     return (
@@ -233,64 +212,18 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
           </div>
         </div>
 
-        {/* 下半部：聊天历史（收起态隐藏；UI 开关关掉快捷侧栏后整块不渲染） */}
-        {!effectiveCollapsed && historyVisible && (
-          <>
-            <div className="mx-3 my-1.5 h-px bg-border shrink-0" />
-            <ChatHistory
-              activeSessionId={agentActiveSessionId}
-              onOpenEntry={(e) => { void openHistoryEntry(e); }}
-            />
-          </>
-        )}
+        {/* 下半部：会话 / 项目快捷区。Phase 3 起由注册表条目渲染
+            （`sidebar.chat-history`，scope=prefs + switchId=sidebar_chat_history）——
+            开关关掉即条目移除、整块消失；收起态由条目内部自己判 `selectSidebarCollapsed`。 */}
+        <UISlot host={SIDEBAR_HOST} />
 
         {/* 底部工具区：生成源 / 主题 / 设置 / 收起。
             mt-auto 把本区块顶到侧栏最底部 —— 收起成图标轨时没有下方的聊天历史撑高度，
-            少了它按钮会紧贴导航堆栈往上跑 */}
+            少了它按钮会紧贴导航堆栈往上跑。
+            按钮本体已条目化（host=sidebar.footer，未完成清单第 2 条）：容器（间距 / 上边框 / 底色）
+            是宿主 chrome，条目只渲染按钮并自标标注属性；条目本身常驻，行为与改造前一致。 */}
         <div className="shrink-0 mt-auto p-2 border-t border-white/60 dark:border-white/10 space-y-0.5 bg-surface/80 dark:bg-black/45 backdrop-blur-xl">
-          <UtilButton
-            icon={Plug}
-            label="生成源"
-            collapsed={effectiveCollapsed}
-            onClick={() => onOpenProvider?.()}
-            iconCls="text-brand-light"
-          />
-
-          {/* 白天 / 黑夜切换：收起态同样在底部第三格，位置与展开态一致 */}
-          <UtilButton
-            icon={effectiveTheme === 'dark' ? Sun : Moon}
-            label={effectiveTheme === 'dark' ? '切换白天模式' : '切换黑夜模式'}
-            collapsed={effectiveCollapsed}
-            onClick={toggleTheme}
-            iconCls={effectiveTheme === 'dark' ? 'text-amber-400' : 'text-indigo-400'}
-          />
-
-          <button
-            onClick={() => setActiveTab('config')}
-            title="设置：核心能力 / 输出与存储 / 扩展 / 系统"
-            className={`w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-xs font-bold transition-all ${
-              effectiveCollapsed ? 'justify-center px-0' : ''
-            } ${
-              activeTab === 'config'
-                ? 'bg-brand text-white shadow-sm shadow-brand/25'
-                : '[color:var(--color-text-main)] hover:bg-surface-hover'
-            }`}
-          >
-            <Settings className="w-4 h-4 shrink-0" />
-            {!effectiveCollapsed && <span className="truncate">设置</span>}
-          </button>
-
-          {/* 图标轨 ⇄ 完整栏（所有页面一致） */}
-          <button
-            onClick={toggleSidebar}
-            title={effectiveCollapsed ? '展开侧栏' : '收起侧栏'}
-            className={`w-full flex items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-[11px] [color:var(--color-text-main)] opacity-70 hover:opacity-100 hover:bg-surface-hover transition-all ${
-              effectiveCollapsed ? 'justify-center px-0' : ''
-            }`}
-          >
-            {effectiveCollapsed ? <PanelLeft className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
-            {!effectiveCollapsed && <span>收起侧栏</span>}
-          </button>
+          <UISlot host={SIDEBAR_FOOTER_HOST} />
         </div>
       </div>
 
@@ -304,21 +237,3 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenProvider }) => {
   );
 };
 
-const UtilButton: React.FC<{
-  icon: LucideIcon;
-  label: string;
-  collapsed: boolean;
-  onClick: () => void;
-  iconCls?: string;
-}> = ({ icon: Icon, label, collapsed, onClick, iconCls }) => (
-  <button
-    onClick={onClick}
-    title={label}
-    className={`w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-xs font-medium [color:var(--color-text-main)] hover:bg-surface-hover transition-all ${
-      collapsed ? 'justify-center px-0' : ''
-    }`}
-  >
-    <Icon className={`w-4 h-4 shrink-0 ${iconCls || ''}`} />
-    {!collapsed && <span className="truncate flex-1 text-left">{label}</span>}
-  </button>
-);

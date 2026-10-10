@@ -16,7 +16,7 @@ interface Position {
  * - 在聚焦元素右上角显示润色按钮
  * - 点击展开技能选择，调用 /skills/execute 润色
  */
-export const GlobalAiPolish: React.FC = () => {
+export const GlobalAiPolish: React.FC<{ markProps?: Record<string, string> }> = ({ markProps }) => {
   const [activeEl, setActiveEl] = useState<HTMLTextAreaElement | HTMLInputElement | null>(null);
   const [pos, setPos] = useState<Position | null>(null);
   const [open, setOpen] = useState(false);
@@ -242,6 +242,8 @@ export const GlobalAiPolish: React.FC = () => {
           pointerEvents: 'auto',
         }}
         className="flex flex-col items-end gap-1"
+        // 标注属性由条目注入，落在本组件自己的 fixed 根上（槽位不加包裹层，见审查 M3）
+        {...markProps}
       >
         <button
           type="button"

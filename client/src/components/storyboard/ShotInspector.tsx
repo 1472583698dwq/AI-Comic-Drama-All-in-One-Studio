@@ -125,7 +125,7 @@ export const ShotInspector: React.FC = () => {
   const [savingAsset, setSavingAsset] = useState(false);
   // P1 插件槽：弹窗开关 + 注册表版本号（同步后 bump 触发重渲染）
   const [slotMgrOpen, setSlotMgrOpen] = useState(false);
-  const [, setSlotsRev] = useState(0);
+
 
   // 旧分镜可能只存了 workflow_id 而没选源，仅作为未选源时的兜底
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>(
@@ -220,13 +220,19 @@ export const ShotInspector: React.FC = () => {
     loadProjectAssets();
   }, [project?.id]);
 
-  // P1：随项目同步插件槽声明（内置不受影响，动态槽精确重载）
+  // P1：随项目同步插件槽声明（内置不受影响，动态槽精确重载）。
+  // Phase 4 起还监听 `storyboard-slots-refresh`：插件启停经 SSE 推送后由事件流统一重播该事件，
+  // 分镜台无需重挂载即可拿到新槽（缺口 §2.5-1 的「插件停用前端无广播」在分镜台这一侧的闭环）。
   useEffect(() => {
-    let cancelled = false;
-    syncStoryboardSlots(project?.id)
-      .then(() => { if (!cancelled) setSlotsRev((v) => v + 1); })
-      .catch(() => {});
-    return () => { cancelled = true; };
+    const sync = () => {
+      // 同步完**不需要**手动触发重渲染（审查 L3）：槽宿主已改从注册表取条目
+      // （`useUIEntries` 订阅注册表版本），注册 / 反注册自会驱动它们重渲染 ——
+      // 原先那个「只丢弃 value 的 setState」纯粹是旧私有 Map 时代的遗留。
+      syncStoryboardSlots(project?.id).catch(() => {});
+    };
+    sync();
+    window.addEventListener('storyboard-slots-refresh', sync);
+    return () => { window.removeEventListener('storyboard-slots-refresh', sync); };
   }, [project?.id]);
 
   const loadProjectAssets = async () => {
@@ -1063,11 +1069,8 @@ export const ShotInspector: React.FC = () => {
         <SlotManagerModal
           projectId={project?.id}
           onClose={() => setSlotMgrOpen(false)}
-          onChanged={() => {
-            syncStoryboardSlots(project?.id)
-              .then(() => setSlotsRev((v) => v + 1))
-              .catch(() => {});
-          }}
+          // 同上：注册表订阅负责让槽宿主刷新，不再手动 setState（审查 L3）
+          onChanged={() => { void syncStoryboardSlots(project?.id).catch(() => {}); }}
         />
       )}
 

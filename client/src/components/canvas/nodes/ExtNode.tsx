@@ -31,26 +31,26 @@ const INPUT_HANDLE_CLASS: Record<string, string> = {
   image: '!bg-violet-400', video: '!bg-orange-400', audio: '!bg-pink-400', text: '!bg-sky-400',
 };
 
-const defCache = new Map<string, CanvasNodeSpec>();
-
 export const ExtNode: React.FC<NodeProps> = ({ id, data, selected }) => {
   const d: any = data || {};
   const { updateNodeData } = useCanvasStore();
-  const [spec, setSpec] = useState<CanvasNodeSpec | null>(d.definition || getCanvasNodeSpec(d.canvas_node_id) || defCache.get(d.canvas_node_id) || null);
+  const [spec, setSpec] = useState<CanvasNodeSpec | null>(d.definition || getCanvasNodeSpec(d.canvas_node_id) || null);
   const [running, setRunning] = useState(false);
 
   useEffect(() => {
     let stop = false;
     const cid = d.canvas_node_id;
     if (!cid) return;
-    const cached = getCanvasNodeSpec(cid) || defCache.get(cid);
+    // 声明只有**一份来源**：全局注册表 `canvasNodeSpecs`（第 26 条：原先 ExtNode 另带一份
+    // 节点侧 `extNodeDefCache`，两份缓存容易漂移；现在懒取回来的 spec 直接注册进同一份注册表，
+    // 注册表重拉时自然一起失效）
+    const cached = getCanvasNodeSpec(cid);
     if (cached) { setSpec(cached); return; }
     (async () => {
       try {
         const res: any = await apiService.getCanvasNode(cid);
         const got: CanvasNodeSpec = res?.node || res;
         if (!got?.id) return;
-        defCache.set(cid, got);
         registerCanvasNodeSpec(got);
         if (!stop) setSpec(got);
       } catch { /* 节点可能已被插件禁用/卸载 */ }

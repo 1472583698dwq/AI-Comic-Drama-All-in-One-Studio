@@ -1,7 +1,7 @@
 import React from 'react';
 import { Image as ImageIcon, Paintbrush, Sliders, Sparkles, Link2 } from 'lucide-react';
 import type { ShotSlotContext } from './types';
-import { getVisibleAnchors } from './registry';
+import { useAnchorDefs } from '../../../ui-registry/adapters/storyboardSlots';
 import { ProviderSlotList } from './ProviderSlotList';
 import { SlotOutlet } from './PluginRender';
 import { ProviderPicker, ProviderParamForm } from '../../ui/ProviderPicker';
@@ -23,9 +23,11 @@ export const VisualTab: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
     setInspectingWorkflowId, probeProvider, regenError,
     handleOneClickBind, hasBindUndo, undoLastBind,
   } = ctx;
+  // 锚点槽从注册表取（内置 + 插件同一条管线），when(ctx) 过滤仍在宿主侧
+  const anchors = useAnchorDefs(ctx);
   return (
     <div className="space-y-3.5">
-      {getVisibleAnchors(ctx).map((a) => (
+      {anchors.map((a) => (
         <SlotOutlet key={a.id} slotKey={a.id} render={a.render} ctx={ctx} />
       ))}
 

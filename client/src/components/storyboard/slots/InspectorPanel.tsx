@@ -1,7 +1,8 @@
 import React from 'react';
 import { Copy, Layers, Sliders, Trash2 } from 'lucide-react';
 import type { ShotSlotContext } from './types';
-import { getMode, getVisibleTabs } from './registry';
+import { getMode } from './registry';
+import { useTabDefs } from '../../../ui-registry/adapters/storyboardSlots';
 import { SlotOutlet } from './PluginRender';
 import { SlotManagerButton } from './SlotManagerModal';
 
@@ -17,7 +18,8 @@ export const InspectorPanel: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
     duplicateShot, deleteShot, openShotCtxMenu, openSlotManager, queue,
   } = ctx;
   const mode = getMode(productionMode);
-  const tabs = getVisibleTabs(ctx);
+  // 槽从注册表取（内置 + 插件同一条管线），when(ctx) 过滤仍在宿主侧
+  const tabs = useTabDefs(ctx);
   return (
     <div className="w-[380px] bg-surface border border-border rounded-2xl flex flex-col overflow-hidden shrink-0 shadow-sm">
       <div className="h-11 px-3 border-b border-border flex items-center justify-between bg-surface-secondary/50 shrink-0">

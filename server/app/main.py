@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import JSONResponse
-from app.core.config import settings, cors_extra_origins, is_local_or_allowed_origin
+from app.core.config import settings, cors_extra_origins, is_local_or_allowed_origin, APP_VERSION
 from app.api.routes import router
 from app.mcp.server import mcp_registry
 
@@ -58,7 +58,7 @@ async def _lifespan(_app):
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description="AI 漫剧双端（移动端 App + 桌面端 Desktop）中枢引擎：MiniMax LLM 剧本拆解 / 动态多Provider生图(ComfyUI/硅基流动/通义万象) / 动态多Provider配音(MiniMax/ElevenLabs/CosyVoice/GPT-SoVITS) / pyJianYingDraft 剪映导出 / MCP 工具扩展（导演Agent全量暴露）",
-    version="2.1.0",
+    version=APP_VERSION,
     lifespan=_lifespan,
 )
 

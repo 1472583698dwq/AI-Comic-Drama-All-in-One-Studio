@@ -1,0 +1,872 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>最小形态 · 开关注册台原型 v3（不接后端）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+/* ============================================================================
+   最小形态 · 开关注册台 v3 —— 工业控制台 × 粗野主义
+   重构要点：
+     · 顶部大标签栏替代图标轨（宿主 = 大 tab，设置台钉底最右、永不消失）
+     · 设置台内分类大 tab：页面 / 功能 / 偏好 / 插件（feature 开启后追加 注册表 / 诊断）
+     · 页面开关 = 大块卡片网格；插件 = 完整介绍卡（版本 / 作者 / 简介 / 贡献清单）
+     · 中 / EN 一键切换（全部文案、toast、标注双语）
+     · 壳 / 标签栏 / 舞台 / 设置台 / 空态自救 / toast 全部 locked，与 v2 语义一致
+   ============================================================================ */
+:root{
+  --bg:#0B0B0D; --s1:#131316; --s2:#1A1A1F; --s3:#24242B; --hov:#202027;
+  --bd:#2C2C35; --bd-hard:#3D3D49; --grid:rgba(255,255,255,.04);
+  --tx:#F2F1EC; --tx2:#A3A39D; --tx3:#6C6C67;
+  --acc:#D7FF3F; --acc-ink:#131503;
+  --plug:#3DD6FF; --plugin:#FF8A2A; --warn:#FFB020; --danger:#FF5555;
+  --sh:rgba(0,0,0,.5);
+  --disp:'Archivo Black','PingFang SC','Microsoft YaHei',sans-serif;
+  --body:'IBM Plex Sans','PingFang SC','Microsoft YaHei',system-ui,sans-serif;
+  --mono:'IBM Plex Mono','JetBrains Mono',monospace;
+}
+[data-theme="light"]{
+  --bg:#EDEAE0; --s1:#FAF8F2; --s2:#FFFFFF; --s3:#E4E0D2; --hov:#E7E3D6;
+  --bd:#1B1B18; --bd-hard:#1B1B18; --grid:rgba(20,20,16,.06);
+  --tx:#14140F; --tx2:#4C4C44; --tx3:#8B887A;
+  --acc:#C9F22E; --sh:rgba(20,20,16,.18);
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--tx);overflow:hidden;font:13px/1.55 var(--body)}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+code{font-family:var(--mono);font-size:11px}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:var(--bd);border-radius:4px}
+
+/* ---------- 壳：顶条 + 大标签栏 + 舞台 ---------- */
+.shell{height:100vh;width:100vw;display:flex;flex-direction:column;overflow:hidden}
+.topbar{height:54px;flex:0 0 auto;display:flex;align-items:center;gap:12px;padding:0 18px;
+  background:var(--s1);border-bottom:1.5px solid var(--bd);position:relative;z-index:30}
+.mark{display:flex;align-items:center;gap:10px;font-family:var(--disp);font-size:14px;letter-spacing:.02em}
+.mark i{width:22px;height:22px;border-radius:6px;background:var(--acc);box-shadow:3px 3px 0 var(--sh);
+  display:grid;place-items:center;font-style:normal;color:var(--acc-ink);font-family:var(--mono);font-weight:600;font-size:12px}
+.mark em{font-style:normal;font-family:var(--mono);font-weight:400;font-size:9.5px;letter-spacing:.18em;color:var(--tx3)}
+.crumb{color:var(--tx3);font-size:11.5px;font-family:var(--mono)}
+.crumb b{color:var(--tx);font-weight:600}
+.grow{flex:1}
+.pill{display:inline-flex;align-items:center;gap:7px;height:26px;padding:0 11px;border-radius:999px;
+  border:1.5px solid var(--bd);background:var(--s2);color:var(--tx2);font-size:11px;font-family:var(--mono)}
+.pill em{width:6px;height:6px;border-radius:50%;background:var(--acc)}
+.tbtn{height:30px;padding:0 12px;border-radius:9px;border:1.5px solid var(--bd);color:var(--tx2);
+  font-size:11.5px;font-weight:600;background:var(--s1);transition:.12s}
+.tbtn:hover{color:var(--tx);transform:translate(-1px,-1px);box-shadow:3px 3px 0 var(--sh)}
+.tbtn.on{background:var(--acc);border-color:var(--acc);color:var(--acc-ink)}
+.tbtn.mono{font-family:var(--mono);min-width:44px}
+
+/* ---------- 大标签栏（locked 壳）：宿主 tab 可插拔，设置台钉右 ---------- */
+.tabs{flex:0 0 auto;display:flex;align-items:stretch;gap:10px;padding:12px 18px;overflow-x:auto;
+  background:var(--s1);border-bottom:1.5px solid var(--bd);position:relative;z-index:20}
+.tab{display:flex;align-items:center;gap:11px;padding:9px 16px 9px 11px;border-radius:13px;text-align:left;
+  border:1.5px solid var(--bd);background:var(--s2);color:var(--tx2);transition:.14s;flex:0 0 auto}
+.tab:hover{color:var(--tx);transform:translate(-2px,-2px);box-shadow:5px 5px 0 var(--sh)}
+.tab.on{background:var(--acc);border-color:var(--acc);color:var(--acc-ink);box-shadow:5px 5px 0 var(--sh)}
+.tg{width:32px;height:32px;flex:0 0 auto;border-radius:9px;display:grid;place-items:center;
+  font-size:14px;font-weight:800;background:var(--s3);color:var(--tx2);border:1.5px solid var(--bd)}
+.tab.on .tg{background:var(--acc-ink);border-color:var(--acc-ink);color:var(--acc)}
+.tab.plugin .tg{background:color-mix(in srgb,var(--plugin) 22%,var(--s3));color:var(--plugin)}
+.tab.on.plugin .tg{background:var(--acc-ink);color:var(--plugin)}
+.tab.broken .tg{background:color-mix(in srgb,var(--danger) 25%,var(--s3));color:var(--danger)}
+.tt b{display:block;font-size:14px;font-weight:700;white-space:nowrap}
+.tt small{display:block;font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--tx3);white-space:nowrap;margin-top:1px}
+.tab.on .tt small{color:color-mix(in srgb,var(--acc-ink) 65%,transparent)}
+.tabs.compact .tt small{display:none}
+.tb{font-family:var(--mono);font-size:9px;letter-spacing:.1em;padding:2px 6px;border-radius:6px;
+  border:1px solid currentColor;opacity:.75;white-space:nowrap}
+.tab-empty{align-self:center;color:var(--tx3);font-size:12px;font-family:var(--mono)}
+.tab.pin{margin-left:auto;border-style:dashed;background:var(--s1);color:var(--tx)}
+.tab.pin .tg{background:color-mix(in srgb,var(--warn) 18%,var(--s3));color:var(--warn)}
+.tab.pin.on{background:var(--tx);border-color:var(--tx);color:var(--bg);border-style:solid}
+.tab.pin.on .tt small{color:color-mix(in srgb,var(--bg) 60%,transparent)}
+.tab.pin.on .tg{background:var(--bg);border-color:var(--bg);color:var(--warn)}
+
+/* ---------- 舞台 ---------- */
+.stage{flex:1;min-height:0;position:relative;overflow:hidden;
+  background:
+    radial-gradient(1000px 420px at 85% -10%,color-mix(in srgb,var(--acc) 7%,transparent),transparent 60%),
+    linear-gradient(var(--grid) 1px,transparent 1px),
+    linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:auto,44px 44px,44px 44px}
+.slot{height:100%;overflow-y:auto;padding:26px 28px 60px}
+.hint{color:var(--tx3);font-size:12px}
+
+/* ---------- 设置台（唯一真实页）：分类大 tab + 大卡片 ---------- */
+.console{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+.chead{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap}
+.chead h1{margin:0;font-family:var(--disp);font-size:32px;letter-spacing:.01em;line-height:1.1;display:flex;align-items:baseline;gap:12px}
+.chead h1 span{font-family:var(--mono);font-weight:400;font-size:11px;letter-spacing:.22em;color:var(--tx3);text-transform:uppercase}
+.chead p{margin:4px 0 0;color:var(--tx2);font-size:12.5px}
+.cats{display:flex;gap:10px;flex-wrap:wrap}
+.cat{display:flex;align-items:baseline;gap:9px;padding:13px 20px;border-radius:13px;text-align:left;
+  border:1.5px solid var(--bd);background:var(--s1);color:var(--tx2);transition:.14s}
+.cat:hover{color:var(--tx);transform:translate(-2px,-2px);box-shadow:5px 5px 0 var(--sh)}
+.cat.on{background:var(--tx);border-color:var(--tx);color:var(--bg);box-shadow:5px 5px 0 var(--sh)}
+.cat b{font-size:16px;font-weight:800}
+.cat small{font-family:var(--mono);font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--tx3)}
+.cat.on small{color:color-mix(in srgb,currentColor 65%,transparent)}
+.cat i{font-style:normal;font-family:var(--mono);font-size:10px;font-weight:600;padding:2px 8px;border-radius:999px;
+  border:1.5px solid var(--bd);background:var(--s2)}
+.cat.on i{border-color:currentColor;background:transparent}
+.cat.hot{box-shadow:inset 3px 0 0 var(--plug)}
+.cat.hot.on{box-shadow:5px 5px 0 var(--sh)}
+.cat-hint{margin:0;color:var(--tx3);font-size:12px;font-family:var(--mono)}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
+.scard{position:relative;display:flex;flex-direction:column;gap:7px;min-height:178px;padding:18px 18px 14px;
+  border:1.5px solid var(--bd);border-radius:15px;background:var(--s1);transition:.15s}
+.scard:hover{transform:translate(-2px,-2px);box-shadow:7px 7px 0 var(--sh)}
+.scard.locked{background:
+  repeating-linear-gradient(-45deg,transparent 0 12px,color-mix(in srgb,var(--warn) 6%,transparent) 12px 24px),var(--s1)}
+.sidx{position:absolute;top:12px;right:16px;font-family:var(--mono);font-size:20px;font-weight:600;
+  color:color-mix(in srgb,var(--tx3) 55%,transparent)}
+.sg{width:44px;height:44px;border-radius:11px;display:grid;place-items:center;font-size:18px;font-weight:800;
+  background:color-mix(in srgb,var(--acc) 16%,var(--s2));border:1.5px solid var(--bd);color:var(--tx)}
+.scard h3{margin:2px 0 0;font-size:16.5px;font-weight:800;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sen{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--tx3)}
+.sd{margin:0;color:var(--tx2);font-size:12.5px;flex:1}
+.sf{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px;padding-top:11px;
+  border-top:1px dashed var(--bd)}
+.tagx{font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;padding:2px 7px;border-radius:6px;
+  border:1px solid var(--bd);color:var(--tx3);white-space:nowrap}
+.tagx.lock{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 55%,transparent)}
+.tagx.plug{color:var(--plug);border-color:color-mix(in srgb,var(--plug) 55%,transparent)}
+.tagx.plugin{color:var(--plugin);border-color:color-mix(in srgb,var(--plugin) 55%,transparent)}
+
+/* 大开关 */
+.sw{width:48px;height:27px;flex:0 0 auto;border-radius:999px;background:var(--s3);border:1.5px solid var(--bd);
+  position:relative;transition:.16s}
+.sw::after{content:'';position:absolute;top:2.5px;left:3px;width:18px;height:18px;border-radius:50%;
+  background:var(--tx3);transition:.18s cubic-bezier(.5,1.6,.4,1)}
+.sw.on{background:var(--acc);border-color:var(--acc)}
+.sw.on::after{left:24px;background:var(--acc-ink)}
+.sw.locked{opacity:.4;cursor:not-allowed}
+
+/* ---------- 插件介绍卡 ---------- */
+.plugin-card{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:20px;align-items:start;
+  padding:24px;border-radius:17px;border:1.5px solid color-mix(in srgb,var(--plugin) 55%,var(--bd));
+  background:
+    radial-gradient(500px 200px at 100% 0%,color-mix(in srgb,var(--plugin) 9%,transparent),transparent 70%),var(--s1)}
+@media (max-width:760px){.plugin-card{grid-template-columns:minmax(0,1fr)}}
+.pl-badge{width:76px;height:76px;border-radius:17px;display:grid;place-items:center;font-size:32px;font-weight:800;
+  background:var(--plugin);color:#1A0E02;box-shadow:6px 6px 0 var(--sh)}
+.pl-name{margin:0;font-size:20px;font-weight:800;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.pl-name .ver{font-family:var(--mono);font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:999px;
+  background:var(--plugin);color:#1A0E02}
+.pl-name .author{font-family:var(--mono);font-size:10.5px;font-weight:400;color:var(--tx3)}
+.pl-en{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--tx3);margin-top:2px}
+.pl-desc{margin:9px 0 0;color:var(--tx2);font-size:13px;max-width:56ch}
+.pl-ct{margin:13px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}
+.pl-ct li{display:flex;gap:9px;align-items:baseline;font-size:12.5px;color:var(--tx)}
+.pl-ct li::before{content:'↳';font-family:var(--mono);color:var(--plugin);font-weight:600}
+.pl-ct-t{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--tx3);margin:14px 0 0}
+.pl-side{display:flex;flex-direction:column;align-items:flex-end;gap:9px}
+.pl-status{font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--tx3)}
+.pl-status b{color:var(--plugin)}
+.note-card{padding:15px 18px;border:1.5px dashed var(--bd);border-radius:13px;color:var(--tx2);font-size:12.5px;background:var(--s1)}
+.note-card b{color:var(--tx)}
+
+/* ---------- 注册表 / 诊断 ---------- */
+.card{border:1.5px solid var(--bd);background:var(--s1);border-radius:15px;padding:18px 20px}
+.card h2{margin:0 0 10px;font-size:14px;font-weight:800;display:flex;align-items:center;gap:9px}
+.card h2 small{font-family:var(--mono);font-weight:400;color:var(--tx3);font-size:10px;letter-spacing:.12em;text-transform:uppercase}
+.tbl{width:100%;border-collapse:collapse;font-size:11.5px}
+.tbl th{text-align:left;font-family:var(--mono);text-transform:uppercase;letter-spacing:.1em;font-size:9.5px;
+  color:var(--tx3);font-weight:600;padding:7px 8px;border-bottom:1.5px solid var(--bd)}
+.tbl td{padding:8px;border-bottom:1px solid color-mix(in srgb,var(--bd) 45%,transparent);color:var(--tx2);vertical-align:top}
+.tbl td b{color:var(--tx);font-weight:600;font-family:var(--mono);font-size:11px}
+.tbl tr:last-child td{border-bottom:0}
+.diag-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px}
+.btn2{height:34px;padding:0 16px;border-radius:10px;border:1.5px solid var(--bd);color:var(--tx);
+  font-size:12px;font-weight:700;background:var(--s2);transition:.12s;white-space:nowrap}
+.btn2:hover{transform:translate(-1px,-1px);box-shadow:4px 4px 0 var(--sh)}
+.btn2.acc{background:var(--acc);border-color:var(--acc);color:var(--acc-ink)}
+
+/* ---------- 宿主占位 ---------- */
+.host{max-width:1080px;margin:0 auto;position:relative}
+.wm{position:absolute;top:-34px;right:-8px;z-index:0;pointer-events:none;user-select:none;
+  font-family:var(--disp);font-size:118px;letter-spacing:.02em;line-height:1;
+  color:color-mix(in srgb,var(--tx) 5%,transparent);white-space:nowrap}
+.host-head{position:relative;z-index:1;display:flex;align-items:center;gap:14px;padding:16px 20px;
+  border:1.5px solid var(--bd);border-bottom:0;border-radius:16px 16px 0 0;background:var(--s2)}
+.host-head .g{width:46px;height:46px;border-radius:12px;display:grid;place-items:center;font-size:19px;font-weight:800;
+  background:var(--acc);color:var(--acc-ink);box-shadow:4px 4px 0 var(--sh)}
+.host-head .g.pg-plugin{background:var(--plugin);color:#1A0E02}
+.host-head .g.pg-broken{background:var(--danger);color:#2A0505}
+.host-head h1{margin:0;font-family:var(--disp);font-size:22px}
+.host-head .id{margin-left:auto;color:var(--tx3)}
+.host-body{position:relative;z-index:1;border:1.5px dashed var(--bd-hard);border-top:0;border-radius:0 0 16px 16px;
+  padding:24px;background:var(--s1)}
+.host-body.solid{border-style:solid}
+.host-body h3{margin:0 0 6px;font-size:15px;font-weight:800}
+.host-body ol{margin:12px 0 0;padding-left:20px;color:var(--tx2);font-size:12.5px}
+.host-body ol li{margin:6px 0}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:7px 16px;margin-top:14px;font-size:12px;color:var(--tx2)}
+.kv i{color:var(--tx3);font-style:normal;font-family:var(--mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.1em}
+
+/* ---------- 空态自救（locked） ---------- */
+.empty{min-height:100%;display:grid;place-items:center;padding:24px}
+.empty-in{width:100%;max-width:600px;border:1.5px solid var(--bd);border-radius:20px;background:var(--s1);
+  padding:40px 44px;text-align:center;box-shadow:9px 9px 0 var(--sh)}
+.empty-in .ring{width:64px;height:64px;margin:0 auto;border-radius:50%;border:2px solid var(--warn);
+  position:relative;background:color-mix(in srgb,var(--warn) 10%,var(--s2))}
+.empty-in .ring::after{content:'';position:absolute;top:9px;left:50%;transform:translateX(-50%);
+  width:3px;height:17px;border-radius:2px;background:var(--warn)}
+.empty-in h2{margin:16px 0 0;font-family:var(--disp);font-size:22px}
+.empty-in p{margin:8px 0 0;color:var(--tx2);font-size:13px}
+.tagwrap{display:flex;flex-wrap:wrap;gap:7px;justify-content:center;margin-top:16px}
+.tagwrap span{border:1.5px solid var(--bd);border-radius:8px;padding:3px 10px;font-size:11.5px;color:var(--tx2);
+  font-family:var(--mono);background:var(--s2)}
+.cta{margin-top:20px;height:40px;padding:0 22px;border-radius:11px;background:var(--acc);color:var(--acc-ink);
+  font-size:13.5px;font-weight:800;border:1.5px solid var(--acc);transition:.12s}
+.cta:hover{transform:translate(-2px,-2px);box-shadow:5px 5px 0 var(--sh)}
+
+/* ---------- 故障条目占位（错误隔离） ---------- */
+.slot-error{border:1.5px solid color-mix(in srgb,var(--danger) 60%,transparent);
+  background:color-mix(in srgb,var(--danger) 10%,transparent);border-radius:13px;
+  padding:16px 18px;color:var(--danger);font-size:12.5px}
+.slot-error b{display:block;margin-bottom:4px;font-size:13.5px}
+
+/* ---------- toast ---------- */
+.toasts{position:fixed;left:50%;transform:translateX(-50%);bottom:24px;z-index:80;display:flex;flex-direction:column;gap:8px;align-items:center}
+.toast{display:flex;align-items:center;gap:10px;border:1.5px solid var(--tx);background:var(--tx);color:var(--bg);
+  border-radius:12px;padding:10px 18px 10px 13px;font-size:12.5px;font-weight:600;
+  box-shadow:5px 5px 0 var(--sh);animation:pop .2s cubic-bezier(.3,1.4,.5,1);max-width:76vw}
+.toast::before{content:'';width:9px;height:9px;flex:0 0 auto;border-radius:3px;background:var(--acc)}
+@keyframes pop{from{opacity:0;transform:translateY(8px) scale(.96)}to{opacity:1;transform:none}}
+
+/* ---------- 标注模式（数字徽章 + 编号图例） ---------- */
+.annot{counter-reset:ann}
+.annot [data-lock]{position:relative;outline:2px dashed var(--ann);outline-offset:3px;counter-increment:ann}
+.annot [data-lock]::after{content:counter(ann);position:absolute;top:5px;left:5px;z-index:35;
+  width:18px;height:18px;border-radius:6px;display:grid;place-items:center;
+  font:600 10px/1 var(--mono);background:var(--ann);color:#131310;box-shadow:2px 2px 0 var(--sh)}
+.annot .console::after{top:-11px;left:-11px}
+.annot [data-lock="locked"]{--ann:var(--warn)}
+.annot [data-lock="pluggable"]{--ann:var(--plug)}
+.annot [data-lock="plugin"]{--ann:var(--plugin)}
+.legend{position:absolute;left:18px;bottom:16px;right:18px;z-index:40;display:none;gap:9px 18px;flex-wrap:wrap;
+  border:1.5px solid var(--bd);border-radius:11px;background:var(--s1);box-shadow:5px 5px 0 var(--sh);
+  padding:10px 16px;font-size:11px;color:var(--tx2);font-family:var(--mono)}
+.annot .legend{display:flex}
+.legend .lg{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+.legend .lg i{width:17px;height:17px;flex:0 0 auto;border-radius:5px;display:grid;place-items:center;
+  font-style:normal;font:600 9.5px/1 var(--mono);color:#131310}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <header class="topbar" data-lock="locked" id="topbar">
+    <span class="mark"><i>M</i><span id="brandZh">最小形态</span><em>MINIMAL SHELL</em></span>
+    <span class="crumb" id="crumb"></span>
+    <span class="grow"></span>
+    <span class="pill" id="statusPill"><em></em><span id="pillText">—</span></span>
+    <button class="tbtn mono" id="langBtn" title="Switch language / 切换语言">EN</button>
+    <button class="tbtn" id="annotBtn"></button>
+    <button class="tbtn" id="themeBtn"></button>
+    <button class="tbtn" id="resetBtn"></button>
+  </header>
+
+  <nav class="tabs" id="tabs" data-lock="locked"></nav>
+
+  <main class="stage" id="stage" data-lock="locked">
+    <div class="slot" id="hostSlot"></div>
+    <aside class="legend" id="legend"></aside>
+  </main>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<script>
+/* ============================================================================
+   最小形态 · 开关注册台 v3（不接后端，状态在内存；刷新即复位）
+   语义与 v2 完全一致：最小形态全 locked；page / feature / prefs 三层开关；
+   插件热插拔（启用即贡献、停用即精确回滚）；空态自救；错误隔离。
+   v3 只重做形态与体验：大标签栏 + 分类大 tab + 大卡片 + 中英双语 + 插件介绍。
+   ============================================================================ */
+
+/* ---------- 双语词典 ---------- */
+const STR = {
+  zh: {
+    brand:'最小形态', crumb_ws:'工作区', crumb_none:'无可用页',
+    btn_annot:'标注', btn_theme:'主题', btn_reset:'重置',
+    tab_empty:'// 暂无启用页 — 先去设置台开启',
+    tag_plugin:'插件', tag_locked:'锁定',
+    console_sub:'三层开关 + 插件热插拔，点击即生效、不刷新。',
+    hint_pages:'开 = 出现在顶部标签栏并可进入；关 = 立即消失。设置台永不关闭。',
+    hint_features:'只作用于附加面板与提示，不影响开关总闸本身（防自锁）。',
+    hint_prefs:'纯本机呈现偏好：只改界面长相，不碰后端能力。',
+    hint_plugins:'启用即贡献，停用即精确回滚，不留残留。',
+    locked_reason:'最小形态总闸：后端 is_locked 拒绝停用（400）',
+    th_entry:'条目', th_status:'状态',
+    st_enabled:'enabled', st_disabled:'disabled', st_locked:'locked', st_broken:'render 失败',
+    diag_crash_t:'故障注入', diag_crash_d:'让一条插件条目在 render 时抛错：只它显示占位，标签栏与其他条目不受影响，且不自动关闭开关。',
+    diag_off_t:'外部停用当前页', diag_off_d:'模拟「页面开关在别处被改」：你正在看的页被停用，若再无可用页 → 落到空态自救页。',
+    diag_run:'演练',
+    host_title:'宿主已接入 · 内容待实现',
+    host_d:'最小形态只实现「设置台」。该宿主由页面开关驱动进出，接入真实内容时替换此占位即可。',
+    wire_1:'在页面注册表登记条目', wire_2:'把真实组件挂到', wire_3:'开关沿用既有契约，不需要新增',
+    pl_host_note:'停用插件后，本入口、介绍卡与画布节点会一起消失（精确回滚）。',
+    kv_node:'画布节点', kv_theme:'主题', kv_slot:'分镜槽',
+    broken_t:'该模块加载失败（示例条目）',
+    broken_d:'错误边界已隔离：只有这一条被替换为占位，标签栏、设置台与其他宿主仍然正常；开关不会被自动关闭。',
+    empty_t:'当前没有可进入的功能页',
+    empty_d:'页面开关全关时，界面落到这里。设置台始终可用，去打开需要的页面即可继续。',
+    empty_cta:'去设置台 → 页面开关',
+    lg_locked:'锁定（最小形态，关不掉）', lg_plug:'可插拔（开关驱动）', lg_plugin:'插件贡献',
+    lk_topbar:'锁定 · 顶条壳', lk_nav:'锁定 · 标签栏', lk_stage:'锁定 · 舞台容器',
+    lk_console:'锁定 · 开关总闸', lk_pin:'锁定 · 自救入口', lk_panel:'可插拔 · feature 面板',
+    lk_host:'可插拔 · page 宿主', lk_plugin:'插件贡献', lk_empty:'锁定 · 空态自救页',
+    contrib_t:'贡献清单', pl_on:'已启用', pl_off:'未启用',
+    rollback_note:'启用即注入以上贡献；停用即按 source 精确回滚，不留孤儿条目。',
+  },
+  en: {
+    brand:'MINIMAL', crumb_ws:'Workspace', crumb_none:'No page available',
+    btn_annot:'Annotate', btn_theme:'Theme', btn_reset:'Reset',
+    tab_empty:'// no pages yet — enable some in Console',
+    tag_plugin:'PLUGIN', tag_locked:'LOCKED',
+    console_sub:'Three switch layers + plugin hot-plug. Everything applies instantly, no refresh.',
+    hint_pages:'On = appears in the tab bar and opens. Off = gone instantly. Console never turns off.',
+    hint_features:'Affects panels & hints only — never the switchboard itself (no self-lock).',
+    hint_prefs:'Local presentation prefs: look & feel only, backend untouched.',
+    hint_plugins:'Enable to contribute; disable for a precise rollback with zero residue.',
+    locked_reason:'Minimal-shell master: backend is_locked rejects disable (400)',
+    th_entry:'Entry', th_status:'Status',
+    st_enabled:'enabled', st_disabled:'disabled', st_locked:'locked', st_broken:'render failed',
+    diag_crash_t:'Fault injection', diag_crash_d:'Make one plugin entry throw on render: only it shows a placeholder — the tab bar and other entries keep working, and no switch is auto-closed.',
+    diag_off_t:'External-disable drill', diag_off_d:'Simulate “the page switch was flipped elsewhere”: the page you are watching gets disabled; with no pages left you land on the rescue page.',
+    diag_run:'Run drill',
+    host_title:'Host wired · content pending',
+    host_d:'Only the Console is real in the minimal shell. This host comes and goes with its page switch — swap this placeholder for real content.',
+    wire_1:'Register the entry in the page registry', wire_2:'Mount the real component to', wire_3:'Reuse the existing switch contract, nothing new',
+    pl_host_note:'Disable the plugin and this entry, the intro card and the canvas node vanish together (precise rollback).',
+    kv_node:'Canvas node', kv_theme:'Theme', kv_slot:'Storyboard slot',
+    broken_t:'Module failed to load (demo entry)',
+    broken_d:'Isolated by the error boundary: only this entry is replaced by a placeholder. Tab bar, Console and other hosts keep working; the switch stays on.',
+    empty_t:'No pages available',
+    empty_d:'When every page switch is off, you land here. The Console is always reachable — turn pages back on to continue.',
+    empty_cta:'Open Console → Pages',
+    lg_locked:'Locked (minimal shell)', lg_plug:'Pluggable (switch-driven)', lg_plugin:'Plugin contribution',
+    lk_topbar:'Locked · Top bar', lk_nav:'Locked · Tab bar', lk_stage:'Locked · Stage',
+    lk_console:'Locked · Switchboard', lk_pin:'Locked · Rescue entry', lk_panel:'Pluggable · feature panel',
+    lk_host:'Pluggable · page host', lk_plugin:'Plugin contribution', lk_empty:'Locked · Rescue page',
+    contrib_t:'Contributes', pl_on:'Enabled', pl_off:'Dormant',
+    rollback_note:'Enable to inject the contributions above; disable to roll back by source — no orphan entries.',
+  }
+};
+
+/* ---------- 数据（id 为后端契约 id；label/desc 双语） ---------- */
+const PAGES = [
+  { id:'config',     glyph:'设', locked:true, label:{zh:'设置台',en:'Console'},    desc:{zh:'三层开关与插件热插拔的总控台',en:'Master board for switches & plugins'} },
+  { id:'studio',     glyph:'分', label:{zh:'分镜台',en:'Storyboard'}, desc:{zh:'镜头与分镜工作台',en:'Shot & storyboard workbench'} },
+  { id:'onekey',     glyph:'片', label:{zh:'成片工作室',en:'One-Key'},  desc:{zh:'一键成片编排',en:'One-click film orchestration'} },
+  { id:'canvas',     glyph:'画', label:{zh:'创意画布',en:'Canvas'},    desc:{zh:'节点式生成工作流',en:'Node-based generation flow'} },
+  { id:'agent',      glyph:'导', label:{zh:'AI 导演',en:'Director'},  desc:{zh:'对话式编排入口',en:'Conversational orchestration'} },
+  { id:'director3d', glyph:'场', label:{zh:'3D 片场',en:'3D Stage'},  desc:{zh:'三维导演台',en:'3D directing stage'} },
+  { id:'timeline',   glyph:'剪', label:{zh:'多轨剪辑',en:'Timeline'}, desc:{zh:'多轨时间线',en:'Multi-track editing'} },
+  { id:'assets',     glyph:'素', label:{zh:'素材库',en:'Assets'},    desc:{zh:'全局素材',en:'Global assets'} },
+  { id:'characters', glyph:'角', label:{zh:'角色设定',en:'Roles'},     desc:{zh:'角色与一致性',en:'Characters & consistency'} },
+  { id:'projects',   glyph:'项', label:{zh:'项目看板',en:'Projects'}, desc:{zh:'项目列表',en:'Project board'} },
+  { id:'home',       glyph:'首', label:{zh:'首页',en:'Home'},       desc:{zh:'工作台概览',en:'Workspace overview'} },
+];
+
+const FEATURES = [
+  { id:'panel_registry',    glyph:'册', label:{zh:'注册表视图',en:'Registry'},    desc:{zh:'设置台新增「注册表」大标签，列出全部条目的 kind / scope / source / 状态',en:'Adds a Registry tab listing every entry with kind / scope / source / status'} },
+  { id:'panel_diagnostics', glyph:'诊', label:{zh:'诊断与演示',en:'Diagnostics'}, desc:{zh:'故障注入 + 「外部停用当前页」兜底演练',en:'Fault injection + external-disable rescue drill'} },
+  { id:'host_wiring_hint',  glyph:'接', label:{zh:'宿主接入提示',en:'Wiring'},      desc:{zh:'进入任一页面宿主时显示接入三步',en:'Shows the 3-step wiring guide inside page hosts'} },
+];
+
+const PREFS = [
+  { id:'nav_sub',     glyph:'副', def:true, label:{zh:'标签副标题',en:'Tab Subtitles'}, desc:{zh:'关闭后标签栏只留图标与名称，更紧凑',en:'Hide secondary names for a tighter tab bar'} },
+  { id:'status_pill', glyph:'囊', def:true, label:{zh:'顶栏状态胶囊',en:'Status Pill'},  desc:{zh:'显示「已启用 N 页 · 插件 N」',en:'Shows live page / plugin counts'} },
+  { id:'host_frame',  glyph:'框', def:true, label:{zh:'宿主虚线外框',en:'Host Frame'},   desc:{zh:'宿主内容区使用虚线外框标记可插拔',en:'Dashed frame marks pluggable host areas'} },
+];
+
+const PLUGIN = {
+  id:'ink_pack', glyph:'墨', source:'plugin:ink-pack', def:false, version:'v1.2.0',
+  label:{zh:'水墨漫剧包',en:'Ink Pack'},
+  author:{zh:'漫剧实验室',en:'Manju Lab'},
+  desc:{
+    zh:'为水墨风漫剧而生的一站式扩展：专属主题、画布超分节点、分镜批注槽，让墨色在片场流动。',
+    en:'A one-stop extension for ink-wash comic dramas: an exclusive theme, an upscale canvas node and a storyboard annotation slot — let the ink flow on set.'
+  },
+  contributes:[
+    {zh:'顶部标签入口「水墨漫剧包」',en:'Tab-bar entry “Ink Pack”'},
+    {zh:'设置台插件介绍卡',en:'Intro card in the Console'},
+    {zh:'画布节点「超分扩展节点」',en:'Canvas node “Upscale Ext”'},
+  ],
+};
+
+const CATS = [
+  { id:'pages',       label:{zh:'页面',en:'Pages'},       hint:'hint_pages' },
+  { id:'features',    label:{zh:'功能',en:'Features'},    hint:'hint_features' },
+  { id:'prefs',       label:{zh:'偏好',en:'Prefs'},       hint:'hint_prefs' },
+  { id:'plugins',     label:{zh:'插件',en:'Plugins'},     hint:'hint_plugins' },
+  { id:'registry',    label:{zh:'注册表',en:'Registry'},  feature:'panel_registry', hot:true },
+  { id:'diagnostics', label:{zh:'诊断',en:'Diagnostics'}, feature:'panel_diagnostics', hot:true },
+];
+
+const SHELL_LOCKED = [
+  {zh:'顶条壳',en:'Top bar'}, {zh:'标签栏',en:'Tab bar'}, {zh:'舞台容器',en:'Stage'},
+  {zh:'设置台',en:'Console'}, {zh:'空态自救页',en:'Rescue page'}, {zh:'toast 通道',en:'Toast channel'},
+];
+
+/* ---------- store ---------- */
+const state = {
+  pages: Object.fromEntries(PAGES.map(p => [p.id, !!p.locked])),   // 出厂：只有设置台（locked）
+  features: Object.fromEntries(FEATURES.map(f => [f.id, false])),  // 出厂全关
+  prefs: Object.fromEntries(PREFS.map(p => [p.id, p.def])),
+  plugin: { [PLUGIN.id]: PLUGIN.def },
+  crash: false,
+  activeTab: 'config',
+  consoleTab: 'pages',
+  annotate: false,
+  theme: 'dark',
+  lang: 'zh',
+};
+
+const t = (k) => STR[state.lang][k] ?? k;
+const L = (o) => state.lang === 'en' ? o.en : o.zh;
+const L2 = (o) => state.lang === 'en' ? o.zh : o.en;   // 副语言（标签副标题用）
+const pageById = (id) => PAGES.find(p => p.id === id) || null;
+const pluginOn = () => state.plugin[PLUGIN.id] === true;
+const enabledPages = () => PAGES.filter(p => state.pages[p.id] === true && !p.locked);
+const P_ENTRY = 'plugin:' + PLUGIN.id;
+const P_BROKEN = 'plugin:broken';
+
+const resolvedTab = () => {
+  const cur = state.activeTab;
+  if (cur === P_ENTRY) return pluginOn() ? cur : null;
+  if (cur === P_BROKEN) return state.crash ? cur : null;
+  if (cur && state.pages[cur] === true) return cur;
+  return enabledPages()[0] ? enabledPages()[0].id : null;
+};
+
+const visibleCats = () => CATS.filter(c => !c.feature || state.features[c.feature]);
+const activeCat = () => visibleCats().some(c => c.id === state.consoleTab) ? state.consoleTab : 'pages';
+
+function toast(zh, en){
+  const el = document.createElement('div');
+  el.className = 'toast'; el.textContent = state.lang === 'en' ? en : zh;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(() => el.remove(), 2600);
+}
+
+/* ============================ 渲染 ============================ */
+function render(){
+  document.documentElement.dataset.theme = state.theme;
+  document.documentElement.lang = state.lang === 'zh' ? 'zh-CN' : 'en';
+
+  /* 顶条控件与锁定标注（双语） */
+  document.getElementById('brandZh').textContent = t('brand');
+  document.getElementById('langBtn').textContent = state.lang === 'zh' ? 'EN' : '中';
+  const ab = document.getElementById('annotBtn');
+  ab.textContent = t('btn_annot'); ab.classList.toggle('on', state.annotate);
+  document.getElementById('themeBtn').textContent = t('btn_theme');
+  document.getElementById('resetBtn').textContent = t('btn_reset');
+  document.getElementById('topbar').dataset.lockLabel = t('lk_topbar');
+  document.getElementById('tabs').dataset.lockLabel = t('lk_nav');
+  document.getElementById('stage').dataset.lockLabel = t('lk_stage');
+  document.getElementById('legend').innerHTML = '';
+
+  renderTabs();
+
+  /* 状态胶囊（prefs 层：可关） */
+  const pill = document.getElementById('statusPill');
+  pill.style.display = state.prefs.status_pill !== false ? 'inline-flex' : 'none';
+  const n = enabledPages().length + 1, pl = pluginOn() ? 1 : 0, c = state.crash ? 1 : 0;
+  document.getElementById('pillText').textContent = state.lang === 'en'
+    ? `${n} page${n>1?'s':''} on · ${pl} plugin${pl!==1?'s':''} · ${c} fault${c!==1?'s':''}`
+    : `已启用 ${n} 页 · 插件 ${pl} · 故障 ${c}`;
+
+  /* 舞台 */
+  const tab = resolvedTab();
+  const slot = document.getElementById('hostSlot');
+  const curLabel = tab ? (tab === 'config' ? L(pageById('config').label) : (pageById(tab) ? L(pageById(tab).label) : L(PLUGIN.label))) : t('crumb_none');
+  document.getElementById('crumb').innerHTML = `${t('crumb_ws')} / <b>${curLabel}</b>`;
+
+  if (!tab) slot.innerHTML = renderEmpty();
+  else if (tab === 'config') slot.innerHTML = renderConsole();
+  else if (tab === P_BROKEN) slot.innerHTML = renderBrokenHost();
+  else if (tab === P_ENTRY) slot.innerHTML = renderPluginHost();
+  else slot.innerHTML = renderHost(tab);
+
+  /* 标注图例：与 CSS 计数器（counter-increment: ann）同序编号 */
+  const annColor = { locked:'var(--warn)', pluggable:'var(--plug)', plugin:'var(--plugin)' };
+  document.getElementById('legend').innerHTML = [...document.querySelectorAll('[data-lock]')]
+    .map((el, i) => `<span class="lg"><i style="background:${annColor[el.dataset.lock]}">${i + 1}</i>${el.dataset.lockLabel}</span>`)
+    .join('');
+}
+
+/* ---------- 大标签栏 ---------- */
+function renderTabs(){
+  const bar = document.getElementById('tabs');
+  bar.classList.toggle('compact', state.prefs.nav_sub === false);
+
+  const items = enabledPages().map(p => ({ go:p.id, glyph:p.glyph, label:L(p.label), sub:L2(p.label), cls:'' }));
+  if (pluginOn()) items.push({ go:P_ENTRY, glyph:PLUGIN.glyph, label:L(PLUGIN.label), sub:L2(PLUGIN.label), cls:'plugin', badge:t('tag_plugin') });
+  if (state.crash) items.push({ go:P_BROKEN, glyph:'!', label:state.lang==='en'?'Faulty Entry':'故障条目', sub:P_BROKEN, cls:'broken', badge:'!' });
+
+  const sub = (s) => `<small>${s}</small>`;
+  bar.innerHTML = `
+    ${items.length ? items.map(it => `
+      <button class="tab ${it.cls} ${state.activeTab===it.go?'on':''}" data-go="${it.go}">
+        <span class="tg">${it.glyph}</span>
+        <span class="tt"><b>${it.label}</b>${sub(it.sub)}</span>
+        ${it.badge ? `<span class="tb">${it.badge}</span>` : ''}
+      </button>`).join('')
+      : `<span class="tab-empty">${t('tab_empty')}</span>`}
+    <button class="tab pin ${resolvedTab()==='config'?'on':''}" data-go="config" data-lock="locked" data-lock-label="${t('lk_pin')}">
+      <span class="tg">设</span>
+      <span class="tt"><b>${L(pageById('config').label)}</b>${sub(L2(pageById('config').label))}</span>
+      <span class="tb">▣</span>
+    </button>`;
+}
+
+/* ---------- 设置台 ---------- */
+function sw(on, attrs, locked){
+  return `<button class="sw ${on ? 'on' : ''} ${locked ? 'locked' : ''}" ${attrs} role="switch" aria-checked="${on}"></button>`;
+}
+
+function renderConsole(){
+  const cat = activeCat();
+  const counts = { pages:PAGES.length, features:FEATURES.length, prefs:PREFS.length, plugins:1,
+    registry: PAGES.length + FEATURES.length + PREFS.length + 1 + (state.crash ? 1 : 0), diagnostics:2 };
+  const catMeta = CATS.find(c => c.id === cat);
+
+  return `
+  <section class="console" data-lock="locked" data-lock-label="${t('lk_console')}">
+    <header class="chead">
+      <div>
+        <h1>${L(pageById('config').label)} <span>Console · Switchboard</span></h1>
+        <p>${t('console_sub')}</p>
+      </div>
+    </header>
+
+    <div class="cats">
+      ${visibleCats().map(c => `
+        <button class="cat ${c.hot?'hot':''} ${c.id===cat?'on':''}" data-cat="${c.id}">
+          <b>${L(c.label)}</b><small>${c.label.en}</small><i>${counts[c.id]}</i>
+        </button>`).join('')}
+    </div>
+
+    ${catMeta.hint ? `<p class="cat-hint">// ${t(catMeta.hint)}</p>` : ''}
+    ${renderCatBody(cat)}
+  </section>`;
+}
+
+function renderCatBody(cat){
+  if (cat === 'pages'){
+    return `<div class="grid">${PAGES.map((p, i) => {
+      const locked = !!p.locked;
+      return `
+      <div class="scard ${locked ? 'locked' : ''}">
+        <span class="sidx">${String(i).padStart(2,'0')}</span>
+        <span class="sg">${p.glyph}</span>
+        <h3>${L(p.label)} ${locked ? `<span class="tagx lock">${t('tag_locked')}</span>` : ''}</h3>
+        <div class="sen">${p.label.en}</div>
+        <p class="sd">${locked ? t('locked_reason') : L(p.desc) + (state.lang==='en' ? ' (placeholder host)' : '（当前为宿主占位）')}</p>
+        <div class="sf">
+          <span class="tagx">scope: page</span>
+          ${locked ? sw(true,'',true) : sw(state.pages[p.id] === true, `data-tog="page" data-id="${p.id}"`)}
+        </div>
+      </div>`;
+    }).join('')}</div>`;
+  }
+
+  if (cat === 'features'){
+    return `<div class="grid">${FEATURES.map((f, i) => `
+      <div class="scard">
+        <span class="sidx">${String(i).padStart(2,'0')}</span>
+        <span class="sg">${f.glyph}</span>
+        <h3>${L(f.label)} <span class="tagx plug">feature</span></h3>
+        <div class="sen">${f.label.en}</div>
+        <p class="sd">${L(f.desc)}</p>
+        <div class="sf"><span class="tagx">scope: feature</span>${sw(!!state.features[f.id], `data-tog="feature" data-id="${f.id}"`)}</div>
+      </div>`).join('')}</div>`;
+  }
+
+  if (cat === 'prefs'){
+    return `<div class="grid">${PREFS.map((u, i) => `
+      <div class="scard">
+        <span class="sidx">${String(i).padStart(2,'0')}</span>
+        <span class="sg">${u.glyph}</span>
+        <h3>${L(u.label)} <span class="tagx plug">prefs</span></h3>
+        <div class="sen">${u.label.en}</div>
+        <p class="sd">${L(u.desc)}</p>
+        <div class="sf"><span class="tagx">scope: prefs</span>${sw(state.prefs[u.id] !== false, `data-tog="pref" data-id="${u.id}"`)}</div>
+      </div>`).join('')}</div>`;
+  }
+
+  if (cat === 'plugins'){
+    return renderPluginIntro(false) + `<div class="note-card" style="margin-top:14px"><b>${state.lang==='en'?'Precise rollback':'精确回滚'} ·</b> ${t('rollback_note')}</div>`;
+  }
+
+  if (cat === 'registry') return renderRegistry();
+  if (cat === 'diagnostics') return renderDiagnostics();
+  return '';
+}
+
+/* ---------- 插件介绍卡（设置台插件 tab 与插件宿主共用） ---------- */
+function renderPluginIntro(inHost){
+  return `
+  <div class="plugin-card" ${inHost ? `data-lock="plugin" data-lock-label="${t('lk_plugin')}"` : ''}>
+    <div class="pl-badge">${PLUGIN.glyph}</div>
+    <div>
+      <h3 class="pl-name">${L(PLUGIN.label)}
+        <span class="ver">${PLUGIN.version}</span>
+        <span class="author">by ${L(PLUGIN.author)} · <code>${PLUGIN.source}</code></span>
+      </h3>
+      <div class="pl-en">${PLUGIN.label.en} · ${PLUGIN.id}</div>
+      <p class="pl-desc">${L(PLUGIN.desc)}</p>
+      <p class="pl-ct-t">${t('contrib_t')} / Contributes</p>
+      <ul class="pl-ct">${PLUGIN.contributes.map(c => `<li>${L(c)}</li>`).join('')}</ul>
+    </div>
+    <div class="pl-side">
+      ${sw(pluginOn(), `data-tog="plugin" data-id="${PLUGIN.id}"`)}
+      <span class="pl-status"><b>${pluginOn() ? t('pl_on') : t('pl_off')}</b> / ${pluginOn() ? PLUGIN.label.en : 'standby'}</span>
+    </div>
+  </div>`;
+}
+
+/* ---------- 注册表视图（feature 层） ---------- */
+function renderRegistry(){
+  const entries = [
+    ...PAGES.map(p => ({ id:p.id, kind:'page', scope:'page', source:'builtin', locked:p.locked, on:state.pages[p.id] === true })),
+    ...FEATURES.map(f => ({ id:f.id, kind:'panel', scope:'feature', source:'builtin', on:!!state.features[f.id] })),
+    ...PREFS.map(u => ({ id:u.id, kind:'shell-pref', scope:'prefs', source:'prefs', on:state.prefs[u.id] !== false })),
+    { id:PLUGIN.id, kind:'page', scope:'plugin', source:PLUGIN.source, on:pluginOn() },
+    ...(state.crash ? [{ id:'broken_entry', kind:'panel', scope:'plugin', source:PLUGIN.source, on:true, broken:true }] : []),
+  ];
+  return `
+  <div class="card" data-lock="pluggable" data-lock-label="${t('lk_panel')}">
+    <h2>${state.lang==='en'?'Registry':'注册表'} <small>UIRegistry entries</small></h2>
+    <table class="tbl">
+      <thead><tr><th>${t('th_entry')}</th><th>kind</th><th>scope</th><th>source</th><th>${t('th_status')}</th></tr></thead>
+      <tbody>
+        ${SHELL_LOCKED.map(n => `<tr><td><b>${L(n)}</b></td><td>shell</td><td>—</td><td>builtin</td><td><span class="tagx lock">${t('st_locked')}</span></td></tr>`).join('')}
+        ${entries.map(e => `<tr>
+          <td><b>${e.id}</b></td><td>${e.kind}</td><td>${e.scope}</td>
+          <td>${e.source.startsWith('plugin') ? '<span class="tagx plugin">'+e.source+'</span>' : e.source}</td>
+          <td>${e.locked ? `<span class="tagx lock">${t('st_locked')}</span>` : (e.broken ? `<span class="tagx" style="color:var(--danger)">${t('st_broken')}</span>` : (e.on ? t('st_enabled') : t('st_disabled')))}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+/* ---------- 诊断与演示（feature 层） ---------- */
+function renderDiagnostics(){
+  return `
+  <div class="diag-grid" data-lock="pluggable" data-lock-label="${t('lk_panel')}">
+    <div class="scard">
+      <span class="sg" style="background:color-mix(in srgb,var(--danger) 18%,var(--s2))">⚠</span>
+      <h3>${t('diag_crash_t')} <span class="tagx plugin">demo</span></h3>
+      <div class="sen">Fault injection</div>
+      <p class="sd">${t('diag_crash_d')}</p>
+      <div class="sf"><span class="tagx">plugin:*</span>${sw(state.crash, `data-tog="demo" data-id="crash"`)}</div>
+    </div>
+    <div class="scard">
+      <span class="sg" style="background:color-mix(in srgb,var(--plug) 16%,var(--s2))">⇄</span>
+      <h3>${t('diag_off_t')} <span class="tagx plug">drill</span></h3>
+      <div class="sen">External-disable drill</div>
+      <p class="sd">${t('diag_off_d')}</p>
+      <div class="sf"><span class="tagx">scope: page</span><button class="btn2 acc" data-demo="external-off">${t('diag_run')} →</button></div>
+    </div>
+  </div>`;
+}
+
+/* ---------- 页面宿主占位 ---------- */
+function renderHost(id){
+  const p = pageById(id);
+  const frame = state.prefs.host_frame !== false;
+  return `
+  <section class="host">
+    <div class="wm">${p.label.en}</div>
+    <header class="host-head">
+      <span class="g">${p.glyph}</span>
+      <div><h1>${L(p.label)}</h1><span class="sen">${p.label.en} · ${L(p.desc)}</span></div>
+      <span class="id"><code>host: ${p.id}</code></span>
+    </header>
+    <div class="host-body ${frame ? '' : 'solid'}" ${frame ? `data-lock="pluggable" data-lock-label="${t('lk_host')}"` : ''}>
+      <h3>${t('host_title')}</h3>
+      <p class="hint" style="margin:0">${t('host_d')}</p>
+      ${state.features.host_wiring_hint ? `
+        <ol>
+          <li>${t('wire_1')} <code>{ id:'${p.id}', kind:'page', scope:'page', host:'${p.id}' }</code></li>
+          <li>${t('wire_2')} <code>render</code></li>
+          <li>${t('wire_3')} <code>page:${p.id}</code></li>
+        </ol>` : ''}
+    </div>
+  </section>`;
+}
+
+function renderPluginHost(){
+  return `
+  <section class="host">
+    <div class="wm">${PLUGIN.label.en}</div>
+    <header class="host-head">
+      <span class="g pg-plugin">${PLUGIN.glyph}</span>
+      <div><h1>${L(PLUGIN.label)}</h1><span class="sen">${PLUGIN.label.en} · ${PLUGIN.version} · by ${L(PLUGIN.author)}</span></div>
+      <span class="id"><code>${PLUGIN.source}</code></span>
+    </header>
+    <div class="host-body" data-lock="plugin" data-lock-label="${t('lk_plugin')}">
+      <p class="hint" style="margin:0 0 4px">${t('pl_host_note')}</p>
+      <div class="kv">
+        <i>${t('kv_node')}</i><span>${state.lang==='en' ? 'Upscale Ext node' : '超分扩展节点'}</span>
+        <i>${t('kv_theme')}</i><span>${state.lang==='en' ? 'Ink-wash comic' : '水墨漫剧'}</span>
+        <i>${t('kv_slot')}</i><span>${state.lang==='en' ? 'Annotation' : '批注'}</span>
+      </div>
+    </div>
+  </section>`;
+}
+
+function renderBrokenHost(){
+  return `
+  <section class="host">
+    <header class="host-head">
+      <span class="g pg-broken">!</span>
+      <div><h1>${state.lang==='en'?'Faulty Entry (plugin)':'故障条目（插件）'}</h1><span class="sen">${P_BROKEN}</span></div>
+      <span class="id"><code>${PLUGIN.source}</code></span>
+    </header>
+    <div class="host-body" data-lock="plugin" data-lock-label="${t('lk_plugin')}">
+      <div class="slot-error"><b>${t('broken_t')}</b>${t('broken_d')}</div>
+    </div>
+  </section>`;
+}
+
+/* ---------- 空态自救（locked） ---------- */
+function renderEmpty(){
+  const off = PAGES.filter(p => !p.locked && state.pages[p.id] !== true);
+  return `
+  <div class="empty">
+    <div class="empty-in" data-lock="locked" data-lock-label="${t('lk_empty')}">
+      <div class="ring"></div>
+      <h2>${t('empty_t')}</h2>
+      <p>${t('empty_d')}</p>
+      ${off.length ? `<div class="tagwrap">${off.map(p => `<span>${p.glyph} ${L(p.label)}</span>`).join('')}</div>` : ''}
+      <button class="cta" data-go="config">${t('empty_cta')}</button>
+    </div>
+  </div>`;
+}
+
+/* ============================ 事件 ============================ */
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('[data-go],[data-tog],[data-demo],[data-cat]');
+  if (!el) return;
+
+  if (el.dataset.cat !== undefined){ state.consoleTab = el.dataset.cat; render(); return; }
+
+  if (el.dataset.go !== undefined){
+    const go = el.dataset.go;
+    if (go === 'config'){ state.activeTab = 'config'; render(); return; }
+    if (go.startsWith('plugin:')){ state.activeTab = go; render(); return; }
+    if (state.pages[go] !== true){
+      const fb = resolvedTab();
+      const fbName = fb === 'config' || !fb ? L(pageById('config').label) : L(pageById(fb).label);
+      toast(`${L(pageById(go).label)} 已关闭，已切到 ${fbName}`, `${pageById(go).label.en} is off — switched to ${fbName}`);
+      state.activeTab = fb || 'config';
+    } else {
+      state.activeTab = go;
+    }
+    render(); return;
+  }
+
+  if (el.dataset.demo === 'external-off'){
+    const target = enabledPages()[0];
+    if (!target){ toast('请先开启任意一个页面，再演练兜底', 'Enable any page first, then run the drill'); return; }
+    state.activeTab = target.id;
+    state.pages[target.id] = false;
+    const fb = resolvedTab();
+    toast(
+      `模拟：你在「${target.label.zh}」时该页被外部停用 → ${fb ? '切到 ' + L(pageById(fb).label) : '无可用页，落到空态自救页'}`,
+      `Drill: "${target.label.en}" was disabled externally → ${fb ? 'switched to ' + pageById(fb).label.en : 'no pages left, landed on rescue page'}`);
+    render(); return;
+  }
+
+  if (el.dataset.tog !== undefined){
+    const kind = el.dataset.tog, id = el.dataset.id;
+    if (kind === 'page'){
+      const p = pageById(id);
+      if (p && p.locked){ toast('设置台不可关闭（后端 is_locked）', 'Console is locked (backend is_locked)'); return; }
+      state.pages[id] = !state.pages[id];
+      if (state.pages[id]){
+        toast(`${L(p.label)} 已开启：标签栏立即出现`, `${p.label.en} enabled — tab appeared instantly`);
+      } else if (state.activeTab === id){
+        const fb = resolvedTab();
+        state.activeTab = fb || 'config';
+        toast(`${L(p.label)} 已关闭 → ${fb ? '切到 ' + L(pageById(fb).label) : '无可用页，落到空态自救页'}`,
+              `${p.label.en} off → ${fb ? 'switched to ' + pageById(fb).label.en : 'no pages left, rescue page'}`);
+      } else {
+        toast(`${L(p.label)} 已关闭：标签入口立即消失`, `${p.label.en} off — tab removed instantly`);
+      }
+    }
+    if (kind === 'feature'){
+      state.features[id] = !state.features[id];
+      const f = FEATURES.find(x => x.id === id);
+      toast(`功能「${L(f.label)}」→ ${state.features[id] ? '开启' : '关闭'}（即生效，无刷新）`,
+            `Feature "${f.label.en}" → ${state.features[id] ? 'on' : 'off'} (instant, no refresh)`);
+    }
+    if (kind === 'pref'){
+      state.prefs[id] = !(state.prefs[id] !== false);
+      const u = PREFS.find(x => x.id === id);
+      toast(`偏好「${L(u.label)}」→ ${state.prefs[id] ? '开启' : '关闭'}（本机，即时生效）`,
+            `Pref "${u.label.en}" → ${state.prefs[id] ? 'on' : 'off'} (local, instant)`);
+    }
+    if (kind === 'plugin'){
+      state.plugin[id] = !state.plugin[id];
+      if (!state.plugin[id] && state.activeTab === P_ENTRY) state.activeTab = 'config';
+      toast(
+        state.plugin[id] ? `插件已启用：注入 ${PLUGIN.contributes.map(c => c.zh).join('、')}` : '插件已停用：贡献已精确回滚，无残留',
+        state.plugin[id] ? `Plugin enabled: injected ${PLUGIN.contributes.map(c => c.en).join(', ')}` : 'Plugin disabled: contributions rolled back cleanly');
+    }
+    if (kind === 'demo'){
+      state.crash = !state.crash;
+      if (state.crash) state.activeTab = P_BROKEN;
+      else if (state.activeTab === P_BROKEN) state.activeTab = 'config';
+      toast(state.crash ? '故障条目已注入：错误边界隔离成功' : '故障条目已移除',
+            state.crash ? 'Faulty entry injected: error boundary holds' : 'Faulty entry removed');
+    }
+    render(); return;
+  }
+});
+
+document.getElementById('annotBtn').onclick = () => {
+  state.annotate = !state.annotate;
+  document.body.classList.toggle('annot', state.annotate);
+  render();
+  toast(state.annotate ? '标注模式：开' : '标注模式：关', state.annotate ? 'Annotations on' : 'Annotations off');
+};
+document.getElementById('themeBtn').onclick = () => {
+  state.theme = state.theme === 'dark' ? 'light' : 'dark';
+  render();
+  toast(`主题 → ${state.theme === 'dark' ? '黑夜' : '白天'}（prefs 层，即时生效）`,
+        `Theme → ${state.theme === 'dark' ? 'dark' : 'light'} (prefs layer, instant)`);
+};
+document.getElementById('resetBtn').onclick = () => {
+  state.pages = Object.fromEntries(PAGES.map(p => [p.id, !!p.locked]));
+  state.features = Object.fromEntries(FEATURES.map(f => [f.id, false]));
+  state.prefs = Object.fromEntries(PREFS.map(p => [p.id, p.def]));
+  state.plugin = { [PLUGIN.id]: PLUGIN.def };
+  state.crash = false; state.activeTab = 'config'; state.consoleTab = 'pages';
+  render();
+  toast('已恢复出厂：仅设置台可用', 'Factory reset: Console only');
+};
+document.getElementById('langBtn').onclick = () => {
+  state.lang = state.lang === 'zh' ? 'en' : 'zh';
+  render();
+  toast('界面语言 → English', 'Language → 中文');
+};
+
+render();
+</script>
+</body>
+</html>

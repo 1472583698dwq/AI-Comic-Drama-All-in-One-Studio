@@ -6,13 +6,19 @@ interface Props {
   storageKey: string;
   title: string;
   desc: string;
+  /**
+   * 标注模式属性（由注册表条目注入，见 `ui-registry/entries/panels.tsx`）：
+   * 本组件根元素是 `absolute` 的卡片，槽位不给它套包裹层（套了高度为 0，描边会退化成游离细线，审查 M3），
+   * 所以标注属性直接落在卡片自己的根元素上。
+   */
+  markProps?: Record<string, string>;
 }
 
 /**
  * 上下文轻引导卡：首次进入某页面时在角落出现一张可关闭的提示，读过即不再出现。
  * 同类产品共识：micro-guide 每页 ≤1 张、由「进入该页」行为触发、不阻塞操作、不用连点 tour。
  */
-export const ContextTipCard: React.FC<Props> = ({ storageKey, title, desc }) => {
+export const ContextTipCard: React.FC<Props> = ({ storageKey, title, desc, markProps }) => {
   const [show, setShow] = useState(() => !isTipSeen(storageKey));
   if (!show) return null;
 
@@ -22,7 +28,7 @@ export const ContextTipCard: React.FC<Props> = ({ storageKey, title, desc }) => 
   };
 
   return (
-    <div className="absolute top-16 right-3 z-30 w-[290px] rounded-2xl bg-surface/80 dark:bg-[#101014]/90 backdrop-blur border border-brand/30 shadow-2xl shadow-brand/10 overflow-hidden">
+    <div className="absolute top-16 right-3 z-30 w-[290px] rounded-2xl bg-surface/80 dark:bg-[#101014]/90 backdrop-blur border border-brand/30 shadow-2xl shadow-brand/10 overflow-hidden" {...markProps}>
       <div className="px-3.5 py-2.5 flex items-start gap-2.5">
         <div className="w-7 h-7 rounded-lg bg-brand/15 border border-brand/30 flex items-center justify-center shrink-0 mt-0.5">
           <Lightbulb className="w-3.5 h-3.5 text-brand-light" />

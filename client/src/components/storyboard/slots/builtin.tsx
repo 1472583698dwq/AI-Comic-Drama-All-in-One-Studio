@@ -1,6 +1,7 @@
 import React from 'react';
 import { Film, Link2, Sparkles, Volume2 } from 'lucide-react';
-import { actionRegistry, anchorRegistry, registerMode, tabRegistry } from './registry';
+import { registerMode } from './registry';
+import { registerSlotEntry } from '../../../ui-registry/adapters/storyboardSlots';
 import { BUILTIN_MODES } from './modes';
 import { CharacterAnchor, PropAnchor, SceneAnchor } from './anchors';
 import { DialogueTab } from './DialogueTab';
@@ -16,8 +17,8 @@ export function registerBuiltinSlots() {
   // ---- 制作模式 ----
   for (const m of BUILTIN_MODES) registerMode(m);
 
-  // ---- 检查器 Tab ----
-  tabRegistry.register({
+  // ---- 检查器 Tab（注册进 UIRegistry：host=studio.slot.tabs，source=builtin） ----
+  registerSlotEntry('tabs', {
     id: 'visual',
     order: 10,
     icon: '🎬',
@@ -27,16 +28,16 @@ export function registerBuiltinSlots() {
       return pm === 'comic' ? '漫画画面与角色' : pm === 'motion_comic' ? '角色与运镜' : '首帧画面与角色';
     },
     render: (ctx) => <VisualTab ctx={ctx} />,
-  });
-  tabRegistry.register({
+  }, 'builtin');
+  registerSlotEntry('tabs', {
     id: 'dialogue',
     order: 20,
     icon: '🗣️',
     color: 'text-pink-400',
     label: (ctx) => (ctx.productionMode === 'comic' ? '气泡与对白' : '台词与配音'),
     render: (ctx) => <DialogueTab ctx={ctx} />,
-  });
-  tabRegistry.register({
+  }, 'builtin');
+  registerSlotEntry('tabs', {
     id: 'motion',
     order: 30,
     icon: '🎥',
@@ -45,21 +46,21 @@ export function registerBuiltinSlots() {
     when: (ctx) => ctx.productionMode !== 'comic',
     label: () => '视频与运镜',
     render: (ctx) => <MotionTab ctx={ctx} />,
-  });
+  }, 'builtin');
 
   // ---- visual 页锚点 ----
-  anchorRegistry.register({
+  registerSlotEntry('anchors', {
     id: 'character', order: 10, render: (ctx) => <CharacterAnchor ctx={ctx} />,
-  });
-  anchorRegistry.register({
+  }, 'builtin');
+  registerSlotEntry('anchors', {
     id: 'scene', order: 20, render: (ctx) => <SceneAnchor ctx={ctx} />,
-  });
-  anchorRegistry.register({
+  }, 'builtin');
+  registerSlotEntry('anchors', {
     id: 'prop', order: 30, render: (ctx) => <PropAnchor ctx={ctx} />,
-  });
+  }, 'builtin');
 
   // ---- 左栏批量操作 ----
-  actionRegistry.register({
+  registerSlotEntry('actions', {
     id: 'batch-image',
     order: 10,
     when: (ctx) => ctx.productionMode !== 'motion_comic',
@@ -68,8 +69,8 @@ export function registerBuiltinSlots() {
         <Sparkles className="w-3 h-3 text-brand" /> 批量生图
       </button>
     ),
-  });
-  actionRegistry.register({
+  }, 'builtin');
+  registerSlotEntry('actions', {
     id: 'batch-bind',
     order: 15,
     render: (ctx) => (
@@ -77,8 +78,8 @@ export function registerBuiltinSlots() {
         <Link2 className="w-3 h-3 text-emerald-400" /> 批量绑定参考
       </button>
     ),
-  });
-  actionRegistry.register({
+  }, 'builtin');
+  registerSlotEntry('actions', {
     id: 'batch-tts',
     order: 20,
     when: (ctx) => ctx.productionMode !== 'comic',
@@ -87,8 +88,8 @@ export function registerBuiltinSlots() {
         <Volume2 className="w-3 h-3 text-pink-400" /> 批量配音
       </button>
     ),
-  });
-  actionRegistry.register({
+  }, 'builtin');
+  registerSlotEntry('actions', {
     id: 'batch-video',
     order: 30,
     when: (ctx) => ctx.productionMode !== 'comic',
@@ -97,5 +98,5 @@ export function registerBuiltinSlots() {
         <Film className="w-3 h-3 text-orange-400" /> 批量生视频
       </button>
     ),
-  });
+  }, 'builtin');
 }

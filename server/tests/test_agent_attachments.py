@@ -36,10 +36,10 @@ def run(coro):
 
 
 class AttachmentBase(unittest.TestCase):
-    """多模态附件现由功能级开关 ``agent_multimodal`` 把门（出厂关闭）。
+    """多模态附件现由功能级开关 ``agent_multimodal`` 把门（设计 §2.3.2 定稿后默认开）。
 
-    本文件测的是「开启后」的既有行为，故类级把开关打开；storage 同时指到临时
-    目录，开关文件与上传落盘都不会碰到真实 storage/。
+    本文件测的是「开启后」的既有行为，故类级仍**显式**打开 —— 不吃默认值，免得默认口径
+    变动把本文件变成假绿；storage 同时指到临时目录，开关文件与上传落盘都不碰真实 storage/。
     """
 
     @classmethod

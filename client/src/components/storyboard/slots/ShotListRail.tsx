@@ -1,7 +1,7 @@
 import React from 'react';
 import { Layers, Plus, Film, Volume2, Users } from 'lucide-react';
 import type { ShotSlotContext } from './types';
-import { getVisibleActions } from './registry';
+import { useActionDefs } from '../../../ui-registry/adapters/storyboardSlots';
 import { SlotOutlet } from './PluginRender';
 import { AutoRatioMedia } from '../../ui/AutoRatioMedia';
 
@@ -15,6 +15,8 @@ export const ShotListRail: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
     shots, activeShot, batchSelected, setBatchSelected,
     setActiveShotId, addShot, openShotCtxMenu, getMediaUrl, project, queue,
   } = ctx;
+  // 批量动作槽从注册表取（内置四个 + 插件贡献同一条管线）
+  const actions = useActionDefs(ctx);
   return (
     <div className="w-[300px] bg-surface border border-border rounded-2xl flex flex-col shrink-0 overflow-hidden shadow-sm">
       <div className="h-11 px-3 border-b border-border flex items-center justify-between shrink-0 bg-surface-secondary/50">
@@ -35,7 +37,7 @@ export const ShotListRail: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
       </div>
 
       <div className="px-2.5 py-1.5 bg-surface-secondary/30 border-b border-border flex items-center justify-between gap-1 text-[10px] shrink-0">
-        {getVisibleActions(ctx).map((a) => (
+        {actions.map((a) => (
           <SlotOutlet key={a.id} slotKey={a.id} render={a.render} ctx={ctx} />
         ))}
       </div>

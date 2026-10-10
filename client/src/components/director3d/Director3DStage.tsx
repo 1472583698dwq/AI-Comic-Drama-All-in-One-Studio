@@ -63,6 +63,11 @@ import {
 } from '../../types';
 import { FRAMING_PRESETS, MOTION_PRESETS, POSE_PRESETS, CAST_LAYOUTS } from './directorPresets';
 import { syncDirectorPacks, listDirectorPackProps, listDirectorPackEnvironments, getDirectorPackEnv } from './directorPackSpecs';
+import { UISlot } from '../../ui-registry/UISlot';
+import { DirectorPackBridgeContext } from '../../ui-registry/directorPackBridge';
+import { syncDirectorPackEntries, clearDirectorPackEntries } from '../../ui-registry/adapters/directorPackEntries';
+import { useUIEntries } from '../../ui-registry/resolveEnabled';
+import { DIRECTOR_ENVS_HOST, DIRECTOR_PROPS_HOST } from '../../ui-registry/types';
 
 // ============================================================
 // MiniMax Design 3D Director - 重构版
@@ -280,17 +285,47 @@ export const Director3DStage: React.FC = () => {
   // 插件导演包（director_packs 扩展点）：预设注入 + 扩展环境背景底图/GLB 道具
   const [packEnvId, setPackEnvId] = useState('');
   const [packRev, setPackRev] = useState(0);
+  /**
+   * 注入给导演包条目的桥接（设计 §12 规则 1 / 2）：「按下道具 / 环境之后发生什么」只有舞台知道
+   * —— 道具改 `propsConfig`（进而重建场景、装配 GLB），环境改 `packEnvId` + 场景描述。
+   * 依赖放进 `propsConfig` / `packEnvId`：行 UI 由条目渲染，选中态必须跟着一起更新。
+   */
+  const directorBridge = useMemo(() => ({
+    toggleProp: (id: string) => setPropsConfig((prev) => (
+      prev.includes(id as StagePropType) ? prev.filter((x) => x !== id) : [...prev, id as StagePropType]
+    )),
+    isPropOn: (id: string) => propsConfig.includes(id as StagePropType),
+    applyEnvironment: (id: string) => {
+      const env = getDirectorPackEnv(id);
+      setPackEnvId(id);
+      if (env) setSceneDesc(`${env.label} · ${env.desc || '插件背景底图'}`);
+    },
+    activeEnvironmentId: packEnvId,
+  }), [propsConfig, packEnvId]);
+  /** 当前插件环境条目数（宿主据此决定「扩展环境」这一节是否显示，替代改造前的裸数组长度） */
+  const envEntries = useUIEntries(DIRECTOR_ENVS_HOST);
   useEffect(() => {
     let cancelled = false;
     const sync = () => {
       syncDirectorPacks(project?.id)
-        .then(() => { if (!cancelled) setPackRev((v) => v + 1); })
+        .then(() => {
+          if (cancelled) return;
+          setPackRev((v) => v + 1);
+          // 把插件声明送进注册表（设计 §12 规则 1）：行 UI 由条目渲染，宿主只注入回调。
+          // 放在同步完成之后、且不重挂舞台 —— 这台舞台挂着 three.js 场景，重挂很贵。
+          syncDirectorPackEntries(listDirectorPackProps(), listDirectorPackEnvironments());
+        })
         .catch(() => {});
     };
     sync();
     const h = () => sync();
     window.addEventListener('directorpacks-list-refresh', h as any);
-    return () => { cancelled = true; window.removeEventListener('directorpacks-list-refresh', h as any); };
+    return () => {
+      cancelled = true;
+      window.removeEventListener('directorpacks-list-refresh', h as any);
+      // 卸载 / 切项目：撤掉导演包条目，别在注册表里留下陈旧行
+      clearDirectorPackEntries();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project?.id]);
 
@@ -549,27 +584,19 @@ export const Director3DStage: React.FC = () => {
     return `[Camera: ${parts.join(', ')}]`;
   }, [framing, motion, focalLength, cameraRoll, motionSpeed, castLayout]);
 
-  // 道具面板条目：内置 + 插件导演包（packRev 触发重算）
-  const propOptions = useMemo(() => {
-    const builtin = [
-      { id: 'sword' as StagePropType, label: '浮空飞剑', icon: '🗡️', sub: '程序化' },
-      { id: 'shield' as StagePropType, label: '聚能护盾', icon: '🛡️', sub: '程序化' },
-      { id: 'magic_circle' as StagePropType, label: '地面符文阵', icon: '🌀', sub: '程序化' },
-      { id: 'chair' as StagePropType, label: '休闲椅', icon: '🪑', sub: 'SheenChair.glb' },
-      { id: 'helmet' as StagePropType, label: '破损头盔', icon: '⛑️', sub: 'DamagedHelmet.glb' },
-      { id: 'camera' as StagePropType, label: '复古相机', icon: '📷', sub: 'AntiqueCamera.glb' },
-      { id: 'avocado' as StagePropType, label: '牛油果', icon: '🥑', sub: 'Avocado.glb' },
-      { id: 'boombox' as StagePropType, label: '音响', icon: '🔊', sub: 'BoomBox.glb' },
-    ];
-    const packProps = listDirectorPackProps().map((p) => ({
-      id: p.id as any,
-      label: p.label,
-      icon: p.icon || '🧩',
-      sub: p.glb_url.split('/').pop() || '插件 GLB',
-    }));
-    return [...builtin, ...packProps];
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [packRev]);
+  // 道具面板条目：只保留**内置**道具。
+  // 插件道具（director_packs.props）已条目化（设计 §12）：宿主注入 toggleProp/isPropOn，
+  // 行由 `UISlot host="director3d.props"` 渲染，不再靠 `packRev` 重算这份数组。
+  const propOptions = useMemo(() => [
+    { id: 'sword' as StagePropType, label: '浮空飞剑', icon: '🗡️', sub: '程序化' },
+    { id: 'shield' as StagePropType, label: '聚能护盾', icon: '🛡️', sub: '程序化' },
+    { id: 'magic_circle' as StagePropType, label: '地面符文阵', icon: '🌀', sub: '程序化' },
+    { id: 'chair' as StagePropType, label: '休闲椅', icon: '🪑', sub: 'SheenChair.glb' },
+    { id: 'helmet' as StagePropType, label: '破损头盔', icon: '⛑️', sub: 'DamagedHelmet.glb' },
+    { id: 'camera' as StagePropType, label: '复古相机', icon: '📷', sub: 'AntiqueCamera.glb' },
+    { id: 'avocado' as StagePropType, label: '牛油果', icon: '🥑', sub: 'Avocado.glb' },
+    { id: 'boombox' as StagePropType, label: '音响', icon: '🔊', sub: 'BoomBox.glb' },
+  ], []);
 
   const handleResetView = useCallback(() => {
     orbitStateRef.current.target.set(0, 1.2, 0);
@@ -2232,6 +2259,11 @@ export const Director3DStage: React.FC = () => {
                       </button>
                     );
                   })}
+                  {/* 插件道具行（director_packs.props）：条目自标，宿主经桥接注入
+                      toggleProp / isPropOn（设计 §12，见 ui-registry/adapters/directorPackEntries.ts） */}
+                  <DirectorPackBridgeContext.Provider value={directorBridge}>
+                    <UISlot host={DIRECTOR_PROPS_HOST} />
+                  </DirectorPackBridgeContext.Provider>
                 </div>
                 <div className="mt-3 p-3 rounded-xl border border-dashed border-brand/40 bg-gradient-to-br from-brand/10 to-accent-blue/10">
                   <input ref={fileInputRef} type="file" accept=".glb,.gltf,model/gltf-binary" hidden onChange={handleImportGLB} />
@@ -2261,23 +2293,15 @@ export const Director3DStage: React.FC = () => {
                 <label className="text-xs text-gray-300 font-semibold mb-2 block">🌆 3D 影棚氛围预设</label>
                 <div className="grid grid-cols-2 gap-2">{(Object.keys(ENV_LABELS) as StageEnvironment[]).map((env) => { const info = ENV_LABELS[env]; return <button key={env} onClick={() => { setEnvironment(env); setPackEnvId(''); setSceneDesc(`${info.label} · ${info.desc}`); }} className={`p-2.5 rounded-xl border text-left transition-all ${environment === env ? 'bg-accent-green/20 border-accent-green text-white shadow-md ring-1 ring-accent-green' : 'bg-surface-secondary border-border text-gray-400 hover:text-gray-200'}`}><div className="text-xs font-bold flex items-center space-x-1"><span>{info.icon}</span><span>{info.label}</span></div><div className="text-[9px] text-gray-500 mt-0.5">{info.desc}</div></button>; })}</div>
               </div>
-              {listDirectorPackEnvironments().length > 0 && (
+              {envEntries.length > 0 && (
                 <div>
                   <label className="text-xs text-gray-300 font-semibold mb-2 block">🧩 扩展环境（插件导演包 · 背景底图）</label>
                   <div className="grid grid-cols-2 gap-2">
-                    {listDirectorPackEnvironments().map((env) => (
-                      <button
-                        key={env.id}
-                        onClick={() => {
-                          setPackEnvId(env.id);
-                          setSceneDesc(`${env.label} · ${env.desc || '插件背景底图'}`);
-                        }}
-                        className={`p-2.5 rounded-xl border text-left transition-all ${packEnvId === env.id ? 'bg-accent-green/20 border-accent-green text-white shadow-md ring-1 ring-accent-green' : 'bg-surface-secondary border-border text-gray-400 hover:text-gray-200'}`}
-                      >
-                        <div className="text-xs font-bold flex items-center space-x-1"><span>{env.icon || '🧩'}</span><span>{env.label}</span></div>
-                        <div className="text-[9px] text-gray-500 mt-0.5">{env.desc || env.id}</div>
-                      </button>
-                    ))}
+                    {/* 插件环境行（director_packs.environments）：条目自标，宿主经桥接注入
+                        applyEnvironment / activeEnvironmentId（设计 §12） */}
+                    <DirectorPackBridgeContext.Provider value={directorBridge}>
+                      <UISlot host={DIRECTOR_ENVS_HOST} />
+                    </DirectorPackBridgeContext.Provider>
                   </div>
                 </div>
               )}

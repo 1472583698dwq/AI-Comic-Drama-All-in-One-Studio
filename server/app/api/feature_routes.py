@@ -39,4 +39,18 @@ async def update_features(body: Any = Body(...)) -> Dict[str, Any]:
         result = features.set_values(raw)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    # 有些能力闸会改变 MCP 工具清单（如 `canvas_custom_nodes` 关掉后 `customnode_*` 必须下架）：
+    # 写成功后立刻重刷一次，别等下一次插件启停才同步（审查 M1）。工具清单只是缓存，
+    # 刷新失败不影响开关本身 —— 调用路径另有同一道闸兜底（mcp/server.py 的 customnode_ 分支）。
+    _refresh_gated_mcp_tools()
     return {"status": "success", "changed": result["changed"], **features.snapshot()}
+
+
+def _refresh_gated_mcp_tools() -> None:
+    """功能开关变化后重刷受闸的 MCP 工具清单（当前只有自定义代码节点）。"""
+    try:
+        from app.mcp.server import mcp_registry
+        if hasattr(mcp_registry, "refresh_customnode_tools"):
+            mcp_registry.refresh_customnode_tools()
+    except Exception:
+        pass

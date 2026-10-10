@@ -16,6 +16,10 @@ from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
+#: 应用版本 —— **唯一真相源**：FastAPI 元信息（`app/main.py`）与插件 manifest 的
+#: `min_app_version` 校验（`app/plugins/manager.py`）共用同一个值，避免两处漂移。
+APP_VERSION = "2.1.0"
+
 # Keys managed via the Config page / API
 MANAGED_KEYS = [
     # MiniMax

@@ -4,6 +4,7 @@ import {
   Terminal, Lock, RefreshCw,
 } from 'lucide-react';
 import { apiService } from '../../services/api';
+import { useUiPrefsStore } from '../../stores/useUiPrefsStore';
 import { toast } from '../../stores/useDialogStore';
 import { API_ORIGIN } from '../../utils/devOrigin';
 import { resetContextTips } from '../../utils/guideFlags';
@@ -60,6 +61,8 @@ const val = (draft: Record<string, string>, cfg: Record<string, string>, k: stri
   draft[k] !== undefined ? draft[k] : (cfg[k] || '');
 
 export const SystemPanel: React.FC<Props> = ({ cfg, draft, setDraft, envFile, jsonFile }) => {
+  // UI 偏好 `wizard_reopen`：只控制本页「重新运行安装向导」入口（设计 Q5）
+  const wizardReopenEnabled = useUiPrefsStore((s) => s.values.wizard_reopen !== false);
   const [health, setHealth] = useState<any>(null);
   const [loadingHealth, setLoadingHealth] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -233,10 +236,13 @@ export const SystemPanel: React.FC<Props> = ({ cfg, draft, setDraft, envFile, js
               className="px-2.5 py-1 rounded-lg bg-surface/80 border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:text-white">
               打开接口文档 /docs
             </a>
-            <button onClick={() => window.dispatchEvent(new Event('open-first-run-wizard'))}
-              className="px-2.5 py-1 rounded-lg bg-surface/80 border border-white/70 dark:border-white/12 text-[11px] text-brand-light hover:text-white">
-              重新运行安装向导
-            </button>
+            {/* Q5：开关只管「系统页里的重开入口」，首次启动的强制向导不受影响（条目仍常驻） */}
+            {wizardReopenEnabled && (
+              <button onClick={() => window.dispatchEvent(new Event('open-first-run-wizard'))}
+                className="px-2.5 py-1 rounded-lg bg-surface/80 border border-white/70 dark:border-white/12 text-[11px] text-brand-light hover:text-white">
+                重新运行安装向导
+              </button>
+            )}
             <button onClick={() => { resetContextTips(); toast.success('已重置：下次进入画布 / 分镜台会重新显示新手提示'); }}
               className="px-2.5 py-1 rounded-lg bg-surface/80 border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:text-white">
               重置新手提示

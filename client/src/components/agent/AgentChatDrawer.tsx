@@ -13,7 +13,7 @@ import { AgentComposer } from './AgentComposer';
 import { AgentSwarmPanel } from './AgentSwarmPanel';
 import { loadRoleMetas } from './swarmMeta';
 
-export const AgentChatDrawer: React.FC = () => {
+export const AgentChatDrawer: React.FC<{ markProps?: Record<string, string> }> = ({ markProps }) => {
   const { project, activeShotId, setActiveTab } = useProjectStore();
   const [isOpen, setIsOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -207,8 +207,13 @@ export const AgentChatDrawer: React.FC = () => {
 
   return (
     <>
-      {/* 悬浮 Trigger 胶囊（可拖拽） */}
-      <div style={{ position: 'fixed', left: `${btnPos.x}px`, top: `${btnPos.y}px`, zIndex: 60 }} className="touch-none select-none">
+      {/* 悬浮 Trigger 胶囊（可拖拽）：标注属性落在本组件自己的 fixed 根上
+          （槽位不给 app 宿主加包裹层，见审查 M3；展开后的会话窗口同属这一条） */}
+      <div
+        style={{ position: 'fixed', left: `${btnPos.x}px`, top: `${btnPos.y}px`, zIndex: 60 }}
+        className="touch-none select-none"
+        {...markProps}
+      >
         <button
           onMouseDown={onBtnMouseDown}
           onTouchStart={onBtnTouchStart}

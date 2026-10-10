@@ -4,6 +4,7 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, HTTPException, UploadFile, File
 
+from app.extensions import events
 from app.plugins.models import MANIFEST_TEMPLATE, EXTENSION_POINTS_DOC
 from app.plugins import manager as pm
 
@@ -32,6 +33,8 @@ async def install_plugin(file: UploadFile = File(...)):
     try:
         data = await file.read()
         m = pm.install_from_zip(data)
+        # 变更推送（SSE）：前端收到即重拉插件列表（设计 §4 Phase 4）
+        events.publish("plugin", "install", m.id)
         return {"status": "installed", "id": m.id, "version": m.version, "enabled": False,
                 "next": f"POST /plugins/{m.id}/enable"}
     except HTTPException:
@@ -44,6 +47,7 @@ async def install_plugin(file: UploadFile = File(...)):
 async def reload_plugins():
     try:
         plugins = pm.discover()
+        events.publish("plugin", "reload", "*")
         return {"status": "ok", "total": len(plugins)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"重扫失败: {e}")
@@ -62,7 +66,9 @@ async def plugins_health():
 @router.post("/plugins/{pid}/reload")
 async def reload_plugin(pid: str):
     try:
-        return {"status": "ok", **pm.reload_plugin(pid)}
+        result = {"status": "ok", **pm.reload_plugin(pid)}
+        events.publish("plugin", "reload", pid)
+        return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"热重载失败: {e}")
 
@@ -70,7 +76,9 @@ async def reload_plugin(pid: str):
 @router.post("/plugins/{pid}/enable")
 async def enable_plugin(pid: str):
     try:
-        return pm.enable(pid)
+        result = pm.enable(pid)
+        events.publish("plugin", "enable", pid)
+        return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"启用失败: {e}")
 
@@ -78,7 +86,9 @@ async def enable_plugin(pid: str):
 @router.post("/plugins/{pid}/disable")
 async def disable_plugin(pid: str):
     try:
-        return pm.disable(pid)
+        result = pm.disable(pid)
+        events.publish("plugin", "disable", pid)
+        return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"禁用失败: {e}")
 
@@ -86,6 +96,8 @@ async def disable_plugin(pid: str):
 @router.delete("/plugins/{pid}")
 async def uninstall_plugin(pid: str):
     try:
-        return pm.uninstall(pid)
+        result = pm.uninstall(pid)
+        events.publish("plugin", "uninstall", pid)
+        return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"卸载失败: {e}")

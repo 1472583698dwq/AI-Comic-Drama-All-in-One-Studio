@@ -83,6 +83,29 @@ def _satisfies(version: str, constraint: str) -> bool:
     return False
 
 
+def _app_version() -> str:
+    """当前应用版本（`min_app_version` 校验用）。单一真相源 = `app.core.config.APP_VERSION`。"""
+    try:
+        from app.core.config import APP_VERSION
+        return str(APP_VERSION or "0.0.0")
+    except Exception:
+        return "0.0.0"
+
+
+def _check_min_app_version(m: PluginManifest) -> None:
+    """`min_app_version` 校验（未完成清单第 18 条）：声明了就必须能被当前应用满足。
+
+    此前该字段全仓零消费（声明了等于没写）：插件作者写「>=9.0.0」也不会被拦，
+    装上一个必然跑不起来的包。现在在 manifest 校验阶段直接拒绝。
+    """
+    need = str(m.min_app_version or "").strip()
+    if not need:
+        return
+    cur = _app_version()
+    if not _satisfies(cur, need):
+        raise ValueError(f"插件要求应用版本 {need}（当前 {cur}），不满足")
+
+
 def _check_dependencies(m: PluginManifest, require_enabled: bool = False) -> Dict[str, List[str]]:
     """校验 dependsOn。返回 {missing, mismatch, disabled}，均为人类可读字符串列表。"""
     idx = (_load_index().get("plugins") or {})
@@ -188,6 +211,85 @@ def _glob_kind(root: str, patterns: List[str]) -> List[str]:
     return uniq[:_MAX_PER_KIND]
 
 
+#: 声明式扩展点字段名（`extensionPoints` 的 key）——glob 无命中告警遍历用
+_EXT_POINT_FIELDS = (
+    "providers", "skills", "workflows", "mcp_tools", "custom_nodes", "storyboard_slots",
+    "canvas_nodes", "director_packs", "exporters", "themes", "agent_profiles", "agent_teams",
+)
+
+
+def _warn_empty_globs(root: str, eps: Any, warn_sink: List[str]) -> None:
+    """**扩展点 glob 无命中告警**（未完成清单第 21 条）。
+
+    声明了 `extensionPoints: {"themes": ["themes/*.json"]}` 却一个文件都没命中时，
+    启用会「成功」但什么都没带来，此前完全静默（用户只看到一个已启用插件 + 空列表）。
+    这里在启用前统一扫一遍并记 warning，把「什么都没带来」变成可在返回值里看到的事实。
+    """
+    for attr in _EXT_POINT_FIELDS:
+        patterns = getattr(eps, attr, None) or []
+        if patterns and not _glob_kind(root, patterns):
+            warn_sink.append(
+                f"{attr}: 声明了 {list(patterns)} 但无任何文件命中（该扩展点不会带来任何贡献）")
+
+
+#: 预检覆盖的扩展点：(注册表 kind, manifest 字段, 人类可读名)
+#: 这些扩展点的条目 JSON 都带顶层 ``id``，可在**注册前**判定撞名；
+#: workflows（id 由入库时生成）/ skills（已按插件命名空间化）/ mcp_tools（查壳名带插件前缀）
+#: 天然不跨插件撞名，不进预检。
+_PREFLIGHT_KINDS: List[Tuple[str, str, str]] = [
+    ("provider", "providers", "生成源"),
+    ("custom_node", "custom_nodes", "自定义节点"),
+    ("canvas_node", "canvas_nodes", "画布节点"),
+    ("theme", "themes", "主题"),
+    ("exporter", "exporters", "导出器"),
+    ("director_pack", "director_packs", "导演包"),
+    ("agent_profile", "agent_profiles", "角色"),
+    ("agent_team", "agent_teams", "导演组"),
+]
+
+
+def _preflight_contribution_conflicts(pdir: str, m: PluginManifest, pid: str) -> List[str]:
+    """安装 / 启用前的**贡献物撞名预检**（未完成清单第 19 条）。
+
+    此前撞名只在各子系统的注册循环里 `warning + continue`：插件「启用成功」了，
+    但其中一部分贡献被静默丢掉，用户直到发现能力缺失才知道。而现成的
+    `extension_registry.check_id_available`（按 `(kind, publisher, local_id)` 去重）
+    在安装 / 启用路径上一次都没被调用。
+
+    现在在**注册任何东西之前**做一次预检：命中「已被别的来源占用」即返回冲突列表，
+    由调用方拒绝安装 / 启用。同包自己的旧件（`source_detail == pid`，如热重载残留）不算冲突。
+    """
+    try:
+        from app.extensions.registry import extension_registry
+    except Exception:
+        return []  # 扩展层不可用时不做预检（不因预检本身阻断安装）
+    eps = m.extensionPoints
+    publisher = str(m.publisher or m.author or m.id)
+    out: List[str] = []
+    for kind, attr, label in _PREFLIGHT_KINDS:
+        patterns = getattr(eps, attr, None) or []
+        if not patterns:
+            continue
+        for rel in _glob_kind(pdir, patterns):
+            if not rel.lower().endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(pdir, rel), "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+            except Exception:
+                continue  # 解析失败留给正式注册路径报错（那里会给出更具体的 warning）
+            lid = str((payload or {}).get("id") or "").strip()
+            if not lid:
+                continue
+            info = extension_registry.check_id_available(kind, lid, publisher)
+            for conflict_id in info.get("conflicts") or []:
+                ext = extension_registry.get(conflict_id)
+                if ext is not None and str(getattr(ext, "source_detail", "") or "") == pid:
+                    continue  # 同包自己的旧件
+                out.append(f"{label} `{lid}` 已被 {conflict_id} 占用")
+    return out
+
+
 _CODE_FILE_EXT = {"python": (".py",), "javascript": (".js", ".mjs")}
 
 
@@ -236,6 +338,7 @@ def validate_manifest_dict(data: Dict[str, Any]) -> PluginManifest:
                 + eps.custom_nodes + eps.storyboard_slots
                 + eps.canvas_nodes + eps.director_packs + eps.exporters + eps.themes):
         _safe_rel("<manifest>", rel)
+    _check_min_app_version(m)
     return m
 
 
@@ -320,6 +423,12 @@ def install_from_dir(src_dir: str) -> PluginManifest:
     with _LOCK:
         if os.path.exists(dest):
             raise ValueError(f"插件已存在: {m.id}（请先卸载或删除旧版）")
+        # 贡献物撞名预检（未完成清单第 19 条）：装进来必然撞件的包直接拒绝，
+        # 不留「启用成功但一半贡献被静默丢掉」的坑
+        conflicts = _preflight_contribution_conflicts(src_dir, m, m.id)
+        if conflicts:
+            raise ValueError("贡献物撞名，已拒绝安装（请改用唯一 id 或先卸载冲突来源）: "
+                             + "；".join(conflicts))
         # 原子安装：先复制到 staging，再 rename 落位；失败清理 staging
         staging = os.path.join(root, f".staging-{m.id}-{os.getpid()}-{int(time.time() * 1000)}")
         try:
@@ -558,11 +667,19 @@ def _enable_locked(pid: str) -> Dict[str, Any]:
         raise ValueError("依赖版本不满足: " + "；".join(deps["mismatch"]))
     if deps["disabled"]:
         raise ValueError(f"依赖插件尚未启用: {', '.join(deps['disabled'])}")
+    # 贡献物撞名预检（未完成清单第 19 条）：注册任何东西之前先拒绝，
+    # 避免「启用成功但一半贡献被静默跳过」
+    conflicts = _preflight_contribution_conflicts(pdir, m, pid)
+    if conflicts:
+        raise ValueError("贡献物撞名，已拒绝启用（请改用唯一 id 或先卸载冲突来源）: "
+                         + "；".join(conflicts))
     idx = _load_index()
     rec = idx.setdefault("plugins", {}).setdefault(pid, {"version": m.version, "enabled": False, "installed_at": "", "installed_files": [], "provider_ids": [], "skill_names": [], "workflow_ids": [], "mcp_tools": [], "custom_nodes": [], "canvas_nodes": [], "theme_ids": [], "exporter_ids": [], "director_pack_ids": []})
     if rec.get("enabled"):
         return {"id": pid, "enabled": True, "note": "已启用，无需重复操作"}
     summary: Dict[str, Any] = {"providers": [], "skills": [], "workflows": [], "mcp_tools": [], "custom_nodes": [], "canvas_nodes": [], "themes": [], "exporters": [], "director_packs": [], "agent_profiles": [], "agent_teams": [], "warnings": []}
+    # 扩展点 glob 无命中告警（未完成清单第 21 条）
+    _warn_empty_globs(pdir, m.extensionPoints, summary["warnings"])
     installed_files: List[str] = []
     provider_ids: List[str] = []
     skill_names: List[str] = []
@@ -1039,11 +1156,17 @@ def _disable_locked(pid: str) -> Dict[str, Any]:
 
 
 def uninstall(pid: str) -> Dict[str, Any]:
+    """卸载：**先完整停用（回滚全部贡献），成功后才删目录与索引**。
+
+    审查第 20 条：此前是 `try: disable(pid) except Exception: pass` 之后照样删目录 + pop 索引 ——
+    disable 中途失败时已注册的贡献会变成**无法再回滚的孤儿**（索引记录一并丢了，再也找不到它们）。
+    现在改为 fail-safe：停用不成功就**不删**，让「目录 / 索引 / 贡献」三者保持可重试的一致状态。
+    """
     with _LOCK:
         try:
-            disable(pid)
-        except Exception:
-            pass
+            dis = disable(pid)
+        except Exception as e:
+            raise ValueError(f"卸载中止：停用失败，插件与索引已保留（可重试）: {e}")
         root = _plugins_root()
         pdir = os.path.join(root, pid)
         if os.path.isdir(pdir):
@@ -1052,21 +1175,40 @@ def uninstall(pid: str) -> Dict[str, Any]:
         (idx.get("plugins") or {}).pop(pid, None)
         _save_index(idx)
         _WATCH_SNAPSHOT.pop(pid, None)
-    return {"id": pid, "uninstalled": True}
+        out: Dict[str, Any] = {"id": pid, "uninstalled": True}
+        # 停用期的告警不再被吞掉（例如某个贡献删不掉），交给调用方展示
+        warns = list((dis or {}).get("warnings") or [])
+        if warns:
+            out["warnings"] = warns
+        return out
 
 
 def reload_plugin(pid: str) -> Dict[str, Any]:
-    """热重载单个插件：启用中则 disable→enable 重读全部贡献；未启用仅重扫。"""
+    """热重载单个插件：启用中则 disable→enable 重读全部贡献；未启用仅重扫。
+
+    审查第 22 条：此前 enable 失败会让插件**停在未启用态**（重载前的「已启用」状态直接丢失）。
+    现在失败时先尽力回滚到重载前的启用态，再把「最终处于什么状态」写进报错 ——
+    否则一次失败的 reload 会静默地把插件停掉。
+    """
     with _LOCK:
         idx = _load_index()
         rec = (idx.get("plugins") or {}).get(pid) or {}
         was_enabled = bool(rec.get("enabled"))
-    if was_enabled:
-        disable(pid)
+    if not was_enabled:
+        return {"id": pid, "reloaded": True, "enabled": False,
+                "note": "未启用，仅重扫 manifest 与贡献"}
+    disable(pid)
+    try:
         ret = enable(pid)
-        return {"id": pid, "reloaded": True, "enabled": True, "detail": ret}
-    return {"id": pid, "reloaded": True, "enabled": False,
-            "note": "未启用，仅重扫 manifest 与贡献"}
+    except Exception as e:
+        # 状态回滚：贡献已被 disable 拆掉，只能靠再 enable 一次恢复
+        try:
+            enable(pid)
+            state = "已回滚到重载前的「已启用」状态"
+        except Exception as e2:
+            state = f"当前为「已停用」（回滚亦失败: {e2}）"
+        raise ValueError(f"重载失败：{e}；{state}")
+    return {"id": pid, "reloaded": True, "enabled": True, "detail": ret}
 
 
 def _dir_mtime(pid: str) -> float:

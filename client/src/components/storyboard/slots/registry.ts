@@ -1,40 +1,13 @@
-import type {
-  ActionDef,
-  AnchorDef,
-  ModeDef,
-  ProductionMode,
-  ShotSlotContext,
-  TabDef,
-} from './types';
+import type { ModeDef, ProductionMode } from './types';
 
 /**
- * 分镜 Slot 本地注册表（P0）。
- * - order 排序，when 过滤，render 渲染；宿主只调 get*，不认识具体 Slot。
- * - P1 时 register* 的调用方从 builtin.tsx 换成插件 slots/*.json 加载器，
- *   注册表 API 不变（dsh"注册即 effect" 的降配版：unregister 供 disable 精确卸载）。
+ * 分镜**制作模式**注册表（P0 保留）。
+ *
+ * 注意：Tab / Anchor / Action 三类槽的注册表已在 Phase 3 收敛进前端 UIRegistry
+ * （`ui-registry/adapters/storyboardSlots.ts`，host = `studio.slot.*`）——
+ * 那里才是槽的单一真相源，本文件只留「制作模式」：它是**数据**（caps / 标题 / 排序），
+ * 不是可插拔 UI 区域，宿主与批量流程都按 id 直接取，没有槽位渲染语义。
  */
-
-function createRegistry<T extends { id: string; order: number }>() {
-  const items = new Map<string, T>();
-  return {
-    register(def: T) {
-      items.set(def.id, def);
-    },
-    unregister(id: string) {
-      items.delete(id);
-    },
-    all(): T[] {
-      return [...items.values()].sort((a, b) => a.order - b.order);
-    },
-    clear() {
-      items.clear();
-    },
-  };
-}
-
-export const tabRegistry = createRegistry<TabDef>();
-export const anchorRegistry = createRegistry<AnchorDef>();
-export const actionRegistry = createRegistry<ActionDef>();
 
 const modeMap = new Map<ProductionMode, ModeDef>();
 
@@ -59,16 +32,4 @@ export function getMode(id: ProductionMode): ModeDef {
     return fallback;
   }
   return m;
-}
-
-export function getVisibleTabs(ctx: ShotSlotContext): TabDef[] {
-  return tabRegistry.all().filter((t) => !t.when || t.when(ctx));
-}
-
-export function getVisibleAnchors(ctx: ShotSlotContext): AnchorDef[] {
-  return anchorRegistry.all().filter((a) => !a.when || a.when(ctx));
-}
-
-export function getVisibleActions(ctx: ShotSlotContext): ActionDef[] {
-  return actionRegistry.all().filter((a) => !a.when || a.when(ctx));
 }

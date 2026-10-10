@@ -2,7 +2,8 @@
 """功能级（feature）运行时开关回归测试（stdlib unittest，风格同 test_pages.py）。
 
 覆盖：
-- 默认全关：``FEATURE_DEFS`` 出厂即关闭，``values()``/``snapshot()`` 一致
+- 默认值：逐条按 ``FEATURE_DEFS[i].default`` 生效（设计 §2.3.2 定稿的显式白名单），
+  ``values()``/``snapshot()`` 一致
 - 未知 id：``is_enabled`` False、``require`` 404、``set_values`` ValueError
 - ``set_values``：落盘内容正确（扁平 + 原子写、无 .tmp 残留）、连续写、外部改文件热重读
 - 非法输入：未知 id / 非布尔 / 非法字符串 / 非 dict 被拒且**不写脏**（含"部分合法"批次）
@@ -12,6 +13,8 @@
 - 真实拦截点 3：``SubAgentPool.spawn`` / ``spawn_batch`` 关闭返回 error（同既有失败分支形状），
   开启后同一调用路径能真正跑出 success
 - 真实拦截点 4：``view_media`` 关闭时不出现在 agent 工具清单里
+- 真实拦截点 5：``canvas_custom_nodes`` 关闭时 MCP 工具 ``customnode_*`` 既不注册、也调用不了
+  （审查 M1：闸必须同时关住 HTTP 与 MCP / Agent 两条执行路径）
 - HTTP：``GET /api/v1/features`` / ``PUT /api/v1/features``（两种 body 写法、400 拒绝）
 
 运行： python -m unittest test_features -v
@@ -32,6 +35,10 @@ from app.core import features  # noqa: E402
 from app.core.config import settings  # noqa: E402
 
 ALL_IDS = [str(d["id"]) for d in features.FEATURE_DEFS]
+#: 逐条默认值（真相源 = FEATURE_DEFS；不再假设「一律全关」）
+DEFAULTS = {str(d["id"]): bool(d["default"]) for d in features.FEATURE_DEFS}
+#: 出厂即开启的 id 集合（设计 §2.3.2 定稿：链路必需的两条）
+DEFAULT_ON = {fid for fid, on in DEFAULTS.items() if on}
 
 
 class _TempStorage(unittest.TestCase):
@@ -49,7 +56,7 @@ class _TempStorage(unittest.TestCase):
         shutil.rmtree(cls._tmp, ignore_errors=True)
 
     def setUp(self):
-        # 每个用例从「文件不存在 = 全默认（关闭）」的干净态开始
+        # 每个用例从「文件不存在 = 逐条按 default」的干净态开始
         try:
             os.remove(features._path())
         except OSError:
@@ -61,21 +68,24 @@ class _TempStorage(unittest.TestCase):
 
 
 class TestDefaults(_TempStorage):
-    def test_default_all_off(self):
+    def test_defaults_follow_defs(self):
         snap = features.snapshot()
-        self.assertEqual({f["id"] for f in snap["features"] if f["enabled"]}, set())
-        self.assertEqual(features.enabled_ids(), [])
-        self.assertEqual(features.values(), {fid: False for fid in ALL_IDS})
+        self.assertEqual({f["id"] for f in snap["features"] if f["enabled"]}, DEFAULT_ON)
+        self.assertEqual(features.enabled_ids(), [fid for fid in ALL_IDS if DEFAULTS[fid]])
+        self.assertEqual(features.values(), DEFAULTS)
         for fid in ALL_IDS:
-            self.assertFalse(features.is_enabled(fid))
-        # 定义本身即契约：默认值必须全部是 False
+            self.assertEqual(features.is_enabled(fid), DEFAULTS[fid])
+        # 定义本身即契约：default 必须是**显式 bool**（不再要求一律 False），label/description 齐备
         for d in features.FEATURE_DEFS:
-            self.assertIs(d["default"], False)
+            self.assertIsInstance(d["default"], bool)
             self.assertTrue(d["label"] and d["description"])
+        # 设计 §2.3.2 定稿口径（用户确认）：链路必需的两条默认开、安全敏感 / 可选进阶默认关。
+        # 改这个集合 = 改产品口径，须同步本断言与本文件顶部说明。
+        self.assertEqual(DEFAULT_ON, {"agent_multimodal", "agent_subagent"})
 
     def test_file_missing_is_all_default(self):
         self.assertFalse(os.path.exists(features._path()))
-        self.assertEqual(features.values(), {fid: False for fid in ALL_IDS})
+        self.assertEqual(features.values(), DEFAULTS)
 
     def test_snapshot_shape(self):
         snap = features.snapshot()
@@ -84,8 +94,12 @@ class TestDefaults(_TempStorage):
             for key, val in definition.items():
                 self.assertEqual(row[key], val)
             self.assertIn("enabled", row)
-            self.assertIs(row["enabled"], False)
-        self.assertEqual(snap["groups"], ["AI 导演", "扩展能力"])
+            # enabled 与各自的 default 一致（不再恒 False）
+            self.assertEqual(row["enabled"], bool(definition.get("default", False)))
+        # 分组清单是**契约**：新增分组必须是有意为之，不能顺手加。
+        # 「创意画布」= 承载页内能力的画布能力组（canvas_custom_nodes），
+        # 由《UI开关热插拔设计》§2.3.2 / §11.4 决定新增。
+        self.assertEqual(snap["groups"], ["AI 导演", "扩展能力", "创意画布"])
         self.assertEqual(list(snap["values"].keys()), ALL_IDS)
         self.assertTrue(snap["file"].endswith("features.json"))
         self.assertIn(str(settings.STORAGE_DIR), snap["file"])
@@ -130,12 +144,13 @@ class TestSetValues(_TempStorage):
         # 落盘 = 扁平 {"<id>": bool}，全量 id（顺序同 FEATURE_DEFS），无 .tmp 残留
         disk = self._disk()
         self.assertEqual(list(disk.keys()), ALL_IDS)
-        self.assertIs(disk["agent_teams"], True)
-        self.assertIs(disk["agent_multimodal"], False)
-        self.assertIs(disk["agent_subagent"], False)
+        # 未动的键保持各自 default（agent_multimodal / agent_subagent 默认开，
+        # canvas_custom_nodes / agent_teams 默认关）
+        self.assertEqual(disk, {**DEFAULTS, "agent_teams": True})
         self.assertFalse(os.path.exists(features._path() + ".tmp"))
         self.assertTrue(features.is_enabled("agent_teams"))
-        self.assertEqual(features.enabled_ids(), ["agent_teams"])
+        self.assertEqual(features.enabled_ids(),
+                         [fid for fid in ALL_IDS if {**DEFAULTS, "agent_teams": True}[fid]])
 
     def test_repeat_write_no_change(self):
         features.set_values({"agent_teams": True})
@@ -151,19 +166,21 @@ class TestSetValues(_TempStorage):
             json.dump({"agent_teams": False, "agent_subagent": True}, f)
         self.assertFalse(features.is_enabled("agent_teams"))
         self.assertTrue(features.is_enabled("agent_subagent"))
-        self.assertFalse(features.is_enabled("agent_multimodal"))  # 未写的键回落默认
+        # 未写的键回落各自的 default（agent_multimodal 默认开 / canvas_custom_nodes 默认关）
+        self.assertEqual(features.is_enabled("agent_multimodal"), DEFAULTS["agent_multimodal"])
+        self.assertEqual(features.is_enabled("canvas_custom_nodes"), DEFAULTS["canvas_custom_nodes"])
 
     def test_deleting_file_resets_to_defaults(self):
         features.set_values({"agent_subagent": True})
         os.remove(features._path())
-        self.assertEqual(features.values(), {fid: False for fid in ALL_IDS})
+        self.assertEqual(features.values(), DEFAULTS)
 
     def test_corrupt_file_falls_back_to_defaults(self):
         features.set_values({"agent_teams": True})
         time.sleep(0.02)
         with open(features._path(), "w", encoding="utf-8") as f:
             f.write("{ not json")
-        self.assertEqual(features.values(), {fid: False for fid in ALL_IDS})
+        self.assertEqual(features.values(), DEFAULTS)
 
 
 class TestInvalidInput(_TempStorage):
@@ -247,6 +264,8 @@ class TestMultimodalGate(_TempStorage):
 
     def setUp(self):
         super().setUp()
+        # §2.3.2 定稿后 agent_multimodal 默认**开**；本类测「关闭时」的退化行为，显式关掉
+        features.set_values({"agent_multimodal": False})
         self._env = os.environ.get("AGENT_FOCUS_MEDIA")
         os.environ["AGENT_FOCUS_MEDIA"] = "1"
         self.addCleanup(self._restore_env)
@@ -294,6 +313,11 @@ class TestMultimodalGate(_TempStorage):
 
 class TestSubagentGate(_TempStorage):
     """拦截点 3：子代理关闭时 spawn/spawn_batch 返回 error（同既有失败分支形状）。"""
+
+    def setUp(self):
+        super().setUp()
+        # §2.3.2 定稿后 agent_subagent 默认**开**；本类测「关闭时」的 error 分支，显式关掉
+        features.set_values({"agent_subagent": False})
 
     def _fake_parent(self):
         class FakeSession:
@@ -419,7 +443,7 @@ class TestFeatureRoutes(_TempStorage):
         self.assertEqual(r.status_code, 200)
         data = r.json()
         self.assertEqual([f["id"] for f in data["features"]], ALL_IDS)
-        self.assertEqual({f["id"] for f in data["features"] if f["enabled"]}, set())
+        self.assertEqual({f["id"] for f in data["features"] if f["enabled"]}, DEFAULT_ON)
         self.assertIn(str(settings.STORAGE_DIR), data["file"])
 
     def test_put_features_both_bodies(self):
@@ -450,6 +474,8 @@ class TestFeatureRoutes(_TempStorage):
 
     def test_agent_upload_404_when_multimodal_off(self):
         """多模态关闭 → 附件上传口 404（不能"文件落了盘但永远送不出去"）；开启后恢复。"""
+        # §2.3.2 定稿后 agent_multimodal 默认开 → 先显式关掉再验 404
+        self.client.put("/api/v1/features", json={"values": {"agent_multimodal": False}})
         r = self.client.post("/api/v1/agent/upload",
                              files={"file": ("a.png", b"\x89PNG\r\n\x1a\n", "image/png")})
         self.assertEqual(r.status_code, 404)
@@ -465,6 +491,65 @@ class TestFeatureRoutes(_TempStorage):
             r = self.client.put("/api/v1/features", json=payload)
             self.assertEqual(r.status_code, 400, payload)
         self.assertFalse(os.path.exists(features._path()))  # 一次脏写都没发生
+
+
+class TestCustomNodeMcpGate(_TempStorage):
+    """真实拦截点 5（审查 M1）：页内能力闸必须同时关住 MCP / Agent 执行路径。
+
+    背景：``canvas_custom_nodes`` 的理由是「会执行用户代码、安全敏感」，此前它只挂在
+    ``/api/v1/custom-nodes`` 的 4 条 HTTP 端点上；MCP 工具 ``customnode_<id>`` 的注册与调用
+    完全不看这个闸 —— HTTP 404 了但 AI 导演 / MCP 调用照样能跑，正是「假闸」。
+    """
+
+    NODE_ID = "gate_node"
+
+    def _save_node(self):
+        from app.custom_nodes.models import CustomNodeDefinition
+        from app.custom_nodes.manager import custom_node_manager
+        return custom_node_manager.save(CustomNodeDefinition(
+            id=self.NODE_ID, name="闸测试", kind="utility",
+            code="async def run(inputs, params, ctx):\n    return {'text': 'ok'}\n",
+        ))
+
+    def _run(self, coro):
+        import asyncio
+        return asyncio.new_event_loop().run_until_complete(coro)
+
+    def test_tool_not_registered_when_feature_off(self):
+        from app.mcp.server import mcp_registry
+        self._save_node()
+        features.set_values({"canvas_custom_nodes": False})
+        mcp_registry.refresh_customnode_tools()
+        self.assertNotIn(f"customnode_{self.NODE_ID}", mcp_registry.tools)
+
+    def test_tool_registered_when_feature_on(self):
+        from app.mcp.server import mcp_registry
+        self._save_node()
+        features.set_values({"canvas_custom_nodes": True})
+        mcp_registry.refresh_customnode_tools()
+        self.assertIn(f"customnode_{self.NODE_ID}", mcp_registry.tools)
+
+    def test_call_blocked_even_if_tool_list_is_stale(self):
+        """闸关掉但清单没重刷（陈旧清单）：调用路径必须自己再判一次。"""
+        from app.mcp.server import mcp_registry
+        self._save_node()
+        features.set_values({"canvas_custom_nodes": True})
+        mcp_registry.refresh_customnode_tools()
+        self.assertIn(f"customnode_{self.NODE_ID}", mcp_registry.tools)  # 此刻清单是「陈旧」的
+        features.set_values({"canvas_custom_nodes": False})
+        resp = self._run(mcp_registry.execute_tool(f"customnode_{self.NODE_ID}", {}))
+        self.assertEqual(resp.status, "error")
+        self.assertIn("功能开关", resp.error or "")
+
+    def test_feature_route_refreshes_tool_list(self):
+        """``PUT /features`` 写成功后立即重刷受闸的 MCP 工具清单（不依赖插件启停）。"""
+        from app.api import feature_routes
+        from app.mcp.server import mcp_registry
+        self._save_node()
+        self._run(feature_routes.update_features({"values": {"canvas_custom_nodes": True}}))
+        self.assertIn(f"customnode_{self.NODE_ID}", mcp_registry.tools)
+        self._run(feature_routes.update_features({"values": {"canvas_custom_nodes": False}}))
+        self.assertNotIn(f"customnode_{self.NODE_ID}", mcp_registry.tools)
 
 
 if __name__ == "__main__":
