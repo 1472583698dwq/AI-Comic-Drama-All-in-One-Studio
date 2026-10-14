@@ -60,6 +60,7 @@ import {
   StagePropType,
   StageEnvironment,
   StoryboardShot,
+  MannequinJointPose,
 } from '../../types';
 import { FRAMING_PRESETS, MOTION_PRESETS, POSE_PRESETS, CAST_LAYOUTS } from './directorPresets';
 import { syncDirectorPacks, listDirectorPackProps, listDirectorPackEnvironments, getDirectorPackEnv } from './directorPackSpecs';
@@ -72,15 +73,13 @@ import { DIRECTOR_ENVS_HOST, DIRECTOR_PROPS_HOST } from '../../ui-registry/types
 // ============================================================
 // MiniMax Design 3D Director - 重构版
 // 对标 houdao.com / design.minimax.io 的 3D Director Stage：
-// - 真实人体建模（非火柴人）+ PBR 材质 + 骨骼姿态驱动
+// - 初始角色为「人体布偶」（木偶关节人偶）+ PBR 材质 + 姿态预设驱动
 // - 真实道具建模 + 多环境完整场景（赛博/云海/荒漠/霓虹）+ Agent 自然语言全量控制
 // ============================================================
 
 // 基础真实模型库（CC0，来自 three.js / Khronos Sample Models，已下载至 public/models）
+// 初始角色（主角/对手/配角）改用程序化「人体布偶」，此处仅保留道具 GLB
 const MODEL_URLS: Record<string, string> = {
-  human_protagonist: '/models/RobotExpressive.glb', // CC0 RobotExpressive
-  human_antagonist: '/models/Soldier.glb', // 2MB 高细节士兵
-  human_supporting: '/models/RobotExpressive.glb',
   chair: '/models/SheenChair.glb', // 4.3MB 椅子
   helmet: '/models/DamagedHelmet.glb', // 3.7MB 头盔
   camera_prop: '/models/AntiqueCamera.glb', // 复古相机
@@ -280,6 +279,9 @@ export const Director3DStage: React.FC = () => {
   const [recordUrl, setRecordUrl] = useState<string | null>(null);
   const [recordSecs, setRecordSecs] = useState(0);
   const [recordMsg, setRecordMsg] = useState<string | null>(null);
+  // 白模导出（clay pass → Seedance 参考视频 / 首尾帧 / 结构化提示词）
+  const [clayExporting, setClayExporting] = useState(false);
+  const [clayMsg, setClayMsg] = useState<string | null>(null);
   const [environment, setEnvironment] = useState<StageEnvironment>('cyber_studio');
   const [propsConfig, setPropsConfig] = useState<StagePropType[]>(['sword', 'magic_circle']);
   // 插件导演包（director_packs 扩展点）：预设注入 + 扩展环境背景底图/GLB 道具
@@ -411,6 +413,20 @@ export const Director3DStage: React.FC = () => {
         });
       }
     } else { entityTransformsRef.current = {}; }
+    // 人体布偶关节姿态跟随分镜：有自定义姿态则应用，没有则复位（避免串镜残留）
+    {
+      const g = stageEntitiesGroupRef.current;
+      const poseMap = ((shot as any).mannequin_pose?.entities || {}) as Record<string, any>;
+      if (g) {
+        (g.children || []).forEach((o) => {
+          if ((o.userData as any)?.mannequinJoints) {
+            const joints = poseMap[o.name]?.joints;
+            if (joints) applyMannequinJoints(o, joints);
+            else resetMannequinJoints(o);
+          }
+        });
+      }
+    }
     if (shot.lighting_config) {
       const lc = shot.lighting_config;
       setKeyIntensity(lc.keyIntensity ?? 3.2);
@@ -525,12 +541,21 @@ export const Director3DStage: React.FC = () => {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recordChunksRef = useRef<Blob[]>([]);
   const recordTimerRef = useRef<any>(null);
+  // 白模导出（clay pass：flat 灰材质 + 隐藏辅助物；录制链路复用预演录制）
+  const clayModeRef = useRef(false);
+  const clayRestoreRef = useRef<null | (() => void)>(null);
+  const clayExportResolveRef = useRef<((v: { url: string; secs: number } | null) => void) | null>(null);
+  const clayFirstFrameRef = useRef<string | null>(null);
+  const clayLastFrameRef = useRef<string | null>(null);
+  const pipSizeBackupRef = useRef<{ w: number; h: number } | null>(null);
   // —— 物体摆放操控 refs（对标三家：Gizmo + 选中高亮 + 撤销 + 持久化）——
   const transformControlsRef = useRef<TransformControls | null>(null);
   const selectionBoxRef = useRef<THREE.BoxHelper | null>(null);
   const entityTransformsRef = useRef<Record<string, { p: [number, number, number]; r: [number, number, number]; s: number }>>({});
   const undoStackRef = useRef<Array<{ id: string; prev: { p: [number, number, number]; r: [number, number, number]; s: number } }>>([]);
   const gizmoDraggingRef = useRef(false);
+  // 关节拖拽（人体布偶：拾取球 → 世界轴向旋转 → 限位钳制）
+  const jointDragRef = useRef<{ group: THREE.Object3D; entity: string; jointId: string; limits: JointAxisLimits; lastX: number; lastY: number; moved: boolean; twist: boolean } | null>(null);
   const mouseDownPosRef = useRef<{ x: number; y: number } | null>(null);
   const lockedIdsRef = useRef<Record<string, boolean>>({});
   // 跨effect调用的稳定引用（Three初始化闭包用，避免过期闭包）
@@ -1210,9 +1235,9 @@ export const Director3DStage: React.FC = () => {
 
   // ============================================================
   // 角色与道具重建（真实建模 - GLB 优先，程序化兜底）
-  // - 人体：RobotExpressive.glb / Soldier.glb（CC0，三阶归一化+底部对齐）
+  // - 初始角色：程序化「人体布偶」（木偶关节人偶，姿态预设驱动）
   // - 道具：SheenChair / DamagedHelmet / AntiqueCamera / Avocado / BoomBox 等真实 GLB
-  // - 失败则回退至程序化 PBR 假人/道具，保证离线可用
+  // - 道具失败回退至程序化 PBR，保证离线可用
   // ============================================================
   useEffect(() => {
     if (!sceneRef.current || !stageEntitiesGroupRef.current) return;
@@ -1237,28 +1262,22 @@ export const Director3DStage: React.FC = () => {
       return false;
     };
     const markBaseY = (obj: THREE.Object3D) => { obj.userData.baseY = obj.position.y; };
-
-    const applyPoseToGLB = (group: THREE.Group, pose: PosePreset) => {
-      // GLB 为绑定模型时，简单通过整体旋转/位移模拟姿态，避免复杂骨骼重定向
-      if (pose === 'fight') { group.rotation.y = 0; group.position.y += 0.02; }
-      else if (pose === 'kneel') { group.scale.set(1, 0.92, 1); group.position.y -= 0.18; }
-      else if (pose === 'fly') { group.position.y += 0.25; group.rotation.x = -0.12; }
-      else if (pose === 'run') { group.rotation.y = 0.35; }
+    // 自定义关节姿态优先于姿态预设（鼠标拖关节 / Agent stage_control 落盘）
+    const applySavedJoints = (obj: THREE.Group, entityName: string) => {
+      try {
+        const store = useProjectStore.getState();
+        const allShots = store.project?.scenes.flatMap((s) => s.shots) || [];
+        const shot = allShots.find((sh) => sh.id === store.activeShotId) || allShots[0];
+        const joints = (shot as any)?.mannequin_pose?.entities?.[entityName]?.joints;
+        if (joints) applyMannequinJoints(obj, joints);
+      } catch {}
     };
 
     (async () => {
-      // Protagonist - 优先 GLB
-      let protagonist: THREE.Group | null = await loadGLBModel(MODEL_URLS.human_protagonist, 1.05);
-      if (!protagonist || cancelled) {
-        protagonist = createRealisticHuman({ pose, role: 'protagonist', name: 'Protagonist', primaryColor: 0x7c3aed, accentColor: 0x00d2ff, hairColor: 0x1a1a2e });
-      } else {
-        applyPoseToGLB(protagonist, pose);
-        // 叠加角色光环以区分
-        const ring = new THREE.Mesh(new THREE.RingGeometry(0.38, 0.40, 32), new THREE.MeshBasicMaterial({ color: 0x00d2ff, transparent: true, opacity: 0.22, side: THREE.DoubleSide }));
-        ring.rotation.x = Math.PI / 2; ring.position.y = 0.01; protagonist.add(ring);
-      }
-      if (cancelled) return;
+      // Protagonist - 人体布偶（木偶关节 + 姿态预设）
+      const protagonist = createPoseMannequin({ pose, role: 'protagonist', accentColor: 0x00d2ff });
       protagonist.name = 'entity_protagonist';
+      applySavedJoints(protagonist, 'entity_protagonist');
       if (!applySaved(protagonist)) protagonist.position.set(0, 0, 0);
       stage.add(protagonist);
       markBaseY(protagonist);
@@ -1266,14 +1285,9 @@ export const Director3DStage: React.FC = () => {
 
       // Antagonist
       if (castLayout === 'duel' || castLayout === 'ots' || castLayout === 'surrounded') {
-        let antagonist: THREE.Group | null = await loadGLBModel(MODEL_URLS.human_antagonist, 1.02);
-        if (!antagonist || cancelled) {
-          antagonist = createRealisticHuman({ pose: pose === 'fight' ? 'fight' : 'stand', role: 'antagonist', name: 'Antagonist', primaryColor: 0x8b1a1a, accentColor: 0xff3b30, hairColor: 0x2b0a0a });
-        } else {
-          applyPoseToGLB(antagonist, pose === 'fight' ? 'fight' : 'stand');
-        }
-        if (cancelled) return;
+        const antagonist = createPoseMannequin({ pose: pose === 'fight' ? 'fight' : 'stand', role: 'antagonist', accentColor: 0xff3b30 });
         antagonist.name = 'entity_antagonist';
+        applySavedJoints(antagonist, 'entity_antagonist');
         if (!applySaved(antagonist)) {
           if (castLayout === 'duel') { antagonist.position.set(0, 0, -2.3); antagonist.rotation.y = Math.PI; }
           else if (castLayout === 'ots') { antagonist.position.set(-0.35, 0, -2.5); antagonist.rotation.y = Math.PI * 0.9; }
@@ -1286,10 +1300,9 @@ export const Director3DStage: React.FC = () => {
 
       if (cancelled) return;
       if (castLayout === 'surrounded') {
-        let sup: THREE.Group | null = await loadGLBModel(MODEL_URLS.human_supporting, 0.98);
-        if (!sup || cancelled) sup = createRealisticHuman({ pose: 'fight', role: 'supporting', name: 'Supporting', primaryColor: 0x1e3a8a, accentColor: 0x60a5fa, hairColor: 0x0f172a });
-        if (cancelled) return;
+        const sup = createPoseMannequin({ pose: 'fight', role: 'supporting', accentColor: 0x60a5fa });
         sup.name = 'entity_supporting';
+        applySavedJoints(sup, 'entity_supporting');
         if (!applySaved(sup)) { sup.position.set(-1.9, 0, -1.2); sup.rotation.y = Math.PI * 0.6; }
         stage.add(sup);
         markBaseY(sup);
@@ -1570,7 +1583,15 @@ export const Director3DStage: React.FC = () => {
         if (Math.hypot(dirX, dirZ) > 0.001) p.rotation.y = Math.atan2(dirX, dirZ);
       }
       if (progress < 1) requestAnimationFrame(step);
-      else { cam.position.copy(startPos); cam.fov = startFov; cam.lookAt(0, 1.25, 0); if (cameraRoll !== 0) cam.rotation.z = (cameraRoll * Math.PI) / 180; cam.updateProjectionMatrix(); if (protagonistGroupRef.current && walkBaseRef.current) { protagonistGroupRef.current.position.x = walkBaseRef.current.x; protagonistGroupRef.current.position.z = walkBaseRef.current.z; protagonistGroupRef.current.rotation.y = walkBaseRef.current.rotY; } if (recorderRef.current && recorderRef.current.state !== 'inactive') { try { recorderRef.current.stop(); } catch {} } setIsSimulating(false); setScrubberProgress(0); }
+      else {
+        // 白模导出：模拟结束会把相机复位，先抓运镜终点帧再复位
+        if (clayModeRef.current) {
+          try {
+            const cvs = pipRendererRef.current?.domElement as HTMLCanvasElement | undefined;
+            if (cvs) clayLastFrameRef.current = cvs.toDataURL('image/jpeg', 0.9);
+          } catch {}
+        }
+        cam.position.copy(startPos); cam.fov = startFov; cam.lookAt(0, 1.25, 0); if (cameraRoll !== 0) cam.rotation.z = (cameraRoll * Math.PI) / 180; cam.updateProjectionMatrix(); if (protagonistGroupRef.current && walkBaseRef.current) { protagonistGroupRef.current.position.x = walkBaseRef.current.x; protagonistGroupRef.current.position.z = walkBaseRef.current.z; protagonistGroupRef.current.rotation.y = walkBaseRef.current.rotY; } if (recorderRef.current && recorderRef.current.state !== 'inactive') { try { recorderRef.current.stop(); } catch {} } setIsSimulating(false); setScrubberProgress(0); }
     };
     requestAnimationFrame(step);
   };
@@ -1590,6 +1611,27 @@ export const Director3DStage: React.FC = () => {
         let cur: THREE.Object3D | null = hit.object;
         while (cur && cur.parent && cur.parent !== stageEntitiesGroupRef.current) cur = cur.parent;
         if (cur && (cur as THREE.Object3D).name) return (cur as THREE.Object3D).name;
+      }
+      return null;
+    };
+    const pickJointAt = (clientX: number, clientY: number): { entity: string; jointId: string; group: THREE.Object3D; limits: JointAxisLimits } | null => {
+      if (!sceneRef.current || !mainCameraRef.current || !stageEntitiesGroupRef.current) return null;
+      const rect = container.getBoundingClientRect();
+      const x = ((clientX - rect.left) / rect.width) * 2 - 1;
+      const y = -((clientY - rect.top) / rect.height) * 2 + 1;
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(new THREE.Vector2(x, y), mainCameraRef.current);
+      const hits = raycaster.intersectObjects(stageEntitiesGroupRef.current.children, true);
+      for (const hit of hits) {
+        const jointId = (hit.object.userData as any)?.jointPick as string | undefined;
+        if (!jointId) continue;
+        let cur: THREE.Object3D | null = hit.object;
+        while (cur && cur.parent && cur.parent !== stageEntitiesGroupRef.current) cur = cur.parent;
+        const entity = cur?.name || '';
+        if (!entity || lockedIdsRef.current[entity]) continue;
+        const entry = (cur?.userData as any)?.mannequinJoints?.[jointId];
+        if (!entry?.group) continue;
+        return { entity, jointId, group: entry.group, limits: entry.limits || {} };
       }
       return null;
     };
@@ -1620,6 +1662,20 @@ export const Director3DStage: React.FC = () => {
           orbitStateRef.current.prevX = e.clientX; orbitStateRef.current.prevY = e.clientY;
           return;
         }
+        // 人体布偶关节优先：命中关节拾取球 → 进入关节拖拽（旋转该关节，不转视角）
+        const jointHit = pickJointAt(e.clientX, e.clientY);
+        if (jointHit) {
+          jointDragRef.current = {
+            ...jointHit,
+            lastX: e.clientX, lastY: e.clientY, moved: false, twist: e.shiftKey,
+          };
+          selectEntityRef.current?.(jointHit.entity);
+          (window as any).__director_selected__ = jointHit.entity;
+          const stj: any = orbitStateRef.current;
+          stj.isRotating = false; stj.maybeRotating = false; stj.pendingHit = false; stj.downPos = null;
+          container.style.cursor = 'grabbing';
+          return;
+        }
         // 锁定物体不可选中（updream图层锁定防误拖）
         const hitId = pickRoot(e.clientX, e.clientY);
         if (hitId) {
@@ -1648,6 +1704,47 @@ export const Director3DStage: React.FC = () => {
       const deltaY = e.clientY - orbitStateRef.current.prevY;
       orbitStateRef.current.prevX = e.clientX; orbitStateRef.current.prevY = e.clientY;
       const st: any = orbitStateRef.current;
+      // 关节拖拽：世界轴向增量旋转 → 欧拉限位钳制（肘/膝铰链、肩/髋锥限位）
+      const jd = jointDragRef.current;
+      if (jd) {
+        const dx = e.clientX - jd.lastX;
+        const dy = e.clientY - jd.lastY;
+        jd.lastX = e.clientX; jd.lastY = e.clientY;
+        if (!dx && !dy) return;
+        jd.moved = true;
+        const group = jd.group;
+        const lim = jd.limits || {};
+        const twist = e.shiftKey || jd.twist;
+        if (twist && Math.abs(dx) >= Math.abs(dy)) {
+          group.rotation.y = clampJointAxis(group.rotation.y + dx * 0.012, lim.y);
+        } else {
+          const applyWorld = (axis: THREE.Vector3, angle: number) => {
+            if (!angle) return;
+            const wq = new THREE.Quaternion().setFromAxisAngle(axis.normalize(), angle);
+            const pq = new THREE.Quaternion();
+            (group.parent || group).getWorldQuaternion(pq);
+            const localDelta = pq.clone().invert().multiply(wq).multiply(pq);
+            group.quaternion.premultiply(localDelta);
+          };
+          applyWorld(new THREE.Vector3(0, 1, 0), dx * 0.012);
+          const cam = mainCameraRef.current;
+          if (cam) {
+            const right = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0);
+            applyWorld(right, dy * 0.012);
+          }
+          const e2 = new THREE.Euler().setFromQuaternion(group.quaternion, 'XYZ');
+          e2.x = clampJointAxis(e2.x, lim.x);
+          e2.y = clampJointAxis(e2.y, lim.y);
+          e2.z = clampJointAxis(e2.z, lim.z);
+          group.quaternion.setFromEuler(e2);
+        }
+        if (selectionBoxRef.current) selectionBoxRef.current.update();
+        return;
+      }
+      // 悬停反馈（空闲时）：关节拾取球 → grab 光标
+      if (e.buttons === 0 && !st.isRotating && !st.isPanning && !st.maybeRotating) {
+        container.style.cursor = pickJointAt(e.clientX, e.clientY) ? 'grab' : '';
+      }
       if (st.maybeRotating && st.downPos) {
         const moved = Math.hypot(e.clientX - st.downPos.x, e.clientY - st.downPos.y);
         // Gizmo拖拽中绝不转视角
@@ -1660,6 +1757,30 @@ export const Director3DStage: React.FC = () => {
     };
     const onMouseUp = (e: MouseEvent) => {
       const st: any = orbitStateRef.current;
+      // 关节拖拽收尾：序列化自定义姿态落盘（分镜 mannequin_pose，切镜/刷新可恢复）
+      const jd = jointDragRef.current;
+      if (jd) {
+        jointDragRef.current = null;
+        container.style.cursor = '';
+        if (jd.moved) {
+          const root = stageEntitiesGroupRef.current?.getObjectByName(jd.entity);
+          if (root) {
+            const joints = serializeMannequinJoints(root);
+            const store = useProjectStore.getState();
+            const allShots = store.project?.scenes.flatMap((s) => s.shots) || [];
+            const shot = allShots.find((sh) => sh.id === store.activeShotId) || allShots[0];
+            if (shot) {
+              const prevEntities = ((shot as any).mannequin_pose?.entities || {}) as Record<string, any>;
+              const next = { v: 1, entities: { ...prevEntities, [jd.entity]: { joints } } };
+              try { store.updateShot(shot.id, { mannequin_pose: next } as any); } catch {}
+            }
+          }
+        }
+        orbitStateRef.current.isRotating = false; orbitStateRef.current.isPanning = false;
+        st.maybeRotating = false; st.pendingHit = false; st.downPos = null;
+        mouseDownPosRef.current = null;
+        return;
+      }
       // 点击空白处清空选中（小云雀式），拖拽则保留
       if (st.maybeRotating && mouseDownPosRef.current) {
         const moved = Math.hypot(e.clientX - mouseDownPosRef.current.x, e.clientY - mouseDownPosRef.current.y);
@@ -1846,7 +1967,7 @@ export const Director3DStage: React.FC = () => {
       const patch: Record<string, any> = { previz_shots: nextShots };
       if (!(activeShot as any).previz_url) patch.previz_url = assetUrl;
       try { updateShot(activeShot.id, patch as any); } catch {}
-      setSnapshotMsg(`「${cameraName}」已存资产库${patch.previz_url ? ' 并挂为参考' : ''}（队列 ${nextShots.length} 张）`);
+      setSnapshotMsg(`「${cameraName}」已存资产库${patch.previz_url ? ' 并挂为参考' : ''}（队列 ${nextShots.length} 张）｜提示：机位截图是**静帧构图参考**；需要运镜视频参考请点「⏺ 录制预演」或「⬜ 导出白模参考」`);
     } catch {
       setShotQueue((q) => q.map((x) => (x.id === item.id ? { ...x, uploading: false, error: '上传失败' } : x)));
       setSnapshotMsg(`「${cameraName}」截图完成，但资产库上传失败（本地缩略图仍可设为首帧/参考）`);
@@ -1955,17 +2076,37 @@ export const Director3DStage: React.FC = () => {
       const url = URL.createObjectURL(blob);
       setRecordUrl(url);
       setRecordSecs(secs);
+      const isClay = clayModeRef.current && !!clayExportResolveRef.current;
       // 自动下载一份到本地
       const a = document.createElement('a');
       a.href = url;
-      a.download = `previz_${activeShot?.shot_index ?? 'shot'}_${Date.now()}.webm`;
+      a.download = `${isClay ? 'clay' : 'previz'}_${activeShot?.shot_index ?? 'shot'}_${Date.now()}.webm`;
       document.body.appendChild(a); a.click(); a.remove();
-      setRecordMsg(`已录制 ${secs.toFixed(1)}s 预演（webm 已下载，正在上传资产库…）`);
-      // 同步上传资产库（失败不阻塞，本地文件已落盘）
       const pid = project?.id;
       const form = new FormData();
-      form.append('name', `导演预演_${activeShot?.shot_index ?? ''}_${new Date().toLocaleString()}`);
       form.append('category', 'previz');
+      if (isClay) {
+        form.append('name', `白模导出_分镜${activeShot?.shot_index ?? ''}_${new Date().toLocaleString()}`);
+        form.append('tags', 'previz,clay,白模');
+        if (pid) form.append('project_id', pid);
+        form.append('file', new File([blob], 'clay.webm', { type: 'video/webm' }));
+        setClayMsg('白模视频已录制，正在上传资产库…');
+        apiService.createAsset(form).then((r: any) => {
+          const assetUrl = r?.asset?.file_url || r?.asset?.url || r?.file_url || '';
+          if (assetUrl) setLastRecordAssetUrl(assetUrl);
+          clayExportResolveRef.current?.({ url: assetUrl, secs });
+          clayExportResolveRef.current = null;
+          setRecordMsg(`白模已导出 ${secs.toFixed(1)}s（webm 已下载${assetUrl ? '，已上传资产库' : '，资产库上传失败'}）`);
+        }).catch(() => {
+          clayExportResolveRef.current?.({ url: '', secs });
+          clayExportResolveRef.current = null;
+          setRecordMsg('白模录制完成，但资产库上传失败（本地 webm 已下载）');
+        });
+        return;
+      }
+      setRecordMsg(`已录制 ${secs.toFixed(1)}s 预演（webm 已下载，正在上传资产库…）`);
+      // 同步上传资产库（失败不阻塞，本地文件已落盘）
+      form.append('name', `导演预演_${activeShot?.shot_index ?? ''}_${new Date().toLocaleString()}`);
       form.append('tags', 'previz,导演预演');
       if (pid) form.append('project_id', pid);
       form.append('file', new File([blob], 'previz.webm', { type: 'video/webm' }));
@@ -2030,6 +2171,241 @@ export const Director3DStage: React.FC = () => {
     } catch (e: any) {
       setRecordMsg(`录制启动失败：${e?.message || e}（该浏览器可能不支持 MediaRecorder）`);
     }
+  };
+
+  // ============================================================
+  // 白模导出（Clay Pass → Seedance 2.5 参考视频链路）
+  // - 材质覆写为统一灰模、隐藏辅助物/UI、纯灰背景（结束后全量还原）
+  // - 复用预演录制链路录制运镜，产出：白模 webm + 首帧 + 运镜终点帧 + 结构化 prompt
+  // ============================================================
+  const applyClayLook = useCallback((): (() => void) => {
+    const scene = sceneRef.current;
+    const restoreFns: Array<() => void> = [];
+    const clayMat = new THREE.MeshStandardMaterial({ color: 0xd6d6d6, roughness: 0.95, metalness: 0.0 });
+    const swap = (m: THREE.Mesh) => {
+      const old = (m as any).material;
+      if (!old || old === clayMat) return;
+      (m as any).material = clayMat;
+      restoreFns.push(() => { (m as any).material = old; });
+    };
+    [stageEntitiesGroupRef.current, envGroupRef.current].forEach((grp) => {
+      grp?.traverse((o) => {
+        const anyO = o as any;
+        if (!anyO.isMesh) return;
+        if (anyO.userData?.jointPick || String(anyO.name || '').startsWith('jointpick_')) {
+          const oldV = o.visible; o.visible = false;
+          restoreFns.push(() => { o.visible = oldV; });
+          return;
+        }
+        swap(o as THREE.Mesh);
+      });
+    });
+    [cameraHelperRef.current, selectionBoxRef.current, walkMarkersRef.current, backdropRef.current].forEach((o) => {
+      if (!o) return;
+      const oldV = o.visible; o.visible = false;
+      restoreFns.push(() => { o.visible = oldV; });
+    });
+    const tc: any = transformControlsRef.current;
+    const gizmoHelper: any = tc?.getHelper?.() || tc;
+    if (gizmoHelper && typeof gizmoHelper.visible === 'boolean') {
+      const oldV = gizmoHelper.visible; gizmoHelper.visible = false;
+      restoreFns.push(() => { gizmoHelper.visible = oldV; });
+    }
+    if (scene) {
+      const oldBg = scene.background;
+      const oldFog: any = scene.fog;
+      scene.background = new THREE.Color(0xeaeaea);
+      (scene as any).fog = null;
+      restoreFns.push(() => { scene.background = oldBg; (scene as any).fog = oldFog; });
+    }
+    return () => { restoreFns.reverse().forEach((f) => { try { f(); } catch {} }); clayMat.dispose(); };
+  }, []);
+
+  const buildClayPrompt = useCallback((secs: number): string => {
+    const framingLabel = FRAMING_PRESETS.find((f) => f.id === framing)?.label || framing;
+    const motionLabel = MOTION_PRESETS.find((m) => m.id === motion)?.label || motion;
+    const wp = waypointsRef.current;
+    const lines = [
+      '参考 @video1 的运镜、构图、景别、空间关系、主体轨迹与镜头节奏（@video1 为白模调度参考，忽略其灰色材质与光照，不要复制它的外观）。',
+      '将白模渲染为：<在此填写目标风格/材质/光照/氛围，或引用 @image1 的角色外形与 @image2 的场景>。',
+      `镜头：${framingLabel}，焦距 ${focalLength}mm${Math.abs(cameraRoll) > 0.5 ? `，荷兰角 ${cameraRoll > 0 ? '+' : ''}${cameraRoll.toFixed(1)}°` : ''}；运镜：${motionLabel}（${motionSpeed}）；时长约 ${secs.toFixed(1)}s；画幅 ${projectAspect}。`,
+      wp.length ? `主角走位：${wp.map((w, i) => `P${i + 1}(${w.x.toFixed(1)},${w.z.toFixed(1)})`).join(' → ')}。` : '',
+      '约束：单镜头连贯无剪辑；保持主体位置、镜头路径与节奏不变，不要重复描述运镜。',
+    ];
+    return lines.filter(Boolean).join('\n');
+  }, [framing, motion, focalLength, cameraRoll, motionSpeed, projectAspect]);
+
+  const handleExportClay = async () => {
+    if (!activeShot) { setClayMsg('请先选择分镜'); return; }
+    if (clayExporting || isRecording) return;
+    if (!pipRendererRef.current || !showPip) { setClayMsg('请先开启监视器（右上 Monitor）再导出白模'); return; }
+    setClayExporting(true);
+    setClayMsg('白模导出中：正在切换灰模材质并录制运镜…');
+    clayFirstFrameRef.current = null;
+    clayLastFrameRef.current = null;
+    try {
+      clayRestoreRef.current = applyClayLook();
+      clayModeRef.current = true;
+      const pip = pipRendererRef.current;
+      if (pip) {
+        const oldSize = new THREE.Vector2();
+        pip.getSize(oldSize);
+        pipSizeBackupRef.current = { w: oldSize.x, h: oldSize.y };
+        const h = Math.max(480, Math.round(720 / projectAspectNum));
+        pip.setSize(720, h, false);
+      }
+      await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+      clayFirstFrameRef.current = captureFrameDataUrl();
+      const result = await new Promise<{ url: string; secs: number } | null>((resolve) => {
+        clayExportResolveRef.current = resolve;
+        handleToggleRecording();
+      });
+      const secs = result?.secs || recordSecsRefValue();
+      const prompt = buildClayPrompt(secs);
+      const patch: Record<string, any> = {
+        clay_prompt: prompt,
+        clay_video_url: result?.url || (activeShot as any).clay_video_url || '',
+        previz_video_url: result?.url || (activeShot as any).previz_video_url || '',
+        clay_first_frame_url: clayFirstFrameRef.current || (activeShot as any).clay_first_frame_url || '',
+        clay_last_frame_url: clayLastFrameRef.current || (activeShot as any).clay_last_frame_url || '',
+      };
+      try { updateShot(activeShot.id, patch as any); } catch {}
+      try { await navigator.clipboard.writeText(prompt); } catch {}
+      setClayMsg(
+        `白模导出完成：${secs.toFixed(1)}s 视频 + 首/尾帧已落分镜（clay_video_url / clay_first_frame_url / clay_last_frame_url）；`
+        + '结构化提示词已复制到剪贴板并写入 clay_prompt。生成时把白模视频作为参考视频（@video1），先 read_skill("seedance-white-model")。',
+      );
+      toast.success('白模导出完成');
+    } catch (e: any) {
+      setClayMsg(`白模导出失败：${e?.message || e}`);
+    } finally {
+      if (clayRestoreRef.current) { try { clayRestoreRef.current(); } catch {} clayRestoreRef.current = null; }
+      clayModeRef.current = false;
+      clayExportResolveRef.current = null;
+      const pip = pipRendererRef.current;
+      if (pip && pipSizeBackupRef.current) {
+        try { pip.setSize(pipSizeBackupRef.current.w, pipSizeBackupRef.current.h, false); } catch {}
+        pipSizeBackupRef.current = null;
+      }
+      setClayExporting(false);
+    }
+  };
+
+  // Agent 舞台控制实时应用：stage_control → tool_result → agent-stage-patch → 落盘 + 3D 即时更新
+  useEffect(() => {
+    const onAgentPatch = (ev: any) => {
+      const detail = ev?.detail || {};
+      const patch = detail.patch && typeof detail.patch === 'object' ? detail.patch : null;
+      const store = useProjectStore.getState();
+      // Agent 新建了分镜（0 镜项目解锁）：重新拉项目并自动切到该镜
+      if (detail.created_shot) {
+        const activeId = store.activeProjectId || store.project?.id;
+        if (!detail.project_id || !activeId || String(detail.project_id) === String(activeId)) {
+          store.loadActiveProject().then(() => {
+            const st2 = useProjectStore.getState();
+            const all = st2.project?.scenes.flatMap((s) => s.shots) || [];
+            const created = all.find((sh) => sh.id === detail.created_shot?.id)
+              || all.find((sh) => Number(sh.shot_index) === Number(detail.created_shot?.shot_index));
+            if (created) {
+              st2.setActiveShotId(created.id);
+              toast.success(`Agent 新建了分镜 #${created.shot_index}（已切换）`);
+            } else {
+              toast.success('Agent 新建了分镜（项目已刷新）');
+            }
+          }).catch(() => { toast.success('Agent 新建了分镜（请手动刷新项目）'); });
+        }
+        return;
+      }
+      if (!patch) return;
+      const allShots = store.project?.scenes.flatMap((s) => s.shots) || [];
+      let shot = allShots.find((sh) => sh.id === detail.shot_id)
+        || allShots.find((sh) => Number(sh.shot_index) === Number(detail.shot_index));
+      if (!shot && !detail.shot_id && !detail.shot_index) {
+        shot = allShots.find((sh) => sh.id === store.activeShotId) || allShots[0];
+      }
+      if (!shot) return;
+      try { store.updateShot(shot.id, patch); } catch {}
+      const isActive = shot.id === (store.activeShotId || allShots[0]?.id);
+      if (!isActive) return;
+      const g = stageEntitiesGroupRef.current;
+      if (patch.mannequin_pose !== undefined && g) {
+        const poseMap = ((patch.mannequin_pose as any)?.entities || {}) as Record<string, any>;
+        g.children.forEach((o) => {
+          if ((o.userData as any)?.mannequinJoints) {
+            const joints = poseMap[o.name]?.joints;
+            if (joints) applyMannequinJoints(o, joints);
+            else resetMannequinJoints(o);
+          }
+        });
+      }
+      if (patch.stage_layout && g) {
+        Object.entries(patch.stage_layout).forEach(([id, t]: any) => {
+          const o = g.getObjectByName(id);
+          if (o && t?.p && t?.r) {
+            o.position.set(t.p[0], t.p[1], t.p[2]);
+            o.rotation.set(t.r[0], t.r[1], t.r[2]);
+            o.scale.setScalar(t.s || 1);
+            entityTransformsRef.current[id] = { p: t.p, r: t.r, s: t.s || 1 };
+          }
+        });
+      }
+      if (patch.pose_preset) setPose(patch.pose_preset);
+      if (patch.camera_framing) setFraming(patch.camera_framing);
+      if (patch.camera_motion) setMotion(patch.camera_motion);
+      if (typeof patch.focal_length_mm === 'number') setFocalLength(patch.focal_length_mm);
+      if (typeof patch.camera_roll_deg === 'number') setCameraRoll(patch.camera_roll_deg);
+      if (patch.motion_speed) setMotionSpeed(patch.motion_speed);
+      if (patch.cast_layout) setCastLayout(patch.cast_layout);
+      if (Array.isArray(patch.props_config)) setPropsConfig(patch.props_config as any);
+      if (Array.isArray(patch.walk_path)) setWaypointsBoth(patch.walk_path);
+      if (Array.isArray(patch.stage_cameras)) setStageCameras(patch.stage_cameras as any);
+      if (patch.lighting_config) {
+        const lc = patch.lighting_config;
+        setKeyIntensity(lc.keyIntensity ?? 3.2);
+        setKeyAzimuth(lc.keyAzimuth ?? 40);
+        setKeyTemp(lc.keyTemp ?? 'neon');
+        setRimIntensity(lc.rimIntensity ?? 3.5);
+        setAmbientIntensity(lc.ambientIntensity ?? 1.8);
+        setExposure(lc.exposure ?? 1.15);
+      }
+      toast.success(`Agent 已更新 3D 导演台（${Object.keys(patch).join('、')}）`);
+    };
+    window.addEventListener('agent-stage-patch', onAgentPatch as any);
+    // 剧本拆解落盘完成 → 刷新项目（0 镜项目拆出分镜后导演台立即可用）
+    const onProjectRefresh = () => {
+      const store = useProjectStore.getState();
+      store.loadActiveProject()
+        .then(() => toast.success('剧本已拆解并写入项目（分镜已更新）'))
+        .catch(() => {});
+    };
+    window.addEventListener('agent-project-refresh', onProjectRefresh as any);
+    return () => {
+      window.removeEventListener('agent-stage-patch', onAgentPatch as any);
+      window.removeEventListener('agent-project-refresh', onProjectRefresh as any);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 姿态预设优先：清除本镜自定义关节（鼠标拖过的关节）后再应用预设
+  const clearCustomJoints = () => {
+    const store = useProjectStore.getState();
+    const allShots = store.project?.scenes.flatMap((s) => s.shots) || [];
+    const shot = allShots.find((sh) => sh.id === store.activeShotId) || allShots[0];
+    if (shot && (shot as any).mannequin_pose) {
+      try { store.updateShot(shot.id, { mannequin_pose: undefined } as any); } catch {}
+    }
+    const g = stageEntitiesGroupRef.current;
+    if (g) g.children.forEach((o) => { if ((o.userData as any)?.mannequinJoints) resetMannequinJoints(o); });
+  };
+
+  const handlePickPosePreset = (p: PosePreset) => {
+    setPose(p);
+    clearCustomJoints();
+  };
+
+  const handleResetJoints = () => {
+    clearCustomJoints();
+    toast.success('已复位关节，回到姿态预设');
   };
 
   return (
@@ -2183,6 +2559,8 @@ export const Director3DStage: React.FC = () => {
                 </div>
                 <div className="mt-4 space-y-2"><button onClick={handleToggleSimulation} className={`w-full flex items-center justify-center space-x-2 py-2.5 rounded-xl text-xs font-bold shadow-lg transition-all ${isSimulating ? 'bg-red-500 text-white' : 'bg-gradient-to-r from-accent-orange to-brand text-white hover:opacity-95'}`}>{isSimulating ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 fill-current" />}<span>{isSimulating ? '停止运镜预览' : '▶ 播放当前运镜轨迹模拟'}</span></button>
                   <button onClick={handleToggleRecording} className={`w-full flex items-center justify-center space-x-2 py-2.5 rounded-xl text-xs font-bold shadow-lg transition-all border ${isRecording ? 'bg-red-600/20 border-red-500 text-red-300' : 'bg-surface-secondary border-border text-gray-200 hover:border-red-400'}`}><Video className="w-4 h-4" /><span>{isRecording ? '⏺ 录制中…点击停止' : '⏺ 录制预演为视频参考（webm）'}</span></button>
+                  <button onClick={handleExportClay} disabled={clayExporting || isRecording} className={`w-full flex items-center justify-center space-x-2 py-2.5 rounded-xl text-xs font-bold shadow-lg transition-all border ${clayExporting ? 'bg-surface-secondary/50 border-border text-gray-500 cursor-wait' : 'bg-accent-blue/10 border-accent-blue/50 text-accent-blue hover:border-accent-blue'}`}><Box className="w-4 h-4" /><span>{clayExporting ? '⏳ 白模导出中…' : '⬜ 导出白模参考（clay pass → Seedance / Kling）'}</span></button>
+                  {clayMsg && <div className="text-[10px] text-accent-blue leading-4">{clayMsg}</div>}
                   {(recordUrl || lastRecordAssetUrl) && !isRecording && <button onClick={handleSetRecordAsVideoRef} className="w-full py-2 rounded-xl bg-surface-secondary border border-border text-[11px] text-gray-200 hover:border-brand">设为本镜视频参考{activeShot?.previz_video_url ? ' ✓已挂载' : ''}</button>}
                   {recordMsg && <div className="text-[10px] text-gray-400 leading-4">{recordMsg}</div>}
                   {recordUrl && <a href={recordUrl} target="_blank" rel="noreferrer" className="block text-center text-[11px] text-accent-blue underline">回放刚录制的预演</a>}
@@ -2237,15 +2615,16 @@ export const Director3DStage: React.FC = () => {
                 })()}
               </div>
               <div>
-                <label className="text-xs text-gray-300 font-semibold mb-2 flex items-center justify-between"><span>🥋 角色动作姿态 (9 Poses)</span><span className="text-[10px] text-accent-green font-mono bg-accent-green/10 px-2 py-0.5 rounded">{pose}</span></label>
-                <div className="grid grid-cols-3 gap-2">{POSE_PRESETS.map((p) => <button key={p.id} onClick={() => setPose(p.id)} className={`p-2 rounded-xl text-left border transition-all ${pose === p.id ? 'bg-accent-green/20 border-accent-green text-white shadow-md ring-1 ring-accent-green' : 'bg-surface-secondary border-border text-gray-400 hover:text-gray-200'}`}><div className="text-sm">{p.icon}</div><div className="text-xs font-bold mt-1 truncate">{p.label}</div></button>)}</div>
+                <label className="text-xs text-gray-300 font-semibold mb-1 flex items-center justify-between"><span>🥋 角色动作姿态 (9 Poses)</span><span className="flex items-center space-x-1"><span className="text-[10px] text-accent-green font-mono bg-accent-green/10 px-2 py-0.5 rounded">{pose}</span><button onClick={handleResetJoints} className="text-[10px] px-2 py-0.5 rounded bg-surface-secondary border border-border text-gray-300 hover:text-white">复位关节</button></span></label>
+                <div className="text-[10px] text-gray-500 mb-2">🖱 直接拖动布偶身上的关节球摆姿势（Shift 拖 = 沿肢体扭转；自动存本镜，切镜/刷新保留）</div>
+                <div className="grid grid-cols-3 gap-2">{POSE_PRESETS.map((p) => <button key={p.id} onClick={() => handlePickPosePreset(p.id)} className={`p-2 rounded-xl text-left border transition-all ${pose === p.id ? 'bg-accent-green/20 border-accent-green text-white shadow-md ring-1 ring-accent-green' : 'bg-surface-secondary border-border text-gray-400 hover:text-gray-200'}`}><div className="text-sm">{p.icon}</div><div className="text-xs font-bold mt-1 truncate">{p.label}</div></button>)}</div>
               </div>
               <div>
                 <label className="text-xs text-gray-300 font-semibold mb-2 flex items-center justify-between"><span>⚔️ 场景道具与结界 (Props & FX)</span><span className="text-[10px] text-gray-500">真实 GLB 已接入</span></label>
                 <div className="grid grid-cols-2 gap-2">
                   {propOptions.map((pr: any) => {
                     const active = propsConfig.includes(pr.id);
-                    return (
+                      return (
                       <button
                         key={pr.id}
                         onClick={() => setPropsConfig((prev) => (prev.includes(pr.id) ? prev.filter((x) => x !== pr.id) : [...prev, pr.id]))}
@@ -2280,9 +2659,9 @@ export const Director3DStage: React.FC = () => {
                 </div>
                 <div className="mt-2 p-2 rounded-xl bg-surface-secondary border border-border">
                   <div className="text-[10px] text-gray-400">
-                    已下载真实模型：<span className="text-accent-green font-mono">RobotExpressive / Soldier / SheenChair / DamagedHelmet / AntiqueCamera / Avocado / BoomBox</span>（CC0，三阶归一化，底部对齐，阴影开启）
+                    已下载真实模型：<span className="text-accent-green font-mono">SheenChair / DamagedHelmet / AntiqueCamera / Avocado / BoomBox</span>（CC0，三阶归一化，底部对齐，阴影开启）
                   </div>
-                  <div className="text-[10px] text-gray-500 mt-1">人体优先加载 GLB，失败回退程序化 PBR 假人；道具支持真实/程序化双路径</div>
+                  <div className="text-[10px] text-gray-500 mt-1">初始角色为程序化人体布偶（木偶关节 + 姿态预设驱动，可直接拖拽摆放）；道具支持真实 GLB / 程序化双路径</div>
                 </div>
               </div>
             </>
@@ -2381,7 +2760,7 @@ export const Director3DStage: React.FC = () => {
 };
 
 // ============================================================
-// 真实人体建模（PBR + 解剖比例 + 姿态驱动）替代原火柴人
+// 程序化 PBR 人体（道具兜底保留；初始角色已换为人体布偶 createPoseMannequin）
 // ============================================================
 function createRealisticHuman(opts: { pose: PosePreset; role: string; primaryColor: number; accentColor: number; name: string; hairColor: number }): THREE.Group {
   const group = new THREE.Group();
@@ -2495,6 +2874,220 @@ function createRealisticHuman(opts: { pose: PosePreset; role: string; primaryCol
   const ring = new THREE.Mesh(new THREE.RingGeometry(0.28, 0.30, 32), new THREE.MeshBasicMaterial({ color: opts.accentColor, transparent: true, opacity: 0.35, side: THREE.DoubleSide }));
   ring.rotation.x = Math.PI / 2; ring.position.y = 0.01; group.add(ring);
   return group;
+}
+
+// ============================================================
+// 人体布偶（木偶关节人偶）— 3D 导演台初始角色模型
+// 经典美术木偶造型：木质 PBR + 关节球 + 姿态预设驱动（站/斗/施法/奔跑/回眸/半跪/格挡/御风/战损）
+// 结构分上半身组 + 四肢两级关节组，姿势可单独旋转各关节，不再靠整体缩放硬凑
+// 交互：每个关节带不可见拾取球（jointpick_*），鼠标可直接拖拽旋转（Shift 拖=沿肢体扭转）
+// ============================================================
+type JointAxisLimits = { x?: [number, number]; y?: [number, number]; z?: [number, number] };
+
+/** 关节限位（弧度，XYZ 欧拉）— 与后端 app/director_stage/ops.py 单一口径，防反关节 */
+const MANNEQUIN_JOINT_LIMITS: Record<string, JointAxisLimits> = {
+  waist: { x: [-0.6, 0.6], y: [-1.0, 1.0], z: [-0.5, 0.5] },
+  neck: { x: [-0.7, 0.7], y: [-1.4, 1.4], z: [-0.5, 0.5] },
+  shoulder_L: { x: [-2.6, 0.9], y: [-1.0, 1.0], z: [-0.5, 1.8] },
+  shoulder_R: { x: [-2.6, 0.9], y: [-1.0, 1.0], z: [-1.8, 0.5] },
+  elbow_L: { x: [-2.6, 0.1], y: [-0.25, 0.25], z: [-0.6, 0.6] },
+  elbow_R: { x: [-2.6, 0.1], y: [-0.25, 0.25], z: [-0.6, 0.6] },
+  hip_L: { x: [-1.7, 1.2], y: [-0.7, 0.7], z: [-0.8, 0.8] },
+  hip_R: { x: [-1.7, 1.2], y: [-0.7, 0.7], z: [-0.8, 0.8] },
+  knee_L: { x: [0.0, 2.2], y: [-0.1, 0.1], z: [-0.1, 0.1] },
+  knee_R: { x: [0.0, 2.2], y: [-0.1, 0.1], z: [-0.1, 0.1] },
+};
+
+const clampJointAxis = (v: number, r?: [number, number]) => (r ? Math.max(r[0], Math.min(r[1], v)) : v);
+
+/** 序列化布偶关节姿态（只记非零关节，减少存储与 diff 噪音） */
+function serializeMannequinJoints(root: THREE.Object3D): MannequinJointPose {
+  const rig = (root.userData as any)?.mannequinJoints as Record<string, { group: THREE.Object3D }> | undefined;
+  const out: MannequinJointPose = {};
+  if (!rig) return out;
+  for (const [id, entry] of Object.entries(rig)) {
+    const e = entry.group.rotation;
+    if (Math.abs(e.x) + Math.abs(e.y) + Math.abs(e.z) > 0.01) {
+      out[id] = [Number(e.x.toFixed(4)), Number(e.y.toFixed(4)), Number(e.z.toFixed(4))];
+    }
+  }
+  return out;
+}
+
+/** 应用关节姿态（按限位钳制；未给出的关节保持现状） */
+function applyMannequinJoints(root: THREE.Object3D, joints?: MannequinJointPose) {
+  const rig = (root.userData as any)?.mannequinJoints as Record<string, { group: THREE.Object3D; limits: JointAxisLimits }> | undefined;
+  if (!rig || !joints) return;
+  for (const [id, rot] of Object.entries(joints)) {
+    const entry = rig[id];
+    if (!entry || !Array.isArray(rot)) continue;
+    const lim = entry.limits || {};
+    entry.group.rotation.set(
+      clampJointAxis(rot[0] || 0, lim.x),
+      clampJointAxis(rot[1] || 0, lim.y),
+      clampJointAxis(rot[2] || 0, lim.z),
+    );
+  }
+}
+
+/** 清零全部关节（切到没有自定义姿态的分镜 / 复位） */
+function resetMannequinJoints(root: THREE.Object3D) {
+  const rig = (root.userData as any)?.mannequinJoints as Record<string, { group: THREE.Object3D }> | undefined;
+  if (!rig) return;
+  for (const entry of Object.values(rig)) entry.group.rotation.set(0, 0, 0);
+}
+
+function createPoseMannequin(opts: { pose: PosePreset; role: string; accentColor: number }): THREE.Group {
+  const root = new THREE.Group();
+  const woodByRole: Record<string, number> = { protagonist: 0xd9aa6b, antagonist: 0xc08a4e, supporting: 0xcfa060 };
+  const woodMat = new THREE.MeshStandardMaterial({ color: woodByRole[opts.role] ?? 0xd9aa6b, roughness: 0.62, metalness: 0.04 });
+  const woodDarkMat = new THREE.MeshStandardMaterial({ color: 0xa9743c, roughness: 0.7, metalness: 0.03 });
+  const accentMat = new THREE.MeshStandardMaterial({ color: opts.accentColor, emissive: opts.accentColor, emissiveIntensity: 0.5, roughness: 0.3, metalness: 0.2 });
+  const cast = (m: THREE.Mesh) => { m.castShadow = true; m.receiveShadow = true; return m; };
+  // 关节拾取球（opacity 0 但可见：可被 Raycaster 命中，不渲染像素）
+  const pickMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
+  const mkPick = (r: number, jointId: string, parent: THREE.Object3D) => {
+    const p = new THREE.Mesh(new THREE.SphereGeometry(r, 12, 12), pickMat);
+    p.name = `jointpick_${jointId}`;
+    (p.userData as any).jointPick = jointId;
+    parent.add(p);
+    return p;
+  };
+
+  const body = new THREE.Group();
+  root.add(body);
+
+  // 骨盆 + 腰关节球
+  const pelvis = cast(new THREE.Mesh(new THREE.SphereGeometry(0.155, 24, 24), woodMat));
+  pelvis.scale.set(1.15, 0.78, 0.72); pelvis.position.y = 0.9; body.add(pelvis);
+  const waist = cast(new THREE.Mesh(new THREE.SphereGeometry(0.085, 20, 20), woodDarkMat));
+  waist.position.y = 1.01; body.add(waist);
+  // 角色识别腰带（不影响木偶中性造型）
+  const belt = cast(new THREE.Mesh(new THREE.CylinderGeometry(0.178, 0.188, 0.028, 24), accentMat));
+  belt.position.y = 0.99; body.add(belt);
+
+  // 上半身组（胸/肩/手臂/颈头；前倾、回眸转身都作用在这组）
+  const upper = new THREE.Group(); upper.position.y = 1.04; body.add(upper);
+  const chest = cast(new THREE.Mesh(new THREE.SphereGeometry(0.225, 28, 28), woodMat));
+  chest.scale.set(1.02, 1.28, 0.6); chest.position.y = 0.2; upper.add(chest);
+  const neck = cast(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.12, 16), woodDarkMat));
+  neck.position.y = 0.42; upper.add(neck);
+  const headGroup = new THREE.Group(); headGroup.position.y = 0.5; upper.add(headGroup);
+  const head = cast(new THREE.Mesh(new THREE.SphereGeometry(0.14, 28, 28), woodMat));
+  head.scale.set(0.95, 1.18, 0.95); head.position.y = 0.09; headGroup.add(head);
+  mkPick(0.15, 'neck', headGroup);
+  mkPick(0.14, 'waist', upper);
+
+  // 手臂：肩关节球 → 上臂 → 肘关节组（前臂+手）
+  const makeArm = (side: 1 | -1) => {
+    const shoulder = cast(new THREE.Mesh(new THREE.SphereGeometry(0.072, 20, 20), woodDarkMat));
+    shoulder.position.set(0.275 * side, 0.34, 0); upper.add(shoulder);
+    const arm = new THREE.Group(); arm.position.set(0.275 * side, 0.34, 0); upper.add(arm);
+    mkPick(0.095, side > 0 ? 'shoulder_L' : 'shoulder_R', arm);
+    const upperArm = cast(new THREE.Mesh(new THREE.CapsuleGeometry(0.052, 0.2, 8, 16), woodMat));
+    upperArm.position.y = -0.155; arm.add(upperArm);
+    const elbowGroup = new THREE.Group(); elbowGroup.position.y = -0.31; arm.add(elbowGroup);
+    elbowGroup.add(cast(new THREE.Mesh(new THREE.SphereGeometry(0.058, 18, 18), woodDarkMat)));
+    mkPick(0.08, side > 0 ? 'elbow_L' : 'elbow_R', elbowGroup);
+    const forearm = cast(new THREE.Mesh(new THREE.CapsuleGeometry(0.046, 0.2, 8, 16), woodMat));
+    forearm.position.y = -0.15; elbowGroup.add(forearm);
+    const hand = cast(new THREE.Mesh(new THREE.SphereGeometry(0.052, 16, 16), woodDarkMat));
+    hand.scale.set(0.85, 1.25, 0.6); hand.position.y = -0.33; elbowGroup.add(hand);
+    return { arm, elbowGroup };
+  };
+  const armL = makeArm(1);
+  const armR = makeArm(-1);
+
+  // 腿：髋关节球 → 大腿 → 膝关节组（小腿+脚）
+  const makeLeg = (side: 1 | -1) => {
+    const hip = cast(new THREE.Mesh(new THREE.SphereGeometry(0.07, 20, 20), woodDarkMat));
+    hip.position.set(0.115 * side, 0.86, 0); body.add(hip);
+    const leg = new THREE.Group(); leg.position.set(0.115 * side, 0.86, 0); body.add(leg);
+    mkPick(0.095, side > 0 ? 'hip_L' : 'hip_R', leg);
+    const thigh = cast(new THREE.Mesh(new THREE.CapsuleGeometry(0.065, 0.24, 8, 16), woodMat));
+    thigh.position.y = -0.19; leg.add(thigh);
+    const kneeGroup = new THREE.Group(); kneeGroup.position.y = -0.38; leg.add(kneeGroup);
+    kneeGroup.add(cast(new THREE.Mesh(new THREE.SphereGeometry(0.062, 18, 18), woodDarkMat)));
+    mkPick(0.085, side > 0 ? 'knee_L' : 'knee_R', kneeGroup);
+    const shin = cast(new THREE.Mesh(new THREE.CapsuleGeometry(0.055, 0.26, 8, 16), woodMat));
+    shin.position.y = -0.19; kneeGroup.add(shin);
+    const foot = cast(new THREE.Mesh(new THREE.BoxGeometry(0.105, 0.06, 0.21), woodDarkMat));
+    foot.position.set(0, -0.445, 0.045); kneeGroup.add(foot);
+    return { leg, kneeGroup };
+  };
+  const legL = makeLeg(1);
+  const legR = makeLeg(-1);
+
+  // 关节 rig 注册（鼠标拖拽 / Agent stage_control / 姿态序列化共用同一张表）
+  (root.userData as any).mannequinJoints = {
+    waist: { group: upper, limits: MANNEQUIN_JOINT_LIMITS.waist },
+    neck: { group: headGroup, limits: MANNEQUIN_JOINT_LIMITS.neck },
+    shoulder_L: { group: armL.arm, limits: MANNEQUIN_JOINT_LIMITS.shoulder_L },
+    shoulder_R: { group: armR.arm, limits: MANNEQUIN_JOINT_LIMITS.shoulder_R },
+    elbow_L: { group: armL.elbowGroup, limits: MANNEQUIN_JOINT_LIMITS.elbow_L },
+    elbow_R: { group: armR.elbowGroup, limits: MANNEQUIN_JOINT_LIMITS.elbow_R },
+    hip_L: { group: legL.leg, limits: MANNEQUIN_JOINT_LIMITS.hip_L },
+    hip_R: { group: legR.leg, limits: MANNEQUIN_JOINT_LIMITS.hip_R },
+    knee_L: { group: legL.kneeGroup, limits: MANNEQUIN_JOINT_LIMITS.knee_L },
+    knee_R: { group: legR.kneeGroup, limits: MANNEQUIN_JOINT_LIMITS.knee_R },
+  };
+
+  // 角色识别光环
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.34, 0.365, 40), new THREE.MeshBasicMaterial({ color: opts.accentColor, transparent: true, opacity: 0.28, side: THREE.DoubleSide }));
+  ring.rotation.x = Math.PI / 2; ring.position.y = 0.012; root.add(ring);
+
+  // 姿态预设（关节旋转；负 x = 手臂/大腿向前摆，肘/膝正 x = 回折）
+  const pose = opts.pose;
+  if (pose === 'fight') {
+    upper.rotation.y = -0.25;
+    armL.arm.rotation.x = -0.55; armL.arm.rotation.z = 0.35; armL.elbowGroup.rotation.x = -1.45;
+    armR.arm.rotation.x = -0.35; armR.arm.rotation.z = -0.45; armR.elbowGroup.rotation.x = -1.2;
+    legL.leg.rotation.x = -0.28; legL.leg.rotation.z = 0.12;
+    legR.leg.rotation.x = 0.32; legR.leg.rotation.z = -0.12; legR.kneeGroup.rotation.x = 0.35;
+  } else if (pose === 'cast_spell') {
+    upper.rotation.x = -0.06; headGroup.rotation.x = -0.18;
+    armL.arm.rotation.x = -1.35; armL.arm.rotation.z = 0.42; armL.elbowGroup.rotation.x = -0.35;
+    armR.arm.rotation.x = -1.15; armR.arm.rotation.z = -0.5; armR.elbowGroup.rotation.x = -0.5;
+    legL.leg.rotation.x = -0.1; legR.leg.rotation.x = 0.1;
+  } else if (pose === 'run') {
+    upper.rotation.x = 0.16;
+    armL.arm.rotation.x = -1.0; armL.elbowGroup.rotation.x = -1.5;
+    armR.arm.rotation.x = 0.75; armR.elbowGroup.rotation.x = -0.6;
+    legL.leg.rotation.x = -0.75; legL.kneeGroup.rotation.x = 1.15;
+    legR.leg.rotation.x = 0.5; legR.kneeGroup.rotation.x = 0.55;
+  } else if (pose === 'look_back') {
+    upper.rotation.y = 0.55; headGroup.rotation.y = 2.0;
+    legR.leg.rotation.y = -0.25;
+  } else if (pose === 'kneel') {
+    body.position.y -= 0.34;
+    upper.rotation.x = 0.1;
+    armL.arm.rotation.x = -0.5; armL.arm.rotation.z = 0.3; armL.elbowGroup.rotation.x = -1.2;
+    armR.arm.rotation.x = 0.3; armR.arm.rotation.z = -0.25; armR.elbowGroup.rotation.x = -0.7;
+    legR.leg.rotation.x = 0.05; legR.kneeGroup.rotation.x = 1.58;
+    legL.leg.rotation.x = -1.4; legL.kneeGroup.rotation.x = 1.32;
+  } else if (pose === 'defend') {
+    upper.rotation.x = 0.12;
+    armL.arm.rotation.x = -0.95; armL.arm.rotation.z = 0.3; armL.elbowGroup.rotation.x = -1.9;
+    armR.arm.rotation.x = -0.85; armR.arm.rotation.z = -0.35; armR.elbowGroup.rotation.x = -1.85;
+    legL.leg.rotation.x = -0.3; legL.leg.rotation.z = 0.14;
+    legR.leg.rotation.x = 0.24; legR.leg.rotation.z = -0.14; legR.kneeGroup.rotation.x = 0.3;
+  } else if (pose === 'fly') {
+    body.position.y += 0.3; body.rotation.x = 0.22;
+    armL.arm.rotation.x = -2.55; armL.arm.rotation.z = 0.5; armL.elbowGroup.rotation.x = -0.25;
+    armR.arm.rotation.x = -2.4; armR.arm.rotation.z = -0.45; armR.elbowGroup.rotation.x = -0.3;
+    legL.leg.rotation.x = 0.55; legL.kneeGroup.rotation.x = 0.5;
+    legR.leg.rotation.x = 0.75; legR.kneeGroup.rotation.x = 0.35;
+  } else if (pose === 'injured') {
+    body.position.y -= 0.08;
+    upper.rotation.x = 0.3; upper.rotation.z = 0.12; headGroup.rotation.z = 0.25;
+    armL.arm.rotation.x = -0.6; armL.arm.rotation.z = 0.15; armL.elbowGroup.rotation.x = -2.0;
+    armR.arm.rotation.x = 0.35; armR.arm.rotation.z = -0.1;
+    legL.leg.rotation.x = -0.45; legL.kneeGroup.rotation.x = 0.7;
+    legR.leg.rotation.x = 0.3; legR.kneeGroup.rotation.x = 0.25;
+  } else {
+    armL.arm.rotation.z = 0.07; armR.arm.rotation.z = -0.07;
+  }
+  return root;
 }
 
 function createRealisticSword(): THREE.Group {

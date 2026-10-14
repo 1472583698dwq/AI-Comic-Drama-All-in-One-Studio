@@ -151,11 +151,29 @@ def _fs_read_action(path: str, offset: int = 0, limit: int = 500, encoding: str 
     """
     import os as _os
     ap = _resolve_trusted_path(path, allow_build_outputs=True)
+    # 目录：直接列清单（只读、无需可信模式）——排障时不必再开 shell
+    if _os.path.isdir(ap):
+        entries: List[Dict[str, Any]] = []
+        try:
+            names = sorted(_os.listdir(ap))
+            for name in names[:300]:
+                fp = _os.path.join(ap, name)
+                try:
+                    st = _os.stat(fp)
+                    entries.append({"name": name, "type": "dir" if _os.path.isdir(fp) else "file",
+                                    "size": int(st.st_size), "mtime": int(st.st_mtime)})
+                except Exception:
+                    entries.append({"name": name, "type": "?", "size": 0})
+        except Exception as e:
+            raise ValueError(f"目录不可读：{ap}（{e}）")
+        return {"path": ap.replace("\\", "/"), "type": "dir", "entries": entries,
+                "total": len(entries), "truncated": len(names) > 300,
+                "note": "目录清单；把 path 换成清单里的文件路径即可读内容（同样的 fs_read，只读无需可信模式）"}
     base_low = _os.path.basename(ap).lower()
     if base_low in (".env", "config_store.json"):
         raise ValueError(f"敏感文件不允许直读（含明文密钥）：{ap}")
     if not _os.path.isfile(ap):
-        raise ValueError(f"文件不存在：{ap}")
+        raise ValueError(f"路径不存在：{ap}（目录也可直接传，会返回清单；项目数据在 storage/projects/<项目目录>/content.json）")
     size = _os.path.getsize(ap)
     if size > 5 * 1024 * 1024:
         raise ValueError(f"文件过大（>{5}MB）已拒绝：{ap}")
@@ -569,7 +587,7 @@ class MCPServerRegistry:
         # 1. 小说拆解
         self.register_tool(MCPToolDefinition(
             name="split_novel_script",
-            description="[剧本 Agent (ViMax/小云雀)] 解析长篇网文或小说章节，提取人物关系并生成标准分镜序列 JSON",
+            description="[剧本 Agent (ViMax/小云雀)] 解析长篇网文或小说章节，提取人物关系并生成标准分镜序列 JSON。在项目上下文中调用会自动把角色与分镜**落盘到当前项目**（角色+场景+逐镜，空 shots 会按文本节拍兜底补镜），返回精简摘要。",
             category="ai_generation",
             icon="BookOpen",
             author="HKUDS ViMax & MiniMax",
@@ -579,7 +597,9 @@ class MCPServerRegistry:
                 "properties": {
                     "novel_text": {"type": "string", "description": "小说或剧本文本内容"},
                     "style_preset": {"type": "string", "enum": ["donghua_xianxia", "japanese_anime", "modern_webtoon", "cinematic_3d", "dark_comic", "pure_white_aesthetic", "white_minimalist"], "default": "donghua_xianxia"},
-                    "aspect_ratio": {"type": "string", "enum": ["9:16", "16:9", "1:1"], "default": "9:16"}
+                    "aspect_ratio": {"type": "string", "enum": ["9:16", "16:9", "1:1"], "default": "9:16"},
+                    "project_id": {"type": "string", "description": "落盘目标项目 id（缺省=当前会话项目；无项目上下文则仅返回 JSON）"},
+                    "persist": {"type": "boolean", "default": True, "description": "是否落盘到项目（false=只返回摘要，不改项目）"},
                 },
                 "required": ["novel_text"]
             }
@@ -875,6 +895,45 @@ class MCPServerRegistry:
             }
         ))
 
+        # 11.1 3D导演台 Agent 控制（状态侦察 + 写控制：姿势/关节/位姿/运镜/走位/道具/灯光）
+        self.register_tool(MCPToolDefinition(
+            name="stage_get_state",
+            description="[3D导演台] 读取当前分镜的 3D 舞台状态：布偶姿态与逐关节角度、实体位姿(stage_layout)、机位/运镜/焦距、走位路径、道具、灯光，以及可操作枚举与关节限位。只读；控制前先侦察。项目 0 镜时不报错，返回 shots_total=0 + 建镜指引（画布节点不是分镜）。",
+            category="utility",
+            icon="Box",
+            author="Director Stage",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "project_id": {"type": "string", "description": "项目 id（缺省=当前会话项目）"},
+                    "shot_id": {"type": "string", "description": "分镜 id（缺省=当前激活/第一镜）"},
+                    "shot_index": {"type": "integer", "description": "分镜号（与 shot_id 二选一）"},
+                },
+                "required": []
+            }
+        ))
+        self.register_tool(MCPToolDefinition(
+            name="stage_control",
+            description="[3D导演台] 控制分镜舞台并即时落盘+前端实时应用：create_shot(新建分镜,0镜项目先走这步)/set_pose(姿态预设)/set_joints(逐关节[弧度])/clear_joints/set_transform(实体位置·旋转·缩放)/set_camera(景别·运镜·焦距·roll·站位·保存机位)/set_waypoints(主角走位≤6点)/set_props(道具)/set_lighting(三点光)/set_cast_layout(站位阵型)。双人打斗类镜头：set_cast_layout=duel + set_pose(fight) + set_camera(orbit/shake)。",
+            category="workflow",
+            icon="Sliders",
+            author="Director Stage",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["create_shot", "set_pose", "set_joints", "clear_joints", "set_transform", "set_camera", "set_waypoints", "set_props", "set_lighting", "set_cast_layout"], "description": "控制动作"},
+                    "project_id": {"type": "string", "description": "项目 id（缺省=当前会话项目）"},
+                    "shot_id": {"type": "string", "description": "分镜 id（缺省=当前激活/第一镜）"},
+                    "shot_index": {"type": "integer", "description": "分镜号（与 shot_id 二选一）"},
+                    "scene_index": {"type": "integer", "description": "create_shot 时指定场景号（缺省=第一个场景，无场景则自动建场景 1）"},
+                    "payload": {"type": "object", "description": "动作参数：entity=实体名；joints={关节:[x,y,z]弧度}；p/r/s；camera_framing/camera_motion/focal_length_mm/camera_roll_deg/motion_speed/cast_layout；camera={pos,quat,fov,name}；points=[{x,z}]；props=[...]；灯光字段；create_shot 可用 action_desc/duration/pose_preset 等"},
+                },
+                "required": ["action"]
+            }
+        ))
+
         # 12. 自定义生成源扩展（导演自扩展核心）
         self.register_tool(MCPToolDefinition(
             name="register_custom_provider",
@@ -923,7 +982,7 @@ class MCPServerRegistry:
         ))
         self.register_tool(MCPToolDefinition(
             name="test_custom_provider",
-            description="[查询] 测试指定自定义 Provider 的连通性与配置",
+            description="[查询] 测试指定生成源的连通性与配置。默认只做代码体检/配置检查（probe=compile/health，不真调上游）；live=true 才真调一次上游最小请求（可能消耗额度，能带出缺 Key/余额不足等真实错误）。",
             category="utility",
             icon="Activity",
             author="Provider Extension",
@@ -931,7 +990,8 @@ class MCPServerRegistry:
             input_schema={
                 "type": "object",
                 "properties": {
-                    "provider_id": {"type": "string", "description": "Provider ID，如 prov_xxx"}
+                    "provider_id": {"type": "string", "description": "Provider ID，如 prov_xxx"},
+                    "live": {"type": "boolean", "default": False, "description": "true=真实调用上游一次最小请求（验证 Key/余额/地址，可能消耗额度）"},
                 },
                 "required": ["provider_id"]
             }
@@ -971,6 +1031,37 @@ class MCPServerRegistry:
                     "default_model": {"type": "string"},
                     "doc_text": {"type": "string", "description": "补充文档（可选，用于 LLM 辅助重写）"},
                     "trusted": {"type": "boolean", "description": "可信开关：True=跳出沙箱（需全局 STUDIO_TRUSTED_MODE=1）"},
+                },
+                "required": ["provider_id"]
+            }
+        ))
+        self.register_tool(MCPToolDefinition(
+            name="provider_key_status",
+            description="[生成源·Key] 查看生成源的 Key 状态（只读，全部掩码）：key_source=stored（配置存储→设置→生成源，换 Key 唯一入口）/ inline（明文写在代码里，建议迁移）/ none（未配置）；附带是否读注入 Key、能否迁移与行动建议。不传 provider_id 则列出全部代码源。",
+            category="utility",
+            icon="KeyRound",
+            author="Provider Extension",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "provider_id": {"type": "string", "description": "Provider ID（可选；不传=全量）"},
+                },
+                "required": []
+            }
+        ))
+        self.register_tool(MCPToolDefinition(
+            name="migrate_provider_inline_key",
+            description="[生成源·Key] 把代码里写死的明文 Key 迁移到配置存储（设置→生成源），可选同时改写代码为运行时从 ctx 读 Key。**Key 不经返回值/对话上下文**（返回只有掩码）；迁移后需重新「测试→实测」。",
+            category="workflow",
+            icon="ShieldCheck",
+            author="Provider Extension",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "provider_id": {"type": "string", "description": "Provider ID"},
+                    "rewrite_code": {"type": "boolean", "default": True, "description": "true=同时改写代码（内联常量置空 + 注入 ctx 读 Key）；false=只写入配置存储"},
                 },
                 "required": ["provider_id"]
             }
@@ -1112,7 +1203,7 @@ class MCPServerRegistry:
         # --- A档可信模式双工具：文件编辑 + 命令执行（总闸 STUDIO_TRUSTED_MODE=1，未开则明错） ---
         self.register_tool(MCPToolDefinition(
             name="fs_read",
-            description="[文件查看-只读] 读取围栏内文件（storage/exports/工作区根），支持 offset/limit 行分页，无需可信模式。用于通读生成源代码文件、插件包、技能规范与 JSON 配置等完整文件；明文密钥文件（.env/config_store.json）拒绝直读。",
+            description="[文件查看-只读] 读取围栏内文件（storage/exports/工作区根），支持 offset/limit 行分页；**传目录路径则列出目录清单**，无需可信模式。用于通读生成源代码文件、插件包、技能规范、项目数据（storage/projects/<项目目录>/content.json）与 JSON 配置等；明文密钥文件（.env/config_store.json）拒绝直读。",
             category="utility",
             icon="FileText",
             author="Runtime",
@@ -1315,9 +1406,10 @@ class MCPServerRegistry:
 
     def _register_provider_dynamic_tools(self):
         """扫描所有 ProviderRegistry，将每个生成源注册为独立 MCP Tool（用户选源 → 节点Agent调对应Tool）"""
-        # 清理旧的 provider_ 工具
+        # 清理旧的 provider_ 工具（保留复用 provider_ 前缀的内置管理工具，如 provider_key_status）
+        _keep_provider_prefix = {"provider_key_status"}
         for k in list(self.tools.keys()):
-            if k.startswith("provider_"):
+            if k.startswith("provider_") and k not in _keep_provider_prefix:
                 del self.tools[k]
         try:
             from app.providers.image.registry import image_registry
@@ -1623,7 +1715,65 @@ class MCPServerRegistry:
                 style = arguments.get("style_preset", "donghua_xianxia")
                 ratio = arguments.get("aspect_ratio", "9:16")
                 project = await script_agent.parse_novel_to_project(text, style, ratio)
-                result = project.model_dump()
+                full = project.model_dump()
+
+                def _brief_split(payload: Dict[str, Any]) -> Dict[str, Any]:
+                    scenes_brief = []
+                    for s in payload.get("scenes") or []:
+                        scenes_brief.append({
+                            "scene_index": s.get("scene_index"),
+                            "title": s.get("title"),
+                            "location": s.get("location"),
+                            "shots": [
+                                {"shot_index": sh.get("shot_index"),
+                                 "camera_framing": sh.get("camera_framing"),
+                                 "camera_motion": sh.get("camera_motion"),
+                                 "action_desc": (sh.get("action_desc") or "")[:60],
+                                 "duration": sh.get("duration")}
+                                for sh in (s.get("shots") or [])
+                            ],
+                        })
+                    return {
+                        "title": payload.get("title"),
+                        "characters": [c.get("name") for c in (payload.get("characters") or [])],
+                        "scenes": scenes_brief,
+                    }
+
+                # 项目上下文中调用 → 自动落盘（修「拆解成功但项目仍 0 镜」）：
+                _pid_split = str(arguments.get("project_id") or "").strip()
+                if not _pid_split and isinstance(project_context, dict):
+                    _pid_split = str(project_context.get("id") or project_context.get("project_id") or "")
+                _persist = arguments.get("persist", True) is not False
+                if _pid_split and _persist:
+                    from app.providers.project.manager import project_manager as _pm_split
+                    _content_split = _pm_split.get_content(_pid_split)
+                    if not isinstance(_content_split, dict):
+                        _content_split = {}
+                    _content_split["characters"] = full.get("characters", [])
+                    _content_split["scenes"] = full.get("scenes", [])
+                    if text:
+                        _content_split["original_novel"] = text
+                    if not _content_split.get("title") or _content_split.get("title") in ("未命名项目", "AI 漫剧项目"):
+                        _content_split["title"] = full.get("title") or _content_split.get("title") or "AI 漫剧项目"
+                    _pm_split.save_content(_pid_split, _content_split)
+                    shots_total = sum(len(s.get("shots") or []) for s in (_content_split.get("scenes") or []))
+                    result = {
+                        "persisted": True,
+                        "project_id": _pid_split,
+                        "title": _content_split.get("title"),
+                        "characters_total": len(_content_split.get("characters") or []),
+                        "scenes_total": len(_content_split.get("scenes") or []),
+                        "shots_total": shots_total,
+                        **_brief_split(full),
+                        "note": "已写入当前项目；下一步用 stage_get_state 侦察 3D 导演台状态，再 stage_control 摆姿势/运镜",
+                    }
+                else:
+                    result = {
+                        "persisted": False,
+                        "shots_total": sum(len(s.get("shots") or []) for s in (full.get("scenes") or [])),
+                        **_brief_split(full),
+                        "note": "未提供项目上下文：结果仅返回摘要（前端「剧本导入」负责保存）。在项目工作台内调用会自动落盘。",
+                    }
 
             elif tool_name in ("generate_image", "comfyui_render_node"):
                 from app.providers.image.base import ImageGenerateRequest
@@ -1874,6 +2024,26 @@ class MCPServerRegistry:
                               "provider": _created["provider"], "mode": "llm_code", "code": _created["code"],
                               "compile_check": _created["compile_check"],
                               **({"hint": "生成的代码未通过沙箱编译体检，请根据 compile_check.error 修正后调用 update_custom_provider 重新提交"} if not _created["compile_check"].get("ok") else {})}
+                # Key 状态与"别硬编码"警示（创建后统一补一次，两个分支共用）
+                try:
+                    from app.providers.custom.inline_config import key_status as _ks_reg
+                    from app.providers.custom.manager import custom_provider_manager as _mgr_reg
+                    _pid_reg = str((_created.get("provider") or {}).get("id") or "")
+                    _pd_reg = _mgr_reg.get_definition(_pid_reg) if _pid_reg else None
+                    if _pd_reg is not None:
+                        _st_reg = _ks_reg(_pd_reg)
+                        result["key_status"] = _st_reg
+                        if _st_reg["key_source"] == "inline":
+                            result["key_warning"] = (
+                                f"检测到代码里写死了明文 Key（{_st_reg['key_masked']}）：请提示用户改到「设置→生成源」配置，"
+                                f"或调用 migrate_provider_inline_key(provider_id=\"{_pid_reg}\") 一键迁移（Key 不会进入对话上下文）。")
+                        elif _st_reg["key_source"] == "none":
+                            result["key_warning"] = (
+                                "该源尚未配置 Key：请在「设置→生成源」填入（写配置存储，不要写进代码），填完用「测试→实测」验证。")
+                        elif api_key:
+                            result["key_note"] = "Key 已写入配置存储（设置→生成源 可随时更换），代码中无需也不应出现明文 Key。"
+                except Exception:
+                    pass
 
             elif tool_name == "list_custom_providers":
                 from app.providers.custom.manager import custom_provider_manager as _mgr
@@ -1886,8 +2056,26 @@ class MCPServerRegistry:
                         hay = f"{d.id} {d.name} {d.display_name or ''} {d.description or ''} {d.kind}".lower()
                         return q in hay
                     defs = [d for d in defs if _hit(d)]
-                # 返回摘要（不含 code 全文，防上下文爆炸）
-                result = {"providers": [d.to_provider_info(include_code=False) for d in defs], "total": len(defs), "q": q or None, "kind": kind}
+                # 返回摘要（不含 code 全文，防上下文爆炸）+ Key 状态（掩码）：Agent 无需读码即可知道
+                # 该源 Key 从哪来（stored/inline/none），缺 Key 时直接引导用户去「设置→生成源」。
+                _providers = []
+                try:
+                    from app.providers.custom.inline_config import key_status as _ks_list
+                    for d in defs:
+                        info = d.to_provider_info(include_code=False)
+                        try:
+                            st = _ks_list(d)
+                            info["key_source"] = st["key_source"]
+                            info["key_masked"] = st["key_masked"]
+                            info["reads_ctx_key"] = st["reads_ctx_key"]
+                            info["migratable_inline_key"] = st["migratable"]
+                        except Exception:
+                            pass
+                        _providers.append(info)
+                except Exception:
+                    _providers = [d.to_provider_info(include_code=False) for d in defs]
+                result = {"providers": _providers, "total": len(defs), "q": q or None, "kind": kind,
+                          "key_legend": "key_source: stored=配置存储(设置→生成源) / inline=明文写在代码(可 migrate_provider_inline_key 迁移) / none=未配置"}
 
             elif tool_name == "test_custom_provider":
                 pid = arguments.get("provider_id") or ""
@@ -1896,7 +2084,7 @@ class MCPServerRegistry:
                 # 与 HTTP /providers/{id}/test 共用同一实现：测试联通即写“生产可用”验证标记，
                 # 保证 Agent 侧测试过的源会出现在画布/分镜的生产端选择器（原先 MCP 不落验证 → 画布选不到源）
                 from app.api.provider_routes import run_provider_test
-                result = await run_provider_test(pid)
+                result = await run_provider_test(pid, live=bool(arguments.get("live")))
 
             elif tool_name == "delete_custom_provider":
                 pid = arguments.get("provider_id") or ""
@@ -1993,6 +2181,46 @@ class MCPServerRegistry:
                 from app.providers import verification as _verification
                 _verification.clear(pid)  # 定义变更 → 需重新测试才可回到生产端（与 HTTP 更新同口径）
                 result = {"status": "updated", "provider": saved.to_provider_info()}
+                # Key 状态与"别硬编码"警示（改码后可能出现内联明文；Key 变更由用户在设置页做）
+                try:
+                    from app.providers.custom.inline_config import key_status as _ks_upd
+                    _st_upd = _ks_upd(saved)
+                    result["key_status"] = _st_upd
+                    if _st_upd["key_source"] == "inline":
+                        result["key_warning"] = (
+                            f"更新后的代码里写死了明文 Key（{_st_upd['key_masked']}）：请改用「设置→生成源」配置，"
+                            f"或调用 migrate_provider_inline_key(provider_id=\"{pid}\") 迁移（Key 不会进入对话上下文）。")
+                    elif _st_upd["key_source"] == "none":
+                        result["key_warning"] = "该源未配置 Key：请在「设置→生成源」填入（不要硬编码进代码）。"
+                except Exception:
+                    pass
+
+            elif tool_name == "provider_key_status":
+                from app.providers.custom.inline_config import key_status as _ks_q
+                from app.providers.custom.manager import custom_provider_manager as _mgr_q
+                _pid_q = str(arguments.get("provider_id") or "").strip()
+                if _pid_q:
+                    _pd_q = _mgr_q.get_definition(_pid_q)
+                    if not _pd_q:
+                        raise ValueError(f"Provider 不存在: {_pid_q}")
+                    result = _ks_q(_pd_q)
+                else:
+                    rows = []
+                    for d in _mgr_q.list_definitions():
+                        try:
+                            rows.append(_ks_q(d))
+                        except Exception:
+                            continue
+                    result = {"providers": rows, "total": len(rows),
+                              "key_legend": "stored=配置存储(设置→生成源) / inline=明文写在代码(可迁移) / none=未配置"}
+
+            elif tool_name == "migrate_provider_inline_key":
+                _pid_m = str(arguments.get("provider_id") or "").strip()
+                if not _pid_m:
+                    raise ValueError("provider_id 不能为空")
+                from app.providers.custom.inline_config import migrate_inline_key as _mig_m
+                _rewrite_m = arguments.get("rewrite_code", True) is not False
+                result = _mig_m(_pid_m, rewrite_code=_rewrite_m)
 
             elif tool_name == "get_provider_code":
                 # 支持 id/name/q/kind 多维精准或模糊单选
@@ -2519,6 +2747,34 @@ class MCPServerRegistry:
                 else:
                     result = {"tool": tool_name, "arguments": arguments, "hint": "前端画布将执行此指令", "directive": True}
 
+            elif tool_name in ("stage_get_state", "stage_control"):
+                from app.director_stage import ops as _stage_ops
+                from app.providers.project.manager import project_manager as _pm_stage
+                _pid_s = str(arguments.get("project_id") or "").strip()
+                if not _pid_s and isinstance(project_context, dict):
+                    _pid_s = str(project_context.get("id") or project_context.get("project_id") or "")
+                if not _pid_s:
+                    try:
+                        _lst_s = _pm_stage.list_projects() or []
+                        _pid_s = str(_lst_s[0].get("id")) if _lst_s else ""
+                    except Exception:
+                        _pid_s = ""
+                if not _pid_s:
+                    raise ValueError("未找到项目：请先在项目工作台打开一个项目，或在参数里传 project_id")
+                _content_s = _pm_stage.get_content(_pid_s)
+                if not _content_s:
+                    raise ValueError(f"项目不存在或内容为空: {_pid_s}")
+                if tool_name == "stage_get_state":
+                    result = _stage_ops.stage_state(
+                        _content_s,
+                        shot_id=str(arguments.get("shot_id") or ""),
+                        shot_index=arguments.get("shot_index"),
+                    )
+                else:
+                    result = _stage_ops.apply_stage_control(_content_s, arguments)
+                    _pm_stage.save_content(_pid_s, _content_s)
+                result["project_id"] = _pid_s
+
             elif tool_name == "director_3d_stage_plan":
                 framing = arguments.get("framing") or "medium"
                 motion = arguments.get("motion") or "push_in"
@@ -2636,7 +2892,17 @@ class MCPServerRegistry:
         except BaseException as e:
             # SystemExit/KeyboardInterrupt 等必须就地转为普通错误，否则杀死 uvicorn worker 致服务崩溃重启
             elapsed_ms = int((time.time() - start_time) * 1000)
-            return MCPToolCallResponse(tool_name=tool_name, status="error", result=None, error=str(e), execution_time_ms=elapsed_ms)
+            err = str(e)
+            # 生成源/代码节点类错误：附行动建议（缺 Key → 去哪填；余额不足 → 充值/换源；本地服务 → 启动）
+            if tool_name.startswith(("provider_", "customnode_", "test_custom_provider")):
+                try:
+                    from app.providers.error_hints import provider_error_hint
+                    hint = provider_error_hint(err)
+                    if hint and "建议：" not in err:
+                        err = f"{err}｜建议：{hint}"
+                except Exception:
+                    pass
+            return MCPToolCallResponse(tool_name=tool_name, status="error", result=None, error=err, execution_time_ms=elapsed_ms)
 
 
 mcp_registry = MCPServerRegistry()

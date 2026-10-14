@@ -137,6 +137,7 @@ class TestPipelineBehaviorGate(TempStore):
 
     def test_auto_execution_skips_approval_for_high_risk(self):
         p, events = self.make_pipeline(interactive=True)
+        p.skills_read.add("prompt-basics")
         out = run(p.execute("c1", "generate_video", {"prompt": "x"}, run_mode="create_auto"))
         # 未走审批：该工具不存在 → error；关键是没弹审批、也没被判 denied
         self.assertNotEqual(out.status, "denied")
@@ -144,6 +145,7 @@ class TestPipelineBehaviorGate(TempStore):
 
     def test_approve_execution_still_asks(self):
         p, _ = self.make_pipeline(interactive=False)
+        p.skills_read.add("prompt-basics")
         out = run(p.execute("c1", "generate_video", {"prompt": "x"}, run_mode="approve"))
         self.assertEqual(out.status, "denied")
 
@@ -188,6 +190,7 @@ class TestHotSwitchExecutionDim(TempStore):
         from app.agent.runtime.loop import AgentLoop
         sid = self.unique("hot_create_auto")
         lp = AgentLoop(sid, run_mode="create", mode="execute", interactive=True, store=self.store)
+        lp.pipeline.skills_read.add("prompt-basics")  # 预读技能解锁提示词门控，聚焦审批热切换
         events = []
         lp.attach(lambda ev: events.append(ev))
 

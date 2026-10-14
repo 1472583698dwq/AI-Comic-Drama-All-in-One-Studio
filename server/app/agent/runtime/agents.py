@@ -15,8 +15,8 @@ from typing import Any, Dict, List, Optional
 _READ = [
     "search_tools", "list_assets", "get_asset", "canvas_query", "canvas_query_assets",
     "list_image_providers", "list_video_providers", "list_voice_providers", "list_voices",
-    "list_comfyui_workflows", "list_custom_providers", "get_provider_code",
-    "fs_read", "read_skill", "director_3d_stage_plan", "todo_write",
+    "list_comfyui_workflows", "list_custom_providers", "get_provider_code", "provider_key_status",
+    "fs_read", "read_skill", "director_3d_stage_plan", "stage_get_state", "todo_write",
     "view_media", "onekey_review",
     "job_list", "job_status", "task_status",
 ]
@@ -35,6 +35,9 @@ class AgentProfile:
     def allows(self, tool: str) -> bool:
         if tool in self.deny_tools:
             return False
+        if tool == "read_skill":
+            # 只读技能规范：任何角色都可读（生成前的提示词技能门要求各角色自读 SOP，裁剪它会造成死锁）
+            return True
         if self.allow_tools is None:
             return True
         return tool in self.allow_tools
@@ -137,7 +140,7 @@ _add(AgentProfile(
         "最终输出必须含：video_url + verdict=pass/fail + 一句话理由。\n"
         f"{_COMMON_RULES}"
     ),
-    allow_tools=["onekey_shot_video", "onekey_summary", "task_status", "task_wait", "todo_write", "view_media", "onekey_review"],
+    allow_tools=["onekey_shot_video", "onekey_summary", "task_status", "task_wait", "todo_write", "view_media", "onekey_review", "fs_read", "read_skill"],
     max_steps=20,
     background_default=True,
 ))

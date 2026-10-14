@@ -17,7 +17,8 @@ _TOOL_TIMEOUTS: Dict[str, int] = {
     "generate_video": _VIDEO_TIMEOUT_S,
     "export_jianyin_draft": 600,
     "shell_exec": 1200,
-    "split_novel_script": 300,
+    # 拆解=大 JSON LLM 生成（角色+场景+逐镜），慢在模型侧；300s 会把长文本拆解中途掐死
+    "split_novel_script": 900,
     "comfyui_render_node": 1500,
 }
 
@@ -349,11 +350,15 @@ class ToolRegistryView:
             return None
 
     def provider_brief(self, limit: int = 40) -> str:
-        """动态 provider_* 工具速览（基础/高级分组），替代旧 90 行硬编码简介。"""
+        """动态 provider_* 工具速览（基础/高级分组 + Key 状态标记），替代旧 90 行硬编码简介。
+
+        Key 状态常驻可见：🔑=配置存储已配 / ⚠️=明文写在代码（建议迁移）/ ❌=未配置（去设置→生成源）。
+        这样 Agent 无需读码就能知道"该源能不能跑、缺 Key 时要引导用户去哪里填"。
+        """
         lines: List[str] = []
         try:
             for t in self._registry().get_all_tools():
-                if not t.name.startswith("provider_"):
+                if not t.name.startswith("provider_") or t.name == "provider_key_status":
                     continue
                 props = ((t.input_schema or {}).get("properties") or {})
                 basic, adv = [], []
@@ -373,12 +378,33 @@ class ToolRegistryView:
                 slots = [k for k, v in props.items() if isinstance(v, dict) and (
                     v.get("format") == "uri" or v.get("x-handle") in ("image", "audio", "video"))]
                 desc = str(t.description or "")[:80].replace("\n", " ")
-                lines.append(f"- {t.name} — {desc} | 插槽:{','.join(slots) or '无'} | 基础:{','.join(basic) or '无'} 高级:{','.join(adv) or '无'}")
+                key_mark = self._provider_key_mark(t.name)
+                lines.append(f"- {t.name} — {desc} | 插槽:{','.join(slots) or '无'} | 基础:{','.join(basic) or '无'} 高级:{','.join(adv) or '无'}"
+                             + (f" | {key_mark}" if key_mark else ""))
                 if len(lines) >= limit:
                     break
         except Exception as e:
             print(f"[RuntimeTools] provider_brief failed: {e}")
         return "\n".join(lines)
+
+    @staticmethod
+    def _provider_key_mark(tool_name: str) -> str:
+        """自定义代码源的 Key 状态标记（内置源不做判断，避免误报）。"""
+        try:
+            pid = tool_name[len("provider_"):]
+            from app.providers.custom.manager import custom_provider_manager
+            pd = custom_provider_manager.get_definition(pid)
+            if pd is None:
+                return ""
+            from app.providers.custom.inline_config import key_status
+            st = key_status(pd)
+            return {
+                "stored": "🔑Key已配(设置→生成源可改)",
+                "inline": "⚠️Key明文写在代码(建议 migrate_provider_inline_key 迁移)",
+                "none": "❌未配Key(去设置→生成源填)",
+            }.get(st.get("key_source", ""), "")
+        except Exception:
+            return ""
 
 
 tool_view = ToolRegistryView()

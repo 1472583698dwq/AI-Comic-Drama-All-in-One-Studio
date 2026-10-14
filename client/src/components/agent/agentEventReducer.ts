@@ -110,6 +110,18 @@ export function reduceAgentEvent(msg: ChatMsg, ev: AgentEvent): ReduceResult {
         sideEffects.push({ type: 'canvas_tool', tool: name, status: ev.status || '', result: ev.result, error: ev.error });
         sideEffects.push({ type: 'canvas_updated', tool: name });
       }
+      if (name.startsWith('stage_') && ev.status === 'success' && ((ev.result as any)?.stage_patch || (ev.result as any)?.created_shot)) {
+        const r = ev.result as any;
+        if (r.stage_patch && Object.keys(r.stage_patch).length > 0) {
+          sideEffects.push({ type: 'stage_patch', tool: name, shot_id: r.shot_id, shot_index: r.shot_index, patch: r.stage_patch, project_id: r.project_id });
+        }
+        if (r.created_shot) {
+          sideEffects.push({ type: 'stage_patch', tool: name, shot_id: r.shot_id, shot_index: r.shot_index, patch: {}, created_shot: r.created_shot, project_id: r.project_id });
+        }
+      }
+      if (name === 'split_novel_script' && ev.status === 'success' && (ev.result as any)?.persisted) {
+        sideEffects.push({ type: 'project_refresh', tool: name });
+      }
       return { msg: { ...msg, steps, artifacts, errors, plan }, sideEffects };
     }
     case 'todo_write': {
@@ -190,6 +202,14 @@ export function dispatchSideEffects(sideEffects: SideEffect[]) {
           break;
         case 'canvas_updated':
           window.dispatchEvent(new CustomEvent('agent-canvas-updated', { detail: { tool: se.tool } }));
+          break;
+        case 'stage_patch':
+          window.dispatchEvent(new CustomEvent('agent-stage-patch', {
+            detail: { tool: se.tool, shot_id: se.shot_id, shot_index: se.shot_index, patch: se.patch, created_shot: se.created_shot, project_id: se.project_id },
+          }));
+          break;
+        case 'project_refresh':
+          window.dispatchEvent(new CustomEvent('agent-project-refresh', { detail: { tool: se.tool } }));
           break;
       }
     } catch {}

@@ -1006,8 +1006,12 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
-  async testProvider(providerId: string): Promise<any> {
-    const res = await fetch(`${API_BASE_URL}/providers/${encodeURIComponent(providerId)}/test`, { method: 'POST' });
+  async testProvider(providerId: string, live = false): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/providers/${encodeURIComponent(providerId)}/test`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ live }),
+    });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },

@@ -54,6 +54,28 @@ class TestProviderVerification(unittest.TestCase):
         self.assertTrue(res["ok"])
         self.assertTrue(res["verified"])
         self.assertTrue(verification.is_verified("prov_vt_ok"))
+        # 诚实口径：代码源默认只做编译体检，必须标明"未真实调用上游"
+        self.assertEqual(res.get("probe"), "compile")
+        self.assertIn("未真实调用上游", res.get("detail", ""))
+
+    def test_live_probe_failure_carries_hint(self):
+        """live=true 实测失败：真实错误（余额/Key）必须带行动建议，且撤销生产可用标记。"""
+        from app.api.provider_routes import run_provider_test
+        from app.providers import verification
+        from app.providers.custom.manager import custom_provider_manager
+        d = self._defn("prov_vt_live")
+        with mock.patch.object(custom_provider_manager, "get_definition", return_value=d), \
+             mock.patch("app.providers.generic.code_provider.compile_check_code", return_value={"ok": True}), \
+             mock.patch("app.providers.generic.code_provider.GenericCodeVideoProvider.check_health",
+                        new=mock.AsyncMock(return_value=True)), \
+             mock.patch("app.api.provider_routes._live_probe_provider",
+                        new=mock.AsyncMock(return_value=(False, "实测失败：Your balance is insufficient｜建议：去充值"))):
+            res = asyncio.run(run_provider_test("prov_vt_live", live=True))
+        self.assertFalse(res["ok"])
+        self.assertFalse(res["verified"])
+        self.assertEqual(res.get("probe"), "live")
+        self.assertIn("balance", res.get("detail", "").lower())
+        self.assertIn("充值", res.get("hint", ""))
 
     def test_health_fail_revokes_verified(self):
         from app.api.provider_routes import run_provider_test
@@ -77,7 +99,7 @@ class TestProviderVerification(unittest.TestCase):
         with mock.patch("app.api.provider_routes.run_provider_test",
                         new=mock.AsyncMock(return_value=fake)) as m:
             res = asyncio.run(mcp_registry.execute_tool("test_custom_provider", {"provider_id": "prov_mcp"}))
-        m.assert_awaited_once_with("prov_mcp")
+        m.assert_awaited_once_with("prov_mcp", live=False)
         self.assertEqual(res.status, "success")
         self.assertTrue((res.result or {}).get("verified"))
 

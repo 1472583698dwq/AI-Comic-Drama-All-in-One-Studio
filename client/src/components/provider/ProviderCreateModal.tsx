@@ -94,9 +94,11 @@ export const ProviderCreateModal: React.FC<Props> = ({
     let testMsg = '';
     try {
       const t = await apiService.testProvider(provider.id);
-      testMsg = t?.ok ? '连通测试 ✓' : `连通测试未通过：${String(t?.detail || t?.error || '').slice(0, 120)}`;
+      testMsg = t?.ok
+        ? `体检 ✓（${String(t?.detail || '').slice(0, 100)}）`
+        : `检测未通过：${String(t?.detail || t?.error || '').slice(0, 120)}${t?.hint ? `（建议：${String(t.hint).slice(0, 80)}）` : ''}`;
     } catch (e: any) {
-      testMsg = `连通测试失败：${String(e?.message || e).slice(0, 120)}`;
+      testMsg = `检测失败：${String(e?.message || e).slice(0, 120)}`;
     }
     if (resultStatus === 'success') {
       toast.success(`✓ 已创建 ${provider.display_name || provider.name || provider.id} · ${testMsg}`);

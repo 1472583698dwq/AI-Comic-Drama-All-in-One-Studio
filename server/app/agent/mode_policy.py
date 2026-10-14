@@ -33,8 +33,10 @@ PLAN_READONLY_TOOLS = frozenset({
     "list_image_providers", "list_video_providers", "list_voice_providers",
     "list_voices", "list_comfyui_workflows", "list_custom_providers",
     "get_provider_code",
+    "provider_key_status",
     "fs_read", "read_skill",
     "director_3d_stage_plan",
+    "stage_get_state",
     "split_novel_script",
     "creator_inspect_runtime",
     "list_custom_nodes",
@@ -57,13 +59,16 @@ TOOL_RISK: Dict[str, str] = {
     "list_voices": "low", "list_comfyui_workflows": "low", "list_custom_providers": "low",
     "get_provider_code": "low", "canvas_query": "low", "canvas_query_assets": "low",
     "fs_read": "low", "read_skill": "low", "view_media": "low",
-    "director_3d_stage_plan": "low", "split_novel_script": "medium",
+    "director_3d_stage_plan": "low", "stage_get_state": "low",
+    "split_novel_script": "medium",
     # 生成
     "generate_image": "medium", "comfyui_render_node": "medium",
     "generate_voice": "medium", "generate_minimax_voice": "medium",
     "generate_video": "high", "canvas_create_node": "medium",
     "canvas_update_node": "medium", "canvas_connect": "medium",
     "canvas_execute": "high", "canvas_dispatch_skill": "high",
+    # 3D导演台控制（落盘 + 前端实时应用；单镜舞台变更，非破坏性）
+    "stage_control": "medium",
     # 删节点不可逆（连带删线），且会打断已有链路 → 与 canvas_execute 同档。
     # 是否人审由执行维决定（审批=确认，自动=直跑），plan 模式无此工具（只读白名单外）。
     "canvas_delete_node": "high",
@@ -71,6 +76,7 @@ TOOL_RISK: Dict[str, str] = {
     # 能力变更（Creator 提案链，默认走人审）
     "register_custom_provider": "high", "update_custom_provider": "high",
     "delete_custom_provider": "catastrophic", "test_custom_provider": "low",
+    "provider_key_status": "low", "migrate_provider_inline_key": "medium",
     "creator_inspect_runtime": "low", "creator_propose_capability": "medium",
     "creator_start_test": "medium", "creator_finalize": "high",
     # 可信双工具
@@ -154,14 +160,17 @@ def compose_run_mode(behavior: Optional[str], execution: Optional[str]) -> str:
 def tool_risk(tool_name: str) -> str:
     if not tool_name:
         return "low"
+    # 显式表优先：provider_key_status 等复用 provider_ 前缀的内置管理工具按表定级
+    if tool_name in TOOL_RISK:
+        return TOOL_RISK[tool_name]
     if tool_name.startswith("provider_"):
-        # provider_* 按 kind 粗分：含 video 视为 high，其余 medium
+        # provider_* 动态源按 kind 粗分：含 video 视为 high，其余 medium
         return "medium"
     if tool_name.startswith("customnode_"):
         return "medium"
     if tool_name.startswith("plugin_"):
         return "high"
-    return TOOL_RISK.get(tool_name, "medium")
+    return "medium"
 
 
 def requires_confirm(tool_name: str, run_mode: str, has_interactive_channel: bool = True) -> bool:

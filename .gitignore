@@ -111,3 +111,4 @@ storage/gen_timings*.jsonl
 prototypes/
 design/
 .skill/
+storage/logs/

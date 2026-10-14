@@ -243,3 +243,129 @@ def rewrite_inline_key(
         new = new.replace(literal, "")
         notes.append('表达式内字面量已移除，改由 ctx.get("api_key") 读取')
     return new, notes
+
+
+# ============================================================
+# Key 管理单一实现（HTTP 路由 / MCP 工具 / 前端共用）
+# 口径：Key 一律进「配置存储」（设置→生成源），代码里不许留明文。
+# ============================================================
+
+def store_key(provider_id: str, api_key: str) -> bool:
+    """把 Key 写入配置存储（config_store.json + 进程环境变量）。空值/失败返回 False。
+
+    这是「设置→生成源 填 Key」与「内联 Key 迁移」唯一落盘口，避免多处各写一份。
+    """
+    if not api_key:
+        return False
+    try:
+        import json as _json
+        import os as _os
+        from app.core.config import settings as _settings
+        cfg_path = _os.path.join(_settings.STORAGE_DIR, "config_store.json")
+        data: Dict[str, Any] = {}
+        if _os.path.exists(cfg_path):
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                try:
+                    data = _json.load(f)
+                except Exception:
+                    data = {}
+        if not isinstance(data.get("custom_providers"), dict):
+            data["custom_providers"] = {}
+        data["custom_providers"][provider_id] = {"api_key": api_key}
+        data[f"CUSTOM_PROVIDER_{provider_id}"] = api_key
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            _json.dump(data, f, ensure_ascii=False, indent=2)
+        _os.environ[f"CUSTOM_PROVIDER_{provider_id}"] = api_key
+        return True
+    except Exception as e:
+        print(f"[InlineConfig] save api_key failed: {e}")
+        return False
+
+
+def key_status(definition) -> Dict[str, Any]:
+    """Key 状态（只读，全部掩码、绝不含明文）——给 Agent / UI 看清"Key 从哪来、要不要迁移"。
+
+    key_source：
+      - stored：配置存储（设置→生成源）有值，运行时优先用它；
+      - inline：代码里写死明文（reads_ctx_key=false 时设置页填 Key 也不生效，必须迁移）；
+      - none  ：未配置。
+    """
+    eff = effective_config(definition)
+    src = eff.get("key_source", "none")
+    label = {"stored": "配置存储（设置→生成源）", "inline": "代码内联明文（建议迁移）", "none": "未配置"}.get(src, src)
+    hint = ""
+    if src == "none":
+        hint = "未配置 Key：请在「设置→生成源」填入（或让用户填入），不要写进代码。"
+    elif src == "inline":
+        hint = ("代码里写死了明文 Key：建议迁移到配置存储（migrate_provider_inline_key，Key 不会进入对话上下文）；"
+                + ("该源不读注入 Key，设置页填的 Key 当前不生效。" if not eff.get("reads_ctx_key") else "该源读注入 Key，迁移后设置页改 Key 即刻生效。"))
+    else:
+        hint = "Key 已在配置存储；换 Key 请到「设置→生成源」，改完用「测试→实测」验证。"
+    return {
+        "provider_id": eff.get("provider_id", ""),
+        "key_source": src,
+        "key_from": label,
+        "key_masked": eff.get("stored_masked") or eff.get("inline_key_masked") or "",
+        "reads_ctx_key": bool(eff.get("reads_ctx_key")),
+        "migratable": bool(eff.get("inline_key")),
+        "env_name": eff.get("env_name", ""),
+        "hint": hint,
+    }
+
+
+def migrate_inline_key(provider_id: str, rewrite_code: bool = True) -> Dict[str, Any]:
+    """把代码里的内联 Key 迁到配置存储（可选改写代码为读 ctx 注入）。
+
+    关键：Key 从代码里直接读出写盘，**不经过任何返回值/对话上下文**；返回体只有掩码。
+    """
+    from app.providers.custom.manager import custom_provider_manager
+
+    pd = custom_provider_manager.get_definition(provider_id)
+    if not pd:
+        raise ValueError(f"Provider 不存在: {provider_id}")
+    if getattr(pd, "provider_type", "") != "code":
+        raise ValueError("仅代码型自定义源存在「隐式配置」，无需迁移")
+    eff = effective_config(pd)
+    literal = eff.get("inline_key") or ""
+    if not literal:
+        return {"status": "noop", "provider_id": provider_id, "key_status": key_status(pd),
+                "note": "代码里没有找到内联 Key，无需迁移"}
+    ok = store_key(provider_id, literal)
+    if not ok:
+        raise RuntimeError("写入配置存储失败（检查 storage/config_store.json 权限）")
+    env_name = getattr(getattr(pd, "auth", None), "key_env", None) or f"CUSTOM_PROVIDER_{provider_id}"
+    try:
+        if getattr(pd, "auth", None) is None:
+            from app.models.provider_definition import ProviderAuthConfig
+            pd.auth = ProviderAuthConfig(type="bearer", key_env=env_name)
+        elif not pd.auth.key_env:
+            pd.auth.key_env = env_name
+    except Exception:
+        pass
+    notes: List[str] = []
+    if rewrite_code:
+        new_code, notes = rewrite_inline_key(
+            pd.code or "", pd.language or "python", literal, eff.get("inline_key_name") or None, env_name,
+        )
+        if new_code != (pd.code or ""):
+            pd.code = new_code
+    custom_provider_manager.save_definition(pd)
+    try:
+        from app.providers.init_providers import register_single_custom_provider
+        register_single_custom_provider(pd)  # 热注册：运行中的进程立刻用上新代码/新 Key
+    except Exception as e:
+        print(f"[InlineConfig] migrate hot-register failed {provider_id}: {e}")
+    try:
+        from app.providers import verification
+        verification.clear(provider_id)  # 代码/Key 变更 → 需重新测试
+    except Exception:
+        pass
+    return {
+        "status": "success",
+        "provider_id": provider_id,
+        "env_name": env_name,
+        "rewritten": bool(notes),
+        "notes": notes,
+        "key_status": key_status(pd),
+        "hint": "Key 已迁到配置存储（不再有明文进代码）；换 Key 在「设置→生成源」，改完用「测试→实测」验证。",
+    }

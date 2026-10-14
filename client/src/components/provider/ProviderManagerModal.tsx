@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { X, Plus, Plug, Globe, Video, Mic, Cpu, Trash2, Edit3, Activity, Save, FileText } from 'lucide-react';
+import { X, Plus, Plug, Globe, Video, Mic, Cpu, Trash2, Edit3, Activity, Save, FileText, Zap } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { CAPABILITIES_BY_KIND, getCapabilities } from './providerCapabilities';
 import { confirmAsync, toast } from '../../stores/useDialogStore';
@@ -79,12 +79,23 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
       window.dispatchEvent(new Event('provider-list-refresh'));
     } catch(e:any){ toast.error(e.message || '删除失败'); }
   };
-  const handleTest = async (id:string)=>{
+  const handleTest = async (id:string, live = false)=>{
+    if (live) {
+      const okConfirm = await confirmAsync({
+        title: '实测生成源',
+        message: `会对「${id}」真调一次上游最小请求（可能消耗少量额度），用于验证 Key / 余额 / 地址是否真的可用。继续？`,
+        confirmText: '实测一次',
+        cancelText: '取消',
+      });
+      if (!okConfirm) return;
+    }
     try {
-      const res = await apiService.testProvider(id);
-      if (res.ok) toast.success(`✓ ${id} 连通正常`);
-      else toast.error(`✗ ${id} 检测未通过: ${res.detail || JSON.stringify(res)}`);
+      const res = await apiService.testProvider(id, live);
+      const detail = String(res.detail || '').slice(0, 200);
+      if (res.ok) toast.success(`✓ ${id}：${detail}`);
+      else toast.error(`✗ ${id}：${detail}${res.hint ? `（建议：${res.hint}）` : ''}`);
       await fetchAll();
+      window.dispatchEvent(new Event('provider-list-refresh'));
     } catch(e:any){ toast.error(e.message || '测试失败'); }
   };
   const handleSaveEdit = async ()=>{
@@ -252,7 +263,8 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
                     <span className="ml-auto flex items-center gap-1">{p.health?.ok ? <span className="w-2 h-2 rounded-full bg-emerald-500"/> : p.health?.ok===false ? <span className="w-2 h-2 rounded-full bg-amber-500"/> : null}{p.builtin?'':<span className="px-1 py-0.5 rounded bg-surface/80">{p.params_schema ? Object.keys(p.params_schema.properties||{}).length+' 参数' : '无参'}</span>}</span>
                   </div>
                   <div className="flex items-center gap-1.5 pt-1">
-                    <button onClick={()=> handleTest(p.id)} className="flex-1 py-1.5 rounded-lg bg-surface/80 border border-white/70 dark:border-white/12 text-xs text-white hover:border-brand flex items-center justify-center gap-1"><Activity className="w-3 h-3"/> 测试</button>
+                    <button onClick={()=> handleTest(p.id)} title="体检/配置检查（不真调上游，不消耗额度）" className="flex-1 py-1.5 rounded-lg bg-surface/80 border border-white/70 dark:border-white/12 text-xs text-white hover:border-brand flex items-center justify-center gap-1"><Activity className="w-3 h-3"/> 测试</button>
+                    <button onClick={()=> handleTest(p.id, true)} title="实测一次：真调上游最小请求，验证 Key / 余额 / 地址（可能消耗额度）" className="flex-1 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-emerald-300 text-xs flex items-center justify-center gap-1"><Zap className="w-3 h-3"/> 实测</button>
                     <button onClick={()=> openEdit(p)} className="flex-1 py-1.5 rounded-lg bg-brand/10 border border-brand/20 text-brand-light text-xs flex items-center justify-center gap-1"><Edit3 className="w-3 h-3"/> {p.builtin?'查看':'编辑'}</button>
                     {!p.builtin && <button onClick={()=> handleDelete(p.id)} className="px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs flex items-center gap-1"><Trash2 className="w-3 h-3"/> 删除</button>}
                   </div>
@@ -309,7 +321,12 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
                         className="px-2.5 py-2 rounded-lg bg-surface/80 border border-white/70 dark:border-white/12 text-[11px] text-gray-400 hover:text-white shrink-0"
                       >清除</button>
                     </div>
-                    <div className="text-[10.5px] text-gray-500">代码里用 <code className="font-mono">api.get("api_key")</code> 取，不用写死在代码中</div>
+                    <div className="text-[10.5px] text-gray-500 leading-4">
+                      <b className="text-gray-300">换 Key 只在这里改</b>（写入本机配置，运行时优先注入）：代码里用
+                      <code className="font-mono"> api.get("api_key")</code> / <code className="font-mono">ctx.get("api_key")</code> 取，
+                      <b className="text-amber-300">不要写死在代码中</b>；若代码里已有明文 Key，去「设置→能力」或让 Agent 调
+                      <code className="font-mono"> migrate_provider_inline_key</code> 一键迁移（Key 不会进入对话）。
+                    </div>
                   </div>
                 )}
                 {[

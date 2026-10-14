@@ -104,7 +104,10 @@ def get_draft(draft_id: str) -> Optional[OneKeyDraft]:
 def _need_draft(args: Dict[str, Any]) -> "OneKeyDraft | Dict[str, Any]":
     d = get_draft(str((args or {}).get("draft_id") or ""))
     if d is None:
-        return {"error": "draft_id 不存在或已过期（请用 onekey 任务创建的 draft_id）"}
+        return {"error": ("draft_id 不存在或已过期：一键成片草稿目前是**内存对象**，需在项目页点「⚡ 一键成片」"
+                          "由前端创建（服务重启/换会话后旧 draft_id 即失效，项目 ID / 剧本 ID 都不能当 draft_id）。"
+                          "只想摆 3D 白模不动成片的话，用 stage_get_state / stage_control / split_novel_script，"
+                          "它们直接作用于项目分镜，不需要 draft_id。")}
     return d
 
 

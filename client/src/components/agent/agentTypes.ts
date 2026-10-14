@@ -37,7 +37,9 @@ export type SideEffect =
   | { type: 'plugin_refresh' }
   | { type: 'template_refresh' }
   | { type: 'canvas_tool'; tool: string; status: string; result?: any; error?: string }
-  | { type: 'canvas_updated'; tool: string };
+  | { type: 'canvas_updated'; tool: string }
+  | { type: 'stage_patch'; tool: string; shot_id?: string; shot_index?: number; patch: any; created_shot?: any; project_id?: string }
+  | { type: 'project_refresh'; tool: string };
 
 export interface ToolStep {
   id: string;

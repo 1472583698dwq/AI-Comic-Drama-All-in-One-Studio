@@ -93,7 +93,8 @@ def _director_prompt(draft_id: str, req: "OneKeyRunRequest", team=None) -> str:
         )
     else:
         skill_line = (
-            "写/改提示词建议先 read_skill（视频优先 minimax-h3-prompt，通用兜底 prompt-basics），"
+            "写/改任何图片/视频提示词前必须先 read_skill（视频优先 minimax-h3-prompt，通用兜底 prompt-basics）："
+            "执行口硬门控会直接拒绝未读技能的生成调用；"
             "成稿经 prompt_override 传入；不写则工具会用六要素兜底提示词。\n"
         )
     return (

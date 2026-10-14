@@ -515,11 +515,13 @@ class TestToolPipeline(TempStore):
 
     def test_approval_fail_closed_without_channel(self):
         p, _ = self.make_pipeline(interactive=False)
+        p.skills_read.add("prompt-basics")
         out = run(p.execute("c1", "generate_video", {"prompt": "x"}, run_mode="approve"))
         self.assertEqual(out.status, "denied")
 
     def test_approval_granted_via_future(self):
         p, events = self.make_pipeline(interactive=True)
+        p.skills_read.add("prompt-basics")
 
         async def scenario():
             task = asyncio.create_task(p.execute("c1", "generate_video", {"prompt": "x"}, run_mode="approve"))
@@ -769,6 +771,7 @@ class TestJobsSubagentBatch(SubagentFeatureOn):
         from app.agent.tools.pipeline import ToolOutcome
         lp = AgentLoop(self.unique("job"), store=self.store)
         lp.jobs.notify_fn = None  # 不唤醒驱动，避免真实模型调用
+        lp.pipeline.skills_read.add("prompt-basics")  # 预读技能解锁提示词门控，聚焦 job 生命周期
 
         async def fake_run_tool(call_id, name, args, ctx, rm):
             await asyncio.sleep(0.05)
@@ -857,6 +860,7 @@ class TestRunModeHotSwitch(SubagentFeatureOn):
         from app.agent.runtime.loop import AgentLoop
         sid = self.unique("hot_switch")
         lp = AgentLoop(sid, run_mode="approve", mode="execute", interactive=True, store=self.store)
+        lp.pipeline.skills_read.add("prompt-basics")  # 预读技能解锁提示词门控，聚焦审批热切换
         events = []
         lp.attach(lambda ev: events.append(ev))
 
@@ -1376,6 +1380,9 @@ class TestTransportIntegration(TempStore):
         import app.agent.runtime.loop as loop_mod
         replies = [
             AssistantReply(content="", tool_calls=[ToolCall(
+                id="c0", name="read_skill",
+                arguments='{"name": "prompt-basics"}', parsed={"name": "prompt-basics"})]),
+            AssistantReply(content="", tool_calls=[ToolCall(
                 id="c1", name="generate_video",
                 arguments='{"prompt":"x"}', parsed={"prompt": "x"})]),
             AssistantReply(content="已处理"),
@@ -1492,6 +1499,7 @@ class TestApprovalAudit(TempStore):
         sid = self.unique("audit_pipe")
         s = Session.open(sid, store=self.store)
         p = ToolPipeline(sid, emit, interactive=False, session=s)
+        p.skills_read.add("prompt-basics")
         out = run(p.execute("c1", "generate_video", {"prompt": "x"}, run_mode="approve"))
         self.assertEqual(out.status, "denied")
         self.assertEqual(out.meta.get("approval"), "non_interactive")

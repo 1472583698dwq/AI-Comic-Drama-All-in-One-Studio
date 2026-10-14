@@ -813,25 +813,10 @@ class ProviderCreateRequest(BaseModel):
 
 
 def _save_api_key(provider_id: str, api_key: str):
-    if not api_key:
-        return
+    """写入配置存储（单一实现已下沉到 inline_config.store_key：HTTP/MCP/迁移三处共用）。"""
     try:
-        import json as _json
-        cfg_path = os.path.join(settings.STORAGE_DIR, "config_store.json")
-        data: Dict[str, Any] = {}
-        if os.path.exists(cfg_path):
-            with open(cfg_path, "r", encoding="utf-8") as f:
-                try:
-                    data = _json.load(f)
-                except Exception:
-                    data = {}
-        if "custom_providers" not in data or not isinstance(data["custom_providers"], dict):
-            data["custom_providers"] = {}
-        data["custom_providers"][provider_id] = {"api_key": api_key}
-        data[f"CUSTOM_PROVIDER_{provider_id}"] = api_key
-        with open(cfg_path, "w", encoding="utf-8") as f:
-            _json.dump(data, f, ensure_ascii=False, indent=2)
-        os.environ[f"CUSTOM_PROVIDER_{provider_id}"] = api_key
+        from app.providers.custom.inline_config import store_key
+        store_key(provider_id, api_key)
     except Exception as e:
         print(f"[ProviderRoutes] save api_key failed: {e}")
 
@@ -1075,20 +1060,64 @@ class ProviderNotFound(ValueError):
     """测试/查询时生成源不存在（HTTP 404，MCP 直接透出错误）。"""
 
 
-async def run_provider_test(provider_id: str) -> Dict[str, Any]:
+async def _live_probe_provider(kind: str, provider_id: str) -> tuple:
+    """实测探针：真调一次最小生成请求（可能消耗额度），把上游的真实错误带回来。
+
+    返回 (ok, detail)。超时按"提交已通过"处理（鉴权/参数在提交环节已验证）；
+    失败时附行动建议（Key/余额/地址）。
+    """
+    import asyncio as _asyncio
+    from app.providers.error_hints import provider_error_hint
+    try:
+        timeout_s = float(os.environ.get("PROVIDER_LIVE_TEST_TIMEOUT_S") or 180)
+    except Exception:
+        timeout_s = 180.0
+    try:
+        if kind == "image":
+            from app.providers.image.registry import image_registry as _reg
+            from app.providers.image.base import ImageGenerateRequest
+            req = ImageGenerateRequest(prompt="connectivity test: a grey cube on white background", aspect_ratio="1:1")
+            coro = _reg.generate(req, provider_id=provider_id)
+        elif kind == "video":
+            from app.providers.video.registry import video_registry as _reg
+            from app.providers.video.base import VideoGenerateRequest
+            req = VideoGenerateRequest(prompt="connectivity test: static shot, a grey cube on a table", mode="t2v", duration=4)
+            coro = _reg.generate(req, provider_id=provider_id)
+        else:
+            from app.providers.audio.registry import audio_registry as _reg
+            from app.providers.audio.base import AudioGenerateRequest
+            req = AudioGenerateRequest(text="连通测试", voice_id="", emotion="")
+            coro = _reg.generate(req, provider_id=provider_id)
+        await _asyncio.wait_for(coro, timeout=timeout_s)
+        return True, "实测通过（已真实调用上游一次，可能消耗少量额度）"
+    except _asyncio.TimeoutError:
+        return True, f"实测已提交但 {int(timeout_s)}s 内未返回终态（鉴权与提交环节已通过；生成结果以任务查询为准）"
+    except Exception as e:
+        msg = str(e)[:300]
+        hint = provider_error_hint(msg)
+        return False, f"实测失败：{msg}" + (f"｜建议：{hint}" if hint else "")
+
+
+async def run_provider_test(provider_id: str, live: bool = False) -> Dict[str, Any]:
     """统一「连通测试 + 生产可用验证标记」的唯一实现（HTTP 路由与 MCP test_custom_provider 共用）。
 
     测试联通即授予生产端（画布/分镜选择器）可见资格；失败/改代码/改 Key 后撤销。
+    诚实口径（probe 字段）：
+      - compile：代码源只做了语法/沙箱编译体检，**没有真调上游**；
+      - health ：内置源走自身健康探针（部分源仅校验配置存在，同样不一定真调上游）；
+      - live   ：显式 live=True 才真调一次上游（可能消耗额度）。
     """
     pd = custom_provider_manager.get_definition(provider_id)
     prov = None
     kind = None
     compile_check = None
+    code_probe = False
     if pd and not pd.code and getattr(pd, "provider_type", "") != "comfyui":
         # 非代码（JSON 模板）模式已删除：无代码的定义不可测试，需先升级为代码
         raise ValueError("该源为非代码（JSON 模板）模式，已废弃；请先升级为代码模式")
     if pd and pd.code:
         kind = pd.kind
+        code_probe = True
         try:
             from app.providers.generic.code_provider import GenericCodeImageProvider, GenericCodeAudioProvider, GenericCodeVideoProvider
             if kind == "image":
@@ -1108,6 +1137,7 @@ async def run_provider_test(provider_id: str) -> Dict[str, Any]:
         if not cc.get("ok"):
             verification.mark(provider_id, False, f"代码体检未通过: {cc.get('error')}", kind or "")
             return {"provider_id": provider_id, "ok": False, "is_configured": True, "kind": kind,
+                    "probe": "compile",
                     "detail": f"代码体检未通过: {cc.get('error')}", "compile_check": cc, "verified": False}
     else:
         try:
@@ -1126,28 +1156,51 @@ async def run_provider_test(provider_id: str) -> Dict[str, Any]:
     try:
         ok = await prov.check_health()
         is_configured = prov.is_configured() if hasattr(prov, "is_configured") else True
+        probe = "compile" if code_probe else "health"
+        if ok and live:
+            kind2 = kind or getattr(prov, "kind", "image")
+            ok, detail = await _live_probe_provider(kind2, provider_id)
+            probe = "live"
+        elif not ok:
+            detail = "检测未通过（检查代码/ Key/地址）"
+        elif code_probe:
+            detail = "代码体检通过（语法/沙箱编译 OK；未真实调用上游——点「实测」会真调一次，可能消耗额度）"
+        else:
+            detail = "配置/健康探针通过（部分内置源仅校验配置存在，不保证真连通；点「实测」可真调一次）"
         # 测试联通即授予“生产可用”资格；失败则撤销，未验证的源不会出现在生产端
         verified = bool(ok and is_configured)
-        verification.mark(provider_id, verified,
-                         "连通正常" if ok else "检测未通过（检查代码/ Key/地址）",
-                         kind or getattr(prov, "id", ""))
+        verification.mark(provider_id, verified, detail, kind or getattr(prov, "id", ""))
         resp = {"provider_id": provider_id, "ok": ok, "is_configured": is_configured,
-                "verified": verified,
+                "verified": verified, "probe": probe,
                 "kind": kind or getattr(prov, "kind", "unknown"),
-                "detail": "连通正常" if ok else "检测未通过（检查代码/ Key/地址）"}
+                "detail": detail}
+        if not ok:
+            from app.providers.error_hints import provider_error_hint
+            hint = provider_error_hint(detail)
+            if hint:
+                resp["hint"] = hint
         if compile_check is not None:
             resp["compile_check"] = compile_check
         return resp
     except Exception as e:
         verification.mark(provider_id, False, f"检测异常: {e}", kind or "")
-        return {"provider_id": provider_id, "ok": False, "verified": False, "detail": f"检测异常: {e}"}
+        from app.providers.error_hints import provider_error_hint
+        hint = provider_error_hint(str(e))
+        out = {"provider_id": provider_id, "ok": False, "verified": False, "detail": f"检测异常: {e}"}
+        if hint:
+            out["hint"] = hint
+        return out
 
 
 @router.post("/providers/{provider_id}/test")
 async def test_provider(provider_id: str, body: Optional[Dict[str, Any]] = Body(None)):
-    """HTTP 连通测试（与 MCP test_custom_provider 共用同一实现，保证验证语义一致）。"""
+    """HTTP 连通测试（与 MCP test_custom_provider 共用同一实现，保证验证语义一致）。
+
+    body: {"live": true} 时真调一次上游最小请求（可能消耗额度）；缺省只做体检/配置检查。
+    """
     try:
-        return await run_provider_test(provider_id)
+        live = bool((body or {}).get("live"))
+        return await run_provider_test(provider_id, live=live)
     except ProviderNotFound as e:
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
@@ -1385,47 +1438,21 @@ async def get_provider_effective_config(provider_id: str):
 
 @router.post("/providers/{provider_id}/migrate-inline-key")
 async def migrate_provider_inline_key(provider_id: str, body: Optional[MigrateInlineKeyRequest] = Body(None)):
-    """把代码里的内联 Key 迁到配置存储 CUSTOM_PROVIDER_<id>，可选同时改写代码（改从 ctx 读）。"""
-    from app.providers.custom.inline_config import effective_config, mask_secret, rewrite_inline_key
-    pd = custom_provider_manager.get_definition(provider_id)
-    if not pd:
-        raise HTTPException(status_code=404, detail=f"Provider 不存在: {provider_id}")
-    eff = effective_config(pd)
-    literal = eff.get("inline_key") or ""
-    if not literal:
-        raise HTTPException(status_code=400, detail="代码里没有找到内联 Key，无需迁移")
+    """把代码里的内联 Key 迁到配置存储 CUSTOM_PROVIDER_<id>，可选同时改写代码（改从 ctx 读）。
 
+    实现已下沉到 inline_config.migrate_inline_key（HTTP 与 MCP 工具共用，返回体只有掩码）。
+    """
+    from app.providers.custom.inline_config import migrate_inline_key as _migrate
     rewrite = True if body is None else bool(body.rewrite_code)
-    _save_api_key(provider_id, literal)
-    if not pd.auth.key_env:
-        pd.auth.key_env = f"CUSTOM_PROVIDER_{provider_id}"
-
-    notes: List[str] = []
-    if rewrite:
-        const_name = eff.get("inline_key_name") or ""
-        new_code, notes = rewrite_inline_key(
-            pd.code or "", pd.language or "python", literal, const_name or None, pd.auth.key_env,
-        )
-        if new_code != (pd.code or ""):
-            pd.code = new_code
-
-    custom_provider_manager.save_definition(pd)
     try:
-        from app.providers.init_providers import register_single_custom_provider
-        register_single_custom_provider(pd)  # 热注册：运行中的进程立刻用上新代码/新 Key
-    except Exception as e:
-        print(f"[ProviderRoutes] migrate inline key hot register failed {provider_id}: {e}")
-    verification.clear(provider_id)  # 代码/Key 变更 → 需重新测试
-    return {
-        "status": "success",
-        "provider_id": provider_id,
-        "env_name": pd.auth.key_env,
-        "key_source": "stored",
-        "stored_masked": mask_secret(literal),
-        "rewritten": bool(notes),
-        "notes": notes,
-        "effective": effective_config(pd),
-    }
+        res = _migrate(provider_id, rewrite_code=rewrite)
+    except ValueError as e:
+        msg = str(e)
+        status = 404 if msg.startswith("Provider 不存在") else 400
+        raise HTTPException(status_code=status, detail=msg)
+    if res.get("status") == "noop":
+        raise HTTPException(status_code=400, detail=res.get("note") or "代码里没有找到内联 Key，无需迁移")
+    return res
 
 
 @router.get("/providers/custom/stats")

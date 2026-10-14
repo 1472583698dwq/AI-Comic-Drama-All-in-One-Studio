@@ -26,6 +26,31 @@ VALID_FRAMINGS = {"close_up", "extreme_close_up", "medium", "full", "long", "bir
 VALID_MOTIONS = {"static", "push_in", "pull_out", "pan_left", "pan_right", "tilt_up", "tilt_down", "orbit", "shake"}
 VALID_EMOTIONS = {"neutral", "intense", "sorrow", "excited", "fearful", "whispering"}
 
+# 空 shots 兜底：镜头节拍循环（连续打斗等文本被 LLM 只归纳成场景时的保底拆解）
+_FALLBACK_FRAMINGS = ["full", "medium", "close_up", "extreme_close_up", "medium", "low_angle"]
+_FALLBACK_MOTIONS = ["push_in", "pan_right", "shake", "static", "pull_out", "orbit"]
+
+
+def _fallback_beats(text: str, max_beats: int = 24) -> List[str]:
+    """把整段文本切成动作节拍（按句读/换行），供无 shots 的场景兜底成镜。
+
+    短碎句（<6 字，如「甲出刀。」）两两合并成一个节拍；正常句子各自成拍。
+    """
+    parts = [p.strip() for p in re.split(r"(?<=[。！？!?；;，,])|\n+", text or "") if p and p.strip()]
+    beats: List[str] = []
+    buf = ""
+    for p in parts:
+        if buf:
+            beats.append((buf + p)[:110])
+            buf = ""
+        elif len(p) < 6:
+            buf = p
+        else:
+            beats.append(p[:110])
+    if buf:
+        beats.append(buf[:110])
+    return [b for b in beats if b.strip()][:max_beats]
+
 
 class ScriptParserAgent:
     """长篇小说 → 结构化分镜剧本（MiniMax LLM 真实拆解）"""
@@ -65,6 +90,8 @@ class ScriptParserAgent:
 2.1 每个场景（scenes[]）必须额外给出**场景资产定义**（用于生成无人的场景参考图，保证全片空间一致）：
    - image_prompt: 该场景的空镜英文 Prompt（只画环境：地点/时间/天气/光线/氛围/标志性陈设与道具，**不要出现人物**）
    - props: 该场景的关键道具清单（2~5 个短词，如 ["旧木凳","搪瓷杯"]），镜头与场景参考图都需包含这些道具
+2.2 **shots 数组绝不允许为空**：每个场景至少 2 镜。连续打斗/连续动作的段落必须按招式节拍逐镜拆解
+   （如：起手→突进→兵刃相撞→格挡→反击→命中→收势），每镜一个清晰动作+一个运镜，不要只做场景概括。
 3. 画风设定：{style_preset} ({STYLE_PROMPTS.get(style_preset, '')})
 4. 画幅比例：{aspect_ratio}
 
@@ -118,7 +145,7 @@ class ScriptParserAgent:
         # 拆解 JSON 很大（角色+场景+每镜多字段 prompt），max_tokens 要给足；
         # 若源端拒绝大值（HTTP 400 提到 tokens），自动降档重试。总时限防网关挂起。
         preferred = int(os.environ.get("ONEKEY_SPLIT_MAX_TOKENS") or 32768)
-        timeout_s = float(os.environ.get("ONEKEY_SPLIT_TIMEOUT_S") or 300)
+        timeout_s = float(os.environ.get("ONEKEY_SPLIT_TIMEOUT_S") or 600)
         data: Dict[str, Any] = {}
         last_err: Exception | None = None
         for mt in (preferred, 16384, 8192):
@@ -195,6 +222,32 @@ class ScriptParserAgent:
                 props=[str(x)[:40] for x in (s.get("props") or []) if str(x).strip()][:6],
                 shots=shots
             ))
+
+        # 兜底修复：LLM 只给出场景、shots 为空（连续打斗常见）→ 按文本节拍补镜头，保证项目不落成 0 镜
+        empty = [sc for sc in scenes if not sc.shots]
+        if empty:
+            beats = _fallback_beats(novel_text)
+            bi = 0
+            for sc in empty:
+                take = beats[bi:bi + 4]
+                bi += 4
+                if not take:
+                    take = [f"{sc.title}：环境与人物状态镜头（{sc.atmosphere or '场景' }）"]
+                for j, beat in enumerate(take):
+                    sc.shots.append(StoryboardShot(
+                        id=str(uuid.uuid4()),
+                        shot_index=j + 1,
+                        camera_framing=_FALLBACK_FRAMINGS[j % len(_FALLBACK_FRAMINGS)],
+                        camera_motion=_FALLBACK_MOTIONS[j % len(_FALLBACK_MOTIONS)],
+                        action_desc=beat,
+                        dialogue="",
+                        voiceover="",
+                        emotion="intense" if any(k in beat for k in ("刀", "剑", "击", "闪", "拳", "撞", "劈", "挡")) else "neutral",
+                        image_prompt=(f"{sc.image_prompt}, " if sc.image_prompt else "") + beat,
+                        duration=3.0,
+                        subtitle_text=beat,
+                        status="ready",
+                    ))
 
         return Project(
             id=str(uuid.uuid4()),

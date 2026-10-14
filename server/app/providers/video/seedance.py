@@ -7,8 +7,13 @@ Seedance 默认视频生成源 (内置, 字节火山引擎 Ark)
 模型: 填模型名 (doubao-seedance-2-0-260128 / -fast-260128 / doubao-seedance-2-5-260628)
       或推理接入点 id (ep-xxxxxxxxxxxxxx-xxxxx)，两者都接受
 参数分层 (照已验证的 sd25pe 口径): generate_audio/return_last_frame/draft 走 JSON 顶层，
-      resolution/ratio/duration/watermark 必须拼成 --xxx 追加在 prompt 尾部；
-      有参考素材时不传 ratio；有参考视频时 duration 强制 -1 且带 omni_reference_task_type=edit
+      resolution/ratio/duration/watermark 必须拼成 --xxx 追加在 prompt 尾部。
+      参考素材口径按模型分档（2026-07 官方 2.5 发布）：
+      - 2.0 系列：参考图≤9/参考视频≤3(2-15s)，有参考视频=编辑任务（omni_reference_task_type=edit，duration 强制 -1）；
+      - 2.5：参考图≤30/参考视频≤10(各 2-30s，合计≤30s)/参考音频≤10，单段时长 4-30s；
+        有参考视频=参考生视频（omni_reference_task_type=reference，时长可指定）；
+        编辑/延长才用 edit/extend；纯参考素材可显式指定 ratio。
+      有首帧/尾帧时 ratio 走 adaptive（不传，由素材决定画幅）。
 鉴权: Bearer SEEDANCE_API_KEY (火山 Ark API Key)
 缺 Key 时 is_configured()=False, 注册表自动跳过。
 注意: 输入含真人脸会被上游审核拒绝, 请用模型生成/非写实素材。
@@ -97,7 +102,7 @@ class SeedanceVideoProvider(VideoProvider):
             "supports_reference": True,
             "supports_reference_video": True,
             "supports_reference_audio": True,
-            "max_duration": 15,
+            "max_duration": 30,
             "min_duration": 4,
             "resolutions": ["480p", "720p", "1080p"],
             "doc_url": DOC_URL,
@@ -110,9 +115,9 @@ class SeedanceVideoProvider(VideoProvider):
                     "prompt": {"type": "string", "description": "文本提示词(中≤500字/英≤1000词)", "x-handle": "text", "x-role": "prompt"},
                     "first_frame": {"type": "string", "format": "uri", "description": "首帧图", "x-handle": "image", "x-slot": "first_frame"},
                     "last_frame": {"type": "string", "format": "uri", "description": "尾帧图(需配首帧)", "x-handle": "image", "x-slot": "last_frame"},
-                    "reference_images": {"type": "array", "items": {"type": "string", "format": "uri"}, "description": "参考图≤9, 单张≤30MB", "x-handle": "image", "x-slot": "reference_images", "maxItems": 9, "minItems": 0},
-                    "reference_videos": {"type": "array", "items": {"type": "string", "format": "uri"}, "description": "参考视频≤3, 单段2-15s", "x-handle": "video", "x-slot": "reference_videos", "maxItems": 3, "minItems": 0},
-                    "reference_audios": {"type": "array", "items": {"type": "string", "format": "uri"}, "description": "参考音频≤3 (需配图文)", "x-handle": "audio", "x-slot": "ref_audio", "maxItems": 3, "minItems": 0},
+                    "reference_images": {"type": "array", "items": {"type": "string", "format": "uri"}, "description": "参考图：2.5≤30 / 2.0≤9，单张≤30MB", "x-handle": "image", "x-slot": "reference_images", "maxItems": 30, "minItems": 0},
+                    "reference_videos": {"type": "array", "items": {"type": "string", "format": "uri"}, "description": "参考视频（白模/clay pass 走这里）：2.5≤10 段(各2-30s 合计≤30s) / 2.0≤3 段(各2-15s)；需公网 HTTPS", "x-handle": "video", "x-slot": "reference_videos", "maxItems": 10, "minItems": 0},
+                    "reference_audios": {"type": "array", "items": {"type": "string", "format": "uri"}, "description": "参考音频：2.5≤10 / 2.0≤3 (需配图文)", "x-handle": "audio", "x-slot": "ref_audio", "maxItems": 10, "minItems": 0},
                 },
                 "required": ["prompt"],
             },
@@ -120,9 +125,10 @@ class SeedanceVideoProvider(VideoProvider):
                 "type": "object",
                 "properties": {
                     "resolution": {"type": "string", "title": "分辨率", "enum": ["480p", "720p", "1080p"], "default": "720p", "description": "fast/mini最高720p, 标准版可用1080p", "x-category": "layout", "x-visibility": "basic", "x-agent": "auto", "x-priority": 20},
-                    "ratio": {"type": "string", "title": "宽高比", "enum": ["adaptive", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9"], "default": "adaptive", "description": "首尾帧建议adaptive", "x-category": "layout", "x-visibility": "basic", "x-agent": "auto", "x-priority": 10},
-                    "duration": {"type": "integer", "title": "时长(秒)", "default": 5, "minimum": 4, "maximum": 15, "description": "4-15整数秒", "x-category": "motion", "x-visibility": "basic", "x-agent": "auto", "x-priority": 30},
+                    "ratio": {"type": "string", "title": "宽高比", "enum": ["adaptive", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9"], "default": "adaptive", "description": "首尾帧建议adaptive；2.5 纯参考素材可显式指定", "x-category": "layout", "x-visibility": "basic", "x-agent": "auto", "x-priority": 10},
+                    "duration": {"type": "integer", "title": "时长(秒)", "default": 5, "minimum": 4, "maximum": 30, "description": "2.5: 4-30整数秒（参考视频时也可指定）；2.0: 4-15", "x-category": "motion", "x-visibility": "basic", "x-agent": "auto", "x-priority": 30},
                     "generate_audio": {"type": "boolean", "title": "原生有声", "default": True, "description": "音画联合生成台词/音效/BGM", "x-category": "audio", "x-visibility": "basic", "x-agent": "auto", "x-priority": 11},
+                    "output_format": {"type": "string", "title": "输出格式", "enum": ["mp4", "mov"], "default": "mp4", "description": "仅 2.5；mov 适合专业后期", "x-category": "quality", "x-visibility": "advanced", "x-agent": "suggest", "x-priority": 61},
                     "watermark": {"type": "boolean", "title": "AI水印", "default": False, "description": "右下角AI生成水印", "x-category": "quality", "x-visibility": "advanced", "x-agent": "suggest", "x-priority": 60},
                 },
             },
@@ -140,6 +146,7 @@ class SeedanceVideoProvider(VideoProvider):
         dyn = req.dynamic_inputs if isinstance(req.dynamic_inputs, dict) else {}
         extra = req.extra if isinstance(req.extra, dict) else {}
         model = (dyn.get("model") or extra.get("model") or getattr(settings, "SEEDANCE_MODEL", "") or "doubao-seedance-2-0-260128").strip()
+        is25 = ("2-5" in model) or ("2.5" in model)
 
         first = req.first_frame_url or dyn.get("first_frame") or dyn.get("first_frame_url")
         last = req.last_frame_url or dyn.get("last_frame") or dyn.get("last_frame_url")
@@ -152,6 +159,9 @@ class SeedanceVideoProvider(VideoProvider):
             ref_vids = [ref_vids]
         if isinstance(ref_auds, str):
             ref_auds = [ref_auds]
+        max_imgs = 30 if is25 else 9
+        max_vids = 10 if is25 else 3
+        max_auds = 10 if is25 else 3
 
         content = [{"type": "text", "text": req.prompt.strip()}]
         if first:
@@ -160,13 +170,13 @@ class SeedanceVideoProvider(VideoProvider):
             if not first:
                 raise ValueError("尾帧必须与首帧配对使用")
             content.append({"type": "image_url", "image_url": {"url": _abs_url(last)}, "role": "last_frame"})
-        for u in (ref_imgs or [])[:9]:
+        for u in (ref_imgs or [])[:max_imgs]:
             if u:
                 content.append({"type": "image_url", "role": "reference_image", "image_url": {"url": _abs_url(u)}})
-        for u in (ref_vids or [])[:3]:
+        for u in (ref_vids or [])[:max_vids]:
             if u:
                 content.append({"type": "video_url", "role": "reference_video", "video_url": {"url": _abs_url(u)}})
-        for u in (ref_auds or [])[:3]:
+        for u in (ref_auds or [])[:max_auds]:
             if u:
                 content.append({"type": "audio_url", "audio_url": {"url": _abs_url(u)}})
         if ref_auds and not (first or ref_imgs or ref_vids):
@@ -180,26 +190,36 @@ class SeedanceVideoProvider(VideoProvider):
             duration = int(req.duration or dyn.get("duration") or 5)
         except Exception:
             duration = 5
-        duration = max(4, min(15, duration))
+        duration = max(4, min(30 if is25 else 15, duration))
         gen_audio = dyn.get("generate_audio", extra.get("generate_audio", True))
         if isinstance(gen_audio, str):
             gen_audio = gen_audio.strip().lower() in ("1", "true", "yes", "on")
         watermark = bool(dyn.get("watermark", extra.get("watermark", False)))
+        output_format = str(dyn.get("output_format") or extra.get("output_format") or "").strip().lower()
 
         # 方舟的参数分两层：generate_audio 这类走 JSON 顶层，resolution/ratio/duration/watermark
         # 这类必须拼成 --xxx 追加到 prompt 文本尾部。放错层不会报错，但参数会被静默忽略。
         has_ref = bool(first or last or ref_imgs or ref_vids)
         flags = [f"--resolution {resolution}", f"--watermark {'true' if watermark else 'false'}"]
         if not has_ref:
-            # 有参考素材时画幅由素材决定，传了反而冲突
+            flags.insert(0, f"--ratio {ratio}")
+        elif is25 and not first and not last and ratio and ratio != "adaptive":
+            # 2.5 纯参考素材（R2V）宽高比无特殊限制，可显式指定；首尾帧/编辑任务必须 adaptive（不传）
             flags.insert(0, f"--ratio {ratio}")
         top: Dict[str, Any] = {"generate_audio": bool(gen_audio)}
         if ref_vids:
-            # 带参考视频＝编辑类任务：时长跟随原片，覆盖调用方传进来的值
-            flags.append("--duration -1")
-            top["omni_reference_task_type"] = "edit"
+            if is25:
+                # 2.5：参考视频 = 参考生视频（reference），时长可指定（白模调度参考走这条）
+                top["omni_reference_task_type"] = "reference"
+                flags.append(f"--duration {duration}")
+            else:
+                # 2.0：带参考视频按编辑类任务处理，时长跟随原片
+                flags.append("--duration -1")
+                top["omni_reference_task_type"] = "edit"
         else:
             flags.append(f"--duration {duration}")
+        if is25 and output_format in ("mp4", "mov"):
+            top["output_format"] = output_format
         content[0]["text"] = f"{content[0]['text']} {' '.join(flags)}".strip()
         payload = {"model": model, **top, "content": content}
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}

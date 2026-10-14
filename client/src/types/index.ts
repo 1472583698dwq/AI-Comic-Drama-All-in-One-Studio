@@ -58,6 +58,13 @@ export type PosePreset =
 
 export type CastLayout = 'solo' | 'duel' | 'ots' | 'surrounded';
 
+/** 人体布偶逐关节姿态：jointId → [rx,ry,rz]（弧度，XYZ 欧拉，铰链关节按限位钳制） */
+export type MannequinJointPose = Record<string, [number, number, number]>;
+export interface MannequinPose {
+  v: number;
+  entities: Record<string, { joints: MannequinJointPose }>;
+}
+
 export type StagePropType = 'sword' | 'shield' | 'magic_circle' | 'spirit_particles' | 'chair' | 'helmet' | 'camera' | 'avocado' | 'boombox';
 
 export type StageEnvironment = 'cyber_studio' | 'xianxia_cloud' | 'desert_battle' | 'neon_city';
@@ -114,6 +121,14 @@ export interface StoryboardShot {
   subtitle_text: string;
   status: 'ready' | 'generating_image' | 'generating_video' | 'generating_audio' | 'completed' | 'error';
   pose_preset?: PosePreset;
+  /** 人体布偶逐关节姿态（鼠标拖关节 / Agent stage_control 落盘；优先于 pose_preset） */
+  mannequin_pose?: MannequinPose;
+  /** 白模结构化提示词（参考任务导出时自动生成，供 Seedance 参考/R2V） */
+  clay_prompt?: string;
+  /** 白模视频（clay pass，运镜/轨迹调度参考）与首尾帧 */
+  clay_video_url?: string;
+  clay_first_frame_url?: string;
+  clay_last_frame_url?: string;
   depth_map_url?: string;
   focal_length_mm?: number;
   camera_roll_deg?: number;

@@ -57,6 +57,71 @@ def _risk(name: str) -> str:
         return "medium"
 
 
+# ── 提示词技能门（执行口硬门控）──────────────────────────────
+# 动机：模型写提示词偷懒（一句话动作词）就直调生成源。这里定死：
+# 本管线内未成功 read_skill(<具名技能>) 之前，生成/写提示词类调用一律拒绝并指路。
+# 单一出口：主循环、job_start、batch_run、子代理都走本管线；读技能后本会话解锁。
+PROMPT_SKILL_GATE_TOOLS = frozenset({
+    "generate_image", "generate_video", "comfyui_render_node",
+    "canvas_execute", "canvas_dispatch_skill",
+    "onekey_style_lock", "onekey_shot_image", "onekey_shot_video",
+})
+PROMPT_SKILL_GATE_PREFIXES = ("provider_", "customnode_", "plugin_")
+_PROMPT_SKILL_SUGGEST_VIDEO = ("minimax-h3-prompt", "prompt-basics")
+_PROMPT_SKILL_SUGGEST_IMAGE = ("prompt-basics", "prompt-anime-optimizer", "prompt-guofeng-xianxia")
+
+
+def prompt_gate_enabled() -> bool:
+    raw = str(os.environ.get("STUDIO_PROMPT_SKILL_GATE", "1")).strip().lower()
+    return raw not in ("0", "false", "no", "off")
+
+
+def _prompt_gate_target(name: str, args: Dict[str, Any]) -> str:
+    """包装工具透传到内层目标工具名（job_start / batch_run）。"""
+    if name in ("job_start", "batch_run"):
+        return str((args or {}).get("tool") or "").strip()
+    return name
+
+
+def _tool_has_prompt_input(name: str) -> Optional[bool]:
+    """动态工具（provider_/customnode_/plugin_）按 schema 是否含 prompt 参数判定；查不到返回 None。"""
+    try:
+        from app.agent.tools.registry import tool_view
+        t = tool_view.get(name)
+        if t is None:
+            return None
+        props = ((getattr(t, "input_schema", None) or {}).get("properties") or {})
+        return "prompt" in props
+    except Exception:
+        return None
+
+
+def is_prompt_gate_tool(name: str) -> bool:
+    if not name:
+        return False
+    if name in PROMPT_SKILL_GATE_TOOLS:
+        return True
+    if name.startswith(PROMPT_SKILL_GATE_PREFIXES):
+        has_prompt = _tool_has_prompt_input(name)
+        if has_prompt is not None:
+            return has_prompt
+        return name.startswith(("provider_", "customnode_"))
+    return False
+
+
+def _prompt_skill_suggestions(tool_name: str) -> List[str]:
+    base = _PROMPT_SKILL_SUGGEST_VIDEO if "video" in tool_name else _PROMPT_SKILL_SUGGEST_IMAGE
+    try:
+        from app.skills.engine import skill_engine
+        usable = {s.name for s in skill_engine.active_skills()}
+        picked = [n for n in base if n in usable]
+        if picked:
+            return picked
+    except Exception:
+        pass
+    return list(base)
+
+
 def _spill_dir() -> Path:
     try:
         from app.core.config import settings
@@ -288,6 +353,8 @@ class ToolPipeline:
         self.approvals = ApprovalService(session_id, emit, policy=approval_policy,
                                          interactive=interactive, session=session)
         self.guard = RepeatToolGuard()
+        # 已成功读取的技能名（提示词技能门：读一个即解锁本会话生成/写提示词调用）
+        self.skills_read: set = set()
 
     def resolve_approval(self, approval_id: str, approved: bool) -> bool:
         return self.approvals.resolve(approval_id, approved)
@@ -313,6 +380,26 @@ class ToolPipeline:
         if _profile is not None and not _profile.allows(name):
             msg = f"工具 {name} 不在子代理角色（{_profile.name}）的能力范围内，已拒绝"
             return ToolOutcome(call_id, name, "denied", error=msg, model_content=json.dumps({"error": msg}, ensure_ascii=False))
+
+        # ①.6 提示词技能门：写提示词/调生成源前，本会话必须先成功读一个技能 SOP（防敷衍成稿）
+        if prompt_gate_enabled():
+            _target = _prompt_gate_target(name, args)
+            if is_prompt_gate_tool(_target) and not self.skills_read:
+                _sugg = _prompt_skill_suggestions(_target)
+                _first = _sugg[0] if _sugg else "prompt-basics"
+                msg = (
+                    f"执行口拦截：调用 {_target} 前必须先读取提示词技能——本会话尚未成功 read_skill 任何技能。"
+                    f"写提示词必须按技能 SOP 成稿，不允许一句话敷衍。"
+                    f"下一步：先 read_skill(\"{_first}\")"
+                    + (f"（或 read_skill(\"{_sugg[1]}\")）" if len(_sugg) > 1 else "")
+                    + f"，按其规范写好后重试 {name}（本次参数可复用）。"
+                )
+                denied = json.dumps(
+                    {"error": msg, "required_action": "read_skill", "suggested_skills": _sugg},
+                    ensure_ascii=False)
+                return ToolOutcome(call_id, name, "denied", error=msg,
+                                   meta={"prompt_skill_gate": True, "suggested_skills": _sugg},
+                                   model_content=denied)
 
         # ② 内置工具：todo_write 直接写会话事件（不经过 MCP）
         if name == "todo_write":
@@ -660,6 +747,12 @@ class ToolPipeline:
         except Exception as e:
             status, result, error = "error", None, str(e)
             logger.exception("工具执行异常 %s session=%s", name, self.session_id)
+
+        # 技能闭环：具名 read_skill 成功 → 记录并解锁后续生成/写提示词调用（只列清单不算读）
+        if status == "success" and name == "read_skill":
+            _read_name = str(args.get("name") or "").strip()
+            if _read_name:
+                self.skills_read.add(_read_name)
 
         # ④ 裁剪 / 溢写
         meta: Dict[str, Any] = {}
