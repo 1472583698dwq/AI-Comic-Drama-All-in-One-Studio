@@ -1476,7 +1476,7 @@ const InnerCanvas: React.FC = () => {
       if (nonce && nonce === importedAssetNonce.current) return;
       if (nonce) importedAssetNonce.current = nonce;
       let abs = asset.file_url || '';
-      if (abs && abs.startsWith('/')) abs = 'http://127.0.0.1:8000' + abs;
+      if (abs && abs.startsWith('/')) abs = resolveMediaUrl(abs);
       // 文本/提示词素材：无文件也要能落画布（此前 if(!abs) 直接吞掉）
       const label0 = asset.visual_prompt || asset.description || asset.name || '';
       if (asset.category === 'text') {
