@@ -29,8 +29,7 @@ export {
 } from './assembleInputs';
 export {
   CanvasHostContext, CanvasHostProvider, useCanvasHost, useKitNodeActions,
-  type CanvasHost, type KitNodeActions, type MediaKind,
-} from './hostContext';
+  type CanvasHost, type KitNodeActions, type MediaKind, type NewNodeSpec, type CreateNodesOptions, createNodesLocal } from './hostContext';
 export { NodeSkeleton, type NodeSkeletonProps, type SkeletonNodeProps } from './NodeSkeleton';
 export { NodeHandles, cardMinHeight, connectedPortsKey, type NodeHandlesProps } from './NodeHandles';
 export { FloatingToolbar, ToolbarButton, ToolbarDivider, type FloatingToolbarProps, type ToolbarButtonProps } from './FloatingToolbar';
@@ -46,3 +45,5 @@ export {
   type ArrangeMode, type DuplicateOptions, type DuplicateResult, type GroupOptions, type Rect,
 } from './graphOps';
 export { Popover, MenuList, computePosition, type PopoverProps, type PopoverPlacement, type PopoverAnchor, type MenuItemSpec } from './ui/Popover';
+export { useGeneration, runGeneration, appendHistory, HISTORY_LIMIT, type GenKind, type GenerationHistoryItem, type RunGenerationOptions, type RunGenerationResult, type UseGeneration } from './useGeneration';
+export { useProviderSources, useProviderDefinition, loadProviderSources, loadProviderDefinition, invalidateProviderSources, type ProviderSource, type SourceKind } from './useProviderSources';

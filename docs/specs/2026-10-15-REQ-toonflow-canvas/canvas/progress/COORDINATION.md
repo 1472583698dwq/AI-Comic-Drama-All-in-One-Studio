@@ -9,3 +9,13 @@
 4. 迁移不删任何旧数据键；转换过的节点带 `_migrated_from`；拆分的批量节点首个保留原 id，其余 `${id}__${i}`。
 5. 后端保存画布要保留 `schema_version`（已派给 T2）。
 6. 后端的 `in`+`refRoles` 组装规则以 T5 的 `server/app/canvas/inputs.py` 为准，前端 `kit/assembleInputs.ts` 必须与之一致（W3 校对）。
+
+## W2 约定（协调人 2026-10-15 补）
+
+7. **媒体生成统一用 `kit/useGeneration`**：`const gen = useGeneration(id, actions.update)`；`gen.run({nodeType, kind, data, assembled: assembleInputs({...}), providerId, params, smartPlan, intent})`。它负责直接生成 / 智能规划两条路径、视频轮询、`agent_state`、`history` 追加；`gen.cancel()` 停止等待并丢弃结果。不要自己调 `executeAgentNode` / `canvasAgentGenerate`。
+8. **生成源列表**用 `kit/useProviderSources(kind)`、定义用 `useProviderDefinition(id)`；槽位用 `providerSkills.extractSlotsFromProvider(def)`，参数控件用 `providerSkills.paramsSchemaToSpecs` + `controls/DynamicControl`（保留 x-agent 徽标）。
+9. **宿主能力只经 `useKitNodeActions(id)`**：`update`、`rename`、`remove`、`copy`、`duplicate`、`saveToAssets`、`openFullscreen`、`execute(overrides)`（文本技能 / director3d 规划 / custom / ext-node 等走宿主原有分支）、`createNodes(specs, {placement, connectFrom})`（宫格切分、截帧、分离音轨、截取、变速、3D 导出等产物落成新节点）、`navigate(tab, payload)`、`projectId`。
+10. **媒体处理接口**用 `client/src/services/mediaOps.ts`（契约见 progress/T2.md）。上传素材沿用现有 `apiService` 的上传 / 素材接口（看 `nodes/LoaderNodes.tsx` 现在怎么传）。
+11. **节点文件只写在自己的 `nodes2/<dir>/` 下**，用 `defineNode` 注册，并在 `nodes2/<dir>/index.ts` 导出；**不要**改 `CreativeCanvas.tsx`、`nodes2/index.ts`、`kit/**`（kit 有缺陷就在 progress 里写清楚，协调人统一改）。
+12. **自测**：各自起临时 vite（端口见下）+ `__dev__/*Showcase.tsx` 演示页，`VITE_API_ORIGIN=http://127.0.0.1:8001`（后端 CORS 放行任意 localhost 端口）。测完停掉、删临时 HTML。端口：N1 5191、N2 5192、N3 5193、N4 5194、N5 5195、N6 5196、N7 5197。不要用 5180（集成实例）。
+13. 并行期间 `tsc -b` 可能报出别人目录的错误：只修自己目录里的。
