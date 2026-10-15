@@ -31,7 +31,7 @@ import { apiService } from '../../../../../services/api';
 import { useProjectStore } from '../../../../../stores/useProjectStore';
 import { useCanvasStore } from '../../../../../stores/useCanvasStore';
 import { toast } from '../../../../../stores/useDialogStore';
-import { NODE_SPECS } from '../../../nodeRegistry';
+import { NODE_SPECS } from '../../../__tests__/fixtures/legacyNodeSpecs';
 import {
   CanvasHostProvider, NodeSkeleton, defineNode, findPort, getNodeDef, nodeTypesMap, paletteDefs, resolvePorts, type CanvasHost, type PortDef,
 } from '../../../kit';

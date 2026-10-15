@@ -4,7 +4,6 @@
  * 所有生成一律走 MCP provider_<id> Tool（含视频 task_id 轮询），结果与 agent_state 回写节点
  */
 import { apiService } from '../../../services/api';
-import { getNodeSpec } from '../nodeRegistry';
 import { pollVideoTask } from '../../../utils/videoTask';
 
 export interface AgentState {
@@ -30,6 +29,16 @@ const INTERNAL_NODE_KEYS = new Set([
   'polished_prompt', 'idea', 'skill_id', 'provider', 'provider_id', 'provider_params', 'params',
   'skill', 'model', 'status', 'render_status', 'render_error', 'error', 'label', 'name',
 ]);
+
+/**
+ * REQ-toonflow-canvas H1：旧 nodeRegistry 删除后，原「节点结构句柄键」改为常量（旧画布节点顶层可能还存着这些槽位值；
+ * kit useGeneration 直接生成时已用 stripStaleSlotKeys 去掉，这里只为其他调用方保持旧行为）。
+ */
+export const LEGACY_HANDLE_KEYS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  image: ['prompt', 'reference', 'reference_images', 'camera_prompt'],
+  video: ['prompt', 'first_frame', 'last_frame', 'reference_images', 'camera_prompt', 'ref_audio'],
+  audio: ['text', 'ref_audio'],
+});
 
 // provider definition 缓存（同一源只拉一次，接口即映射）
 const _defCache = new Map<string, any>();
@@ -57,7 +66,7 @@ function declaredInputKeys(def: any): string[] {
   return Object.keys(props);
 }
 
-export function buildAgentArgs(d: any, prompt: string, extraKeys: string[] = []): Record<string, any> {
+export function buildAgentArgs(d: any, prompt: string, extraKeys: string[] = [], override?: Record<string, any> | null): Record<string, any> {
   const args: Record<string, any> = {
     prompt,
     text: d.text || prompt,
@@ -65,6 +74,19 @@ export function buildAgentArgs(d: any, prompt: string, extraKeys: string[] = [])
     ...(d.params && typeof d.params === 'object' ? d.params : {}),
     ...(d.provider_params && typeof d.provider_params === 'object' ? d.provider_params : {}),
   };
+  // REQ-toonflow-canvas H1：本次执行传入的参数优先于节点里保存的 params / provider_params
+  // （原先保存的参数会盖掉本次 override，例如面板刚改的比例下发的还是旧值，N2）
+  if (override && typeof override === 'object') {
+    for (const src of [override.params, override.provider_params]) {
+      if (src && typeof src === 'object') Object.assign(args, src);
+    }
+    // 只覆盖本来就会下发的键（已在 args 里的参数 / 生成源声明键 / 旧句柄键），不额外多发未声明的键
+    const allowed = new Set<string>([...extraKeys, 'prompt', 'text']);
+    for (const [k, v] of Object.entries(override)) {
+      if (v === undefined || k === 'params' || k === 'provider_params' || INTERNAL_NODE_KEYS.has(k)) continue;
+      if (k in args || allowed.has(k)) args[k] = v;
+    }
+  }
   // 声明键 + 已连线句柄键：从节点顶层数据取值
   for (const k of extraKeys) {
     if (INTERNAL_NODE_KEYS.has(k)) continue;
@@ -108,7 +130,9 @@ export function patchFromPayload(nodeType: string, payload: any): Record<string,
   if (typeof payload.prompt === 'string' && payload.prompt && payload.prompt !== '__RAW__') patch.prompt = payload.prompt;
   if (payload.width) patch.width = payload.width;
   if (payload.height) patch.height = payload.height;
-  if (payload.width && payload.height) patch.aspect_ratio = `${payload.width}:${payload.height}`;
+  // REQ-toonflow-canvas H1：产物像素比单独存 result_aspect，不覆盖用户选的 aspect_ratio
+  // （原先写成 "832:1216"，后端执行器随后又先读顶层 aspect_ratio，下次生成带非法比例，N2）
+  if (payload.width && payload.height) patch.result_aspect = `${payload.width}:${payload.height}`;
   return patch;
 }
 
@@ -151,6 +175,9 @@ export async function executeAgentNode(opts: ExecuteAgentNodeOpts): Promise<Reco
       }
       const params: Record<string, any> = { ...(d.params && typeof d.params === 'object' ? d.params : {}) };
       for (const k of paramKeys) {
+        // REQ-toonflow-canvas H1：本次 override 的参数值优先于保存的 params
+        const ov = override?.[k];
+        if (ov !== undefined && ov !== '') { params[k] = ov; continue; }
         if (d[k] !== undefined && d[k] !== '' && params[k] === undefined) params[k] = d[k];
       }
       const payload: any = await apiService.runCustomNode({ custom_node_id: cid, inputs, params });
@@ -174,8 +201,8 @@ export async function executeAgentNode(opts: ExecuteAgentNodeOpts): Promise<Reco
 
   // 接口映射：拉取该源声明的入参键（input_schema + params_schema）+ 节点结构句柄键，从节点数据按键收集
   const def = await getProviderDefinition(providerId);
-  const declaredKeys = [...declaredInputKeys(def), ...(getNodeSpec(node.type || '')?.inputs.map(h => h.id) || [])];
-  const args = buildAgentArgs(d, prompt, declaredKeys);
+  const declaredKeys = [...declaredInputKeys(def), ...(LEGACY_HANDLE_KEYS[node.type || ''] || [])];
+  const args = buildAgentArgs(d, prompt, declaredKeys, override);
   const start = Date.now();
   setState({ status: 'running', tool: toolName, provider_id: providerId, updated_at: new Date().toISOString() });
 

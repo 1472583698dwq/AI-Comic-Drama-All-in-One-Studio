@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import { toast } from '../../../stores/useDialogStore';
 import { rectOf, findFreeInColumn } from '../autoLayout';
+import { GROUP_TYPE, absolutePosition, ungroupNodes } from '../kit/graphOps';
 
 /**
  * 画布标准快捷键：撤销 / 重做 / 复制 / 粘贴 / 删除。
@@ -32,6 +33,8 @@ interface Options {
   attachHandlers: (node: Node) => Node;
   genId: (prefix: string) => string;
   onSelect?: (id: string | null) => void;
+  /** REQ-toonflow-canvas H1：宿主接管删除（分组只删框、清理会话关注）；缺省按旧逻辑直接删 */
+  onRemoveNodes?: (ids: string[]) => void;
 }
 
 const MAX_HISTORY = 60;
@@ -57,7 +60,7 @@ const stripNodes = (nds: Node[]): Node[] =>
   })) as Node[];
 
 export function useCanvasShortcuts({
-  enabled, nodes, edges, setNodes, setEdges, attachHandlers, genId, onSelect,
+  enabled, nodes, edges, setNodes, setEdges, attachHandlers, genId, onSelect, onRemoveNodes,
 }: Options) {
   const past = useRef<CanvasSnapshot[]>([]);
   const future = useRef<CanvasSnapshot[]>([]);
@@ -128,7 +131,16 @@ export function useCanvasShortcuts({
     if (!sel.length) { toast.info('先选中节点再复制（按住 Shift 可多选）'); return; }
     const ids = new Set(sel.map(n => n.id));
     const inner = live.current.edges.filter(e => ids.has(e.source) && ids.has(e.target));
-    memoryClipboard = { nodes: stripNodes(sel), edges: JSON.parse(JSON.stringify(inner)) };
+    // REQ-toonflow-canvas H1：父分组没被一起复制的子节点按画布绝对坐标存（粘贴后是顶层节点）
+    const byId = new Map(live.current.nodes.map(n => [n.id, n]));
+    const detached = sel.map(n => {
+      if (!n.parentId || ids.has(n.parentId)) return n;
+      const out = { ...n, position: absolutePosition(n, byId) } as Node;
+      delete (out as Partial<Node>).parentId;
+      delete (out as Partial<Node>).extent;
+      return out;
+    });
+    memoryClipboard = { nodes: stripNodes(detached), edges: JSON.parse(JSON.stringify(inner)) };
     toast.info(`已复制 ${sel.length} 个节点`);
   }, []);
 
@@ -137,7 +149,7 @@ export function useCanvasShortcuts({
     if (!clip || !clip.nodes.length) { toast.info('剪贴板是空的'); return; }
     const idMap = new Map<string, string>();
     // 整组沿原列向下平移到第一个放得下整组的空位（自动放置统一规则，见 autoLayout.ts），不再固定 +48 叠在原卡上
-    const rects = clip.nodes.map(n => rectOf(n as any));
+    const rects = clip.nodes.filter(n => !n.parentId).map(n => rectOf(n as any));
     const bx = Math.min(...rects.map(r => r.x));
     const by = Math.min(...rects.map(r => r.y));
     const bw = Math.max(...rects.map(r => r.x + r.w)) - bx;
@@ -147,14 +159,17 @@ export function useCanvasShortcuts({
     const newNodes = clip.nodes.map(n => {
       const nid = genId(String(n.type || 'node'));
       idMap.set(n.id, nid);
+      // 子节点（父分组一起粘贴）用相对坐标，不平移
+      const shift = n.parentId ? 0 : dy;
       return attachHandlers({
         ...n,
         id: nid,
-        position: { x: n.position?.x ?? 0, y: (n.position?.y ?? 0) + dy },
-        selected: true,
+        position: { x: n.position?.x ?? 0, y: (n.position?.y ?? 0) + shift },
+        selected: !n.parentId,
         data: { ...(n.data as any) },
       } as Node);
     });
+    for (const n of newNodes) if (n.parentId) n.parentId = idMap.get(n.parentId);
     const newEdges = clip.edges.map(e => ({
       ...e,
       id: `e_${idMap.get(e.source)}_${idMap.get(e.target)}_${Date.now()}`,
@@ -172,13 +187,20 @@ export function useCanvasShortcuts({
     const selEdges = live.current.edges.filter(e => e.selected);
     if (!sel.length && !selEdges.length) return;
     const ids = new Set(sel.map(n => n.id));
-    setNodes((nds: Node[]) => nds.filter(n => !ids.has(n.id)));
+    if (onRemoveNodes && sel.length) {
+      onRemoveNodes([...ids]);
+      if (selEdges.length) setEdges((es: Edge[]) => es.filter(e => !e.selected));
+      return;
+    }
+    // 分组只删框：子节点释放到上一级（与右键删除、后端 canvas_delete_node 一致）
+    const groupIds = sel.filter(n => n.type === GROUP_TYPE).map(n => n.id);
+    setNodes((nds: Node[]) => ungroupNodes(nds, groupIds).filter(n => !ids.has(n.id)));
     setEdges((es: Edge[]) =>
       es.filter(e => !ids.has(e.source) && !ids.has(e.target) && !e.selected),
     );
     onSelect?.(null);
     toast.info(sel.length ? `已删除 ${sel.length} 个节点` : `已删除 ${selEdges.length} 条连线`);
-  }, [setNodes, setEdges, onSelect]);
+  }, [setNodes, setEdges, onSelect, onRemoveNodes]);
 
   useEffect(() => {
     if (!enabled) return;

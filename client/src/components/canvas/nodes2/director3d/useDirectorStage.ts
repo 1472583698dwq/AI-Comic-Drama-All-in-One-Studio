@@ -11,9 +11,9 @@
  * 同步（data 是唯一真源）：站位 / 姿态 / 自定义关节 → setCast；景别 → 预设机位；焦距 / 荷兰角 → 改 FOV / roll；
  * 机位被外部改写（撤销等）→ setCameraState；环境、画幅同理。舞台里的拖关节 / 环绕结果写回 data（mannequin_pose / camera_state）。
  *
- * 缩放补偿：React Flow 用 CSS transform 缩放画布，而 createMiniStage 的拾取把 getBoundingClientRect（屏幕像素）与
- * clientWidth（布局像素）混用，缩放 ≠ 1 时关节拾取会偏。这里让舞台容器的布局尺寸 = 屏幕尺寸（宽高 × zoom 再 scale(1/zoom)），
- * 两种像素一致，顺带让画面在放大时保持清晰（像素总量封顶）。
+ * 画布缩放：React Flow 用 CSS transform 缩放画布。关节拾取由 stageCore 按「屏幕 rect / 布局尺寸」换算，任意缩放比都准
+ * （REQ-toonflow-canvas C1 修复，去掉了原先「容器宽高 × zoom 再 scale(1/zoom)」的反向缩放绕法）；
+ * 这里只按 zoom 调像素比，让画面放大时依然清晰、缩小时不浪费像素（绘制缓冲像素总量封顶 MAX_STAGE_PIXELS）。
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { useStoreApi } from '@xyflow/react';
@@ -30,8 +30,12 @@ export const MAX_STAGE_PIXELS = 1_600_000;
 
 export type StageStatus = 'idle' | 'loading' | 'ready' | 'suspended' | 'over-budget' | 'error';
 
-export function stagePixelRatio(width: number, height: number, dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1): number {
-  const base = Math.min(dpr, 2);
+/**
+ * 舞台像素比：设备像素比（上限 2）× 画布缩放，再按 MAX_STAGE_PIXELS 封顶。
+ * width / height 是舞台的布局尺寸（未缩放）；zoom 是 React Flow 画布缩放（屏幕上实际显示 = 布局 × zoom）。
+ */
+export function stagePixelRatio(width: number, height: number, dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, zoom = 1): number {
+  const base = Math.min(dpr, 2) * (zoom > 0 ? zoom : 1);
   const cap = Math.sqrt(MAX_STAGE_PIXELS / Math.max(1, width * height));
   return Math.max(0.25, Math.min(base, cap));
 }
@@ -78,7 +82,7 @@ export interface DirectorStage {
   error: string;
   /** 舞台卸载前冻结的最后一帧（dataURL），占位时显示 */
   snapshot: string;
-  /** 当前缩放补偿系数（= React Flow zoom，防抖 150ms） */
+  /** 当前画布缩放（= React Flow zoom，防抖 150ms；只用来定像素比） */
   zoom: number;
   visible: boolean;
   selectedJoint: { entity: string; jointId: string } | null;
@@ -115,7 +119,7 @@ export function useDirectorStage(opts: UseDirectorStageOptions): DirectorStage {
   const [snapshot, setSnapshot] = useState('');
   const [selectedJoint, setSelectedJoint] = useState<{ entity: string; jointId: string } | null>(null);
 
-  // —— 缩放补偿（订阅 store，不随每帧缩放重渲染）——
+  // —— 画布缩放（订阅 store，不随每帧缩放重渲染；只用来定像素比）——
   const store = useStoreApi();
   const [zoom, setZoom] = useState(() => store.getState().transform[2] || 1);
   useEffect(() => {
@@ -209,7 +213,7 @@ export function useDirectorStage(opts: UseDirectorStageOptions): DirectorStage {
         focalLength: params.focalLength,
         cameraRoll: params.roll,
         aspect: params.aspect,
-        pixelRatio: stagePixelRatio(host.clientWidth, host.clientHeight),
+        pixelRatio: stagePixelRatio(host.clientWidth, host.clientHeight, undefined, store.getState().transform[2] || 1),
         onJointsChange: () => {
           const cur = stageRef.current;
           if (!cur) return;
@@ -274,7 +278,7 @@ export function useDirectorStage(opts: UseDirectorStageOptions): DirectorStage {
       setSelectedJoint(null);
       release();
     };
-  }, [live, nodeId, hostRef]);
+  }, [live, nodeId, hostRef, store]);
 
   // —— data → 舞台 ——
   const entities = poseEntitiesOf(data);
@@ -341,12 +345,12 @@ export function useDirectorStage(opts: UseDirectorStageOptions): DirectorStage {
     stage.setAspect(p.aspect);
   }, [ready, p.aspect]);
 
-  // 缩放补偿后容器布局尺寸变了：按像素上限重设像素比
+  // 画布缩放 / 画幅变了：按「设备像素比 × 缩放」与像素上限重设像素比
   useLayoutEffect(() => {
     const stage = stageRef.current;
     const host = hostRef.current;
     if (!ready || !stage || !host) return;
-    stage.renderer.setPixelRatio(stagePixelRatio(host.clientWidth, host.clientHeight));
+    stage.renderer.setPixelRatio(stagePixelRatio(host.clientWidth, host.clientHeight, undefined, zoom));
     stage.resize();
   }, [ready, zoom, p.aspect, hostRef]);
 

@@ -42,7 +42,7 @@ import {
   serializeMannequinJoints,
   type JointAxisLimits,
 } from './mannequin';
-import { dragRotateJoint, pickJoint, raycasterAt } from './picking';
+import { dragRotateJoint, layoutRectToClient, pickJoint, raycasterAt } from './picking';
 import { castMembers, ROLE_ACCENT_COLORS, type MannequinRole, type Vec3Tuple } from './presets';
 import {
   applyLightingConfig,
@@ -189,6 +189,104 @@ export function pickRecorderMimeType(): string {
 
 const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
 
+/** REQ-toonflow-canvas C1 录制收尾：末帧后至少可等多久（实际上限再加运镜时长，管线卡死时尽力而为） */
+const RECORD_DRAIN_MAX_MS = 4000;
+/** 末帧后最多等多久的绝对上限 */
+const RECORD_DRAIN_CAP_MS = 15000;
+/** 没有帧探针时（非 Chromium），末帧后至少等多久 */
+const RECORD_DRAIN_MIN_MS = 600;
+/** 没有帧探针、录制器也不增量吐数据（整段封装到 stop 才输出）时，末帧后至少等多久（看不到进度，只能多等） */
+const RECORD_DRAIN_BLIND_MS = 1500;
+/** 没有帧探针时，轮询 requestData 的间隔 */
+const RECORD_DRAIN_POLL_MS = 150;
+/** 探针看到末帧离开采集管线后，再留给编码器的时间（Chromium 编码队列最多积压约 10 帧） */
+const RECORD_ENCODER_GRACE_MS = 200;
+/** 探针兜底：末帧画完后已有帧到达、随后这么久没有新帧，视为管线已排空（时间戳语义对不上时用） */
+const PROBE_QUIET_MS = 1000;
+
+interface FrameProbe {
+  /**
+   * 等末帧离开采集管线：看到时间戳（相对建流时刻）≥ relMs 的帧，或末帧画完后（finalAt 之后）有帧到达且随后
+   * PROBE_QUIET_MS 内再无新帧，返回 true；`cancelled()` 变真、探针关闭或超时返回 false。
+   */
+  waitFor(relMs: number, finalAt: number, cancelled: () => boolean, timeoutMs: number): Promise<boolean>;
+  close(): void;
+}
+
+/**
+ * REQ-toonflow-canvas C1 · 采集管线探针：在克隆的视频轨道上挂 MediaStreamTrackProcessor（Chromium 才有），
+ * 读到的帧就是录制器同时收到的帧（同源同时分发），用时间戳判断末帧是否已经离开采集管线。不支持时返回 null。
+ *
+ * 时间戳原点：Chromium 画布采集的帧时间戳从建流时刻（首帧）起算。探针在机器忙时会漏掉开头几帧，
+ * 所以不能拿它读到的第一帧当原点——第一帧时间戳落在 [0, 到达时刻] 内就认定原点 = 建流时刻 `t0`；
+ * 否则（其他实现用绝对时钟）退回以第一帧为原点，再加「排空后静默」兜底。
+ */
+function createFrameProbe(stream: MediaStream, t0: number): FrameProbe | null {
+  type ProbeFrame = { timestamp: number; close(): void };
+  const Processor = (globalThis as { MediaStreamTrackProcessor?: new (init: { track: MediaStreamTrack }) => { readable: ReadableStream<ProbeFrame> } }).MediaStreamTrackProcessor;
+  const track = typeof stream.getVideoTracks === 'function' ? stream.getVideoTracks()[0] : undefined;
+  if (typeof Processor !== 'function' || !track || typeof track.clone !== 'function') return null;
+  let clone: MediaStreamTrack | null = null;
+  let reader: ReadableStreamDefaultReader<ProbeFrame>;
+  try {
+    clone = track.clone();
+    reader = new Processor({ track: clone }).readable.getReader();
+  } catch {
+    try { clone?.stop(); } catch { /* ignore */ }
+    return null;
+  }
+  let origin = Number.NaN;
+  let latestRelMs = -Infinity;
+  let lastArrival = 0;
+  let closed = false;
+  const listeners = new Set<() => void>();
+  const notify = () => listeners.forEach((fn) => fn());
+  void (async () => {
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const tsMs = value.timestamp / 1000;
+        try { value.close(); } catch { /* ignore */ }
+        lastArrival = performance.now();
+        if (Number.isNaN(origin)) origin = tsMs >= -50 && tsMs <= lastArrival - t0 + 50 ? 0 : tsMs;
+        latestRelMs = Math.max(latestRelMs, tsMs - origin);
+        notify();
+      }
+    } catch { /* 探针被关闭 */ }
+    closed = true;
+    notify();
+  })();
+  return {
+    waitFor: (relMs, finalAt, cancelled, timeoutMs) => new Promise<boolean>((resolve) => {
+      let settled = false;
+      const finish = (ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(deadline);
+        clearInterval(poll);
+        listeners.delete(check);
+        resolve(ok);
+      };
+      const check = () => {
+        if (latestRelMs >= relMs) finish(true);
+        else if (lastArrival > finalAt && performance.now() - lastArrival >= PROBE_QUIET_MS) finish(true);
+        else if (closed || cancelled()) finish(false);
+      };
+      const deadline = setTimeout(() => finish(false), timeoutMs);
+      const poll = setInterval(check, 50);
+      listeners.add(check);
+      check();
+    }),
+    close: () => {
+      closed = true;
+      try { void reader.cancel(); } catch { /* ignore */ }
+      try { clone?.stop(); } catch { /* ignore */ }
+      notify();
+    },
+  };
+}
+
 /** 画布 → Blob（toBlob 失败时报错，而不是 resolve(null)） */
 function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
@@ -255,10 +353,13 @@ export function createMiniStage(container: HTMLElement, opts: MiniStageOptions =
     if (fh > h) { fh = h; fw = Math.round(h * aspectOpt); }
     return { x: Math.floor((w - fw) / 2), y: Math.floor((h - fh) / 2), w: fw, h: fh };
   };
+  // REQ-toonflow-canvas C1：帧区域是布局像素（与渲染器视口同一单位），getBoundingClientRect 是屏幕像素。
+  // 舞台挂在被 CSS 缩放的容器里（画布 zoom ≠ 1）时两者差一个缩放比，必须按比例换算后再与 clientX/Y 比较。
+  // 优先量画布元素本身（它承载渲染结果；容器带内边距时画布被拉伸也能对上），量不到（未布局 / jsdom）退回容器。
   const frameClientRect = () => {
-    const r = container.getBoundingClientRect();
-    const f = frame();
-    return { left: r.left + f.x, top: r.top + f.y, width: f.w, height: f.h };
+    const cr = renderer.domElement.getBoundingClientRect();
+    const rect = cr.width > 0 && cr.height > 0 ? cr : container.getBoundingClientRect();
+    return layoutRectToClient(rect, size(), frame());
   };
 
   // —— 渲染（按需） ——
@@ -531,6 +632,22 @@ export function createMiniStage(container: HTMLElement, opts: MiniStageOptions =
     });
   };
 
+  /**
+   * REQ-toonflow-canvas C1 · 按关键帧实时录制。
+   *
+   * 时间轴：MediaRecorder 用「画面被采集的时刻」当帧时间戳，成片时长 = 末帧时间戳 + 一帧。所以按 1/fps 的网格出帧，
+   * 运镜内容 [0, duration] 均匀映射到 [0, duration − 1 帧] 的墙钟时间上，末帧（内容 = 终点机位）落在 duration − 1 帧，
+   * 成片时长正好等于 duration，首帧是起点机位、末帧是终点机位。
+   *
+   * 收尾（修尾部丢帧）：采集（WebGL 读回像素）和编码在别的线程排队，机器忙时会落后 0.5～1s；
+   * 以前末帧后只等两帧就 stop()，还在队列里的帧被直接丢掉，成片尾部被截。现在末帧画完后**不再画新帧**
+   * （画面不变就不产生新帧，成片不会变长），等管线把末帧送进录制器再 stop()：
+   * - Chromium：在克隆轨道上挂 MediaStreamTrackProcessor 当探针，看到末帧（按时间戳）出了采集管线，再留一点编码时间；
+   * - 其他浏览器：录制器还在吐数据（WebM 等增量封装）就接着等，直到连续两次 requestData 无新数据（至少 RECORD_DRAIN_MIN_MS）；
+   *   录制器不增量吐数据时看不到进度，至少等 RECORD_DRAIN_BLIND_MS；
+   * - 总等待不超过 RECORD_DRAIN_MAX_MS + 运镜时长（封顶 RECORD_DRAIN_CAP_MS；管线卡死时尽力而为）。
+   * 实测（无头 Chromium + SwiftShader、1280×720、CPU 压满）：旧逻辑 2.5s 运镜只剩 1.2～1.9s，现在 2.50±0.01s，首末帧机位正确。
+   */
   const recordCameraPath = async (keyframes: CameraKeyframe[], durationSec?: number, fps = 30, o: RecordOptions = {}): Promise<Blob> => {
     const frames = normalizeKeyframes(keyframes);
     if (!frames.length) throw new Error('没有可用的机位关键帧');
@@ -544,46 +661,88 @@ export function createMiniStage(container: HTMLElement, opts: MiniStageOptions =
     const { width, height } = exportSize(o);
     return withOffscreen(width, height, async (r, cam, canvas) => {
       const draw = (t: number) => { applyCameraState(cam, sampleCameraKeyframes(frames, t)); r.render(scene, cam); };
+      const interval = 1000 / rate;
+      const durationMs = duration * 1000;
+      // 末帧的采集时刻（墙钟，相对首帧）：比运镜时长早一帧
+      const lastAtMs = Math.max(interval, durationMs - interval);
       draw(0);
       const stream = (canvas as HTMLCanvasElement & { captureStream(frameRate?: number): MediaStream }).captureStream(rate);
+      // 首帧（起点机位）在建流时被采集，视频时间轴从这里开始
+      const t0 = performance.now();
+      const probe = createFrameProbe(stream, t0);
       const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: o.videoBitsPerSecond ?? 8_000_000 });
       const chunks: Blob[] = [];
       let timer: ReturnType<typeof setTimeout> | null = null;
       let onAbort: (() => void) | null = null;
+      let ended = false;
       try {
         await new Promise<void>((resolve, reject) => {
           let failure: unknown = null;
+          let lastDataAt = 0;
+          let dataEvents = 0;
           const stop = (err?: unknown) => {
             if (err && !failure) failure = err;
+            ended = true;
             if (timer) { clearTimeout(timer); timer = null; }
             if (recorder.state !== 'inactive') recorder.stop();
             else if (failure) reject(failure);
+            else resolve();
           };
           onAbort = () => stop(o.signal?.reason ?? new Error('已取消'));
           o.signal?.addEventListener('abort', onAbort, { once: true });
-          recorder.ondataavailable = (ev) => { if (ev.data && ev.data.size) chunks.push(ev.data); };
+          recorder.ondataavailable = (ev) => { if (ev.data && ev.data.size) { chunks.push(ev.data); lastDataAt = performance.now(); dataEvents++; } };
           recorder.onerror = () => stop(new Error('视频编码失败，请重试'));
           recorder.onstop = () => (failure ? reject(failure) : resolve());
+
+          const wait = (ms: number) => new Promise<void>((res) => { timer = setTimeout(() => { timer = null; res(); }, ms); });
+          /** 末帧画完后等管线把它送进录制器（见上方说明）；被取消 / 出错时 ended 置位，立即返回 */
+          const drain = async (finalMs: number) => {
+            const maxWait = Math.min(RECORD_DRAIN_CAP_MS, RECORD_DRAIN_MAX_MS + durationMs);
+            if (probe) {
+              const seen = await probe.waitFor(finalMs - interval / 2, t0 + finalMs, () => ended, maxWait);
+              if (seen && !ended) await wait(Math.max(RECORD_ENCODER_GRACE_MS, interval * 3));
+              return;
+            }
+            const deadline = performance.now() + maxWait;
+            // 录制中已经陆续吐过数据（WebM / 分片 MP4）→ 静默即排空；否则看不到进度，按盲等下限
+            const minUntil = performance.now() + (dataEvents >= 2 ? RECORD_DRAIN_MIN_MS : RECORD_DRAIN_BLIND_MS);
+            let quiet = 0;
+            while (!ended && performance.now() < deadline) {
+              const before = lastDataAt;
+              try { if (typeof recorder.requestData === 'function' && recorder.state === 'recording') recorder.requestData(); } catch { /* ignore */ }
+              await wait(RECORD_DRAIN_POLL_MS);
+              quiet = lastDataAt === before ? quiet + 1 : 0;
+              if (quiet >= 2 && performance.now() >= minUntil) return;
+            }
+          };
+
           recorder.start(250);
-          const started = performance.now();
-          const interval = 1000 / rate;
           const tick = () => {
-            const now = performance.now();
+            timer = null;
+            if (ended) return;
             try {
-              const t = Math.min(duration, (now - started) / 1000);
-              draw(t);
-              o.onProgress?.(Math.min(1, t / duration));
-              // 末帧多停两帧再停录制，保证最后一个画面进流
-              if (t >= duration) timer = setTimeout(() => stop(), interval * 2);
-              else timer = setTimeout(tick, Math.max(8, interval - (performance.now() - now)));
+              const elapsed = performance.now() - t0;
+              if (elapsed >= lastAtMs) {
+                draw(duration);
+                o.onProgress?.(1);
+                drain(performance.now() - t0).then(() => { if (!ended) stop(); }, (err) => stop(err));
+                return;
+              }
+              draw((duration * elapsed) / lastAtMs);
+              o.onProgress?.(Math.min(1, elapsed / lastAtMs));
+              // 对齐到 1/fps 网格（不累积 setTimeout 误差）；最后一跳正好落在末帧时刻
+              const next = Math.min(lastAtMs, (Math.floor(elapsed / interval) + 1) * interval);
+              timer = setTimeout(tick, Math.max(1, next - (performance.now() - t0)));
             } catch (err) { stop(err); }
           };
           timer = setTimeout(tick, 0);
         });
       } finally {
+        ended = true;
         if (timer) clearTimeout(timer);
         if (onAbort) o.signal?.removeEventListener('abort', onAbort);
         if (recorder.state !== 'inactive') { try { recorder.stop(); } catch { /* ignore */ } }
+        probe?.close();
         stream.getTracks().forEach((t) => t.stop());
       }
       const blob = new Blob(chunks, { type: mimeType.split(';')[0] });

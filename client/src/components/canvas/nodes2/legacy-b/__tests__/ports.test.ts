@@ -3,7 +3,7 @@ import type { Edge, Node } from '@xyflow/react';
 import { getNodeDef } from '../../../kit/registry';
 import { isValidConnectionFactory, resolvePorts } from '../../../kit/connection';
 import { clearCanvasNodeSpecs, registerCanvasNodeSpec } from '../../../canvasNodeSpecs';
-import { NODE_SPECS } from '../../../nodeRegistry';
+import { NODE_SPECS } from '../../../__tests__/fixtures/legacyNodeSpecs';
 import '../index';
 import {
   BRIEF_PORTS, SCRIPT_SPLIT_PORTS, customNodePorts, extNodePorts, extSpecOf, findInputPort, providerKindOf, providerNodePorts,

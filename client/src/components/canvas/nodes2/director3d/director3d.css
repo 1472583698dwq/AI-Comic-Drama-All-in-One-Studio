@@ -19,15 +19,10 @@
   touch-action: none;
 }
 .cv-d3__stage:active { cursor: grabbing; }
-.cv-d3__scale {
-  position: absolute;
-  top: 0;
-  left: 0;
-  transform-origin: 0 0;
-}
+/* REQ-toonflow-canvas C1：舞台拾取已按屏幕 / 布局像素比例换算（stageCore），不再需要反向缩放的包裹层 */
 .cv-d3__host {
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  inset: 0;
 }
 .cv-d3__host > canvas { display: block; }
 

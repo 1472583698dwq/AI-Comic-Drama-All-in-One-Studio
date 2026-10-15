@@ -1,4 +1,4 @@
-// REQ-toonflow-canvas N4：截取 / 变速 → 后端 /media/ops/*（mock）→ createNodes 新建 load-audio；上传走素材库 / 转码。
+// REQ-toonflow-canvas N4：截取 / 变速 → 后端 /media/ops/*（mock）→ createNodes 新建 load-audio；上传走素材库（C1 起常见格式直传，只有 amr 等转码）。
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
@@ -161,11 +161,23 @@ describe('上传 / 拖入', () => {
     expect(speedAudio).not.toHaveBeenCalled();
   });
 
-  it('m4a 等格式先原速转码（素材库会把扩展名改成 .png），再以 file_url 登记', async () => {
-    const res = await uploadAudioFile(file('memo.m4a', 'audio/mp4'));
+  it('REQ-toonflow-canvas C1：m4a / ogg / flac / aac 等常见格式也直接进素材库（素材库已保留真实扩展名，不再转码）', async () => {
+    for (const [name, type] of [['memo.m4a', 'audio/mp4'], ['rain.ogg', 'audio/ogg'], ['take.flac', 'audio/flac'], ['bgm.aac', 'audio/aac'], ['voice', 'audio/mp4']] as const) {
+      (apiService.createAsset as any).mockClear();
+      const res = await uploadAudioFile(file(name, type));
+      const fd = (apiService.createAsset as any).mock.calls[0][0] as FormData;
+      expect((fd.get('file') as File).name).toBe(name);
+      expect(fd.get('file_url')).toBeNull();
+      expect(res.transcoded).toBe(false);
+    }
+    expect(speedAudio).not.toHaveBeenCalled();
+  });
+
+  it('浏览器播不了的格式（amr 等）先原速转码，再以 file_url 登记', async () => {
+    const res = await uploadAudioFile(file('memo.amr', 'audio/amr'));
     expect(speedAudio).toHaveBeenCalledTimes(1);
     const [dataUrl, rate] = (speedAudio as any).mock.calls[0];
-    expect(String(dataUrl).startsWith('data:audio/mp4;base64,')).toBe(true);
+    expect(String(dataUrl).startsWith('data:audio/amr;base64,')).toBe(true);
     expect(rate).toBe(1);
     const fd = (apiService.createAsset as any).mock.calls[0][0] as FormData;
     expect(fd.get('file')).toBeNull();

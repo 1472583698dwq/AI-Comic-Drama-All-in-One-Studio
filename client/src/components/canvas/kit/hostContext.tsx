@@ -9,6 +9,7 @@ import { useReactFlow, useStore, type Edge, type Node, type ReactFlowState, type
 import { duplicateNodes, sizeOf } from './graphOps';
 import { getNodeDef } from './registry';
 import { PRIMARY_OUTPUT_PORT } from './inputRules';
+import type { MenuItemSpec } from './ui/Popover';
 
 export type MediaKind = 'image' | 'video' | 'audio';
 
@@ -47,6 +48,11 @@ export interface CanvasHost {
   navigate?: (tab: string, payload?: Record<string, unknown>) => void;
   /** 当前项目 id（媒体接口 / 备份 / 素材库需要）。 */
   projectId?: string;
+  /**
+   * REQ-toonflow-canvas H1：宿主追加到节点右键菜单的项（排在节点自己的 menuItems 之后，如「添加到会话」「回写到分镜」）。
+   * 打开菜单时才调用；返回空数组即不追加。
+   */
+  contextMenuItems?: (nodeId: string) => MenuItemSpec[];
 }
 
 export interface NewNodeSpec {

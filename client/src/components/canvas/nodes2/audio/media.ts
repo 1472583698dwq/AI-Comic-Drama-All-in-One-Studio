@@ -3,8 +3,9 @@
  * REQ-toonflow-canvas 音频节点的素材存取：上传 / 拖入素材库素材 / URL 归一。
  *
  * 上传沿用 MiniMax 画布现有做法（CanvasResourcePickerModal：音视频走素材库 POST /assets 后取 file_url）。
- * 素材库落盘只保留 mp3 / wav 扩展名（asset manager 白名单，其余会被改成 .png），
- * 所以 m4a / ogg / flac… 先经 /media/ops/speed（rate=1，原速转码为 m4a）落到 storage，再以 file_url 登记进素材库。
+ * REQ-toonflow-canvas C1：素材库已保留真实扩展名（asset manager `ASSET_FILE_EXTS`），浏览器能直接播放的格式
+ * （mp3 / wav / m4a / aac / ogg / opus / flac / webm）原样进素材库；只有浏览器播不了、素材库也不收的格式
+ * （amr / aiff / wma…）才先经 /media/ops/speed（rate=1，原速转码为 m4a）落到 storage，再以 file_url 登记进素材库。
  */
 import { apiService } from '../../../../services/api';
 import { probeMedia, speedAudio } from '../../../../services/mediaOps';
@@ -13,8 +14,11 @@ import { readOutputValue } from '../../kit/references';
 
 /** 认作音频的扩展名。 */
 export const AUDIO_EXTS = ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'oga', 'opus', 'flac', 'weba', 'webm', 'amr', 'aif', 'aiff', 'wma'] as const;
-/** 素材库能原样保存的音频扩展名（server/app/providers/asset/manager.py::_attach_file）。 */
-export const ASSET_SAFE_EXTS = ['mp3', 'wav'] as const;
+/**
+ * 直接进素材库的音频扩展名：素材库原样保存（server/app/providers/asset/manager.py::ASSET_FILE_EXTS）且浏览器能播放。
+ * REQ-toonflow-canvas C1：以前只有 mp3 / wav（其余被素材库存成 .png），现在常见格式都直接上传。
+ */
+export const ASSET_SAFE_EXTS = ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'oga', 'opus', 'flac', 'weba', 'webm'] as const;
 /** 单个音频上限（Toonflow 同款 100 MB）。 */
 export const MAX_AUDIO_BYTES = 100 * 1024 * 1024;
 /** 需要转码的格式走 data: URI，后端上限 50 MB（base64 后），原始文件约 37 MB。 */
@@ -102,11 +106,11 @@ export interface UploadedAudio {
   assetId?: string;
   /** 不带扩展名的文件名 */
   name: string;
-  /** 是否经过转码（m4a 等非 mp3/wav 格式） */
+  /** 是否经过转码（amr / aiff / wma 等浏览器播不了的格式） */
   transcoded: boolean;
 }
 
-/** 上传音频文件：mp3 / wav 直接进素材库；其他格式先转码再登记。失败抛 Error（message 可直接展示）。 */
+/** 上传音频文件：常见格式（ASSET_SAFE_EXTS）直接进素材库；其他格式先转码再登记。失败抛 Error（message 可直接展示）。 */
 export async function uploadAudioFile(file: File, opts: { projectId?: string } = {}): Promise<UploadedAudio> {
   if (!isAudioFile(file)) throw new Error('请选择音频文件');
   if (!file.size || file.size > MAX_AUDIO_BYTES) throw new Error('音频不能为空且不能超过 100 MB');
@@ -115,7 +119,7 @@ export async function uploadAudioFile(file: File, opts: { projectId?: string } =
   const direct = (ASSET_SAFE_EXTS as readonly string[]).includes(ext);
   let fileUrl = '';
   if (!direct) {
-    if (file.size > MAX_TRANSCODE_BYTES) throw new Error('该格式需要先转码，文件不能超过 37 MB；也可以先转成 mp3 / wav 再上传');
+    if (file.size > MAX_TRANSCODE_BYTES) throw new Error('该格式需要先转码，文件不能超过 37 MB；也可以先转成 mp3 / m4a / wav 再上传');
     // rate=1：atempo=1 等于原速转码（默认输出 m4a/AAC 192k）
     const res = await speedAudio(await readAsDataUrl(file), 1);
     fileUrl = res.url;
@@ -184,7 +188,7 @@ export async function resolveDroppedAudioUrl(payload: Pick<DropPayload, 'url' | 
   if (/^data:/i.test(url)) throw new Error('请直接上传音频文件');
   const stored = toStoredUrl(url);
   if (!looksLikeAudioUrl(stored)) {
-    // 没有可识别的扩展名（或素材库把 m4a 存成了 .png）：交给后端 ffprobe 判断
+    // 没有可识别的扩展名（或 C1 修复前素材库把 m4a 存成了 .png 的旧素材）：交给后端 ffprobe 判断
     const info = await probeMedia(stored);
     if (info.kind !== 'audio') throw new Error(info.kind === 'video' ? '这是视频素材，请拖到视频节点' : '请拖入音频素材');
   }

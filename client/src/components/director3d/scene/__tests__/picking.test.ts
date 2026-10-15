@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { createPoseMannequin, getMannequinRig } from '../mannequin';
-import { dragRotateJoint, pickJoint, pickStageRoot, raycasterAt } from '../picking';
+import { dragRotateJoint, layoutRectToClient, pickJoint, pickStageRoot, raycasterAt } from '../picking';
 
 const RECT = { left: 100, top: 50, width: 800, height: 600 };
 
@@ -53,6 +53,33 @@ describe('scene/picking · 拾取', () => {
     const { stage, camera } = setup();
     expect(pickJoint(raycasterAt(RECT.left + 5, RECT.top + 5, RECT, camera), stage)).toBeNull();
     expect(pickStageRoot(raycasterAt(RECT.left + 5, RECT.top + 5, RECT, camera), stage)).toBeNull();
+  });
+});
+
+describe('scene/picking · 布局像素 → 屏幕像素（REQ-toonflow-canvas C1）', () => {
+  it('元素被 CSS 缩放时，元素内的布局区域按 rect / 布局尺寸 的比例换算到屏幕', () => {
+    // 布局 640×480 的容器被 scale(0.5) 缩到屏幕 320×240，位于 (100, 50)；帧区域（letterbox）在布局坐标 (0, 60) 起、640×360
+    const rect = { left: 100, top: 50, width: 320, height: 240 };
+    expect(layoutRectToClient(rect, { w: 640, h: 480 }, { x: 0, y: 60, w: 640, h: 360 })).toEqual({ left: 100, top: 80, width: 320, height: 180 });
+    // 放大 2 倍
+    const big = { left: 10, top: 20, width: 1280, height: 960 };
+    expect(layoutRectToClient(big, { w: 640, h: 480 }, { x: 80, y: 0, w: 480, h: 480 })).toEqual({ left: 170, top: 20, width: 960, height: 960 });
+    // 不缩放 / 不给子区域 = 原 rect；量不到尺寸时按 1:1
+    expect(layoutRectToClient({ left: 1, top: 2, width: 640, height: 480 }, { w: 640, h: 480 })).toEqual({ left: 1, top: 2, width: 640, height: 480 });
+    expect(layoutRectToClient({ left: 0, top: 0, width: 0, height: 0 }, { w: 640, h: 480 }, { x: 5, y: 6, w: 7, h: 8 })).toEqual({ left: 5, top: 6, width: 7, height: 8 });
+  });
+
+  it('缩放后的屏幕坐标 + 换算后的 rect 拾取到同一个关节', () => {
+    const { stage, doll, camera } = setup();
+    const p = doll.getObjectByName('jointpick_elbow_R')!.getWorldPosition(new THREE.Vector3());
+    for (const zoom of [0.6, 1, 2]) {
+      const screen = { left: 30, top: 40, width: RECT.width * zoom, height: RECT.height * zoom };
+      const rect = layoutRectToClient(screen, { w: RECT.width, h: RECT.height });
+      const ndc = p.clone().project(camera);
+      const x = screen.left + ((ndc.x + 1) / 2) * screen.width;
+      const y = screen.top + ((1 - ndc.y) / 2) * screen.height;
+      expect(pickJoint(raycasterAt(x, y, rect, camera), stage)?.jointId).toBe('elbow_R');
+    }
   });
 });
 

@@ -73,7 +73,8 @@ export function TextNode(props: NodeProps) {
   const failureKey = failure ? `${state?.updated_at ?? ''}|${failure}` : null;
   const showFailure = !!failure && !running && failureKey !== dismissed;
   const aliveRef = useRef(true);
-  useEffect(() => () => { aliveRef.current = false; }, []);
+  // REQ-toonflow-canvas H1：StrictMode 下 effect 会先卸载再挂载，挂载时要把标记复位（否则发送后「生成中」一直不消失）
+  useEffect(() => { aliveRef.current = true; return () => { aliveRef.current = false; }; }, []);
 
   const send = useCallback(async () => {
     if (running || !request.ok) return;

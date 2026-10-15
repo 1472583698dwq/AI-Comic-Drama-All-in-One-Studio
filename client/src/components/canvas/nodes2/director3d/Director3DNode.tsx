@@ -33,18 +33,16 @@ import {
 } from './model';
 import { useDirectorStage, type DirectorStage } from './useDirectorStage';
 import { loadStageModule } from './stageLoader';
-import { finalizeStageVideo, isTruncated, measureVideoDuration, uploadStageBlob } from './exportMedia';
+import { isTruncated, measureVideoDuration, uploadStageBlob, uploadStageVideo } from './exportMedia';
 import { PresetPicker } from './PresetPicker';
 import { KeyframeList } from './KeyframeList';
 import './director3d.css';
 
 /** 卡片宽（Toonflow director3dNode 同宽） */
 export const DIRECTOR3D_WIDTH = 320;
-/** 导出长边（16:9 → 1280×720）；录制掉帧时降到 RETRY_LONG_EDGE 重录一次 */
+/** 导出长边（16:9 → 1280×720）；成片明显短于运镜（设备极忙、采集管线卡住）时降到 RETRY_LONG_EDGE 重录一次 */
 const EXPORT_LONG_EDGE = 1280;
 const RETRY_LONG_EDGE = 960;
-/** 录视频时在末尾多停留的秒数（给编码器追帧，上传前裁掉） */
-const RECORD_TAIL_HOLD_SEC = 0.6;
 
 /** 「AI 规划」的生成源下拉只有一项：宿主的 director_3d_stage_plan 分支（MCP） */
 export const PLAN_SOURCES: GenSourceOption[] = [
@@ -373,10 +371,8 @@ export function Director3DNode(props: NodeProps) {
       : mod.motionPresetKeyframes(p.motion, s.getCameraState(), { speed: p.speed, easing: p.easing }));
     const duration = mod.cameraKeyframesDuration(frames);
     if (!(duration > 0)) { say('error', '运镜时长为 0：请至少记录两个不同时间的关键帧'); return; }
-    // 末尾多停留一小段再停录：MediaRecorder 停止时会丢掉编码器还没处理完的帧（机器忙时尤甚），停留段给它追帧，事后裁掉
-    const last = frames[frames.length - 1];
-    const held = [...frames, { time: duration + RECORD_TAIL_HOLD_SEC, camera: last.camera, easing: 'linear' as const }];
-    const total = duration + RECORD_TAIL_HOLD_SEC;
+    // REQ-toonflow-canvas C1：stageCore.recordCameraPath 已修尾部丢帧（末帧后等采集 / 编码管线排空再停录，成片时长 = 运镜时长），
+    // 不再需要「末尾多录 0.6s + 服务器裁剪」的绕法，按运镜时长原样录制、MP4 直接进素材库
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     progressRef.current = 0;
@@ -385,18 +381,18 @@ export function Director3DNode(props: NodeProps) {
     try {
       const record = async (longEdge: number) => {
         let lastPct = -1;
-        const blob = await s.recordCameraPath(held, total, 30, {
+        const blob = await s.recordCameraPath(frames, duration, 30, {
           longEdge,
           signal: ctrl.signal,
           onProgress: (v) => {
-            const pct = Math.min(99, Math.floor((v * total * 100) / duration));
+            const pct = Math.min(99, Math.floor(v * 100));
             if (pct !== lastPct) { lastPct = pct; paintProgress(pct); }
           },
         });
         ctrl.signal.throwIfAborted();
         return { blob, seconds: await measureVideoDuration(blob) };
       };
-      // 停留段也没追回来（视频比运镜短）：降分辨率重录一次，取较长的那份
+      // 兜底：成片仍明显短于运镜（采集管线卡住超过录制收尾的等待上限）→ 降分辨率重录一次，取较长的那份
       let take = await record(EXPORT_LONG_EDGE);
       if (isTruncated(take.seconds, duration)) {
         recordLabelRef.current = '录制掉帧，降低分辨率重录';
@@ -406,8 +402,8 @@ export function Director3DNode(props: NodeProps) {
       }
       const names = exportNames(dataRef.current.label, 'video');
       setExporting({ kind: 'video', phase: 'upload' });
-      const { url } = await finalizeStageVideo(take.blob, {
-        fileBase: names.fileBase, name: names.assetName, projectId: actions.projectId, expectedSec: duration, measuredSec: take.seconds,
+      const url = await uploadStageVideo(take.blob, Number.isFinite(take.seconds) ? take.seconds : duration, {
+        fileBase: names.fileBase, name: names.assetName, projectId: actions.projectId,
       });
       ctrl.signal.throwIfAborted();
       update({ video_url: url });
@@ -555,7 +551,6 @@ export function Director3DNode(props: NodeProps) {
 
   // —— 卡片 ——
   const boxAspect = stageBoxAspect(params.aspect);
-  const z = stage.zoom > 0 ? stage.zoom : 1;
   const joint = stage.selectedJoint;
   const busyText = !exporting ? ''
     : exporting.phase === 'upload' ? `正在上传${exporting.kind === 'image' ? '截图' : '视频'}到素材库…`
@@ -584,9 +579,7 @@ export function Director3DNode(props: NodeProps) {
           onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
           onDoubleClick={(e) => e.stopPropagation()}
         >
-          <div className="cv-d3__scale" style={{ width: `${z * 100}%`, height: `${z * 100}%`, transform: `scale(${1 / z})` }}>
-            <div ref={hostRef} className="cv-d3__host" />
-          </div>
+          <div ref={hostRef} className="cv-d3__host" />
           {stageReady && overlayOn && imageRefs[0] && (
             <img className="cv-d3__overlay-ref" src={resolveMediaUrl(imageRefs[0].value)} style={frameStyle(params.aspect, boxAspect)} alt="" draggable={false} />
           )}

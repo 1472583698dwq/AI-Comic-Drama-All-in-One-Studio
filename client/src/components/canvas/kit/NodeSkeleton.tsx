@@ -14,7 +14,7 @@ import { getNodeDef } from './registry';
 import { resolvePorts } from './connection';
 import { NodeHandles, cardMinHeight } from './NodeHandles';
 import { FloatingToolbar, ToolbarButton } from './FloatingToolbar';
-import { useKitNodeActions } from './hostContext';
+import { useCanvasHost, useKitNodeActions } from './hostContext';
 import { MenuList, Popover, type MenuItemSpec } from './ui/Popover';
 import type { KitIcon, PortDef } from './types';
 
@@ -120,6 +120,7 @@ export function NodeSkeleton(props: NodeSkeletonProps) {
   const selected = !!node.selected;
 
   const rf = useReactFlow();
+  const host = useCanvasHost();
   const actions = useKitNodeActions(node.id);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -183,6 +184,8 @@ export function NodeSkeleton(props: NodeSkeletonProps) {
     { key: 'duplicate', label: '创建副本', icon: <IconCopyPlus size={16} aria-hidden />, onSelect: actions.duplicate },
     { key: 'delete', label: '删除节点', icon: <IconTrash size={16} aria-hidden />, danger: true, onSelect: () => void run('remove', remove) },
     ...(props.menuItems || []).map((it, i) => (i === 0 ? { ...it, divided: true } : it)),
+    // REQ-toonflow-canvas H1：宿主追加项（只在菜单打开时求值）
+    ...((menuAt && host.contextMenuItems ? host.contextMenuItems(node.id) : []) || []).map((it, i) => (i === 0 ? { ...it, divided: true } : it)),
   ];
 
   // —— 双击聚焦：把节点和浮层一起缩放到视口中央（Toonflow focusNode）——

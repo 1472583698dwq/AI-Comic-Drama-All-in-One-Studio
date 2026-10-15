@@ -9,7 +9,7 @@ import { create } from 'zustand';
 import { apiService } from '../../services/api';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { useCanvasStore } from '../../stores/useCanvasStore';
-import { getNodeSpec } from '../canvas/nodeRegistry';
+import { getNodeDef } from '../canvas/kit/registry';
 import { toast } from '../../stores/useDialogStore';
 import { agentSocket } from './agentSocket';
 import { clearAgentDraft, useAgentDraftStore } from './agentDraftStore';
@@ -75,7 +75,7 @@ function buildAgentFocusNodes(): any[] {
       .filter(Boolean)
       .map((n: any) => {
         const d: any = n.data || {};
-        const spec = getNodeSpec(String(n.type || ''));
+        const spec = getNodeDef(String(n.type || ''));
         const produced = [
           d.image_url ? '图像' : '',
           d.video_url ? '视频' : '',
@@ -84,7 +84,7 @@ function buildAgentFocusNodes(): any[] {
         return {
           id: n.id,
           type: n.type,
-          label: spec?.label || n.type,
+          label: d.label || spec?.label || n.type,
           summary: (d.prompt || d.text || d.brief || d.ai_directive || '').slice(0, 160),
           provider_id: d.provider_id || d.provider || '',
           params: d.params || d.provider_params || undefined,

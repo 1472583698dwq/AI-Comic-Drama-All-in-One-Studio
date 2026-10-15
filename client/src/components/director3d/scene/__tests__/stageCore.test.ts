@@ -38,11 +38,14 @@ import { framingCameraState } from '../camera';
 const W = 640;
 const H = 480;
 
-function makeContainer() {
+/** zoom ≠ 1 模拟祖先 CSS transform 缩放（React Flow 画布）：布局尺寸不变，屏幕 rect 按比例缩放并平移 */
+function makeContainer(zoom = 1, left = 0, top = 0) {
   const el = document.createElement('div');
   Object.defineProperty(el, 'clientWidth', { value: W, configurable: true });
   Object.defineProperty(el, 'clientHeight', { value: H, configurable: true });
-  el.getBoundingClientRect = () => ({ left: 0, top: 0, width: W, height: H, right: W, bottom: H, x: 0, y: 0, toJSON() {} }) as DOMRect;
+  const w = W * zoom;
+  const h = H * zoom;
+  el.getBoundingClientRect = () => ({ left, top, width: w, height: h, right: left + w, bottom: top + h, x: left, y: top, toJSON() {} }) as DOMRect;
   document.body.appendChild(el);
   return el;
 }
@@ -94,6 +97,29 @@ describe('scene/stageCore · createMiniStage', () => {
     expect(entity).toBe('entity_protagonist');
     expect(joints).toEqual(stage.getJoints('entity_protagonist'));
     expect(joints.shoulder_L).not.toEqual(before.shoulder_L);
+  });
+
+  it('REQ-toonflow-canvas C1：容器被 CSS 缩放（画布 zoom 0.6 / 2）且画幅留边时，按屏幕坐标仍能拾取到关节', () => {
+    for (const zoom of [0.6, 2]) {
+      const scaled = makeContainer(zoom, 37, 21);
+      const onSelect = vi.fn();
+      // 640×480 容器里 16:9 画幅 → 帧区域布局坐标 (0, 60) 起、640×360
+      const s = createMiniStage(scaled, { castLayout: 'solo', pose: 'stand', framing: 'full', aspect: 16 / 9, onSelect });
+      try {
+        const ball = s.getEntity('entity_protagonist')!.getObjectByName('jointpick_elbow_R')!;
+        s.scene.updateMatrixWorld(true);
+        s.camera.updateMatrixWorld(true);
+        const ndc = ball.getWorldPosition(new THREE.Vector3()).project(s.camera);
+        const x = 37 + ((ndc.x + 1) / 2) * 640 * zoom;
+        const y = 21 + 60 * zoom + ((1 - ndc.y) / 2) * 360 * zoom;
+        fire(s.renderer.domElement, 'pointerdown', x, y, { button: 0 });
+        expect(onSelect).toHaveBeenCalledWith('entity_protagonist', 'elbow_R');
+        fire(s.renderer.domElement, 'pointerup', x, y);
+      } finally {
+        s.dispose();
+        scaled.remove();
+      }
+    }
   });
 
   it('空白处拖动 = 轨道旋转（半径不变）并回调机位；单击空白回调取消选中', () => {
@@ -193,6 +219,76 @@ describe('scene/stageCore · createMiniStage', () => {
       expect(blob.size).toBeGreaterThan(0);
       expect(progress[progress.length - 1]).toBe(1);
     } finally {
+      vi.unstubAllGlobals();
+      delete (HTMLCanvasElement.prototype as any).captureStream;
+    }
+  });
+
+  it('REQ-toonflow-canvas C1 recordCameraPath：首帧起点机位、末帧终点机位；末帧后不再出帧，等探针看到末帧离开采集管线再停录', async () => {
+    stage = createMiniStage(container, {});
+    const main = stage.renderer;
+    const kf = [
+      { time: 0, camera: framingCameraState('medium') },
+      { time: 0.2, camera: framingCameraState('close_up') },
+    ];
+    const LAG = 350; // 模拟机器忙：采集管线落后 350ms
+    let streamAt = 0;
+    let controller: ReadableStreamDefaultController<{ timestamp: number; close(): void }> | null = null;
+    const draws: { at: number; fov: number }[] = [];
+    let finalDeliveredAt = 0;
+    let stopAt = 0;
+    const enqueue = (tsMs: number, isFinal: () => boolean) => setTimeout(() => {
+      if (isFinal()) finalDeliveredAt = performance.now();
+      try { controller?.enqueue({ timestamp: tsMs * 1000, close() {} }); } catch { /* 探针已关闭 */ }
+    }, LAG);
+    const Fake = (THREE as any).WebGLRenderer;
+    const origRender = Fake.prototype.render;
+    Fake.prototype.render = function (this: any, _scene: unknown, cam: THREE.PerspectiveCamera) {
+      origRender.call(this);
+      if (this === main || !streamAt) return;
+      const at = performance.now();
+      draws.push({ at, fov: cam.fov });
+      const idx = draws.length - 1;
+      enqueue(at - streamAt, () => idx === draws.length - 1 && Math.abs(cam.fov - kf[1].camera.fov) < 1e-9);
+    };
+    class FakeProcessor {
+      readable = new ReadableStream<{ timestamp: number; close(): void }>({ start(c) { controller = c; } });
+    }
+    class FakeRecorder {
+      static isTypeSupported = (t: string) => t === 'video/mp4';
+      state: 'inactive' | 'recording' = 'inactive';
+      ondataavailable: ((e: { data: Blob }) => void) | null = null;
+      onstop: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      start() { this.state = 'recording'; }
+      stop() { stopAt = performance.now(); this.state = 'inactive'; this.ondataavailable?.({ data: new Blob(['mp4'], { type: 'video/mp4' }) }); this.onstop?.(); }
+    }
+    vi.stubGlobal('MediaRecorder', FakeRecorder);
+    vi.stubGlobal('MediaStreamTrackProcessor', FakeProcessor);
+    (HTMLCanvasElement.prototype as any).captureStream = () => {
+      streamAt = performance.now();
+      enqueue(0, () => false); // 建流时采集到的首帧（起点机位）
+      return { getTracks: () => [], getVideoTracks: () => [{ clone: () => ({ stop() {} }) }] };
+    };
+    try {
+      const blob = await stage.recordCameraPath(kf, 0.2, 30);
+      expect(blob.type).toBe('video/mp4');
+      const fovMedium = framingCameraState('medium').fov;
+      const fovClose = kf[1].camera.fov;
+      expect(draws[0].fov).toBeCloseTo(fovMedium, 9);
+      const last = draws[draws.length - 1];
+      expect(last.fov).toBeCloseTo(fovClose, 9);
+      // 末帧落在「运镜时长 − 1 帧」：成片时长 = 末帧时间戳 + 一帧 = 运镜时长
+      expect(last.at - streamAt).toBeGreaterThanOrEqual(200 - 1000 / 30 - 1);
+      expect(last.at - streamAt).toBeLessThan(200 + 40);
+      // 停录发生在末帧送达之后（旧逻辑末帧后 66ms 就停，落后 350ms 的末帧会被丢掉）
+      expect(finalDeliveredAt).toBeGreaterThan(0);
+      expect(stopAt).toBeGreaterThanOrEqual(finalDeliveredAt);
+      expect(stopAt - last.at).toBeLessThan(LAG + 1500);
+      // 末帧之后没有再画新帧（画面不变就不产生新帧，成片不会变长）
+      expect(draws.filter((d) => d.at > last.at)).toHaveLength(0);
+    } finally {
+      Fake.prototype.render = origRender;
       vi.unstubAllGlobals();
       delete (HTMLCanvasElement.prototype as any).captureStream;
     }

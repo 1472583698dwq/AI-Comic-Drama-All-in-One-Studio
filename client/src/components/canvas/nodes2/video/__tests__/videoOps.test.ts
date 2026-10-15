@@ -8,9 +8,17 @@ vi.mock('../../../../../services/mediaOps', () => ({
   trimMedia: vi.fn(),
 }));
 
+vi.mock('../../../../../services/api', () => ({
+  apiService: {
+    createAsset: vi.fn(async (fd: FormData) => ({ id: 'ast_v', file_url: `/storage/assets/ast_v/original.${String((fd.get('file') as File).name).split('.').pop()}` })),
+    uploadAgentAttachment: vi.fn(async (f: File) => ({ kind: 'file', name: f.name, ref: `/storage/agent_uploads/${f.name}`, size: f.size, mime: f.type })),
+  },
+}));
+
 import { extractAudio, extractFrame, splitAv, trimMedia } from '../../../../../services/mediaOps';
+import { apiService } from '../../../../../services/api';
 import { captureFrameSpec, placeBeside, runVideoAction, withPlacement } from '../videoOps';
-import { isVideoDrop, normalizeMediaUrl, parseMediaDrop, validateVideoFile, videoUrlOf } from '../media';
+import { assetKeepsVideoFormat, isVideoDrop, normalizeMediaUrl, parseMediaDrop, uploadVideoFile, validateVideoFile, videoUrlOf } from '../media';
 import { API_ORIGIN } from '../../../../../utils/devOrigin';
 
 const V = '/storage/assets/ast_1/original.mp4';
@@ -104,6 +112,24 @@ describe('素材 URL / 上传校验 / 拖入', () => {
     expect(parseMediaDrop(dt({ 'text/plain': '一段文字 不是地址' }))).toBeNull();
     expect(parseMediaDrop(dt({ 'text/uri-list': '# c\nhttps://x.test/a.webm' }))?.url).toBe('https://x.test/a.webm');
   });
+  it('REQ-toonflow-canvas C1：mov / webm 等素材库认得的格式直接进素材库（不再绕道附件上传）；少见格式仍走附件', async () => {
+    expect(assetKeepsVideoFormat({ name: 'a.MOV', type: 'video/quicktime' })).toBe(true);
+    expect(assetKeepsVideoFormat({ name: 'clip', type: 'video/webm' })).toBe(true);
+    expect(assetKeepsVideoFormat({ name: 'a.wmv', type: 'video/x-ms-wmv' })).toBe(false);
+    expect(assetKeepsVideoFormat({ name: 'a.flv', type: 'video/mp4' })).toBe(false);
+    for (const [name, type] of [['take.mov', 'video/quicktime'], ['rec.webm', 'video/webm'], ['a.mp4', 'video/mp4'], ['b.mkv', 'video/x-matroska']] as const) {
+      (apiService.createAsset as any).mockClear();
+      const up = await uploadVideoFile(new File(['x'], name, { type }), 'proj_1');
+      const fd = (apiService.createAsset as any).mock.calls[0][0] as FormData;
+      expect((fd.get('file') as File).name).toBe(name);
+      expect(fd.get('project_id')).toBe('proj_1');
+      expect(up).toEqual({ url: `/storage/assets/ast_v/original.${name.split('.').pop()}`, assetId: 'ast_v' });
+    }
+    expect(apiService.uploadAgentAttachment).not.toHaveBeenCalled();
+    const odd = await uploadVideoFile(new File(['x'], 'old.wmv', { type: 'video/x-ms-wmv' }), 'proj_1');
+    expect(odd).toEqual({ url: '/storage/agent_uploads/old.wmv' });
+  });
+
   it('上传校验：类型、空文件、100MB 上限', () => {
     expect(validateVideoFile(new File(['x'], 'a.txt', { type: 'text/plain' }))).toBe('请选择视频文件');
     expect(validateVideoFile(new File([], 'a.mp4', { type: 'video/mp4' }))).toContain('100 MB');

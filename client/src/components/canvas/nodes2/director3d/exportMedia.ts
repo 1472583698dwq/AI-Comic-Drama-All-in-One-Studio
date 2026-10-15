@@ -3,8 +3,9 @@
  * REQ-toonflow-canvas N5 · 3D 导演导出的上传：沿用 3D 片场的做法（apiService.createAsset → 素材库 previz 分类），
  * 返回 `/storage/assets/<id>/original.<ext>` 写进节点 image_url / video_url。
  *
- * 素材库按扩展名落盘且只认 png/jpg/webp/mp4…（webm 会被存成 .png），所以视频只上传 MP4；
- * 浏览器只能录 WebM 时（如 Firefox）走 T2 媒体接口 `/media/ops/trim` 转成 H.264 MP4 再登记到素材库。
+ * 「导出 MP4」只产出 MP4（下游视频生成 / 剪辑按 H.264 MP4 处理）：浏览器录出 MP4 时直接进素材库；
+ * 只能录 WebM 时（如 Firefox）走 T2 媒体接口 `/media/ops/trim` 转成 H.264 MP4 再登记到素材库。
+ * （C1 起素材库已保留 .webm 等真实扩展名；录制尾部丢帧也已在 stageCore 修掉，不再需要多录 + 服务器裁剪。）
  */
 import { apiService } from '../../../../services/api';
 import { trimMedia } from '../../../../services/mediaOps';
@@ -78,34 +79,6 @@ export async function uploadStageVideo(blob: Blob, durationSec: number, opts: Om
   }
   await registerAsset(url, opts);
   return url;
-}
-
-export interface FinalizeVideoOptions extends Omit<UploadOptions, 'fileName'> {
-  fileBase: string;
-  /** 运镜时长（不含录制时多录的尾帧停留） */
-  expectedSec: number;
-  /** 录好的视频实际时长（measureVideoDuration；NaN = 读不到） */
-  measuredSec: number;
-}
-
-/**
- * REQ-toonflow-canvas 录制产物落地：录制时在末尾多停留了一小段（给编码器追帧，见节点 RECORD_TAIL_HOLD_SEC），
- * 视频完整时交给 `/media/ops/trim` 精确裁到运镜时长（同时转成标准 H.264 MP4），再登记素材库；
- * 裁剪失败（如服务器没装 ffmpeg）或视频不完整时原样上传。
- */
-export async function finalizeStageVideo(blob: Blob, o: FinalizeVideoOptions): Promise<{ url: string; trimmed: boolean }> {
-  const complete = Number.isFinite(o.measuredSec) && o.measuredSec >= o.expectedSec - 0.05;
-  if (complete) {
-    try {
-      const res = await trimMedia(await blobToDataUrl(blob), 0, o.expectedSec);
-      await registerAsset(res.url, o);
-      return { url: res.url, trimmed: true };
-    } catch (e) {
-      console.warn('[director3d] 服务器裁剪运镜视频失败，改为原样上传', e);
-    }
-  }
-  const seconds = Number.isFinite(o.measuredSec) ? o.measuredSec : o.expectedSec;
-  return { url: await uploadStageVideo(blob, seconds, o), trimmed: false };
 }
 
 /**

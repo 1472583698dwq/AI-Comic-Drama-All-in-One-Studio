@@ -257,4 +257,13 @@ describe('舞台名额 / 像素比', () => {
     expect(2416 * 1360 * r * r).toBeLessThanOrEqual(MAX_STAGE_PIXELS + 1);
     expect(stagePixelRatio(100000, 100000, 2)).toBe(0.25);
   });
+
+  it('REQ-toonflow-canvas C1 像素比随画布缩放：放大时绘制缓冲跟着放大（清晰）、缩小时跟着缩小，总量仍封顶', () => {
+    // 与原先「布局 × zoom 再 scale(1/zoom)」的绘制缓冲一致：布局 302×170、zoom 2、dpr 1 → 缓冲 604×340
+    expect(stagePixelRatio(302, 170, 1, 2)).toBe(2);
+    expect(stagePixelRatio(302, 170, 2, 0.6)).toBeCloseTo(1.2, 9);
+    const r = stagePixelRatio(302, 170, 2, 4);
+    expect(302 * 170 * r * r).toBeLessThanOrEqual(MAX_STAGE_PIXELS + 1);
+    expect(stagePixelRatio(302, 170, 1, 0)).toBe(1);
+  });
 });

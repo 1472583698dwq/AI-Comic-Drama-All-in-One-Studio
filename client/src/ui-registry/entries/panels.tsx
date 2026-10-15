@@ -35,7 +35,7 @@ export const CanvasTipEntry: React.FC = () => {
     <ContextTipCard
       storageKey="canvas_first"
       title="画布这样玩"
-      desc="按住节点右侧圆点拖到下一个节点即连线；选中生图 / 视频 / 配音节点，底部会弹出它的 Agent 控制台，用一句大白话描述你要什么即可。"
+      desc="按住节点右侧圆点拖到下一个节点即连线，拖到空白处可直接新建能接上的节点；选中节点后在它下方的提示词面板里描述你要什么并生成。"
       markProps={markAttrs({ id: 'tip.canvas-first', kind: 'panel', scope: 'prefs', source: 'builtin' })}
     />
   );

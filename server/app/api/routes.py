@@ -1207,6 +1207,40 @@ async def expand_prompt(req: PromptExpandRequest):
         raise HTTPException(status_code=502, detail=f"LLM 扩写失败: {e}")
 
 
+class TextGenerateRequest(BaseModel):
+    prompt: str
+    system: Optional[str] = None
+    images: Optional[List[str]] = None  # 预留：参考图（当前 LLM 通道为纯文本，只把地址列进提示词）
+    temperature: float = 0.7
+    max_tokens: int = 2000
+
+
+@router.post("/llm/generate")
+async def generate_text(req: TextGenerateRequest):
+    """REQ-toonflow-canvas H1 通用文本生成：画布文本节点「自由生成」技能（按提示词生成 Markdown）。"""
+    from app.pipelines.llm_service import llm_service, LLMServiceError
+    prompt = (req.prompt or "").strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="prompt 不能为空")
+    system = (req.system or "").strip() or "你是漫剧创作助手。按用户要求生成内容，使用 Markdown 排版；只输出正文，不要多余的解释。"
+    user = prompt[:12000]
+    imgs = [u for u in (req.images or []) if isinstance(u, str) and u.strip()][:8]
+    if imgs:
+        user += "\n\n（参考图地址：" + "；".join(imgs) + "）"
+    try:
+        text = await llm_service.chat_completion(
+            messages=[{"role": "system", "content": system[:4000]}, {"role": "user", "content": user}],
+            temperature=max(0.0, min(float(req.temperature), 1.5)),
+            max_tokens=max(64, min(int(req.max_tokens), 8000)),
+        )
+    except LLMServiceError as e:
+        raise HTTPException(status_code=502, detail=f"LLM 生成失败: {e}")
+    text = (text or "").strip()
+    if not text:
+        raise HTTPException(status_code=502, detail="LLM 返回为空")
+    return {"status": "success", "text": text}
+
+
 
 @router.websocket("/ws/agent")
 async def websocket_agent_endpoint(websocket: WebSocket):

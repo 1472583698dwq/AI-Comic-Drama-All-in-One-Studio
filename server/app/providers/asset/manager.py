@@ -8,6 +8,7 @@ import json
 import time
 import uuid
 import shutil
+import mimetypes
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 
@@ -22,6 +23,113 @@ MIGRATED_MARKER = os.path.join(ASSETS_ROOT, ".migrated")
 
 # 悬空素材清理前的备份清单（jsonl，逐条追加，可人工找回）
 MISSING_BACKUP = os.path.join(ASSETS_ROOT, ".missing_backup.jsonl")
+
+# REQ-toonflow-canvas 素材文件保留真实扩展名（图片 / 视频 / 音频 / 3D 模型）。
+# 以前白名单只有 png/jpg/jpeg/webp/mp3/wav/mp4/glb/fbx，其余（webm/m4a/mov/ogg/flac/aac/gif…）一律存成 original.png，
+# 浏览器拿到 image/png 的音视频播不了，画布节点只能先转码或绕道附件上传。
+# 不在白名单里的（html/svg/js 等同源可执行内容、未知格式）仍按旧规则落成 .png，不对外以原类型提供。
+ASSET_FILE_EXTS = {
+    # 图片
+    ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".avif",
+    # 视频
+    ".mp4", ".m4v", ".mov", ".webm", ".mkv", ".avi", ".ogv",
+    # 音频
+    ".mp3", ".wav", ".m4a", ".aac", ".ogg", ".oga", ".opus", ".flac", ".weba",
+    # 3D 模型
+    ".glb", ".fbx",
+}
+
+# 上传时浏览器给的 content-type → 扩展名（文件名没有可用扩展名时用）
+_MIME_TO_EXT = {
+    "image/png": ".png", "image/jpeg": ".jpg", "image/jpg": ".jpg", "image/pjpeg": ".jpg", "image/webp": ".webp",
+    "image/gif": ".gif", "image/bmp": ".bmp", "image/x-ms-bmp": ".bmp", "image/avif": ".avif",
+    "video/mp4": ".mp4", "video/x-m4v": ".m4v", "video/quicktime": ".mov", "video/webm": ".webm",
+    "video/x-matroska": ".mkv", "video/x-msvideo": ".avi", "video/avi": ".avi", "video/ogg": ".ogv",
+    "audio/mpeg": ".mp3", "audio/mp3": ".mp3", "audio/wav": ".wav", "audio/x-wav": ".wav", "audio/wave": ".wav",
+    "audio/vnd.wave": ".wav", "audio/mp4": ".m4a", "audio/x-m4a": ".m4a", "audio/m4a": ".m4a", "audio/aac": ".aac",
+    "audio/x-aac": ".aac", "audio/aacp": ".aac", "audio/ogg": ".ogg", "audio/opus": ".opus", "audio/flac": ".flac",
+    "audio/x-flac": ".flac", "audio/webm": ".weba",
+    "model/gltf-binary": ".glb",
+}
+
+# 落盘后 /storage 静态服务按扩展名回 content-type（Starlette 用 mimetypes.guess_type）：
+# 系统 mime.types 因平台而异（macOS 把 .m4a 报成 audio/mp4a-latm、.glb 没有登记会回 text/plain），这里统一成浏览器认的标准类型
+ASSET_CONTENT_TYPES = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif",
+    ".bmp": "image/bmp", ".avif": "image/avif",
+    ".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
+    ".mkv": "video/x-matroska", ".avi": "video/x-msvideo", ".ogv": "video/ogg",
+    ".mp3": "audio/mpeg", ".wav": "audio/wav", ".m4a": "audio/mp4", ".aac": "audio/aac", ".ogg": "audio/ogg",
+    ".oga": "audio/ogg", ".opus": "audio/ogg", ".flac": "audio/flac", ".weba": "audio/webm",
+    ".glb": "model/gltf-binary", ".fbx": "application/octet-stream",
+}
+
+
+def register_asset_content_types() -> None:
+    """REQ-toonflow-canvas 把素材扩展名的标准 content-type 登记进 mimetypes（幂等，模块导入时自动调用）"""
+    for ext, ctype in ASSET_CONTENT_TYPES.items():
+        mimetypes.add_type(ctype, ext)
+
+
+register_asset_content_types()
+
+
+def _sniff_ext(head: bytes) -> Optional[str]:
+    """REQ-toonflow-canvas 按文件头认常见媒体格式（文件名 / content-type 都给不出扩展名时兜底）"""
+    if not head:
+        return None
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if head.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if head[:6] in (b"GIF87a", b"GIF89a"):
+        return ".gif"
+    if head[:4] == b"RIFF" and len(head) >= 12:
+        return {b"WEBP": ".webp", b"WAVE": ".wav", b"AVI ": ".avi"}.get(head[8:12])
+    if len(head) >= 12 and head[4:8] == b"ftyp":
+        brand = head[8:12]
+        if brand == b"qt  ":
+            return ".mov"
+        if brand in (b"M4A ", b"M4B ", b"M4P "):
+            return ".m4a"
+        if brand in (b"avif", b"avis"):
+            return ".avif"
+        if brand == b"M4V ":
+            return ".m4v"
+        return ".mp4"
+    if head.startswith(b"\x1a\x45\xdf\xa3"):
+        return ".webm" if b"webm" in head[:64] else ".mkv"
+    if head.startswith(b"OggS"):
+        return ".ogg"
+    if head.startswith(b"fLaC"):
+        return ".flac"
+    if head.startswith(b"ID3"):
+        return ".mp3"
+    if len(head) >= 2 and head[0] == 0xFF and (head[1] & 0xF6) == 0xF0:
+        return ".aac"  # ADTS
+    if len(head) >= 2 and head[0] == 0xFF and (head[1] & 0xE0) == 0xE0:
+        return ".mp3"  # MPEG audio frame sync
+    if head.startswith(b"glTF"):
+        return ".glb"
+    if head.startswith(b"Kaydara FBX Binary"):
+        return ".fbx"
+    return None
+
+
+def resolve_asset_ext(filename: Optional[str], content_type: Optional[str] = None, head: bytes = b"") -> str:
+    """
+    REQ-toonflow-canvas 素材落盘扩展名：文件名扩展名（白名单内）→ 上传 content-type → 文件头 → 旧规则 .png。
+    返回小写、带点的扩展名，一定在 ASSET_FILE_EXTS 内。
+    """
+    ext = os.path.splitext(filename or "")[1].lower()
+    if ext in ASSET_FILE_EXTS:
+        return ext
+    ctype = (content_type or "").split(";")[0].strip().lower()
+    by_type = _MIME_TO_EXT.get(ctype)
+    if by_type:
+        return by_type
+    return _sniff_ext(head[:64]) or ".png"
+
 
 def _asset_dir(asset_id: str) -> str:
     return os.path.join(ASSETS_ROOT, asset_id)
@@ -182,7 +290,7 @@ class AssetManager:
                 pass
         return {"removed": removed, "count": len(removed), "kept": kept}
 
-    def create_asset(self, data: Dict[str, Any], file_bytes: Optional[bytes] = None, filename: Optional[str] = None) -> Asset:
+    def create_asset(self, data: Dict[str, Any], file_bytes: Optional[bytes] = None, filename: Optional[str] = None, content_type: Optional[str] = None) -> Asset:
         # 校验 category
         cat = data.get("category", "other")
         if cat not in ASSET_CATEGORIES:
@@ -223,7 +331,7 @@ class AssetManager:
         )
         # 处理文件
         if file_bytes and filename:
-            asset = self._attach_file(asset, file_bytes, filename)
+            asset = self._attach_file(asset, file_bytes, filename, content_type)
         elif data.get("file_url"):
             # 直接引用已有URL（如 /storage/generated/xxx.png 或 http）
             asset.file_url = data["file_url"]
@@ -231,13 +339,11 @@ class AssetManager:
         _save_asset(asset)
         return asset
 
-    def _attach_file(self, asset: Asset, file_bytes: bytes, filename: str) -> Asset:
+    def _attach_file(self, asset: Asset, file_bytes: bytes, filename: str, content_type: Optional[str] = None) -> Asset:
         d = _asset_dir(asset.id)
         os.makedirs(d, exist_ok=True)
-        # 清理旧文件
-        ext = os.path.splitext(filename)[1] or ".png"
-        if ext.lower() not in [".png",".jpg",".jpeg",".webp",".mp3",".wav",".mp4",".glb",".fbx"]:
-            ext = ".png"
+        # REQ-toonflow-canvas 保留真实扩展名（文件名 → content-type → 文件头），不再把音视频存成 .png
+        ext = resolve_asset_ext(filename, content_type, file_bytes[:64])
         out_name = f"original{ext}"
         out_path = os.path.join(d, out_name)
         with open(out_path, "wb") as f:
@@ -263,7 +369,7 @@ class AssetManager:
             pass
         return asset
 
-    def update_asset(self, asset_id: str, updates: Dict[str, Any], file_bytes: Optional[bytes] = None, filename: Optional[str] = None) -> Optional[Asset]:
+    def update_asset(self, asset_id: str, updates: Dict[str, Any], file_bytes: Optional[bytes] = None, filename: Optional[str] = None, content_type: Optional[str] = None) -> Optional[Asset]:
         asset = _load_asset(asset_id)
         if not asset:
             return None
@@ -284,7 +390,7 @@ class AssetManager:
             asset.file_url = updates["file_url"]
             asset.thumb_url = updates["file_url"]
         if file_bytes and filename:
-            asset = self._attach_file(asset, file_bytes, filename)
+            asset = self._attach_file(asset, file_bytes, filename, content_type)
         _save_asset(asset)
         return asset
 
@@ -305,8 +411,10 @@ class AssetManager:
         # 复制文件
         src_dir = _asset_dir(asset_id)
         new_asset = Asset.model_validate({**data, "id": f"ast_{uuid.uuid4().hex[:8]}"})
-        # 复制原始文件
-        for fname in os.listdir(src_dir):
+        # 复制原始文件（REQ-toonflow-canvas 换过不同扩展名的文件后目录里可能有多个 original.*，优先复制当前 file_url 指向的那个）
+        current = os.path.basename(src.file_url or "") if (src.file_url or "").startswith("/storage/") else ""
+        names = sorted(os.listdir(src_dir), key=lambda n: n != current)
+        for fname in names:
             if fname == "meta.json":
                 continue
             src_path = os.path.join(src_dir, fname)

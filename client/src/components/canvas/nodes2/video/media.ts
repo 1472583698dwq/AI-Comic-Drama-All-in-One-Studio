@@ -2,8 +2,9 @@
 /**
  * REQ-toonflow-canvas 视频节点的素材读写：上传、素材库拖入、URL 归一。
  *
- * 上传沿用 MiniMax 画布现有通道（CanvasResourcePickerModal：音视频走素材库 createAsset 取 file_url）；
- * 素材库 `_attach_file` 只认 .mp4 等少数扩展名（其余会被存成 .png），所以非 MP4 改走附件上传（保留扩展名）。
+ * 上传沿用 MiniMax 画布现有通道（CanvasResourcePickerModal：音视频走素材库 createAsset 取 file_url）。
+ * REQ-toonflow-canvas C1：素材库已保留真实扩展名（mp4 / mov / webm / m4v / mkv / avi / ogv），这些格式都直接进素材库
+ * （以前非 MP4 会被存成 .png，只能绕道附件上传）；素材库不收的少见格式（wmv / flv…）仍走附件上传保留扩展名。
  */
 import { apiService } from '../../../../services/api';
 import { API_ORIGIN } from '../../../../utils/devOrigin';
@@ -57,8 +58,16 @@ export function validateVideoFile(file: File | null | undefined): string | null 
   return null;
 }
 
-function isMp4(file: File): boolean {
-  return file.type === 'video/mp4' || /\.mp4$/i.test(file.name);
+/** 素材库原样保存的视频扩展名 / content-type（server/app/providers/asset/manager.py::ASSET_FILE_EXTS / _MIME_TO_EXT）。 */
+const ASSET_VIDEO_EXT_RE = /\.(mp4|m4v|mov|webm|mkv|avi|ogv)$/i;
+const ASSET_VIDEO_TYPES = ['video/mp4', 'video/x-m4v', 'video/quicktime', 'video/webm', 'video/x-matroska', 'video/x-msvideo', 'video/avi', 'video/ogg'];
+
+/** REQ-toonflow-canvas C1：素材库能否原样保存这个视频（文件名扩展名或 content-type 认得出来）。 */
+export function assetKeepsVideoFormat(file: Pick<File, 'name' | 'type'>): boolean {
+  if (ASSET_VIDEO_EXT_RE.test(file.name)) return true;
+  // 文件名带了别的扩展名（如 .wmv）时后端按文件名判断，不看 content-type
+  if (/\.[a-z0-9]{1,5}$/i.test(file.name)) return false;
+  return ASSET_VIDEO_TYPES.includes((file.type || '').split(';')[0].trim().toLowerCase());
 }
 
 export interface UploadedVideo {
@@ -67,11 +76,11 @@ export interface UploadedVideo {
   assetId?: string;
 }
 
-/** 上传视频：MP4 → 素材库（项目内）；其他格式 → 附件上传。返回存储相对 URL。 */
+/** 上传视频：素材库认得的格式 → 素材库（项目内）；其他少见格式 → 附件上传。返回存储相对 URL。 */
 export async function uploadVideoFile(file: File, projectId?: string | null): Promise<UploadedVideo> {
   const err = validateVideoFile(file);
   if (err) throw new Error(err);
-  if (isMp4(file)) {
+  if (assetKeepsVideoFormat(file)) {
     const fd = new FormData();
     fd.append('file', file);
     fd.append('name', file.name.replace(/\.[^/.]+$/, '') || '视频');

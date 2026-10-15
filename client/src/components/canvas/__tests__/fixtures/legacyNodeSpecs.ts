@@ -1,23 +1,26 @@
-import { HandleDef } from './utils/dynamicHandles';
-
-export type NodeKind = 'image'|'video'|'audio'|'text'|'character'|'shot';
-export interface NodeSpec {
+// -*- coding: utf-8 -*-
+/**
+ * REQ-toonflow-canvas H1：旧 `nodeRegistry.NODE_SPECS` 的冻结快照（只给测试用）。
+ * 旧注册表随旧节点一起删除；换皮节点的端口 id / 方向 / 类型要与旧画布存量连线兼容，测试仍以这份旧表为对照基准。
+ * 运行时代码不得引用本文件（端口一律以 kit 注册表为准）。
+ */
+export interface LegacyHandleDef { id: string; label: string; type: 'image' | 'video' | 'audio' | 'text' | 'character' | 'shot'; required?: boolean }
+export interface LegacyNodeSpec {
   type: string;
   label: string;
   desc: string;
   color: string;
-  inputs: HandleDef[];
-  outputs: HandleDef[];
+  inputs: LegacyHandleDef[];
+  outputs: LegacyHandleDef[];
   paramsSchema?: any;
-  providerKind?: 'image'|'video'|'audio'|'llm';
+  providerKind?: 'image' | 'video' | 'audio' | 'llm';
   icon?: string;
   isCore?: boolean;
 }
 
-const H = (id:string, label:string, type:HandleDef['type'], required?:boolean): HandleDef => ({id, label, type, required});
+const H = (id: string, label: string, type: LegacyHandleDef['type'], required?: boolean): LegacyHandleDef => ({ id, label, type, required });
 
-// 6 核心线性节点 + 兼容老节点（迁移用，不在工具栏展示）
-export const NODE_SPECS: Record<string, NodeSpec> = {
+export const NODE_SPECS: Record<string, LegacyNodeSpec> = {
   // ====== 新 6 核心（极简） ======
   'prompt': {
     type:'prompt', label:'提示词', desc:'文本/描述', color:'text-sky-500',
@@ -133,9 +136,3 @@ export const NODE_SPECS: Record<string, NodeSpec> = {
     isCore: true,
   },
 };
-
-export function getNodeSpec(type:string): NodeSpec | undefined {
-  return NODE_SPECS[type];
-}
-export function allNodeSpecs(): NodeSpec[] { return Object.values(NODE_SPECS); }
-export function coreNodeSpecs(): NodeSpec[] { return Object.values(NODE_SPECS).filter(s=> s.isCore); }

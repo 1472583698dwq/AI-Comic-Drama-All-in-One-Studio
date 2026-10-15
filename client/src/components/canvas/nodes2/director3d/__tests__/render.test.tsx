@@ -65,8 +65,8 @@ vi.mock('../stageLoader', async () => {
 vi.mock('../exportMedia', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../exportMedia')>()),
   uploadStageBlob: vi.fn(async () => '/storage/assets/ast_test/original.png'),
-  finalizeStageVideo: vi.fn(async () => ({ url: '/storage/generated/media_ops/test.mp4', trimmed: true })),
-  measureVideoDuration: vi.fn(async () => 3.1),
+  uploadStageVideo: vi.fn(async () => '/storage/assets/ast_test/original.mp4'),
+  measureVideoDuration: vi.fn(async () => 2.5),
 }));
 
 import { CanvasHostProvider, defineNode, nodeTypesMap, type CanvasHost, type PortDef } from '../../../kit';
@@ -75,7 +75,7 @@ import '../index';
 import { DIRECTOR3D_PORTS } from '../index';
 import { deriveCameraPrompt, roundCamera } from '../model';
 import { resetStageSlots } from '../stageBudget';
-import { finalizeStageVideo, uploadStageBlob } from '../exportMedia';
+import { uploadStageBlob, uploadStageVideo } from '../exportMedia';
 
 beforeAll(() => {
   class RO {
@@ -294,21 +294,22 @@ describe('director3d 节点', () => {
     await waitFor(() => expect(el.querySelector('.cv-d3__notice')?.textContent).toContain('AI 规划没有返回结果'));
   });
 
-  it('导出 MP4：无关键帧时按当前运镜预设录制（末尾多停 0.6s 给编码器追帧，再裁回运镜时长），写 video_url', async () => {
+  it('导出 MP4：无关键帧时按当前运镜预设录制（REQ-toonflow-canvas C1：按运镜时长原样录制，MP4 直接进素材库），写 video_url', async () => {
     const createNodes = vi.fn(() => ['v1']);
     const { container } = await mount({ ai_directive: '', export_new_node: false }, { host: { createNodes, projectId: 'proj_test' } });
     const el = nodeEl(container);
     fireEvent.click(within(el).getByRole('button', { name: /按运镜「急进推镜 \(Dolly In\)」导出 MP4/ }));
-    await waitFor(() => expect(d3Data().video_url).toBe('/storage/generated/media_ops/test.mp4'));
+    await waitFor(() => expect(d3Data().video_url).toBe('/storage/assets/ast_test/original.mp4'));
     expect(fake.stages[0].recordCameraPath).toHaveBeenCalledTimes(1);
     const [frames, duration, fps, opts] = fake.stages[0].recordCameraPath.mock.calls[0];
     expect(frames.length).toBeGreaterThan(2);
-    expect(duration).toBeCloseTo(3.1, 6);
-    expect(frames.at(-1).time).toBeCloseTo(3.1, 6);
-    expect(frames.at(-1).camera).toEqual(frames.at(-2).camera);
+    expect(duration).toBeCloseTo(2.5, 6);
+    // 不再在末尾追加停留帧
+    expect(frames.at(-1).time).toBeCloseTo(2.5, 6);
+    expect(frames.at(-1).camera).not.toEqual(frames.at(-2).camera);
     expect(fps).toBe(30);
     expect(opts).toMatchObject({ longEdge: 1280 });
-    expect(finalizeStageVideo).toHaveBeenCalledWith(expect.any(Blob), expect.objectContaining({ expectedSec: 2.5, measuredSec: 3.1, projectId: 'proj_test' }));
+    expect(uploadStageVideo).toHaveBeenCalledWith(expect.any(Blob), 2.5, expect.objectContaining({ projectId: 'proj_test' }));
     expect(createNodes).not.toHaveBeenCalled();
     expect(el.querySelector('.cv-d3__notice')?.textContent).toContain('已导出运镜视频 MP4（2.5s');
   });
