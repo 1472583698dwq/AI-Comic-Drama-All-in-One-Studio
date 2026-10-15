@@ -12,7 +12,7 @@
 
 ## W2 约定（协调人 2026-10-15 补）
 
-7. **媒体生成统一用 `kit/useGeneration`**：`const gen = useGeneration(id, actions.update)`；`gen.run({nodeType, kind, data, assembled: assembleInputs({...}), providerId, params, smartPlan, intent})`。它负责直接生成 / 智能规划两条路径、视频轮询、`agent_state`、`history` 追加；`gen.cancel()` 停止等待并丢弃结果。不要自己调 `executeAgentNode` / `canvasAgentGenerate`。
+7. **媒体生成统一用 `kit/useGeneration`**：节点里写 `const gen = useNodeGeneration(id)`（K1 新增，回写走 `useKitNodeActions(id).update`）；需要自定义回写时用 `useGeneration(id, (nodeId, patch) => …)`——注意它的回写签名是 `(nodeId, patch)`，**不能**直接传 `actions.update`（只收 patch）。`gen.run({nodeType, kind, data, assembled: assembleInputs({...}), providerId, params, smartPlan, intent, inputKeys?})`。它负责直接生成 / 智能规划两条路径、视频轮询、`agent_state`、`history` 追加，直接生成时会用 `stripStaleSlotKeys` 去掉节点 data 里的旧槽位键（`inputKeys` 可追加生成源 input_schema 键）；`gen.cancel()` 停止等待并丢弃结果。不要自己调 `executeAgentNode` / `canvasAgentGenerate`。
 8. **生成源列表**用 `kit/useProviderSources(kind)`、定义用 `useProviderDefinition(id)`；槽位用 `providerSkills.extractSlotsFromProvider(def)`，参数控件用 `providerSkills.paramsSchemaToSpecs` + `controls/DynamicControl`（保留 x-agent 徽标）。
 9. **宿主能力只经 `useKitNodeActions(id)`**：`update`、`rename`、`remove`、`copy`、`duplicate`、`saveToAssets`、`openFullscreen`、`execute(overrides)`（文本技能 / director3d 规划 / custom / ext-node 等走宿主原有分支）、`createNodes(specs, {placement, connectFrom})`（宫格切分、截帧、分离音轨、截取、变速、3D 导出等产物落成新节点）、`navigate(tab, payload)`、`projectId`。
 10. **媒体处理接口**用 `client/src/services/mediaOps.ts`（契约见 progress/T2.md）。上传素材沿用现有 `apiService` 的上传 / 素材接口（看 `nodes/LoaderNodes.tsx` 现在怎么传）。

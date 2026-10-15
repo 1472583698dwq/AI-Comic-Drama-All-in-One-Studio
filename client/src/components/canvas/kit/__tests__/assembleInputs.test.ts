@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Edge, Node } from '@xyflow/react';
 import {
-  assembleInputs, assemblePrompt, autoMode, availableModes, providerVideoMode, resolveSlotCaps, toEngineArgs, type SlotSpec,
+  assembleInputs, assemblePrompt, assembleAudioText, autoMode, availableModes, providerVideoMode, resolveSlotCaps, toEngineArgs, type SlotSpec,
 } from '../assembleInputs';
 import { buildRefs } from '../references';
 import { normalizeVideoMode, ownPromptOf } from '../inputRules';
@@ -235,6 +235,64 @@ describe('前后端同一夹具：顺序与提示词（TestOrderAndPrompt）', (
     expect(ownPromptOf('audio', { prompt: 'p', text: ' 台词 ' })).toBe('台词');
     expect(ownPromptOf('image', { prompt: 'p', text: 't' })).toBe('p');
     expect(assemblePrompt('', [])).toBe('');
+  });
+});
+
+describe('前后端同一夹具：音频配音文本 R6a（TestAudioText，K1 / T6）', () => {
+  function nodes(data: Record<string, unknown>, type = 'audio'): N[] {
+    return [
+      { id: 'ta', type: 'prompt', data: { prompt: '角色：白衣少女' } },
+      { id: 'im', type: 'load-image', data: { image_url: '/s/a.png' } },
+      { id: 'tb', type: 'prompt', data: { prompt: '场景：竹林夜雨' } },
+      { id: 'aud', type, data },
+    ];
+  }
+  const edges = () => [e('e1', 'ta', 'text', 'aud', 'in'), e('e2', 'im', 'image', 'aud', 'in'), e('e3', 'tb', 'text', 'aud', 'in')];
+  const prompt = (data: Record<string, unknown>) => collect(nodes(data), edges(), 'aud').slots.prompt;
+
+  it('test_own_text_tokens_replaced_by_ref_text', () => {
+    expect(prompt({ text: '{{ref 1}}，{{ref 3}}' })).toBe('角色：白衣少女，场景：竹林夜雨');
+  });
+
+  it('test_own_text_only_no_prefix_no_mapping', () => {
+    // 没提到的文本参考不念；媒体参考 {{ref 2}} / 越界 {{ref 9}} 换成空串，也不加「参考编号对应」附注
+    expect(prompt({ text: '大家好' })).toBe('大家好');
+    expect(prompt({ text: '看{{ref 2}}这里{{ref 9}}' })).toBe('看这里');
+  });
+
+  it('test_text_key_before_prompt', () => {
+    expect(prompt({ text: '念这句', prompt: '不念这句' })).toBe('念这句');
+    expect(prompt({ prompt: '旧节点只有 prompt {{ref 3}}' })).toBe('旧节点只有 prompt 场景：竹林夜雨');
+  });
+
+  it('test_empty_own_joins_text_refs_with_newline', () => {
+    expect(prompt({})).toBe('角色：白衣少女\n场景：竹林夜雨');
+    const r = collect(nodes({ refOrder: ['tb|text', 'ta|text'] }), edges(), 'aud');
+    expect(r.slots.prompt).toBe('场景：竹林夜雨\n角色：白衣少女');
+  });
+
+  it('test_other_targets_keep_numbered_refs', () => {
+    const r = collect(nodes({ prompt: '{{ref 1}}' }, 'image'), edges(), 'aud');
+    expect(r.slots.prompt).toBe('参考 1\n\n参考 1：\n角色：白衣少女\n\n参考 3：\n场景：竹林夜雨');
+  });
+
+  it('空值文本参考 / 机位文本也换成空串；assembleAudioText 纯函数', () => {
+    expect(assembleAudioText(' {{ref 1}}{{ref 2}} ', [[1, '  甲 '], [2, '  ']])).toBe('甲');
+    expect(assembleAudioText('', [[3, '丙'], [1, '甲'], [2, '']])).toBe('甲\n丙');
+    expect(assembleAudioText('', [])).toBe('');
+    const ns: N[] = [...srcNodes(), { id: 'aud', type: 'audio', data: { text: '{{ref 1}}开拍' } }];
+    expect(collect(ns, [e('a', 'd1', 'camera_prompt', 'aud', 'in')], 'aud').slots).toEqual({ prompt: '开拍', camera_prompt: '[推进,左摇]' });
+  });
+
+  it('前端独有：自身台词没引用的文本参考标为未使用并提示；引用了非文本参考提示会被忽略', () => {
+    const { r, refs } = collect(nodes({ text: '{{ref 1}}，{{ref 2}}' }), edges(), 'aud');
+    expect(r.prompt).toBe('角色：白衣少女，');
+    expect(r.assignments[refs[0].key]).toBe('prompt');
+    expect(r.assignments[refs[2].key]).toBeNull();
+    expect(r.warnings).toEqual(['台词里没有引用 参考 3，不会念出', '参考 2 不是文本，台词里的引用会被忽略']);
+    expect(r.hasTextRefs).toBe(true); // 同后端 has_text_refs = 有文本参考
+    // 自身为空：全部文本参考都念，没有这两条提示
+    expect(collect(nodes({}), edges(), 'aud').r.warnings).toEqual([]);
   });
 });
 

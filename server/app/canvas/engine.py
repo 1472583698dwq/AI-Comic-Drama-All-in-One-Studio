@@ -299,6 +299,14 @@ def collect_upstream_data(node_id: str, nodes: List[Dict], edges: List[Dict], re
             data.setdefault("visual_prompt", src_res["visual_prompt"])
         if src_res.get("result_url"):
             data.setdefault("image_url", src_res["result_url"])
+    # REQ-toonflow-canvas T6 ext-node / custom 目标：上游值按连线 targetHandle 落到**声明的端口 id**
+    # （upscale_ext 的 video 口 → data["video"]，不再只有 video_url/videos）。execute_node 里这两个分支按端口 id
+    # 先读 upstream 再读节点数据，所以上游重新生成后 DAG 用的是本次产出而不是节点上旧的传播值。
+    # 上面旧启发式写的兼容键保留，同名键以这里为准。
+    if tgt_type in canvas_inputs.DYNAMIC_PORT_NODE_TYPES:
+        ports = canvas_inputs.resolve_dynamic_ports(tgt_node_obj)
+        if ports:
+            data.update(canvas_inputs.collect_port_inputs(tgt_node_obj, ports[0], edges, id_to_node, results))
     return data
 
 
@@ -509,6 +517,9 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
                 if not definition.enabled:
                     return {"status":"error","error":f"自定义节点已禁用: {cnid}"}
                 declared_in = list(((definition.input_schema or {}).get("properties") or {}).keys())
+                if not declared_in:
+                    # REQ-toonflow-canvas T6 没有 input_schema 时与卡片兜底输入口一致（prompt / video / reference_images）
+                    declared_in = [p["id"] for p in canvas_inputs.CUSTOM_FALLBACK_INPUTS]
                 inputs: Dict[str, Any] = {}
                 for k in declared_in:
                     v = upstream.get(k, merged.get(k, None))

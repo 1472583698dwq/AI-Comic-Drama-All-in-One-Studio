@@ -24,6 +24,8 @@
   --cv-primary: var(--color-brand, #7C3AED);
   --cv-primary-soft: color-mix(in srgb, var(--cv-primary) 14%, transparent);
   --cv-danger: var(--color-red-500, #EF4444);
+  /* K1：提醒色（琥珀），映射 MiniMax --color-accent-yellow；浅色下改深橙保证白底可读 */
+  --cv-warning: var(--color-accent-yellow, #EAB308);
   --cv-edge: var(--canvas-edge, var(--color-border-active));
   --cv-edge-width: 1px;
   --cv-radius: 8px;
@@ -41,6 +43,7 @@
 .light .cv-canvas,
 .cv-canvas.light {
   --cv-shadow: 0 8px 24px rgb(15 23 42 / 0.12);
+  --cv-warning: color-mix(in srgb, var(--color-accent-orange, #F97316) 70%, var(--color-text-main, #0F172A));
 }
 
 /* ======================================================================
@@ -377,13 +380,30 @@
   overflow: visible;
 }
 .cv-prompt-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   margin: 8px 0 0;
-  padding: 6px 8px;
-  border-radius: var(--cv-radius);
-  background: color-mix(in srgb, var(--cv-danger) 8%, transparent);
-  color: var(--cv-danger);
   font-size: 12px;
   line-height: 18px;
+}
+/* K1：按语气分组（error 危险色 / warn 琥珀 / info 中性），纯字符串 warnings = warn */
+.cv-prompt-warnings__group {
+  padding: 6px 8px;
+  border-radius: var(--cv-radius);
+  overflow-wrap: anywhere;
+}
+.cv-prompt-warnings__group.is-error {
+  background: color-mix(in srgb, var(--cv-danger) 8%, transparent);
+  color: var(--cv-danger);
+}
+.cv-prompt-warnings__group.is-warn {
+  background: color-mix(in srgb, var(--cv-warning) 12%, transparent);
+  color: var(--cv-warning);
+}
+.cv-prompt-warnings__group.is-info {
+  background: var(--cv-fill);
+  color: var(--cv-text-2);
 }
 .cv-prompt-footer {
   display: flex;

@@ -112,4 +112,15 @@ describe('resolvePorts / createNodeData', () => {
     expect(createNodeData('r-data')).toEqual({ label: '图片生成', prompt: '', mode: '' });
     expect(createNodeData('r-missing')).toEqual({});
   });
+
+  it('K1：defaultData 自带 label（含空串）时不覆盖；computedLabel 的节点不写 label', () => {
+    def(mk('r-empty', { label: '扩展节点', defaultData: () => ({ label: '', x: 1 }) }));
+    expect(createNodeData('r-empty')).toEqual({ label: '', x: 1 });
+    def(mk('r-own', { label: '默认', defaultData: () => ({ label: '自定' }) }));
+    expect(createNodeData('r-own')).toEqual({ label: '自定' });
+    def(mk('r-computed', { label: '自定义节点', computedLabel: true, defaultData: () => ({ kind: 'image' }) }));
+    expect(createNodeData('r-computed')).toEqual({ kind: 'image' });
+    def(mk('r-plain', { label: '文本' }));
+    expect(createNodeData('r-plain')).toEqual({ label: '文本' });
+  });
 });

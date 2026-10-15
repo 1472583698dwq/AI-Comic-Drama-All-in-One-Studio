@@ -24,7 +24,7 @@ export {
 } from './inputRules';
 export { useNodeReferences, type NodeReferences, type UseNodeReferencesOptions } from './useNodeReferences';
 export {
-  assembleInputs, assemblePrompt, autoMode, availableModes, providerVideoMode, resolveSlotCaps, toEngineArgs,
+  assembleInputs, assemblePrompt, assembleAudioText, autoMode, availableModes, providerVideoMode, resolveSlotCaps, toEngineArgs,
   type AssembleParams, type AssembledInputs, type CanonicalSlots, type SlotSpec,
 } from './assembleInputs';
 export {
@@ -36,7 +36,10 @@ export { FloatingToolbar, ToolbarButton, ToolbarDivider, type FloatingToolbarPro
 export { PromptInput, RefAtom, type PromptInputProps } from './PromptInput';
 export { stringToDoc, docToString, docJSONToString, fragmentToString, refAtomAttrs, REF_ATOM } from './promptDoc';
 export { RefList, SLOT_LABELS, refTitle, type RefListProps } from './RefList';
-export { PromptPanel, SmartPlanSwitch, ratioShapeStyle, type PromptPanelProps, type GenSourceOption } from './PromptPanel';
+export {
+  PromptPanel, SmartPlanSwitch, ratioShapeStyle, normalizeWarnings,
+  type PromptPanelProps, type GenSourceOption, type PromptWarning, type PromptWarningInput, type PromptWarningTone,
+} from './PromptPanel';
 export { GroupNode, groupNodeDef } from './GroupNode';
 export { SelectionToolbar, type SelectionToolbarProps, type SelectionAction } from './SelectionToolbar';
 export {
@@ -45,5 +48,16 @@ export {
   type ArrangeMode, type DuplicateOptions, type DuplicateResult, type GroupOptions, type Rect,
 } from './graphOps';
 export { Popover, MenuList, computePosition, type PopoverProps, type PopoverPlacement, type PopoverAnchor, type MenuItemSpec } from './ui/Popover';
-export { useGeneration, runGeneration, appendHistory, HISTORY_LIMIT, type GenKind, type GenerationHistoryItem, type RunGenerationOptions, type RunGenerationResult, type UseGeneration } from './useGeneration';
-export { useProviderSources, useProviderDefinition, loadProviderSources, loadProviderDefinition, invalidateProviderSources, type ProviderSource, type SourceKind } from './useProviderSources';
+export {
+  useGeneration, useNodeGeneration, runGeneration, appendHistory, HISTORY_LIMIT, stripStaleSlotKeys, STALE_SLOT_KEYS, LEGACY_REF_AUDIO_KEYS,
+  type GenKind, type GenerationHistoryItem, type RunGenerationOptions, type RunGenerationResult, type UseGeneration, type StripStaleOptions,
+} from './useGeneration';
+export {
+  useProviderSources, useProviderDefinition, loadProviderSources, loadProviderDefinition, invalidateProviderSources,
+  providerSourcesGeneration, PROVIDER_REFRESH_EVENT, type ProviderSource, type SourceKind,
+} from './useProviderSources';
+// K1：卡片 / 弹层内通用表单控件（.cv-ctl-*，Element Plus 外观）
+export {
+  KitField, KitInput, KitTextarea, KitSelect, KitButton, KitTag, KitAlert,
+  type KitFieldProps, type KitInputProps, type KitTextareaProps, type KitSelectProps, type KitSelectOption, type KitButtonProps, type KitControlSize,
+} from './ui/controls';

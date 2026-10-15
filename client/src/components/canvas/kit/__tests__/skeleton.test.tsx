@@ -1,9 +1,10 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { ReactFlow, ReactFlowProvider, type Edge, type Node, type NodeProps } from '@xyflow/react';
+import { createPortal } from 'react-dom';
+import { ReactFlow, ReactFlowProvider, useReactFlow, type Edge, type Node, type NodeProps, type ReactFlowInstance } from '@xyflow/react';
 import { IconPhotoAi } from '@tabler/icons-react';
 import { NodeSkeleton } from '../NodeSkeleton';
-import { CanvasHostProvider, type CanvasHost } from '../hostContext';
+import { CanvasHostProvider, useKitNodeActions, type CanvasHost } from '../hostContext';
 import { defineNode, nodeTypesMap } from '../registry';
 import { cardMinHeight } from '../NodeHandles';
 import { SelectionToolbar } from '../SelectionToolbar';
@@ -167,5 +168,58 @@ describe('NodeSkeleton + NodeHandles', () => {
     expect(added).toBeTruthy();
     const replaced = flat.filter((c) => c.type === 'replace' && c.item?.parentId === added!.item!.id);
     expect(replaced.map((c) => c.item!.id).sort()).toEqual(['gen', 'src']);
+  });
+});
+
+// REQ-toonflow-canvas K1
+function PortalNode(props: NodeProps) {
+  return (
+    <NodeSkeleton node={props}>
+      <div data-testid="own">卡片内</div>
+      {createPortal(<div data-testid="portal">全屏编辑器</div>, document.body)}
+    </NodeSkeleton>
+  );
+}
+function CanSaveNode(props: NodeProps) {
+  const actions = useKitNodeActions(props.id);
+  return <NodeSkeleton node={props}><span data-testid={`can-${props.id}`}>{String(actions.canSaveToAssets)}</span></NodeSkeleton>;
+}
+defineNode({ type: 'sk-portal', label: '时间线', icon: IconPhotoAi, category: 'tool', ports: [], component: PortalNode });
+defineNode({ type: 'sk-cansave', label: '图片', icon: IconPhotoAi, category: 'image', ports: [], component: CanSaveNode });
+
+describe('K1：右键菜单只认节点自己的 DOM；canSaveToAssets 随节点数据更新', () => {
+  it('portal 出去的弹层里右键 / 双击不触发节点菜单 / 聚焦；节点内右键照常；子元素 preventDefault 过的右键也不弹', async () => {
+    const { container } = render(<Canvas nodes={[{ id: 'p', type: 'sk-portal', position: { x: 0, y: 0 }, data: {} }]} edges={[]} />);
+    await act(async () => {});
+    fireEvent.contextMenu(screen.getByTestId('portal'), { clientX: 5, clientY: 5 });
+    expect(screen.queryByRole('menu', { name: '节点菜单' })).toBeNull();
+    fireEvent.doubleClick(screen.getByTestId('portal'));
+    const own = screen.getByTestId('own');
+    own.addEventListener('contextmenu', (e) => e.preventDefault(), { once: true });
+    fireEvent.contextMenu(own, { clientX: 5, clientY: 5 });
+    expect(screen.queryByRole('menu', { name: '节点菜单' })).toBeNull();
+    fireEvent.contextMenu(container.querySelector('.react-flow__node[data-id="p"] .cv-node__card') as HTMLElement, { clientX: 5, clientY: 5 });
+    expect(await screen.findByRole('menu', { name: '节点菜单' })).toBeTruthy();
+  });
+
+  it('宿主 canSaveToAssets 依赖节点产出：生成出图后按钮状态跟着变', async () => {
+    const ref: { rf?: ReactFlowInstance } = {};
+    function Grab() { ref.rf = useReactFlow(); return null; }
+    const host: CanvasHost = { saveToAssets: vi.fn(), canSaveToAssets: (id) => !!(ref.rf?.getNode(id)?.data as { image_url?: string } | undefined)?.image_url };
+    render(
+      <div style={{ width: 1000, height: 800 }}>
+        <ReactFlowProvider>
+          <CanvasHostProvider value={host}>
+            <ReactFlow className="cv-canvas" defaultNodes={[{ id: 'c', type: 'sk-cansave', position: { x: 0, y: 0 }, data: {} }]} defaultEdges={[]} nodeTypes={nodeTypesMap()}>
+              <Grab />
+            </ReactFlow>
+          </CanvasHostProvider>
+        </ReactFlowProvider>
+      </div>,
+    );
+    await act(async () => {});
+    expect(screen.getByTestId('can-c').textContent).toBe('false');
+    await act(async () => { ref.rf!.updateNodeData('c', { image_url: '/storage/out.png' }); });
+    expect(screen.getByTestId('can-c').textContent).toBe('true');
   });
 });

@@ -298,6 +298,64 @@ class TestOrderAndPrompt(unittest.TestCase):
         self.assertEqual(captured["args"]["reference_images"], ["/s/a.png"])
 
 
+class TestAudioText(unittest.TestCase):
+    """REQ-toonflow-canvas R6a：音频目标的配音文本不加「参考 N：」前缀、不加对应关系附注。"""
+
+    def _nodes(self, data):
+        return [
+            {"id": "ta", "type": "prompt", "data": {"prompt": "角色：白衣少女"}},
+            {"id": "im", "type": "load-image", "data": {"image_url": "/s/a.png"}},
+            {"id": "tb", "type": "prompt", "data": {"prompt": "场景：竹林夜雨"}},
+            {"id": "aud", "type": "audio", "data": data},
+        ]
+
+    def _edges(self):
+        return [_e("e1", "ta", "text", "aud", "in"), _e("e2", "im", "image", "aud", "in"), _e("e3", "tb", "text", "aud", "in")]
+
+    def _prompt(self, data):
+        nodes = self._nodes(data)
+        return ci.collect_inputs(nodes[-1], self._edges(), _by_id(nodes))["slots"].get("prompt")
+
+    def test_own_text_tokens_replaced_by_ref_text(self):
+        self.assertEqual(self._prompt({"text": "{{ref 1}}，{{ref 3}}"}), "角色：白衣少女，场景：竹林夜雨")
+
+    def test_own_text_only_no_prefix_no_mapping(self):
+        # 没提到的文本参考不念；媒体参考 {{ref 2}} 换成空串，也不加「参考编号对应」附注
+        self.assertEqual(self._prompt({"text": "大家好"}), "大家好")
+        self.assertEqual(self._prompt({"text": "看{{ref 2}}这里{{ref 9}}"}), "看这里")
+
+    def test_text_key_before_prompt(self):
+        self.assertEqual(self._prompt({"text": "念这句", "prompt": "不念这句"}), "念这句")
+        self.assertEqual(self._prompt({"prompt": "旧节点只有 prompt {{ref 3}}"}), "旧节点只有 prompt 场景：竹林夜雨")
+
+    def test_empty_own_joins_text_refs_with_newline(self):
+        self.assertEqual(self._prompt({}), "角色：白衣少女\n场景：竹林夜雨")
+        nodes = self._nodes({"refOrder": ["tb|text", "ta|text"]})
+        r = ci.collect_inputs(nodes[-1], self._edges(), _by_id(nodes))
+        self.assertEqual(r["slots"]["prompt"], "场景：竹林夜雨\n角色：白衣少女")
+
+    def test_other_targets_keep_numbered_refs(self):
+        nodes = self._nodes({"prompt": "{{ref 1}}"})
+        nodes[-1]["type"] = "image"
+        r = ci.collect_inputs(nodes[-1], [dict(e, target="aud") for e in self._edges()], _by_id(nodes))
+        self.assertEqual(r["slots"]["prompt"], "参考 1\n\n参考 1：\n角色：白衣少女\n\n参考 3：\n场景：竹林夜雨")
+
+    def test_engine_speaks_assembled_audio_text(self):
+        nodes = self._nodes({"text": "{{ref 1}}登场", "provider_id": "fakeaud"})
+        up = eng.collect_upstream_data("aud", nodes, self._edges(), {})
+        captured = {}
+
+        async def fake_exec(name, args, *a, **kw):
+            captured["args"] = dict(args)
+            return mock.Mock(status="success", result={"audio_url": "/out.mp3"}, execution_time_ms=1, error=None)
+
+        with mock.patch.object(eng, "_ensure_provider_registered", lambda *a, **k: None), \
+                mock.patch("app.mcp.server.mcp_registry.execute_tool", side_effect=fake_exec):
+            res = asyncio.run(eng.execute_node(nodes[-1], up))
+        self.assertEqual(res["status"], "success", res)
+        self.assertEqual(captured["args"]["text"], "角色：白衣少女登场")
+
+
 # ---------- 2. 执行器：生成源入参新旧一致、group 跳过 ----------
 
 class TestEngineProviderArgs(unittest.TestCase):

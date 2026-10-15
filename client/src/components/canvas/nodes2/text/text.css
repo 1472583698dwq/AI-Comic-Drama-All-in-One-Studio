@@ -1,0 +1,377 @@
+/* REQ-toonflow-canvas N1 文本节点 `prompt`
+ * 结构与尺寸照搬 Toonflow textNode（textContent / textPreview / editButton / textNodeMarkdown / markdownEditor / el-dialog）；
+ * 颜色一律用 kit 的 --cv-* 变量（跟随 MiniMax 深浅色与插件主题），不写死色值。 */
+
+/* ======================================================================
+ * 卡片正文（Toonflow .textContent）
+ * ====================================================================== */
+.cv-text {
+  position: relative;
+  min-height: 110px;
+}
+.cv-text.is-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.cv-text__preview {
+  min-height: 110px;
+  max-height: 240px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.cv-text__edit {
+  display: flex;
+  margin-left: auto;
+}
+.cv-text.is-empty .cv-text__edit { margin: 0; }
+
+.cv-text__alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  align-self: stretch;
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border-radius: var(--cv-radius);
+  background: color-mix(in srgb, var(--cv-danger) 10%, transparent);
+  color: var(--cv-danger);
+  font-size: 12px;
+  line-height: 18px;
+}
+.cv-text__alert-text {
+  flex: 1;
+  min-width: 0;
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+.cv-text__alert-close {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--cv-radius-sm);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.cv-text__alert-close:hover { background: color-mix(in srgb, var(--cv-danger) 16%, transparent); }
+
+/* 生成中：盖在正文上的转圈（MiniMax 文本接口非流式，完成后整段替换） */
+.cv-text__running {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: var(--cv-radius);
+  background: color-mix(in srgb, var(--cv-bg) 82%, transparent);
+  color: var(--cv-text-2);
+  font-size: 12px;
+}
+.cv-text__running > svg { color: var(--cv-primary); }
+.cv-text__footer-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--cv-text-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.cv-text__footer-status > svg { color: var(--cv-primary); }
+
+/* ======================================================================
+ * Markdown 排版（Toonflow .textNodeMarkdown）：预览与富文本编辑共用。
+ * 需逐项写明：Tailwind preflight 会清掉标题字号、列表符号、外边距等。
+ * ====================================================================== */
+.cv-md {
+  color: var(--cv-text-1);
+  font-size: 14px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.cv-md > :first-child { margin-top: 0; }
+.cv-md > :last-child { margin-bottom: 0; }
+.cv-md p { margin: 0.55em 0; }
+.cv-md h1, .cv-md h2, .cv-md h3, .cv-md h4, .cv-md h5, .cv-md h6 {
+  margin: 1em 0 0.5em;
+  color: var(--cv-text-1);
+  font-weight: 600;
+  line-height: 1.4;
+}
+.cv-md h1 { font-size: 1.8em; }
+.cv-md h2 { font-size: 1.5em; }
+.cv-md h3 { font-size: 1.25em; }
+.cv-md h4, .cv-md h5, .cv-md h6 { font-size: 1em; }
+.cv-md strong, .cv-md b { font-weight: 600; }
+.cv-md em, .cv-md i { font-style: italic; }
+.cv-md del, .cv-md s { text-decoration: line-through; }
+.cv-md u { text-decoration: underline; }
+.cv-md ul, .cv-md ol { margin: 0.55em 0; padding-left: 1.7em; }
+.cv-md ul { list-style: disc; }
+.cv-md ol { list-style: decimal; }
+.cv-md ul ul { list-style: circle; }
+.cv-md li { margin: 0.2em 0; }
+.cv-md li > p { margin: 0; }
+.cv-md ul[data-type="taskList"],
+.cv-md ul:has(> li > input[type="checkbox"]) {
+  padding-left: 0.2em;
+  list-style: none;
+}
+.cv-md ul[data-type="taskList"] > li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.cv-md ul[data-type="taskList"] > li > label { flex-shrink: 0; margin-top: 0.15em; }
+.cv-md ul[data-type="taskList"] > li > div { flex: 1; min-width: 0; }
+.cv-md ul[data-type="taskList"] > li > div > p { margin: 0; }
+.cv-md li > input[type="checkbox"] { margin: 0 6px 0 0; vertical-align: middle; }
+.cv-md input[type="checkbox"] { accent-color: var(--cv-primary); }
+.cv-md blockquote {
+  margin: 0.75em 0;
+  padding: 0.1em 1em;
+  border-left: 3px solid var(--cv-primary);
+  color: var(--cv-text-2);
+}
+.cv-md pre {
+  margin: 0.75em 0;
+  padding: 12px;
+  overflow: auto;
+  border-radius: var(--cv-radius-sm);
+  background: var(--cv-fill);
+  white-space: pre;
+}
+.cv-md code {
+  padding: 0.1em 0.25em;
+  border-radius: var(--cv-radius-sm);
+  background: var(--cv-fill);
+  font-family: Consolas, 'SFMono-Regular', Menlo, monospace;
+  font-size: 0.9em;
+}
+.cv-md pre code { padding: 0; background: transparent; font-size: 13px; }
+.cv-md a { color: var(--cv-primary); text-decoration: underline; cursor: pointer; }
+.cv-md img { display: inline-block; max-width: 100%; height: auto; vertical-align: middle; border-radius: var(--cv-radius-sm); }
+.cv-md table { width: 100%; margin: 0.7em 0; border-collapse: collapse; }
+.cv-md td, .cv-md th {
+  min-width: 40px;
+  padding: 6px 10px;
+  border: 1px solid var(--cv-border-light);
+  vertical-align: top;
+  text-align: left;
+}
+.cv-md th { background: var(--cv-fill); font-weight: 600; }
+.cv-md td > p, .cv-md th > p { margin: 0; }
+.cv-md hr { height: 0; margin: 1.2em 0; border: 0; border-top: 1px solid var(--cv-border-light); }
+.cv-md mark { padding: 0 0.1em; background: color-mix(in srgb, var(--cv-primary) 22%, transparent); color: inherit; }
+
+/* ======================================================================
+ * 文本弹窗（Toonflow el-dialog「编辑文本」）
+ * ====================================================================== */
+.cv-text-dialog-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 1900;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--cv-canvas-bg) 60%, transparent);
+}
+.cv-text-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(860px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  padding: 16px 20px 20px;
+  outline: none;
+  box-shadow: var(--cv-shadow);
+  text-align: left;
+}
+.cv-text-dialog.is-fullscreen {
+  width: 100vw;
+  height: 100dvh;
+  max-height: none;
+  border-radius: 0;
+}
+.cv-text-dialog__header {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  padding-bottom: 12px;
+}
+.cv-text-dialog__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cv-text-1);
+  font-size: 16px;
+  line-height: 24px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cv-text-dialog__body {
+  display: flex;
+  flex-direction: column;
+  height: min(560px, calc(100dvh - 144px));
+  min-height: 0;
+}
+.cv-text-dialog.is-fullscreen .cv-text-dialog__body { flex: 1; height: auto; }
+.cv-text-dialog__read {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 16px;
+  border: 1px solid var(--cv-border-light);
+  border-radius: var(--cv-radius-sm);
+  overscroll-behavior: contain;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.cv-text-dialog__placeholder {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--cv-text-3);
+  font-size: 13px;
+}
+
+/* 预览 / 编辑 切换（分段按钮） */
+.cv-segmented {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-right: 4px;
+  padding: 2px;
+  border-radius: var(--cv-radius);
+  background: var(--cv-fill);
+}
+.cv-segmented > button {
+  height: 26px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: calc(var(--cv-radius) - 2px);
+  background: transparent;
+  color: var(--cv-text-2);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.cv-segmented > button[aria-pressed="true"] {
+  background: var(--cv-bg);
+  color: var(--cv-text-1);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--cv-text-1) 12%, transparent);
+}
+.cv-segmented > button:disabled { color: var(--cv-text-3); cursor: not-allowed; }
+.cv-segmented > button:focus-visible { outline: 2px solid var(--cv-primary); outline-offset: -2px; }
+
+/* ======================================================================
+ * Markdown 编辑器（Toonflow markdownEditor.vue）
+ * ====================================================================== */
+.cv-md-editor {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.cv-md-editor__toolbar {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 0 8px;
+}
+.cv-md-editor__toolbar > button {
+  padding: 4px 8px;
+  border: 1px solid var(--cv-border-light);
+  border-radius: var(--cv-radius-sm);
+  background: var(--cv-bg);
+  color: var(--cv-text-1);
+  font: inherit;
+  font-size: 13px;
+  line-height: 18px;
+  cursor: pointer;
+}
+.cv-md-editor__toolbar > button:hover:not(:disabled) { border-color: var(--cv-primary); }
+.cv-md-editor__toolbar > button[aria-pressed="true"] { border-color: var(--cv-primary); color: var(--cv-primary); }
+.cv-md-editor__toolbar > button:disabled { opacity: 0.45; cursor: default; }
+.cv-md-editor__toolbar > button:focus-visible { outline: 2px solid var(--cv-primary); outline-offset: 1px; }
+.cv-md-editor__spacer { flex: 1; }
+.cv-md-editor__error,
+.cv-md-editor__notice {
+  flex-shrink: 0;
+  margin: 0 0 6px;
+  font-size: 12px;
+  line-height: 18px;
+}
+.cv-md-editor__error { color: var(--cv-danger); }
+.cv-md-editor__notice {
+  padding: 6px 8px;
+  border-radius: var(--cv-radius-sm);
+  background: var(--cv-fill);
+  color: var(--cv-text-2);
+}
+.cv-md-editor__source {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+  padding: 12px;
+  resize: none;
+  border: 1px solid var(--cv-border-light);
+  border-radius: var(--cv-radius-sm);
+  outline: none;
+  background: var(--cv-bg);
+  color: var(--cv-text-1);
+  font: 14px/1.8 Consolas, 'SFMono-Regular', Menlo, monospace;
+}
+.cv-md-editor__source:focus { border-color: color-mix(in srgb, var(--cv-primary) 60%, var(--cv-border-light)); }
+.cv-md-editor__rich {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--cv-border-light);
+  border-radius: var(--cv-radius-sm);
+  background: var(--cv-bg);
+  overscroll-behavior: contain;
+}
+.cv-md-editor__rich:focus-within { border-color: color-mix(in srgb, var(--cv-primary) 60%, var(--cv-border-light)); }
+.cv-md-editor__rich .ProseMirror {
+  min-height: 180px;
+  padding: 12px 16px;
+  outline: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: text;
+}
+.cv-md-editor__rich .ProseMirror-selectednode { outline: 2px solid var(--cv-primary); }
+.cv-md-editor__rich .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  color: var(--cv-text-3);
+  pointer-events: none;
+}
+.cv-md-editor__rich .ProseMirror .selectedCell { background: var(--cv-primary-soft); }
+.cv-md-editor__rich .ProseMirror .tableWrapper { overflow-x: auto; }
+.cv-md-editor__hint {
+  flex-shrink: 0;
+  margin: 6px 0 0;
+  color: var(--cv-text-3);
+  font-size: 11px;
+}

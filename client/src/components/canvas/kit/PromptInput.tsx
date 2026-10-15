@@ -19,6 +19,7 @@ import { refName } from './references';
 import { ToolbarButton } from './FloatingToolbar';
 import { Popover } from './ui/Popover';
 import { REF_ATOM, docToString, fragmentToString, lineToInline, refAtomAttrs, stringToDoc } from './promptDoc';
+import { resolveMediaUrl } from '../../../utils/devOrigin';
 
 /** 行内原子节点：`{{ref N}}` 的编辑态表示。 */
 export const RefAtom = TiptapNode.create({
@@ -53,7 +54,7 @@ export const RefAtom = TiptapNode.create({
     if (refKey) attrs['data-ref-key'] = refKey;
     if (label) attrs.title = label;
     return thumb
-      ? ['span', attrs, ['img', { src: thumb, alt: '', draggable: 'false' }], refName(index)]
+      ? ['span', attrs, ['img', { src: resolveMediaUrl(thumb), alt: '', draggable: 'false' }], refName(index)] // 属性存原值，展示时回源
       : ['span', attrs, refName(index)];
   },
   renderText({ node }) {
@@ -174,7 +175,10 @@ export function PromptInput({ value, onChange, refs, placeholder = '描述一下
     setMention((prev) => ({ ...found, anchor, active: prev && prev.query === found.query ? prev.active : 0 }));
   }, []);
 
-  // 选项对象保持稳定引用：useEditor 每次渲染会比较选项，不同就 setOptions
+  // 选项对象保持稳定引用：useEditor 每次渲染会比较选项，不同就 setOptions（但扩展不会因此重建）。
+  // K1：占位文字经 ref 读取——prop 变化后（如文本节点切技能）下面的 effect 派发一个空事务让占位装饰重算。
+  const placeholderRef = useRef(placeholder);
+  placeholderRef.current = placeholder;
   const extensions = useMemo(() => [
     StarterKit.configure({
       heading: false, bulletList: false, orderedList: false, listItem: false, listKeymap: false,
@@ -182,9 +186,9 @@ export function PromptInput({ value, onChange, refs, placeholder = '描述一下
       strike: false, code: false, link: false, underline: false, trailingNode: false,
       dropcursor: false, gapcursor: false, hardBreak: false,
     }),
-    Placeholder.configure({ placeholder }),
+    Placeholder.configure({ placeholder: () => placeholderRef.current }),
     RefAtom,
-  ], [placeholder]);
+  ], []);
   const [initialContent] = useState(() => stringToDoc(value, refs));
   const editorProps = useMemo(() => ({
     attributes: { class: 'nokey', role: 'textbox', 'aria-multiline': 'true', 'aria-label': '生成提示词' },
@@ -267,6 +271,14 @@ export function PromptInput({ value, onChange, refs, placeholder = '描述一下
 
   useEffect(() => { editor?.setEditable(!disabled); }, [editor, disabled]);
 
+  // K1：占位文字变化 → 空事务（不进撤销历史、不改文档）触发占位装饰重算
+  const shownPlaceholder = useRef(placeholder);
+  useEffect(() => {
+    if (!editor || editor.isDestroyed || shownPlaceholder.current === placeholder) return;
+    shownPlaceholder.current = placeholder;
+    editor.view.dispatch(editor.state.tr.setMeta('addToHistory', false));
+  }, [editor, placeholder]);
+
   const openMention = () => {
     if (!editor || disabled) return;
     editor.chain().focus().insertContent('@').run();
@@ -313,7 +325,7 @@ export function PromptInput({ value, onChange, refs, placeholder = '描述一下
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => mention && insertRef(i + 1, { from: mention.from, to: mention.to })}
           >
-            {r.thumb ? <img className="cv-mention-pop__thumb" src={r.thumb} alt="" /> : refIcon(r)}
+            {r.thumb ? <img className="cv-mention-pop__thumb" src={resolveMediaUrl(r.thumb)} alt="" /> : refIcon(r)}
             <span>{refName(i + 1)}</span>
             {r.label && <span className="cv-menu__item-extra">{r.label}</span>}
           </button>

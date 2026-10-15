@@ -133,6 +133,11 @@ export interface NodeDef<D extends Record<string, unknown> = KitNodeData> {
   /** 动态端口（ext-node / custom 按 input_schema 渲染）；连线校验与参考解析优先用它。 */
   getPorts?: (data: D) => PortDef[];
   defaultData?: () => Partial<D> & Record<string, unknown>;
+  /**
+   * REQ-toonflow-canvas K1：标题由节点现算（如按所选定义 / 扩展声明命名），createNodeData 不写 `label`。
+   * 缺省 false：defaultData 没给 `label` 时写入 NodeDef.label。
+   */
+  computedLabel?: boolean;
   /** React Flow 节点组件（与 <ReactFlow nodeTypes> 的值同型：NodeProps & {data:any; type:any}）。 */
   component: KitNodeComponent;
   /** 是否出现在工具栏 / 拖线菜单；缺省 true（`group` 等内部节点设 false）。 */

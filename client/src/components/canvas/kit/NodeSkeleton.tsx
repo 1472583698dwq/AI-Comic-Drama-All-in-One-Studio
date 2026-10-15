@@ -47,6 +47,8 @@ export interface NodeSkeletonProps {
   topWidth?: number | string;
   downloadUrl?: string;
   downloadName?: string;
+  /** 见 FloatingToolbar.showDownload（缺省：有 downloadUrl 才显示下载按钮）。 */
+  showDownload?: boolean;
   /** 全屏按钮回调；缺省调用宿主 openFullscreen(downloadUrl)。传 null 隐藏全屏按钮。 */
   onFullscreen?: (() => void) | null;
   fullscreenDisabled?: boolean;
@@ -95,6 +97,16 @@ function selectedCountSelector(s: ReactFlowState): number {
   return n;
 }
 const userSelectionSelector = (s: ReactFlowState) => s.userSelectionActive;
+
+/**
+ * REQ-toonflow-canvas K1：事件是否真的发生在节点自己的 DOM 子树里。
+ * React 合成事件会沿组件树冒泡——节点 portal 到 body 的弹层（全屏编辑器、弹窗…）里的右键 / 双击也会冒到这里，
+ * 这类事件的 target 不在 currentTarget 的 DOM 子树内，要忽略。
+ */
+function fromOwnDom(e: ReactMouseEvent): boolean {
+  const target = e.target as globalThis.Node | null;
+  return !!target && (e.currentTarget as HTMLElement).contains(target);
+}
 
 export function NodeSkeleton(props: NodeSkeletonProps) {
   const { node, children, loading } = props;
@@ -159,6 +171,8 @@ export function NodeSkeleton(props: NodeSkeletonProps) {
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   const onContextMenu = (e: ReactMouseEvent) => {
     if (props.contextMenu === false) return;
+    // 来自 portal 弹层的冒泡、或子元素已自行处理（preventDefault）的右键：不弹节点菜单
+    if (e.defaultPrevented || !fromOwnDom(e)) return;
     e.preventDefault();
     e.stopPropagation();
     setMenuAt({ x: e.clientX, y: e.clientY });
@@ -173,7 +187,7 @@ export function NodeSkeleton(props: NodeSkeletonProps) {
 
   // —— 双击聚焦：把节点和浮层一起缩放到视口中央（Toonflow focusNode）——
   const onDoubleClick = (e: ReactMouseEvent) => {
-    if (props.focusOnDoubleClick === false) return;
+    if (props.focusOnDoubleClick === false || !fromOwnDom(e)) return;
     const el = rootRef.current;
     if (!el || (e.target as HTMLElement).closest('input,textarea,[contenteditable="true"]')) return;
     const rects = [el, ...Array.from(el.querySelectorAll<HTMLElement>(':scope > .cv-node__slot'))]
@@ -198,6 +212,7 @@ export function NodeSkeleton(props: NodeSkeletonProps) {
       saveDisabled={!actions.canSaveToAssets}
       downloadUrl={props.downloadUrl}
       downloadName={props.downloadName}
+      showDownload={props.showDownload}
       onFullscreen={fullscreen}
       fullscreenDisabled={props.fullscreenDisabled}
     />

@@ -5,7 +5,7 @@
  * 「模型」下拉换成 MiniMax 生成源；参数弹层内容由宿主提供（DynamicControl）；智能规划开启时走 /canvas/agent/generate。
  */
 import { useMemo, useState, type ReactNode } from 'react';
-import { IconArrowUp, IconCheck, IconChevronDown, IconChevronUp, IconPlayerStop, IconSparkles } from '@tabler/icons-react';
+import { IconArrowUp, IconCheck, IconChevronDown, IconChevronUp, IconLoader2, IconPlayerStop, IconSparkles } from '@tabler/icons-react';
 import type { RefItem, Slot } from './types';
 import { PromptInput } from './PromptInput';
 import { RefList } from './RefList';
@@ -18,6 +18,30 @@ export interface GenSourceOption {
   group?: string;
   description?: string;
   disabled?: boolean;
+}
+
+/** REQ-toonflow-canvas K1：面板提示的语气。warn = 琥珀色（缺省），error = 危险色，info = 中性色。 */
+export type PromptWarningTone = 'warn' | 'error' | 'info';
+export interface PromptWarning {
+  text: string;
+  tone?: PromptWarningTone;
+}
+/** 纯字符串 = `{ text, tone: 'warn' }`。 */
+export type PromptWarningInput = string | PromptWarning;
+
+const TONE_ORDER: readonly PromptWarningTone[] = ['error', 'warn', 'info'];
+
+/** 归一 warnings：字符串当 warn；空文本丢弃；同语气同文本去重；按 error → warn → info 分组（组内保持原顺序）。 */
+export function normalizeWarnings(list: readonly PromptWarningInput[] | null | undefined): { text: string; tone: PromptWarningTone }[] {
+  const seen = new Set<string>();
+  const out: { text: string; tone: PromptWarningTone }[] = [];
+  for (const w of list || []) {
+    const item = typeof w === 'string' ? { text: w, tone: 'warn' as const } : { text: w?.text ?? '', tone: w?.tone && TONE_ORDER.includes(w.tone) ? w.tone : 'warn' as const };
+    if (!item.text || seen.has(`${item.tone}\u0001${item.text}`)) continue;
+    seen.add(`${item.tone}\u0001${item.text}`);
+    out.push(item);
+  }
+  return TONE_ORDER.flatMap((tone) => out.filter((w) => w.tone === tone));
 }
 
 export interface PromptPanelProps {
@@ -35,6 +59,10 @@ export interface PromptPanelProps {
   onSourceChange: (id: string) => void;
   sourcesLoading?: boolean;
   sourcePlaceholder?: string;
+  /** K1：下拉的名称（按钮 aria-label、搜索框、空列表文案），缺省「生成源」；文本节点传「技能」。 */
+  sourceLabel?: string;
+  /** K1：下拉里是否显示搜索框，缺省 true。 */
+  sourceSearchable?: boolean;
   /** 下拉展开时触发（懒加载生成源列表）。 */
   onSourcesOpen?: () => void;
 
@@ -49,6 +77,7 @@ export interface PromptPanelProps {
   smartPlan?: boolean;
   onSmartPlanChange?: (value: boolean) => void;
 
+  /** 运行中：有 onStop 时发送键变成「停止生成」；没有 onStop（不可取消）时显示转圈（Toonflow :loading）。 */
   running?: boolean;
   onSend: () => void;
   onStop?: () => void;
@@ -59,8 +88,8 @@ export interface PromptPanelProps {
   header?: ReactNode;
   /** 插在参数按钮之后。 */
   extraFooter?: ReactNode;
-  /** 组装告警（截断 / 不支持的槽位…）。 */
-  warnings?: readonly string[];
+  /** 组装告警（截断 / 不支持的槽位…）。K1：可传 `{text, tone}`；纯字符串按 warn（琥珀色）显示。 */
+  warnings?: readonly PromptWarningInput[];
   placeholder?: string;
   disabled?: boolean;
   className?: string;
@@ -72,8 +101,9 @@ export function ratioShapeStyle(ratio: string): { width: number; height: number 
   return { width: 16 * Math.min(w / h, 1), height: 16 * Math.min(h / w, 1) };
 }
 
-function SourceSelect({ sources, sourceId, onChange, loading, placeholder, disabled, onOpen }: {
+function SourceSelect({ sources, sourceId, onChange, loading, placeholder, disabled, onOpen, label = '生成源', searchable = true }: {
   sources: readonly GenSourceOption[]; sourceId?: string; onChange: (id: string) => void; loading?: boolean; placeholder: string; disabled?: boolean; onOpen?: () => void;
+  label?: string; searchable?: boolean;
 }) {
   const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
   const open = !!anchor;
@@ -96,7 +126,7 @@ function SourceSelect({ sources, sourceId, onChange, loading, placeholder, disab
       <button
         type="button"
         className="cv-source-select"
-        aria-label="生成源"
+        aria-label={label}
         aria-haspopup="listbox"
         aria-expanded={open}
         disabled={disabled}
@@ -113,20 +143,22 @@ function SourceSelect({ sources, sourceId, onChange, loading, placeholder, disab
         </span>
         <IconChevronDown size={14} aria-hidden />
       </button>
-      <Popover open={open} anchor={anchor} placement="top-start" onClose={() => setOpen(false)} className="cv-menu" role="listbox" aria-label="生成源" style={{ maxHeight: 320, overflow: 'auto', minWidth: 220 }}>
-        <div style={{ padding: '2px 8px 6px' }}>
-          <input
-            className="cv-node__label-input"
-            style={{ width: '100%', height: 28, borderColor: 'var(--cv-border-light)' }}
-            placeholder="搜索生成源"
-            aria-label="搜索生成源"
-            value={query}
-            autoFocus
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </div>
+      <Popover open={open} anchor={anchor} placement="top-start" onClose={() => setOpen(false)} className="cv-menu" role="listbox" aria-label={label} style={{ maxHeight: 320, overflow: 'auto', minWidth: 220 }}>
+        {searchable && (
+          <div style={{ padding: '2px 8px 6px' }}>
+            <input
+              className="cv-node__label-input"
+              style={{ width: '100%', height: 28, borderColor: 'var(--cv-border-light)' }}
+              placeholder={`搜索${label}`}
+              aria-label={`搜索${label}`}
+              value={query}
+              autoFocus
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+        )}
         {loading && <div className="cv-menu__empty">加载中…</div>}
-        {!loading && !groups.length && <div className="cv-menu__empty">{sources.length ? '没有匹配的生成源' : '暂无可用生成源，请先在设置中配置'}</div>}
+        {!loading && !groups.length && <div className="cv-menu__empty">{sources.length ? `没有匹配的${label}` : `暂无可用${label}，请先在设置中配置`}</div>}
         {groups.map(([group, items]) => (
           <div key={group || '_'} role="group" aria-label={group || undefined}>
             {group && <div className="cv-menu__group">{group}</div>}
@@ -201,7 +233,9 @@ export function PromptPanel(props: PromptPanelProps) {
     running, onSend, onStop, disabled,
   } = props;
   const sendDisabled = running ? !onStop : (disabled || props.sendDisabled);
-  const sendTitle = running ? '停止生成' : (props.sendTitle ?? '生成');
+  const sendTitle = running ? (onStop ? '停止生成' : '生成中…') : (props.sendTitle ?? '生成');
+  const sourceLabel = props.sourceLabel || '生成源';
+  const warnings = normalizeWarnings(props.warnings);
   return (
     <div className={['cv-card cv-prompt-card', props.className].filter(Boolean).join(' ')}>
       {refs.length > 0 && (
@@ -223,9 +257,11 @@ export function PromptPanel(props: PromptPanelProps) {
           sourceId={sourceId}
           onChange={onSourceChange}
           loading={sourcesLoading}
-          placeholder={props.sourcePlaceholder ?? '选择生成源'}
+          placeholder={props.sourcePlaceholder ?? `选择${sourceLabel}`}
           disabled={disabled || running}
           onOpen={onSourcesOpen}
+          label={sourceLabel}
+          searchable={props.sourceSearchable ?? true}
         />
         {props.renderParams && (
           <ParamsButton summary={props.paramsSummary} ratio={props.paramsRatio} render={props.renderParams} disabled={disabled || running} />
@@ -240,14 +276,24 @@ export function PromptPanel(props: PromptPanelProps) {
           title={sendTitle}
           aria-label={sendTitle}
           disabled={sendDisabled}
+          aria-busy={running && !onStop ? true : undefined}
           onClick={(e) => { e.stopPropagation(); if (running) onStop?.(); else onSend(); }}
         >
-          {running ? <IconPlayerStop size={16} aria-hidden /> : <IconArrowUp size={16} aria-hidden />}
+          {running
+            ? (onStop ? <IconPlayerStop size={16} aria-hidden /> : <IconLoader2 className="cv-spin" size={16} aria-hidden />)
+            : <IconArrowUp size={16} aria-hidden />}
         </button>
       </div>
-      {props.warnings && props.warnings.length > 0 && (
+      {warnings.length > 0 && (
         <div className="cv-prompt-warnings" role="status">
-          {props.warnings.map((w) => <div key={w}>{w}</div>)}
+          {TONE_ORDER.map((tone) => {
+            const items = warnings.filter((w) => w.tone === tone);
+            return items.length ? (
+              <div key={tone} className={`cv-prompt-warnings__group is-${tone}`} data-tone={tone}>
+                {items.map((w) => <div key={w.text}>{w.text}</div>)}
+              </div>
+            ) : null;
+          })}
         </div>
       )}
     </div>

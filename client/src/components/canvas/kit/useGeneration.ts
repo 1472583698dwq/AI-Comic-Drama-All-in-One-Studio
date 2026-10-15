@@ -14,6 +14,7 @@ import { apiService } from '../../../services/api';
 import { pollVideoTask } from '../../../utils/videoTask';
 import { executeAgentNode, type AgentState } from '../hooks/nodeAgentExecutor';
 import type { AssembledInputs } from './assembleInputs';
+import { useKitNodeActions } from './hostContext';
 
 export type GenKind = 'image' | 'video' | 'audio';
 
@@ -53,6 +54,13 @@ export interface RunGenerationOptions {
   updateNodeData: (id: string, patch: Record<string, unknown>) => void;
   /** 取消检查：返回 false 时丢弃结果 */
   isCurrent?: () => boolean;
+  /**
+   * REQ-toonflow-canvas K1：生成源 input_schema 声明的输入键（如 extractSlotsFromProvider 的 key / originalKey）。
+   * 直接生成时节点数据里的同名旧值一并去掉（真实值由本次组装结果 args 提供），见 stripStaleSlotKeys。
+   */
+  inputKeys?: readonly string[];
+  /** REQ-toonflow-canvas K1：直接生成时不要从节点数据里去掉的键（逃生口，缺省无）。 */
+  keepDataKeys?: readonly string[];
 }
 
 export interface RunGenerationResult {
@@ -79,6 +87,58 @@ export function appendHistory(
 ): GenerationHistoryItem[] {
   const prev = Array.isArray(history) ? (history as GenerationHistoryItem[]).filter((h) => h && h.url) : [];
   return [item, ...prev.filter((h) => h.url !== item.url)].slice(0, limit);
+}
+
+/**
+ * REQ-toonflow-canvas K1：旧画布节点 data 顶层残留的槽位 / 传播键。
+ * 旧 CreativeCanvas 连线时把上游产出（及其别名）拷进下游节点顶层；迁移不删旧键，
+ * 而 executeAgentNode.buildAgentArgs 会按生成源 input_schema / 旧 nodeRegistry 句柄键从节点顶层补入参——
+ * 不去掉的话，断开的首帧、旧连线拷来的图 / 文本会被悄悄下发（面板上看不到）。
+ */
+export const STALE_SLOT_KEYS: readonly string[] = [
+  'first_frame', 'first_frame_url', 'last_frame', 'last_frame_url',
+  'reference_images', 'reference', 'reference_image', 'images', 'image_list',
+  'reference_video', 'reference_videos', 'videos',
+  'ref_audio', 'ref_audio_path', 'reference_audio', 'reference_audios', 'audios',
+  'camera_prompt', 'minimax_camera_prompt', 'dynamic_inputs',
+  'image', 'video', 'audio', 'url',
+];
+
+/** 旧画布遗留在音频节点上的参考音频键（未连参考音频时 N4 面板显式展示「沿用节点里的参考音频」并照旧下发）。 */
+export const LEGACY_REF_AUDIO_KEYS: readonly string[] = ['ref_audio', 'ref_audio_path', 'reference_audio', 'reference_audios', 'audios'];
+
+/** 旧 ComfyUI 工作流图片入参键（img_5 …）。 */
+const LEGACY_IMG_KEY = /^img_\d+$/;
+
+export interface StripStaleOptions {
+  /** 额外要去掉的键（生成源 input_schema 声明的输入键等）。 */
+  extraKeys?: readonly string[];
+  /** 不去掉的键（优先于以上所有规则）。 */
+  keep?: readonly string[];
+}
+
+/**
+ * REQ-toonflow-canvas K1：交给执行器的节点数据 = 节点数据去掉旧槽位键（不改原对象）。
+ * - 去掉 STALE_SLOT_KEYS、`img_N`、opts.extraKeys；
+ * - `text`：图片 / 视频节点是旧控制台 / 旧传播的提示词镜像（可能带 `{{ref N}}` 原文），去掉后执行器的 `text` 回落组装后的提示词；
+ *   音频节点的 `text` 是台词本身，保留；
+ * - 永远保留 `prompt`、`provider_id`/`provider`、`model`、`params`/`provider_params`、参数键、`history`、`skill_id` 等非槽位键。
+ * 本次真实的槽位值由 runGeneration 的 override（assembleInputs().args）提供。
+ */
+export function stripStaleSlotKeys(
+  data: Record<string, unknown> | null | undefined,
+  kind: GenKind | string,
+  opts: StripStaleOptions = {},
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...(data || {}) };
+  const keep = new Set<string>(['prompt', ...(opts.keep || [])]);
+  if (kind === 'audio') keep.add('text');
+  const drop = (k: string) => { if (!keep.has(k)) delete out[k]; };
+  for (const k of STALE_SLOT_KEYS) drop(k);
+  if (kind !== 'audio') drop('text');
+  for (const k of opts.extraKeys || []) drop(k);
+  for (const k of Object.keys(out)) if (LEGACY_IMG_KEY.test(k)) drop(k);
+  return out;
 }
 
 /** 入参里去掉 prompt / camera_prompt，剩下的就是槽位（智能规划的 slots） */
@@ -193,8 +253,14 @@ export async function runGeneration(o: RunGenerationOptions): Promise<RunGenerat
     };
     if (assembled.camera_prompt) override.camera_prompt = assembled.camera_prompt;
     if (kind === 'video' && assembled.providerMode) override.mode = assembled.providerMode;
+    // K1：节点数据去掉旧槽位键再交给执行器（槽位只来自本次组装）；音频节点未连参考音频时保留旧画布遗留的参考音频（N4 面板可见、可清除）
+    const keepLegacyRefAudio = kind === 'audio' && !assembled.canonical?.ref_audio?.length;
+    const runData = stripStaleSlotKeys(data, kind, {
+      extraKeys: o.inputKeys,
+      keep: [...(o.keepDataKeys || []), ...(keepLegacyRefAudio ? LEGACY_REF_AUDIO_KEYS : [])],
+    });
     const payload: any = await executeAgentNode({
-      node: { id: nodeId, type: nodeType, data },
+      node: { id: nodeId, type: nodeType, data: runData },
       override,
       updateNodeData: (id, p) => {
         if (isCurrent()) updateNodeData(id, p);
@@ -226,7 +292,10 @@ export interface UseGeneration {
   cancel: () => void;
 }
 
-/** 节点内使用：带运行态与取消。updateNodeData 用 useKitNodeActions(nodeId).update 传入。 */
+/**
+ * 节点内使用：带运行态与取消。updateNodeData 的签名是 `(nodeId, patch)`；
+ * 节点里一般直接用 useNodeGeneration(nodeId)（内部接 useKitNodeActions(nodeId).update）。
+ */
 export function useGeneration(nodeId: string, updateNodeData: (id: string, patch: Record<string, unknown>) => void): UseGeneration {
   const tokenRef = useRef(0);
   const [running, setRunning] = useState(false);
@@ -259,4 +328,14 @@ export function useGeneration(nodeId: string, updateNodeData: (id: string, patch
   }, [nodeId, updateNodeData]);
 
   return { running, error, run, cancel };
+}
+
+/**
+ * REQ-toonflow-canvas K1：useGeneration 的节点版——回写走 useKitNodeActions(nodeId).update（宿主优先，缺省 React Flow），
+ * 节点不用再包一层 `(id, patch) => actions.update(patch)`。返回值与 useGeneration 相同。
+ */
+export function useNodeGeneration(nodeId: string): UseGeneration {
+  const { update } = useKitNodeActions(nodeId);
+  const write = useCallback((_id: string, patch: Record<string, unknown>) => update(patch), [update]);
+  return useGeneration(nodeId, write);
 }

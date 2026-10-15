@@ -85,9 +85,14 @@ export function defsProvidingTo(dataType: DataType | DataType[]): AnyNodeDef[] {
   return paletteDefs().filter((d) => !!findCompatiblePort(d, dataType, 'source'));
 }
 
-/** 新建节点的默认 data：defaultData() + label。 */
+/**
+ * 新建节点的默认 data：defaultData() + label。
+ * K1：只在 defaultData 没有 `label` 键（含 `label: ''`）且 def 不是 computedLabel 时才写 NodeDef.label。
+ */
 export function createNodeData(type: string): Record<string, unknown> {
   const def = getNodeDef(type);
   if (!def) return {};
-  return { label: def.label, ...(def.defaultData?.() || {}) };
+  const data: Record<string, unknown> = { ...(def.defaultData?.() || {}) };
+  if (!def.computedLabel && !Object.prototype.hasOwnProperty.call(data, 'label')) return { label: def.label, ...data };
+  return data;
 }

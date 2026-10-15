@@ -6,6 +6,7 @@
 import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react';
 import { IconDownload, IconFolderPlus, IconLoader2, IconMaximize } from '@tabler/icons-react';
 import type { KitIcon } from './types';
+import { resolveMediaUrl } from '../../../utils/devOrigin';
 
 export interface ToolbarButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'title'> {
   icon?: KitIcon;
@@ -54,8 +55,14 @@ export interface FloatingToolbarProps {
   /** 「添加到素材库」：不传则不显示该按钮。 */
   onSaveToAssets?: () => void;
   saveDisabled?: boolean;
+  /** 下载地址（存值可为相对 `/storage/...`，渲染时经 resolveMediaUrl 回源）。 */
   downloadUrl?: string;
   downloadName?: string;
+  /**
+   * REQ-toonflow-canvas K1：是否显示下载按钮。缺省 `!!downloadUrl`（无产出的节点不显示）；
+   * 传 true 时没有 downloadUrl 也显示一个置灰的下载按钮（Toonflow 原样）。
+   */
+  showDownload?: boolean;
   /** 不传则不显示全屏按钮。 */
   onFullscreen?: () => void;
   /** 缺省：没有 downloadUrl 时置灰（Toonflow 同款）。 */
@@ -63,7 +70,8 @@ export interface FloatingToolbarProps {
   className?: string;
 }
 
-export function FloatingToolbar({ left, right, onSaveToAssets, saveDisabled, downloadUrl, downloadName, onFullscreen, fullscreenDisabled, className }: FloatingToolbarProps) {
+export function FloatingToolbar({ left, right, onSaveToAssets, saveDisabled, downloadUrl, downloadName, showDownload, onFullscreen, fullscreenDisabled, className }: FloatingToolbarProps) {
+  const href = resolveMediaUrl(downloadUrl);
   return (
     <div className={['cv-card cv-toolbar', className].filter(Boolean).join(' ')} role="toolbar">
       {onSaveToAssets && (
@@ -74,10 +82,10 @@ export function FloatingToolbar({ left, right, onSaveToAssets, saveDisabled, dow
       {left}
       <ToolbarDivider />
       {right}
-      {downloadUrl ? (
+      {href ? (
         <a
           className="cv-btn"
-          href={downloadUrl}
+          href={href}
           download={downloadName || ''}
           target="_blank"
           rel="noreferrer"
@@ -87,9 +95,9 @@ export function FloatingToolbar({ left, right, onSaveToAssets, saveDisabled, dow
         >
           <IconDownload size={16} aria-hidden />
         </a>
-      ) : (
+      ) : showDownload ? (
         <ToolbarButton icon={IconDownload} title="下载" iconOnly disabled />
-      )}
+      ) : null}
       {onFullscreen && <ToolbarButton icon={IconMaximize} title="全屏" iconOnly disabled={fullscreenDisabled ?? !downloadUrl} onClick={() => onFullscreen()} />}
     </div>
   );

@@ -14,6 +14,9 @@
  *    其他目标一律 → reference_images。
  * R6 提示词：主体 = 节点自身文本（{{ref N}} → 参考 N）；自身为空时第一条文本参考作主体（不加前缀）；
  *    其余文本参考 `参考 N：\n…`；去掉与自身文本完全相同的文本参考；自身文本提到的非文本参考附「参考编号对应」；段落 \n\n 连接。
+ * R6a 音频目标（K1，协调人拍板，后端 T6 同步改 inputs.assemble_audio_text）：配音文本不加「参考 N：」前缀、不加对应关系附注；
+ *    自身文本（text 优先，其次 prompt）非空 → 只念自身文本，`{{ref N}}` 换成第 N 项文本参考（prompt 槽）的原文
+ *    （不是带值的文本参考——媒体 / 机位 / 越界 / 空值——换成空串），结果 trim；自身为空 → 文本参考按参考顺序用 "\n" 连接（无前缀）。
  * R7 生成源模式：text→t2v、singleImage/startEnd→i2v、multiReference→r2v；空：有首帧 i2v、只有参考图/视频 r2v、否则 t2v。
  */
 import type { AssetSlotDef } from '../providerSkills';
@@ -193,6 +196,18 @@ export function assemblePrompt(own: string, texts: readonly [number, string][], 
   return parts.filter(Boolean).join('\n\n');
 }
 
+/** R6a 音频目标的配音文本（与 inputs.assemble_audio_text 一致）：无「参考 N：」前缀、无对应关系附注。 */
+export function assembleAudioText(own: string, texts: readonly [number, string][]): string {
+  const o = (own || '').trim();
+  const byN = new Map<number, string>();
+  for (const [n, t] of texts) {
+    const v = typeof t === 'string' ? t.trim() : '';
+    if (v) byN.set(n, v);
+  }
+  if (o) return o.replace(REF_TOKEN_RE, (_w, n: string) => byN.get(Number(n)) ?? '').trim();
+  return [...byN.entries()].sort((a, b) => a[0] - b[0]).map(([, t]) => t).join('\n');
+}
+
 /** 后端 to_engine_upstream 的键（生成源未知时的入参）。 */
 export function toEngineArgs(c: CanonicalSlots): Record<string, string | string[]> {
   const up: Record<string, string | string[]> = {};
@@ -336,7 +351,20 @@ export function assembleInputs(params: AssembleParams): AssembledInputs {
       if (desc) mapping.push(`${refName(i + 1)}=${desc}`);
     });
   }
-  const prompt = assemblePrompt(own, promptTexts, mapping.length ? `（参考编号对应：${mapping.join('，')}）` : '');
+  let prompt: string;
+  if (targetType === 'audio') {
+    // R6a：只念自身文本（{{ref N}} 换成原文）；自身为空才念文本参考。前端额外：没被念到的文本参考标为未使用并提示
+    prompt = assembleAudioText(own, promptTexts);
+    if (own) {
+      const unusedTexts = promptTexts.map(([n]) => n - 1).filter((i) => !mentioned.has(i + 1));
+      unusedTexts.forEach((i) => { assignments[refs[i].key] = null; });
+      if (unusedTexts.length) warnings.push(`台词里没有引用 ${names(unusedTexts)}，不会念出`);
+      const nonText = [...mentioned].map((n) => n - 1).filter((i) => i >= 0 && i < refs.length && refs[i].dataType !== 'STRING');
+      if (nonText.length) warnings.push(`${names(nonText)} 不是文本，台词里的引用会被忽略`);
+    }
+  } else {
+    prompt = assemblePrompt(own, promptTexts, mapping.length ? `（参考编号对应：${mapping.join('，')}）` : '');
+  }
   if (prompt) canonical.prompt = prompt;
 
   const val = (s: MediaSlot) => finalLists[s].map((i) => refs[i].value);

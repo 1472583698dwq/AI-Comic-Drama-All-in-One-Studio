@@ -4,9 +4,11 @@
  * 都由宿主（CreativeCanvas，H1 集成时提供）通过这里注入，节点组件不直接依赖 CreativeCanvas。
  * 宿主未提供的能力回落到 React Flow 实例上的等价操作。
  */
-import { createContext, useContext, useMemo, type ReactNode } from 'react';
-import { useReactFlow, type Edge, type Node } from '@xyflow/react';
-import { duplicateNodes } from './graphOps';
+import { createContext, useCallback, useContext, useMemo, type ReactNode } from 'react';
+import { useReactFlow, useStore, type Edge, type Node, type ReactFlowState, type XYPosition } from '@xyflow/react';
+import { duplicateNodes, sizeOf } from './graphOps';
+import { getNodeDef } from './registry';
+import { PRIMARY_OUTPUT_PORT } from './inputRules';
 
 export type MediaKind = 'image' | 'video' | 'audio';
 
@@ -50,7 +52,10 @@ export interface CanvasHost {
 export interface NewNodeSpec {
   type: string;
   data: Record<string, unknown>;
-  /** 绝对坐标；缺省按 placement 自动排布 */
+  /**
+   * 画布**绝对**坐标（flow 坐标系，与 screenToFlowPosition 同系）；缺省按 placement 自动排布。
+   * K1：锚点在分组里时新节点挂同一个 parentId，宿主 / createNodesLocal 负责换算成相对分组的坐标。
+   */
   position?: { x: number; y: number };
 }
 
@@ -61,6 +66,12 @@ export interface CreateNodesOptions {
   placement?: 'right' | 'below';
   /** 从锚点的哪个输出口连到每个新节点的 in（不连则不传） */
   connectFrom?: { nodeId: string; sourceHandle: string; targetHandle?: string };
+  /**
+   * K1：反向连线——把每个**新节点**的主输出口连到锚点（当前节点）的 targetHandle（缺省 `in`），
+   * 如图片节点「角色一致性」把新建的参考图节点接进自己。sourceHandle 缺省取新节点注册表的第一个 source 口
+   * （没有注册则 PRIMARY_OUTPUT_PORT[type]）。
+   */
+  connectTo?: { targetHandle?: string; sourceHandle?: string };
   /** 是否选中新节点（默认 true） */
   select?: boolean;
 }
@@ -98,7 +109,10 @@ export interface KitNodeActions {
 export function useKitNodeActions(nodeId: string): KitNodeActions {
   const host = useCanvasHost();
   const rf = useReactFlow();
-  return useMemo<KitNodeActions>(() => {
+  // K1：订阅本节点 data，产出变化（如刚生成了图）后重新求 canSaveToAssets；其余动作对象保持稳定引用
+  useStore(useCallback((s: ReactFlowState) => s.nodeLookup.get(nodeId)?.data, [nodeId]));
+  const canSaveToAssets = !!host.saveToAssets && (host.canSaveToAssets ? host.canSaveToAssets(nodeId) : true);
+  const base = useMemo<Omit<KitNodeActions, 'canSaveToAssets'>>(() => {
     const update = (patch: Record<string, unknown>) => {
       if (host.updateNodeData) host.updateNodeData(nodeId, patch);
       else rf.updateNodeData(nodeId, patch);
@@ -124,7 +138,6 @@ export function useKitNodeActions(nodeId: string): KitNodeActions {
       duplicate: () => (host.duplicate ? host.duplicate(nodeId) : copyLocal(true)),
       removeEdge: (edgeId: string) => (host.removeEdge ? host.removeEdge(edgeId) : void rf.deleteElements({ edges: [{ id: edgeId }] })),
       saveToAssets: host.saveToAssets ? () => host.saveToAssets!(nodeId) : undefined,
-      canSaveToAssets: !!host.saveToAssets && (host.canSaveToAssets ? host.canSaveToAssets(nodeId) : true),
       refresh: host.refresh ? () => host.refresh!(nodeId) : undefined,
       openFullscreen: (url: string, kind?: MediaKind) => {
         if (host.openFullscreen) host.openFullscreen({ nodeId, url, kind });
@@ -147,51 +160,128 @@ export function useKitNodeActions(nodeId: string): KitNodeActions {
       projectId: host.projectId,
     };
   }, [host, rf, nodeId]);
+  return useMemo<KitNodeActions>(() => ({ ...base, canSaveToAssets }), [base, canSaveToAssets]);
 }
 
 
-/** createNodes 的缺省实现：按锚点排布 + 可选连线（宿主没接管时用）。 */
+type LocalRf = Pick<ReturnType<typeof useReactFlow>, 'getNode' | 'addNodes' | 'addEdges' | 'setNodes'>
+  & Partial<Pick<ReturnType<typeof useReactFlow>, 'getNodes'>>;
+
+/** 新节点在自动排布时的估计尺寸（还没渲染、没有测量值）。 */
+const NEW_NODE_FALLBACK = { width: 220, height: 200 };
+const PLACE_GAP = 48;
+
+function measured(n: Node | undefined, fallback = NEW_NODE_FALLBACK): { width: number; height: number } {
+  const s = n ? sizeOf(n) : { width: 0, height: 0 };
+  return { width: s.width || fallback.width, height: s.height || fallback.height };
+}
+
+/** 节点的画布绝对坐标（沿 parentId 链累加，带环保护）。 */
+function absoluteOf(rf: Pick<LocalRf, 'getNode'>, id: string | undefined): XYPosition {
+  const p = { x: 0, y: 0 };
+  const seen = new Set<string>();
+  let n = id ? (rf.getNode(id) as Node | undefined) : undefined;
+  while (n && !seen.has(n.id)) {
+    seen.add(n.id);
+    p.x += n.position.x;
+    p.y += n.position.y;
+    n = n.parentId ? (rf.getNode(n.parentId) as Node | undefined) : undefined;
+  }
+  return p;
+}
+
+interface Rect { x: number; y: number; w: number; h: number }
+const overlaps = (a: Rect, b: Rect) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+
+/** 新节点的主输出口：注册表第一个 source 口，其次 PRIMARY_OUTPUT_PORT。 */
+function primaryOutputOf(type: string): string | undefined {
+  return getNodeDef(type)?.ports.find((p) => p.type === 'source')?.id ?? PRIMARY_OUTPUT_PORT[type];
+}
+
+/**
+ * createNodes 的缺省实现（宿主没接管时用）。K1 起按 Toonflow 摆放：
+ * - placement 'right'（缺省）：锚点右侧 48px 一列，从锚点顶部往下排，碰到同层已有节点（按测量尺寸）就挪到它下方 +48；
+ * - placement 'below'：锚点下方 48px 一行，从锚点左侧往右排，碰到已有节点就挪到它右侧 +48；
+ * - spec.position 是画布绝对坐标：锚点在分组里时换算成相对分组的坐标（新节点与锚点同一 parentId）；
+ * - connectFrom：锚点某输出口 → 每个新节点的 in；connectTo：每个新节点主输出口 → 锚点 targetHandle（缺省 in）。
+ * rf 可选提供 getNodes（用于避让已有节点；没有时只在新节点之间避让）。
+ */
 export function createNodesLocal(
-  rf: Pick<ReturnType<typeof useReactFlow>, 'getNode' | 'addNodes' | 'addEdges' | 'setNodes'>,
+  rf: LocalRf,
   specs: NewNodeSpec[],
   opts: CreateNodesOptions = {},
 ): string[] {
   const anchor = opts.anchorId ? (rf.getNode(opts.anchorId) as Node | undefined) : undefined;
-  const aw = (anchor?.measured?.width ?? anchor?.width ?? 240) as number;
-  const ah = (anchor?.measured?.height ?? anchor?.height ?? 240) as number;
+  const parentId = anchor?.parentId;
+  const parentAbs = parentId ? absoluteOf(rf, parentId) : { x: 0, y: 0 };
+  const a = measured(anchor, { width: 240, height: 240 });
   const base = anchor?.position ?? { x: 0, y: 0 };
-  const gap = 48;
+  // 同层（相对同一父节点）的已有节点，用于避让
+  const occupied: Rect[] = (rf.getNodes?.() ?? [])
+    .filter((n) => n.id !== anchor?.id && (n.parentId ?? undefined) === parentId)
+    .map((n) => { const s = measured(n as Node); return { x: n.position.x, y: n.position.y, w: s.width, h: s.height }; });
+  const place = (start: Rect, axis: 'x' | 'y'): Rect => {
+    const r = { ...start };
+    for (let guard = 0; guard < 200; guard++) {
+      const hit = occupied.find((o) => overlaps(r, o));
+      if (!hit) break;
+      if (axis === 'y') r.y = hit.y + hit.h + PLACE_GAP;
+      else r.x = hit.x + hit.w + PLACE_GAP;
+    }
+    return r;
+  };
+  let cursor = opts.placement === 'below' ? base.x : base.y;
+
   const ids: string[] = [];
   const nodes: Node[] = specs.map((spec, i) => {
     const id = `${spec.type}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}_${i}`;
     ids.push(id);
-    const position =
-      spec.position ??
-      (opts.placement === 'below'
-        ? { x: base.x + i * (aw + gap), y: base.y + ah + gap }
-        : { x: base.x + aw + gap, y: base.y + i * (ah + gap) });
+    const est = { width: getNodeDef(spec.type)?.width ?? NEW_NODE_FALLBACK.width, height: a.height || NEW_NODE_FALLBACK.height };
+    let position: XYPosition;
+    if (spec.position) {
+      position = { x: spec.position.x - parentAbs.x, y: spec.position.y - parentAbs.y };
+      occupied.push({ ...position, w: est.width, h: est.height });
+    } else if (opts.placement === 'below') {
+      const r = place({ x: cursor, y: base.y + a.height + PLACE_GAP, w: est.width, h: est.height }, 'x');
+      position = { x: r.x, y: r.y };
+      occupied.push(r);
+      cursor = r.x + r.w + PLACE_GAP;
+    } else {
+      const r = place({ x: base.x + a.width + PLACE_GAP, y: cursor, w: est.width, h: est.height }, 'y');
+      position = { x: r.x, y: r.y };
+      occupied.push(r);
+      cursor = r.y + r.h + PLACE_GAP;
+    }
     return {
       id,
       type: spec.type,
       position,
-      parentId: anchor?.parentId,
+      parentId,
       data: spec.data,
       selected: opts.select !== false,
     } as Node;
   });
   if (opts.select !== false) rf.setNodes((nds) => nds.map((n) => (n.selected ? { ...n, selected: false } : n)));
   rf.addNodes(nodes);
+  const edges: Edge[] = [];
   if (opts.connectFrom) {
     const { nodeId, sourceHandle, targetHandle } = opts.connectFrom;
-    rf.addEdges(
-      ids.map((id) => ({
-        id: `e_${nodeId}_${sourceHandle}_${id}`,
-        source: nodeId,
-        sourceHandle,
-        target: id,
-        targetHandle: targetHandle ?? 'in',
-      })),
-    );
+    edges.push(...ids.map((id) => ({
+      id: `e_${nodeId}_${sourceHandle}_${id}`,
+      source: nodeId,
+      sourceHandle,
+      target: id,
+      targetHandle: targetHandle ?? 'in',
+    })));
   }
+  if (opts.connectTo && opts.anchorId) {
+    const targetHandle = opts.connectTo.targetHandle ?? 'in';
+    specs.forEach((spec, i) => {
+      const sourceHandle = opts.connectTo!.sourceHandle ?? primaryOutputOf(spec.type);
+      if (!sourceHandle) return;
+      edges.push({ id: `e_${ids[i]}_${sourceHandle}_${opts.anchorId}`, source: ids[i], sourceHandle, target: opts.anchorId!, targetHandle });
+    });
+  }
+  if (edges.length) rf.addEdges(edges);
   return ids;
 }

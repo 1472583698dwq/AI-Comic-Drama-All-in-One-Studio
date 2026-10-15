@@ -1,0 +1,571 @@
+/* REQ-toonflow-canvas 音频节点（load-audio 音频 / audio 音频生成）样式。
+ * 结构与尺寸照搬 Toonflow audioNode / audioPlayer / audioActions / audioClipEditor / generationSettings / mediaHistory，
+ * 颜色一律走 kit/theme.css 的 --cv-* 变量（跟随深浅色与插件主题包），类名统一 cv-audio- 前缀。 */
+
+/* ---------- 节点内容区（Toonflow .audioContent） ---------- */
+.cv-audio-content {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 144px;
+}
+.cv-audio-content.is-dragover {
+  outline: 1px dashed var(--cv-primary);
+  outline-offset: 2px;
+  border-radius: var(--cv-radius);
+}
+.cv-audio-upload {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 6px;
+  width: 100%;
+  height: 144px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--cv-radius);
+  background: transparent;
+  color: var(--cv-text-3);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 120ms ease-out;
+}
+.cv-audio-upload:hover:not(:disabled) { color: var(--cv-primary); }
+.cv-audio-upload:disabled { cursor: progress; }
+.cv-audio-upload:focus-visible { outline: 2px solid var(--cv-primary); outline-offset: -2px; }
+.cv-audio-empty {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-height: 144px;
+  color: var(--cv-text-3);
+}
+.cv-audio-busy {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: var(--cv-radius);
+  background: color-mix(in srgb, var(--cv-bg) 72%, transparent);
+  color: var(--cv-text-2);
+  font-size: 12px;
+  pointer-events: none;
+}
+.cv-audio-busy svg { color: var(--cv-primary); }
+.cv-audio-note {
+  margin: 6px 2px 0;
+  overflow: hidden;
+  color: var(--cv-text-3);
+  font-size: 12px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 错误原因可能很长（后端附带处理建议）：最多 3 行，完整内容在 title 里 */
+.cv-audio-note.is-error {
+  display: -webkit-box;
+  color: var(--cv-danger);
+  white-space: normal;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+}
+
+/* ---------- 播放器（Toonflow audioPlayer.vue） ---------- */
+.cv-audio-player {
+  width: 100%;
+  min-width: 0;
+  color: var(--cv-text-1);
+}
+.cv-audio-player audio { display: none; }
+.cv-audio-wave {
+  padding: 10px 14px;
+  border-radius: var(--cv-radius);
+  background: var(--cv-fill);
+}
+.cv-audio-wave.is-unavailable { opacity: 0.65; }
+.cv-audio-track {
+  position: relative;
+  height: var(--cv-audio-track-h, 96px);
+}
+.cv-audio-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  color: var(--cv-text-3);
+  pointer-events: none;
+}
+.cv-audio-canvas.is-played { color: var(--cv-primary); }
+.cv-audio-status {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--cv-text-2);
+  font-size: 12px;
+  pointer-events: none;
+}
+.cv-audio-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  transform: translateX(-50%);
+  background: var(--cv-primary);
+  pointer-events: none;
+}
+.cv-audio-playhead::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+  background: inherit;
+  transform: translate(-50%, -2px);
+}
+/* 只让播放头附近的滑块接收拖动，波形其余区域交给节点拖拽（Toonflow ACT） */
+.cv-audio-seek {
+  position: absolute;
+  inset: 0 -6px;
+  width: calc(100% + 12px);
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  opacity: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  pointer-events: none;
+  touch-action: none;
+}
+.cv-audio-seek::-webkit-slider-thumb {
+  width: 12px;
+  height: var(--cv-audio-track-h, 96px);
+  appearance: none;
+  -webkit-appearance: none;
+  pointer-events: auto;
+  cursor: ew-resize;
+}
+.cv-audio-seek::-moz-range-thumb {
+  width: 12px;
+  height: var(--cv-audio-track-h, 96px);
+  border: 0;
+  pointer-events: auto;
+  cursor: ew-resize;
+}
+.cv-audio-seek:disabled::-webkit-slider-thumb { pointer-events: none; }
+.cv-audio-seek:disabled::-moz-range-thumb { pointer-events: none; }
+.cv-audio-track:has(.cv-audio-seek:focus-visible) {
+  outline: 2px solid var(--cv-primary);
+  outline-offset: 5px;
+  border-radius: 3px;
+}
+.cv-audio-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 2px 0;
+}
+.cv-audio-play {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--cv-primary) 30%, transparent);
+  border-radius: 50%;
+  background: var(--cv-primary-soft);
+  color: var(--cv-primary);
+  cursor: pointer;
+}
+.cv-audio-play:disabled { opacity: 0.5; cursor: not-allowed; }
+.cv-audio-play:focus-visible { outline: 2px solid var(--cv-primary); outline-offset: 2px; }
+.cv-audio-time {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--cv-text-2);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.cv-audio-time > span:first-child { color: var(--cv-text-1); }
+.cv-audio-time__sep { opacity: 0.5; }
+.cv-audio-volume {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+.cv-audio-volume .cv-btn {
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  padding: 4px;
+}
+.cv-audio-volume input {
+  width: 56px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--cv-primary);
+  cursor: pointer;
+}
+
+/* ---------- 变速面板（Toonflow audioActions speedPanel，宽 440） ---------- */
+.cv-audio-speed { padding: 8px; }
+.cv-audio-speed__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.cv-audio-speed__limit { color: var(--cv-text-2); font-size: 11px; white-space: nowrap; }
+.cv-audio-speed__slider {
+  flex: 1;
+  min-width: 70px;
+  margin: 0;
+  accent-color: var(--cv-primary);
+  cursor: pointer;
+}
+.cv-audio-speed__status {
+  margin: 6px 4px 0;
+  color: var(--cv-text-2);
+  font-size: 12px;
+}
+.cv-audio-speed__status.is-error { color: var(--cv-danger); }
+
+/* ---------- 通用输入 / 按钮 ---------- */
+.cv-audio-num,
+.cv-audio-select,
+.cv-audio-input {
+  box-sizing: border-box;
+  height: 30px;
+  min-width: 0;
+  padding: 0 8px;
+  border: 1px solid var(--cv-border-light);
+  border-radius: var(--cv-radius);
+  outline: none;
+  background: var(--cv-bg);
+  color: var(--cv-text-1);
+  font: inherit;
+  font-size: 13px;
+}
+.cv-audio-num { width: 84px; font-variant-numeric: tabular-nums; }
+.cv-audio-num:focus,
+.cv-audio-select:focus,
+.cv-audio-input:focus { border-color: var(--cv-primary); }
+.cv-audio-num:disabled,
+.cv-audio-select:disabled,
+.cv-audio-input:disabled { color: var(--cv-text-3); cursor: not-allowed; }
+.cv-audio-select option { background: var(--cv-bg); color: var(--cv-text-1); }
+.cv-audio-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 15px;
+  border: 1px solid var(--cv-border-light);
+  border-radius: var(--cv-radius);
+  background: var(--cv-bg);
+  color: var(--cv-text-1);
+  font: inherit;
+  font-size: 14px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
+}
+.cv-audio-btn:hover:not(:disabled) { border-color: color-mix(in srgb, var(--cv-primary) 50%, var(--cv-border-light)); color: var(--cv-primary); }
+.cv-audio-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.cv-audio-btn:focus-visible { outline: 2px solid var(--cv-primary); outline-offset: 2px; }
+.cv-audio-btn--primary {
+  border-color: var(--cv-primary);
+  background: var(--cv-primary);
+  color: var(--cv-on-accent);
+}
+.cv-audio-btn--primary:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--cv-primary) 85%, var(--cv-text-1));
+  background: color-mix(in srgb, var(--cv-primary) 85%, var(--cv-text-1));
+  color: var(--cv-on-accent);
+}
+.cv-audio-btn--sm { height: 28px; padding: 0 10px; font-size: 13px; }
+
+/* ---------- 弹窗（Toonflow el-dialog：截取 900 / 历史 760） ---------- */
+.cv-audio-dialog-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 2100;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  background: rgb(0 0 0 / 0.5);
+}
+.cv-audio-dialog {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: min(var(--cv-audio-dialog-w, 900px), calc(100vw - 24px));
+  max-height: 84vh;
+  border: 1px solid var(--cv-border-light);
+  border-radius: var(--cv-radius-lg);
+  background: var(--cv-bg-overlay);
+  color: var(--cv-text-1);
+  box-shadow: var(--cv-shadow);
+  font-size: 14px;
+  text-align: left;
+}
+.cv-audio-dialog:focus { outline: none; }
+.cv-audio-dialog__header {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--cv-border-lighter);
+  font-size: 16px;
+  font-weight: 600;
+}
+.cv-audio-dialog__body {
+  min-height: 0;
+  padding: 16px;
+  overflow-y: auto;
+}
+.cv-audio-dialog__footer {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--cv-border-lighter);
+}
+.cv-audio-dialog__status { margin-right: auto; color: var(--cv-text-2); font-size: 12px; }
+.cv-audio-dialog__status.is-error { color: var(--cv-danger); }
+
+/* ---------- 截取（单区间，Toonflow audioClipEditor 的轨道外观） ---------- */
+.cv-audio-trim__ruler {
+  position: relative;
+  height: 24px;
+  margin: 0 14px;
+  cursor: crosshair;
+}
+.cv-audio-trim__ruler span {
+  position: absolute;
+  top: 2px;
+  color: var(--cv-text-2);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  transform: translateX(-50%);
+}
+.cv-audio-trim__ruler span::after {
+  content: "";
+  position: absolute;
+  top: 15px;
+  left: 50%;
+  height: 6px;
+  border-left: 1px solid var(--cv-border-light);
+}
+.cv-audio-trim__ruler span:first-child { transform: none; }
+.cv-audio-trim__ruler span:first-child::after { left: 0; }
+.cv-audio-trim__ruler span:last-child { transform: translateX(-100%); }
+.cv-audio-trim__ruler span:last-child::after { left: auto; right: 0; }
+.cv-audio-trim__overlay {
+  position: absolute;
+  inset: 0;
+  cursor: crosshair;
+  touch-action: none;
+}
+.cv-audio-trim__shade {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: color-mix(in srgb, var(--cv-bg) 62%, transparent);
+  pointer-events: none;
+}
+.cv-audio-trim__sel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  box-sizing: border-box;
+  border: 1px solid var(--cv-primary);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--cv-primary) 10%, transparent);
+  pointer-events: none;
+}
+.cv-audio-trim__handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 12px;
+  transform: translateX(-50%);
+  cursor: ew-resize;
+}
+.cv-audio-trim__handle::before {
+  content: "";
+  width: 4px;
+  height: 40%;
+  border-radius: 2px;
+  background: var(--cv-primary);
+}
+.cv-audio-trim__handle:focus-visible { outline: 2px solid var(--cv-primary); outline-offset: 2px; border-radius: 3px; }
+.cv-audio-trim__fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-top: 14px;
+  color: var(--cv-text-2);
+  font-size: 13px;
+}
+.cv-audio-trim__fields label { display: inline-flex; align-items: center; gap: 8px; }
+.cv-audio-trim__span { color: var(--cv-text-1); font-variant-numeric: tabular-nums; }
+
+/* ---------- 历史记录（Toonflow mediaHistory） ---------- */
+.cv-audio-history {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(0, 2fr);
+  gap: 16px;
+  min-height: 240px;
+}
+.cv-audio-history__list { max-height: 360px; overflow: auto; }
+.cv-audio-history__item {
+  display: block;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid transparent;
+  border-radius: var(--cv-radius);
+  background: transparent;
+  color: var(--cv-text-1);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cv-audio-history__item:hover { background: var(--cv-fill); }
+.cv-audio-history__item.is-selected { border-color: var(--cv-primary); background: var(--cv-primary-soft); }
+.cv-audio-history__item:focus-visible { outline: 2px solid var(--cv-primary); outline-offset: -2px; }
+.cv-audio-history__name,
+.cv-audio-history__meta {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cv-audio-history__name { font-size: 13px; }
+.cv-audio-history__meta { color: var(--cv-text-3); font-size: 12px; }
+.cv-audio-history__current { color: var(--cv-primary); font-size: 12px; }
+.cv-audio-history__preview { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.cv-audio-history__prompt {
+  max-height: 120px;
+  overflow: auto;
+  color: var(--cv-text-2);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.cv-audio-history__empty { display: grid; place-items: center; min-height: 200px; color: var(--cv-text-3); font-size: 13px; }
+
+/* ---------- 参数弹层（Toonflow generationSettings + MiniMax 音色 / DynamicControl） ---------- */
+.cv-audio-params {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  text-align: left;
+}
+.cv-audio-params__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--cv-border-lighter);
+  color: var(--cv-text-1);
+  font-size: 13px;
+  font-weight: 600;
+}
+.cv-audio-params__status {
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--cv-text-3);
+  font-size: 12px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cv-audio-params__status.is-bad { color: var(--cv-danger); }
+.cv-audio-params__section { display: flex; flex-direction: column; gap: 10px; }
+.cv-audio-params__title { color: var(--cv-text-3); font-size: 11px; font-weight: 600; letter-spacing: 0.04em; }
+.cv-audio-params__hint { color: var(--cv-text-3); font-size: 11px; line-height: 16px; }
+.cv-audio-field { display: flex; align-items: center; gap: 12px; }
+.cv-audio-field__label {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 60px;
+  color: var(--cv-text-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.cv-audio-field__control { display: flex; flex: 1; flex-direction: column; gap: 6px; min-width: 0; }
+.cv-audio-segmented {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  padding: 2px;
+  border-radius: var(--cv-radius);
+  background: var(--cv-fill);
+}
+.cv-audio-segmented button {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--cv-text-2);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.cv-audio-segmented button[aria-checked="true"] {
+  background: var(--cv-fill-2);
+  color: var(--cv-text-1);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.12);
+}
+.cv-audio-segmented button:disabled { cursor: not-allowed; opacity: 0.6; }
+.cv-audio-segmented button:focus-visible { outline: 2px solid var(--cv-primary); outline-offset: -2px; }
+.cv-audio-badge {
+  flex-shrink: 0;
+  padding: 0 4px;
+  border: 1px solid color-mix(in srgb, var(--cv-primary) 35%, transparent);
+  border-radius: 4px;
+  background: var(--cv-primary-soft);
+  color: var(--cv-primary);
+  font-size: 9px;
+  line-height: 14px;
+}
+.cv-audio-ref-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--cv-text-2);
+  font-size: 12px;
+  line-height: 18px;
+}
+.cv-audio-ref-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-audio-params__footer { display: flex; justify-content: flex-end; }

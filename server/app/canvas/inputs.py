@@ -41,6 +41,10 @@ R6 提示词：own = 节点自身文本（audio 取 text 优先，其余 prompt 
    对应关系：own 里 ``{{ref N}}`` 提到的非文本参考，按落位写 ``（参考编号对应：参考 2=首帧图，参考 3=第 1 张参考图）``
    （首帧图 / 尾帧图 / 第 k 张参考图 / 参考音频 / 参考视频；k = 在最终 reference_images 里的位置）。
    camera_prompt 槽多条用 "\n" 连接。
+R6a 音频目标（type=audio，T6 协调人拍板，前端 K1 同步）：配音文本**不加**「参考 N：」前缀、**不加**对应关系附注。
+   own（text 优先，其次 prompt）非空 → 只念 own，其中 ``{{ref N}}`` 换成第 N 项文本参考（prompt 槽）的**原文**；
+   N 不是带值的文本参考（媒体 / camera_prompt 槽 / 越界 / 空值）→ 换成空串；结果 trim。
+   own 为空 → prompt 槽的文本参考按参考顺序用 "\n" 连接（空串丢弃，无前缀）。其他目标类型仍按 R6。
 R7 生成源模式（引擎）：data.mode 为新模式时 text→t2v、singleImage/startEnd→i2v、multiReference→r2v；
    旧值 i2v/r2v/t2v 原样；为空时有首帧 i2v、只有参考图/参考视频 r2v、都没有 t2v。
 """
@@ -211,6 +215,11 @@ def source_kind(source_node: Optional[Dict[str, Any]], source_handle: str = "",
                 result: Optional[Dict[str, Any]] = None) -> Optional[str]:
     """参考类型（规则 3）：sourceHandle → 来源节点类型 → 产物键推断。"""
     sh = (source_handle or "").strip()
+    if (source_node or {}).get("type") in DYNAMIC_PORT_NODE_TYPES and sh:
+        # REQ-toonflow-canvas T6 ext-node / custom 来源：连的是声明的输出口时以其声明类型为准
+        out = _output_port(resolve_dynamic_ports(source_node), sh)
+        if out and out["kind"] != ANY_KIND:
+            return out["kind"]
     if sh in _SOURCE_HANDLE_KIND:
         return _SOURCE_HANDLE_KIND[sh]
     st = (source_node or {}).get("type") or ""
@@ -245,6 +254,11 @@ def source_values(kind: Optional[str], source_node: Optional[Dict[str, Any]], so
     data = node_data(source_node)
     st = (source_node or {}).get("type") or ""
     sh = (source_handle or "").strip()
+    if st in DYNAMIC_PORT_NODE_TYPES:
+        # REQ-toonflow-canvas T6 ext-node / custom 来源：按声明输出口取产出，不把同名输入口的值当产出
+        ports = resolve_dynamic_ports(source_node)
+        if ports is not None:
+            return port_source_values(kind, source_node, sh, result, ports)
     if kind == IMAGE and (st == "load-image-batch" or (isinstance(result, dict) and isinstance(result.get("images"), list))):
         for src in (result, data):
             if isinstance(src, dict):
@@ -447,7 +461,11 @@ def collect_inputs(node: Dict[str, Any], edges: List[Dict[str, Any]], nodes_by_i
                 lst.append(url)
         if lst:
             slots[s] = lst
-    prompt = assemble_prompt(own_prompt(node), prompt_texts, ref_mapping(own_prompt(node), refs, slots))
+    if ttype == "audio":
+        # REQ-toonflow-canvas R6a 配音文本：只念自身文本（{{ref N}} 换成原文），自身为空才念文本参考
+        prompt = assemble_audio_text(own_prompt(node), prompt_texts)
+    else:
+        prompt = assemble_prompt(own_prompt(node), prompt_texts, ref_mapping(own_prompt(node), refs, slots))
     if prompt:
         slots["prompt"] = prompt
     return {"refs": refs, "slots": slots, "mode": mode, "has_text_refs": bool(prompt_texts)}
@@ -492,6 +510,243 @@ def assemble_prompt(own: str, texts: List[Tuple[int, str]], mapping: str = "") -
     if mapping:
         parts.append(mapping)
     return "\n\n".join(p for p in parts if p)
+
+
+def assemble_audio_text(own: str, texts: List[Tuple[int, str]]) -> str:
+    """REQ-toonflow-canvas R6a：音频目标的配音文本（无「参考 N：」前缀、无对应关系附注）。
+
+    own 非空 → 只念 own，``{{ref N}}`` 换成第 N 项文本参考的原文（不是带值的文本参考 → 空串）；
+    own 为空 → 文本参考按顺序 "\\n" 连接。
+    """
+    own = (own or "").strip()
+    by_n = {n: t.strip() for n, t in texts if isinstance(t, str) and t.strip()}
+    if own:
+        return REF_TOKEN_RE.sub(lambda m: by_n.get(int(m.group(1)), ""), own).strip()
+    return "\n".join(t for _n, t in sorted(by_n.items()))
+
+
+# ---------- 动态端口节点（ext-node / custom）：上游值 → 声明端口 id ----------
+# REQ-toonflow-canvas T6：与前端 nodes2/legacy-b/{ports,inputs}.ts 同口径（N7 遗留 2、3）。
+# - 端口：ext-node = canvas_nodes 声明 inputs/outputs；custom = input_schema 每个属性（无 schema 用兜底三口），
+#   输出口按 kind。声明来源：注册表（canvas_node_manager / custom_node_manager）优先，其次 data.definition 快照。
+# - 落位：连线 targetHandle 必须是声明的输入口（空 handle = 第一个输入口，同前端 findInputPort）；
+#   单值口 = 最后一条有值的入边，多值口（schema type=array）= 按连线顺序去重的列表。
+# - 取值：执行期 result 优先于节点数据；来源也是 ext/custom 时读 outputs[口] → 输出口 from 键 → 该类型的结果键，
+#   读节点数据时跳过与输入口同名的键（upscale_ext 输入口、输出口都叫 video，data.video 是输入不是产出）。
+
+DYNAMIC_PORT_NODE_TYPES = frozenset({"ext-node", "ext_node", "custom"})
+EXT_NODE_TYPES = frozenset({"ext-node", "ext_node"})
+ANY_KIND = "*"
+
+# 端口声明类型 / x-handle → 参考类型（含旧插槽别名，同前端 MEDIA_ALIASES）
+_MEDIA_ALIASES: Dict[str, str] = {
+    "image": IMAGE, "images": IMAGE, "reference_images": IMAGE, "reference_image": IMAGE,
+    "first_frame": IMAGE, "last_frame": IMAGE,
+    "video": VIDEO, "videos": VIDEO, "reference_videos": VIDEO, "reference_video": VIDEO,
+    "audio": AUDIO, "audios": AUDIO, "reference_audios": AUDIO, "reference_audio": AUDIO, "ref_audio": AUDIO,
+}
+_RESULT_KEYS: Dict[str, Tuple[str, ...]] = {
+    IMAGE: ("image_url", "result_url"), VIDEO: ("video_url",), AUDIO: ("audio_url",), STRING: ("text",),
+}
+# 代码节点没有 input_schema 时的输入口（同前端 CUSTOM_FALLBACK_INPUTS / 旧 CustomNode 兜底）
+CUSTOM_FALLBACK_INPUTS: Tuple[Dict[str, Any], ...] = (
+    {"id": "prompt", "kind": STRING, "multi": False},
+    {"id": "video", "kind": VIDEO, "multi": False},
+    {"id": "reference_images", "kind": IMAGE, "multi": True},
+)
+
+
+def _get(obj: Any, key: str, default: Any = None) -> Any:
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def port_type_kind(t: Any) -> str:
+    """canvas_nodes 端口类型（image|video|audio|text|any）→ 参考类型，any → ``*``。"""
+    k = str(t or "").strip().lower()
+    if k in ("any", "*"):
+        return ANY_KIND
+    return _MEDIA_ALIASES.get(k, STRING)
+
+
+def custom_slot_kind(key: str, prop: Any) -> str:
+    """custom input_schema 属性 → 参考类型：x-handle 媒体 → uri 按键名（缺省图片）→ 其余文本。"""
+    prop = prop if isinstance(prop, dict) else {}
+    h = str(prop.get("x-handle") or "").strip().lower()
+    if h in _MEDIA_ALIASES:
+        return _MEDIA_ALIASES[h]
+    items = prop.get("items") if isinstance(prop.get("items"), dict) else {}
+    if prop.get("format") == "uri" or items.get("format") == "uri":
+        lk = key.lower()
+        return AUDIO if "audio" in lk else VIDEO if "video" in lk else IMAGE
+    return STRING
+
+
+def ext_ports(spec: Any) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """ext-node 端口（spec 为 CanvasNodeSpec 或其 dict 快照）→ (输入口, 输出口)。"""
+    ins, outs = [], []
+    for p in _get(spec, "inputs") or []:
+        pid = str(_get(p, "id") or "")
+        if pid:
+            ins.append({"id": pid, "kind": port_type_kind(_get(p, "type")), "multi": False})
+    for p in _get(spec, "outputs") or []:
+        pid = str(_get(p, "id") or "")
+        if pid:
+            frm = _get(p, "from_key") if not isinstance(p, dict) else (p.get("from") or p.get("from_key"))
+            outs.append({"id": pid, "kind": port_type_kind(_get(p, "type")), "from": str(frm or "")})
+    return ins, outs
+
+
+def custom_output_ports(kind: Any) -> List[Dict[str, Any]]:
+    k = str(kind or "").strip() or "utility"
+    single = {"image": IMAGE, "video": VIDEO, "audio": AUDIO}
+    if k in single:
+        return [{"id": k, "kind": single[k], "from": ""}]
+    return [{"id": "image", "kind": IMAGE, "from": ""}, {"id": "video", "kind": VIDEO, "from": ""},
+            {"id": "audio", "kind": AUDIO, "from": ""}, {"id": "text", "kind": STRING, "from": ""}]
+
+
+def custom_ports(definition: Any) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """custom 端口（definition 为 CustomNodeDefinition / dict / None）→ (输入口, 输出口)。"""
+    schema = _get(definition, "input_schema") if definition is not None else None
+    props = schema.get("properties") if isinstance(schema, dict) else None
+    if isinstance(props, dict) and props:
+        ins = [{"id": str(k), "kind": custom_slot_kind(str(k), p),
+                "multi": isinstance(p, dict) and p.get("type") == "array"} for k, p in props.items()]
+    else:
+        ins = [dict(p) for p in CUSTOM_FALLBACK_INPUTS]
+    return ins, custom_output_ports(_get(definition, "kind") if definition is not None else None)
+
+
+def resolve_dynamic_ports(node: Optional[Dict[str, Any]]) -> Optional[Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]]:
+    """ext-node / custom 节点的声明端口；不是这两类或 ext-node 声明找不到 → None。"""
+    ntype = (node or {}).get("type") or ""
+    data = node_data(node)
+    if ntype in EXT_NODE_TYPES:
+        cnid = str(data.get("canvas_node_id") or data.get("canvasNodeId") or "").strip()
+        spec = None
+        if cnid:
+            try:
+                from app.canvas_nodes.manager import canvas_node_manager
+                spec = canvas_node_manager.get(cnid)
+            except Exception:
+                spec = None
+        if spec is None:
+            snap = data.get("definition")
+            if isinstance(snap, dict) and (isinstance(snap.get("inputs"), list) or isinstance(snap.get("outputs"), list)) \
+                    and (not cnid or not snap.get("id") or snap.get("id") == cnid):
+                spec = snap
+        return ext_ports(spec) if spec is not None else None
+    if ntype == "custom":
+        cnid = str(data.get("custom_node_id") or data.get("customNodeId") or "").strip()
+        definition = None
+        if cnid:
+            try:
+                from app.custom_nodes.manager import custom_node_manager
+                definition = custom_node_manager.get(cnid)
+            except Exception:
+                definition = None
+        if definition is None:
+            snap = data.get("definition")
+            if isinstance(snap, dict) and snap.get("input_schema") and (not cnid or not snap.get("id") or snap.get("id") == cnid):
+                definition = snap
+        return custom_ports(definition)
+    return None
+
+
+def find_input_port(in_ports: List[Dict[str, Any]], handle: str) -> Optional[Dict[str, Any]]:
+    """连线 targetHandle → 声明的输入口；空 handle（旧连线）= 第一个输入口；未声明的口 → None。"""
+    if not in_ports:
+        return None
+    if not handle:
+        return in_ports[0]
+    return next((p for p in in_ports if p["id"] == handle), None)
+
+
+def _output_port(ports: Optional[Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]], handle: str) -> Optional[Dict[str, Any]]:
+    if not ports or not handle:
+        return None
+    return next((p for p in ports[1] if p["id"] == handle), None)
+
+
+def port_source_values(kind: Optional[str], source_node: Optional[Dict[str, Any]], source_handle: str,
+                       result: Optional[Dict[str, Any]],
+                       ports: Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]) -> List[str]:
+    """来源是 ext-node / custom 时的取值：outputs[口] → 输出口 from 键 → 该类型的结果键；
+    读节点数据时跳过与输入口同名的键（不把输入当产出漏给下游）。"""
+    data = node_data(source_node)
+    sh = (source_handle or "").strip()
+    in_ids = {p["id"] for p in ports[0]}
+    out = _output_port(ports, sh)
+    if out is None and sh in in_ids:
+        return []  # 连的是输入口同名的句柄却不是输出口：没有产出可读
+    out_kind = out["kind"] if out and out["kind"] != ANY_KIND else kind
+    keys = _RESULT_KEYS.get(out_kind or "", ()) or _RESULT_KEYS.get(kind or "", ())
+    for src in (result, data):
+        if not isinstance(src, dict):
+            continue
+        is_data = src is data
+        outputs = src.get("outputs")
+        if sh and isinstance(outputs, dict):
+            lst = _str_list(outputs.get(sh))
+            if lst:
+                return lst[:1] if out_kind == STRING else lst
+        frm = (out or {}).get("from") or ""
+        if frm and not (is_data and frm in in_ids):
+            lst = _str_list(src.get(frm))
+            if lst:
+                return lst[:1] if out_kind == STRING else lst
+        v = _first_str([src], tuple(k for k in keys if not (is_data and k in in_ids)))
+        if v:
+            return [v]
+    return []
+
+
+def port_kind_for_edge(port: Dict[str, Any], source_node: Optional[Dict[str, Any]], source_handle: str,
+                       result: Optional[Dict[str, Any]]) -> Optional[str]:
+    """端口要读的上游类型：具体类型直接用（上游类型明确且不符 → None，不落值）；``*`` 按上游推断。"""
+    inferred = source_kind(source_node, source_handle, result)
+    if port["kind"] == ANY_KIND:
+        return inferred
+    if inferred and inferred != port["kind"]:
+        return None
+    return port["kind"]
+
+
+def collect_port_inputs(node: Dict[str, Any], in_ports: List[Dict[str, Any]], edges: List[Dict[str, Any]],
+                        nodes_by_id: Dict[str, Dict[str, Any]],
+                        results: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """ext-node / custom 目标：全部入边 → ``{声明端口 id: 值}``（只含有入边且有值的口）。
+    生成源（provider*）/ 分组来源不落值（生成源 id 由引擎另行透传）。"""
+    results = results or {}
+    nid = node.get("id")
+    out: Dict[str, Any] = {}
+    for e in edges or []:
+        if not isinstance(e, dict) or e.get("target") != nid:
+            continue
+        src = nodes_by_id.get(e.get("source"))
+        if src is None or src.get("type") in PROVIDER_NODE_TYPES or src.get("type") == GROUP_TYPE:
+            continue
+        port = find_input_port(in_ports, target_handle(e))
+        if port is None:
+            continue
+        sh = str(e.get("sourceHandle") or e.get("source_handle") or "")
+        res = results.get(e.get("source")) if isinstance(results.get(e.get("source")), dict) else None
+        kind = port_kind_for_edge(port, src, sh, res)
+        if not kind:
+            continue
+        values = source_values(kind, src, sh, res)
+        if not values:
+            continue
+        if port.get("multi"):
+            lst = out.setdefault(port["id"], [])
+            for v in values:
+                if v not in lst:
+                    lst.append(v)
+        else:
+            out[port["id"]] = values[0]
+    return out
 
 
 # ---------- 引擎适配 ----------

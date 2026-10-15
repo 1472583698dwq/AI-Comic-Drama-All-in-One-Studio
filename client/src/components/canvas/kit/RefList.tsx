@@ -3,10 +3,12 @@
  * REQ-toonflow-canvas 参考列表（对照 Toonflow components/referenceItem.vue + referenceCard.vue）：
  * 横向 48×48 卡片（最小高 48、间距 8），左上角序号、右上角删除、视频底部时长条；
  * 拖拽重排（原生 HTML5 DnD）或 Alt+←/→ 键盘移动 → moveRef，提示词里的 {{ref N}} 编号随之改变。
+ * 缩略图 / 视频地址只在展示时经 resolveMediaUrl 回源（RefItem.value 仍是原值，组装 / 下发不变）。
  */
 import { useState, type DragEvent, type KeyboardEvent, type SyntheticEvent } from 'react';
 import { IconFileText, IconMusic, IconPhoto, IconPlayerPlay, IconVideo, IconX } from '@tabler/icons-react';
 import type { RefItem, Slot } from './types';
+import { resolveMediaUrl } from '../../../utils/devOrigin';
 
 export const SLOT_LABELS: Record<Slot, string> = {
   first_frame: '首帧',
@@ -54,13 +56,13 @@ function RefCard({ item, index, slot, onRemove, onPreview }: { item: RefItem; in
   return (
     <>
       {showImage ? (
-        <img className="cv-ref__preview" src={item.thumb || item.value} alt={`预览引用 ${index}`} draggable={false} onError={() => setError(true)} />
+        <img className="cv-ref__preview" src={resolveMediaUrl(item.thumb || item.value)} alt={`预览引用 ${index}`} draggable={false} onError={() => setError(true)} />
       ) : showVideoThumb ? (
-        <img className="cv-ref__preview" src={item.thumb} alt={`预览引用 ${index}`} draggable={false} onError={() => setError(true)} />
+        <img className="cv-ref__preview" src={resolveMediaUrl(item.thumb)} alt={`预览引用 ${index}`} draggable={false} onError={() => setError(true)} />
       ) : showVideo ? (
         <video
           className="cv-ref__preview"
-          src={item.value}
+          src={resolveMediaUrl(item.value)}
           preload="metadata"
           muted
           playsInline
