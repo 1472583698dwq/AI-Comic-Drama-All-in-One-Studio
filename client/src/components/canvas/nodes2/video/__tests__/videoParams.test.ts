@@ -1,8 +1,8 @@
 // REQ-toonflow-canvas N3：视频生成参数 / 模式 / 入参清理（纯函数）
 import { describe, expect, it } from 'vitest';
 import {
-  carryOverParams, currentRatio, dataForRun, effectiveMode, modeOptions, paramsPatch, paramsSummary, quickParamsOf,
-  resolveAutoMode, schemaDefaults,
+  carryOverParams, currentRatio, dataForRun, displayRatio, effectiveMode, modeOptions, paramsPatch, paramsSummary, quickParamsOf,
+  resolveAutoMode, resolveVideoParams, schemaDefaults,
 } from '../videoParams';
 import { assembleInputs } from '../../../kit/assembleInputs';
 import type { RefItem } from '../../../kit/types';
@@ -160,5 +160,80 @@ describe('dataForRun', () => {
     expect(out).toMatchObject({ prompt: '新提示词', params: { duration: 5 }, skill_id: 'k' });
     expect(out.history).toBe(data.history);
     expect(data).toHaveProperty('first_frame'); // 不改原对象
+  });
+});
+
+// FX-2：面板显示什么，直接生成就发什么（真实 comfyui_video params_schema，server 8001 /providers/comfyui_video 摘录）
+const COMFYUI_VIDEO = {
+  params_schema: {
+    properties: {
+      aspect_ratio: { type: 'string', title: '画面比例', enum: ['9:16', '16:9', '1:1'], default: '9:16', 'x-visibility': 'basic' },
+      resolution: { type: 'string', title: '分辨率', enum: ['480p', '720p', '1080p'], default: '720p', 'x-visibility': 'basic' },
+      duration: { type: 'integer', title: '时长', default: 5, minimum: 3, maximum: 15, 'x-visibility': 'basic' },
+      fps: { type: 'integer', title: '帧率', enum: [16, 24, 30], default: 24, 'x-visibility': 'basic' },
+    },
+  },
+  input_schema: { properties: { prompt: { type: 'string' }, first_frame: { type: 'string', format: 'uri', 'x-handle': 'image', 'x-slot': 'first_frame' } } },
+};
+
+describe('resolveVideoParams（FX-2）', () => {
+  it('comfyui_video 节点 params 为空：补齐面板显示的比例 9:16 / 720p / 5 秒 / 24fps；不改入参', () => {
+    const saved = {};
+    const r = resolveVideoParams(COMFYUI_VIDEO, saved, {});
+    expect(r).toEqual({ aspect_ratio: '9:16', resolution: '720p', duration: 5, fps: 24 });
+    expect(saved).toEqual({});
+    // 面板显示同一份
+    const q = quickParamsOf(COMFYUI_VIDEO);
+    expect(displayRatio(q, r, {}, true)).toBe('9:16');
+    expect(paramsSummary(q, r, {}, displayRatio(q, r, {}, true))).toBe('9:16 · 720p · 5秒');
+  });
+
+  it('已存值优先；比例缺省按生成源缺省（Seedance 的 ratio=adaptive，不是 Toonflow 的 9:16）；开关缺省照发', () => {
+    expect(resolveVideoParams(COMFYUI_VIDEO, { aspect_ratio: '16:9', duration: 8 }, {})).toEqual({ aspect_ratio: '16:9', resolution: '720p', duration: 8, fps: 24 });
+    const r = resolveVideoParams(SEEDANCE, {}, {});
+    expect(r).toEqual({ ratio: 'adaptive', resolution: '720p', duration: 5, generate_audio: true, watermark: false });
+    expect(displayRatio(quickParamsOf(SEEDANCE), r, {}, true)).toBe('adaptive');
+  });
+
+  it('没有缺省的开关按「关」下发（面板开关只显示开 / 关）；没有缺省的数值不补（面板显示「默认」）', () => {
+    const def = { params_schema: { properties: { generate_audio: { type: 'boolean' }, duration: { type: 'integer', enum: [5, 10] } } } };
+    expect(resolveVideoParams(def, {}, {})).toEqual({ generate_audio: false });
+  });
+
+  it('旧画布顶层值（engine 镜像键）优先于缺省，类型 / 枚举对不上的不认', () => {
+    expect(resolveVideoParams(AUTODL, {}, { duration: 8, resolution: '768p竖' })).toEqual({ resolution: '768p竖', duration: 8, seed: 7 });
+    expect(resolveVideoParams(AUTODL, {}, { resolution: '1080p', duration: 'abc' })).toEqual({ resolution: '768p竖', duration: 5, seed: 7 });
+    // 比例：顶层 aspect_ratio 是生成源支持的值才用，否则回到生成源缺省
+    expect(resolveVideoParams(KLING, {}, { aspect_ratio: '16:9' }).aspect_ratio).toBe('16:9');
+    expect(resolveVideoParams(KLING, {}, { aspect_ratio: '4:3' }).aspect_ratio).toBe('9:16');
+    // Seedance 的比例键是 ratio：旧镜像的顶层 aspect_ratio 映射过去
+    expect(resolveVideoParams(SEEDANCE, {}, { aspect_ratio: '1:1' }).ratio).toBe('1:1');
+  });
+
+  it('生成源没声明比例：不补比例、面板不选中任何比例；手动选过的照发', () => {
+    const q = quickParamsOf(AUTODL);
+    const r = resolveVideoParams(AUTODL, {}, { aspect_ratio: '16:9' });
+    expect(r.aspect_ratio).toBeUndefined();
+    expect(displayRatio(q, r, { aspect_ratio: '16:9' }, true)).toBe('');
+    expect(paramsSummary(q, r, {}, displayRatio(q, r, {}, true))).toBe('768p竖 · 5秒');
+    const manual = resolveVideoParams(AUTODL, { aspect_ratio: '1:1' }, {});
+    expect(manual.aspect_ratio).toBe('1:1');
+    expect(displayRatio(q, manual, {}, true)).toBe('1:1');
+  });
+
+  it('未选生成源：原样返回（没有声明可映射）；面板仍显示 Toonflow 缺省 9:16（智能规划由 Agent 定比例）', () => {
+    expect(resolveVideoParams(null, { duration: 5 }, {})).toEqual({ duration: 5 });
+    expect(displayRatio(quickParamsOf(null), {}, {}, false)).toBe('9:16');
+  });
+
+  it('提示词 / 媒体 / 隐藏参数不补', () => {
+    const def = { params_schema: { properties: {
+      text: { type: 'string', default: '旧台词' },
+      negative: { type: 'string', 'x-role': 'prompt', default: 'x' },
+      mask: { type: 'string', format: 'uri', default: '/m.png' },
+      internal: { type: 'string', default: 'k', 'x-visibility': 'hidden' },
+      steps: { type: 'integer', default: 20 },
+    } } };
+    expect(resolveVideoParams(def, {}, { text: '镜像提示词' })).toEqual({ steps: 20 });
   });
 });

@@ -9,6 +9,7 @@
  */
 import { paramsSchemaToSpecs } from '../../providerSkills';
 import type { ControlSpec } from '../../controls/DynamicControl';
+import { materializeParams } from '../../kit/paramDefaults';
 
 export interface QuickParams {
   /** 全部参数控件（含快捷项本身）。 */
@@ -84,6 +85,27 @@ export function providerDefaultParams(def: Record<string, unknown> | null | unde
   const dp = def?.default_params;
   if (dp && typeof dp === 'object' && !Array.isArray(dp)) Object.assign(out, dp as Record<string, unknown>);
   return out;
+}
+
+/**
+ * REQ-toonflow-canvas FX-2：直接生成下发的参数 = 参数弹层显示的参数。
+ * 弹层对没存值的参数显示缺省值（比例 / 分辨率 / DynamicControl 都回落 default），原来却只发节点里存过的键；
+ * 这里按生成源 params_schema 补齐（kit materializeParams：已存 → 顶层旧值 → default_params / schema default → 开关缺省关），
+ * 弹层与请求都用它。未选生成源时原样返回。
+ */
+export function resolveImageParams(
+  def: Record<string, unknown> | null | undefined,
+  params: Record<string, unknown> | null | undefined,
+  data?: Record<string, unknown> | null,
+): Record<string, unknown> {
+  return materializeParams(def as Parameters<typeof materializeParams>[0], params, data);
+}
+
+/** 生成源有多个模型时「模型」控件显示的缺省模型（default_model → 第一个）；只有 0 / 1 个模型时没有该控件，返回 undefined。 */
+export function defaultModelOf(def: Record<string, unknown> | null | undefined): string | undefined {
+  const models = Array.isArray(def?.models) ? (def!.models as unknown[]).map(String).filter(Boolean) : [];
+  if (models.length < 2) return undefined;
+  return typeof def?.default_model === 'string' && def.default_model ? def.default_model : models[0];
 }
 
 /** 当前生效值：节点 params 优先，其次控件默认值。 */

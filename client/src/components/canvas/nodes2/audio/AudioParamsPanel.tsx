@@ -12,7 +12,7 @@ import { IconAdjustmentsHorizontal } from '@tabler/icons-react';
 import { DynamicControl, groupSpecs, CATEGORY_LABEL, type ControlSpec } from '../../controls/DynamicControl';
 import { paramsSchemaToSpecs } from '../../providerSkills';
 import {
-  audioSettingsOf, currentSettingValue, emotionParamKey, paramPatch, paramsOf, schemaDefaults, settingControls, settingLabel,
+  audioSettingsOf, currentSettingValue, emotionParamKey, paramPatch, paramsOf, resolveAudioParams, schemaDefaults, settingControls, settingLabel,
   specialParamKeys, toDataValue, voiceParamKey, SETTING_LABELS, TEXT_PARAM_KEYS, type ProviderDefLike, type SettingControl, type SettingValue,
 } from './audioSettings';
 import type { VoiceCatalog } from './voices';
@@ -123,7 +123,8 @@ export interface AudioParamsPanelProps {
 
 export function AudioParamsPanel(props: AudioParamsPanelProps) {
   const { data, def, providerId, providerName, catalog, voicesLoading, refAudio, refAudioSupported, legacyRefAudio, disabled, onPatch } = props;
-  const params = paramsOf(data);
+  // FX-2：显示补齐缺省后的参数（与直接生成下发的一致）；改动仍只写被改的那个键
+  const params = resolveAudioParams(def, paramsOf(data), data);
   const schemaProps = (def?.params_schema?.properties ?? {}) as Record<string, any>;
   const specs = useMemo(() => paramsSchemaToSpecs(def?.params_schema as Record<string, any> | undefined), [def]);
   const voiceKey = voiceParamKey(def);

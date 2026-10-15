@@ -12,7 +12,8 @@ export { resolvePorts };
 
 const defs = new Map<string, AnyNodeDef>();
 let version = 0;
-let cachedTypes: { version: number; map: NodeTypes } | null = null;
+/** nodeTypesMap 的缓存：按兜底组件（无兜底 = undefined）分别记，注册表版本变了才重建。 */
+const cachedTypes = new Map<unknown, { version: number; map: NodeTypes }>();
 const listeners = new Set<() => void>();
 
 /** 注册（或覆盖）节点定义；返回同一个 def 方便 `export const X = defineNode({...})`。 */
@@ -58,16 +59,37 @@ export function subscribeRegistry(fn: () => void): () => void {
   return () => listeners.delete(fn);
 }
 
+/** 普通对象自带的键（toString / constructor / then 之类）不当作节点类型，避免兜底组件冒充它们。 */
+function isTypeKey(key: string | symbol): key is string {
+  return typeof key === 'string' && key !== 'then' && key !== 'toJSON' && key !== '$$typeof' && !(key in Object.prototype);
+}
+
 /**
  * type → component 映射，直接传给 `<ReactFlow nodeTypes>`。
- * 注册表不变时返回同一个对象引用，避免 React Flow 的 nodeTypes 变更告警。
+ * 注册表不变时返回同一个对象引用，避免 React Flow 的 nodeTypes 变更告警（error002）与节点重挂载。
+ *
+ * REQ-toonflow-canvas FX-2：传 `fallback` 时，不认识的类型（旧画布 / 未启用插件的节点）读到的是 fallback 组件
+ * （`default` 也是它）。原来宿主按「画布里出现了哪些未知类型」拼一份新对象，未知类型一变（Agent 改画布、
+ * 旧画布迁移前后）nodeTypes 就换引用、React Flow 报 error002。现在用只读代理按需兜底：对象只随注册表版本变化；
+ * Object.keys 仍只有已注册类型 + default。按 fallback 分别缓存（宿主只用一个兜底组件）。
  */
-export function nodeTypesMap(): NodeTypes {
-  if (cachedTypes && cachedTypes.version === version) return cachedTypes.map;
+export function nodeTypesMap(fallback?: NodeTypes[string]): NodeTypes {
+  const hit = cachedTypes.get(fallback);
+  if (hit && hit.version === version) return hit.map;
   const map: NodeTypes = {};
   for (const d of defs.values()) map[d.type] = d.component;
-  cachedTypes = { version, map };
-  return map;
+  let out = map;
+  if (fallback) {
+    if (!Object.prototype.hasOwnProperty.call(map, 'default')) map.default = fallback;
+    out = new Proxy(map, {
+      get(target, key, receiver) {
+        if (isTypeKey(key) && !Object.prototype.hasOwnProperty.call(target, key)) return fallback;
+        return Reflect.get(target, key, receiver);
+      },
+    });
+  }
+  cachedTypes.set(fallback, { version, map: out });
+  return out;
 }
 
 /** 在 def 上找第一个能与 dataType 相连的端口（side = 该端口自身的方向）。 */

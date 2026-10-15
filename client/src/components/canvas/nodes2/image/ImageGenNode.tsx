@@ -17,6 +17,7 @@ import { PromptPanel } from '../../kit/PromptPanel';
 import { useKitNodeActions } from '../../kit/hostContext';
 import { appendHistory, useGeneration } from '../../kit/useGeneration';
 import { useNodeReferences } from '../../kit/useNodeReferences';
+import { loadProviderDefinition } from '../../kit/useProviderSources';
 import { assembleInputs, ownPromptOf } from '../../kit/assembleInputs';
 import type { RefItem } from '../../kit/types';
 import { resolveMediaUrl } from '../../../../utils/devOrigin';
@@ -34,7 +35,7 @@ import { useInpaint } from './useInpaint';
 import { agentError, generationData, generationLanded, isAgentRunning } from './generation';
 import { assembleInpaint, inpaintBlockedReason } from './inpaint';
 import { fileNameOf, genImagePatch, imageUrlOf, loadImagePatch } from './media';
-import { aspectLabel, effectiveParams, paramsPatch } from './imageParams';
+import { aspectLabel, defaultModelOf, effectiveParams, paramsPatch, resolveImageParams } from './imageParams';
 import { siblingRects, stackLeftOf } from './layout';
 import './image.css';
 
@@ -81,7 +82,7 @@ export function ImageGenNode(props: NodeProps) {
   const model = typeof data.model === 'string' ? data.model : undefined;
   const smartPlan = data.smart_plan === true;
   const skillId = typeof data.skill_id === 'string' ? data.skill_id : '';
-  const cfg = useImageGenConfig(providerId, params);
+  const cfg = useImageGenConfig(providerId, params, data);
 
   // —— 新图片（上传 / 拖入替换）：写当前版本并记入历史（Toonflow：替换的文件也在历史里）——
   const onImage = useCallback((next: string) => {
@@ -98,8 +99,9 @@ export function ImageGenNode(props: NodeProps) {
   const ownPrompt = ownPromptOf(IMAGE_GEN_TYPE, data);
   const refRoles = (data.refRoles && typeof data.refRoles === 'object' ? data.refRoles : null) as Record<string, string> | null;
 
+  // 局部重绘只走直接生成：参数与模型按弹层显示的值下发（FX-2）
   const inpaint = useInpaint({
-    id, kind: 'image', url, data, editor, gen, actions, providerId, params, model,
+    id, kind: 'image', url, data, editor, gen, actions, providerId, params: cfg.resolved, model: model || defaultModelOf(cfg.def),
     slots: cfg.slots, ratioSpec: cfg.quick.ratio, natural: media.natural, refs, refRoles, prompt: inpaintPrompt,
   });
   const running = agentBusy || inpaint.inpainting;
@@ -121,11 +123,14 @@ export function ImageGenNode(props: NodeProps) {
     if (gen.running) return;
     if (!assembled.prompt.trim()) { toast.info('请输入生成提示词，或连入文本参考'); return; }
     if (!providerId && !smartPlan) { toast.info('请先选择生成源，或开启智能规划由 Agent 自动选源'); return; }
-    const runParams = effectiveParams(params);
+    // FX-2：直接生成下发弹层显示的参数 / 模型（定义还没到时现取一次）；智能规划只发手动存过的参数，其余由 Agent 规划
+    const liveDef = smartPlan ? null : cfg.def ?? (providerId ? await loadProviderDefinition(providerId) : null);
+    const runParams = effectiveParams(smartPlan ? params : resolveImageParams(liveDef, params, data));
+    const runModel = model || (smartPlan ? undefined : defaultModelOf(liveDef));
     const res = await gen.run({
       nodeType: IMAGE_GEN_TYPE,
       kind: 'image',
-      data: generationData({ ...data, history: withCurrent(history, url) }, cfg.slots, runParams, model ? { model } : {}),
+      data: generationData({ ...data, history: withCurrent(history, url) }, cfg.slots, runParams, runModel ? { model: runModel } : {}),
       assembled,
       providerId,
       params: runParams,
@@ -144,7 +149,7 @@ export function ImageGenNode(props: NodeProps) {
     const cur = rf.getNode(id)?.data as Data | undefined;
     const fix = genImagePatch(res.url, cur);
     if (Object.entries(fix).some(([k, v]) => cur?.[k] !== v)) actions.update(fix);
-  }, [gen, assembled, providerId, smartPlan, params, data, history, url, cfg.slots, model, rf, id, actions]);
+  }, [gen, assembled, providerId, smartPlan, params, data, history, url, cfg.slots, cfg.def, model, rf, id, actions]);
 
   const selectProvider = (pid: string) => {
     if (pid === providerId) return;
@@ -256,12 +261,12 @@ export function ImageGenNode(props: NodeProps) {
       onSourceChange={selectProvider}
       sourcesLoading={cfg.sourcesLoading}
       onSourcesOpen={cfg.refreshSources}
-      paramsSummary={inpaintMode && cfg.quick.ratio ? `跟随原图${cfg.quick.size ? ` · ${String(params[cfg.quick.size.param_name] ?? cfg.quick.size.default_value ?? '')}` : ''}` : cfg.summary.text}
+      paramsSummary={inpaintMode && cfg.quick.ratio ? `跟随原图${cfg.quick.size ? ` · ${String(cfg.resolved[cfg.quick.size.param_name] ?? cfg.quick.size.default_value ?? '')}` : ''}` : cfg.summary.text}
       paramsRatio={inpaintMode ? lockedRatio : cfg.summary.ratio}
       renderParams={() => (
         <GenParamsPanel
           quick={cfg.quick}
-          params={params}
+          params={cfg.resolved}
           onParamChange={setParam}
           modelSpec={cfg.modelSpec}
           model={model}

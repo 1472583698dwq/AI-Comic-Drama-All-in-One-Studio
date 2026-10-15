@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExtern
 import {
   ReactFlow, Background, BackgroundVariant, ConnectionLineType, Controls, ControlButton, PanOnScrollMode,
   useNodesState, useEdgesState, addEdge, ReactFlowProvider, useReactFlow,
-  type Connection, type Edge, type Node, type FinalConnectionState, type NodeTypes, type OnConnectEnd,
+  type Connection, type DefaultEdgeOptions, type Edge, type Node, type FinalConnectionState, type OnConnectEnd,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Sparkles, Image as ImageIcon, Boxes, Library, Save, Download, Plus, Wand2, Layers, PanelLeft, ChevronsUp, ArrowLeftRight, MoreHorizontal, Pencil, Trash2, Keyboard, X, FolderOpen } from 'lucide-react';
@@ -34,7 +34,7 @@ import { useCanvasShortcuts } from './hooks/useCanvasShortcuts';
 import './nodes2';
 import {
   CanvasHostProvider, SelectionToolbar, defsAcceptingFrom, defsProvidingTo, findCompatiblePort, getNodeDef, isValidConnectionFactory,
-  nodeTypesMap, paletteDefs, registryVersion, subscribeRegistry, reparentOnDrop, arrangeNodes, selectionRoots, loadProviderDefinition,
+  paletteDefs, registryVersion, subscribeRegistry, reparentOnDrop, arrangeNodes, selectionRoots, loadProviderDefinition,
   type AnyNodeDef, type PortDef,
 } from './kit';
 import { findPort } from './kit/connection';
@@ -48,7 +48,7 @@ import { TEMPLATES, buildTemplate, buildCreatorTemplate, linkNodes, type CanvasT
 import { buildShotSubgraph } from './host/shotSubgraph';
 import { autoRunShotSubgraph } from './host/shotAutoRun';
 import { useCanvasHostController } from './host/useCanvasHost';
-import { UnsupportedNode } from './host/UnsupportedNode';
+import { useCanvasNodeTypes } from './host/nodeTypes';
 import { AutoHideMiniMap } from './host/AutoHideMiniMap';
 import {
   EdgeDisconnectButton, FullscreenViewer, NodeAddMenu, ShotWriteBackDialog, useRenderedEdges,
@@ -85,6 +85,10 @@ const WorkbenchGroupTitle: React.FC<{ children: React.ReactNode }> = ({ children
     {children}
   </div>
 );
+
+/** 模块常量：传给 ReactFlow 的对象 / 数组每次渲染都新建的话，React Flow 每次都要同步进 store（FX-2）。 */
+const DEFAULT_EDGE_OPTIONS: DefaultEdgeOptions = { type: 'simplebezier' };
+const SNAP_GRID: [number, number] = [16, 16];
 
 const MEDIA_LOADER: Record<'image' | 'video' | 'audio', string> = { image: 'load-image', video: 'load-video', audio: 'load-audio' };
 const isVideoUrl = (u: string) => /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(u);
@@ -385,21 +389,10 @@ const InnerCanvas: React.FC = () => {
   // 连线显示层：平滑贝塞尔 + 与选中 / 拖动节点相连的边高亮（cv-edge-active）
   const renderedEdges = useRenderedEdges(nodes, edges);
 
-  // 节点类型：注册表 + 不认识的类型（含无类型）→「不支持的节点」卡片（数据原样保留）
+  // 节点类型：注册表 + 不认识的类型（含无类型）→「不支持的节点」卡片（数据原样保留）。
+  // FX-2：引用只随注册表版本变（与画布里有哪些未知类型无关），React Flow 不再报 nodeTypes 变更（error002）
   const regVersion = useSyncExternalStore(subscribeRegistry, registryVersion, registryVersion);
-  const unknownTypesKey = useMemo(() => {
-    const set = new Set<string>();
-    for (const n of nodes) {
-      const t = n.type || 'default';
-      if (!getNodeDef(t)) set.add(t);
-    }
-    return [...set].sort().join('|');
-  }, [nodes, regVersion]); // eslint-disable-line react-hooks/exhaustive-deps
-  const nodeTypes = useMemo<NodeTypes>(() => {
-    const map: NodeTypes = { ...nodeTypesMap(), default: UnsupportedNode };
-    for (const t of unknownTypesKey.split('|')) if (t) map[t] = UnsupportedNode;
-    return map;
-  }, [regVersion, unknownTypesKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const nodeTypes = useCanvasNodeTypes();
 
   // 必须 memo：ReactFlow 把 onSelectionChange 放进 effect 依赖
   const handleSelectionChange = useCallback(({ nodes: sel }: { nodes: Node[] }) => {
@@ -1360,7 +1353,7 @@ const InnerCanvas: React.FC = () => {
               nodes={nodes}
               edges={renderedEdges}
               nodeTypes={nodeTypes}
-              defaultEdgeOptions={{ type: 'simplebezier' }}
+              defaultEdgeOptions={DEFAULT_EDGE_OPTIONS}
               connectionLineType={ConnectionLineType.SimpleBezier}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
@@ -1385,7 +1378,7 @@ const InnerCanvas: React.FC = () => {
               deleteKeyCode={null}  /* 删除交给 useCanvasShortcuts，统一处理节点+连线 */
               /* REQ-toonflow-canvas H1：Toonflow 画布手感 —— 16 格吸附、缩放 0.2–8、滚轮平移、Ctrl/⌘+滚轮或双指捏合缩放 */
               snapToGrid
-              snapGrid={[16, 16]}
+              snapGrid={SNAP_GRID}
               minZoom={0.2}
               maxZoom={8}
               zoomOnScroll={false}

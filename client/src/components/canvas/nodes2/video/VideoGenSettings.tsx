@@ -145,7 +145,7 @@ export function VideoGenSettings(props: VideoGenSettingsProps) {
         </>
       )}
       {!providerSelected && <div className="cv-vgen-settings__note">选择生成源后可设置时长、分辨率等该源支持的参数。</div>}
-      {providerSelected && !q.ratioDeclared && <div className="cv-vgen-settings__note">该生成源未声明比例参数，比例以 aspect_ratio 下发，是否生效由生成源决定。</div>}
+      {providerSelected && !q.ratioDeclared && <div className="cv-vgen-settings__note">该生成源未声明比例参数：默认不下发比例；手动选择后以 aspect_ratio 下发，是否生效由生成源决定。</div>}
     </div>
   );
 }

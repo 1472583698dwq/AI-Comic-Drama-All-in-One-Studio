@@ -27,7 +27,7 @@ import { useImageGenConfig } from './useImageGenConfig';
 import { useInpaint } from './useInpaint';
 import { agentError, isAgentRunning } from './generation';
 import { fileNameOf, imageUrlOf, loadImagePatch } from './media';
-import { aspectLabel } from './imageParams';
+import { aspectLabel, defaultModelOf } from './imageParams';
 import './image.css';
 
 type Data = Record<string, unknown>;
@@ -57,11 +57,13 @@ export function LoadImageNode(props: NodeProps) {
   // —— 局部重绘的生成源与参数（只在本节点用，键带 inpaint_ 前缀，不和下游混淆）——
   const providerId = typeof data.inpaint_provider_id === 'string' ? data.inpaint_provider_id : '';
   const params = useMemo(() => (data.inpaint_params && typeof data.inpaint_params === 'object' ? data.inpaint_params as Data : {}), [data.inpaint_params]);
+  // 节点顶层是图片节点自己的数据（不是重绘参数），不拿来回落参数
   const cfg = useImageGenConfig(providerId, params);
   const prompt = typeof data.inpaint_prompt === 'string' ? data.inpaint_prompt : '';
+  // FX-2：重绘按弹层显示的参数 / 模型下发（没存值的补生成源缺省）
   const inpaint = useInpaint({
-    id, kind: 'load-image', url, data, editor, gen, actions, providerId, params,
-    model: typeof data.inpaint_model === 'string' ? data.inpaint_model : undefined,
+    id, kind: 'load-image', url, data, editor, gen, actions, providerId, params: cfg.resolved,
+    model: (typeof data.inpaint_model === 'string' && data.inpaint_model) || defaultModelOf(cfg.def),
     slots: cfg.slots, ratioSpec: cfg.quick.ratio, natural: media.natural, refs: [], prompt,
   });
   const running = agentBusy || inpaint.inpainting;
@@ -110,12 +112,12 @@ export function LoadImageNode(props: NodeProps) {
       onSourceChange={(pid) => cfg.selectProvider(pid, (nid, defaults) => actions.update({ inpaint_provider_id: nid, inpaint_params: defaults }))}
       sourcesLoading={cfg.sourcesLoading}
       onSourcesOpen={cfg.refreshSources}
-      paramsSummary={cfg.quick.ratio ? `跟随原图${cfg.quick.size ? ` · ${String(params[cfg.quick.size.param_name] ?? cfg.quick.size.default_value ?? '')}` : ''}` : cfg.summary.text}
+      paramsSummary={cfg.quick.ratio ? `跟随原图${cfg.quick.size ? ` · ${String(cfg.resolved[cfg.quick.size.param_name] ?? cfg.quick.size.default_value ?? '')}` : ''}` : cfg.summary.text}
       paramsRatio={lockedRatio}
       renderParams={() => (
         <GenParamsPanel
           quick={cfg.quick}
-          params={params}
+          params={cfg.resolved}
           onParamChange={(k, v) => actions.update({ inpaint_params: { ...params, [k]: v } })}
           modelSpec={cfg.modelSpec}
           model={typeof data.inpaint_model === 'string' ? data.inpaint_model : undefined}

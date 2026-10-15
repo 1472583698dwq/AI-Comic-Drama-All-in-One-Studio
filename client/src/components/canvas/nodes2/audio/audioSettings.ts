@@ -8,6 +8,7 @@
  * 生成源参数值统一存 data.params（并镜像 provider_params 与顶层键，与 NodeAgentConsole / nodeAgentExecutor.buildAgentArgs 一致）。
  */
 import type { DynamicProviderInfo } from '../../providerSkills';
+import { isEmptyParam, materializeParams } from '../../kit/paramDefaults';
 
 // —— Toonflow audioSettings.ts ——
 export const LANGUAGE_OPTIONS = [
@@ -192,6 +193,29 @@ export function schemaDefaults(def: ProviderDefLike): Record<string, unknown> {
   }
   const extra = def?.default_params;
   if (extra && typeof extra === 'object') Object.assign(out, extra);
+  return out;
+}
+
+/**
+ * REQ-toonflow-canvas FX-2：直接生成下发的参数 = 参数弹层显示的参数。
+ * - 语种 / 采样率 / 格式（生成源声明了才有控件）：没存值时取控件显示的值（currentSettingValue：节点 Toonflow 设置映射 → schema 缺省）；
+ * - 其余声明参数（情绪、语速…）：kit materializeParams（已存 → 顶层旧值 → default_params / schema default → 开关缺省关）；
+ * - 台词键、音色键不补（音色没选时弹层显示「默认音色」，由生成源自己定；顶层 voice_id 执行器照旧补发）。
+ * 未选生成源时原样返回。
+ */
+export function resolveAudioParams(def: ProviderDefLike, params: Record<string, unknown> | null | undefined, data?: Record<string, unknown> | null): Record<string, unknown> {
+  const saved = params || {};
+  if (!def) return { ...saved };
+  const voice = voiceParamKey(def);
+  const controls = settingControls(def);
+  const out = materializeParams(def as Parameters<typeof materializeParams>[0], saved, data, {
+    skip: [...TEXT_PARAM_KEYS, ...(voice ? [voice] : []), ...controls.map((c) => c.paramKey)],
+  });
+  for (const c of controls) {
+    if (!isEmptyParam(saved[c.paramKey])) continue;
+    const v = currentSettingValue(c, saved, data || {}, def);
+    if (v !== undefined) out[c.paramKey] = v;
+  }
   return out;
 }
 

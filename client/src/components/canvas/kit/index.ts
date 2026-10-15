@@ -52,6 +52,8 @@ export {
   useGeneration, useNodeGeneration, runGeneration, appendHistory, HISTORY_LIMIT, stripStaleSlotKeys, STALE_SLOT_KEYS, LEGACY_REF_AUDIO_KEYS,
   type GenKind, type GenerationHistoryItem, type RunGenerationOptions, type RunGenerationResult, type UseGeneration, type StripStaleOptions,
 } from './useGeneration';
+// FX-2：直接生成时把面板显示的缺省参数补进请求
+export { materializeParams, coerceParamValue, isEmptyParam, type ParamsDefLike, type MaterializeOptions } from './paramDefaults';
 export {
   useProviderSources, useProviderDefinition, loadProviderSources, loadProviderDefinition, invalidateProviderSources,
   providerSourcesGeneration, PROVIDER_REFRESH_EVENT, type ProviderSource, type SourceKind,

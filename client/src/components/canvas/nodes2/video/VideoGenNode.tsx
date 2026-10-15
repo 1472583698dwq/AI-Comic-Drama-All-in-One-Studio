@@ -40,8 +40,8 @@ import { useVideoTaskRecovery, taskIdOf } from './useTaskRecovery';
 import { mediaNodeWidth } from './LoadVideoNode';
 import { fileNameOf, uploadVideoFile, validateVideoFile } from './media';
 import {
-  carryOverParams, currentRatio, dataForRun, effectiveMode, isRatioShape, modeHint, modeOptions, paramsPatch, paramsSummary,
-  quickParamKeys, quickParamsOf, resolveAutoMode, type ProviderDefLike,
+  carryOverParams, dataForRun, displayRatio, effectiveMode, isRatioShape, modeHint, modeOptions, paramsPatch, paramsSummary,
+  quickParamKeys, quickParamsOf, resolveAutoMode, resolveVideoParams, type ProviderDefLike,
 } from './videoParams';
 import './video.css';
 
@@ -80,6 +80,8 @@ export function VideoGenNode(props: NodeProps) {
   const slots = useMemo(() => (providerId && def ? extractSlotsFromProvider(def) : null), [providerId, def]);
   const q = useMemo(() => quickParamsOf(def), [def]);
   const params = useMemo(() => (data.params && typeof data.params === 'object' ? { ...(data.params as Record<string, unknown>) } : {}), [data.params]);
+  // FX-2：面板显示与直接生成下发同一份参数（没存值的按生成源缺省补齐，见 resolveVideoParams）
+  const resolved = useMemo(() => resolveVideoParams(def, params, data), [def, params, data]);
   const smartPlan = data.smart_plan === true;
 
   // —— 参考 → 组装（模式缺省自动；旧 i2v/r2v/t2v 映射成新模式）——
@@ -152,13 +154,16 @@ export function VideoGenNode(props: NodeProps) {
       : '';
   const onSend = async () => {
     if (sendBlock || busy) return;
+    // 定义还没到（刚切源就点发送）时现取一次，保证补齐的缺省与面板一致
+    const liveDef = def ?? (providerId ? ((await loadProviderDefinition(providerId)) as ProviderDefLike | null) : null);
     const res = await gen.run({
       nodeType: 'video',
       kind: 'video',
-      data: dataForRun(data, def, assembled.args),
+      data: dataForRun(data, liveDef, assembled.args),
       assembled,
       providerId: providerId || undefined,
-      params,
+      // 直接生成：面板显示的参数全部下发（FX-2）；智能规划：只发手动存过的参数，其余交给 Agent 规划（后端以用户参数优先）
+      params: smartPlan ? params : resolveVideoParams(liveDef, params, data),
       smartPlan,
       intent: assembled.prompt,
     });
@@ -263,7 +268,7 @@ export function VideoGenNode(props: NodeProps) {
     </div>
   ) : null;
 
-  const ratio = currentRatio(q, params, data);
+  const ratio = displayRatio(q, resolved, data, !!providerId);
   const specs = useMemo(() => {
     const quick = new Set(quickParamKeys(q));
     return paramsSchemaToSpecs(def?.params_schema ?? undefined).filter((s) => !quick.has(s.param_name));
@@ -327,12 +332,12 @@ export function VideoGenNode(props: NodeProps) {
             onSourceChange={onSourceChange}
             sourcesLoading={sourcesLoading}
             sourcePlaceholder="选择生成源"
-            paramsSummary={paramsSummary(q, params, data)}
+            paramsSummary={paramsSummary(q, resolved, data, ratio) || undefined}
             paramsRatio={isRatioShape(ratio) ? ratio : undefined}
             renderParams={() => (
               <VideoGenSettings
                 q={q}
-                params={params}
+                params={resolved}
                 ratio={ratio}
                 modeValue={modeValue}
                 autoModeLabel={VIDEO_MODE_LABELS[autoResolved]}

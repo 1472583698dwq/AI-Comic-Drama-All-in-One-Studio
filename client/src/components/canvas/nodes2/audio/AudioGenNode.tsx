@@ -31,8 +31,8 @@ import { MEDIA_REF_LIMIT, countMediaRefs } from './connect';
 import { audioGenerationInputs, audioPromptValue, declaresAudioSlot, legacyRefAudioOf } from './genInputs';
 import { fileNameOf, uploadAudioFile } from './media';
 import {
-  currentSettingValue, emotionParamKey, paramsOf, paramsSummary, providerSwitchPatch, settingControls, settingLabel, voiceParamKey,
-  type ProviderDefLike,
+  currentSettingValue, emotionParamKey, paramsOf, paramsSummary, providerSwitchPatch, resolveAudioParams, settingControls, settingLabel,
+  voiceParamKey, type ProviderDefLike,
 } from './audioSettings';
 import './audio.css';
 
@@ -79,6 +79,8 @@ export function AudioGenNode(props: NodeProps) {
   // 按生成源声明的槽位组装（不传 nodeKind：不要兜底槽位，生成源不支持参考音频 / 参考图时如实提示）
   const slots = useMemo(() => (def ? extractSlotsFromProvider(def) : null), [def]);
   const params = useMemo(() => paramsOf(d), [d]);
+  // FX-2：弹层显示与直接生成下发同一份参数（没存值的按生成源缺省补齐，见 resolveAudioParams）
+  const resolved = useMemo(() => resolveAudioParams(def as ProviderDefLike, params, d), [def, params, d]);
   const assembled = useMemo(
     () => assembleInputs({ refs, targetType: 'audio', prompt: ownPromptOf('audio', d), refRoles: d.refRoles, slots }),
     [refs, d, slots],
@@ -124,7 +126,7 @@ export function AudioGenNode(props: NodeProps) {
   const voiceId = String((voiceKey ? params[voiceKey] : undefined) ?? d.voice_id ?? '');
   const voiceName = catalog?.voices.find((v) => v.id === voiceId)?.name || voiceId;
   const emotionKey = emotionParamKey(def);
-  const emotion = emotionKey ? String(params[emotionKey] ?? '') : '';
+  const emotion = emotionKey ? String(resolved[emotionKey] ?? '') : '';
   const summary = providerId
     ? paramsSummary([
       voiceKey ? voiceName || '默认音色' : '',
@@ -150,13 +152,15 @@ export function AudioGenNode(props: NodeProps) {
     if (!canSend) return;
     pause();
     setNote(null);
+    // FX-2：直接生成下发弹层显示的参数（定义还没到时现取一次）；智能规划只发手动存过的参数，其余由 Agent 规划
+    const liveDef = smartPlan ? null : def ?? (providerId ? ((await loadProviderDefinition(providerId)) as ProviderDefLike) : null);
     const res = await gen.run({
       nodeType: 'audio',
       kind: 'audio',
       data: d,
       assembled: audioGenerationInputs(assembled),
       providerId: providerId || undefined,
-      params,
+      params: smartPlan ? params : resolveAudioParams(liveDef, params, d),
       smartPlan,
       intent: assembled.prompt,
     });

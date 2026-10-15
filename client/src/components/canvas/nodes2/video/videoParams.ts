@@ -12,6 +12,7 @@
  */
 import type { GenMode, RefItem } from '../../kit/types';
 import { autoMode, availableModes, normalizeVideoMode, resolveSlotCaps, type SlotSpec } from '../../kit/assembleInputs';
+import { isEmptyParam, materializeParams } from '../../kit/paramDefaults';
 
 /** Toonflow 通用比例（videoGenerationNode ratioOptions）。 */
 export const RATIO_OPTIONS = ['16:9', '9:16', '1:1', '4:3', '3:4'] as const;
@@ -148,6 +149,45 @@ export function currentRatio(q: QuickParams, params: Record<string, unknown> | n
   return typeof v === 'string' && v ? v : DEFAULT_RATIO;
 }
 
+/**
+ * REQ-toonflow-canvas FX-2：直接生成下发的参数 = 面板显示的参数。
+ * 节点 params 为空（模板 / Agent / 旧画布建的节点，没走过切源）时，面板显示的是缺省值，原来不下发（后端用自己的缺省）。
+ * 这里按生成源 params_schema 补齐（kit materializeParams：已存 → 顶层旧值 → default_params / schema default → 开关缺省关），
+ * 比例另按面板口径：生成源声明了比例键才补——顶层旧值（比例键 / 镜像的 aspect_ratio）→ 生成源缺省 → 9:16 → 第一个可选比例，
+ * 只取该源支持的值；**没声明比例的生成源不补比例**（手动选过的 params.aspect_ratio 照旧下发）。
+ * 未选生成源（def 为空）时原样返回：没有声明可以映射。
+ */
+export function resolveVideoParams(
+  def: ProviderDefLike | null | undefined,
+  params: Record<string, unknown> | null | undefined,
+  data?: Record<string, unknown> | null,
+): Record<string, unknown> {
+  const saved = params || {};
+  if (!def) return { ...saved };
+  const q = quickParamsOf(def);
+  const out = materializeParams(def, saved, data, { skip: q.ratioDeclared ? [q.ratioKey] : [] });
+  if (q.ratioDeclared && isEmptyParam(saved[q.ratioKey])) {
+    const supported = q.ratioOptions.filter((o) => o.supported).map((o) => o.value);
+    const pick = (v: unknown) => (typeof v === 'string' && v ? supported.find((o) => o === v) : undefined);
+    const fallback = def.default_params?.[q.ratioKey] ?? propsOf(def)[q.ratioKey]?.default;
+    const r = pick(data?.[q.ratioKey]) ?? pick(data?.aspect_ratio) ?? pick(fallback) ?? pick(DEFAULT_RATIO) ?? supported[0];
+    if (r) out[q.ratioKey] = r;
+  }
+  return out;
+}
+
+/**
+ * 面板显示的比例（FX-2，与 resolveVideoParams 同口径）：
+ * - 未选生成源：Toonflow 缺省 9:16（只能走智能规划，比例由 Agent 定）；
+ * - 生成源声明了比例：补齐后的值；
+ * - 生成源没声明比例：只显示手动选过的值，没选过就不选中任何比例（不下发）。
+ */
+export function displayRatio(q: QuickParams, resolved: Record<string, unknown>, data: Record<string, unknown> | undefined, providerSelected: boolean): string {
+  if (!providerSelected) return currentRatio(q, resolved, data);
+  const v = resolved[q.ratioDeclared ? q.ratioKey : 'aspect_ratio'];
+  return typeof v === 'string' ? v : '';
+}
+
 /** 比例小框只对 `w:h` 形式的值有意义（adaptive 等不画）。 */
 export function isRatioShape(v: string): boolean {
   return /^\d+(\.\d+)?:\d+(\.\d+)?$/.test(v);
@@ -158,12 +198,12 @@ export function formatDuration(v: unknown): string {
   return typeof v === 'number' || /^\d+(\.\d+)?$/.test(String(v)) ? `${v}秒` : String(v);
 }
 
-/** 参数按钮摘要（Toonflow：比例 · 分辨率 · 时长）。 */
-export function paramsSummary(q: QuickParams, params: Record<string, unknown> | null | undefined, data?: Record<string, unknown>): string {
+/** 参数按钮摘要（Toonflow：比例 · 分辨率 · 时长）。ratio 传入时用它（FX-2 displayRatio，可为空串 = 不显示比例）。 */
+export function paramsSummary(q: QuickParams, params: Record<string, unknown> | null | undefined, data?: Record<string, unknown>, ratio?: string): string {
   const p = params || {};
   const res = q.resolutionKey ? p[q.resolutionKey] : p.resolution;
   const dur = q.durationKey ? p[q.durationKey] : p.duration;
-  return [currentRatio(q, p, data), res ? String(res) : '', formatDuration(dur)].filter(Boolean).join(' · ');
+  return [ratio ?? currentRatio(q, p, data), res ? String(res) : '', formatDuration(dur)].filter(Boolean).join(' · ');
 }
 
 /**

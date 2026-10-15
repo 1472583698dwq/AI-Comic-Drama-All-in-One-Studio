@@ -17,7 +17,7 @@ import { paramsSchemaToSpecs } from '../../providerSkills';
 import { extNodePorts, extSpecOf } from './ports';
 import { extIconFor, resultOf } from './model';
 import { useDynamicInputStates, useExtSpec, useRunWithInputs } from './hooks';
-import { LbAlert, LbButton, LbTag, ParamsSection, PortInputList, ResultView, ShotWriteBack, TextPortInputs } from './ui';
+import { LbAlert, LbButton, LbTag, ParamsSection, PortInputList, ResultView, ShotWriteBackButton, TextPortInputs } from './ui';
 
 type AnyData = Record<string, any>;
 const EMPTY: AnyData = {};
@@ -46,7 +46,13 @@ export function ExtNode(props: NodeProps) {
       icon={extIconFor(spec?.icon)}
       ports={ports}
       width={320}
-      toolbar={<ToolbarButton icon={IconPlayerPlay} title="运行节点" loading={busy} disabled={!cid} onClick={() => void run()}>运行</ToolbarButton>}
+      toolbar={(
+        <>
+          <ToolbarButton icon={IconPlayerPlay} title="运行节点" loading={busy} disabled={!cid} onClick={() => void run()}>运行</ToolbarButton>
+          {/* FX-2：回写分镜放进工具栏弹层，不再在卡片里出结果后多出一段 */}
+          <ShotWriteBackButton nodeId={props.id} nodeType="ext-node" data={d} onUpdate={actions.update} disabled={busy} />
+        </>
+      )}
       downloadUrl={result?.url}
       onFullscreen={result && result.kind !== 'audio' ? () => actions.openFullscreen(result.url, result.kind) : null}
     >
@@ -70,8 +76,8 @@ export function ExtNode(props: NodeProps) {
           onChange={(name, v) => actions.update({ params: { ...params, [name]: v } })}
         />
 
-        <ResultView data={d} textIsInput={textIsInput} />
-        <ShotWriteBack nodeId={props.id} nodeType="ext-node" data={d} onUpdate={actions.update} />
+        {/* FX-2：固定高度的产出框，绑定后就占位，出结果前后卡片高度不变 */}
+        <ResultView data={d} textIsInput={textIsInput} reserve={!!spec} />
 
         <LbButton variant="primary" block icon={IconPlayerPlay} loading={busy} disabled={!cid} onClick={() => void run()}>
           {busy ? '运行中' : '运行节点'}

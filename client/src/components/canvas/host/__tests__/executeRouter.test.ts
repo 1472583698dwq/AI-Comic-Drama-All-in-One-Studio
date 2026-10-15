@@ -311,6 +311,36 @@ describe('媒体生成（宿主侧）：按连线组装参考 → runGeneration'
     const h = harness([node('v', 'video', { prompt: 'x', provider_id: 'comfyui_video' })]);
     await expect(h.execute('v')).resolves.toEqual({ url: '/storage/videos/out.mp4' });
   });
+  it('FX-2：节点 params 为空时按面板口径补齐缺省（comfyui_video：9:16 / 720p / 5 秒 / 24fps）；智能规划只发存过的', async () => {
+    api.getProvider.mockResolvedValue({ provider: {
+      id: 'fx2_cv',
+      input_schema: { properties: { prompt: { type: 'string' } } },
+      params_schema: { properties: {
+        aspect_ratio: { type: 'string', enum: ['9:16', '16:9', '1:1'], default: '9:16' },
+        resolution: { type: 'string', enum: ['480p', '720p', '1080p'], default: '720p' },
+        duration: { type: 'integer', default: 5, minimum: 3, maximum: 15 },
+        fps: { type: 'integer', enum: [16, 24, 30], default: 24 },
+      } },
+    } });
+    const h = harness([node('v', 'video', { prompt: 'x', provider_id: 'fx2_cv' }), node('s', 'video', { prompt: 'x', provider_id: 'fx2_cv', smart_plan: true, params: { duration: 8 } })]);
+    await h.execute('v');
+    expect(vi.mocked(runGeneration).mock.calls[0][0].params).toEqual({ aspect_ratio: '9:16', resolution: '720p', duration: 5, fps: 24 });
+    expect(h.data('v').params).toBeUndefined(); // 只补请求，不写节点
+    await h.execute('s');
+    expect(vi.mocked(runGeneration).mock.calls[1][0].params).toEqual({ duration: 8 });
+  });
+  it('FX-2：图片节点没选模型时按「模型」控件显示的缺省模型下发', async () => {
+    api.getProvider.mockResolvedValue({ provider: {
+      id: 'fx2_img', models: ['m-a', 'm-b'], default_model: 'm-b',
+      input_schema: { properties: { prompt: { type: 'string' } } },
+      params_schema: { properties: { steps: { type: 'integer', default: 20 } } },
+    } });
+    const h = harness([node('i', 'image', { prompt: 'x', provider_id: 'fx2_img' })]);
+    await h.execute('i');
+    const call = vi.mocked(runGeneration).mock.calls[0][0];
+    expect(call.params).toEqual({ steps: 20 });
+    expect(call.data.model).toBe('m-b');
+  });
   it('生成失败 → reject', async () => {
     vi.mocked(runGeneration).mockRejectedValueOnce(new Error('请先在节点内选择生成源'));
     const h = harness([node('i', 'image', { prompt: 'x' })]);

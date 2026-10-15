@@ -80,7 +80,9 @@ describe('发送 → useGeneration.run', () => {
     await act(async () => {});
     expect(mocks.run).toHaveBeenCalledTimes(1);
     const o = mocks.run.mock.calls[0][0];
-    expect(o).toMatchObject({ nodeType: 'image', kind: 'image', providerId: 'p1', smartPlan: false, params: { aspect_ratio: '9:16' } });
+    // FX-2：没存值的分辨率 / 步数按弹层显示的缺省一并下发
+    const shown = { aspect_ratio: '9:16', resolution: '720p', steps: 20 };
+    expect(o).toMatchObject({ nodeType: 'image', kind: 'image', providerId: 'p1', smartPlan: false, params: shown });
     expect(o.assembled.args).toEqual({
       prompt: '参考 2 站在 参考 3\n\n参考 1：\n雨夜街道\n\n（参考编号对应：参考 2=第 1 张参考图，参考 3=第 2 张参考图）',
       reference_images: [IMG1, IMG2],
@@ -88,12 +90,41 @@ describe('发送 → useGeneration.run', () => {
     expect(o.intent).toBe(o.assembled.prompt);
     expect(o.data.reference_images).toBeUndefined();
     expect(o.data.text).toBeUndefined();
-    expect(o.data.params).toEqual({ aspect_ratio: '9:16' });
-    expect(o.data.provider_params).toEqual({ aspect_ratio: '9:16' });
+    expect(o.data.params).toEqual(shown);
+    expect(o.data.provider_params).toEqual(shown);
     // 结果对齐 result_url
     const gn = probe.nodes.find((n) => n.id === 'g')!;
     expect(gn.data.image_url).toBe('/storage/generated/out.png');
     expect(gn.data.result_url).toBe('/storage/generated/out.png');
+  });
+
+  it('FX-2：params 为空时下发的就是弹层显示的值（比例 / 分辨率 / 步数缺省），节点数据不被改写', async () => {
+    mocks.run.mockResolvedValue(null);
+    const probe: CanvasProbe = { nodes: [], edges: [] };
+    const g = graph({ prompt: '雨夜', provider_id: 'p1', smart_plan: false });
+    const { container } = render(<TestCanvas probe={probe} nodes={g.nodes} edges={g.edges} />);
+    await act(async () => {});
+    const panel = panelOf(container);
+    // 弹层按钮摘要 = 下发值
+    expect(within(panel).getByRole('button', { name: '生成参数' }).textContent).toContain('9:16 · 720p');
+    fireEvent.click(within(panel).getByRole('button', { name: '生成图片' }));
+    await act(async () => {});
+    const o = mocks.run.mock.calls[0][0];
+    expect(o.params).toEqual({ aspect_ratio: '9:16', resolution: '720p', steps: 20 });
+    expect(o.data.params).toEqual(o.params);
+    // 只在请求里补，不往节点里写
+    expect(probe.nodes.find((n) => n.id === 'g')!.data.params).toBeUndefined();
+  });
+
+  it('FX-2：智能规划只发手动存过的参数（其余交给 Agent 规划）', async () => {
+    mocks.run.mockResolvedValue(null);
+    const probe: CanvasProbe = { nodes: [], edges: [] };
+    const g = graph({ prompt: '雨夜', provider_id: 'p1', smart_plan: true, params: { steps: 30 } });
+    const { container } = render(<TestCanvas probe={probe} nodes={g.nodes} edges={g.edges} />);
+    await act(async () => {});
+    fireEvent.click(within(panelOf(container)).getByRole('button', { name: '生成图片' }));
+    await act(async () => {});
+    expect(mocks.run.mock.calls[0][0].params).toEqual({ steps: 30 });
   });
 
   it('智能规划 + Agent 自动选源：smartPlan=true、providerId 为空、带 skill_id', async () => {

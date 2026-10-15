@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_FORMAT, DEFAULT_LANGUAGE, DEFAULT_SAMPLE_RATE, audioSettingsOf, currentSettingValue, matchSettingValue, paramPatch,
-  providerSwitchPatch, schemaDefaults, settingControls, settingLabel, specialParamKeys, toDataValue, voiceParamKey,
+  providerSwitchPatch, resolveAudioParams, schemaDefaults, settingControls, settingLabel, specialParamKeys, toDataValue, voiceParamKey,
 } from '../audioSettings';
 import { formatPreciseTime, formatTime, getWaveformPeaks, rawPeaks, resamplePeaks } from '../waveform';
 
@@ -85,6 +85,22 @@ describe('参数补丁', () => {
     expect('voice_id' in same).toBe(false);
     // 清空
     expect(providerSwitchPatch(data, '', null)).toMatchObject({ provider_id: undefined, provider: undefined });
+  });
+});
+
+describe('resolveAudioParams（FX-2：直接生成下发 = 弹层显示）', () => {
+  it('params 为空：音频设置取控件显示值（节点设置 zh-CN / 24000 / wav 映射到源的选项，映射不上取源缺省），其余取缺省；音色 / 台词不补', () => {
+    const r = resolveAudioParams(RICH, {}, {});
+    expect(r).toEqual({ language: 'zh', sample_rate: 24000, response_format: 'wav', speed: 1.1 });
+    // 与弹层控件显示的值逐项一致
+    for (const c of settingControls(RICH)) expect(r[c.paramKey]).toBe(currentSettingValue(c, {}, {}, RICH));
+    expect(r).not.toHaveProperty('voice');
+    expect(r).not.toHaveProperty('text');
+  });
+
+  it('已存值不动；情绪等声明参数缺省补齐；没选生成源原样返回', () => {
+    expect(resolveAudioParams(COSY, { speed: 1.2 }, {})).toEqual({ speed: 1.2, emotion: 'neutral' });
+    expect(resolveAudioParams(null, { speed: 1.2 }, {})).toEqual({ speed: 1.2 });
   });
 });
 

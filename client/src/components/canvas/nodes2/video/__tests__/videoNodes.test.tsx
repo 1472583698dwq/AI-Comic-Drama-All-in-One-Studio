@@ -292,6 +292,39 @@ describe('video 视频生成节点', () => {
     await waitFor(() => expect(nodeEl(container, 'g').querySelector('video')?.getAttribute('src')).toBe('/storage/videos/out.mp4'));
   });
 
+  it('FX-2：params 为空、面板显示 9:16 · 5秒 → 直接生成下发的就是 aspect_ratio 9:16 + duration 5（不往节点里写）', async () => {
+    (executeAgentNode as any).mockResolvedValue({ video_url: '/storage/videos/out.mp4' });
+    const host: CanvasHost = { updateNodeData: vi.fn() };
+    const { container } = render(<Canvas host={host} nodes={[genNode({ prompt: '镜头缓慢推近', provider_id: 'pv_full' })]} />);
+    const g = () => nodeEl(container, 'g');
+    await waitFor(() => expect(within(g()).getByLabelText('生成参数').textContent).toContain('9:16 · 5秒'));
+    // 弹层：9:16 选中、时长显示 5 秒（不是「默认」）
+    fireEvent.click(within(g()).getByLabelText('生成参数'));
+    expect((await screen.findByLabelText('比例 9:16')).getAttribute('aria-pressed')).toBe('true');
+    expect((screen.getByLabelText('视频时长') as HTMLSelectElement).value).toBe('5');
+    expect(host.updateNodeData).not.toHaveBeenCalledWith('g', expect.objectContaining({ params: expect.anything() }));
+    fireEvent.click(within(g()).getByLabelText('生成视频'));
+    await waitFor(() => expect(executeAgentNode).toHaveBeenCalled());
+    const call = (executeAgentNode as any).mock.calls[0][0];
+    expect(call.override).toMatchObject({ provider_id: 'pv_full', aspect_ratio: '9:16', duration: 5 });
+    expect(call.override).not.toHaveProperty('seed'); // 没有缺省、面板显示为空的不发
+  });
+
+  it('FX-2：生成源没声明比例 → 面板不选中比例、不下发 aspect_ratio；时长缺省照发', async () => {
+    (executeAgentNode as any).mockResolvedValue({ video_url: '/storage/videos/out.mp4' });
+    const { container } = render(<Canvas nodes={[genNode({ prompt: '雨夜', provider_id: 'pv_t2v' })]} />);
+    const g = () => nodeEl(container, 'g');
+    await waitFor(() => expect(within(g()).getByLabelText('生成参数').textContent).toContain('5秒'));
+    expect(within(g()).getByLabelText('生成参数').textContent).not.toContain('9:16');
+    fireEvent.click(within(g()).getByLabelText('生成参数'));
+    expect((await screen.findByLabelText('比例 9:16')).getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(within(g()).getByLabelText('生成视频'));
+    await waitFor(() => expect(executeAgentNode).toHaveBeenCalled());
+    const call = (executeAgentNode as any).mock.calls[0][0];
+    expect(call.override).toMatchObject({ duration: 5 });
+    expect(call.override).not.toHaveProperty('aspect_ratio');
+  });
+
   it('只收文本的生成源：自动模式为文生、图片参考提示「不支持」', async () => {
     const { container } = render(<Canvas nodes={upstream([genNode({ prompt: 'x', provider_id: 'pv_t2v' })])} edges={edges(['i1'])} />);
     await waitFor(() => expect(within(nodeEl(container, 'g')).getByTestId('cv-vgen-mode').textContent).toContain('模式：文生视频（自动）'));

@@ -27,6 +27,9 @@ import { runGeneration, type GenKind } from '../kit/useGeneration';
 import { loadProviderDefinition } from '../kit/useProviderSources';
 import { extractSlotsFromProvider, type DynamicProviderInfo } from '../providerSkills';
 import { audioGenerationInputs } from '../nodes2/audio/genInputs';
+import { resolveAudioParams, type ProviderDefLike as AudioDefLike } from '../nodes2/audio/audioSettings';
+import { defaultModelOf, resolveImageParams } from '../nodes2/image/imageParams';
+import { resolveVideoParams, type ProviderDefLike as VideoDefLike } from '../nodes2/video/videoParams';
 import { StreamUnavailableError, streamLlmText, type StreamSkill } from './textStream';
 import { cameraPromptPatch } from '../nodes2/director3d/model';
 
@@ -219,21 +222,32 @@ export async function runHostGeneration(deps: ExecuteDeps, node: Node, overrides
     refs, targetType: type, prompt: ownPromptOf(type, data), mode: data.mode, refRoles: data.refRoles, slots,
   });
   if (type === 'audio') assembled = audioGenerationInputs(assembled);
-  const params = (data.params && typeof data.params === 'object' ? data.params : undefined) as AnyData | undefined;
+  const saved = (data.params && typeof data.params === 'object' ? data.params : undefined) as AnyData | undefined;
+  // FX-2：与节点面板同口径——直接生成下发面板显示的参数（没存值的补生成源缺省），智能规划只发存过的参数
+  const smartPlan = !!data.smart_plan;
+  const params = smartPlan || !def ? saved : directParams(type, def, saved || {}, data);
+  const model = !smartPlan && type === 'image' && !data.model ? defaultModelOf(def) : undefined;
   const r = await runGeneration({
     nodeId: node.id,
     nodeType: type,
     kind: type,
-    data,
+    data: model ? { ...data, model } : data,
     assembled,
     providerId,
     params,
-    smartPlan: !!data.smart_plan,
+    smartPlan,
     intent: assembled.prompt,
     updateNodeData: deps.updateNodeData,
     inputKeys: slots ? slots.flatMap((s) => [s.key, s.originalKey].filter(Boolean) as string[]) : undefined,
   });
   return { url: r.url };
+}
+
+/** 直接生成的参数：按节点类型补齐面板显示的缺省（视频 / 图片 / 音频各自的面板口径）。 */
+function directParams(type: GenKind, def: Record<string, unknown>, saved: AnyData, data: AnyData): AnyData {
+  if (type === 'video') return resolveVideoParams(def as VideoDefLike, saved, data);
+  if (type === 'audio') return resolveAudioParams(def as AudioDefLike, saved, data);
+  return resolveImageParams(def, saved, data);
 }
 
 const DIRECTOR_PARAM_KEYS = ['framing', 'motion', 'pose', 'focal_length_mm', 'camera_roll_deg', 'cast_layout', 'speed', 'parse_mode'];

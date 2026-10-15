@@ -208,4 +208,44 @@ describe('legacy-b 节点渲染冒烟', () => {
     expect(screen.getByText(/2 角色 · 4 镜 已生成/)).toBeTruthy();
     view.unmount();
   });
+
+  it('FX-2：代码节点产出放在固定高度的产出框里（绑定后就占位）；回写分镜在工具栏弹层，卡片里不再多出一段', async () => {
+    const view = render(
+      <div style={{ width: 1000, height: 800 }}>
+        <ReactFlowProvider>
+          <CanvasHostProvider value={{ updateNodeData: vi.fn() }}>
+            <ReactFlow
+              className="cv-canvas"
+              nodes={[
+                { id: 'c0', type: 'custom', position: at(0), data: { custom_node_id: 'upscale_demo' } },
+                { id: 'c1', type: 'custom', position: at(400), selected: true, data: { custom_node_id: 'upscale_demo', video_url: '/storage/videos/out.mp4', agent_state: { status: 'failed', error: '上次运行失败' } } },
+                { id: 'c2', type: 'custom', position: at(800), data: {} },
+              ]}
+              edges={[]}
+              nodeTypes={nodeTypesMap()}
+            />
+          </CanvasHostProvider>
+        </ReactFlowProvider>
+      </div>,
+    );
+    await act(async () => {});
+    const c0 = nodeEl(view.container, 'c0');
+    const c1 = nodeEl(view.container, 'c1');
+    // 运行前：占好产出框（空态提示），运行后：同一个框里放产出 + 贴底的错误
+    expect(within(c0).getByTestId('cv-lb-output').textContent).toContain('运行后在这里预览产出');
+    const out = within(c1).getByTestId('cv-lb-output');
+    expect(out.className).toContain('cv-lb-output--video');
+    expect(out.querySelector('video.cv-lb-output__media')?.getAttribute('src')).toBe('/storage/videos/out.mp4');
+    expect(within(out).getByRole('alert').textContent).toBe('上次运行失败');
+    // 没绑定代码节点、也没有产出：不占位
+    expect(within(nodeEl(view.container, 'c2')).queryByTestId('cv-lb-output')).toBeNull();
+    // 回写分镜：卡片正文里没有，工具栏按钮打开弹层
+    expect(within(c1).queryByLabelText('目标分镜')).toBeNull();
+    expect(within(c0).queryByRole('button', { name: '回写到分镜' })).toBeNull(); // 没产出不显示
+    fireEvent.click(within(c1).getByRole('button', { name: '回写到分镜' }));
+    const dialog = await screen.findByRole('dialog', { name: '回写到分镜' });
+    expect(within(dialog).getByLabelText('目标分镜')).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: /回写视频/ })).toBeTruthy();
+    view.unmount();
+  });
 });

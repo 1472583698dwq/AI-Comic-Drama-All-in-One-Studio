@@ -12,8 +12,9 @@ import {
   IconAsterisk, IconChevronDown, IconChevronRight, IconCircleDashed, IconCircleDot, IconCornerUpLeft, IconLetterT, IconLoader2,
   IconMovie, IconMusic, IconPhoto,
 } from '@tabler/icons-react';
-import { AutoRatioMedia } from '../../../ui/AutoRatioMedia';
 import { DynamicControl, groupSpecs, type ControlSpec } from '../../controls/DynamicControl';
+import { ToolbarButton } from '../../kit/FloatingToolbar';
+import { Popover } from '../../kit/ui/Popover';
 import { resolveMediaUrl } from '../../../../utils/devOrigin';
 import { useProjectStore } from '../../../../stores/useProjectStore';
 import { confirmAsync, toast } from '../../../../stores/useDialogStore';
@@ -99,33 +100,47 @@ export function LbField({ label, extra, children, hint }: { label: ReactNode; ex
   );
 }
 
-/** 产出预览：图片 / 视频按真实比例（不裁切），音频用原生播放器；相对 URL 在开发环境回源后端。 */
+/** 产出预览：图片 / 视频在固定高度的产出框里等比完整显示（不裁切），音频用原生播放器；相对 URL 在开发环境回源后端。 */
 export function MediaPreview({ url, kind }: { url: string; kind: 'image' | 'video' | 'audio' }) {
   const src = resolveMediaUrl(url) || url;
-  if (kind === 'audio') return <audio className="cv-lb-audio nodrag nopan" src={src} controls onPointerDown={stop} />;
-  return (
-    <div className="cv-lb-media nodrag nopan nowheel" onPointerDown={stop}>
-      {kind === 'video'
-        ? <AutoRatioMedia src={src} kind="video" fallbackAspect="16/9" maxHeight={160} videoProps={{ controls: true }} />
-        : <AutoRatioMedia src={src} kind="image" fallbackAspect="1/1" maxHeight={160} />}
-    </div>
-  );
+  if (kind === 'audio') return <audio className="cv-lb-audio nodrag nopan" src={src} controls preload="metadata" onPointerDown={stop} />;
+  if (kind === 'video') return <video className="cv-lb-output__media" src={src} controls preload="metadata" aria-label="产出视频" />;
+  return <img className="cv-lb-output__media" src={src} alt="产出图片" draggable={false} />;
 }
 
 /**
  * 产出区（custom / ext-node）：媒体预览；没有媒体时显示结果文本 data.text（`text` 是输入口时它是输入，不当结果显示）；
  * 失败的 agent_state 显示错误。
+ *
+ * REQ-toonflow-canvas FX-2：产出放在固定高度的产出框里（Toonflow 媒体节点空态同高 144px）：媒体等比缩进框内、
+ * 长文本在框内滚动、错误贴在框底（有产出时）或占满框（没产出时）。`reserve`（已绑定代码节点 / 扩展声明）时运行前就占好位置，
+ * 出结果前后卡片高度不变，不会长高压住下方节点。
  */
-export function ResultView({ data, textIsInput }: { data: Record<string, any>; textIsInput?: boolean }) {
+export function ResultView({ data, textIsInput, reserve }: { data: Record<string, any>; textIsInput?: boolean; reserve?: boolean }) {
   const res = resultOf(data);
   const st = (data.agent_state || {}) as Record<string, unknown>;
   const text = !res && !textIsInput && typeof data.text === 'string' ? data.text.trim() : '';
+  const error = st.status === 'failed' && st.error ? String(st.error) : '';
+  if (!reserve && !res && !text && !error) return null;
+  const empty = !res && !text;
   return (
-    <>
+    <div
+      className={cx('cv-lb-output nodrag nopan nowheel', res && `cv-lb-output--${res.kind}`)}
+      role="group"
+      aria-label="产出"
+      data-testid="cv-lb-output"
+      onPointerDown={stop}
+    >
       {res && <MediaPreview url={res.url} kind={res.kind} />}
-      {text && <div className="cv-lb-quote cv-lb-quote--result nodrag nopan nowheel">{text}</div>}
-      {st.status === 'failed' && !!st.error && <LbAlert>{String(st.error)}</LbAlert>}
-    </>
+      {text && <div className="cv-lb-output__text">{text}</div>}
+      {empty && !error && (
+        <div className="cv-lb-output__empty">
+          <IconPhoto size={28} stroke={1.25} aria-hidden />
+          <span>运行后在这里预览产出</span>
+        </div>
+      )}
+      {error && <div className={cx('cv-lb-output__error', empty && 'is-full')} role="alert">{error}</div>}
+    </div>
   );
 }
 
@@ -319,5 +334,43 @@ export function ShotWriteBack({ nodeId, nodeType, data, onUpdate }: {
         <div className="cv-lb-hint">{linkedShotId ? '节点所属分镜不存在（可能已删除），请重新选择目标分镜' : '选择目标分镜后即可回写（节点无归属时不改动分镜）'}</div>
       )}
     </section>
+  );
+}
+
+/**
+ * REQ-toonflow-canvas FX-2：「回写到分镜」放进浮动工具栏的弹层（custom / ext-node）。
+ * 原来是出结果后才出现在卡片里的一整段（目标分镜下拉 + 回写按钮 + 提示），会把卡片撑高、压住下方节点；
+ * 工具栏浮在卡片上方，不占卡片高度。没有可回写的产出时不显示按钮。
+ */
+export function ShotWriteBackButton(props: {
+  nodeId: string;
+  nodeType: string;
+  data: Record<string, unknown>;
+  onUpdate: (patch: Record<string, unknown>) => void;
+  disabled?: boolean;
+}) {
+  const { nodeType, data, disabled } = props;
+  const results = useMemo(() => collectNodeResults(nodeType, data), [nodeType, data]);
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  if (!results.length) return null;
+  return (
+    <>
+      <ToolbarButton
+        icon={IconCornerUpLeft}
+        title="回写到分镜"
+        active={!!anchor}
+        disabled={disabled}
+        aria-haspopup="dialog"
+        aria-expanded={!!anchor}
+        onClick={(e) => setAnchor(anchor ? null : e.currentTarget)}
+      >
+        回写分镜
+      </ToolbarButton>
+      <Popover open={!!anchor} anchor={anchor} onClose={() => setAnchor(null)} placement="bottom-start" className="cv-lb-pop" role="dialog" aria-label="回写到分镜">
+        <div className="cv-lb">
+          <ShotWriteBack nodeId={props.nodeId} nodeType={nodeType} data={data} onUpdate={props.onUpdate} />
+        </div>
+      </Popover>
+    </>
   );
 }

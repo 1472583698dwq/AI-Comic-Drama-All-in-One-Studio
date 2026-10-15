@@ -11,7 +11,7 @@ import type { GenSourceOption } from '../../kit/PromptPanel';
 import { loadProviderDefinition, loadProviderSources, useProviderDefinition, useProviderSources, type ProviderSource } from '../../kit/useProviderSources';
 import { extractSlotsFromProvider, type AssetSlotDef, type DynamicProviderInfo } from '../../providerSkills';
 import type { ControlSpec } from '../../controls/DynamicControl';
-import { detectQuickParams, paramsSummary, providerDefaultParams, type QuickParams } from './imageParams';
+import { defaultModelOf, detectQuickParams, paramsSummary, providerDefaultParams, resolveImageParams, type QuickParams } from './imageParams';
 
 export const AUTO_SOURCE_ID = '';
 export const AUTO_SOURCE: GenSourceOption = {
@@ -44,12 +44,18 @@ export interface ImageGenConfig {
   quick: QuickParams;
   /** 生成源有多个模型时的「模型」控件（写 data.model）。 */
   modelSpec?: ControlSpec;
+  /** FX-2：弹层显示 / 直接生成下发的参数（节点 params 按生成源缺省补齐，见 resolveImageParams）。 */
+  resolved: Record<string, unknown>;
   summary: { text: string; ratio?: string };
   /** 选源：异步拉定义算默认参数后回调。 */
   selectProvider: (id: string, apply: (id: string, defaults: Record<string, unknown>, def: Record<string, unknown> | null) => void) => void;
 }
 
-export function useImageGenConfig(providerId: string, params: Record<string, unknown> | null | undefined): ImageGenConfig {
+export function useImageGenConfig(
+  providerId: string,
+  params: Record<string, unknown> | null | undefined,
+  data?: Record<string, unknown> | null,
+): ImageGenConfig {
   const { sources, loading } = useProviderSources('image');
   const [fresh, setFresh] = useState<ProviderSource[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -71,15 +77,17 @@ export function useImageGenConfig(providerId: string, params: Record<string, unk
   const slots = useMemo(() => (providerId && def ? extractSlotsFromProvider(def as unknown as DynamicProviderInfo, 'image') : null), [providerId, def]);
   const quick = useMemo(() => detectQuickParams(def?.params_schema), [def]);
   const modelSpec = useMemo<ControlSpec | undefined>(() => {
-    const models = Array.isArray(def?.models) ? (def!.models as unknown[]).map(String).filter(Boolean) : [];
-    if (models.length < 2) return undefined;
+    const fallback = defaultModelOf(def);
+    if (!fallback) return undefined;
+    const models = (def!.models as unknown[]).map(String).filter(Boolean);
     return {
       id: 'model', param_name: 'model', label: '模型', type: 'combo', options: models,
-      default_value: typeof def?.default_model === 'string' && def.default_model ? def.default_model : models[0],
+      default_value: fallback,
       visibility: 'basic', agent: 'suggest', category: 'advanced',
     };
   }, [def]);
-  const summary = useMemo(() => paramsSummary(params, quick), [params, quick]);
+  const resolved = useMemo(() => (def ? resolveImageParams(def, params, data) : { ...(params || {}) }), [def, params, data]);
+  const summary = useMemo(() => paramsSummary(resolved, quick), [resolved, quick]);
 
   const pending = useRef(0);
   const selectProvider = useCallback<ImageGenConfig['selectProvider']>((id, apply) => {
@@ -93,5 +101,5 @@ export function useImageGenConfig(providerId: string, params: Record<string, unk
     });
   }, [list]);
 
-  return { sourceOptions, sourcesLoading: loading || refreshing, refreshSources, def, slots, quick, modelSpec, summary, selectProvider };
+  return { sourceOptions, sourcesLoading: loading || refreshing, refreshSources, def, slots, quick, modelSpec, resolved, summary, selectProvider };
 }

@@ -157,3 +157,70 @@
 2. **custom 节点出图后变高，盖住下方节点**（`14-custom-ran.jpg`）：既有的摆放问题，与本次修复无关。
 3. **B8 面板显示 `9:16`，但 MCP 入参没有 aspect_ratio / duration**：节点 `params` 为空时，面板显示的是缺省值、不下发。这是既有行为，后端用自己的缺省值。如果希望「显示什么就发什么」，需要在节点侧把缺省值写进 params（N3 范围）。
 4. **控制台 warning**：React Flow 报「created a new nodeTypes object」。原因是 `CreativeCanvas` 的 nodeTypes 随未知类型集合变化重建，既有问题，不影响功能。
+
+---
+
+# FX-2 遗留问题修复（上面「留给协调人」第 2 / 3 / 4 条）
+
+状态：完成（未提交）。worktree 同上（HEAD dca8f31），只改了 `client/**`；8001 / 5180 没重启。
+
+| 项 | 结果 | 改了哪里 | 浏览器复验（5180，proj_8f110548，headless Chromium） |
+|---|---|---|---|
+| 1 显示 9:16 却不下发比例 | 已修 | 新增 `kit/paramDefaults.ts`；`nodes2/video/{videoParams.ts, VideoGenNode.tsx, VideoGenSettings.tsx}`、`nodes2/image/{imageParams.ts, useImageGenConfig.ts, ImageGenNode.tsx, LoadImageNode.tsx}`、`nodes2/audio/{audioSettings.ts, AudioGenNode.tsx, AudioParamsPanel.tsx}`、`host/executeRouter.ts` | comfyui_video 节点、params 为空：面板「9:16 · 720p · 5秒」、帧率 24；拦截 `/mcp/call`，入参 `{aspect_ratio:"9:16", resolution:"720p", duration:5, fps:24, mode:"t2v"}`；发送前节点 params 仍为空（不落盘） |
+| 2 「new nodeTypes object」告警 | 已修 | `kit/registry.ts`（`nodeTypesMap(fallback)`）、新增 `host/nodeTypes.ts`、`CreativeCanvas.tsx` | 修前复现：画布挂载中经 `agent-canvas-updated` 混入未知类型 → 报 error002；修后同一操作、再让它消失、切到含未知类型的画布再切回，控制台 0 条 warning |
+| 3 custom 节点出结果后变高压住下方 | 已修 | `nodes2/legacy-b/{ui.tsx, CustomNode.tsx, ExtNode.tsx, legacyB.css}` | 4 个 custom（无产出 / 视频 / 图片 + 失败 / 文本口）高度都是 611（产出框都是 144）；修前无产出 459、出视频后 778、出图 + 报错 835 |
+
+验证：`cd client && npx tsc -b` 0 错；`npx vitest run` **59 个文件、645 / 645** 全绿（开工时 57 / 621）；oxlint 0 错。
+反向验证：把视频节点发送改回只发已存 params，2 条新视频用例失败；把 nodeTypes 改回每次新建对象，2 条 nodeTypes 用例失败。
+
+## 1：面板显示什么，直接生成就发什么
+- **根因**：面板对没存值的参数显示缺省（比例回落 9:16、DynamicControl 回落 schema default），但请求只带节点 `params` 里存过的键。切源时会写缺省，模板 / Agent / 旧画布建的节点没走切源，`params` 为空。
+- **kit `materializeParams(def, params, data)`**：只按生成源 `params_schema` 声明的键补，顺序是：已存 → 节点顶层同名旧值（类型 / 枚举对得上才认；执行器原本也会从顶层补发）→ `default_params` → schema `default` → 开关没有缺省时按「关」。
+  - 不补：提示词类（`prompt` / `text` / x-role prompt·dialogue）、媒体（format uri）、数组 / 对象、`x-visibility: hidden`。
+  - 只用于请求和面板显示，不写节点数据。
+- **视频 `resolveVideoParams`**：比例只在生成源声明了比例键时补，取值顺序：顶层旧值（比例键 / 镜像的 `aspect_ratio`）→ 生成源缺省 → 9:16 → 第一个可选比例，只取该源支持的值（例如 Seedance 补 `ratio: adaptive`）。
+  - **没声明比例的源不补比例**，面板也不再选中 9:16；手动点过的照旧以 `aspect_ratio` 下发（提示文案同步改了）。
+  - 未选生成源时面板仍显示 9:16（只能走智能规划）。
+  - `displayRatio` 与请求同口径；参数按钮摘要、比例 / 时长 / 分辨率 / 生成音频 / 其他参数都显示补齐后的值。
+- **图片**：`resolveImageParams` 同上；「模型」控件（≥2 个模型）没选时，按显示的缺省模型下发。局部重绘（生成节点 / 图片节点）也用补齐后的参数。
+- **音频**：`resolveAudioParams`：语种 / 采样率 / 格式按控件显示值（节点 Toonflow 设置映射 → 源缺省）；情绪等按缺省；音色不补（面板显示「默认音色」，由源自己定）。
+- **智能规划不补**：只发手动存过的参数。后端 `/canvas/agent/generate` 以请求里的 params 覆盖 Agent 规划值，补了缺省会让 Agent 没法选比例 / 时长（「Agent 可填」徽标的语义）。
+- **宿主侧生成**（分镜子图自动运行等，`executeRouter.runHostGeneration`）同口径补齐。
+- 发送时如果定义还没拉到（刚切源就点发送），会现取一次定义再补。
+- **单测**：
+  - `kit/__tests__/paramDefaults.test.ts` 3 条；
+  - `videoParams.test` 7 条（含真实 comfyui_video schema）；
+  - `videoNodes.test` 2 条：面板 9:16 · 5秒 → 执行器入参带 `aspect_ratio:9:16, duration:5`，不往节点写；没声明比例的源不选中、不下发；
+  - 图片 `generate.test` 2 条（含智能规划只发存过的），并更新了 1 条旧断言（现在多了显示的 `resolution` / `steps`）；
+  - 音频 `settings.test` 2 条、`generation.test` 1 条；
+  - `executeRouter.test` 2 条（宿主侧补齐、智能规划不补；图片缺省模型）。
+
+## 2：nodeTypes 引用稳定
+- **根因**：`CreativeCanvas` 按「画布里出现了哪些未知类型」拼一份新的 nodeTypes。未知类型一出现或消失（Agent 改画布、旧画布迁移前后），就会多出或少掉键，React Flow 报 error002。
+- **改法**：
+  - `nodeTypesMap(fallback)` 改成模块级缓存（按兜底组件分别缓存，注册表版本变了才重建）。
+  - 传兜底组件时返回只读代理：不认识的类型读到「不支持的节点」，`default` 也指向它；`Object.keys` 只有已注册类型 + default；`then` / `toString` 这类普通对象自带的键不会被兜底组件冒充。
+  - 新增 `host/nodeTypes.ts` 的 `useCanvasNodeTypes()`：订阅注册表版本并 useMemo，`CreativeCanvas` 改用它。
+  - 顺手把 `defaultEdgeOptions` / `snapGrid` 提成模块常量（原来每次渲染都新建，React Flow 每次都要同步进 store）。
+- **单测** `host/__tests__/nodeTypes.test.tsx` 4 条：
+  - 引用稳定、兜底、键集合；
+  - hook 多次重渲染同一对象，`defineNode` 后才换新对象；
+  - 真实 `<ReactFlow>` 在 `NODE_ENV=development` 下让未知类型出现再消失：nodeTypes 始终同一个对象，`onError` 没有 002 / 003，已有节点不重挂载；
+  - 对照：旧写法在同样操作下会报 002。
+
+## 3：custom 节点出结果后不再长高
+- **根因**：出结果后卡片里多出两段——媒体预览（最高 160）和「回写到分镜」整段（下拉 + 按钮 + 提示），合计约 +320，压住下方节点。
+- **改法**：
+  - **固定高度的产出框** `.cv-lb-output`：高 144px，与 Toonflow 媒体节点空态同高。绑定了代码节点（custom 的 `custom_node_id` / ext-node 的声明）就先占好位置，运行前显示「运行后在这里预览产出」。
+  - 框里的内容：媒体等比缩进框内，不裁切；结果文本在框内滚动；有产出时失败信息贴在框底，没产出时占满整个框。
+  - **「回写到分镜」移进浮动工具栏的弹层**（`ShotWriteBackButton`，有可回写的产出才显示）。工具栏浮在卡片上方，不占卡片高度；宿主右键菜单里原有的「回写到分镜…」不变。
+  - `legacyB.css` 的控件样式作用域从 `.cv-node` 扩到 `:is(.cv-node, .cv-lb-pop)`，弹层里的下拉和按钮外观与卡片里一致。
+  - ext-node 用的是同一套组件，一并生效。
+- **代价**：没有产出的 custom 节点比原来高 152px（144 的框加 8 的间距），换来出结果前后高度不变。
+- **单测** `legacy-b render.test` 1 条：运行前占位；视频产出和失败信息在同一个框里；没绑定节点时不占位；卡片里不再有回写段；工具栏按钮打开回写弹层。
+
+## 清理
+- proj_8f110548 的 `canvas.json` / `content.json` / `agent_sessions.json` 已按测试前快照逐字节还原。测试画布 cv_fx2u / cv_fx2c / cv_fx2v 和默认画布里我加的节点随之去掉。
+- `projects/index.json` 只把本项目条目的 `last_opened_at` / `updated_at` 改回原值，整个文件与快照逐字节一致。
+- 视频生成是拦截 `/mcp/call` 后返回现成的 `mock_578da233.mp4`，没有真的生成。`assets` / `videos` / `generated` 文件列表与开工时一致；`git status --short storage` 与开工时逐行一致；也没有生成 `features.json`。
+- 我起的 headless Chromium 和驱动脚本已退出。截图在会话 scratchpad 的 `fx2/shots/`（`09-video-params`、`11-custom-after`、`12-writeback-pop-styled`）。

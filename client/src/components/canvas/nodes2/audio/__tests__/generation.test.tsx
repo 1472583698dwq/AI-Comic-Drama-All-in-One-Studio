@@ -114,6 +114,20 @@ describe('直接生成', () => {
   });
 });
 
+describe('FX-2：直接生成下发弹层显示的参数', () => {
+  it('params 为空：情绪按弹层显示的缺省 neutral 下发；音色没选不补（弹层显示「默认音色」）', async () => {
+    const { bottom } = renderGen({ text: '台词', provider_id: 'prov_mm' });
+    await act(async () => {});
+    await waitFor(() => expect(within(bottom()).getByLabelText('生成参数').textContent).toContain('neutral'));
+    await act(async () => { fireEvent.click(within(bottom()).getByLabelText('生成音频')); });
+    await waitFor(() => expect(executeAgentNode).toHaveBeenCalledTimes(1));
+    const o = (executeAgentNode as any).mock.calls[0][0].override;
+    expect(o.emotion).toBe('neutral');
+    expect(o.voice_id).toBeUndefined();
+    expect(o.text).toBe('台词');
+  });
+});
+
 describe('智能规划', () => {
   it('打开开关后走 /canvas/agent/generate（不选源也能发），intent = 组装后的台词，结果与规划写回', async () => {
     const { updateNodeData, bottom } = renderGen({ text: '晚安', smart_plan: true });
