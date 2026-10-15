@@ -1078,10 +1078,10 @@ AGENT_SYSTEM_PROMPT_BODY = """你是「AI漫剧导演 Agent」，运行在 MiniM
 
 **无限画布（Canvas DAG，可视化编排）：**
 20. canvas_query —— 查询画布摘要与节点清单，感知当前画布状态
-21. canvas_create_node —— 创建节点。参数：type(prompt/image/video/audio/director3d/export/custom/brief/script-split/shot-card/comfy-workflow/provider-image/provider-video/provider-audio/tts/load-image/load-image-batch/load-video/load-audio/text-prompt/timeline-export), position{x,y}, params(可选内部参数；type=custom 时 params 必带 custom_node_id，即 customnode_<id> 工具去掉前缀的 id，可直接调该工具执行)
+21. canvas_create_node —— 创建节点。参数：type(prompt/image/video/audio/director3d/group/export/custom/brief/script-split/shot-card/comfy-workflow/provider-image/provider-video/provider-audio/load-image/load-image-batch/load-video/load-audio/timeline-export；group 用 children 传子节点 id), position{x,y}, params(可选内部参数；type=custom 时 params 必带 custom_node_id，即 customnode_<id> 工具去掉前缀的 id，可直接调该工具执行)
 22. canvas_update_node —— 更新节点。参数：node_id, patch(要更新的 data 字段)
 22.5 canvas_delete_node —— 删除节点（连带删除挂在它身上的连线）。参数：node_id。【高危：审批模式必弹人审确认，自动模式直跑】删前先用 canvas_query 确认真实 id，并说清会影响哪些下游
-23. canvas_connect —— 连线。参数：source, sourceHandle, target, targetHandle（类型需匹配 image/video/audio/text/provider）
+23. canvas_connect —— 连线。参数：source, sourceHandle, target, targetHandle, slot。生成类节点(prompt/image/video/audio/director3d)只有输入口 in，用 slot(first_frame/last_frame/reference_images/camera_prompt/ref_audio/reference_video/prompt) 指定槽位，不填自动分配；旧端口名会自动转成 in+槽位
 24. canvas_execute —— 执行画布 DAG。参数：target_ids(可选，仅执行选中), project_id
 
 **策略指引：**
@@ -1092,7 +1092,7 @@ AGENT_SYSTEM_PROMPT_BODY = """你是「AI漫剧导演 Agent」，运行在 MiniM
 - 如需确认可用 provider/工作流/音色/素材，先调用对应的 list_* 查询工具再决策
 - 可组合调用：例如“生成战斗画面并配怒吼”可同时调用 generate_image + generate_voice
 - 多生成源：画布中每个 Provider 节点可独立存在，生图/视频/TTS 节点通过连线绑定具体 Provider，不再全局单选
-- 用户说“画布/无限画布/连线/节点/批量生成/参考图/用工作流/让画布执行” → 优先 canvas_query 感知画布，再用 canvas_create_node/canvas_connect 编排，最后 canvas_execute 触发。参考图场景必须创建 load-image/load-image-batch 并连到 video.reference_images 或 comfy-workflow 的 image 输入
+- 用户说“画布/无限画布/连线/节点/批量生成/参考图/用工作流/让画布执行” → 优先 canvas_query 感知画布，再用 canvas_create_node/canvas_connect 编排，最后 canvas_execute 触发。参考图场景必须创建 load-image 并连到生成节点的 in 口（canvas_connect 的 slot 指定 first_frame/reference_images 等）或 comfy-workflow 的 image 输入
 
 **多轮执行策略（循环模式专用-防一步即停）：**
 - 把用户目标拆解为步骤清单，逐轮执行：每轮基于上一轮工具结果决定下一个动作
@@ -1160,7 +1160,7 @@ def _provider_tools_brief() -> str:
             "\n\n**动态生成源 Tools v2（当前已注册 " + str(len(lines)) + " 个，一源一Tool，基础常显 高级需点⚙ auto可自动 suggest需确认 manual仅手填）：**\n"
             + "\n".join(lines[:90])
             + "\n\n**编排画布时：** 用 canvas_create_node 创建 prompt/image/video/audio 节点，data 内直接写 provider_id(即Tool名去掉provider_前缀)、prompt/idea、skill_id 与挂载的 first_frame/reference_images/ref_audio；"
-            "canvas_connect 按句柄(prompt/image/first_frame/last_frame/reference_images/ref_audio/text)连线后 canvas_execute 一键执行。"
+            "canvas_connect 连到生成节点的 in 口、用 slot(first_frame/last_frame/reference_images/camera_prompt/ref_audio/reference_video/prompt) 指定槽位后 canvas_execute 一键执行。"
             "生成源参数异构一律按该 provider_* Tool 自己的 schema 填写，含 x-visibility/x-agent：basic/auto 可由你自动按项目画幅推断，advanced/suggest 仅在用户提及时填写，hidden/manual 绝不填。"
             "\n**生成源选择铁律：** 需要首帧/参考图/尾帧/参考音频时，必须选择输入参数里含对应插槽(first_frame/reference_images/last_frame/ref_audio)的源；"
             "输入参数只有 prompt 的纯文本源不接受任何图像/音频，禁止把参考图挂给它（否则外部 API 会报参数错误）。选源前可先调 get_provider_code 查看其 input_schema 确认。"

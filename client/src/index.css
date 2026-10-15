@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./components/canvas/kit/theme.css"; /* REQ-toonflow-canvas 画布节点主题变量 --cv-* */
 
 /* dark: 变体跟随应用内主题切换（.dark 类），而非仅跟随操作系统 */
 @custom-variant dark (&:where(.dark, .dark *));

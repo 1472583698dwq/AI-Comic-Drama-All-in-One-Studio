@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { useDirectorAgent } from '../canvas/hooks/useDirectorAgent';
 import { useCanvasStore } from '../../stores/useCanvasStore';
@@ -60,9 +59,25 @@ import {
   StagePropType,
   StageEnvironment,
   StoryboardShot,
-  MannequinJointPose,
 } from '../../types';
-import { FRAMING_PRESETS, MOTION_PRESETS, POSE_PRESETS, CAST_LAYOUTS } from './directorPresets';
+// REQ-toonflow-canvas T3：3D 场景共用模块（与画布 director3d 节点同源）
+import {
+  FRAMING_PRESETS, MOTION_PRESETS, POSE_PRESETS, CAST_LAYOUTS,
+  FOCAL_PRESETS, KEY_TEMPS, ENV_LABELS, ratioToNumber,
+  buildMinimaxCameraPrompt, buildClayPrompt as buildClayPromptText,
+  focalLengthToFov, framingCameraPose, motionDurationMs, easeMotionProgress, castMembers,
+} from './scene/presets';
+import { MODEL_URLS, loadGLBModel } from './scene/glb';
+import {
+  type JointAxisLimits,
+  createPoseMannequin, createRealisticHuman,
+  serializeMannequinJoints, applyMannequinJoints, resetMannequinJoints,
+} from './scene/mannequin';
+import { BUILTIN_PROP_OPTIONS, createRealisticSword, createRealisticShield, createRealisticMagicCircle, createIncenseBurner, createBattleFlag } from './scene/props';
+import { buildStageEnvironment } from './scene/environments';
+import { createOrbitState, applyOrbitToCamera, applyCameraRoll, calculateMotionWaypoints, applyMotionFrame } from './scene/camera';
+import { raycasterAt, pickStageRoot, pickJoint, dragRotateJoint } from './scene/picking';
+import { createStageRenderer, createThreePointLights, applyLightingConfig } from './scene/stageSetup';
 import { syncDirectorPacks, listDirectorPackProps, listDirectorPackEnvironments, getDirectorPackEnv } from './directorPackSpecs';
 import { UISlot } from '../../ui-registry/UISlot';
 import { DirectorPackBridgeContext } from '../../ui-registry/directorPackBridge';
@@ -77,147 +92,8 @@ import { DIRECTOR_ENVS_HOST, DIRECTOR_PROPS_HOST } from '../../ui-registry/types
 // - 真实道具建模 + 多环境完整场景（赛博/云海/荒漠/霓虹）+ Agent 自然语言全量控制
 // ============================================================
 
-// 基础真实模型库（CC0，来自 three.js / Khronos Sample Models，已下载至 public/models）
-// 初始角色（主角/对手/配角）改用程序化「人体布偶」，此处仅保留道具 GLB
-const MODEL_URLS: Record<string, string> = {
-  chair: '/models/SheenChair.glb', // 4.3MB 椅子
-  helmet: '/models/DamagedHelmet.glb', // 3.7MB 头盔
-  camera_prop: '/models/AntiqueCamera.glb', // 复古相机
-  avocado: '/models/Avocado.glb',
-  boombox: '/models/BoomBox.glb',
-};
-const gltfLoader = new GLTFLoader();
-const modelCache = new Map<string, THREE.Group>();
-/** 正在加载中的 URL → 同一个 Promise。缓存是 await 之后才写的，没有这张表的话
- *  同一个模型的并发请求会各自完整下载+解析一遍（实测 BoomBox 被拉了两次）。 */
-const modelInflight = new Map<string, Promise<THREE.Group | null>>();
-/** 加载失败过的 URL。坏文件不记下来的话，每放一次道具都会重试一轮，
- *  一个坏 GLB 能刷出 8 次解析失败 + 30 条贴图报错。 */
-const modelFailed = new Set<string>();
-
-function cloneWithOwnMaterials(src: THREE.Group): THREE.Group {
-  const clone = src.clone(true) as THREE.Group;
-  // 深拷贝材质避免共享
-  clone.traverse((obj) => {
-    if ((obj as THREE.Mesh).isMesh) {
-      const m = obj as THREE.Mesh;
-      if (Array.isArray(m.material)) m.material = (m.material as any[]).map((mat: any) => mat.clone());
-      else if (m.material) m.material = (m.material as any).clone();
-    }
-  });
-  return clone;
-}
-
-/** GLB 完整性预检：文件头第 8 字节起是声明的总长度，和实际字节数对不上就是下载被截断。
- *  不先验的话 GLTFLoader 只会抛一句没头没尾的 `Invalid typed array length`。 */
-async function assertGlbIntact(url: string): Promise<ArrayBuffer> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const buf = await res.arrayBuffer();
-  if (buf.byteLength < 12) throw new Error(`文件只有 ${buf.byteLength} 字节，不是合法 GLB`);
-  const dv = new DataView(buf);
-  const magic = String.fromCharCode(dv.getUint8(0), dv.getUint8(1), dv.getUint8(2), dv.getUint8(3));
-  if (magic !== 'glTF') throw new Error(`不是 GLB（文件头为 ${JSON.stringify(magic)}）`);
-  const declared = dv.getUint32(8, true);
-  if (declared !== buf.byteLength) {
-    throw new Error(
-      `GLB 文件不完整：实际 ${buf.byteLength} 字节，文件头声明 ${declared} 字节`
-      + `（缺 ${declared - buf.byteLength}）。这份模型下载时被截断了，需要重新下载。`,
-    );
-  }
-  return buf;
-}
-
-async function loadGLBModel(url: string, scale = 1): Promise<THREE.Group | null> {
-  if (modelCache.has(url)) return cloneWithOwnMaterials(modelCache.get(url)!);
-  if (modelFailed.has(url)) return null;
-  const pending = modelInflight.get(url);
-  if (pending) {
-    const root = await pending;
-    return root ? cloneWithOwnMaterials(root) : null;
-  }
-  const task = loadGLBModelOnce(url, scale);
-  modelInflight.set(url, task);
-  try {
-    const root = await task;
-    return root ? cloneWithOwnMaterials(root) : null;
-  } finally {
-    modelInflight.delete(url);
-  }
-}
-
-async function loadGLBModelOnce(url: string, scale = 1): Promise<THREE.Group | null> {
-  try {
-    const buf = await assertGlbIntact(url);
-    const gltf = await gltfLoader.parseAsync(buf, '');
-    const root = gltf.scene as THREE.Group;
-    root.traverse((obj) => {
-      if ((obj as THREE.Mesh).isMesh) {
-        const mesh = obj as THREE.Mesh;
-        mesh.castShadow = true;
-        mesh.receiveShadow = true;
-        // 修正过亮的金属度
-        const mat = mesh.material as THREE.MeshStandardMaterial;
-        if (mat && (mat as any).isMeshStandardMaterial) {
-          if (mat.metalness > 0.9) mat.metalness = 0.3;
-          mat.needsUpdate = true;
-        }
-      }
-    });
-    // 归一化尺寸至 ~1.6m 高
-    const box = new THREE.Box3().setFromObject(root);
-    const size = new THREE.Vector3();
-    box.getSize(size);
-    const maxDim = Math.max(size.x, size.y, size.z);
-    if (maxDim > 0) {
-      const s = (1.6 / maxDim) * scale;
-      root.scale.setScalar(s);
-    }
-    // 底部对齐到 y=0
-    const box2 = new THREE.Box3().setFromObject(root);
-    const center = new THREE.Vector3();
-    box2.getCenter(center);
-    root.position.sub(new THREE.Vector3(center.x, box2.min.y, center.z));
-    // 淡入
-    root.traverse((obj) => {
-      if ((obj as any).isMesh) (obj as THREE.Mesh).userData.isRealModel = true;
-    });
-    modelCache.set(url, root);
-    return root;
-  } catch (e) {
-    modelFailed.add(url);
-    console.warn(`[Director3D] GLB 加载失败 ${url}:`, e instanceof Error ? e.message : e);
-    return null;
-  }
-}
-
-// 预设已迁移至 ./directorPresets（舞台与画布节点同源），此处仅保留舞台私有的焦距档位
-const FOCAL_PRESETS = [16, 24, 35, 50, 85, 135];
-
-// 基础三点光色温预设（主光颜色，轮廓光保持冷色勾边）
-const KEY_TEMPS: Record<string, { label: string; color: number }> = {
-  neon: { label: '霓虹紫', color: 0x7c3aed },
-  cold: { label: '冷白', color: 0xf5f7ff },
-  warm: { label: '暖黄', color: 0xffb46b },
-  moon: { label: '月夜蓝', color: 0x9bbcff },
-};
-
-const ENV_LABELS: Record<StageEnvironment, { label: string; desc: string; icon: string }> = {
-  cyber_studio: { label: '暗黑赛博影棚', desc: '霓虹网格+城市天际线', icon: '🏙️' },
-  xianxia_cloud: { label: '修仙云海仙山', desc: '浮空山+云雾缭绕', icon: '⛰️' },
-  desert_battle: { label: '决战古荒漠', desc: '沙丘+落日+岩石', icon: '🏜️' },
-  neon_city: { label: '雨夜霓虹都市', desc: '湿漉街道+雨滴反射', icon: '🌃' },
-};
-
-/** "9:16" / "16/9" → 数值宽高比；非法回退 9:16。 */
-const ratioToNumber = (ratio?: string): number => {
-  const m = String(ratio || '').match(/(\d+(?:\.\d+)?)\s*[:/]\s*(\d+(?:\.\d+)?)/);
-  if (m) {
-    const n = parseFloat(m[1]) / parseFloat(m[2]);
-    if (isFinite(n) && n > 0) return n;
-  }
-  return 9 / 16;
-};
+// REQ-toonflow-canvas T3：GLB 加载 / 人偶 / 道具 / 环境 / 预设 / 拾取与关节拖拽等与 React 无关的代码
+// 已抽到 ./scene/*（画布 director3d 节点共用），本文件只保留舞台 UI 与状态编排。
 
 /** 摄影机位（对标 LibTV 导演台：多机位保存/切换/多视角截图） */
 interface StageCamera {
@@ -441,16 +317,12 @@ export const Director3DStage: React.FC = () => {
 
   // 灯光面板 → 基础三点光实时应用（主光方位绕 Y 轴旋转，高度固定）
   useEffect(() => {
-    const az = THREE.MathUtils.degToRad(keyAzimuth);
-    const r = 6;
-    if (keyLightRef.current) {
-      keyLightRef.current.position.set(Math.sin(az) * r, 5, Math.cos(az) * r);
-      keyLightRef.current.color.setHex(KEY_TEMPS[keyTemp].color);
-      keyLightRef.current.intensity = keyIntensity;
-    }
-    if (rimLightRef.current) rimLightRef.current.intensity = rimIntensity;
-    if (ambientRef.current) ambientRef.current.intensity = ambientIntensity;
-    if (rendererRef.current) rendererRef.current.toneMappingExposure = exposure;
+    // REQ-toonflow-canvas T3：灯光换算抽到 scene/stageSetup（画布迷你舞台共用）
+    applyLightingConfig(
+      { key: keyLightRef.current || undefined, rim: rimLightRef.current || undefined, ambient: ambientRef.current || undefined },
+      rendererRef.current,
+      { keyIntensity, keyAzimuth, keyTemp, rimIntensity, ambientIntensity, exposure },
+    );
   }, [keyIntensity, keyAzimuth, keyTemp, rimIntensity, ambientIntensity, exposure]);
 
   // 走位模式 ref 镜像（供 canvas 点击监听读取，避免闭包过期）
@@ -577,51 +449,24 @@ export const Director3DStage: React.FC = () => {
     applySnapRef.current();
   }, [snapEnabled]);
 
-  const orbitStateRef = useRef({
-    isRotating: false,
-    isPanning: false,
-    prevX: 0,
-    prevY: 0,
-    target: new THREE.Vector3(0, 1.2, 0),
-    radius: 4.8,
-    theta: 0,
-    phi: Math.PI / 3.0,
-  });
+  // REQ-toonflow-canvas T3：导演视角轨道（球坐标）初值与换算抽到 scene/camera
+  const orbitStateRef = useRef(createOrbitState());
 
   const updateMainCameraPosition = useCallback(() => {
     if (!mainCameraRef.current) return;
-    const { target, radius, theta, phi } = orbitStateRef.current;
-    const clampedPhi = Math.max(0.05, Math.min(Math.PI - 0.05, phi));
-    const x = target.x + radius * Math.sin(clampedPhi) * Math.sin(theta);
-    const y = target.y + radius * Math.cos(clampedPhi);
-    const z = target.z + radius * Math.sin(clampedPhi) * Math.cos(theta);
-    mainCameraRef.current.position.set(x, y, z);
-    mainCameraRef.current.lookAt(target);
+    applyOrbitToCamera(mainCameraRef.current, orbitStateRef.current);
   }, []);
 
-  const minimaxPromptPreview = useMemo(() => {
-    const framingObj = FRAMING_PRESETS.find((f) => f.id === framing);
-    const motionObj = MOTION_PRESETS.find((m) => m.id === motion);
-    const parts = [`Motion: ${motionObj?.minimaxCode || motion}`, `Framing: ${framingObj?.label || framing}`, `Lens: ${focalLength}mm`];
-    if (Math.abs(cameraRoll) > 0.5) parts.push(`Dutch Roll: ${cameraRoll > 0 ? '+' : ''}${cameraRoll.toFixed(1)}°`);
-    if (motionSpeed !== '1.0x') parts.push(`Speed: ${motionSpeed}`);
-    if (castLayout !== 'solo') parts.push(`Cast Staging: ${castLayout.toUpperCase()}`);
-    return `[Camera: ${parts.join(', ')}]`;
-  }, [framing, motion, focalLength, cameraRoll, motionSpeed, castLayout]);
+  // REQ-toonflow-canvas T3：海螺运镜提示词与画布 director3d 节点同源（scene/presets）
+  const minimaxPromptPreview = useMemo(
+    () => buildMinimaxCameraPrompt({ framing, motion, focalLength, cameraRoll, motionSpeed, castLayout }),
+    [framing, motion, focalLength, cameraRoll, motionSpeed, castLayout],
+  );
 
   // 道具面板条目：只保留**内置**道具。
   // 插件道具（director_packs.props）已条目化（设计 §12）：宿主注入 toggleProp/isPropOn，
   // 行由 `UISlot host="director3d.props"` 渲染，不再靠 `packRev` 重算这份数组。
-  const propOptions = useMemo(() => [
-    { id: 'sword' as StagePropType, label: '浮空飞剑', icon: '🗡️', sub: '程序化' },
-    { id: 'shield' as StagePropType, label: '聚能护盾', icon: '🛡️', sub: '程序化' },
-    { id: 'magic_circle' as StagePropType, label: '地面符文阵', icon: '🌀', sub: '程序化' },
-    { id: 'chair' as StagePropType, label: '休闲椅', icon: '🪑', sub: 'SheenChair.glb' },
-    { id: 'helmet' as StagePropType, label: '破损头盔', icon: '⛑️', sub: 'DamagedHelmet.glb' },
-    { id: 'camera' as StagePropType, label: '复古相机', icon: '📷', sub: 'AntiqueCamera.glb' },
-    { id: 'avocado' as StagePropType, label: '牛油果', icon: '🥑', sub: 'Avocado.glb' },
-    { id: 'boombox' as StagePropType, label: '音响', icon: '🔊', sub: 'BoomBox.glb' },
-  ], []);
+  const propOptions = BUILTIN_PROP_OPTIONS;
 
   const handleResetView = useCallback(() => {
     orbitStateRef.current.target.set(0, 1.2, 0);
@@ -941,13 +786,8 @@ export const Director3DStage: React.FC = () => {
     }
     scene.add(helper);
     cameraHelperRef.current = helper;
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.15;
+    // REQ-toonflow-canvas T3：渲染参数（软阴影 / ACES / 曝光）与画布迷你舞台共用 scene/stageSetup
+    const renderer = createStageRenderer({ width, height });
     // 挂载前先清掉容器里的残留 canvas。
     // 必须这么做：本 effect 体里一旦有语句抛异常，React 就拿不到 return 的清理函数，
     // 上一次挂上去的 canvas 会永久留在 DOM 里。两个 canvas 都是 position:static 的兄弟节点，
@@ -957,19 +797,10 @@ export const Director3DStage: React.FC = () => {
     containerRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
     // 基础光（会被环境光覆盖，保留兜底；灯光面板通过 ref 实时控制）
-    const ambient = new THREE.AmbientLight(0x1a1528, 1.8);
-    scene.add(ambient);
-    ambientRef.current = ambient;
-    const keyLight = new THREE.DirectionalLight(0x7c3aed, 3.2);
-    keyLight.position.set(4, 5, 3.5);
-    keyLight.castShadow = true;
-    keyLight.shadow.mapSize.set(1024, 1024);
-    scene.add(keyLight);
-    keyLightRef.current = keyLight;
-    const rimLight = new THREE.DirectionalLight(0x00d2ff, 3.5);
-    rimLight.position.set(-3.5, 3.5, -3);
-    scene.add(rimLight);
-    rimLightRef.current = rimLight;
+    const lights = createThreePointLights(scene);
+    ambientRef.current = lights.ambient;
+    keyLightRef.current = lights.key;
+    rimLightRef.current = lights.rim;
     // 环境组
     const envGroup = new THREE.Group();
     envGroup.name = 'env_group';
@@ -1124,113 +955,8 @@ export const Director3DStage: React.FC = () => {
   // ============================================================
   useEffect(() => {
     if (!sceneRef.current || !envGroupRef.current) return;
-    const envGroup = envGroupRef.current;
-    while (envGroup.children.length) envGroup.remove(envGroup.children[0]);
-    const scene = sceneRef.current;
-    // 清理旧光
-    const toRemove: THREE.Object3D[] = [];
-    scene.traverse((obj) => { if ((obj as any).isLight && obj.name.startsWith('env_')) toRemove.push(obj); });
-    toRemove.forEach((o) => scene.remove(o));
-    if (environment === 'cyber_studio') {
-      scene.background = new THREE.Color(0x07070a);
-      scene.fog = new THREE.FogExp2(0x0a0a1a, 0.06);
-      const floor = new THREE.Mesh(new THREE.PlaneGeometry(24, 24), new THREE.MeshStandardMaterial({ color: 0x0f0f1a, metalness: 0.6, roughness: 0.35 }));
-      floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; envGroup.add(floor);
-      const grid = new THREE.GridHelper(20, 40, 0x7c3aed, 0x1a1a2e); grid.position.y = 0.01; envGroup.add(grid);
-      // 霓虹环
-      const ring = new THREE.Mesh(new THREE.RingGeometry(1.5, 1.55, 64), new THREE.MeshBasicMaterial({ color: 0x7c3aed, side: THREE.DoubleSide }));
-      ring.rotation.x = Math.PI / 2; ring.position.y = 0.02; envGroup.add(ring);
-      // 远景城市剪影
-      for (let i = 0; i < 18; i++) {
-        const h = 1.5 + Math.random() * 3;
-        const b = new THREE.Mesh(new THREE.BoxGeometry(0.6 + Math.random() * 0.7, h, 0.6), new THREE.MeshStandardMaterial({ color: 0x1a1a2e, emissive: 0x7c3aed, emissiveIntensity: 0.15 }));
-        const angle = (i / 18) * Math.PI * 2;
-        const r = 8 + Math.random() * 2;
-        b.position.set(Math.cos(angle) * r, h / 2, Math.sin(angle) * r);
-        envGroup.add(b);
-        // 窗光
-        for (let w = 0; w < 3; w++) {
-          const win = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 0.12), new THREE.MeshBasicMaterial({ color: 0x00d2ff, transparent: true, opacity: 0.6 }));
-          win.position.set(b.position.x + (Math.random() - 0.5) * 0.3, h * 0.3 + w * 0.4, b.position.z + 0.31);
-          win.lookAt(0, win.position.y, 0);
-          envGroup.add(win);
-        }
-      }
-      const spot = new THREE.SpotLight(0x7c3aed, 18, 12, Math.PI / 5, 0.4); spot.position.set(0, 5, 2); spot.target.position.set(0, 0, 0); spot.name = 'env_spot'; scene.add(spot); scene.add(spot.target);
-      const rim = new THREE.DirectionalLight(0x00d2ff, 4); rim.position.set(-4, 4, -3); rim.name = 'env_rim'; scene.add(rim);
-    } else if (environment === 'xianxia_cloud') {
-      scene.background = new THREE.Color(0x87ceeb);
-      scene.fog = new THREE.FogExp2(0xcfe9f5, 0.025);
-      const ground = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshStandardMaterial({ color: 0xe8f5f0, roughness: 0.9 }));
-      ground.rotation.x = -Math.PI / 2; ground.position.y = -0.5; ground.receiveShadow = true; envGroup.add(ground);
-      // 浮空山
-      const mtnMat = new THREE.MeshStandardMaterial({ color: 0x5a6d7e, roughness: 0.95, flatShading: true });
-      for (let i = 0; i < 6; i++) {
-        const mtn = new THREE.Mesh(new THREE.ConeGeometry(1.2 + Math.random() * 1.0, 3 + Math.random() * 2, 6), mtnMat);
-        const a = (i / 6) * Math.PI * 2; const r = 7 + Math.random() * 4;
-        mtn.position.set(Math.cos(a) * r, 1 + Math.random(), Math.sin(a) * r); mtn.castShadow = true; envGroup.add(mtn);
-      }
-      // 云海
-      const clouds = new THREE.Group(); clouds.name = 'clouds_group';
-      const cloudMat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, roughness: 1 });
-      for (let i = 0; i < 12; i++) {
-        const cl = new THREE.Group();
-        for (let j = 0; j < 4; j++) {
-          const s = new THREE.Mesh(new THREE.SphereGeometry(0.5 + Math.random() * 0.4, 12, 12), cloudMat);
-          s.position.set((Math.random() - 0.5) * 1.2, (Math.random() - 0.5) * 0.3, (Math.random() - 0.5) * 1.2);
-          cl.add(s);
-        }
-        const a = (i / 12) * Math.PI * 2; const r = 4 + Math.random() * 8;
-        cl.position.set(Math.cos(a) * r, 2 + Math.random() * 2, Math.sin(a) * r); clouds.add(cl);
-      }
-      envGroup.add(clouds);
-      const sun = new THREE.DirectionalLight(0xfff2cc, 3.5); sun.position.set(5, 8, 3); sun.castShadow = true; sun.name = 'env_sun'; scene.add(sun);
-      const fill = new THREE.HemisphereLight(0x87ceeb, 0xe8f5f0, 1.2); fill.name = 'env_fill'; scene.add(fill);
-    } else if (environment === 'desert_battle') {
-      scene.background = new THREE.Color(0xff8c42);
-      scene.fog = new THREE.FogExp2(0xffa85c, 0.035);
-      const sand = new THREE.Mesh(new THREE.PlaneGeometry(40, 40, 20, 20), new THREE.MeshStandardMaterial({ color: 0xc2a878, roughness: 1, metalness: 0 }));
-      // 起伏沙丘
-      const pos = sand.geometry.attributes.position as THREE.BufferAttribute;
-      for (let i = 0; i < pos.count; i++) { const x = pos.getX(i), y = pos.getY(i); pos.setZ(i, Math.sin(x * 0.3) * 0.4 + Math.cos(y * 0.3) * 0.3); }
-      pos.needsUpdate = true; sand.geometry.computeVertexNormals();
-      sand.rotation.x = -Math.PI / 2; sand.position.y = -0.3; sand.receiveShadow = true; envGroup.add(sand);
-      // 岩石
-      const rockMat = new THREE.MeshStandardMaterial({ color: 0x8b7355, roughness: 0.95 });
-      for (let i = 0; i < 8; i++) {
-        const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.5 + Math.random() * 0.5), rockMat);
-        const a = Math.random() * Math.PI * 2; const r = 3 + Math.random() * 6;
-        rock.position.set(Math.cos(a) * r, 0.1, Math.sin(a) * r); rock.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0); rock.castShadow = true; envGroup.add(rock);
-      }
-      const sun2 = new THREE.DirectionalLight(0xff6b35, 4); sun2.position.set(4, 6, -2); sun2.castShadow = true; sun2.name = 'env_sun'; scene.add(sun2);
-      const amber = new THREE.PointLight(0xff8c42, 2, 20); amber.position.set(0, 2, 0); amber.name = 'env_amber'; scene.add(amber);
-    } else if (environment === 'neon_city') {
-      scene.background = new THREE.Color(0x0a0a1a);
-      scene.fog = new THREE.FogExp2(0x0a0a1a, 0.055);
-      const street = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), new THREE.MeshStandardMaterial({ color: 0x1a1a2e, metalness: 0.8, roughness: 0.2 }));
-      street.rotation.x = -Math.PI / 2; street.position.y = 0; street.receiveShadow = true; envGroup.add(street);
-      // 雨夜建筑
-      for (let i = 0; i < 20; i++) {
-        const h = 2 + Math.random() * 4;
-        const b = new THREE.Mesh(new THREE.BoxGeometry(0.8 + Math.random(), h, 0.8), new THREE.MeshStandardMaterial({ color: 0x0f0f1e }));
-        const a = (i / 20) * Math.PI * 2; const r = 6 + Math.random() * 5;
-        b.position.set(Math.cos(a) * r, h / 2, Math.sin(a) * r); envGroup.add(b);
-        // 霓虹窗
-        const neonColors = [0xff0080, 0x00ffff, 0x7c3aed, 0xffaa00];
-        for (let k = 0; k < 2; k++) {
-          const win = new THREE.Mesh(new THREE.PlaneGeometry(0.25, 0.35), new THREE.MeshBasicMaterial({ color: neonColors[i % neonColors.length], transparent: true, opacity: 0.7 }));
-          win.position.set(b.position.x, h * 0.3 + k * 0.8, b.position.z + 0.42);
-          win.lookAt(0, win.position.y, 0); envGroup.add(win);
-        }
-      }
-      // 街灯
-      for (let i = 0; i < 4; i++) {
-        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 3), new THREE.MeshStandardMaterial({ color: 0x333333 }));
-        const a = (i / 4) * Math.PI * 2 + 0.3; pole.position.set(Math.cos(a) * 3.5, 1.5, Math.sin(a) * 3.5); envGroup.add(pole);
-        const lamp = new THREE.PointLight(0xffaa00, 3, 6); lamp.position.set(pole.position.x, 3, pole.position.z); lamp.name = 'env_lamp'; scene.add(lamp);
-      }
-      const moon = new THREE.DirectionalLight(0x9bbcff, 1.2); moon.position.set(-4, 6, -4); moon.name = 'env_moon'; scene.add(moon);
-    }
+    // REQ-toonflow-canvas T3：环境预设构建抽到 scene/environments（画布迷你舞台共用）
+    buildStageEnvironment(sceneRef.current, envGroupRef.current, environment);
   }, [environment]);
 
   // ============================================================
@@ -1274,38 +1000,20 @@ export const Director3DStage: React.FC = () => {
     };
 
     (async () => {
-      // Protagonist - 人体布偶（木偶关节 + 姿态预设）
-      const protagonist = createPoseMannequin({ pose, role: 'protagonist', accentColor: 0x00d2ff });
-      protagonist.name = 'entity_protagonist';
-      applySavedJoints(protagonist, 'entity_protagonist');
-      if (!applySaved(protagonist)) protagonist.position.set(0, 0, 0);
-      stage.add(protagonist);
-      markBaseY(protagonist);
-      protagonistGroupRef.current = protagonist;
-
-      // Antagonist
-      if (castLayout === 'duel' || castLayout === 'ots' || castLayout === 'surrounded') {
-        const antagonist = createPoseMannequin({ pose: pose === 'fight' ? 'fight' : 'stand', role: 'antagonist', accentColor: 0xff3b30 });
-        antagonist.name = 'entity_antagonist';
-        applySavedJoints(antagonist, 'entity_antagonist');
-        if (!applySaved(antagonist)) {
-          if (castLayout === 'duel') { antagonist.position.set(0, 0, -2.3); antagonist.rotation.y = Math.PI; }
-          else if (castLayout === 'ots') { antagonist.position.set(-0.35, 0, -2.5); antagonist.rotation.y = Math.PI * 0.9; }
-          else { antagonist.position.set(1.9, 0, -1.2); antagonist.rotation.y = -Math.PI * 0.6; }
+      // 人体布偶（木偶关节 + 姿态预设）：主角 → 对手 → 配角
+      // REQ-toonflow-canvas T3：站位 → 上场角色/默认摆位表抽到 scene/presets.castMembers（画布迷你舞台同源）
+      for (const member of castMembers(castLayout, pose)) {
+        const doll = createPoseMannequin({ pose: member.pose, role: member.role, accentColor: member.accentColor });
+        doll.name = member.entity;
+        applySavedJoints(doll, member.entity);
+        if (!applySaved(doll)) {
+          doll.position.set(member.position[0], member.position[1], member.position[2]);
+          if (member.rotationY !== undefined) doll.rotation.y = member.rotationY;
         }
-        stage.add(antagonist);
-        markBaseY(antagonist);
-        antagonistGroupRef.current = antagonist;
-      } else antagonistGroupRef.current = null;
-
-      if (cancelled) return;
-      if (castLayout === 'surrounded') {
-        const sup = createPoseMannequin({ pose: 'fight', role: 'supporting', accentColor: 0x60a5fa });
-        sup.name = 'entity_supporting';
-        applySavedJoints(sup, 'entity_supporting');
-        if (!applySaved(sup)) { sup.position.set(-1.9, 0, -1.2); sup.rotation.y = Math.PI * 0.6; }
-        stage.add(sup);
-        markBaseY(sup);
+        stage.add(doll);
+        markBaseY(doll);
+        if (member.role === 'protagonist') protagonistGroupRef.current = doll;
+        else if (member.role === 'antagonist') antagonistGroupRef.current = doll;
       }
 
       if (cancelled) return;
@@ -1418,7 +1126,6 @@ export const Director3DStage: React.FC = () => {
   const updateVirtualCameraOptics = useCallback(() => {
     if (!virtualCameraRef.current) return;
     const vCam = virtualCameraRef.current;
-    const sensorHeight = 24;
     const presetKey = `${framing}|${focalLength}|${cameraRoll}|${projectAspectNum}`;
     // 机位覆盖优先：用户切到某个已保存机位时，光圈/景别预设不再抢占视角；
     // 一旦用户改了景别/焦距/roll（presetKey 变化），自动解除覆盖回到预设机位。
@@ -1437,49 +1144,21 @@ export const Director3DStage: React.FC = () => {
       if (cameraHelperRef.current) cameraHelperRef.current.update();
       return;
     }
-    const fovCalculated = 2 * Math.atan(sensorHeight / (2 * focalLength)) * (180 / Math.PI);
-    vCam.fov = Math.max(12, Math.min(105, fovCalculated));
+    // REQ-toonflow-canvas T3：焦距→FOV、景别→机位表抽到 scene/presets（画布 director3d 节点同源）
+    vCam.fov = focalLengthToFov(focalLength);
     // 摄像机画幅 = 项目画幅（与生成结果一致），不再用独立遮幅
     vCam.aspect = projectAspectNum;
-    let target = new THREE.Vector3(0, 1.25, 0);
-    let camPos = new THREE.Vector3(0, 1.3, 2.5);
-    switch (framing) {
-      case 'extreme_close_up': camPos.set(0, 1.68, 0.75); target.set(0, 1.68, 0); break;
-      case 'close_up': camPos.set(0, 1.55, 1.35); target.set(0, 1.5, 0); break;
-      case 'medium': camPos.set(0, 1.3, 2.4); target.set(0, 1.25, 0); break;
-      case 'full': camPos.set(0, 1.15, 3.8); target.set(0, 1.0, 0); break;
-      case 'long': camPos.set(0, 1.6, 6.0); target.set(0, 1.1, 0); break;
-      case 'bird_eye': camPos.set(0, 4.5, 2.0); target.set(0, 0.5, 0); break;
-      case 'low_angle': camPos.set(0, 0.25, 1.8); target.set(0, 1.5, 0); break;
-      case 'over_shoulder': camPos.set(0.55, 1.55, 1.8); target.set(-0.2, 1.4, -1.2); break;
-      case 'dutch_angle': camPos.set(0, 1.2, 2.2); target.set(0, 1.25, 0); break;
-      case 'high_angle': camPos.set(0, 2.8, 2.8); target.set(0, 1.0, 0); break;
-    }
-    vCam.position.copy(camPos);
-    vCam.lookAt(target);
-    if (cameraRoll !== 0) vCam.rotation.z = (cameraRoll * Math.PI) / 180;
+    const framingPose = framingCameraPose(framing);
+    vCam.position.set(framingPose.position[0], framingPose.position[1], framingPose.position[2]);
+    vCam.lookAt(framingPose.target[0], framingPose.target[1], framingPose.target[2]);
+    applyCameraRoll(vCam, cameraRoll);
     vCam.updateProjectionMatrix();
     if (cameraHelperRef.current) cameraHelperRef.current.update();
   }, [framing, focalLength, cameraRoll, projectAspectNum]);
 
   useEffect(() => { updateVirtualCameraOptics(); }, [updateVirtualCameraOptics]);
 
-  const calculateMotionWaypoints = useCallback((motionType: CameraMotion, startPos: THREE.Vector3, target: THREE.Vector3): THREE.Vector3[] => {
-    const points: THREE.Vector3[] = [];
-    points.push(startPos.clone());
-    switch (motionType) {
-      case 'push_in': points.push(startPos.clone().lerp(target, 0.45)); points.push(startPos.clone().lerp(target, 0.75)); break;
-      case 'pull_out': points.push(new THREE.Vector3(startPos.x, startPos.y + 0.3, startPos.z + 1.2)); points.push(new THREE.Vector3(startPos.x, startPos.y + 0.6, startPos.z + 2.4)); break;
-      case 'orbit': { const r = startPos.distanceTo(target); for (let i = 1; i <= 6; i++) { const angle = (i / 6) * Math.PI * 0.9; points.push(new THREE.Vector3(target.x + r * Math.sin(angle), startPos.y, target.z + r * Math.cos(angle))); } break; }
-      case 'orbit_boom_up': { const r = startPos.distanceTo(target); for (let i = 1; i <= 6; i++) { const angle = (i / 6) * Math.PI * 0.9; points.push(new THREE.Vector3(target.x + r * Math.sin(angle), startPos.y + (i / 6) * 1.5, target.z + r * Math.cos(angle))); } break; }
-      case 'truck_left': points.push(new THREE.Vector3(startPos.x - 0.8, startPos.y, startPos.z)); points.push(new THREE.Vector3(startPos.x - 1.6, startPos.y, startPos.z)); break;
-      case 'truck_right': points.push(new THREE.Vector3(startPos.x + 0.8, startPos.y, startPos.z)); points.push(new THREE.Vector3(startPos.x + 1.6, startPos.y, startPos.z)); break;
-      case 'boom_up': points.push(new THREE.Vector3(startPos.x, startPos.y + 0.9, startPos.z)); points.push(new THREE.Vector3(startPos.x, startPos.y + 1.8, startPos.z)); break;
-      case 'pan_left_crane_down': points.push(new THREE.Vector3(startPos.x - 1.0, startPos.y - 0.5, startPos.z)); points.push(new THREE.Vector3(startPos.x - 1.8, startPos.y - 1.0, startPos.z - 0.4)); break;
-      default: points.push(startPos.clone().lerp(target, 0.5));
-    }
-    return points;
-  }, []);
+  // REQ-toonflow-canvas T3：运镜轨迹预览路径点 calculateMotionWaypoints 抽到 scene/camera
 
   useEffect(() => {
     if (!sceneRef.current || !virtualCameraRef.current || !showTrajectory) {
@@ -1501,7 +1180,7 @@ export const Director3DStage: React.FC = () => {
     scene.add(line);
     trajectoryLineRef.current = line;
     return () => { if (trajectoryLineRef.current && sceneRef.current) sceneRef.current.remove(trajectoryLineRef.current); };
-  }, [motion, framing, showTrajectory, calculateMotionWaypoints]);
+  }, [motion, framing, showTrajectory]);
 
   const handleToggleSimulation = () => {
     if (!virtualCameraRef.current) return;
@@ -1535,27 +1214,16 @@ export const Director3DStage: React.FC = () => {
       walkSegLens.push(len);
       walkTotal += len;
     }
-    const duration = motionSpeed === '0.5x' ? 4500 : motionSpeed === '1.5x' ? 1800 : motionSpeed === '2.0x' ? 1200 : 2500;
+    // REQ-toonflow-canvas T3：运镜时长 / 缓动 / 每帧位移抽到 scene/presets + scene/camera（画布 director3d 同源）
+    const duration = motionDurationMs(motionSpeed);
     const step = (now: number) => {
       const elapsed = now - startTime;
       const progress = Math.min(1, elapsed / duration);
       setScrubberProgress(progress);
-      let ease = progress;
-      if (motionEasing === 'ease_in_out') ease = 0.5 * (1 - Math.cos(Math.PI * progress));
-      else if (motionEasing === 'explosive') ease = Math.pow(progress, 0.4);
-      else if (motionEasing === 'slow_out') ease = Math.sin((progress * Math.PI) / 2);
-      if (motion === 'push_in') cam.position.z = startPos.z - ease * 0.95;
-      else if (motion === 'pull_out') cam.position.z = startPos.z + ease * 1.3;
-      else if (motion === 'orbit') { const angle = ease * Math.PI * 0.85; cam.position.x = Math.sin(angle) * startPos.z; cam.position.z = Math.cos(angle) * startPos.z; }
-      else if (motion === 'orbit_boom_up') { const angle = ease * Math.PI * 0.85; cam.position.x = Math.sin(angle) * startPos.z; cam.position.z = Math.cos(angle) * startPos.z; cam.position.y = startPos.y + ease * 1.5; }
-      else if (motion === 'dolly_zoom') { cam.position.z = startPos.z - ease * 1.0; cam.fov = startFov + ease * 22; cam.updateProjectionMatrix(); }
-      else if (motion === 'fast_push_shake') { cam.position.z = startPos.z - ease * 1.2; if (progress > 0.6) { cam.position.x = (Math.random() - 0.5) * 0.15; cam.position.y = startPos.y + (Math.random() - 0.5) * 0.15; } }
-      else if (motion === 'truck_left') cam.position.x = startPos.x - ease * 1.5;
-      else if (motion === 'truck_right') cam.position.x = startPos.x + ease * 1.5;
-      else if (motion === 'boom_up') cam.position.y = startPos.y + ease * 1.6;
-      else if (motion === 'shake') { cam.position.x = startPos.x + (Math.random() - 0.5) * 0.12; cam.position.y = startPos.y + (Math.random() - 0.5) * 0.12; }
+      const ease = easeMotionProgress(progress, motionEasing);
+      applyMotionFrame(cam, motion, startPos, startFov, ease, progress);
       cam.lookAt(0, 1.25, 0);
-      if (cameraRoll !== 0) cam.rotation.z = (cameraRoll * Math.PI) / 180;
+      applyCameraRoll(cam, cameraRoll);
       cam.updateProjectionMatrix();
       // 主角沿走位路径等速行走，朝向行进方向（与运镜同一 easing 共进退）
       if (walkPath.length > 1 && walkTotal > 0.001 && protagonistGroupRef.current) {
@@ -1599,41 +1267,16 @@ export const Director3DStage: React.FC = () => {
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+    // REQ-toonflow-canvas T3：射线拾取 / 关节拾取抽到 scene/picking（画布迷你舞台同一套逻辑）
     const pickRoot = (clientX: number, clientY: number): string | null => {
       if (!sceneRef.current || !mainCameraRef.current || !stageEntitiesGroupRef.current) return null;
-      const rect = container.getBoundingClientRect();
-      const x = ((clientX - rect.left) / rect.width) * 2 - 1;
-      const y = -((clientY - rect.top) / rect.height) * 2 + 1;
-      const raycaster = new THREE.Raycaster();
-      raycaster.setFromCamera(new THREE.Vector2(x, y), mainCameraRef.current);
-      const intersects = raycaster.intersectObjects(stageEntitiesGroupRef.current.children, true);
-      for (const hit of intersects) {
-        let cur: THREE.Object3D | null = hit.object;
-        while (cur && cur.parent && cur.parent !== stageEntitiesGroupRef.current) cur = cur.parent;
-        if (cur && (cur as THREE.Object3D).name) return (cur as THREE.Object3D).name;
-      }
-      return null;
+      const raycaster = raycasterAt(clientX, clientY, container.getBoundingClientRect(), mainCameraRef.current);
+      return pickStageRoot(raycaster, stageEntitiesGroupRef.current);
     };
     const pickJointAt = (clientX: number, clientY: number): { entity: string; jointId: string; group: THREE.Object3D; limits: JointAxisLimits } | null => {
       if (!sceneRef.current || !mainCameraRef.current || !stageEntitiesGroupRef.current) return null;
-      const rect = container.getBoundingClientRect();
-      const x = ((clientX - rect.left) / rect.width) * 2 - 1;
-      const y = -((clientY - rect.top) / rect.height) * 2 + 1;
-      const raycaster = new THREE.Raycaster();
-      raycaster.setFromCamera(new THREE.Vector2(x, y), mainCameraRef.current);
-      const hits = raycaster.intersectObjects(stageEntitiesGroupRef.current.children, true);
-      for (const hit of hits) {
-        const jointId = (hit.object.userData as any)?.jointPick as string | undefined;
-        if (!jointId) continue;
-        let cur: THREE.Object3D | null = hit.object;
-        while (cur && cur.parent && cur.parent !== stageEntitiesGroupRef.current) cur = cur.parent;
-        const entity = cur?.name || '';
-        if (!entity || lockedIdsRef.current[entity]) continue;
-        const entry = (cur?.userData as any)?.mannequinJoints?.[jointId];
-        if (!entry?.group) continue;
-        return { entity, jointId, group: entry.group, limits: entry.limits || {} };
-      }
-      return null;
+      const raycaster = raycasterAt(clientX, clientY, container.getBoundingClientRect(), mainCameraRef.current);
+      return pickJoint(raycaster, stageEntitiesGroupRef.current, (entity) => !!lockedIdsRef.current[entity]);
     };
     const onMouseDown = (e: MouseEvent) => {
       mouseDownPosRef.current = { x: e.clientX, y: e.clientY };
@@ -1641,11 +1284,7 @@ export const Director3DStage: React.FC = () => {
       const tc: any = transformControlsRef.current;
       if (tc && (tc.dragging || tc.axis)) return;
       if (e.button === 0 && sceneRef.current && mainCameraRef.current) {
-        const rect = container.getBoundingClientRect();
-        const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-        const y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-        const raycaster = new THREE.Raycaster();
-        raycaster.setFromCamera(new THREE.Vector2(x, y), mainCameraRef.current);
+        const raycaster = raycasterAt(e.clientX, e.clientY, container.getBoundingClientRect(), mainCameraRef.current);
         // 走位模式：点击地面打路径点（最多 6 个），不触发旋转/选中
         if (walkModeRef.current) {
           const hit = new THREE.Vector3();
@@ -1712,32 +1351,8 @@ export const Director3DStage: React.FC = () => {
         jd.lastX = e.clientX; jd.lastY = e.clientY;
         if (!dx && !dy) return;
         jd.moved = true;
-        const group = jd.group;
-        const lim = jd.limits || {};
-        const twist = e.shiftKey || jd.twist;
-        if (twist && Math.abs(dx) >= Math.abs(dy)) {
-          group.rotation.y = clampJointAxis(group.rotation.y + dx * 0.012, lim.y);
-        } else {
-          const applyWorld = (axis: THREE.Vector3, angle: number) => {
-            if (!angle) return;
-            const wq = new THREE.Quaternion().setFromAxisAngle(axis.normalize(), angle);
-            const pq = new THREE.Quaternion();
-            (group.parent || group).getWorldQuaternion(pq);
-            const localDelta = pq.clone().invert().multiply(wq).multiply(pq);
-            group.quaternion.premultiply(localDelta);
-          };
-          applyWorld(new THREE.Vector3(0, 1, 0), dx * 0.012);
-          const cam = mainCameraRef.current;
-          if (cam) {
-            const right = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0);
-            applyWorld(right, dy * 0.012);
-          }
-          const e2 = new THREE.Euler().setFromQuaternion(group.quaternion, 'XYZ');
-          e2.x = clampJointAxis(e2.x, lim.x);
-          e2.y = clampJointAxis(e2.y, lim.y);
-          e2.z = clampJointAxis(e2.z, lim.z);
-          group.quaternion.setFromEuler(e2);
-        }
+        // REQ-toonflow-canvas T3：关节拖拽（世界轴增量旋转 + 限位钳制）抽到 scene/picking.dragRotateJoint
+        dragRotateJoint(jd.group, jd.limits, dx, dy, e.shiftKey || jd.twist, mainCameraRef.current);
         if (selectionBoxRef.current) selectionBoxRef.current.update();
         return;
       }
@@ -2128,7 +1743,7 @@ export const Director3DStage: React.FC = () => {
 
   const recordSecsRefValue = () => {
     // 录制时长按当前运镜模拟时长估算（与模拟同起同止）
-    return motionSpeed === '0.5x' ? 4.5 : motionSpeed === '1.5x' ? 1.8 : motionSpeed === '2.0x' ? 1.2 : 2.5;
+    return motionDurationMs(motionSpeed) / 1000;
   };
 
   // 录制结果显式设为本镜视频参考（上传成功即资产地址；仅本地时提示会话有效期）
@@ -2221,19 +1836,10 @@ export const Director3DStage: React.FC = () => {
     return () => { restoreFns.reverse().forEach((f) => { try { f(); } catch {} }); clayMat.dispose(); };
   }, []);
 
-  const buildClayPrompt = useCallback((secs: number): string => {
-    const framingLabel = FRAMING_PRESETS.find((f) => f.id === framing)?.label || framing;
-    const motionLabel = MOTION_PRESETS.find((m) => m.id === motion)?.label || motion;
-    const wp = waypointsRef.current;
-    const lines = [
-      '参考 @video1 的运镜、构图、景别、空间关系、主体轨迹与镜头节奏（@video1 为白模调度参考，忽略其灰色材质与光照，不要复制它的外观）。',
-      '将白模渲染为：<在此填写目标风格/材质/光照/氛围，或引用 @image1 的角色外形与 @image2 的场景>。',
-      `镜头：${framingLabel}，焦距 ${focalLength}mm${Math.abs(cameraRoll) > 0.5 ? `，荷兰角 ${cameraRoll > 0 ? '+' : ''}${cameraRoll.toFixed(1)}°` : ''}；运镜：${motionLabel}（${motionSpeed}）；时长约 ${secs.toFixed(1)}s；画幅 ${projectAspect}。`,
-      wp.length ? `主角走位：${wp.map((w, i) => `P${i + 1}(${w.x.toFixed(1)},${w.z.toFixed(1)})`).join(' → ')}。` : '',
-      '约束：单镜头连贯无剪辑；保持主体位置、镜头路径与节奏不变，不要重复描述运镜。',
-    ];
-    return lines.filter(Boolean).join('\n');
-  }, [framing, motion, focalLength, cameraRoll, motionSpeed, projectAspect]);
+  // REQ-toonflow-canvas T3：白模结构化提示词抽到 scene/presets.buildClayPrompt（纯函数）
+  const buildClayPrompt = useCallback((secs: number): string => buildClayPromptText({
+    framing, motion, focalLength, cameraRoll, motionSpeed, aspect: projectAspect, secs, waypoints: waypointsRef.current,
+  }), [framing, motion, focalLength, cameraRoll, motionSpeed, projectAspect]);
 
   const handleExportClay = async () => {
     if (!activeShot) { setClayMsg('请先选择分镜'); return; }
@@ -2758,420 +2364,3 @@ export const Director3DStage: React.FC = () => {
     </div>
   );
 };
-
-// ============================================================
-// 程序化 PBR 人体（道具兜底保留；初始角色已换为人体布偶 createPoseMannequin）
-// ============================================================
-function createRealisticHuman(opts: { pose: PosePreset; role: string; primaryColor: number; accentColor: number; name: string; hairColor: number }): THREE.Group {
-  const group = new THREE.Group();
-  const skinMat = new THREE.MeshStandardMaterial({ color: 0xffdcc2, roughness: 0.45, metalness: 0.02 });
-  const skinShadowMat = new THREE.MeshStandardMaterial({ color: 0xe8b8a0, roughness: 0.55 });
-  const clothMat = new THREE.MeshStandardMaterial({ color: opts.primaryColor, roughness: 0.35, metalness: 0.12 });
-  const clothDarkMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(opts.primaryColor).multiplyScalar(0.6).getHex(), roughness: 0.5 });
-  const accentMat = new THREE.MeshStandardMaterial({ color: opts.accentColor, emissive: opts.accentColor, emissiveIntensity: 0.35, roughness: 0.25, metalness: 0.2 });
-  const hairMat = new THREE.MeshStandardMaterial({ color: opts.hairColor, roughness: 0.7, metalness: 0.0 });
-  const eyeWhiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.2 });
-  const pupilMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 0.1 });
-  const irisColors: Record<string, number> = { protagonist: 0x4a90e2, antagonist: 0xff3b30, supporting: 0x34c759 };
-  const irisMat = new THREE.MeshStandardMaterial({ color: irisColors[opts.role] || 0x4a90e2, emissive: irisColors[opts.role] || 0x4a90e2, emissiveIntensity: 0.15 });
-
-  // 头部 - 颅骨
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.21, 32, 32), skinMat);
-  head.position.y = 1.68; head.castShadow = true; head.receiveShadow = true; group.add(head);
-  // 面部阴影层（下颌）
-  const jaw = new THREE.Mesh(new THREE.SphereGeometry(0.14, 16, 16), skinShadowMat);
-  jaw.position.set(0, 1.58, 0.06); jaw.scale.set(1, 0.8, 0.85); group.add(jaw);
-  // 头发 - 半球 + 侧发
-  const hairCap = new THREE.Mesh(new THREE.SphereGeometry(0.225, 32, 32, 0, Math.PI * 2, 0, Math.PI * 0.62), hairMat);
-  hairCap.position.y = 1.72; hairCap.rotation.x = -0.08; group.add(hairCap);
-  const hairBack = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.17, 0.22, 16), hairMat);
-  hairBack.position.set(0, 1.62, -0.08); group.add(hairBack);
-  // 耳朵
-  const earGeo = new THREE.SphereGeometry(0.045, 12, 12);
-  const earL = new THREE.Mesh(earGeo, skinMat); earL.position.set(-0.19, 1.66, 0); earL.scale.set(0.6, 1.2, 0.8); group.add(earL);
-  const earR = new THREE.Mesh(earGeo, skinMat); earR.position.set(0.19, 1.66, 0); earR.scale.set(0.6, 1.2, 0.8); group.add(earR);
-  // 眼部
-  const eyeGeo = new THREE.SphereGeometry(0.042, 16, 16);
-  const eyeL = new THREE.Mesh(eyeGeo, eyeWhiteMat); eyeL.position.set(-0.075, 1.70, 0.17); eyeL.scale.set(1, 0.9, 0.6); group.add(eyeL);
-  const eyeR = new THREE.Mesh(eyeGeo, eyeWhiteMat); eyeR.position.set(0.075, 1.70, 0.17); eyeR.scale.set(1, 0.9, 0.6); group.add(eyeR);
-  const pupilGeo = new THREE.SphereGeometry(0.022, 16, 16);
-  const pupilL = new THREE.Mesh(pupilGeo, pupilMat); pupilL.position.set(-0.075, 1.70, 0.205); group.add(pupilL);
-  const pupilR = new THREE.Mesh(pupilGeo, pupilMat); pupilR.position.set(0.075, 1.70, 0.205); group.add(pupilR);
-  const irisGeo = new THREE.SphereGeometry(0.012, 12, 12);
-  const irisL = new THREE.Mesh(irisGeo, irisMat); irisL.position.set(-0.075, 1.70, 0.215); group.add(irisL);
-  const irisR = new THREE.Mesh(irisGeo, irisMat); irisR.position.set(0.075, 1.70, 0.215); group.add(irisR);
-  // 眉毛
-  const browGeo = new THREE.BoxGeometry(0.09, 0.015, 0.01);
-  const browL = new THREE.Mesh(browGeo, hairMat); browL.position.set(-0.075, 1.735, 0.19); browL.rotation.z = 0.08; group.add(browL);
-  const browR = new THREE.Mesh(browGeo, hairMat); browR.position.set(0.075, 1.735, 0.19); browR.rotation.z = -0.08; group.add(browR);
-  // 鼻子
-  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.018, 0.06, 8), skinShadowMat); nose.position.set(0, 1.66, 0.21); nose.rotation.x = Math.PI; group.add(nose);
-  // 嘴
-  const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.012, 0.008), new THREE.MeshStandardMaterial({ color: 0x8b3a3a, roughness: 0.6 })); mouth.position.set(0, 1.60, 0.20); group.add(mouth);
-
-  // 颈部
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.09, 0.14, 12), skinMat); neck.position.y = 1.48; group.add(neck);
-  // 胸腔 + 服装
-  const chest = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.38, 0.24), clothMat); chest.position.y = 1.28; chest.castShadow = true; chest.receiveShadow = true; group.add(chest);
-  const chestDark = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.12, 0.245), clothDarkMat); chestDark.position.y = 1.18; group.add(chestDark);
-  // 腰带
-  const belt = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.06, 0.26), new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 0.3, metalness: 0.4 })); belt.position.y = 1.02; group.add(belt);
-  const buckle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.055, 0.03), accentMat); buckle.position.set(0, 1.02, 0.135); group.add(buckle);
-  // 胯部/下衣
-  const hips = new THREE.Mesh(new THREE.BoxGeometry(0.40, 0.18, 0.20), clothDarkMat); hips.position.y = 0.92; hips.castShadow = true; group.add(hips);
-
-  // 手臂 - 上臂/前臂 用胶囊近似（圆柱+球端）
-  const createArm = (isLeft: boolean, shoulderPos: THREE.Vector3, pose: PosePreset) => {
-    const armGroup = new THREE.Group(); armGroup.position.copy(shoulderPos);
-    const upperMat = clothMat;
-    const skinArmMat = skinMat;
-    // 上臂
-    const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.065, 0.32, 8, 16), isLeft ? upperMat : clothMat);
-    upper.position.y = -0.18; upper.castShadow = true; armGroup.add(upper);
-    // 肘关节
-    const elbow = new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 12), skinArmMat); elbow.position.y = -0.38; armGroup.add(elbow);
-    // 前臂
-    const fore = new THREE.Mesh(new THREE.CapsuleGeometry(0.055, 0.30, 8, 16), skinArmMat);
-    fore.position.y = -0.58; fore.castShadow = true; armGroup.add(fore);
-    // 手
-    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 12), skinArmMat); hand.position.y = -0.78; hand.scale.set(1, 1.2, 0.7); armGroup.add(hand);
-    // 手套/护腕
-    const guard = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.065, 0.08, 12), accentMat); guard.position.y = -0.68; armGroup.add(guard);
-    // 姿态驱动
-    if (pose === 'fight') {
-      if (isLeft) { armGroup.rotation.x = 1.0; armGroup.rotation.z = -0.6; armGroup.rotation.y = 0.3; }
-      else { armGroup.rotation.x = 0.6; armGroup.rotation.z = 0.5; }
-    } else if (pose === 'cast_spell') {
-      armGroup.rotation.x = 0.9; armGroup.rotation.z = isLeft ? -0.4 : 0.4; armGroup.rotation.y = isLeft ? -0.2 : 0.2;
-    } else if (pose === 'defend') {
-      armGroup.position.z += 0.15; armGroup.rotation.x = 1.1; armGroup.rotation.z = isLeft ? -0.2 : 0.2;
-    } else if (pose === 'run') {
-      armGroup.rotation.x = isLeft ? 0.5 : -0.5; armGroup.rotation.z = isLeft ? -0.3 : 0.3;
-    }
-    return armGroup;
-  };
-  const leftArm = createArm(true, new THREE.Vector3(0.26, 1.38, 0), opts.pose);
-  const rightArm = createArm(false, new THREE.Vector3(-0.26, 1.38, 0), opts.pose);
-  group.add(leftArm); group.add(rightArm);
-
-  // 腿部
-  const createLeg = (isLeft: boolean) => {
-    const legGroup = new THREE.Group();
-    legGroup.position.set(isLeft ? 0.13 : -0.13, 0.83, 0);
-    const thighMat = clothDarkMat;
-    const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.38, 8, 16), thighMat); thigh.position.y = -0.22; thigh.castShadow = true; legGroup.add(thigh);
-    const knee = new THREE.Mesh(new THREE.SphereGeometry(0.075, 12, 12), skinMat); knee.position.y = -0.45; legGroup.add(knee);
-    const shin = new THREE.Mesh(new THREE.CapsuleGeometry(0.075, 0.36, 8, 16), skinMat); shin.position.y = -0.68; shin.castShadow = true; legGroup.add(shin);
-    const foot = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.07, 0.24), new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.4 })); foot.position.set(0, -0.92, 0.05); foot.castShadow = true; legGroup.add(foot);
-    if (opts.pose === 'fight' || opts.pose === 'run') { legGroup.rotation.x = isLeft ? 0.25 : -0.2; legGroup.position.z += isLeft ? 0.15 : -0.12; }
-    if (opts.pose === 'kneel') { if (!isLeft) { legGroup.rotation.x = -1.2; legGroup.position.y -= 0.15; } }
-    if (opts.pose === 'fly') { legGroup.rotation.x = -0.4; legGroup.position.y += 0.1; }
-    return legGroup;
-  };
-  group.add(createLeg(true)); group.add(createLeg(false));
-
-  // 角色标识光环脚底
-  const ring = new THREE.Mesh(new THREE.RingGeometry(0.28, 0.30, 32), new THREE.MeshBasicMaterial({ color: opts.accentColor, transparent: true, opacity: 0.35, side: THREE.DoubleSide }));
-  ring.rotation.x = Math.PI / 2; ring.position.y = 0.01; group.add(ring);
-  return group;
-}
-
-// ============================================================
-// 人体布偶（木偶关节人偶）— 3D 导演台初始角色模型
-// 经典美术木偶造型：木质 PBR + 关节球 + 姿态预设驱动（站/斗/施法/奔跑/回眸/半跪/格挡/御风/战损）
-// 结构分上半身组 + 四肢两级关节组，姿势可单独旋转各关节，不再靠整体缩放硬凑
-// 交互：每个关节带不可见拾取球（jointpick_*），鼠标可直接拖拽旋转（Shift 拖=沿肢体扭转）
-// ============================================================
-type JointAxisLimits = { x?: [number, number]; y?: [number, number]; z?: [number, number] };
-
-/** 关节限位（弧度，XYZ 欧拉）— 与后端 app/director_stage/ops.py 单一口径，防反关节 */
-const MANNEQUIN_JOINT_LIMITS: Record<string, JointAxisLimits> = {
-  waist: { x: [-0.6, 0.6], y: [-1.0, 1.0], z: [-0.5, 0.5] },
-  neck: { x: [-0.7, 0.7], y: [-1.4, 1.4], z: [-0.5, 0.5] },
-  shoulder_L: { x: [-2.6, 0.9], y: [-1.0, 1.0], z: [-0.5, 1.8] },
-  shoulder_R: { x: [-2.6, 0.9], y: [-1.0, 1.0], z: [-1.8, 0.5] },
-  elbow_L: { x: [-2.6, 0.1], y: [-0.25, 0.25], z: [-0.6, 0.6] },
-  elbow_R: { x: [-2.6, 0.1], y: [-0.25, 0.25], z: [-0.6, 0.6] },
-  hip_L: { x: [-1.7, 1.2], y: [-0.7, 0.7], z: [-0.8, 0.8] },
-  hip_R: { x: [-1.7, 1.2], y: [-0.7, 0.7], z: [-0.8, 0.8] },
-  knee_L: { x: [0.0, 2.2], y: [-0.1, 0.1], z: [-0.1, 0.1] },
-  knee_R: { x: [0.0, 2.2], y: [-0.1, 0.1], z: [-0.1, 0.1] },
-};
-
-const clampJointAxis = (v: number, r?: [number, number]) => (r ? Math.max(r[0], Math.min(r[1], v)) : v);
-
-/** 序列化布偶关节姿态（只记非零关节，减少存储与 diff 噪音） */
-function serializeMannequinJoints(root: THREE.Object3D): MannequinJointPose {
-  const rig = (root.userData as any)?.mannequinJoints as Record<string, { group: THREE.Object3D }> | undefined;
-  const out: MannequinJointPose = {};
-  if (!rig) return out;
-  for (const [id, entry] of Object.entries(rig)) {
-    const e = entry.group.rotation;
-    if (Math.abs(e.x) + Math.abs(e.y) + Math.abs(e.z) > 0.01) {
-      out[id] = [Number(e.x.toFixed(4)), Number(e.y.toFixed(4)), Number(e.z.toFixed(4))];
-    }
-  }
-  return out;
-}
-
-/** 应用关节姿态（按限位钳制；未给出的关节保持现状） */
-function applyMannequinJoints(root: THREE.Object3D, joints?: MannequinJointPose) {
-  const rig = (root.userData as any)?.mannequinJoints as Record<string, { group: THREE.Object3D; limits: JointAxisLimits }> | undefined;
-  if (!rig || !joints) return;
-  for (const [id, rot] of Object.entries(joints)) {
-    const entry = rig[id];
-    if (!entry || !Array.isArray(rot)) continue;
-    const lim = entry.limits || {};
-    entry.group.rotation.set(
-      clampJointAxis(rot[0] || 0, lim.x),
-      clampJointAxis(rot[1] || 0, lim.y),
-      clampJointAxis(rot[2] || 0, lim.z),
-    );
-  }
-}
-
-/** 清零全部关节（切到没有自定义姿态的分镜 / 复位） */
-function resetMannequinJoints(root: THREE.Object3D) {
-  const rig = (root.userData as any)?.mannequinJoints as Record<string, { group: THREE.Object3D }> | undefined;
-  if (!rig) return;
-  for (const entry of Object.values(rig)) entry.group.rotation.set(0, 0, 0);
-}
-
-function createPoseMannequin(opts: { pose: PosePreset; role: string; accentColor: number }): THREE.Group {
-  const root = new THREE.Group();
-  const woodByRole: Record<string, number> = { protagonist: 0xd9aa6b, antagonist: 0xc08a4e, supporting: 0xcfa060 };
-  const woodMat = new THREE.MeshStandardMaterial({ color: woodByRole[opts.role] ?? 0xd9aa6b, roughness: 0.62, metalness: 0.04 });
-  const woodDarkMat = new THREE.MeshStandardMaterial({ color: 0xa9743c, roughness: 0.7, metalness: 0.03 });
-  const accentMat = new THREE.MeshStandardMaterial({ color: opts.accentColor, emissive: opts.accentColor, emissiveIntensity: 0.5, roughness: 0.3, metalness: 0.2 });
-  const cast = (m: THREE.Mesh) => { m.castShadow = true; m.receiveShadow = true; return m; };
-  // 关节拾取球（opacity 0 但可见：可被 Raycaster 命中，不渲染像素）
-  const pickMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
-  const mkPick = (r: number, jointId: string, parent: THREE.Object3D) => {
-    const p = new THREE.Mesh(new THREE.SphereGeometry(r, 12, 12), pickMat);
-    p.name = `jointpick_${jointId}`;
-    (p.userData as any).jointPick = jointId;
-    parent.add(p);
-    return p;
-  };
-
-  const body = new THREE.Group();
-  root.add(body);
-
-  // 骨盆 + 腰关节球
-  const pelvis = cast(new THREE.Mesh(new THREE.SphereGeometry(0.155, 24, 24), woodMat));
-  pelvis.scale.set(1.15, 0.78, 0.72); pelvis.position.y = 0.9; body.add(pelvis);
-  const waist = cast(new THREE.Mesh(new THREE.SphereGeometry(0.085, 20, 20), woodDarkMat));
-  waist.position.y = 1.01; body.add(waist);
-  // 角色识别腰带（不影响木偶中性造型）
-  const belt = cast(new THREE.Mesh(new THREE.CylinderGeometry(0.178, 0.188, 0.028, 24), accentMat));
-  belt.position.y = 0.99; body.add(belt);
-
-  // 上半身组（胸/肩/手臂/颈头；前倾、回眸转身都作用在这组）
-  const upper = new THREE.Group(); upper.position.y = 1.04; body.add(upper);
-  const chest = cast(new THREE.Mesh(new THREE.SphereGeometry(0.225, 28, 28), woodMat));
-  chest.scale.set(1.02, 1.28, 0.6); chest.position.y = 0.2; upper.add(chest);
-  const neck = cast(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.12, 16), woodDarkMat));
-  neck.position.y = 0.42; upper.add(neck);
-  const headGroup = new THREE.Group(); headGroup.position.y = 0.5; upper.add(headGroup);
-  const head = cast(new THREE.Mesh(new THREE.SphereGeometry(0.14, 28, 28), woodMat));
-  head.scale.set(0.95, 1.18, 0.95); head.position.y = 0.09; headGroup.add(head);
-  mkPick(0.15, 'neck', headGroup);
-  mkPick(0.14, 'waist', upper);
-
-  // 手臂：肩关节球 → 上臂 → 肘关节组（前臂+手）
-  const makeArm = (side: 1 | -1) => {
-    const shoulder = cast(new THREE.Mesh(new THREE.SphereGeometry(0.072, 20, 20), woodDarkMat));
-    shoulder.position.set(0.275 * side, 0.34, 0); upper.add(shoulder);
-    const arm = new THREE.Group(); arm.position.set(0.275 * side, 0.34, 0); upper.add(arm);
-    mkPick(0.095, side > 0 ? 'shoulder_L' : 'shoulder_R', arm);
-    const upperArm = cast(new THREE.Mesh(new THREE.CapsuleGeometry(0.052, 0.2, 8, 16), woodMat));
-    upperArm.position.y = -0.155; arm.add(upperArm);
-    const elbowGroup = new THREE.Group(); elbowGroup.position.y = -0.31; arm.add(elbowGroup);
-    elbowGroup.add(cast(new THREE.Mesh(new THREE.SphereGeometry(0.058, 18, 18), woodDarkMat)));
-    mkPick(0.08, side > 0 ? 'elbow_L' : 'elbow_R', elbowGroup);
-    const forearm = cast(new THREE.Mesh(new THREE.CapsuleGeometry(0.046, 0.2, 8, 16), woodMat));
-    forearm.position.y = -0.15; elbowGroup.add(forearm);
-    const hand = cast(new THREE.Mesh(new THREE.SphereGeometry(0.052, 16, 16), woodDarkMat));
-    hand.scale.set(0.85, 1.25, 0.6); hand.position.y = -0.33; elbowGroup.add(hand);
-    return { arm, elbowGroup };
-  };
-  const armL = makeArm(1);
-  const armR = makeArm(-1);
-
-  // 腿：髋关节球 → 大腿 → 膝关节组（小腿+脚）
-  const makeLeg = (side: 1 | -1) => {
-    const hip = cast(new THREE.Mesh(new THREE.SphereGeometry(0.07, 20, 20), woodDarkMat));
-    hip.position.set(0.115 * side, 0.86, 0); body.add(hip);
-    const leg = new THREE.Group(); leg.position.set(0.115 * side, 0.86, 0); body.add(leg);
-    mkPick(0.095, side > 0 ? 'hip_L' : 'hip_R', leg);
-    const thigh = cast(new THREE.Mesh(new THREE.CapsuleGeometry(0.065, 0.24, 8, 16), woodMat));
-    thigh.position.y = -0.19; leg.add(thigh);
-    const kneeGroup = new THREE.Group(); kneeGroup.position.y = -0.38; leg.add(kneeGroup);
-    kneeGroup.add(cast(new THREE.Mesh(new THREE.SphereGeometry(0.062, 18, 18), woodDarkMat)));
-    mkPick(0.085, side > 0 ? 'knee_L' : 'knee_R', kneeGroup);
-    const shin = cast(new THREE.Mesh(new THREE.CapsuleGeometry(0.055, 0.26, 8, 16), woodMat));
-    shin.position.y = -0.19; kneeGroup.add(shin);
-    const foot = cast(new THREE.Mesh(new THREE.BoxGeometry(0.105, 0.06, 0.21), woodDarkMat));
-    foot.position.set(0, -0.445, 0.045); kneeGroup.add(foot);
-    return { leg, kneeGroup };
-  };
-  const legL = makeLeg(1);
-  const legR = makeLeg(-1);
-
-  // 关节 rig 注册（鼠标拖拽 / Agent stage_control / 姿态序列化共用同一张表）
-  (root.userData as any).mannequinJoints = {
-    waist: { group: upper, limits: MANNEQUIN_JOINT_LIMITS.waist },
-    neck: { group: headGroup, limits: MANNEQUIN_JOINT_LIMITS.neck },
-    shoulder_L: { group: armL.arm, limits: MANNEQUIN_JOINT_LIMITS.shoulder_L },
-    shoulder_R: { group: armR.arm, limits: MANNEQUIN_JOINT_LIMITS.shoulder_R },
-    elbow_L: { group: armL.elbowGroup, limits: MANNEQUIN_JOINT_LIMITS.elbow_L },
-    elbow_R: { group: armR.elbowGroup, limits: MANNEQUIN_JOINT_LIMITS.elbow_R },
-    hip_L: { group: legL.leg, limits: MANNEQUIN_JOINT_LIMITS.hip_L },
-    hip_R: { group: legR.leg, limits: MANNEQUIN_JOINT_LIMITS.hip_R },
-    knee_L: { group: legL.kneeGroup, limits: MANNEQUIN_JOINT_LIMITS.knee_L },
-    knee_R: { group: legR.kneeGroup, limits: MANNEQUIN_JOINT_LIMITS.knee_R },
-  };
-
-  // 角色识别光环
-  const ring = new THREE.Mesh(new THREE.RingGeometry(0.34, 0.365, 40), new THREE.MeshBasicMaterial({ color: opts.accentColor, transparent: true, opacity: 0.28, side: THREE.DoubleSide }));
-  ring.rotation.x = Math.PI / 2; ring.position.y = 0.012; root.add(ring);
-
-  // 姿态预设（关节旋转；负 x = 手臂/大腿向前摆，肘/膝正 x = 回折）
-  const pose = opts.pose;
-  if (pose === 'fight') {
-    upper.rotation.y = -0.25;
-    armL.arm.rotation.x = -0.55; armL.arm.rotation.z = 0.35; armL.elbowGroup.rotation.x = -1.45;
-    armR.arm.rotation.x = -0.35; armR.arm.rotation.z = -0.45; armR.elbowGroup.rotation.x = -1.2;
-    legL.leg.rotation.x = -0.28; legL.leg.rotation.z = 0.12;
-    legR.leg.rotation.x = 0.32; legR.leg.rotation.z = -0.12; legR.kneeGroup.rotation.x = 0.35;
-  } else if (pose === 'cast_spell') {
-    upper.rotation.x = -0.06; headGroup.rotation.x = -0.18;
-    armL.arm.rotation.x = -1.35; armL.arm.rotation.z = 0.42; armL.elbowGroup.rotation.x = -0.35;
-    armR.arm.rotation.x = -1.15; armR.arm.rotation.z = -0.5; armR.elbowGroup.rotation.x = -0.5;
-    legL.leg.rotation.x = -0.1; legR.leg.rotation.x = 0.1;
-  } else if (pose === 'run') {
-    upper.rotation.x = 0.16;
-    armL.arm.rotation.x = -1.0; armL.elbowGroup.rotation.x = -1.5;
-    armR.arm.rotation.x = 0.75; armR.elbowGroup.rotation.x = -0.6;
-    legL.leg.rotation.x = -0.75; legL.kneeGroup.rotation.x = 1.15;
-    legR.leg.rotation.x = 0.5; legR.kneeGroup.rotation.x = 0.55;
-  } else if (pose === 'look_back') {
-    upper.rotation.y = 0.55; headGroup.rotation.y = 2.0;
-    legR.leg.rotation.y = -0.25;
-  } else if (pose === 'kneel') {
-    body.position.y -= 0.34;
-    upper.rotation.x = 0.1;
-    armL.arm.rotation.x = -0.5; armL.arm.rotation.z = 0.3; armL.elbowGroup.rotation.x = -1.2;
-    armR.arm.rotation.x = 0.3; armR.arm.rotation.z = -0.25; armR.elbowGroup.rotation.x = -0.7;
-    legR.leg.rotation.x = 0.05; legR.kneeGroup.rotation.x = 1.58;
-    legL.leg.rotation.x = -1.4; legL.kneeGroup.rotation.x = 1.32;
-  } else if (pose === 'defend') {
-    upper.rotation.x = 0.12;
-    armL.arm.rotation.x = -0.95; armL.arm.rotation.z = 0.3; armL.elbowGroup.rotation.x = -1.9;
-    armR.arm.rotation.x = -0.85; armR.arm.rotation.z = -0.35; armR.elbowGroup.rotation.x = -1.85;
-    legL.leg.rotation.x = -0.3; legL.leg.rotation.z = 0.14;
-    legR.leg.rotation.x = 0.24; legR.leg.rotation.z = -0.14; legR.kneeGroup.rotation.x = 0.3;
-  } else if (pose === 'fly') {
-    body.position.y += 0.3; body.rotation.x = 0.22;
-    armL.arm.rotation.x = -2.55; armL.arm.rotation.z = 0.5; armL.elbowGroup.rotation.x = -0.25;
-    armR.arm.rotation.x = -2.4; armR.arm.rotation.z = -0.45; armR.elbowGroup.rotation.x = -0.3;
-    legL.leg.rotation.x = 0.55; legL.kneeGroup.rotation.x = 0.5;
-    legR.leg.rotation.x = 0.75; legR.kneeGroup.rotation.x = 0.35;
-  } else if (pose === 'injured') {
-    body.position.y -= 0.08;
-    upper.rotation.x = 0.3; upper.rotation.z = 0.12; headGroup.rotation.z = 0.25;
-    armL.arm.rotation.x = -0.6; armL.arm.rotation.z = 0.15; armL.elbowGroup.rotation.x = -2.0;
-    armR.arm.rotation.x = 0.35; armR.arm.rotation.z = -0.1;
-    legL.leg.rotation.x = -0.45; legL.kneeGroup.rotation.x = 0.7;
-    legR.leg.rotation.x = 0.3; legR.kneeGroup.rotation.x = 0.25;
-  } else {
-    armL.arm.rotation.z = 0.07; armR.arm.rotation.z = -0.07;
-  }
-  return root;
-}
-
-function createRealisticSword(): THREE.Group {
-  const g = new THREE.Group();
-  // 剑身 - 渐变发光
-  const bladeMat = new THREE.MeshStandardMaterial({ color: 0xe0f0ff, emissive: 0x00aaff, emissiveIntensity: 0.45, metalness: 0.85, roughness: 0.15 });
-  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.07, 1.35, 0.015), bladeMat);
-  blade.position.y = 0.72; blade.castShadow = true; g.add(blade);
-  // 血槽
-  const fuller = new THREE.Mesh(new THREE.BoxGeometry(0.015, 1.1, 0.016), new THREE.MeshStandardMaterial({ color: 0x88c0ff, emissive: 0x0088ff, emissiveIntensity: 0.3 }));
-  fuller.position.y = 0.72; g.add(fuller);
-  // 剑尖
-  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.18, 4), bladeMat); tip.position.y = 1.48; tip.rotation.y = Math.PI / 4; g.add(tip);
-  // 护手
-  const guardMat = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.9, roughness: 0.15, emissive: 0xffaa00, emissiveIntensity: 0.15 });
-  const guard = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.06, 0.05), guardMat); guard.position.y = 0.08; guard.castShadow = true; g.add(guard);
-  const guardGem = new THREE.Mesh(new THREE.SphereGeometry(0.04, 12, 12), new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 0.9 })); guardGem.position.y = 0.08; g.add(guardGem);
-  // 柄
-  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.28, 12), new THREE.MeshStandardMaterial({ color: 0x1a0a0a, roughness: 0.9 })); handle.position.y = -0.12; g.add(handle);
-  const wrap1 = new THREE.Mesh(new THREE.TorusGeometry(0.038, 0.008, 8, 16), new THREE.MeshStandardMaterial({ color: 0x8b0000 })); wrap1.position.y = -0.06; wrap1.rotation.x = Math.PI / 2; g.add(wrap1);
-  const wrap2 = wrap1.clone(); wrap2.position.y = -0.14; g.add(wrap2);
-  // 剑首
-  const pommel = new THREE.Mesh(new THREE.SphereGeometry(0.055, 16, 16), guardMat); pommel.position.y = -0.28; g.add(pommel);
-  // 光迹
-  const trail = new THREE.Mesh(new THREE.PlaneGeometry(0.04, 1.0), new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.12, side: THREE.DoubleSide })); trail.position.set(0, 0.7, 0.02); g.add(trail);
-  g.castShadow = true;
-  return g;
-}
-
-function createRealisticShield(): THREE.Group {
-  const g = new THREE.Group();
-  const shieldMat = new THREE.MeshStandardMaterial({ color: 0x4a5568, metalness: 0.75, roughness: 0.25, transparent: true, opacity: 0.92 });
-  const shield = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.52, 0.06, 6), shieldMat); shield.rotation.x = Math.PI / 2; shield.castShadow = true; g.add(shield);
-  const rimMat = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.95, roughness: 0.1, emissive: 0xffaa00, emissiveIntensity: 0.2 });
-  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.52, 0.025, 12, 6), rimMat); rim.rotation.x = Math.PI / 2; g.add(rim);
-  // 徽记
-  const emblem = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.02, 6), new THREE.MeshStandardMaterial({ color: 0x7c3aed, emissive: 0x7c3aed, emissiveIntensity: 0.5 })); emblem.rotation.x = Math.PI / 2; emblem.position.z = 0.04; g.add(emblem);
-  const inner = new THREE.Mesh(new THREE.SphereGeometry(0.07, 16, 16), new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 0.8 })); inner.position.z = 0.06; g.add(inner);
-  // 盾后握把
-  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.04, 0.04), new THREE.MeshStandardMaterial({ color: 0x2d1b0e })); grip.position.z = -0.05; g.add(grip);
-  return g;
-}
-
-function createRealisticMagicCircle(): THREE.Group {
-  const g = new THREE.Group();
-  const mkRing = (r1: number, r2: number, color: number, opacity = 0.7) => {
-    const m = new THREE.Mesh(new THREE.RingGeometry(r1, r2, 64), new THREE.MeshBasicMaterial({ color, transparent: true, opacity, side: THREE.DoubleSide }));
-    m.rotation.x = Math.PI / 2; return m;
-  };
-  g.add(mkRing(1.55, 1.65, 0x00ffff, 0.85));
-  g.add(mkRing(1.25, 1.30, 0x7c3aed, 0.65));
-  g.add(mkRing(0.85, 0.90, 0x00ffff, 0.5));
-  // 符文
-  const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 512;
-  const ctx = canvas.getContext('2d')!;
-  ctx.clearRect(0, 0, 512, 512);
-  ctx.strokeStyle = '#00ffff'; ctx.lineWidth = 2; ctx.font = '28px serif'; ctx.textAlign = 'center';
-  const runes = ['✦', '⬢', '⬣', '✧', '❂', '⌖', '⬔', '⬓'];
-  for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; const x = 256 + Math.cos(a) * 180; const y = 256 + Math.sin(a) * 180; ctx.fillStyle = '#00ffff'; ctx.fillText(runes[i % runes.length], x, y); }
-  ctx.beginPath(); ctx.arc(256, 256, 120, 0, Math.PI * 2); ctx.stroke();
-  const tex = new THREE.CanvasTexture(canvas); tex.needsUpdate = true;
-  const runePlane = new THREE.Mesh(new THREE.CircleGeometry(1.15, 32), new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.85, side: THREE.DoubleSide }));
-  runePlane.rotation.x = -Math.PI / 2; runePlane.position.y = 0.01; g.add(runePlane);
-  // 中心法阵柱光
-  const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.18, 1.8, 16), new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.12 })); pillar.position.y = 0.9; g.add(pillar);
-  return g;
-}
-
-function createIncenseBurner(): THREE.Group {
-  const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 0.35, 16), new THREE.MeshStandardMaterial({ color: 0x8b4513, roughness: 0.6, metalness: 0.15 })); body.position.y = 0.2; g.add(body);
-  const lid = new THREE.Mesh(new THREE.SphereGeometry(0.18, 16, 16, 0, Math.PI * 2, 0, Math.PI * 0.5), new THREE.MeshStandardMaterial({ color: 0x5a2d0c, roughness: 0.5 })); lid.position.y = 0.42; g.add(lid);
-  // 香烟
-  for (let i = 0; i < 3; i++) {
-    const smoke = new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.15 }));
-    smoke.position.set((Math.random() - 0.5) * 0.1, 0.55 + i * 0.12, (Math.random() - 0.5) * 0.1); g.add(smoke);
-  }
-  return g;
-}
-
-function createBattleFlag(): THREE.Group {
-  const g = new THREE.Group();
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 2.2, 8), new THREE.MeshStandardMaterial({ color: 0x2b1a0a })); pole.position.y = 1.1; g.add(pole);
-  const flag = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.6), new THREE.MeshStandardMaterial({ color: 0x8b1a1a, side: THREE.DoubleSide, emissive: 0x441111, emissiveIntensity: 0.2 })); flag.position.set(0.45, 1.7, 0); flag.castShadow = true; g.add(flag);
-  const emblem = new THREE.Mesh(new THREE.CircleGeometry(0.14, 16), new THREE.MeshBasicMaterial({ color: 0xffd700 })); emblem.position.set(0.45, 1.7, 0.02); g.add(emblem);
-  return g;
-}

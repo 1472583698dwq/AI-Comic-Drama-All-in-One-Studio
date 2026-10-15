@@ -1,0 +1,479 @@
+{
+  "_source": "storage/projects/<proj>/canvas.json (worktree feature/toonflow-canvas, 2026-10-15); long prompt strings shortened, every key kept",
+  "canvases": {
+    "proj_7e528eff/default": {
+      "name": "默认画布",
+      "nodes": [
+        {
+          "id": "prompt_1790761554739_1",
+          "type": "prompt",
+          "position": {
+            "x": -330.06297616429345,
+            "y": 26.951485405168626
+          },
+          "data": {
+            "prompt": "masterpiece, best quality, newes…",
+            "text": "masterpiece, best quality, newes…"
+          },
+          "selected": false,
+          "measured": {
+            "width": 360,
+            "height": 277
+          },
+          "dragging": false
+        },
+        {
+          "id": "image_1790761554739_2",
+          "type": "image",
+          "position": {
+            "x": 450.11357283641894,
+            "y": -17.012727295844684
+          },
+          "data": {
+            "prompt": "masterpiece, best quality, newes…",
+            "provider": "comfyui_wf_b6dd2cda",
+            "provider_id": "comfyui_wf_b6dd2cda",
+            "aspect_ratio": "9:16",
+            "params": {
+              "aspect_ratio": "9:16",
+              "resolution": "720p",
+              "steps": 20,
+              "cfg": 7
+            },
+            "_upstream": {
+              "prompt": "masterpiece, best quality, newes…"
+            },
+            "agent_state": {
+              "status": "completed",
+              "tool": "provider_comfyui_wf_b6dd2cda",
+              "provider_id": "comfyui_wf_b6dd2cda",
+              "elapsed_ms": 33045,
+              "updated_at": "2026-09-30T09:46:27.809872Z"
+            },
+            "image_url": "/storage/generated/gen_1790761587_b583dd70.png",
+            "result_url": "/storage/generated/gen_1790761587_b583dd70.png",
+            "width": 832,
+            "height": 1216,
+            "reference_images": [
+              "/storage/generated/gen_1790761587_b583dd70.png"
+            ],
+            "resolution": "720p",
+            "steps": 20,
+            "cfg": 7,
+            "provider_params": {
+              "aspect_ratio": "9:16",
+              "resolution": "720p",
+              "steps": 20,
+              "cfg": 7
+            }
+          },
+          "selected": false,
+          "measured": {
+            "width": 360,
+            "height": 506
+          },
+          "dragging": false
+        },
+        {
+          "id": "prompt_1790761554739_3",
+          "type": "prompt",
+          "position": {
+            "x": -404.55871547020956,
+            "y": 390.68581782373366
+          },
+          "data": {
+            "prompt": "镜头缓慢推近，少女回眸微笑，银色长发与裙摆随风轻轻飘动，樱花花瓣…",
+            "text": "镜头缓慢推近，少女回眸微笑，银色长发与裙摆随风轻轻飘动，樱花花瓣…"
+          },
+          "selected": false,
+          "measured": {
+            "width": 360,
+            "height": 255
+          },
+          "dragging": false
+        },
+        {
+          "id": "video_1790761554739_4",
+          "type": "video",
+          "position": {
+            "x": 1108.9926614038227,
+            "y": 127.54615296154356
+          },
+          "data": {
+            "prompt": "镜头缓慢推近，少女回眸微笑，银色长发与裙摆随风轻轻飘动，樱花花瓣…",
+            "provider": "prov_ecf35ae4",
+            "provider_id": "prov_ecf35ae4",
+            "duration": 5,
+            "aspect_ratio": "9:16",
+            "params": {
+              "duration": 5,
+              "aspect_ratio": "9:16 (Portrait Widescreen)"
+            },
+            "_upstream": {
+              "prompt": "镜头缓慢推近，少女回眸微笑，银色长发与裙摆随风轻轻飘动，樱花花瓣…",
+              "first_frame": "/storage/generated/gen_1790761587_b583dd70.png"
+            },
+            "first_frame": "/storage/generated/gen_1790761587_b583dd70.png",
+            "agent_state": {
+              "status": "completed",
+              "tool": "provider_prov_ecf35ae4",
+              "provider_id": "prov_ecf35ae4",
+              "elapsed_ms": 239717,
+              "updated_at": "2026-09-30T09:50:27.594002Z"
+            },
+            "video_url": "/storage/videos/vid_1790761824_be0b3b18.mp4"
+          },
+          "selected": false,
+          "measured": {
+            "width": 360,
+            "height": 506
+          },
+          "dragging": false
+        },
+        {
+          "id": "load-image_1790765086372_1",
+          "type": "load-image",
+          "position": {
+            "x": 44.6970036155719,
+            "y": 767.3544299482921
+          },
+          "data": {
+            "image": "/storage/generated/gen_1790761587_b583dd70.png",
+            "url": "/storage/generated/gen_1790761587_b583dd70.png",
+            "image_url": "/storage/generated/gen_1790761587_b583dd70.png",
+            "_autoInput": true
+          },
+          "measured": {
+            "width": 260,
+            "height": 353
+          },
+          "selected": false,
+          "dragging": false
+        }
+      ],
+      "edges": [
+        {
+          "id": "e_image_1790761554739_2_video_17…",
+          "source": "image_1790761554739_2",
+          "target": "video_1790761554739_4",
+          "sourceHandle": "image",
+          "targetHandle": "first_frame",
+          "type": "default"
+        },
+        {
+          "id": "e_prompt_1790761554739_3_video_1…",
+          "source": "prompt_1790761554739_3",
+          "target": "video_1790761554739_4",
+          "sourceHandle": "prompt",
+          "targetHandle": "prompt",
+          "type": "default",
+          "selected": false
+        },
+        {
+          "id": "e_load-image_1790765086372_1_ima…",
+          "source": "load-image_1790765086372_1",
+          "target": "image_1790761554739_2",
+          "sourceHandle": "image",
+          "targetHandle": "reference_images",
+          "type": "default",
+          "selected": false
+        }
+      ],
+      "updated_at": "2026-10-10 14:56:48"
+    },
+    "proj_0be82585/cv_mu6za3h8": {
+      "name": "分镜#1画布",
+      "nodes": [
+        {
+          "id": "prompt_1789737135497_8",
+          "type": "prompt",
+          "position": {
+            "x": 120,
+            "y": 120
+          },
+          "data": {
+            "prompt": "Cinematic anime shot, high quali…",
+            "text": "Cinematic anime shot, high quali…"
+          },
+          "measured": {
+            "width": 360,
+            "height": 253
+          }
+        },
+        {
+          "id": "director3d_1789737135497_9",
+          "type": "director3d",
+          "position": {
+            "x": 120,
+            "y": 360
+          },
+          "data": {
+            "framing": "medium",
+            "motion": "push_in",
+            "pose": "stand",
+            "focal_length_mm": 35,
+            "camera_roll_deg": 0,
+            "cast_layout": "solo",
+            "speed": "1.0x",
+            "ai_directive": ""
+          },
+          "measured": {
+            "width": 360,
+            "height": 253
+          }
+        },
+        {
+          "id": "image_1789737135497_10",
+          "type": "image",
+          "position": {
+            "x": 120,
+            "y": 600
+          },
+          "data": {
+            "prompt": "Cinematic anime shot, high quali…",
+            "shotId": "shot-1789736403512",
+            "shotIndex": 1
+          },
+          "measured": {
+            "width": 360,
+            "height": 405
+          }
+        },
+        {
+          "id": "video_1789737135497_11",
+          "type": "video",
+          "position": {
+            "x": 540,
+            "y": 240
+          },
+          "data": {
+            "prompt": "Cinematic anime shot, high quali…",
+            "duration": 4,
+            "camera_prompt": "",
+            "shotId": "shot-1789736403512",
+            "shotIndex": 1,
+            "speaker_name": null
+          },
+          "measured": {
+            "width": 360,
+            "height": 405
+          }
+        },
+        {
+          "id": "image_1789737142531_12",
+          "type": "image",
+          "position": {
+            "x": 283.46638141809285,
+            "y": 653.6198044009781
+          },
+          "data": {
+            "prompt": ""
+          },
+          "measured": {
+            "width": 360,
+            "height": 405
+          },
+          "selected": false
+        }
+      ],
+      "edges": [
+        {
+          "id": "e_prompt_1789737135497_8_video_1…",
+          "source": "prompt_1789737135497_8",
+          "target": "video_1789737135497_11",
+          "sourceHandle": "prompt",
+          "targetHandle": "prompt",
+          "type": "smoothstep",
+          "animated": true
+        },
+        {
+          "id": "e_director3d_1789737135497_9_vid…",
+          "source": "director3d_1789737135497_9",
+          "target": "video_1789737135497_11",
+          "sourceHandle": "camera_prompt",
+          "targetHandle": "camera_prompt",
+          "type": "smoothstep",
+          "animated": true
+        },
+        {
+          "id": "e_prompt_1789737135497_8_image_1…",
+          "source": "prompt_1789737135497_8",
+          "target": "image_1789737135497_10",
+          "sourceHandle": "prompt",
+          "targetHandle": "prompt",
+          "type": "smoothstep",
+          "animated": true
+        },
+        {
+          "id": "e_image_1789737135497_10_video_1…",
+          "source": "image_1789737135497_10",
+          "target": "video_1789737135497_11",
+          "sourceHandle": "image",
+          "targetHandle": "first_frame",
+          "type": "smoothstep",
+          "animated": true
+        }
+      ],
+      "updated_at": "2026-09-18 21:12:51"
+    },
+    "proj_48f29f6e/default": {
+      "name": "默认画布",
+      "nodes": [
+        {
+          "id": "load-image_11599_978",
+          "type": "load-image",
+          "position": {
+            "x": 100,
+            "y": 100
+          },
+          "data": {
+            "name": "参考图1-全身立绘",
+            "image_url": "/storage/generated/gen_1789111164_943da570.png"
+          },
+          "measured": {
+            "width": 260,
+            "height": 228
+          },
+          "selected": false
+        },
+        {
+          "id": "load-image_11602_587",
+          "type": "load-image",
+          "position": {
+            "x": 100,
+            "y": 320
+          },
+          "data": {
+            "name": "参考图2-回眸中景",
+            "image_url": "/storage/generated/gen_1789111181_451aa7f9.png"
+          },
+          "measured": {
+            "width": 260,
+            "height": 228
+          },
+          "selected": false
+        },
+        {
+          "id": "load-image_11603_933",
+          "type": "load-image",
+          "position": {
+            "x": 100,
+            "y": 540
+          },
+          "data": {
+            "name": "参考图3-微笑特写",
+            "image_url": "/storage/generated/gen_1789111198_8e693df4.png"
+          },
+          "measured": {
+            "width": 260,
+            "height": 228
+          },
+          "selected": false
+        },
+        {
+          "id": "video_11605_417",
+          "type": "video",
+          "position": {
+            "x": 500,
+            "y": 320
+          },
+          "data": {
+            "name": "JK少女回眸-多参考视频",
+            "provider_id": "prov_e3a19229",
+            "mode": "r2v",
+            "prompt": "镜头缓慢推近，JK少女回眸浅笑，长发随风轻扬，樱花飘落，柔光校园，清新治愈氛围",
+            "duration": 8,
+            "resolution": "720p竖",
+            "reference_images": [
+              "/storage/generated/gen_1789111164_943da570.png",
+              "/storage/generated/gen_1789111181_451aa7f9.png",
+              "/storage/generated/gen_1789111198_8e693df4.png"
+            ]
+          },
+          "measured": {
+            "width": 360,
+            "height": 405
+          },
+          "selected": false
+        },
+        {
+          "id": "video_10143_380",
+          "type": "video",
+          "position": {
+            "x": 500,
+            "y": 640
+          },
+          "data": {
+            "name": "仙侠美女打招呼-多参考视频",
+            "provider_id": "prov_6131876a",
+            "mode": "r2v",
+            "prompt": "镜头缓慢推近，仙侠风格绝美少女微微一笑，抬手轻盈打招呼，长发与衣…",
+            "duration": 8,
+            "resolution": "720p竖",
+            "reference_images": [
+              "/storage/generated/gen_1789111164_943da570.png",
+              "/storage/generated/gen_1789111181_451aa7f9.png",
+              "/storage/generated/gen_1789111198_8e693df4.png"
+            ]
+          },
+          "measured": {
+            "width": 360,
+            "height": 405
+          },
+          "selected": false
+        }
+      ],
+      "edges": [
+        {
+          "id": "e_load-image_11599_978_video_11605_417_9250",
+          "source": "load-image_11599_978",
+          "target": "video_11605_417",
+          "targetHandle": "reference_images",
+          "type": "smoothstep",
+          "animated": true
+        },
+        {
+          "id": "e_load-image_11602_587_video_11605_417_9252",
+          "source": "load-image_11602_587",
+          "target": "video_11605_417",
+          "targetHandle": "reference_images",
+          "type": "smoothstep",
+          "animated": true
+        },
+        {
+          "id": "e_load-image_11603_933_video_11605_417_9253",
+          "source": "load-image_11603_933",
+          "target": "video_11605_417",
+          "targetHandle": "reference_images",
+          "type": "smoothstep",
+          "animated": true
+        },
+        {
+          "id": "e_load-image_11599_978_video_10143_380_6463",
+          "source": "load-image_11599_978",
+          "target": "video_10143_380",
+          "targetHandle": "reference_images",
+          "type": "smoothstep",
+          "animated": true
+        },
+        {
+          "id": "e_load-image_11602_587_video_10143_380_6465",
+          "source": "load-image_11602_587",
+          "target": "video_10143_380",
+          "targetHandle": "reference_images",
+          "type": "smoothstep",
+          "animated": true
+        },
+        {
+          "id": "e_load-image_11603_933_video_10143_380_6466",
+          "source": "load-image_11603_933",
+          "target": "video_10143_380",
+          "targetHandle": "reference_images",
+          "type": "smoothstep",
+          "animated": true
+        }
+      ],
+      "updated_at": "2026-09-30 16:46:41"
+    }
+  }
+}

@@ -12,7 +12,13 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@tabler/icons-react": "3.49.0",
     "@tailwindcss/vite": "^4.3.3",
+    "@tiptap/core": "3.32.0",
+    "@tiptap/extensions": "3.32.0",
+    "@tiptap/pm": "3.32.0",
+    "@tiptap/react": "3.32.0",
+    "@tiptap/starter-kit": "3.32.0",
     "@types/three": "^0.185.4",
     "@xyflow/react": "^12.8.6",
     "autoprefixer": "^10.5.4",

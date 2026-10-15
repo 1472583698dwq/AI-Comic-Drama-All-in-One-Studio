@@ -255,6 +255,13 @@ try:
     print("[Main] Timeline routes mounted at /api/v1/timeline")
 except Exception as e:
     print(f"[Main] Timeline routes mount failed: {e}")
+# REQ-toonflow-canvas 画布素材处理路由（截帧/分离音轨/截取/变速/宫格切分/标记合成；画布与多轨剪辑都关时 404）
+try:
+    from app.api.media_ops_routes import router as media_ops_router
+    app.include_router(media_ops_router, prefix=settings.API_V1_STR)
+    print("[Main] MediaOps routes mounted at /api/v1/media/ops")
+except Exception as e:
+    print(f"[Main] MediaOps routes mount failed: {e}")
 # 前端扩展点路由：主题包 / 导出器 / 导演包
 # 三个模块导出的都是 `router`（与其余路由模块一致），此前按 theme_router/exporter_router/
 # director_pack_router 取会 AttributeError，被 except 吞掉 → 三个扩展点静默未挂载

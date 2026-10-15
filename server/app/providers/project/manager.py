@@ -95,6 +95,20 @@ def _resolve_id(project_id: str) -> str:
     return _UUID_ID_MAP.get(project_id, project_id)
 
 
+# REQ-toonflow-canvas 画布条目除 name/nodes/edges/updated_at 外的顶层键（schema_version、viewport…）原样落盘；
+# 下面这些属于容器/路由层（画布 id、存储结构版本、请求包装），不进画布条目
+_CANVAS_RESERVED_KEYS = frozenset({
+    "canvas_id", "name", "nodes", "edges", "updated_at",
+    "project_id", "version", "active_canvas_id", "canvases", "snapshot",
+})
+
+
+def _canvas_extras(src: Any) -> Dict[str, Any]:
+    if not isinstance(src, dict):
+        return {}
+    return {k: v for k, v in src.items() if k not in _CANVAS_RESERVED_KEYS}
+
+
 class ProjectManager:
     def list_projects(self, q: Optional[str] = None, status: Optional[str] = None, sort: str = "updated_at") -> List[Dict[str, Any]]:
         items = _load_index()
@@ -303,10 +317,14 @@ class ProjectManager:
             pass
         return content
 
-    def save_canvas(self, project_id: str, snapshot: Dict[str, Any], canvas_id: str = "default", name: Optional[str] = None) -> Dict[str, Any]:
+    def save_canvas(self, project_id: str, snapshot: Dict[str, Any], canvas_id: Optional[str] = None, name: Optional[str] = None) -> Dict[str, Any]:
         project_id = _resolve_id(project_id)
         if not self.get_meta(project_id):
             raise FileNotFoundError(f"项目不存在: {project_id}")
+        snap = snapshot if isinstance(snapshot, dict) else {}
+        # REQ-toonflow-canvas 未显式指定画布时沿用快照自带的 canvas_id（get_canvas 读出的就是当前画布），
+        # 否则「读当前画布 → 改 → save_canvas(pid, snap)」会把别的画布内容写进 default
+        canvas_id = canvas_id or str(snap.get("canvas_id") or "") or "default"
         os.makedirs(os.path.join(PROJECTS_ROOT, project_id), exist_ok=True)
         # 归一化为多画布结构（兼容存量单画布文件，原样迁移为 default）
         store: Dict[str, Any] = {"version": 2, "active_canvas_id": canvas_id, "canvases": {}}
@@ -319,6 +337,7 @@ class ProjectManager:
                     store = old
                 elif isinstance(old, dict):
                     store["canvases"]["default"] = {
+                        **_canvas_extras(old),
                         "name": "默认画布",
                         "nodes": old.get("nodes", []),
                         "edges": old.get("edges", []),
@@ -326,19 +345,26 @@ class ProjectManager:
                     }
             except Exception:
                 pass
-        nodes = snapshot.get("nodes", []) if isinstance(snapshot, dict) else []
-        edges = snapshot.get("edges", []) if isinstance(snapshot, dict) else []
-        prev = store["canvases"].get(canvas_id, {})
-        store["canvases"][canvas_id] = {
+        nodes = snap.get("nodes", [])
+        edges = snap.get("edges", [])
+        prev = store["canvases"].get(canvas_id) or {}
+        entry = {
+            # 已存的未知键先垫底、本次快照覆盖：保存时没带 viewport/schema_version 也不会把它们丢掉
+            **_canvas_extras(prev),
+            **_canvas_extras(snap),
             "name": name or prev.get("name") or ("默认画布" if canvas_id == "default" else canvas_id),
             "nodes": nodes,
             "edges": edges,
             "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
+        store["canvases"][canvas_id] = entry
         store["active_canvas_id"] = canvas_id
         with open(p, "w", encoding="utf-8") as f:
             json.dump(store, f, ensure_ascii=False, indent=2)
-        return {"canvas_id": canvas_id, "name": store["canvases"][canvas_id]["name"]}
+        saved = {"canvas_id": canvas_id, "name": entry["name"]}
+        if "schema_version" in entry:
+            saved["schema_version"] = entry["schema_version"]
+        return saved
 
     def get_canvas(self, project_id: str, canvas_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         project_id = _resolve_id(project_id)
@@ -360,12 +386,12 @@ class ProjectManager:
             cur = data["canvases"].get(canvas_id)
             if not cur:
                 return None
-            return {"canvas_id": canvas_id, "name": cur.get("name", canvas_id), "nodes": cur.get("nodes", []), "edges": cur.get("edges", [])}
+            return {**_canvas_extras(cur), "canvas_id": canvas_id, "name": cur.get("name", canvas_id), "nodes": cur.get("nodes", []), "edges": cur.get("edges", [])}
         cid = data.get("active_canvas_id") or "default"
         cur = data["canvases"].get(cid) or data["canvases"].get("default")
         if not cur:
             return None
-        return {"canvas_id": cid, "name": cur.get("name", cid), "nodes": cur.get("nodes", []), "edges": cur.get("edges", [])}
+        return {**_canvas_extras(cur), "canvas_id": cid, "name": cur.get("name", cid), "nodes": cur.get("nodes", []), "edges": cur.get("edges", [])}
 
     def list_canvases(self, project_id: str) -> List[Dict[str, Any]]:
         project_id = _resolve_id(project_id)
@@ -383,10 +409,12 @@ class ProjectManager:
             legacy = data if isinstance(data.get("nodes"), list) else None
             if legacy is None:
                 return []
-            return [{"id": "default", "name": "默认画布", "updated_at": "", "node_count": len(legacy.get("nodes", []))}]
+            return [{"id": "default", "name": "默认画布", "updated_at": "", "node_count": len(legacy.get("nodes", [])),
+                     "schema_version": legacy.get("schema_version")}]
         out = []
         for cid, c in data["canvases"].items():
-            out.append({"id": cid, "name": (c or {}).get("name", cid), "updated_at": (c or {}).get("updated_at", ""), "node_count": len((c or {}).get("nodes", []))})
+            out.append({"id": cid, "name": (c or {}).get("name", cid), "updated_at": (c or {}).get("updated_at", ""), "node_count": len((c or {}).get("nodes", [])),
+                        "schema_version": (c or {}).get("schema_version")})
         return out
 
     def rename_canvas(self, project_id: str, canvas_id: str, name: str) -> Dict[str, Any]:

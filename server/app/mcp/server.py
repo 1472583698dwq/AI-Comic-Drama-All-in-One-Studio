@@ -1108,7 +1108,9 @@ class MCPServerRegistry:
         # --- Canvas Agent 深度绑定 5 工具 (P4) ---
         self.register_tool(MCPToolDefinition(
             name="canvas_query",
-            description="[画布] 查询当前画布摘要与节点清单，Agent 画布感知入口",
+            description="[画布] 查询当前画布摘要与节点清单，Agent 画布感知入口。生成类节点（prompt/image/video/audio/director3d）只有一个输入口 in，"
+                        "返回的 inputs[node_id] 是该节点的有序参考列表（n=提示词里 {{ref n}} 的序号、kind=类型、slot=落到的生成源槽位、assigned_by=legacy_handle/ref_roles/auto）；"
+                        "group 为分组容器（子节点 parentId=分组 id，位置相对分组），不参与执行",
             category="workflow",
             icon="Layout",
             author="Canvas Engine",
@@ -1117,16 +1119,19 @@ class MCPServerRegistry:
         ))
         self.register_tool(MCPToolDefinition(
             name="canvas_create_node",
-            description="[画布] 创建节点，type 需为 nodeRegistry 中的合法类型；project_id 不传则使用当前项目",
+            description="[画布] 创建节点，type 需为 nodeRegistry 中的合法类型；project_id 不传则使用当前项目。"
+                        "type=group 创建分组：children 传要收进分组的节点 id，分组框按子节点包围盒自动定位定尺寸（内边距 左右24/上40/下24），子节点改为相对分组的位置；"
+                        "旧类型 text-prompt/tts/video-legacy 会自动换成 prompt/audio/video",
             category="workflow",
             icon="Plus",
             author="Canvas Engine",
             is_enabled=True,
-            input_schema={"type":"object","properties":{"type":{"type":"string","description":"节点类型，如 prompt/image/video/audio/director3d/export/shot-card/comfy-workflow/brief/load-image/text-prompt"},"position":{"type":"object","description":"{x,y} 可选"},"params":{"type":"object","description":"节点初始 data"},"project_id":{"type":"string","description":"归属项目ID，不传则使用上下文项目"}},"required":["type"]}
+            input_schema={"type":"object","properties":{"type":{"type":"string","description":"节点类型，如 prompt/image/video/audio/director3d/load-image/load-video/load-audio/group/export/shot-card/comfy-workflow/brief/custom"},"position":{"type":"object","description":"{x,y} 可选（group 带 children 时忽略）"},"params":{"type":"object","description":"节点初始 data（group 可传 label 标题）"},"children":{"type":"array","items":{"type":"string"},"description":"仅 type=group：收进分组的节点 id 列表"},"label":{"type":"string","description":"仅 type=group：分组标题"},"project_id":{"type":"string","description":"归属项目ID，不传则使用上下文项目"}},"required":["type"]}
         ))
         self.register_tool(MCPToolDefinition(
             name="canvas_update_node",
-            description="[画布] 更新节点数据；结果键必须用 snake_case（视频结果用 video_url，勿用 videoUrl 驼峰——驼峰会被自动归一兼容，但节点组件只读 snake_case）",
+            description="[画布] 更新节点数据；结果键必须用 snake_case（视频结果用 video_url，勿用 videoUrl 驼峰——驼峰会被自动归一兼容，但节点组件只读 snake_case）。"
+                        "改参考槽位优先用 canvas_connect(slot=…)；视频参考模式写 mode（text/singleImage/startEnd/multiReference，空=自动）",
             category="workflow",
             icon="Edit",
             author="Canvas Engine",
@@ -1135,7 +1140,7 @@ class MCPServerRegistry:
         ))
         self.register_tool(MCPToolDefinition(
             name="canvas_delete_node",
-            description="[画布] 删除节点（连带删除挂在它身上的连线，避免留下悬空边）。高危操作（审批模式下需人工确认）；删前先用 canvas_query 确认 node_id 与它连了什么",
+            description="[画布] 删除节点（连带删除挂在它身上的连线，避免留下悬空边，并清理下游 refOrder/refRoles）；删分组只删框，子节点保留并移回原位置。高危操作（审批模式下需人工确认）；删前先用 canvas_query 确认 node_id 与它连了什么",
             category="workflow",
             icon="Trash2",
             author="Canvas Engine",
@@ -1144,16 +1149,20 @@ class MCPServerRegistry:
         ))
         self.register_tool(MCPToolDefinition(
             name="canvas_connect",
-            description="[画布] 连线两节点句柄，自动校验类型",
+            description="[画布] 连线两节点。生成类节点（prompt/image/video/audio/director3d）只有一个输入口 in：连上的素材按顺序进参考列表（提示词里 {{ref N}} 指第 N 个），"
+                        "用 slot 指定落到哪个槽位（prompt/camera_prompt/first_frame/last_frame/reference_images/ref_audio/reference_video），不指定则自动分配"
+                        "（文本→提示词、3D导演文本→机位、视频节点 1 张图→首帧/≥2 张→参考图、音频→参考音频、视频→参考视频）。"
+                        "旧端口名（first_frame/last_frame/reference/reference_images/camera_prompt/ref_audio/prompt/text）仍可作为 targetHandle 传入，会自动转成 in + 对应槽位。"
+                        "其他节点（export/timeline/custom 等）按原端口连线。显式 slot 与上游类型不符会报错",
             category="workflow",
             icon="Link",
             author="Canvas Engine",
             is_enabled=True,
-            input_schema={"type":"object","properties":{"source":{"type":"string"},"sourceHandle":{"type":"string"},"target":{"type":"string"},"targetHandle":{"type":"string"},"project_id":{"type":"string"}},"required":["source","target"]}
+            input_schema={"type":"object","properties":{"source":{"type":"string","description":"上游节点 id"},"sourceHandle":{"type":"string","description":"上游输出口，可省略"},"target":{"type":"string","description":"下游节点 id"},"targetHandle":{"type":"string","description":"生成类节点填 in 或省略（旧端口名兼容）；其他节点填其端口 id"},"slot":{"type":"string","enum":["prompt","camera_prompt","first_frame","last_frame","reference_images","ref_audio","reference_video"],"description":"生成类节点的显式槽位，不填=自动分配"},"project_id":{"type":"string"}},"required":["source","target"]}
         ))
         self.register_tool(MCPToolDefinition(
             name="canvas_execute",
-            description="[画布] 执行画布 DAG，可指定 target_ids 仅执行选中",
+            description="[画布] 执行画布 DAG，可指定 target_ids 仅执行选中（传分组 id = 执行分组内全部节点）；分组节点本身不执行",
             category="workflow",
             icon="Play",
             author="Canvas Engine",
@@ -2448,6 +2457,34 @@ class MCPServerRegistry:
             elif tool_name in ("canvas_query","canvas_create_node","canvas_update_node","canvas_delete_node","canvas_connect","canvas_execute","canvas_dispatch_skill","canvas_query_assets"):
                 # 画布工具：真实持久化到 storage/projects/{id}/canvas.json，前端通过轮询/事件同步
                 from app.providers.project.manager import project_manager as _pm
+                from app.canvas import inputs as _cin
+                from app.canvas import groups as _cgroups
+
+                def _save_snap(_pid, _snap):
+                    # REQ-toonflow-canvas 写回读出来的那张画布（原先恒写 default：激活的是别的画布时会把它的内容写进默认画布）
+                    return _pm.save_canvas(_pid, _snap, canvas_id=(_snap or {}).get("canvas_id") or "default")
+
+                def _ref_brief(_node, _edges, _by_id):
+                    # REQ-toonflow-canvas 有序参考列表摘要（静态：取节点数据里的现有产物）
+                    out = []
+                    for r in _cin.collect_inputs(_node, _edges, _by_id)["refs"]:
+                        item = {"n": r["n"], "key": r["key"], "source": r["source"], "source_type": r["source_type"],
+                                "kind": r["kind"], "slot": r["slot"], "assigned_by": r["assigned_by"]}
+                        vals = r.get("values") or []
+                        if vals:
+                            v0 = vals[0]
+                            item["value"] = (v0[:40] + "…") if r["kind"] == _cin.STRING and len(v0) > 40 else v0
+                            if len(vals) > 1:
+                                item["count"] = len(vals)
+                        else:
+                            item["value"] = None
+                        if r.get("ignored"):
+                            item["ignored"] = True
+                        if r.get("value_slots"):
+                            item["value_slots"] = r["value_slots"]
+                        out.append(item)
+                    return out
+
                 # 尝试从参数或上下文获取 project_id
                 pid = arguments.get("project_id")
                 if not pid and isinstance(project_context, dict):
@@ -2470,15 +2507,35 @@ class MCPServerRegistry:
                         else:
                             nodes = snap.get("nodes") or []
                             edges = snap.get("edges") or []
+                            by_id = {n.get("id"): n for n in nodes if isinstance(n, dict)}
+                            # REQ-toonflow-canvas 每个生成节点的有序参考列表（in 口 + refOrder/refRoles，旧具名口同样解析）
+                            inputs_map = {}
+                            for n in nodes:
+                                if not isinstance(n, dict) or n.get("type") == _cin.GROUP_TYPE:
+                                    continue
+                                if any(e.get("target") == n.get("id") and _cin.is_ref_edge(e, n.get("type"), (by_id.get(e.get("source")) or {}).get("type")) for e in edges):
+                                    inputs_map[n.get("id")] = _ref_brief(n, edges, by_id)
                             # 压缩摘要
                             lines = [f"画布共 {len(nodes)} 节点 {len(edges)} 连线"]
                             for n in nodes[:10]:
                                 d = n.get("data") or {}
+                                if n.get("type") == _cin.GROUP_TYPE:
+                                    kids = sum(1 for c in nodes if isinstance(c, dict) and c.get("parentId") == n.get("id"))
+                                    lines.append(f"- [group] {n.get('id')} 「{d.get('label') or '分组'}」 含 {kids} 个节点")
+                                    continue
                                 title = (d.get("prompt") or d.get("text") or d.get("brief") or d.get("name") or "")[:24]
-                                lines.append(f"- [{n.get('type')}] {n.get('id')} @({int(n.get('position',{}).get('x',0))},{int(n.get('position',{}).get('y',0))}) {title}")
+                                parent = f" ∈{n.get('parentId')}" if n.get("parentId") else ""
+                                lines.append(f"- [{n.get('type')}] {n.get('id')} @({int(n.get('position',{}).get('x',0))},{int(n.get('position',{}).get('y',0))}){parent} {title}")
+                                for r in inputs_map.get(n.get("id"), [])[:8]:
+                                    lines.append(f"    ← 参考{r['n']} {r['kind'] or '?'}→{r['slot'] or '-'}{'(忽略)' if r.get('ignored') else ''} 来自 {r['source']}")
                             if len(nodes) > 10:
                                 lines.append(f"… 还有 {len(nodes)-10} 节点")
-                            result = {"project_id": pid, "nodes": nodes, "edges": edges, "summary": "\n".join(lines)}
+                            result = {
+                                "project_id": pid, "nodes": nodes, "edges": edges, "inputs": inputs_map,
+                                "input_model": "生成类节点(prompt/image/video/audio/director3d)只有一个输入口 in；inputs[节点id] 为有序参考列表，"
+                                               "n 即提示词 {{ref n}} 的序号；slot 由 data.refRoles 显式指定或按规则自动分配；改槽位用 canvas_connect(slot=…)",
+                                "summary": "\n".join(lines),
+                            }
                 elif tool_name == "canvas_query_assets":
                     if not pid:
                         result = {"assets": [], "summary": "暂无项目"}
@@ -2577,7 +2634,7 @@ class MCPServerRegistry:
                     snap["nodes"] = nodes
                     import time as _t4
                     snap["updated_at"] = _t4.strftime("%Y-%m-%dT%H:%M:%SZ", _t4.gmtime())
-                    _pm.save_canvas(pid, snap)
+                    _save_snap(pid, snap)
                     result = {
                         "status": "success",
                         "skill_id": skill_id,
@@ -2591,6 +2648,8 @@ class MCPServerRegistry:
                     ntype = arguments.get("type")
                     if not ntype:
                         raise ValueError("type 不能为空")
+                    # REQ-toonflow-canvas 被合并掉的旧类型直接建成新类型（schema v2），免得新画布里出现「不支持的节点」
+                    ntype = {"text-prompt": "prompt", "tts": "audio", "video-legacy": "video"}.get(ntype, ntype)
                     pos = arguments.get("position") or {}
                     if isinstance(pos, str):
                         try:
@@ -2607,6 +2666,8 @@ class MCPServerRegistry:
                             params = _js2.loads(params)
                         except Exception:
                             params = {}
+                    if not isinstance(params, dict):
+                        params = {}
                     snap = _pm.get_canvas(pid) or {"nodes": [], "edges": [], "version": 2}
                     nodes = snap.get("nodes") or []
                     import time as _time, random as _rnd
@@ -2614,15 +2675,42 @@ class MCPServerRegistry:
                     existing_ids = {n.get("id") for n in nodes}
                     while nid in existing_ids:
                         nid = f"{ntype}_{int(_time.time()*1000)%100000}_{_rnd.randint(100,999)}"
-                    new_node = {"id": nid, "type": ntype, "position": {"x": x, "y": y}, "data": dict(params or {})}
-                    if ntype == "prompt" and not new_node["data"].get("prompt"):
-                        new_node["data"]["prompt"] = params.get("prompt") or ""
-                    nodes.append(new_node)
+                    if ntype == _cin.GROUP_TYPE:
+                        # REQ-toonflow-canvas 分组：子节点挂 parentId、位置改相对分组，分组框按包围盒 + 内边距计算
+                        gparams = dict(params)
+                        children = arguments.get("children") or gparams.pop("children", None) or []
+                        if isinstance(children, str):
+                            children = [c.strip() for c in children.split(",") if c.strip()]
+                        label = arguments.get("label") or gparams.pop("label", None) or gparams.pop("title", None) or "分组"
+                        gsize = None
+                        if gparams.get("width") and gparams.get("height"):
+                            try:
+                                gsize = (float(gparams.pop("width")), float(gparams.pop("height")))
+                            except (TypeError, ValueError):
+                                gsize = None
+                        new_node, missing = _cgroups.create_group(nodes, nid, list(children), label=label,
+                                                                  position={"x": x, "y": y}, size=gsize, extra_data=gparams)
+                        if children and len(missing) == len(children):
+                            raise ValueError(f"分组的子节点都不存在: {missing}（先用 canvas_query 确认真实 id）")
+                    else:
+                        new_node = {"id": nid, "type": ntype, "position": {"x": x, "y": y}, "data": dict(params or {})}
+                        missing = []
+                        if ntype == "prompt" and not new_node["data"].get("prompt"):
+                            new_node["data"]["prompt"] = params.get("prompt") or ""
+                        if ntype in _cin.IN_PORT_NODE_TYPES:
+                            # REQ-toonflow-canvas 新输入模型的默认字段：参考顺序与显式槽位
+                            new_node["data"].setdefault("refOrder", [])
+                            new_node["data"].setdefault("refRoles", {})
+                        nodes.append(new_node)
                     snap["nodes"] = nodes
                     snap["edges"] = snap.get("edges") or []
                     snap["updated_at"] = _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime())
-                    _pm.save_canvas(pid, snap)
+                    _save_snap(pid, snap)
                     result = {"status": "created", "project_id": pid, "node": new_node, "total_nodes": len(nodes)}
+                    if ntype == _cin.GROUP_TYPE:
+                        result["children"] = [n.get("id") for n in nodes if isinstance(n, dict) and n.get("parentId") == nid]
+                        if missing:
+                            result["missing_children"] = missing
                 elif tool_name == "canvas_update_node":
                     if not pid:
                         raise ValueError("canvas_update_node 需要 project_id")
@@ -2668,7 +2756,7 @@ class MCPServerRegistry:
                     snap["nodes"] = nodes
                     import time as _time2
                     snap["updated_at"] = _time2.strftime("%Y-%m-%dT%H:%M:%SZ", _time2.gmtime())
-                    _pm.save_canvas(pid, snap)
+                    _save_snap(pid, snap)
                     result = {"status": "updated", "project_id": pid, "node_id": nid, "patch": patch, "normalized_keys": sorted(set(_patch_norm) - set(patch or {}))}
                 elif tool_name == "canvas_delete_node":
                     if not pid:
@@ -2687,16 +2775,26 @@ class MCPServerRegistry:
                     # 连带删掉挂在它身上的连线：只删节点会留下 source/target 指向不存在节点的悬空边，
                     # 前端渲染与后端 canvas_execute 的拓扑排序都会受影响。
                     drop_edges = [e for e in edges if e.get("source") == nid or e.get("target") == nid]
+                    # REQ-toonflow-canvas 删分组只删框：子节点挂回上一级并换算回原位置（否则 parentId 悬空，前端直接报错）
+                    released = _cgroups.release_children(nodes, nid) if hit.get("type") == _cin.GROUP_TYPE else []
                     snap["nodes"] = [n for n in nodes if n.get("id") != nid]
                     snap["edges"] = [e for e in edges if e.get("source") != nid and e.get("target") != nid]
+                    # REQ-toonflow-canvas 下游节点 refOrder/refRoles 里指向被删节点的键一并清掉
+                    _left = {n.get("id"): n for n in snap["nodes"]}
+                    _alive = {(e.get("target"), _cin.edge_key(e)) for e in snap["edges"]}
+                    for e in drop_edges:
+                        tn = _left.get(e.get("target"))
+                        if tn is not None and (e.get("target"), _cin.edge_key(e)) not in _alive:
+                            _cin.forget_ref(tn, _cin.edge_key(e))
                     import time as _time5
                     snap["updated_at"] = _time5.strftime("%Y-%m-%dT%H:%M:%SZ", _time5.gmtime())
-                    _pm.save_canvas(pid, snap)
+                    _save_snap(pid, snap)
                     result = {
                         "status": "deleted",
                         "project_id": pid,
                         "deleted_node": {"id": nid, "type": hit.get("type")},
                         "deleted_edges": len(drop_edges),
+                        "released_children": released,
                         "total_nodes": len(snap["nodes"]),
                         "total_edges": len(snap["edges"]),
                     }
@@ -2709,27 +2807,97 @@ class MCPServerRegistry:
                         raise ValueError("source/target 不能为空")
                     sh = arguments.get("sourceHandle") or arguments.get("source_handle") or ""
                     th = arguments.get("targetHandle") or arguments.get("target_handle") or ""
+                    slot_arg = arguments.get("slot") or arguments.get("role") or ""
                     snap = _pm.get_canvas(pid)
                     if not snap:
                         raise ValueError(f"项目 {pid} 画布不存在")
                     edges = snap.get("edges") or []
-                    for e in edges:
-                        if e.get("source")==src and e.get("target")==tgt and (e.get("sourceHandle") or "")==(sh or "") and (e.get("targetHandle") or "")==(th or ""):
-                            result = {"status": "already_connected", "project_id": pid, "edge": e}
-                            break
-                    else:
-                        import time as _time3, uuid as _uuid
-                        eid = f"e_{src}_{tgt}_{int(_time3.time()*1000)%10000}"
-                        new_edge = {"id": eid, "source": src, "target": tgt, "sourceHandle": sh, "targetHandle": th, "type": "smoothstep", "animated": True}
-                        if not sh:
-                            new_edge.pop("sourceHandle", None)
-                        if not th:
-                            new_edge.pop("targetHandle", None)
-                        edges.append(new_edge)
+                    nodes = snap.get("nodes") or []
+                    by_id = {n.get("id"): n for n in nodes if isinstance(n, dict)}
+                    tgt_node = by_id.get(tgt)
+                    src_node = by_id.get(src)
+                    if src_node is None or tgt_node is None:
+                        raise ValueError(f"节点不存在: {src if src_node is None else tgt}（先用 canvas_query 确认真实 id）")
+                    if _cin.GROUP_TYPE in (src_node.get("type"), tgt_node.get("type")):
+                        raise ValueError("分组节点没有端口，不能连线；把节点收进分组用 canvas_create_node(type='group', children=[...])")
+                    import time as _time3
+                    if tgt_node.get("type") in _cin.IN_PORT_NODE_TYPES:
+                        # REQ-toonflow-canvas 生成类节点只有 in 口：旧端口名 / slot 参数 → in + data.refRoles，追加到 data.refOrder
+                        note = ""
+                        if slot_arg:
+                            slot = _cin.normalize_slot(slot_arg)
+                            if not slot:
+                                raise ValueError(f"slot 不合法: {slot_arg}（可选 {', '.join(_cin.SLOTS)}）")
+                        else:
+                            slot = _cin.LEGACY_HANDLE_SLOTS.get(th) if th and th != _cin.IN_PORT else None
+                            if th and th != _cin.IN_PORT:
+                                note = f"旧端口 {th} 已转换为 in" + (f" + 槽位 {slot}" if slot else "（未知端口名，槽位自动分配）")
+                        if not sh and not any(e.get("target") == tgt and e.get("source") == src and not (e.get("sourceHandle") or e.get("source_handle"))
+                                              and _cin.is_ref_edge(e, tgt_node.get("type"), src_node.get("type")) for e in edges):
+                            # 省略输出口时补主输出口（与前端迁移一致），edgeKey 才能和前端算的对上
+                            sh = _cin.PRIMARY_OUTPUT_PORT.get(src_node.get("type") or "", "")
+                        kind = _cin.source_kind(src_node, sh)
+                        if slot and kind and _cin.SLOT_KIND.get(slot) != kind:
+                            if slot_arg:
+                                raise ValueError(f"槽位 {slot} 需要 {_cin.SLOT_KIND[slot]} 类型的上游，{src} 输出的是 {kind}")
+                            note += f"；上游类型 {kind} 与槽位 {slot} 不符，改为自动分配"
+                            slot = None
+                        key = _cin.edge_key({"source": src, "sourceHandle": sh})
+                        before = _cin.ordered_ref_keys(tgt_node, edges, by_id)
+                        existing = next((e for e in edges if e.get("target") == tgt and _cin.edge_key(e) == key
+                                         and _cin.is_ref_edge(e, tgt_node.get("type"), src_node.get("type"))), None)
+                        status = "connected"
+                        if existing is not None:
+                            old_th = _cin.target_handle(existing)
+                            if old_th != _cin.IN_PORT:
+                                # 未迁移的旧具名口连线：就地改成 in，旧口名对应的槽位保留（除非这次显式指定）
+                                if not slot and old_th in _cin.LEGACY_HANDLE_SLOTS:
+                                    slot = _cin.LEGACY_HANDLE_SLOTS[old_th]
+                                existing["targetHandle"] = _cin.IN_PORT
+                                existing.pop("target_handle", None)
+                            prev_slot = _cin.ref_roles_of(_cin.node_data(tgt_node)).get(key)
+                            status = "updated" if (old_th != _cin.IN_PORT or (slot and slot != prev_slot)) else "already_connected"
+                            edge_obj = existing
+                        else:
+                            eid = f"e_{src}_{tgt}_{int(_time3.time()*1000)%10000}"
+                            _ids = {e.get("id") for e in edges}
+                            while eid in _ids:
+                                eid = f"{eid}_x"
+                            edge_obj = {"id": eid, "source": src, "target": tgt, "targetHandle": _cin.IN_PORT, "type": "default"}
+                            if sh:
+                                edge_obj["sourceHandle"] = sh
+                            edges.append(edge_obj)
+                        _cin.register_ref(tgt_node, key, slot, before)
                         snap["edges"] = edges
-                        snap["updated_at"] = _time3.strftime("%Y-%m-%dT%H:%M:%SZ", _time3.gmtime())
-                        _pm.save_canvas(pid, snap)
-                        result = {"status": "connected", "project_id": pid, "edge": new_edge, "total_edges": len(edges)}
+                        snap["nodes"] = nodes
+                        if status != "already_connected":
+                            snap["updated_at"] = _time3.strftime("%Y-%m-%dT%H:%M:%SZ", _time3.gmtime())
+                        _save_snap(pid, snap)
+                        refs_now = _ref_brief(tgt_node, edges, by_id)
+                        mine = next((r for r in refs_now if r["key"] == key), None)
+                        result = {"status": status, "project_id": pid, "edge": edge_obj, "total_edges": len(edges),
+                                  "ref_key": key, "ref_index": mine["n"] if mine else None,
+                                  "slot": (mine or {}).get("slot") or slot, "slot_source": (mine or {}).get("assigned_by"),
+                                  "refs": refs_now}
+                        if note:
+                            result["note"] = note.lstrip("；")
+                    else:
+                        for e in edges:
+                            if e.get("source")==src and e.get("target")==tgt and (e.get("sourceHandle") or "")==(sh or "") and (e.get("targetHandle") or "")==(th or ""):
+                                result = {"status": "already_connected", "project_id": pid, "edge": e}
+                                break
+                        else:
+                            eid = f"e_{src}_{tgt}_{int(_time3.time()*1000)%10000}"
+                            new_edge = {"id": eid, "source": src, "target": tgt, "sourceHandle": sh, "targetHandle": th, "type": "smoothstep", "animated": True}
+                            if not sh:
+                                new_edge.pop("sourceHandle", None)
+                            if not th:
+                                new_edge.pop("targetHandle", None)
+                            edges.append(new_edge)
+                            snap["edges"] = edges
+                            snap["updated_at"] = _time3.strftime("%Y-%m-%dT%H:%M:%SZ", _time3.gmtime())
+                            _save_snap(pid, snap)
+                            result = {"status": "connected", "project_id": pid, "edge": new_edge, "total_edges": len(edges)}
                 elif tool_name == "canvas_execute":
                     from app.canvas.engine import canvas_engine as _engine
                     nodes = arguments.get("nodes")
