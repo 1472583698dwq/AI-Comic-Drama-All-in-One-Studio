@@ -1,6 +1,7 @@
 """
 画布 DAG 执行引擎 — 复用现有 Providers + MCP 工具
 节点类型映射到真实生成能力：
+  prompt -> canvas/text_skills（自由生成 / 扩写 / 剧本拆解 / 策划案；无技能时透传正文）
   brief / script-split -> llm_service / script_agent
   shot-card -> image_registry (可选 workflow)
   comfy-workflow -> image_registry (workflow_id 必选)
@@ -17,6 +18,7 @@ import asyncio
 from typing import Dict, Any, List, Optional, Set, Tuple
 
 from app.canvas import inputs as canvas_inputs
+from app.canvas import text_skills
 
 
 def topo_sort(nodes: List[Dict[str, Any]], edges: List[Dict[str, Any]]) -> List[str]:
@@ -86,6 +88,9 @@ def collect_upstream_data(node_id: str, nodes: List[Dict], edges: List[Dict], re
     if has_ref_edges:
         resolved = canvas_inputs.collect_inputs(tgt_node_obj, edges, id_to_node, results)
         data.update(canvas_inputs.to_engine_upstream(resolved["slots"], resolved.get("has_text_refs", False)))
+        if tgt_type == "prompt":
+            # REQ-toonflow-canvas F2 文本节点技能输入：指令 gen_prompt + 全部文本参考（N1，见 canvas/text_skills.py）
+            data[text_skills.SKILL_INPUT_KEY] = text_skills.skill_refs_input(tgt_node_obj, resolved)
     for e in incoming:
         src_id = e.get("source")
         tgt_handle = (e.get("targetHandle") or e.get("target_handle") or "").strip()
@@ -369,55 +374,29 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
     try:
         # 新 6 核心：prompt 智能体能力分发
         if ntype == "prompt":
-            txt = data.get("prompt") or data.get("text") or upstream.get("prompt") or upstream.get("text") or ""
-            if not txt.strip() and upstream.get("prompt"):
-                txt = upstream.get("prompt")
-            # REQ-toonflow-canvas 不带技能时原样透传节点文本；带技能时把文本参考一并交给技能
-            txt_out = txt
-            if assembled:
-                txt = assembled
-            skill_id = data.get("skill_id") or merged.get("skill_id")
-            if skill_id == "script_generation" and txt.strip():
-                try:
-                    from app.pipelines.script_agent import script_agent
-                    style = data.get("style_preset") or merged.get("style_preset") or "donghua_xianxia"
-                    ratio = data.get("aspect_ratio") or merged.get("aspect_ratio") or "9:16"
-                    proj = await script_agent.parse_novel_to_project(txt, style, ratio)
-                    script_lines = []
-                    for s in proj.scenes:
-                        script_lines.append(f"【场景 {s.scene_index}】")
-                        for sh in s.shots:
-                            script_lines.append(f"镜头 {sh.shot_index}: [{sh.camera_framing}] {sh.action_desc}\n台词: {sh.dialogue or '（无对白）'}")
-                    script_text = "\n\n".join(script_lines)
-                    return {"status": "success", "prompt": script_text, "text": script_text, "script_data": proj.model_dump(), "elapsed_ms": int((time.time()-start)*1000)}
-                except Exception as e:
-                    print(f"[Canvas] script_generation failed: {e}")
-            elif skill_id == "proposal_generation" and txt.strip():
-                try:
-                    from app.pipelines.llm_service import llm_service
-                    res = await llm_service.chat_completion(
-                        messages=[
-                            {"role": "system", "content": "你是一位金牌影视与漫剧总策划。根据用户输入的主题或题材，生成一份高吸引力的策划案，包括世界观、主角人设、核心矛盾与前三集爆点大纲。"},
-                            {"role": "user", "content": txt}
-                        ]
-                    )
-                    content = res.get("content", txt)
-                    return {"status": "success", "prompt": content, "text": content, "elapsed_ms": int((time.time()-start)*1000)}
-                except Exception as e:
-                    print(f"[Canvas] proposal_generation failed: {e}")
-            elif skill_id == "prompt_expansion" and txt.strip():
-                try:
-                    from app.pipelines.llm_service import llm_service
-                    res = await llm_service.chat_completion(
-                        messages=[
-                            {"role": "system", "content": "你是一位电影级视觉提示词工程师。请将用户的简要描述扩写为细节丰富、电影质感强烈的专业提示词（包含景别、光影、构图、色温与胶片颗粒感）。直接输出提示词。"},
-                            {"role": "user", "content": txt}
-                        ]
-                    )
-                    content = res.get("content", txt)
-                    return {"status": "success", "prompt": content, "text": content, "elapsed_ms": int((time.time()-start)*1000)}
-                except Exception as e:
-                    print(f"[Canvas] prompt_expansion failed: {e}")
+            txt_out = data.get("prompt") or data.get("text") or upstream.get("prompt") or upstream.get("text") or ""
+            if not isinstance(txt_out, str):
+                txt_out = str(txt_out)
+            if not txt_out.strip() and isinstance(upstream.get("prompt"), str):
+                txt_out = upstream.get("prompt")
+            # REQ-toonflow-canvas F2 文本技能（自由生成 / 扩写 / 剧本拆解 / 策划案）：指令 gen_prompt + 文本参考为输入，
+            # 与前端宿主 runTextSkill 同口径（canvas/text_skills.py）；不执行技能时原样透传节点文本
+            skill = text_skills.effective_skill(data.get("skill_id") or merged.get("skill_id"), data.get("gen_prompt"))
+            if skill:
+                skill_txt, skill_src, skill_imgs = text_skills.skill_input(skill, data, upstream)
+                if skill_txt.strip():
+                    try:
+                        out = await text_skills.run_text_skill(
+                            skill, skill_txt, images=skill_imgs,
+                            style_preset=data.get("style_preset") or merged.get("style_preset"),
+                            aspect_ratio=data.get("aspect_ratio") or merged.get("aspect_ratio"),
+                        )
+                    except Exception as e:
+                        print(f"[Canvas] text skill {skill} failed: {e}")
+                        return {"status": "error", "error": f"{text_skills.SKILL_LABELS[skill]}失败: {e}", "skill_id": skill,
+                                "elapsed_ms": int((time.time()-start)*1000)}
+                    return {"status": "success", **out, "skill_id": skill, "input_source": skill_src,
+                            "elapsed_ms": int((time.time()-start)*1000)}
             return {"status":"success","prompt": txt_out, "text": txt_out, "elapsed_ms": int((time.time()-start)*1000)}
         if ntype == "export":
             # 聚合上游视频/音频/图片，透传即可，真实导出由前端触发 saveProjectContent/ exportJianYing

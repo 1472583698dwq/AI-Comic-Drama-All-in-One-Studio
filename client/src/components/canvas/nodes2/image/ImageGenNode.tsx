@@ -178,6 +178,7 @@ export function ImageGenNode(props: NodeProps) {
   const bindCharacter = (c: any, views: CharacterView[]) => {
     const todo = views.filter((v) => !boundViews.has(`${c.id}|${v.key}`));
     if (!todo.length) return;
+    // 左侧竖排，绝对坐标（K1 h）：锚点在分组里时宿主换算成相对坐标
     const { anchor, others } = siblingRects(rf.getNodes() as Node[], id);
     const positions = anchor ? stackLeftOf(anchor, todo.length, others) : [];
     const ids = actions.createNodes(

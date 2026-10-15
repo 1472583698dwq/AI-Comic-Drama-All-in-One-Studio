@@ -1159,7 +1159,8 @@ def _provider_tools_brief() -> str:
         return (
             "\n\n**动态生成源 Tools v2（当前已注册 " + str(len(lines)) + " 个，一源一Tool，基础常显 高级需点⚙ auto可自动 suggest需确认 manual仅手填）：**\n"
             + "\n".join(lines[:90])
-            + "\n\n**编排画布时：** 用 canvas_create_node 创建 prompt/image/video/audio 节点，data 内直接写 provider_id(即Tool名去掉provider_前缀)、prompt/idea、skill_id 与挂载的 first_frame/reference_images/ref_audio；"
+            + "\n\n**编排画布时：** 用 canvas_create_node 创建 prompt/image/video/audio 节点，data 内直接写 provider_id(即Tool名去掉provider_前缀)、prompt/idea、skill_id 与挂载的 first_frame/reference_images/ref_audio"
+            "（文本节点 prompt 例外：正文写 prompt，要执行文本技能时指令写 gen_prompt）；"
             "canvas_connect 连到生成节点的 in 口、用 slot(first_frame/last_frame/reference_images/camera_prompt/ref_audio/reference_video/prompt) 指定槽位后 canvas_execute 一键执行。"
             "生成源参数异构一律按该 provider_* Tool 自己的 schema 填写，含 x-visibility/x-agent：basic/auto 可由你自动按项目画幅推断，advanced/suggest 仅在用户提及时填写，hidden/manual 绝不填。"
             "\n**生成源选择铁律：** 需要首帧/参考图/尾帧/参考音频时，必须选择输入参数里含对应插槽(first_frame/reference_images/last_frame/ref_audio)的源；"
@@ -1185,24 +1186,13 @@ class PromptExpandRequest(BaseModel):
 @router.post("/llm/expand")
 async def expand_prompt(req: PromptExpandRequest):
     """电影级提示词扩写：短描述 → 专业影视分镜提示词（导演 Agent 技能后端）"""
-    from app.pipelines.llm_service import llm_service, LLMServiceError
+    from app.pipelines.llm_service import LLMServiceError
+    from app.canvas import text_skills
     if not req.prompt.strip():
         raise HTTPException(status_code=400, detail="prompt 不能为空")
-    kind_hint = {
-        "image": "生图提示词（主体、构图、景别、光线、材质风格、画质词，英文逗号短语）",
-        "video": "视频运动提示词（主体动作、运镜轨迹、节奏、光影变化，中文一句到三句）",
-        "dialogue": "角色台词与情绪标注（中文，带情绪标签）",
-    }.get(req.kind, "生图提示词")
     try:
-        text = await llm_service.chat_completion(
-            messages=[
-                {"role": "system", "content": f"你是漫剧影视级提示词扩写引擎。把用户的简短画面构思扩写为专业{kind_hint}。只输出提示词本身，不要解释、不要引号、不要 markdown。"},
-                {"role": "user", "content": req.prompt.strip()[:2000]},
-            ],
-            temperature=0.7,
-            max_tokens=600,
-        )
-        return {"status": "success", "expanded": (text or "").strip()[:1200]}
+        # REQ-toonflow-canvas F2 实现移到 canvas/text_skills.expand_prompt（画布引擎「扩写」技能共用）
+        return {"status": "success", "expanded": await text_skills.expand_prompt(req.prompt, req.kind)}
     except LLMServiceError as e:
         raise HTTPException(status_code=502, detail=f"LLM 扩写失败: {e}")
 
@@ -1218,26 +1208,18 @@ class TextGenerateRequest(BaseModel):
 @router.post("/llm/generate")
 async def generate_text(req: TextGenerateRequest):
     """REQ-toonflow-canvas H1 通用文本生成：画布文本节点「自由生成」技能（按提示词生成 Markdown）。"""
-    from app.pipelines.llm_service import llm_service, LLMServiceError
-    prompt = (req.prompt or "").strip()
-    if not prompt:
+    from app.pipelines.llm_service import LLMServiceError
+    from app.canvas import text_skills
+    if not (req.prompt or "").strip():
         raise HTTPException(status_code=400, detail="prompt 不能为空")
-    system = (req.system or "").strip() or "你是漫剧创作助手。按用户要求生成内容，使用 Markdown 排版；只输出正文，不要多余的解释。"
-    user = prompt[:12000]
-    imgs = [u for u in (req.images or []) if isinstance(u, str) and u.strip()][:8]
-    if imgs:
-        user += "\n\n（参考图地址：" + "；".join(imgs) + "）"
     try:
-        text = await llm_service.chat_completion(
-            messages=[{"role": "system", "content": system[:4000]}, {"role": "user", "content": user}],
-            temperature=max(0.0, min(float(req.temperature), 1.5)),
-            max_tokens=max(64, min(int(req.max_tokens), 8000)),
-        )
+        # REQ-toonflow-canvas F2 实现移到 canvas/text_skills.generate_text（画布引擎「自由生成 / 策划案」技能共用）
+        text = await text_skills.generate_text(req.prompt, system=req.system, images=req.images,
+                                               temperature=req.temperature, max_tokens=req.max_tokens)
+    except text_skills.EmptyResultError:
+        raise HTTPException(status_code=502, detail="LLM 返回为空")
     except LLMServiceError as e:
         raise HTTPException(status_code=502, detail=f"LLM 生成失败: {e}")
-    text = (text or "").strip()
-    if not text:
-        raise HTTPException(status_code=502, detail="LLM 返回为空")
     return {"status": "success", "text": text}
 
 

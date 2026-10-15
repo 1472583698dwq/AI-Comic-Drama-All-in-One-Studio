@@ -9,7 +9,7 @@
  * - `skill_id`：技能下拉的选择（宿主 / 后端执行器沿用此键按技能分发）。
  *
  * 执行：节点调用 `useKitNodeActions(id).execute(overrides)`，宿主按 `overrides.skill_id` 路由到原有分支
- * （剧本拆解 parseScript、策划案 MCP split_novel_script、扩写 /llm/expand、自由生成 LLM），把结果写回 `text` + `prompt`。
+ * （剧本拆解 parseScript、策划案与自由生成走通用 LLM /llm/generate、扩写 /llm/expand），把结果写回 `text` + `prompt`。
  * overrides 只作用于本次执行、不落盘（同旧 data.onExecute 的 customData），键名见 TextExecuteOverrides。
  */
 import { REF_TOKEN_RE, assembleInputs, refName, type RefItem } from '../../kit';
@@ -63,7 +63,7 @@ export const TEXT_SKILLS: readonly TextSkill[] = [
     id: 'proposal_generation',
     label: '策划案',
     group: '技能',
-    description: '生成世界观、主角人设与前三集爆点大纲（split_novel_script）',
+    description: '生成世界观、主角人设与前三集爆点大纲',
     placeholder: '输入漫剧题材或核心梗生成策划案，输入 @ 引用参考；留空则基于上游文本或当前正文',
     documentFallback: true,
     textOnly: true,

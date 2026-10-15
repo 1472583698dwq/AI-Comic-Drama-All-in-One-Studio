@@ -1162,7 +1162,11 @@ class MCPServerRegistry:
         ))
         self.register_tool(MCPToolDefinition(
             name="canvas_execute",
-            description="[画布] 执行画布 DAG，可指定 target_ids 仅执行选中（传分组 id = 执行分组内全部节点）；分组节点本身不执行",
+            description="[画布] 执行画布 DAG，可指定 target_ids 仅执行选中（传分组 id = 执行分组内全部节点）；分组节点本身不执行。"
+                        "文本节点（prompt）：data.prompt/text 是正文，data.gen_prompt 是生成指令（可含 {{ref N}}），"
+                        "skill_id ∈ free_generation(自由生成)/prompt_expansion(扩写)/script_generation(剧本拆解)/proposal_generation(策划案)；"
+                        "以 gen_prompt + 连进来的文本参考为输入执行技能（扩写/拆解/策划案在两者都空时处理正文），"
+                        "未设 skill_id 且无 gen_prompt 的文本节点原样输出正文",
             category="workflow",
             icon="Play",
             author="Canvas Engine",
@@ -1171,7 +1175,8 @@ class MCPServerRegistry:
         ))
         self.register_tool(MCPToolDefinition(
             name="canvas_dispatch_skill",
-            description="[画布] 针对画布指定节点调度特定 Agent 技能（如 script_generation / proposal_generation / prompt_expansion / first_last_frame / all_round_reference / text_to_image / tts_voice）并执行",
+            description="[画布] 针对画布指定节点调度特定 Agent 技能（如 free_generation / script_generation / proposal_generation / prompt_expansion / first_last_frame / all_round_reference / text_to_image / tts_voice）并执行。"
+                        "文本节点（prompt）的技能：prompt 参数写入节点的生成指令 gen_prompt，结果（Markdown）写回正文 prompt/text",
             category="workflow",
             icon="Zap",
             author="Canvas Engine",
@@ -1179,7 +1184,7 @@ class MCPServerRegistry:
             input_schema={
                 "type":"object",
                 "properties":{
-                    "skill_id":{"type":"string","description":"技能ID：script_generation, proposal_generation, prompt_expansion, first_last_frame, all_round_reference, text_to_image, tts_voice"},
+                    "skill_id":{"type":"string","description":"技能ID：free_generation, script_generation, proposal_generation, prompt_expansion, first_last_frame, all_round_reference, text_to_image, tts_voice"},
                     "prompt":{"type":"string","description":"提示词或文本内容"},
                     "node_id":{"type":"string","description":"目标节点ID（若不填则自动创建对应节点）"},
                     "first_frame_url":{"type":"string","description":"首帧图URL"},
@@ -2606,7 +2611,10 @@ class MCPServerRegistry:
                     
                     d = target_node.get("data") or {}
                     d["skill_id"] = skill_id
-                    if prompt:
+                    if prompt and target_node.get("type") == "prompt":
+                        # REQ-toonflow-canvas F2 文本节点：prompt/text 是正文，技能指令写 gen_prompt（N1），结果回写正文
+                        d["gen_prompt"] = prompt
+                    elif prompt:
                         d["prompt"] = prompt
                         d["text"] = prompt
                         d["image_prompt"] = prompt

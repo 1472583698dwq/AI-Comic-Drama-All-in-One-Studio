@@ -93,11 +93,16 @@ describe('文本节点技能路由', () => {
     expect(h.data('t').script_data).toBe(res);
   });
 
-  it('策划案：内容非字符串时 text / prompt 写同一份 JSON', async () => {
-    api.callMcpTool.mockResolvedValue({ status: 'success', result: { project: { title: '仙侠' } } });
+  it('策划案：走 /llm/generate + 策划案系统提示（与后端 text_skills 一致），不再调 split_novel_script', async () => {
     const h = harness([node('t', 'prompt', {})]);
     await h.execute('t', { skill_id: 'proposal_generation', prompt: '仙侠题材' });
-    expect(h.data('t').text).toBe(JSON.stringify({ title: '仙侠' }, null, 2));
+    expect(api.callMcpTool).not.toHaveBeenCalled();
+    const [url, init] = h.fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toMatch(/\/llm\/generate$/);
+    const body = JSON.parse(String(init.body));
+    expect(body.prompt).toBe('仙侠题材');
+    expect(body.system).toMatch(/策划案/);
+    expect(h.data('t').text).toBe('生成的正文');
     expect(h.data('t').prompt).toBe(h.data('t').text);
   });
 

@@ -528,39 +528,6 @@ export function buildNavigatePayload(nodeId: string, data: Director3DData, shotI
   };
 }
 
-export interface SlotNode {
-  id: string;
-  parentId?: string;
-  position: { x: number; y: number };
-  width?: number;
-  height?: number;
-  measured?: { width?: number; height?: number };
-}
-
-const sizeOf = (n: SlotNode, fallback: { w: number; h: number }) => ({
-  w: n.measured?.width ?? n.width ?? fallback.w,
-  h: n.measured?.height ?? n.height ?? fallback.h,
-});
-
-/**
- * 导出产物新节点的落点（Toonflow addExportNode）：锚点右侧 80px，从锚点顶部往下找第一个不与同层节点重叠的位置。
- */
-export function findFreeSlot(nodes: readonly SlotNode[], anchor: SlotNode, size: { w: number; h: number }, gapX = 80, gapY = 24): { x: number; y: number } {
-  const a = sizeOf(anchor, { w: 320, h: 300 });
-  const x = anchor.position.x + a.w + gapX;
-  let y = anchor.position.y;
-  const siblings = nodes
-    .filter((n) => n.id !== anchor.id && (n.parentId ?? '') === (anchor.parentId ?? ''))
-    .sort((p, q) => p.position.y - q.position.y);
-  for (const other of siblings) {
-    const s = sizeOf(other, { w: 320, h: 300 });
-    const ox = other.position.x;
-    const oy = other.position.y;
-    if (ox < x + size.w && ox + s.w > x && oy < y + size.h && oy + s.h > y) y = oy + s.h + gapY;
-  }
-  return { x, y };
-}
-
 /** 导出文件名（ASCII，后端按扩展名落盘）与素材名 */
 export function exportNames(label: string | undefined, kind: 'image' | 'video', now = new Date()) {
   const pad = (n: number) => String(n).padStart(2, '0');

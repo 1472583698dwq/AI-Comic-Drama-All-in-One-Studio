@@ -25,11 +25,11 @@ import { motionShortLabel } from '../../../director3d/scene/presets';
 import {
   ASPECT_OPTIONS, EASING_OPTIONS, ENTITY_LABELS, JOINT_LABELS, SPEED_OPTIONS,
   appendKeyframe, castOptions, cameraPromptPatch, deriveCameraPrompt, environmentLabel, environmentOptions, exportNames,
-  findFreeSlot, findShotId, focalOptions, framingOptions, framingPatch, isValidCamera, keyframesDuration, labelOf,
+  findShotId, focalOptions, framingOptions, framingPatch, isValidCamera, keyframesDuration, labelOf,
   motionKeyframeSamples, motionOptions, moveKeyframe, nextKeyframeEasing, posePatch, poseOptions, presetToKeyframes,
   readKeyframes, readStageParams, removeKeyframe, replaceKeyframeCamera, retimeKeyframe, scaleKeyframesDuration,
   setKeyframeEasing, stageBadge, stageBoxAspect, withCurrent, buildNavigatePayload, describeParamChanges, PARSE_MODE_LABELS,
-  type Director3DData, type Director3DKeyframe, type MinimalNode, type PickerOption, type SlotNode,
+  type Director3DData, type Director3DKeyframe, type MinimalNode, type PickerOption,
 } from './model';
 import { useDirectorStage, type DirectorStage } from './useDirectorStage';
 import { loadStageModule } from './stageLoader';
@@ -328,12 +328,10 @@ export function Director3DNode(props: NodeProps) {
     if (videoBtnTextRef.current) videoBtnTextRef.current.textContent = `导出中 ${pct}%`;
   }, []);
 
+  // REQ-toonflow-canvas F1：不传 position（K1 h 约定是画布绝对坐标），交给宿主摆放：
+  // 锚点右侧、按实测尺寸避让同层节点，锚点在分组里时新节点挂同一分组并换算成相对坐标。
   const placeExportNode = (type: 'load-image' | 'load-video', nodeData: Record<string, unknown>) => {
-    const self = rf.getNode(id) as SlotNode | undefined;
-    const aspect = readStageParams(dataRef.current).aspect;
-    const size = { w: Math.round(Math.min(520, Math.max(160, 240 * aspect + 18))), h: 300 };
-    const position = self ? findFreeSlot(rf.getNodes() as SlotNode[], self, size) : undefined;
-    actions.createNodes([{ type, data: nodeData, ...(position ? { position } : {}) }], { placement: 'right', select: false });
+    actions.createNodes([{ type, data: nodeData }], { placement: 'right', select: false });
   };
 
   const exportImage = async () => {

@@ -1,11 +1,14 @@
 // -*- coding: utf-8 -*-
 /**
- * REQ-toonflow-canvas 产物节点摆放（纯函数，照 Toonflow imageGridSplit.vue / imageEditor.vue 的 saveMark）。
+ * REQ-toonflow-canvas 产物节点摆放（纯函数，照 Toonflow imageGridSplit.vue）：宫格切分、角色参考。
+ * 单个产物（标记结果）不在这里算坐标，交给宿主 createNodes 的 Toonflow 摆放。
  *
- * 坐标系：与锚点节点相同（React Flow `node.position`，有父分组时为相对父分组的坐标），
- * 与 kit 的 createNodesLocal（新节点继承锚点 parentId）一致。
+ * 坐标系：画布绝对坐标（flow 坐标系）。REQ-toonflow-canvas F1：K1 (h) 约定 `NewNodeSpec.position` 是绝对坐标，
+ * 锚点在分组里时由宿主 / kit createNodesLocal 让新节点继承锚点 parentId 并换算成相对坐标；
+ * 所以 siblingRects 先把锚点与同层节点换算成绝对矩形，下面的版式函数直接产出绝对坐标。
  */
 import type { Node } from '@xyflow/react';
+import { absolutePosition } from '../../kit/graphOps';
 import { CARD_EXTRA, MEDIA_HEIGHT, mediaNodeWidth } from './media';
 
 export interface Rect {
@@ -45,12 +48,6 @@ export function freeY(target: Rect, others: readonly Rect[], gap = STACK_GAP): n
     if (overlaps({ ...target, y }, o)) y = o.y + o.height + gap;
   }
   return y;
-}
-
-/** 单个产物（标记结果等）：锚点右侧 80px，竖向避让。 */
-export function placeRightOf(anchor: Rect, size: { width: number; height: number }, others: readonly Rect[]): Point {
-  const x = anchor.x + anchor.width + SIDE_GAP;
-  return { x, y: freeY({ x, y: anchor.y, width: size.width, height: size.height }, others) };
 }
 
 /** 宫格切块节点的估算宽度（Toonflow：块宽/块高 × 240 + 18）。 */
@@ -101,7 +98,7 @@ export function stackLeftOf(anchor: Rect, count: number, others: readonly Rect[]
   return out;
 }
 
-/** React Flow 节点 → 矩形（与锚点同坐标系；尺寸优先用测量值）。 */
+/** React Flow 节点 → 矩形（node.position 所在坐标系；尺寸优先用测量值）。 */
 export function nodeRect(n: Pick<Node, 'position' | 'measured' | 'width' | 'height'>): Rect {
   return {
     x: n.position.x,
@@ -111,13 +108,23 @@ export function nodeRect(n: Pick<Node, 'position' | 'measured' | 'width' | 'heig
   };
 }
 
-/** 与锚点处在同一父级（同坐标系）的其他节点矩形。 */
+/**
+ * 锚点与同一父级的其他节点矩形，**画布绝对坐标**（REQ-toonflow-canvas F1）。
+ * 同层节点共用父级原点：父级绝对坐标 = 锚点绝对坐标 − 锚点 position（沿 parentId 链累加，带环保护）。
+ */
 export function siblingRects(nodes: readonly Node[], anchorId: string): { anchor: Rect | null; others: Rect[] } {
   const anchorNode = nodes.find((n) => n.id === anchorId);
   if (!anchorNode) return { anchor: null, others: [] };
+  const abs = absolutePosition(anchorNode, new Map(nodes.map((n) => [n.id, n])));
+  const dx = abs.x - anchorNode.position.x;
+  const dy = abs.y - anchorNode.position.y;
+  const absRect = (n: Node): Rect => {
+    const r = nodeRect(n);
+    return { ...r, x: r.x + dx, y: r.y + dy };
+  };
   const parent = anchorNode.parentId ?? null;
   const others = nodes
     .filter((n) => n.id !== anchorId && (n.parentId ?? null) === parent && !n.hidden)
-    .map(nodeRect);
-  return { anchor: nodeRect(anchorNode), others };
+    .map(absRect);
+  return { anchor: absRect(anchorNode), others };
 }

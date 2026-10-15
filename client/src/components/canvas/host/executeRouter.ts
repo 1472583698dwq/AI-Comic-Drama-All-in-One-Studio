@@ -4,7 +4,7 @@
  *
  * 节点调用 `useKitNodeActions(id).execute(overrides)`；overrides 只作用于本次执行、不落盘。
  * - `prompt`（文本）：按 `overrides.skill_id`（缺省节点 skill_id → free_generation）路由：
- *     剧本拆解 parseScript / 策划案 MCP split_novel_script / 扩写 /llm/expand / 自由生成 /llm/generate（新增）；
+ *     剧本拆解 parseScript / 策划案 /llm/generate + 策划案系统提示（与后端 canvas/text_skills 一致）/ 扩写 /llm/expand / 自由生成 /llm/generate（新增）；
  *     结果 text 与 prompt 写同一内容（N1）。
  * - `image` / `video` / `audio`：宿主侧生成（分镜子图自动运行等宿主发起的场景）：按连线组装参考（kit buildRefs +
  *     assembleInputs，与节点面板同口径）→ kit runGeneration（直接生成 / 智能规划、视频轮询、history）。
@@ -51,7 +51,7 @@ const TEXT_TOOL: Record<TextSkill, string> = {
   free_generation: 'llm/generate',
   prompt_expansion: 'llm/expand',
   script_generation: 'parseScript',
-  proposal_generation: 'split_novel_script',
+  proposal_generation: 'llm/generate',
 };
 
 const FREE_GEN_SYSTEM = '你是漫剧创作助手。按用户要求生成内容，使用 Markdown 排版；只输出正文，不要多余的解释。';
@@ -114,19 +114,10 @@ async function runTextSkill(deps: ExecuteDeps, node: Node, overrides: AnyData): 
       out = formatScript(res) || input;
       extra.script_data = res;
     } else if (skill === 'proposal_generation') {
-      let content: unknown;
-      try {
-        const r: AnyData = await apiService.callMcpTool('split_novel_script', {
-          novel_text: input, style_preset: d.style_preset || 'donghua_xianxia', aspect_ratio: d.aspect_ratio || '9:16',
-        });
-        if (r?.status === 'error') throw new Error(String(r?.error || '策划案生成失败'));
-        content = r?.result?.content || r?.result?.project;
-      } catch {
-        // 降级：通用 LLM 按策划案指令直接生成（旧宿主降级走 /agent/chat）
-        content = await generateText(f, input, { system: PROPOSAL_SYSTEM });
-      }
-      out = typeof content === 'string' ? content : content ? JSON.stringify(content, null, 2) : '';
-      if (!out.trim()) throw new Error('策划案返回为空');
+      // REQ-toonflow-canvas：与后端 text_skills.PROPOSAL_GENERATION 一致，直接用策划案系统提示走通用 LLM。
+      // 旧实现调 MCP split_novel_script：它返回的是分场/分镜拆解（不是策划案），带项目上下文时还会写入项目；
+      // 且成功时读 result.content||result.project 取不到值，直接抛「策划案返回为空」，降级分支永远走不到。
+      out = await generateText(f, input, { system: PROPOSAL_SYSTEM });
     } else if (skill === 'prompt_expansion') {
       out = await apiService.expandPrompt(input, 'image');
       if (!out) throw new Error('扩写返回为空');

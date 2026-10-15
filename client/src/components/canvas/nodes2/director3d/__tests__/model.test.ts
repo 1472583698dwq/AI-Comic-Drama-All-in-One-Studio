@@ -1,8 +1,8 @@
-// REQ-toonflow-canvas N5 · 3D 导演节点数据模型：运镜提示词推导、旧数据兼容、关键帧编辑、跳转载荷、导出落点、舞台预算
+// REQ-toonflow-canvas N5 · 3D 导演节点数据模型：运镜提示词推导、旧数据兼容、关键帧编辑、跳转载荷、舞台预算
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildMinimaxCameraPrompt, FRAMING_PRESETS } from '../../../../director3d/scene/presets';
 import {
-  DEFAULTS, appendKeyframe, buildNavigatePayload, describeParamChanges, cameraPromptPatch, createDirector3DData, deriveCameraPrompt, findFreeSlot,
+  DEFAULTS, appendKeyframe, buildNavigatePayload, describeParamChanges, cameraPromptPatch, createDirector3DData, deriveCameraPrompt,
   findShotId, focalOptions, framingPatch, isValidCamera, keyframesDuration, motionKeyframeSamples, moveKeyframe, nextKeyframeEasing,
   posePatch, presetToKeyframes, readKeyframes, readStageParams, removeKeyframe, replaceKeyframeCamera, retimeKeyframe, roundCamera,
   scaleKeyframesDuration, setKeyframeEasing, stageBoxAspect, withCurrent, type Director3DKeyframe, type StageCameraState,
@@ -208,17 +208,6 @@ describe('在 3D 片场打开 / 导出落点', () => {
     });
     expect(p.stage.keyframes).toHaveLength(2);
     expect('shotId' in buildNavigatePayload('d3', createDirector3DData())).toBe(false);
-  });
-
-  it('导出新节点落点：锚点右侧 80px，往下避开同层节点', () => {
-    const anchor = { id: 'd3', position: { x: 0, y: 0 }, measured: { width: 320, height: 600 } };
-    const size = { w: 280, h: 300 };
-    expect(findFreeSlot([anchor], anchor, size)).toEqual({ x: 400, y: 0 });
-    const blocker = { id: 'img1', position: { x: 400, y: 0 }, measured: { width: 260, height: 200 } };
-    const other = { id: 'img2', position: { x: 400, y: 224 }, measured: { width: 260, height: 200 } };
-    expect(findFreeSlot([anchor, other, blocker], anchor, size)).toEqual({ x: 400, y: 448 });
-    const inGroup = { id: 'g1', parentId: 'grp', position: { x: 400, y: 0 }, measured: { width: 260, height: 200 } };
-    expect(findFreeSlot([anchor, inGroup], anchor, size)).toEqual({ x: 400, y: 0 });
   });
 });
 

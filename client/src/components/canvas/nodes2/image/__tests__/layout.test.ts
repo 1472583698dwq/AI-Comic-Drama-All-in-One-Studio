@@ -1,6 +1,6 @@
 // REQ-toonflow-canvas N2：摆放 / 尺寸 / 参数快捷项 / 局部重绘组装 / 生成入参整理 —— 纯函数
 import { describe, expect, it } from 'vitest';
-import { freeY, gridSplitPositions, placeRightOf, siblingRects, stackLeftOf, tileNodeWidth, GRID_ROW_PITCH } from '../layout';
+import { freeY, gridSplitPositions, siblingRects, stackLeftOf, tileNodeWidth, GRID_ROW_PITCH } from '../layout';
 import { imageUrlFromDrop, loadImagePatch, genImagePatch, mediaNodeWidth, normalizeMediaUrl, validateImageFile } from '../media';
 import { aspectLabel, closestRatioOption, detectQuickParams, paramsPatch, paramsSummary, providerDefaultParams, ratioText } from '../imageParams';
 import { assembleInpaint, inpaintBlockedReason, shiftRefTokens, INPAINT_GUIDE_KEY, INPAINT_SOURCE_KEY } from '../inpaint';
@@ -42,10 +42,8 @@ describe('宫格切分版式（Toonflow imageGridSplit）', () => {
     expect(tileNodeWidth(10000, 100)).toBe(720 + 18);
   });
 
-  it('标记产物放右侧并避让；角色参考放左侧竖排', () => {
+  it('角色参考放左侧竖排', () => {
     const anchor = { x: 0, y: 0, width: 300, height: 300 };
-    expect(placeRightOf(anchor, { width: 258, height: 290 }, [])).toEqual({ x: 380, y: 0 });
-    expect(placeRightOf(anchor, { width: 258, height: 290 }, [{ x: 380, y: 0, width: 100, height: 100 }])).toEqual({ x: 380, y: 140 });
     const left = stackLeftOf(anchor, 2, []);
     expect(left[0].x).toBe(-80 - 220);
     expect(left[1].y).toBeGreaterThan(left[0].y);
@@ -61,6 +59,22 @@ describe('宫格切分版式（Toonflow imageGridSplit）', () => {
     const r = siblingRects(nodes, 'a');
     expect(r.anchor).toEqual({ x: 1, y: 2, width: 10, height: 20 });
     expect(r.others).toEqual([{ x: 5, y: 5, width: 30, height: 40 }]);
+  });
+
+  it('REQ-toonflow-canvas F1：锚点在（嵌套）分组里时，锚点与同层节点都换算成画布绝对坐标', () => {
+    const nodes = [
+      { id: 'outer', type: 'group', position: { x: 1000, y: 500 }, data: {} },
+      { id: 'inner', type: 'group', parentId: 'outer', position: { x: 100, y: 60 }, data: {} },
+      { id: 'a', parentId: 'inner', position: { x: 24, y: 40 }, measured: { width: 300, height: 290 }, data: {} },
+      { id: 'b', parentId: 'inner', position: { x: 400, y: 40 }, measured: { width: 200, height: 100 }, data: {} },
+      { id: 'top', position: { x: 1504, y: 760 }, measured: { width: 200, height: 100 }, data: {} }, // 顶层节点：与锚点不同层，不参与避让
+    ] as unknown as Node[];
+    const r = siblingRects(nodes, 'a');
+    expect(r.anchor).toEqual({ x: 1124, y: 600, width: 300, height: 290 });
+    expect(r.others).toEqual([{ x: 1500, y: 600, width: 200, height: 100 }]);
+    // 宫格版式直接得到绝对坐标：锚点右侧 80px，压到同层节点 b 就整体下移
+    const pos = gridSplitPositions({ anchor: r.anchor!, rows: 1, cols: 2, tileWidth: 258, others: r.others });
+    expect(pos[0]).toEqual({ x: 1124 + 300 + 80, y: 600 + 100 + 40 });
   });
 });
 

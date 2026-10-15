@@ -3,6 +3,8 @@
  * REQ-toonflow-canvas 图片 / 图片生成节点共用的素材动作：
  * 预览尺寸、上传 / 替换（≤100MB）、素材库拖入、宫格切分（→ rows×cols 个图片节点）、标记保存（→ 新图片节点并连线）。
  * 产物节点一律经 useKitNodeActions(id).createNodes 落到画布（宿主可接管撤销 / 选中），摆放照 Toonflow。
+ * 坐标约定（K1 h）：spec.position 是画布绝对坐标；宫格切分按 siblingRects 的绝对矩形排版，
+ * 标记产物（单个节点）不传 position，由宿主摆放（锚点在分组里也正确）。
  */
 import { useCallback, useRef, useState, type DragEvent } from 'react';
 import { useReactFlow, type Node } from '@xyflow/react';
@@ -12,7 +14,7 @@ import { toast } from '../../../../stores/useDialogStore';
 import {
   dragMayCarryImage, imageUrlFromDrop, loadImagePatch, mediaNodeWidth, validateImageFile, type NaturalSize,
 } from './media';
-import { gridSplitPositions, placeRightOf, siblingRects, tileNodeWidth, DEFAULT_NODE_HEIGHT } from './layout';
+import { gridSplitPositions, siblingRects, tileNodeWidth } from './layout';
 import { uploadImageFile, type UploadResult } from './upload';
 import type { PaintEditor } from './usePaintEditor';
 import { MARK_DEFAULT_COLOR } from './usePaintEditor';
@@ -112,6 +114,7 @@ export function useImageMedia({ id, label, url, actions, onImage, busy }: UseIma
       const res = await gridSplit(url, rows, cols);
       const tiles = res.images || [];
       if (!tiles.length) throw new Error('切分未返回图片');
+      // 绝对坐标（K1 h）：锚点在分组里时宿主换算成相对坐标，保持宫格版式
       const { anchor, others } = siblingRects(rf.getNodes() as Node[], id);
       const tileWidth = tileNodeWidth(tiles[0].width, tiles[0].height);
       const positions = anchor ? gridSplitPositions({ anchor, rows: res.rows, cols: res.cols, tileWidth, others }) : [];
@@ -145,13 +148,10 @@ export function useImageMedia({ id, label, url, actions, onImage, busy }: UseIma
     editor.setBusy(true);
     try {
       const res = await composeMask(url, mask, { opacity: 0.9, color: editor.color || MARK_DEFAULT_COLOR });
-      const { anchor, others } = siblingRects(rf.getNodes() as Node[], id);
-      const w = mediaNodeWidth({ width: res.width, height: res.height }) ?? 220;
-      const position = anchor ? placeRightOf(anchor, { width: w, height: DEFAULT_NODE_HEIGHT }, others) : undefined;
+      // REQ-toonflow-canvas F1：单个产物不传 position，交给宿主摆放（锚点右侧、避让同层、分组内自动换算）
       actions.createNodes(
         [{
           type: LOAD_IMAGE_TYPE,
-          ...(position ? { position } : {}),
           data: { label: `${label || '图片'} - 标记`, ...loadImagePatch(res.url), _origin: { op: 'mark', from: id } },
         }],
         { connectFrom: { nodeId: id, sourceHandle: 'image', targetHandle: 'in' }, select: false },
@@ -165,7 +165,7 @@ export function useImageMedia({ id, label, url, actions, onImage, busy }: UseIma
     } finally {
       setMarkSaving(false);
     }
-  }, [url, markSaving, rf, id, label, actions]);
+  }, [url, markSaving, id, label, actions]);
 
   return {
     natural: size, width, failed, onLoad, onError,

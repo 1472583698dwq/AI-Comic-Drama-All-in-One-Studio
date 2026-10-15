@@ -281,9 +281,11 @@ describe('director3d 节点', () => {
     expect(fake.stages[0].snapshotPNG).toHaveBeenCalledWith({ longEdge: 1280 });
     expect(uploadStageBlob).toHaveBeenCalledWith(expect.any(Blob), expect.objectContaining({ projectId: 'proj_test', fileName: expect.stringMatching(/^director3d_\d{8}-\d{6}\.png$/) }));
     expect(createNodes).toHaveBeenCalledWith(
-      [expect.objectContaining({ type: 'load-image', data: expect.objectContaining({ image_url: '/storage/assets/ast_test/original.png' }), position: expect.any(Object) })],
-      expect.objectContaining({ anchorId: 'd3', select: false }),
+      [expect.objectContaining({ type: 'load-image', data: expect.objectContaining({ image_url: '/storage/assets/ast_test/original.png' }) })],
+      expect.objectContaining({ anchorId: 'd3', placement: 'right', select: false }),
     );
+    // REQ-toonflow-canvas F1：单个导出节点不传 position（K1 h 约定是绝对坐标），交给宿主摆放
+    expect((createNodes.mock.calls[0] as unknown as [Array<Record<string, unknown>>])[0][0]).not.toHaveProperty('position');
   });
 
   it('AI 规划：宿主没写回任何数据（旧宿主出错只弹窗）时提示失败', async () => {
@@ -312,5 +314,25 @@ describe('director3d 节点', () => {
     expect(uploadStageVideo).toHaveBeenCalledWith(expect.any(Blob), 2.5, expect.objectContaining({ projectId: 'proj_test' }));
     expect(createNodes).not.toHaveBeenCalled();
     expect(el.querySelector('.cv-d3__notice')?.textContent).toContain('已导出运镜视频 MP4（2.5s');
+  });
+
+  it('REQ-toonflow-canvas F1：导演节点在分组里导出 PNG → 新图片节点挂同一分组、落在节点右侧（不再偏移分组的绝对坐标）', async () => {
+    latest.patches = [];
+    // 分组排在子节点前；不给宿主 createNodes → 走 kit createNodesLocal（与宿主同一摆放 / 换算）
+    const initial: Node[] = [
+      { id: 'grp', type: 'group', position: { x: 1000, y: 500 }, style: { width: 1600, height: 1200 }, data: { label: '分组' } },
+      { id: 'd3', type: 'director3d', parentId: 'grp', position: { x: 24, y: 40 }, selected: true, data: { ai_directive: '' } },
+    ];
+    const { container } = render(<Harness initial={initial} host={{ projectId: 'proj_test' }} />);
+    await waitFor(() => expect(container.querySelector('.react-flow__node[data-id="d3"] .cv-d3__stage[data-stage-status="ready"]')).toBeTruthy());
+    fireEvent.click(within(nodeEl(container)).getByRole('button', { name: '导出当前机位 PNG' }));
+    await waitFor(() => expect(latest.nodes.some((n) => n.type === 'load-image')).toBe(true));
+    const anchor = latest.nodes.find((n) => n.id === 'd3')!;
+    const made = latest.nodes.find((n) => n.type === 'load-image')!;
+    expect(made.parentId).toBe('grp');
+    expect(made.data).toMatchObject({ image_url: '/storage/assets/ast_test/original.png' });
+    // 相对分组：锚点右缘 + 48（kit PLACE_GAP），与锚点顶对齐 → 画布绝对坐标就在导演节点右侧
+    const aw = anchor.measured?.width ?? anchor.width ?? 240;
+    expect(made.position).toEqual({ x: 24 + aw + 48, y: 40 });
   });
 });

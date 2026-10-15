@@ -47,5 +47,5 @@ export const imageGenNodeDef = defineNode({
 export { LoadImageNode } from './LoadImageNode';
 export { ImageGenNode, promptPatch, IMAGE_PROMPT_KEYS } from './ImageGenNode';
 export { setImageUploader, assetLibraryUploader, uploadImageFile, persistDataUrl, type ImageUploader, type UploadResult } from './upload';
-export { gridSplitPositions, placeRightOf, stackLeftOf, tileNodeWidth, siblingRects, type Rect } from './layout';
+export { gridSplitPositions, stackLeftOf, tileNodeWidth, siblingRects, type Rect } from './layout';
 export { mediaNodeWidth, imageUrlOf, loadImagePatch, genImagePatch, normalizeMediaUrl, MEDIA_HEIGHT, CARD_EXTRA } from './media';
