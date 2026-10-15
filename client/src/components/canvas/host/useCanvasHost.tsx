@@ -23,7 +23,7 @@ import { GROUP_TYPE, defaultIdFactory, duplicateNodes, ungroupNodes } from '../k
 import { resolveDynamicPorts } from '../nodes2/legacy-b/ports';
 import { collectNodeResults } from '../shotWriteBack';
 import { applyDataPatch, applyPatches, downstreamPatches } from './propagation';
-import { createExecuteRouter } from './executeRouter';
+import { createExecuteRouter, type ExecuteResult } from './executeRouter';
 import { hostCreateNodes } from './createNodes';
 import type { ViewerState, WriteBackState } from './canvasChrome';
 
@@ -79,7 +79,8 @@ export interface CanvasHostDeps {
 export interface CanvasHostController {
   host: CanvasHost;
   updateNodeData: (nodeId: string, patch: AnyData) => void;
-  execute: (nodeId: string, overrides?: AnyData) => Promise<void>;
+  /** 返回产物（媒体生成的 url / 文本正文），见 host/executeRouter.ExecuteResult */
+  execute: (nodeId: string, overrides?: AnyData) => Promise<ExecuteResult>;
   removeNodes: (ids: string[], opts?: { silent?: boolean }) => void;
   viewer: ViewerState | null;
   setViewer: (v: ViewerState | null) => void;

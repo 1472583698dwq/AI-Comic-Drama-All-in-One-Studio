@@ -1223,6 +1223,55 @@ async def generate_text(req: TextGenerateRequest):
     return {"status": "success", "text": text}
 
 
+class TextStreamRequest(BaseModel):
+    prompt: str
+    skill: Optional[str] = None  # free_generation（默认）/ prompt_expansion / proposal_generation
+    system: Optional[str] = None  # 仅调用方显式传入时覆盖技能的系统提示
+    images: Optional[List[str]] = None
+
+
+def _sse_data(payload: Dict[str, Any]) -> str:
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+@router.post("/llm/generate/stream")
+async def generate_text_stream(req: TextStreamRequest):
+    """REQ-toonflow-canvas FX-B 文本节点流式生成（SSE，契约见 progress/COORDINATION.md 第 14 条）。
+
+    每个增量 ``data: {"delta": "…"}``；结束 ``data: {"done": true, "text": "<完整文本>"}``；
+    出错 ``data: {"error": "…"}`` 后结束（参数错误同样以 error 事件返回）。上游不支持流式时退化为一条 delta + done。
+    系统提示与非流式技能共用 canvas/text_skills（自由生成 / 扩写 / 策划案），剧本拆解不走流式。
+    """
+    from app.canvas import text_skills
+    skill = (req.skill or "").strip() or text_skills.FREE_GENERATION
+
+    async def events():
+        if not (req.prompt or "").strip():
+            yield _sse_data({"error": "prompt 不能为空"})
+            return
+        if skill not in text_skills.STREAM_SKILLS:
+            yield _sse_data({"error": f"不支持的流式技能: {skill}（可选 {' / '.join(text_skills.STREAM_SKILLS)}）"})
+            return
+        parts: List[str] = []
+        try:
+            async for delta in text_skills.stream_text(skill, req.prompt, system=req.system, images=req.images):
+                parts.append(delta)
+                yield _sse_data({"delta": delta})
+        except Exception as e:  # LLMServiceError / 网络异常：已下发的增量作废，前端按 error 处理
+            yield _sse_data({"error": f"LLM 生成失败: {e}"})
+            return
+        text = "".join(parts).strip()
+        if skill == text_skills.PROMPT_EXPANSION:
+            text = text[:text_skills.EXPAND_MAX_CHARS]
+        if not text:
+            yield _sse_data({"error": "LLM 返回为空"})
+            return
+        yield _sse_data({"done": True, "text": text})
+
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
 
 @router.websocket("/ws/agent")
 async def websocket_agent_endpoint(websocket: WebSocket):

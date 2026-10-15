@@ -33,7 +33,7 @@ import {
 } from './model';
 import { useDirectorStage, type DirectorStage } from './useDirectorStage';
 import { loadStageModule } from './stageLoader';
-import { isTruncated, measureVideoDuration, uploadStageBlob, uploadStageVideo } from './exportMedia';
+import { exportSavedPatch, isTruncated, measureVideoDuration, uploadStageBlob, uploadStageVideo } from './exportMedia';
 import { PresetPicker } from './PresetPicker';
 import { KeyframeList } from './KeyframeList';
 import './director3d.css';
@@ -343,11 +343,13 @@ export function Director3DNode(props: NodeProps) {
       const blob = await s.snapshotPNG({ longEdge: EXPORT_LONG_EDGE });
       const names = exportNames(dataRef.current.label, 'image');
       setExporting({ kind: 'image', phase: 'upload' });
-      const url = await uploadStageBlob(blob, { fileName: `${names.fileBase}.png`, name: names.assetName, projectId: actions.projectId });
-      update({ image_url: url });
+      const up = await uploadStageBlob(blob, { fileName: `${names.fileBase}.png`, name: names.assetName, projectId: actions.projectId });
+      const url = up.url;
+      // 已入素材库：导演节点与新建的图片节点都带上素材 id，「保存到素材库」置灰，不重复入库
+      update(exportSavedPatch(dataRef.current, 'image', up));
       setLastExport('image');
       const newNode = dataRef.current.export_new_node !== false;
-      if (newNode) placeExportNode('load-image', { label: names.nodeLabel, image_url: url, image: url, url });
+      if (newNode) placeExportNode('load-image', { label: names.nodeLabel, image_url: url, image: url, url, ...(up.assetId ? { asset_id: up.assetId } : {}) });
       say('success', `已导出机位截图 PNG（「图片」输出口${newNode ? '，并在右侧新建图片节点' : ''}）`);
     } catch (e) {
       say('error', `导出 PNG 失败：${errText(e)}`);
@@ -400,14 +402,15 @@ export function Director3DNode(props: NodeProps) {
       }
       const names = exportNames(dataRef.current.label, 'video');
       setExporting({ kind: 'video', phase: 'upload' });
-      const url = await uploadStageVideo(take.blob, Number.isFinite(take.seconds) ? take.seconds : duration, {
+      const up = await uploadStageVideo(take.blob, Number.isFinite(take.seconds) ? take.seconds : duration, {
         fileBase: names.fileBase, name: names.assetName, projectId: actions.projectId,
       });
+      const url = up.url;
       ctrl.signal.throwIfAborted();
-      update({ video_url: url });
+      update(exportSavedPatch(dataRef.current, 'video', up));
       setLastExport('video');
       const newNode = dataRef.current.export_new_node !== false;
-      if (newNode) placeExportNode('load-video', { label: names.nodeLabel, video_url: url, video: url, url });
+      if (newNode) placeExportNode('load-video', { label: names.nodeLabel, video_url: url, video: url, url, ...(up.assetId ? { asset_id: up.assetId } : {}) });
       const source = fromKeyframes ? `${framesRef.current.length} 个关键帧` : `运镜「${motionShortLabel(p.motion)}」`;
       if (isTruncated(take.seconds, duration)) {
         say('error', `视频已导出，但录制时设备繁忙丢帧：成片 ${take.seconds.toFixed(1)}s，短于运镜 ${duration.toFixed(1)}s。可关闭其他页面后重试`);

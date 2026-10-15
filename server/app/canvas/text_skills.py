@@ -25,7 +25,7 @@
 - 技能有效但没有输入（如自由生成无指令也无文本参考）→ 透传正文。
 技能失败返回 ``status=error``（前端同样 reject），不再静默透传。
 """
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 from app.canvas import inputs as canvas_inputs
 
@@ -61,13 +61,15 @@ class EmptyResultError(RuntimeError):
 
 # ---------- LLM 调用（与 HTTP 接口共用，接口只做参数校验与错误码映射） ----------
 
-async def generate_text(prompt: str, system: Optional[str] = None, images: Optional[List[str]] = None,
-                        temperature: float = 0.7, max_tokens: int = 2000) -> str:
-    """通用文本生成（``POST /llm/generate`` 的实现）。
+# 扩写结果上限（字符），流式与非流式同口径
+EXPAND_MAX_CHARS = 1200
+# 流式接口支持的技能（剧本拆解是结构化 JSON 流程，不走流式，COORDINATION 第 14 条）
+STREAM_SKILLS: Tuple[str, ...] = (FREE_GENERATION, PROMPT_EXPANSION, PROPOSAL_GENERATION)
 
-    空 prompt → ValueError；LLM 失败 → LLMServiceError；返回空 → EmptyResultError。
-    """
-    from app.pipelines.llm_service import llm_service
+
+def generate_request(prompt: str, system: Optional[str] = None, images: Optional[List[str]] = None,
+                     temperature: float = 0.7, max_tokens: int = 2000) -> Dict[str, Any]:
+    """通用文本生成的 LLM 请求（messages / temperature / max_tokens）；流式与非流式共用。空 prompt → ValueError。"""
     prompt = (prompt or "").strip()
     if not prompt:
         raise ValueError("prompt 不能为空")
@@ -77,11 +79,37 @@ async def generate_text(prompt: str, system: Optional[str] = None, images: Optio
     if imgs:
         # 当前 LLM 通道为纯文本，只把参考图地址列进提示词
         user += "\n\n（参考图地址：" + "；".join(imgs) + "）"
-    text = await llm_service.chat_completion(
-        messages=[{"role": "system", "content": system[:4000]}, {"role": "user", "content": user}],
-        temperature=max(0.0, min(float(temperature), 1.5)),
-        max_tokens=max(64, min(int(max_tokens), 8000)),
-    )
+    return {
+        "messages": [{"role": "system", "content": system[:4000]}, {"role": "user", "content": user}],
+        "temperature": max(0.0, min(float(temperature), 1.5)),
+        "max_tokens": max(64, min(int(max_tokens), 8000)),
+    }
+
+
+def expand_request(prompt: str, kind: str = "image") -> Dict[str, Any]:
+    """扩写的 LLM 请求（与 ``POST /llm/expand`` 同一系统提示）；流式与非流式共用。空 prompt → ValueError。"""
+    prompt = (prompt or "").strip()
+    if not prompt:
+        raise ValueError("prompt 不能为空")
+    kind_hint = EXPAND_KIND_HINT.get(kind, "生图提示词")
+    return {
+        "messages": [
+            {"role": "system", "content": f"你是漫剧影视级提示词扩写引擎。把用户的简短画面构思扩写为专业{kind_hint}。只输出提示词本身，不要解释、不要引号、不要 markdown。"},
+            {"role": "user", "content": prompt[:2000]},
+        ],
+        "temperature": 0.7,
+        "max_tokens": 600,
+    }
+
+
+async def generate_text(prompt: str, system: Optional[str] = None, images: Optional[List[str]] = None,
+                        temperature: float = 0.7, max_tokens: int = 2000) -> str:
+    """通用文本生成（``POST /llm/generate`` 的实现）。
+
+    空 prompt → ValueError；LLM 失败 → LLMServiceError；返回空 → EmptyResultError。
+    """
+    from app.pipelines.llm_service import llm_service
+    text = await llm_service.chat_completion(**generate_request(prompt, system, images, temperature, max_tokens))
     text = (text or "").strip()
     if not text:
         raise EmptyResultError("LLM 返回为空")
@@ -91,19 +119,50 @@ async def generate_text(prompt: str, system: Optional[str] = None, images: Optio
 async def expand_prompt(prompt: str, kind: str = "image") -> str:
     """电影级提示词扩写（``POST /llm/expand`` 的实现）；返回可能为空串，由调用方决定如何处理。"""
     from app.pipelines.llm_service import llm_service
-    prompt = (prompt or "").strip()
-    if not prompt:
-        raise ValueError("prompt 不能为空")
-    kind_hint = EXPAND_KIND_HINT.get(kind, "生图提示词")
-    text = await llm_service.chat_completion(
-        messages=[
-            {"role": "system", "content": f"你是漫剧影视级提示词扩写引擎。把用户的简短画面构思扩写为专业{kind_hint}。只输出提示词本身，不要解释、不要引号、不要 markdown。"},
-            {"role": "user", "content": prompt[:2000]},
-        ],
-        temperature=0.7,
-        max_tokens=600,
-    )
-    return (text or "").strip()[:1200]
+    text = await llm_service.chat_completion(**expand_request(prompt, kind))
+    return (text or "").strip()[:EXPAND_MAX_CHARS]
+
+
+def stream_request(skill: Optional[str], prompt: str, system: Optional[str] = None,
+                   images: Optional[List[str]] = None) -> Dict[str, Any]:
+    """流式文本接口（``POST /llm/generate/stream``，COORDINATION 第 14 条）的 LLM 请求。
+
+    系统提示按技能取与非流式完全相同的那份：free_generation=FREE_GEN_SYSTEM、proposal_generation=PROPOSAL_SYSTEM、
+    prompt_expansion=与 ``/llm/expand`` 相同的扩写提示（kind=image）；``system`` 只在调用方显式传入时覆盖。
+    未知技能 → ValueError；空 prompt → ValueError。
+    """
+    skill = (skill or "").strip() or FREE_GENERATION
+    if skill not in STREAM_SKILLS:
+        raise ValueError(f"不支持的流式技能: {skill}（可选 {' / '.join(STREAM_SKILLS)}）")
+    override = (system or "").strip()
+    if skill == PROMPT_EXPANSION:
+        req = expand_request(prompt, "image")
+        if override:
+            req["messages"][0] = {"role": "system", "content": override[:4000]}
+        return req
+    default_system = PROPOSAL_SYSTEM if skill == PROPOSAL_GENERATION else FREE_GEN_SYSTEM
+    return generate_request(prompt, system=override or default_system, images=images)
+
+
+async def stream_text(skill: Optional[str], prompt: str, system: Optional[str] = None,
+                      images: Optional[List[str]] = None) -> AsyncIterator[str]:
+    """流式执行文本技能，逐段 yield 增量（上游不支持流式时整段 yield 一次）。
+
+    扩写同非流式按 :data:`EXPAND_MAX_CHARS` 截断（超出部分不再下发）。参数错误 → ValueError（在第一次迭代前抛出）。
+    """
+    from app.pipelines.llm_service import llm_service
+    req = stream_request(skill, prompt, system, images)
+    cap = EXPAND_MAX_CHARS if (skill or "").strip() == PROMPT_EXPANSION else None
+    sent = 0
+    async for delta in llm_service.chat_completion_stream(**req):
+        if not delta:
+            continue
+        if cap is not None:
+            if sent >= cap:
+                break
+            delta = delta[:cap - sent]
+        sent += len(delta)
+        yield delta
 
 
 def format_script(project: Optional[Dict[str, Any]]) -> str:

@@ -72,6 +72,9 @@ export const TEXT_SKILLS: readonly TextSkill[] = [
 
 export const DEFAULT_TEXT_SKILL: TextSkillId = 'free_generation';
 
+/** 宿主走流式生成（可「停止生成」）的技能；剧本拆解不流式（COORDINATION 14）。 */
+export const STREAMING_SKILLS: ReadonlySet<TextSkillId> = new Set<TextSkillId>(['free_generation', 'prompt_expansion', 'proposal_generation']);
+
 /** 旧技能 id 兼容：`custom_text`（旧「自由编写」）归到自由生成。 */
 const SKILL_ALIASES: Readonly<Record<string, TextSkillId>> = Object.freeze({ custom_text: 'free_generation' });
 
@@ -96,7 +99,8 @@ export interface TextNodeData extends Record<string, unknown> {
   prompt?: string;
   gen_prompt?: string;
   skill_id?: string;
-  agent_state?: { status?: string; error?: string; tool?: string; updated_at?: string } | null;
+  /** streaming：宿主流式写回正文中（B1），节点显示正在增长的正文而不是整块转圈 */
+  agent_state?: { status?: string; error?: string; tool?: string; updated_at?: string; streaming?: boolean } | null;
   refRoles?: Record<string, string>;
   refOrder?: string[];
 }

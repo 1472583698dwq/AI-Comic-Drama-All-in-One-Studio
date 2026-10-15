@@ -135,7 +135,9 @@ export function dynamicInputStates(
 
 /**
  * 生成源节点（provider*）连到下游时要写进下游的补丁（旧 CreativeCanvas.onConnect「Provider 节点透传」）：
- * `{ provider_id, provider, model? }`；源未选定 → null。下游种类匹配由接收端节点自己判断（见 providerKindMatches）。
+ * `{ provider_id, provider, model }`；源未选定 → null。下游种类匹配由接收端节点自己判断（见 providerKindMatches）。
+ * REQ-toonflow-canvas D2：`model` 键总是带上——新源没有 model 时值为 `undefined`（宿主合并补丁时删键），
+ * 否则换源后下游残留上一个源的 model，会把别家的模型名发给会读 model 的源。
  */
 export function providerPatchFor(source: NodeLike | undefined | null): Record<string, unknown> | null {
   if (!source || !isProviderNodeType(source.type)) return null;
@@ -144,7 +146,7 @@ export function providerPatchFor(source: NodeLike | undefined | null): Record<st
   if (!pid) return null;
   const patch: Record<string, unknown> = { provider_id: pid, provider: pid };
   const model = typeof data.model === 'string' ? data.model.trim() : '';
-  if (model) patch.model = model;
+  patch.model = model || undefined;
   return patch;
 }
 

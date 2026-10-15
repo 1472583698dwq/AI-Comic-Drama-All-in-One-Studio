@@ -19,3 +19,9 @@
 11. **节点文件只写在自己的 `nodes2/<dir>/` 下**，用 `defineNode` 注册，并在 `nodes2/<dir>/index.ts` 导出；**不要**改 `CreativeCanvas.tsx`、`nodes2/index.ts`、`kit/**`（kit 有缺陷就在 progress 里写清楚，协调人统一改）。
 12. **自测**：各自起临时 vite（端口见下）+ `__dev__/*Showcase.tsx` 演示页，`VITE_API_ORIGIN=http://127.0.0.1:8001`（后端 CORS 放行任意 localhost 端口）。测完停掉、删临时 HTML。端口：N1 5191、N2 5192、N3 5193、N4 5194、N5 5195、N6 5196、N7 5197。不要用 5180（集成实例）。
 13. 并行期间 `tsc -b` 可能报出别人目录的错误：只修自己目录里的。
+
+## E2E 修复轮约定（协调人 2026-10-15）
+
+14. **文本流式生成接口**（FX-B 实现后端、FX-F 接前端）：`POST /api/v1/llm/generate/stream`，请求体 `{prompt: string, skill?: 'free_generation'|'prompt_expansion'|'proposal_generation' (默认 free_generation), system?: string, images?: string[]}`；系统提示由后端按 skill 取 `canvas/text_skills` 里的同款（free_generation=FREE_GEN_SYSTEM、proposal_generation=PROPOSAL_SYSTEM、prompt_expansion=与 /llm/expand 相同的扩写提示），`system` 只在调用方显式传入时覆盖。响应 `text/event-stream`：每个增量 `data: {"delta":"…"}\n\n`；结束 `data: {"done":true,"text":"<完整文本>"}\n\n`；出错 `data: {"error":"…"}\n\n` 后结束。上游不支持流式时后端退化为一次性返回（发一条 delta + done）。剧本拆解不走流式。
+15. 视频 `mode`：前端执行器放行 `mode`（视频节点）；后端 MCP 生成工具在缺 `mode` 时按入参推断：有 first_frame→i2v，只有 reference_images/reference_video→r2v，否则 t2v。
+16. `canvas_execute` 的结果必须写回画布节点（产出键、agent_state、history 追加）并按显式 canvas id 保存；只执行目标节点（及缺结果的必要上游），**不得**连带重跑兄弟生成节点。

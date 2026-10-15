@@ -97,7 +97,10 @@ export function decodeWaveform(url: string): Promise<DecodedWaveform | null> {
     return hit;
   }
   const job = (async (): Promise<DecodedWaveform | null> => {
-    const res = await fetch(url);
+    // REQ-toonflow-canvas（E2E-3 发现 3）：同一地址先被 <audio preload> 以 no-cors 取过时，浏览器缓存里那份响应
+    // 没有 Access-Control-Allow-Origin（请求没带 Origin，后端不回 ACAO / Vary），这里的 CORS fetch 命中它就被拦，
+    // dev 跨源（5180 → 8001）波形必挂。绕开 HTTP 缓存直接带 Origin 取；解码结果本身已按 URL 缓存在内存里。
+    const res = await fetch(url, { mode: 'cors', cache: 'no-store' });
     if (!res.ok) throw new Error(`无法读取音频（HTTP ${res.status}）`);
     const content = await res.arrayBuffer();
     // 与 Toonflow 一致：48k 单声道离线上下文只用来解码（decodeAudioData 会保留全部声道）

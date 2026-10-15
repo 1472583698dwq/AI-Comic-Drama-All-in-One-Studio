@@ -66,7 +66,26 @@
 }
 .cv-text__alert-close:hover { background: color-mix(in srgb, var(--cv-danger) 16%, transparent); }
 
-/* 生成中：盖在正文上的转圈（MiniMax 文本接口非流式，完成后整段替换） */
+/* 流式生成中（B1）：正文照常显示并增长，只在左下角（「编辑」按钮那一行的空位）挂一个小状态 */
+.cv-text__streaming {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--cv-radius-sm);
+  background: color-mix(in srgb, var(--cv-bg) 88%, transparent);
+  color: var(--cv-text-2);
+  font-size: 12px;
+  line-height: 18px;
+  pointer-events: none;
+}
+.cv-text__streaming > svg { color: var(--cv-primary); }
+
+/* 生成中：盖在正文上的转圈（剧本拆解等非流式技能，完成后整段替换） */
 .cv-text__running {
   position: absolute;
   inset: 0;

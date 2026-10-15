@@ -68,6 +68,79 @@ def _extract_url_from_src(src_res: Optional[Dict[str, Any]], src_data: Dict[str,
     return None
 
 
+# REQ-toonflow-canvas FX-B 各类节点「已有产出」看哪些数据键（节点数据里有值 = 不必为下游重新执行）
+_TEXT_TYPES = frozenset({"prompt", "text-prompt", "brief"})
+_IMAGE_TYPES = frozenset({"image", "generate-image", "load-image", "shot-card", "comfy-workflow", "asset"})
+_VIDEO_TYPES = frozenset({"video", "video-node", "video-legacy", "load-video"})
+_AUDIO_TYPES = frozenset({"audio", "tts", "voice", "load-audio"})
+_STATIC_OUTPUT_KEYS: Dict[str, Tuple[str, ...]] = {
+    **{t: ("prompt", "text", "brief") for t in _TEXT_TYPES},
+    **{t: ("image_url", "result_url", "file_url", "thumb_url") for t in _IMAGE_TYPES},
+    "load-image-batch": ("images", "image_urls", "reference_images"),
+    **{t: ("video_url", "file_url") for t in _VIDEO_TYPES},
+    **{t: ("audio_url", "file_url") for t in _AUDIO_TYPES},
+    "director3d": ("camera_prompt", "minimax_camera_prompt", "image_url", "video_url"),
+}
+
+
+def static_outputs(node: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """节点数据里已有的产出（按节点类型取产出键，非空才算）；类型未知 → {}（视为没有产出）。"""
+    data = canvas_inputs.node_data(node)
+    out: Dict[str, Any] = {}
+    for k in _STATIC_OUTPUT_KEYS.get((node or {}).get("type") or "", ()):
+        v = data.get(k)
+        if (isinstance(v, str) and v.strip()) or (isinstance(v, list) and any(isinstance(x, str) and x.strip() for x in v)):
+            out[k] = v
+    return out
+
+
+def upstream_needs_run(src: Dict[str, Any], edge: Dict[str, Any], tgt: Dict[str, Any]) -> bool:
+    """这条边的来源是否必须先执行才能给目标供数（来源节点数据里已有对应产出 → 不执行，直接读数据）。
+
+    - provider* 配置节点：只透传 provider_id/model，读节点数据即可 → 不执行；
+    - 参考边（in 口 / 生成节点旧具名口）：按 inputs 规则取该参考的类型与值，有值 → 不执行；
+    - 其余边：按来源类型的产出键看节点数据；类型未知（custom / ext-node / script-split…）→ 执行（同修复前）。
+    """
+    st = src.get("type") or ""
+    if st in canvas_inputs.PROVIDER_NODE_TYPES:
+        return False
+    if canvas_inputs.is_ref_edge(edge, tgt.get("type"), st):
+        sh = str(edge.get("sourceHandle") or edge.get("source_handle") or "")
+        kind = canvas_inputs.source_kind(src, sh)
+        return not (kind and canvas_inputs.source_values(kind, src, sh))
+    return not static_outputs(src)
+
+
+def execution_set(nodes: List[Dict[str, Any]], edges: List[Dict[str, Any]], target_ids: List[str]) -> Set[str]:
+    """REQ-toonflow-canvas FX-B 指定 target_ids 时实际要执行的节点（COORDINATION 第 16 条）。
+
+    = 目标节点 + 为给它们供数而**必须**执行的上游（产出缺失的祖先，逐级向上）。
+    产出已在的祖先只读数据、不执行；祖先的其他下游（兄弟生成节点）与目标的下游一律不执行——
+    原先闭包是「目标的祖先 + 整个闭包的下游」，执行一个视频节点会把共享上游文本的另一个图片节点也重跑一遍（E2E-3）。
+    """
+    by_id = {n["id"]: n for n in nodes if isinstance(n, dict) and n.get("id")}
+    incoming: Dict[str, List[Dict[str, Any]]] = {}
+    for e in edges:
+        s, t = e.get("source"), e.get("target")
+        if s in by_id and t in by_id:
+            incoming.setdefault(t, []).append(e)
+    run: Set[str] = {t for t in target_ids if t in by_id}
+    stack = list(run)
+    while stack:
+        cur = stack.pop()
+        for e in incoming.get(cur, []):
+            sid = e["source"]
+            if sid in run:
+                continue
+            src = by_id[sid]
+            if src.get("type") == canvas_inputs.GROUP_TYPE:
+                continue
+            if upstream_needs_run(src, e, by_id[cur]):
+                run.add(sid)
+                stack.append(sid)
+    return run
+
+
 def collect_upstream_data(node_id: str, nodes: List[Dict], edges: List[Dict], results: Dict[str, Any]) -> Dict[str, Any]:
     """收集上游节点已产生的可注入数据（全量 Provider 系统复用：动态句柄 + 多模态聚合）"""
     data: Dict[str, Any] = {}
@@ -223,15 +296,16 @@ def collect_upstream_data(node_id: str, nodes: List[Dict], edges: List[Dict], re
                     data["reference_images"].append(url)
             continue
         if tgt_handle in ("video","audio"):
+            # REQ-toonflow-canvas FX-B 来源本次没执行（已有产出、只读数据）时取节点数据里的产出
             if tgt_handle=="video":
-                url = src_res.get("video_url") if src_res else None
+                url = src_res.get("video_url") if src_res else static_outputs(src_node).get("video_url")
                 if url:
                     data.setdefault("videos", [])
                     if url not in data["videos"]:
                         data["videos"].append(url)
                     data.setdefault("video_url", url)
             else:
-                url = src_res.get("audio_url") if src_res else None
+                url = src_res.get("audio_url") if src_res else static_outputs(src_node).get("audio_url")
                 if url:
                     data.setdefault("audios", [])
                     if url not in data["audios"]:
@@ -292,6 +366,9 @@ def collect_upstream_data(node_id: str, nodes: List[Dict], edges: List[Dict], re
             continue
         if tgt_handle in ("provider", "provider_video", "provider_image", "provider_audio"):
             pass
+        if not src_res:
+            # REQ-toonflow-canvas FX-B 来源本次没执行（只读数据）：用节点数据里的产出兜底透传
+            src_res = static_outputs(src_node)
         if not src_res:
             continue
         # 兜底透传：仅当无显式句柄命中时，按白名单透传已产生的多模态结果
@@ -972,7 +1049,8 @@ class CanvasEngine:
     async def execute_dag(self, nodes: List[Dict], edges: List[Dict], project_id: Optional[str]=None, target_ids: Optional[List[str]]=None, on_progress=None) -> Dict[str, Any]:
         """
         执行画布 DAG
-        - target_ids: 仅执行这些节点及其下游（为 None 则执行全部拓扑序）
+        - target_ids: 仅执行这些节点 + 产出缺失、必须先执行的上游（见 execution_set；为 None 则执行全部拓扑序）。
+          不执行目标的下游，也不执行祖先的其他下游（兄弟生成节点）；结果不落盘，由调用方 persist（canvas/persist.py）
         """
         if not nodes:
             return {"results":{}, "order":[]}
@@ -987,51 +1065,24 @@ class CanvasEngine:
                         expanded.append(n["id"])
                         frontier.append(n["id"])
             target_ids = expanded
-        # 若指定 target_ids，计算闭包（target + 下游）
-        if target_ids:
-            # 计算闭包：上游依赖 + 下游影响，确保单点执行时上游数据可注入
-            adj: Dict[str,List[str]]={}
-            rev: Dict[str,List[str]]={}
-            for n in nodes:
-                adj[n["id"]]=[]
-                rev[n["id"]]=[]
-            for e in edges:
-                s = e.get("source"); t = e.get("target")
-                if s in adj and t in adj:
-                    adj[s].append(t)
-                    rev[t].append(s)
-            # 1) 上游祖先
-            closure=set(target_ids)
-            q=list(target_ids)
-            while q:
-                cur=q.pop(0)
-                for pre in rev.get(cur,[]):
-                    if pre not in closure:
-                        closure.add(pre); q.append(pre)
-            # 2) 下游后继（基于已包含上游的闭包）
-            q=list(closure)
-            visited_down=set(closure)
-            while q:
-                cur=q.pop(0)
-                for nb in adj.get(cur,[]):
-                    if nb not in visited_down:
-                        visited_down.add(nb); q.append(nb)
-                        closure.add(nb)
-            nodes = [n for n in nodes if n["id"] in closure]
-            edges = [e for e in edges if e.get("source") in closure and e.get("target") in closure]
-
         # REQ-toonflow-canvas 分组（group）只是容器：无端口、不执行，也不进拓扑
         group_ids = {n["id"] for n in nodes if n.get("type") == canvas_inputs.GROUP_TYPE}
         if group_ids:
             nodes = [n for n in nodes if n["id"] not in group_ids]
             edges = [e for e in edges if e.get("source") not in group_ids and e.get("target") not in group_ids]
+        # 上下文（取上游数据用）始终是整张图；指定 target_ids 时只执行目标 + 缺产出的必要上游（execution_set）
+        ctx_nodes, ctx_edges = nodes, edges
+        if target_ids:
+            run_ids = execution_set(nodes, edges, list(target_ids))
+            nodes = [n for n in nodes if n["id"] in run_ids]
+            edges = [e for e in edges if e.get("source") in run_ids and e.get("target") in run_ids]
         order = topo_sort(nodes, edges)
         results: Dict[str, Any] = {}
         for nid in order:
             node = next((n for n in nodes if n["id"]==nid), None)
             if not node:
                 continue
-            upstream = collect_upstream_data(nid, nodes, edges, results)
+            upstream = collect_upstream_data(nid, ctx_nodes, ctx_edges, results)
             if on_progress:
                 try: await on_progress({"event":"node_start","node_id":nid,"type":node.get("type")})
                 except: pass

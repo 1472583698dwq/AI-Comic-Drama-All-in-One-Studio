@@ -232,12 +232,18 @@ class TestUpscaleDemoRealRun(_TempStorage):
                 return {"status": "success", "video_url": "/storage/videos/new.mp4"}
             return await real_execute_node(node, upstream, project_id=project_id)
 
+        # REQ-toonflow-canvas FX-B（COORDINATION 第 16 条）：target_ids 只执行目标 + 缺产出的上游，
+        # 已有产出的 gen 不再被连带重跑；要重新生成上游就把它也列进 target_ids
         with mock.patch.object(eng, "execute_node", side_effect=fake_execute_node):
-            out = asyncio.run(eng.canvas_engine.execute_dag(nodes, edges, target_ids=["ext"]))
+            out = asyncio.run(eng.canvas_engine.execute_dag(nodes, edges, target_ids=["gen", "ext"]))
         res = out["results"]["ext"]
         self.assertEqual(res["status"], "success", res)
         self.assertEqual(res["video_url"], "/storage/videos/new.mp4")
         self.assertEqual(res["outputs"], {"video": "/storage/videos/new.mp4"})
+        with mock.patch.object(eng, "execute_node", side_effect=fake_execute_node) as m:
+            out = asyncio.run(eng.canvas_engine.execute_dag(nodes, edges, target_ids=["ext"]))
+        self.assertEqual([c.args[0]["id"] for c in m.call_args_list], ["ext"])
+        self.assertEqual(out["results"]["ext"]["outputs"], {"video": "/storage/videos/old.mp4"})
 
 
 # ---------- bug 2：上游值 → 目标声明端口 id ----------

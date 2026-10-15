@@ -19,12 +19,24 @@ import './host.css';
 
 // ───────────────────────────── 连线显示层 ─────────────────────────────
 
-/** 存量 smoothstep / step / straight / default 一律画成 simplebezier；只影响显示，不写回 edges 状态。 */
-export function renderEdges(nodes: readonly Pick<Node, 'id' | 'selected' | 'dragging'>[], edges: readonly Edge[]): Edge[] {
+/**
+ * 存量 smoothstep / step / straight / default 一律画成 simplebezier；只影响显示，不写回 edges 状态。
+ *
+ * 高亮边抬一层（zIndex 1）压过其他边与未选中的顶层节点；但**端点在分组里的边不抬**（REQ-toonflow-canvas D1）：
+ * @xyflow/system getElevatedEdgeZIndex 会给这类边再加上子节点的 internals.z（选中的子节点 = 1000），
+ * zIndex 1 → 1001 > 节点 1000，整条边就画到选中节点的提示词面板 / 浮动工具栏上面。保持 0 时边与节点同层，
+ * 节点容器在 DOM 里排在边容器之后，面板总在边之上。
+ */
+export function renderEdges(nodes: readonly Pick<Node, 'id' | 'selected' | 'dragging' | 'parentId'>[], edges: readonly Edge[]): Edge[] {
   const active = new Set<string>();
-  for (const n of nodes) if (n.selected || n.dragging) active.add(n.id);
+  const nested = new Set<string>();
+  for (const n of nodes) {
+    if (n.selected || n.dragging) active.add(n.id);
+    if (n.parentId) nested.add(n.id);
+  }
   return edges.map((e) => {
     const hl = active.has(e.source) || active.has(e.target);
+    const lift = hl && !nested.has(e.source) && !nested.has(e.target);
     const base = String(e.className || '').split(/\s+/).filter((c) => c && c !== 'cv-edge-active' && c !== 'canvas-edge-hl' && c !== 'canvas-edge-dim');
     if (hl) base.push('cv-edge-active');
     return {
@@ -34,7 +46,7 @@ export function renderEdges(nodes: readonly Pick<Node, 'id' | 'selected' | 'drag
       selectable: false,
       focusable: false,
       interactionWidth: 40,
-      zIndex: hl ? 1 : 0,
+      zIndex: lift ? 1 : 0,
       className: base.join(' ') || undefined,
     };
   });

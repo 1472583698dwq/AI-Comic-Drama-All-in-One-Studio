@@ -6,7 +6,8 @@
  * 上方浮动工具栏：添加到素材库 ｜ 复制文本 · 下载 .md · 全屏阅读；
  * 下方提示词面板（kit PromptPanel）：参考列表 + `{{ref N}}` 提示词 + 技能下拉（替换 Toonflow 的模型下拉）+ 发送。
  * 技能执行经 useKitNodeActions(id).execute(overrides) 交给宿主原有分支（键见 skills.TextExecuteOverrides）；
- * MiniMax 的文本接口不是流式，生成中显示转圈，完成后整段替换正文。颜色只用 --cv-* 变量（text.css）。
+ * 自由生成 / 扩写 / 策划案由宿主流式写回正文（B1，agent_state.streaming）：正文边生成边显示，发送键变「停止生成」
+ * （overrides.signal 中止，保留已生成部分）；剧本拆解不流式，生成中整块转圈，完成后整段替换。颜色只用 --cv-* 变量（text.css）。
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type SyntheticEvent } from 'react';
 import { useReactFlow, type NodeProps } from '@xyflow/react';
@@ -19,7 +20,7 @@ import { MarkdownPreview } from './MarkdownPreview';
 import { TextDocumentDialog, type TextDialogMode } from './TextDocumentDialog';
 import { copyText } from './clipboard';
 import {
-  GEN_PROMPT_KEY, TEXT_SKILLS, buildSkillRequest, documentOf, documentPatch, isRunningState, markdownFileName, skillOf,
+  GEN_PROMPT_KEY, STREAMING_SKILLS, TEXT_SKILLS, buildSkillRequest, documentOf, documentPatch, isRunningState, markdownFileName, skillOf,
   type TextNodeData,
 } from './skills';
 import './text.css';
@@ -68,6 +69,19 @@ export function TextNode(props: NodeProps) {
   const [pending, setPending] = useState(false);
   const state = data.agent_state ?? null;
   const running = pending || isRunningState(state);
+  // B1：宿主流式写回正文中——显示正在增长的正文（不盖整块转圈），预览自动滚到底
+  const streaming = running && state?.status === 'running' && state.streaming === true;
+  // 本页面发起、可中止的流式运行：发送键变「停止生成」
+  const abortRef = useRef<AbortController | null>(null);
+  const [stoppable, setStoppable] = useState(false);
+  // 流式技能发出后、首个增量到达前（网关首字可能要等 70–80 秒）：显示「等待模型响应…」
+  const waitingFirstDelta = pending && stoppable && !streaming;
+  const previewBoxRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!streaming) return;
+    const el = previewBoxRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [streaming, doc]);
   const [dismissed, setDismissed] = useState<string | null>(null);
   const failure = state?.status === 'failed' ? (state.error || '生成失败') : null;
   const failureKey = failure ? `${state?.updated_at ?? ''}|${failure}` : null;
@@ -88,16 +102,24 @@ export function TextNode(props: NodeProps) {
     setPending(true);
     setDismissed(null);
     actions.update({ agent_state: { status: 'running', tool, updated_at: startedAt } });
+    const ctrl = STREAMING_SKILLS.has(request.skill.id) && typeof AbortController !== 'undefined' ? new AbortController() : null;
+    abortRef.current = ctrl;
+    setStoppable(!!ctrl);
     try {
-      // REQ-toonflow-canvas 宿主按 skill_id 路由（键见 skills.TextExecuteOverrides / progress/N1.md）
-      await actions.execute(request.overrides);
+      // REQ-toonflow-canvas 宿主按 skill_id 路由（键见 skills.TextExecuteOverrides / progress/N1.md）；
+      // signal 只用于「停止生成」，宿主不会把它写进节点或请求体
+      await actions.execute(ctrl ? { ...request.overrides, signal: ctrl.signal } : request.overrides);
       if (!hostTouched()) actions.update({ agent_state: { status: 'completed', tool, updated_at: new Date().toISOString() } });
     } catch (e) {
       if (!hostTouched()) actions.update({ agent_state: { status: 'failed', tool, error: errorMessage(e), updated_at: new Date().toISOString() } });
     } finally {
-      if (aliveRef.current) setPending(false);
+      if (abortRef.current === ctrl) abortRef.current = null;
+      if (aliveRef.current) { setPending(false); setStoppable(false); }
     }
   }, [running, request, rf, id, actions]);
+  const stopGeneration = useCallback(() => { abortRef.current?.abort(); }, []);
+  // 卸载时中止本节点发起的流式请求（节点被删 / 切画布）
+  useEffect(() => () => { abortRef.current?.abort(); }, []);
 
   // —— 正文编辑：text / prompt 两键同步 ——
   const setDocument = useCallback((markdown: string) => actions.update(documentPatch(markdown)), [actions]);
@@ -157,6 +179,8 @@ export function TextNode(props: NodeProps) {
       sourcePlaceholder="选择技能"
       placeholder={skill.placeholder}
       disabled={running}
+      running={pending && stoppable ? true : undefined}
+      onStop={pending && stoppable ? stopGeneration : undefined}
       onSend={() => void send()}
       sendDisabled={!request.ok}
       sendTitle={request.ok ? `${skill.label}（⌘/Ctrl + Enter）` : request.reason}
@@ -164,7 +188,7 @@ export function TextNode(props: NodeProps) {
       extraFooter={running ? (
         <span className="cv-text__footer-status" role="status">
           <IconLoader2 className="cv-spin" size={14} aria-hidden />
-          {skill.label}中…
+          {waitingFirstDelta ? '等待模型响应…' : `${skill.label}中…`}
         </span>
       ) : null}
     />
@@ -182,7 +206,7 @@ export function TextNode(props: NodeProps) {
           </div>
         )}
         {hasDoc && (
-          <div className="cv-text__preview nopan nowheel" aria-label="文本内容">
+          <div ref={previewBoxRef} className="cv-text__preview nopan nowheel" aria-label="文本内容" aria-busy={streaming || undefined}>
             <MarkdownPreview value={doc} />
           </div>
         )}
@@ -197,10 +221,16 @@ export function TextNode(props: NodeProps) {
           <IconEdit size={16} aria-hidden />
           编辑
         </button>
-        {running && (
+        {streaming && (
+          <div className="cv-text__streaming" role="status" aria-label="文本生成中">
+            <IconLoader2 className="cv-spin" size={12} aria-hidden />
+            <span>生成中…</span>
+          </div>
+        )}
+        {running && !streaming && (
           <div className="cv-text__running" role="status" aria-label="文本生成中">
             <IconLoader2 className="cv-spin" size={22} aria-hidden />
-            <span>生成中…</span>
+            <span>{waitingFirstDelta ? '等待模型响应…' : '生成中…'}</span>
             {!pending && (
               // 不是本页面发起的运行（Agent 执行 / 刷新前残留的状态）：允许不再等待
               <button

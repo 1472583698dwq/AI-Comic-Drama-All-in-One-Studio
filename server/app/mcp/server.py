@@ -369,6 +369,36 @@ def _lazy_asset_manager():
     from app.providers.asset.manager import asset_manager
     return asset_manager
 
+def _has_media_arg(v) -> bool:
+    if isinstance(v, str):
+        return bool(v.strip())
+    if isinstance(v, (list, tuple)):
+        return any(isinstance(x, str) and x.strip() for x in v)
+    return False
+
+
+def infer_video_mode(arguments: dict) -> str:
+    """REQ-toonflow-canvas FX-B 视频生成源的 mode（COORDINATION 第 15 条）。
+
+    显式 mode 原样保留（新参考模式名 singleImage/startEnd/multiReference/text 换算成 i2v/r2v/t2v）；
+    缺省时按入参推断：有首帧 → i2v；只有参考图 / 参考视频 → r2v；否则 t2v。
+    原先缺省恒为 i2v，前端「多参考」丢了 mode 时会被当成图生视频、报「需要首帧」（E2E-2 B8）。
+    """
+    raw = (arguments or {}).get("mode")
+    if isinstance(raw, str) and raw.strip():
+        m = raw.strip()
+        if m.lower() in ("i2v", "r2v", "t2v"):
+            return m.lower()
+        from app.canvas.inputs import normalize_video_mode, PROVIDER_MODE_BY_VIDEO_MODE
+        return PROVIDER_MODE_BY_VIDEO_MODE.get(normalize_video_mode(m)) or m
+    args = arguments or {}
+    if _has_media_arg(args.get("first_frame")) or _has_media_arg(args.get("first_frame_url")):
+        return "i2v"
+    if any(_has_media_arg(args.get(k)) for k in ("reference_images", "reference_image", "reference_video", "reference_videos")):
+        return "r2v"
+    return "t2v"
+
+
 def _infer_kind_from_doc(doc: str, url: str = "") -> str | None:
     low = f"{doc or ''} {url or ''}".lower()
     if any(k in low for k in ["video", "minimax_h3", "lightx2v", "kling", "vidu", "hailuo"]):
@@ -1163,6 +1193,8 @@ class MCPServerRegistry:
         self.register_tool(MCPToolDefinition(
             name="canvas_execute",
             description="[画布] 执行画布 DAG，可指定 target_ids 仅执行选中（传分组 id = 执行分组内全部节点）；分组节点本身不执行。"
+                        "指定 target_ids 时只额外执行产出缺失的必要上游，已有产出的上游直接取数据，不会重跑其他（兄弟/下游）节点；"
+                        "执行结果（image_url/video_url/audio_url/文本、agent_state、history）自动写回画布节点并保存。"
                         "文本节点（prompt）：data.prompt/text 是正文，data.gen_prompt 是生成指令（可含 {{ref N}}），"
                         "skill_id ∈ free_generation(自由生成)/prompt_expansion(扩写)/script_generation(剧本拆解)/proposal_generation(策划案)；"
                         "以 gen_prompt + 连进来的文本参考为输入执行技能（扩写/拆解/策划案在两者都空时处理正文），"
@@ -1171,7 +1203,7 @@ class MCPServerRegistry:
             icon="Play",
             author="Canvas Engine",
             is_enabled=True,
-            input_schema={"type":"object","properties":{"target_ids":{"type":"array","items":{"type":"string"}},"project_id":{"type":"string"}},"required":[]}
+            input_schema={"type":"object","properties":{"target_ids":{"type":"array","items":{"type":"string"}},"project_id":{"type":"string"},"canvas_id":{"type":"string","description":"要执行的画布 id，缺省=当前激活画布；结果写回这张画布"}},"required":[]}
         ))
         self.register_tool(MCPToolDefinition(
             name="canvas_dispatch_skill",
@@ -1654,9 +1686,10 @@ class MCPServerRegistry:
                     from app.providers.video.base import VideoGenerateRequest
                     reg = _lazy_video_registry()
                     prompt = arguments.get("prompt") or ""
+                    _video_mode = infer_video_mode(arguments)
                     req = VideoGenerateRequest(
                         prompt=prompt,
-                        mode=arguments.get("mode") or "i2v",
+                        mode=_video_mode,
                         first_frame_url=arguments.get("first_frame") or arguments.get("first_frame_url"),
                         last_frame_url=arguments.get("last_frame") or arguments.get("last_frame_url"),
                         reference_images=arguments.get("reference_images"),
@@ -1682,7 +1715,7 @@ class MCPServerRegistry:
                         _pid_ctx = str((project_context or {}).get("id") or "") if isinstance(project_context, dict) else ""
                         task_center.register(
                             str(res.task_id), provider_id, "video",
-                            request={"mode": arguments.get("mode") or "i2v"},
+                            request={"mode": _video_mode},
                             project_id=_pid_ctx,
                         )
                         if arguments.get("wait") is False:
@@ -2633,10 +2666,11 @@ class MCPServerRegistry:
                     res = await _engine.execute_dag(nodes, snap.get("edges") or [], project_id=pid, target_ids=[nid])
                     node_res = (res.get("results") or {}).get(nid) or {}
                     
-                    if node_res.get("status") == "success":
-                        for k in ("image_url", "video_url", "audio_url", "prompt", "text", "script_data"):
-                            if node_res.get(k):
-                                d[k] = node_res[k]
+                    # REQ-toonflow-canvas FX-B 与 canvas_execute 同口径写回（产出键 + agent_state + history，canvas/persist.py）
+                    from app.canvas.persist import result_patch as _result_patch
+                    _patch = _result_patch({**target_node, "data": d}, node_res)
+                    if _patch:
+                        d.update(_patch)
                         target_node["data"] = d
                     
                     snap["nodes"] = nodes
@@ -2908,18 +2942,24 @@ class MCPServerRegistry:
                             result = {"status": "connected", "project_id": pid, "edge": new_edge, "total_edges": len(edges)}
                 elif tool_name == "canvas_execute":
                     from app.canvas.engine import canvas_engine as _engine
+                    from app.canvas.persist import persist_execution_results as _persist
                     nodes = arguments.get("nodes")
                     edges = arguments.get("edges")
                     tgt_ids = arguments.get("target_ids") or arguments.get("targetIds")
+                    exec_cid = str(arguments.get("canvas_id") or "").strip() or None
                     if (not nodes or not edges) and pid:
-                        snap = _pm.get_canvas(pid)
+                        snap = _pm.get_canvas(pid, exec_cid) if exec_cid else _pm.get_canvas(pid)
                         if snap:
                             nodes = snap.get("nodes") or nodes
                             edges = snap.get("edges") or edges
+                            exec_cid = exec_cid or snap.get("canvas_id")
                     if not nodes:
                         raise ValueError("画布为空，无法执行")
                     exec_res = await _engine.execute_dag(nodes or [], edges or [], project_id=pid, target_ids=tgt_ids)
                     result = {"project_id": pid, "executed": True, "order": exec_res.get("order"), "results": exec_res.get("results")}
+                    # REQ-toonflow-canvas FX-B 结果写回画布节点（产出键 / agent_state / history），按读出的那张画布保存（COORDINATION 第 16 条）
+                    if pid:
+                        result["persisted"] = _persist(pid, exec_cid, exec_res.get("results") or {})
                 else:
                     result = {"tool": tool_name, "arguments": arguments, "hint": "前端画布将执行此指令", "directive": True}
 

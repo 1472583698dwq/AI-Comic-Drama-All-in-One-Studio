@@ -32,6 +32,24 @@ DEFAULT_NEGATIVE = (
     "extra fingers, missing fingers, watermark, signature, text, jpeg artifacts"
 )
 
+# REQ-toonflow-canvas FX-B 内容安全负向词：本地 SDXL 动漫底模（如 waiIllustriousSDXL）对无关/看不懂的提示词
+# 可能出露骨图（E2E-3：中文「一只橘猫…」出了露骨图）。负向词缺这些词时一律补在末尾，不删用户自己的词。
+SAFETY_NEGATIVE_TERMS = ("nsfw", "nude", "nudity", "sexual", "explicit")
+
+
+def safe_negative_prompt(negative: Optional[str]) -> str:
+    """负向提示词：为空用 DEFAULT_NEGATIVE；再补齐缺失的 SAFETY_NEGATIVE_TERMS（按逗号分词、忽略大小写与权重括号）。"""
+    base = (negative or "").strip() or DEFAULT_NEGATIVE
+    present = set()
+    for tok in base.replace("\n", ",").split(","):
+        t = tok.strip().strip("()[]{}").split(":")[0].strip().lower()
+        if t:
+            present.add(t)
+    missing = [t for t in SAFETY_NEGATIVE_TERMS if t not in present]
+    if not missing:
+        return base
+    return base.rstrip().rstrip(",") + ", " + ", ".join(missing)
+
 ASPECT_SIZES: Dict[str, tuple] = {
     "9:16": (832, 1216),
     "16:9": (1216, 832),
@@ -300,7 +318,7 @@ class ComfyUIProvider(ImageProvider):
                     mapping,
                     {
                         "prompt": req.prompt.strip(),
-                        "negative_prompt": req.negative_prompt or DEFAULT_NEGATIVE,
+                        "negative_prompt": safe_negative_prompt(req.negative_prompt),
                         "seed": final_seed,
                         "width": width,
                         "height": height,
@@ -328,7 +346,7 @@ class ComfyUIProvider(ImageProvider):
                 workflow = self._build_txt2img_workflow(
                     checkpoint=checkpoint,
                     positive_prompt=positive,
-                    negative_prompt=req.negative_prompt or DEFAULT_NEGATIVE,
+                    negative_prompt=safe_negative_prompt(req.negative_prompt),
                     width=width,
                     height=height,
                     seed=final_seed,

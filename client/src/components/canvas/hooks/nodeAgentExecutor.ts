@@ -40,6 +40,26 @@ export const LEGACY_HANDLE_KEYS: Readonly<Record<string, readonly string[]>> = O
   audio: ['text', 'ref_audio'],
 });
 
+/** 不需要提示词就能执行的节点类型（C5：执行前不做「提示词为空」拦截）。 */
+export const PROMPT_OPTIONAL_TYPES: ReadonlySet<string> = new Set([
+  'custom', 'ext-node', 'export', 'timeline', 'timeline-export', 'director3d', 'script-split', 'brief', 'shot-card', 'comfy-workflow',
+]);
+
+/** 自定义代码节点按 input_schema / params_schema 的 required 校验必填项，返回缺失项的显示名。 */
+export function missingRequiredInputs(def: any, inputs: Record<string, any>, params: Record<string, any>): string[] {
+  const missing: string[] = [];
+  const empty = (v: any) => v === undefined || v === null || v === '' || (Array.isArray(v) && !v.length);
+  for (const [schema, values] of [[def?.input_schema, inputs], [def?.params_schema, params]] as const) {
+    const req = Array.isArray(schema?.required) ? (schema.required as unknown[]) : [];
+    for (const k of req) {
+      if (typeof k !== 'string' || !empty(values[k])) continue;
+      const title = schema?.properties?.[k]?.title;
+      missing.push(typeof title === 'string' && title ? `${title}（${k}）` : k);
+    }
+  }
+  return missing;
+}
+
 // provider definition 缓存（同一源只拉一次，接口即映射）
 const _defCache = new Map<string, any>();
 async function getProviderDefinition(providerId: string): Promise<any> {
@@ -66,7 +86,32 @@ function declaredInputKeys(def: any): string[] {
   return Object.keys(props);
 }
 
-export function buildAgentArgs(d: any, prompt: string, extraKeys: string[] = [], override?: Record<string, any> | null): Record<string, any> {
+/**
+ * 视频生成源的 `mode`（COORDINATION 15）：只取本次 override（kit 组装的 providerMode：t2v / i2v / r2v），
+ * 节点 data.mode 是界面模式名（singleImage / startEnd / multiReference / text，或旧画布的 i2v / r2v / t2v），不从节点数据补。
+ * 界面模式名按 COORDINATION 3 映射回生成源模式，无法识别的 override 值不放行。
+ */
+const VIDEO_PROVIDER_MODES: Readonly<Record<string, 't2v' | 'i2v' | 'r2v'>> = Object.freeze({
+  t2v: 't2v', i2v: 'i2v', r2v: 'r2v',
+  text: 't2v', singleImage: 'i2v', startEnd: 'i2v', multiReference: 'r2v',
+});
+
+export function videoProviderMode(v: unknown): 't2v' | 'i2v' | 'r2v' | undefined {
+  return typeof v === 'string' ? VIDEO_PROVIDER_MODES[v.trim()] : undefined;
+}
+
+export interface BuildAgentArgsOptions {
+  /** 节点类型：`video` 时放行 override.mode（REQ-toonflow-canvas B8） */
+  nodeType?: string;
+}
+
+export function buildAgentArgs(
+  d: any,
+  prompt: string,
+  extraKeys: string[] = [],
+  override?: Record<string, any> | null,
+  opts: BuildAgentArgsOptions = {},
+): Record<string, any> {
   const args: Record<string, any> = {
     prompt,
     text: d.text || prompt,
@@ -91,6 +136,12 @@ export function buildAgentArgs(d: any, prompt: string, extraKeys: string[] = [],
   for (const k of extraKeys) {
     if (INTERNAL_NODE_KEYS.has(k)) continue;
     if (d[k] !== undefined && args[k] === undefined) args[k] = d[k];
+  }
+  // REQ-toonflow-canvas B8：视频节点放行本次 mode（多参考 → r2v）。生成源 schema 多半不声明 mode，
+  // 原先被上面的「只覆盖已声明键」规则丢掉，后端缺省按 i2v 要首帧，多参考必定失败
+  if (opts.nodeType === 'video') {
+    const mode = videoProviderMode(override?.mode);
+    if (mode) args.mode = mode;
   }
   if (Array.isArray(args.reference_images)) {
     args.reference_images = args.reference_images.filter((u: any) => typeof u === 'string' && u.trim());
@@ -145,8 +196,9 @@ export async function executeAgentNode(opts: ExecuteAgentNodeOpts): Promise<Reco
   if (!node) throw new Error('节点不存在');
   const d: any = { ...(node.data || {}), ...(override || {}) };
   const prompt = (d.prompt ?? d.text ?? '').toString().trim();
-  // export/timeline 是聚合型节点，本来就没有提示词，不能按「提示词为空」拦下
-  if (!prompt && node.type !== 'director3d' && node.type !== 'export' && node.type !== 'timeline') throw new Error('提示词为空');
+  // REQ-toonflow-canvas C5：只有媒体生成节点必须有提示词；custom / ext-node / export / timeline / director3d 等
+  // 本来就不靠提示词（custom 的必填项由其 input_schema.required 决定，见下方 custom 分支）
+  if (!prompt && !PROMPT_OPTIONAL_TYPES.has(node.type || '')) throw new Error('提示词为空');
   const providerId: string = d.provider_id || d.provider || '';
   const toolName = providerId ? `provider_${providerId}` : '';
 
@@ -180,6 +232,9 @@ export async function executeAgentNode(opts: ExecuteAgentNodeOpts): Promise<Reco
         if (ov !== undefined && ov !== '') { params[k] = ov; continue; }
         if (d[k] !== undefined && d[k] !== '' && params[k] === undefined) params[k] = d[k];
       }
+      // C5：是否必填由代码节点自己的 schema 决定（未声明 required 的端口 / 参数都可空）
+      const missing = missingRequiredInputs(def, inputs, params);
+      if (missing.length) throw new Error(`缺少必填输入：${missing.join('、')}`);
       const payload: any = await apiService.runCustomNode({ custom_node_id: cid, inputs, params });
       if (payload?.status === 'error') throw new Error(String(payload?.error || '自定义节点执行失败'));
       const patch = patchFromPayload('custom', payload);
@@ -202,7 +257,7 @@ export async function executeAgentNode(opts: ExecuteAgentNodeOpts): Promise<Reco
   // 接口映射：拉取该源声明的入参键（input_schema + params_schema）+ 节点结构句柄键，从节点数据按键收集
   const def = await getProviderDefinition(providerId);
   const declaredKeys = [...declaredInputKeys(def), ...(LEGACY_HANDLE_KEYS[node.type || ''] || [])];
-  const args = buildAgentArgs(d, prompt, declaredKeys, override);
+  const args = buildAgentArgs(d, prompt, declaredKeys, override, { nodeType: node.type });
   const start = Date.now();
   setState({ status: 'running', tool: toolName, provider_id: providerId, updated_at: new Date().toISOString() });
 

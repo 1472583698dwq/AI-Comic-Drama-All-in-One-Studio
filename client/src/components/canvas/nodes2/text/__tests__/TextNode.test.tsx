@@ -174,6 +174,48 @@ describe('文本节点 prompt', () => {
     expect(within(nodeEl(container, 't1')).queryByRole('status', { name: '文本生成中' })).toBeNull();
   });
 
+  it('B1 流式：agent_state.streaming 时显示正在增长的正文 + 角标，不盖整块转圈', async () => {
+    const { container } = mount([{ id: 't1', type: 'prompt', position: { x: 0, y: 0 }, data: { prompt: '雨夜，霓虹', text: '雨夜，霓虹', agent_state: { status: 'running', streaming: true, updated_at: new Date().toISOString() } } }]);
+    await act(async () => {});
+    const el = nodeEl(container, 't1');
+    expect(el.querySelector('.cv-text__running')).toBeNull();
+    expect(el.querySelector('.cv-text__streaming')).toBeTruthy();
+    expect(within(el).getByRole('status', { name: '文本生成中' })).toBeTruthy();
+    expect(el.querySelector('.cv-text__preview')?.textContent).toContain('雨夜，霓虹');
+    expect(el.querySelector('.cv-text__preview')?.getAttribute('aria-busy')).toBe('true');
+    expect((within(el).getByRole('button', { name: '编辑' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('B1 停止生成：流式技能发送后发送键变「停止生成」，点了中止 overrides.signal；剧本拆解不可停止', async () => {
+    let signal: AbortSignal | undefined;
+    const execute = vi.fn((_id: string, ov?: Record<string, unknown>) => new Promise<void>((resolve) => {
+      signal = ov?.signal as AbortSignal | undefined;
+      signal?.addEventListener('abort', () => resolve());
+    }));
+    const { container } = mount([{ id: 't1', type: 'prompt', position: { x: 0, y: 0 }, selected: true, data: { prompt: DOC, text: DOC, gen_prompt: '写旁白' } }], [], { execute });
+    await act(async () => {});
+    const send = () => nodeEl(container, 't1').querySelector('.cv-send') as HTMLButtonElement;
+    fireEvent.click(send());
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    expect(signal).toBeInstanceOf(AbortSignal);
+    await waitFor(() => expect(send().title).toBe('停止生成'));
+    expect(send().disabled).toBe(false);
+    // 首个增量到达前：等待模型响应（网关首字可能要等很久）
+    expect(within(nodeEl(container, 't1')).getByRole('status', { name: '文本生成中' }).textContent).toContain('等待模型响应…');
+    fireEvent.click(send());
+    expect(signal!.aborted).toBe(true);
+    await waitFor(() => expect(send().title).not.toBe('停止生成'));
+
+    // 剧本拆解：不流式、不传 signal
+    const exec2 = vi.fn().mockResolvedValue(undefined);
+    cleanup();
+    const r2 = mount([{ id: 't2', type: 'prompt', position: { x: 0, y: 0 }, selected: true, data: { prompt: DOC, text: DOC, skill_id: 'script_generation' } }], [], { execute: exec2 });
+    await act(async () => {});
+    fireEvent.click(nodeEl(r2.container, 't2').querySelector('.cv-send') as HTMLElement);
+    await waitFor(() => expect(exec2).toHaveBeenCalledTimes(1));
+    expect(exec2.mock.calls[0][1]).not.toHaveProperty('signal');
+  });
+
   it('编辑弹窗：富文本可还原的正文用 tiptap；原文编辑回写 text + prompt 两键，预览跟着变', async () => {
     const { container } = mount([{ id: 't1', type: 'prompt', position: { x: 0, y: 0 }, data: { prompt: DOC, text: DOC } }]);
     await act(async () => {});

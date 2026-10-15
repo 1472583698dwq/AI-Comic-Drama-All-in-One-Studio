@@ -64,8 +64,8 @@ vi.mock('../stageLoader', async () => {
 });
 vi.mock('../exportMedia', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../exportMedia')>()),
-  uploadStageBlob: vi.fn(async () => '/storage/assets/ast_test/original.png'),
-  uploadStageVideo: vi.fn(async () => '/storage/assets/ast_test/original.mp4'),
+  uploadStageBlob: vi.fn(async () => ({ url: '/storage/assets/ast_test/original.png', assetId: 'ast_test' })),
+  uploadStageVideo: vi.fn(async () => ({ url: '/storage/assets/ast_test/original.mp4', assetId: 'ast_test_v' })),
   measureVideoDuration: vi.fn(async () => 2.5),
 }));
 
@@ -281,9 +281,11 @@ describe('director3d 节点', () => {
     expect(fake.stages[0].snapshotPNG).toHaveBeenCalledWith({ longEdge: 1280 });
     expect(uploadStageBlob).toHaveBeenCalledWith(expect.any(Blob), expect.objectContaining({ projectId: 'proj_test', fileName: expect.stringMatching(/^director3d_\d{8}-\d{6}\.png$/) }));
     expect(createNodes).toHaveBeenCalledWith(
-      [expect.objectContaining({ type: 'load-image', data: expect.objectContaining({ image_url: '/storage/assets/ast_test/original.png' }) })],
+      // 已入素材库：新图片节点带 asset_id（「保存到素材库」置灰，不重复入库）
+      [expect.objectContaining({ type: 'load-image', data: expect.objectContaining({ image_url: '/storage/assets/ast_test/original.png', asset_id: 'ast_test' }) })],
       expect.objectContaining({ anchorId: 'd3', placement: 'right', select: false }),
     );
+    expect(d3Data()).toMatchObject({ image_asset_id: 'ast_test', _saved_asset: { id: 'ast_test', value: '/storage/assets/ast_test/original.png' } });
     // REQ-toonflow-canvas F1：单个导出节点不传 position（K1 h 约定是绝对坐标），交给宿主摆放
     expect((createNodes.mock.calls[0] as unknown as [Array<Record<string, unknown>>])[0][0]).not.toHaveProperty('position');
   });

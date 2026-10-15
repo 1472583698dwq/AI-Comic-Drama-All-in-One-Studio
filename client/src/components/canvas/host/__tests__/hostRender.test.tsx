@@ -16,6 +16,7 @@ import { apiService } from '../../../../services/api';
 import { nodeTypesMap } from '../../kit/registry';
 import { UnsupportedNode, portsFromEdges } from '../UnsupportedNode';
 import { renderEdges } from '../canvasChrome';
+import { getElevatedEdgeZIndex } from '@xyflow/system';
 import { canSaveNodeAsset, nodeAssetOf, useCanvasHostController } from '../useCanvasHost';
 import { useCanvasStore } from '../../../../stores/useCanvasStore';
 import { useProjectStore } from '../../../../stores/useProjectStore';
@@ -76,6 +77,28 @@ describe('连线显示层', () => {
     );
     expect(out.map((e) => e.type)).toEqual(['simplebezier', 'simplebezier', 'simplebezier']);
     expect(out.map((e) => e.className)).toEqual(['cv-edge-active', undefined, 'cv-edge-active']);
+  });
+
+  it('D1：分组里的选中节点，高亮边不抬层 → 实际 z 不超过节点（提示词面板 / 工具栏在边之上）', () => {
+    const nodes = [
+      { id: 'g', type: 'group' },
+      { id: 'gen', parentId: 'g', selected: true },
+      { id: 'txt', parentId: 'g' },
+      { id: 'top', selected: true },
+      { id: 'other' },
+    ] as Node[];
+    const out = renderEdges(nodes, [
+      { id: 'in-group', source: 'txt', target: 'gen' },
+      { id: 'top-level', source: 'top', target: 'other' },
+    ]);
+    expect(out.map((e) => e.className)).toEqual(['cv-edge-active', 'cv-edge-active']);
+    expect(out.map((e) => e.zIndex)).toEqual([0, 1]);
+    // 用 React Flow 自己的算法核对：选中的子节点 internals.z = 1000，未选中的子节点 = 1（父 0 + 1）
+    const internal = (z: number, parentId?: string, selected = false) => ({ parentId, selected, internals: { z } }) as never;
+    const edgeZ = getElevatedEdgeZIndex({ sourceNode: internal(1, 'g'), targetNode: internal(1000, 'g', true), zIndex: out[0].zIndex });
+    expect(edgeZ).toBeLessThanOrEqual(1000);
+    // 修复前（高亮边一律 zIndex 1）会得到 1001，压在节点 1000 之上
+    expect(getElevatedEdgeZIndex({ sourceNode: internal(1, 'g'), targetNode: internal(1000, 'g', true), zIndex: 1 })).toBe(1001);
   });
 });
 

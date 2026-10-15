@@ -78,6 +78,23 @@ describe('downstreamPatches：只传源端口产出值', () => {
     expect(p.get('shot')).toEqual({ provider_id: 'comfy_x', provider: 'comfy_x', model: 'sdxl' });
   });
 
+  it('D2：生成源换成没有 model 的源 → 下游残留的上一个源的 model 被清掉', () => {
+    const nodes = [
+      n('pi', 'provider-image', { kind: 'image', provider_id: 'comfyui', definition: { id: 'comfyui' } }),
+      n('shot', 'shot-card', { provider_id: 'comfyui_wf_4a19b2a2', provider: 'comfyui_wf_4a19b2a2', model: 'krea2_turbo_fp8_scaled.safetensors' }),
+      n('img', 'image', { provider_id: 'comfyui_wf_4a19b2a2', model: 'krea2_turbo_fp8_scaled.safetensors' }),
+    ];
+    const edges = [e('pi', 'provider', 'shot', 'provider'), e('pi', 'provider', 'img', 'in')];
+    const next = applyPatches(nodes, downstreamPatches(nodes, edges, 'pi'));
+    const shot = next.find((x) => x.id === 'shot')!.data;
+    expect(shot).toMatchObject({ provider_id: 'comfyui', provider: 'comfyui' });
+    expect(shot).not.toHaveProperty('model');
+    expect(next.find((x) => x.id === 'img')!.data).not.toHaveProperty('model');
+    // 本来就没有 model 的下游：不产生多余补丁
+    const clean = [nodes[0], n('img2', 'image', { provider_id: 'comfyui', provider: 'comfyui' })];
+    expect(downstreamPatches(clean, [e('pi', 'provider', 'img2', 'in')], 'pi').size).toBe(0);
+  });
+
   it('旧具名口节点（分镜卡 / ComfyUI）：只写目标端口同名键 + _upstream', () => {
     const nodes = [
       n('txt', 'prompt', { prompt: '镜头推进', text: '镜头推进', agent_state: { status: 'completed' }, script_data: {} }),

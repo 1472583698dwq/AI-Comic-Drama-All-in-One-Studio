@@ -36,8 +36,9 @@ export interface CanvasHost {
    * 宿主执行：走宿主原有分支（文本技能 parseScript/split_novel_script/扩写、director3d 的
    * director_3d_stage_plan、custom 代码节点、ext-node 等）。媒体生成节点请直接用 kit/useGeneration。
    * overrides 作为本次执行的数据覆盖（同旧 data.onExecute 的 customData）。
+   * 返回值节点侧不读（useKitNodeActions.execute 丢弃）；宿主自己可返回产物（REQ-toonflow-canvas D4：分镜子图回写用）。
    */
-  execute?: (nodeId: string, overrides?: Record<string, unknown>) => Promise<void> | void;
+  execute?: (nodeId: string, overrides?: Record<string, unknown>) => Promise<unknown> | void;
   /**
    * 新建节点（宫格切分 / 截帧 / 分离音轨 / 截取 / 变速 / 3D 导出等产物落成新节点）。
    * connectFrom：从当前节点某输出口连到新节点的 in；placement：相对源节点的摆放方向。

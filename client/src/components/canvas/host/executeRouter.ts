@@ -4,7 +4,9 @@
  *
  * 节点调用 `useKitNodeActions(id).execute(overrides)`；overrides 只作用于本次执行、不落盘。
  * - `prompt`（文本）：按 `overrides.skill_id`（缺省节点 skill_id → free_generation）路由：
- *     剧本拆解 parseScript / 策划案 /llm/generate + 策划案系统提示（与后端 canvas/text_skills 一致）/ 扩写 /llm/expand / 自由生成 /llm/generate（新增）；
+ *     自由生成 / 扩写 / 策划案走流式 `POST /llm/generate/stream`（B1，COORDINATION 14：增量节流追加进正文，
+ *     done 写最终全文，error 还原正文并 reject，`overrides.signal` 中止 = 停止生成、保留已生成部分）；
+ *     后端还没有流式接口（404/405）时退回一次性接口（/llm/generate、/llm/expand）；剧本拆解 parseScript 不走流式。
  *     结果 text 与 prompt 写同一内容（N1）。
  * - `image` / `video` / `audio`：宿主侧生成（分镜子图自动运行等宿主发起的场景）：按连线组装参考（kit buildRefs +
  *     assembleInputs，与节点面板同口径）→ kit runGeneration（直接生成 / 智能规划、视频轮询、history）。
@@ -25,6 +27,7 @@ import { runGeneration, type GenKind } from '../kit/useGeneration';
 import { loadProviderDefinition } from '../kit/useProviderSources';
 import { extractSlotsFromProvider, type DynamicProviderInfo } from '../providerSkills';
 import { audioGenerationInputs } from '../nodes2/audio/genInputs';
+import { StreamUnavailableError, streamLlmText, type StreamSkill } from './textStream';
 import { cameraPromptPatch } from '../nodes2/director3d/model';
 
 type AnyData = Record<string, any>;
@@ -37,6 +40,15 @@ export interface ExecuteDeps {
   /** 测试注入（缺省 window.fetch） */
   fetch?: typeof fetch;
 }
+
+/** execute 的结果：媒体生成返回产物 url（分镜子图自动运行据此回写分镜，D4）；文本技能返回正文。 */
+export interface ExecuteResult {
+  url?: string;
+  text?: string;
+}
+
+/** 流式写回正文的节流间隔（ms） */
+export const STREAM_FLUSH_MS = 80;
 
 export const TEXT_SKILLS = ['free_generation', 'prompt_expansion', 'script_generation', 'proposal_generation'] as const;
 export type TextSkill = (typeof TEXT_SKILLS)[number];
@@ -97,38 +109,96 @@ export async function generateText(f: typeof fetch, prompt: string, opts: { syst
   return text;
 }
 
-async function runTextSkill(deps: ExecuteDeps, node: Node, overrides: AnyData): Promise<void> {
+const STREAM_SKILLS: ReadonlySet<TextSkill> = new Set<TextSkill>(['free_generation', 'prompt_expansion', 'proposal_generation']);
+
+function isAbort(e: unknown, signal?: AbortSignal): boolean {
+  return !!signal?.aborted || (e as Error)?.name === 'AbortError';
+}
+
+/** 一次性接口（流式不可用时的退路，与流式前的行为一致） */
+async function runTextOnce(f: typeof fetch, skill: TextSkill, input: string, images: string[]): Promise<string> {
+  if (skill === 'proposal_generation') return generateText(f, input, { system: PROPOSAL_SYSTEM });
+  if (skill === 'prompt_expansion') {
+    const out = await apiService.expandPrompt(input, 'image');
+    if (!out) throw new Error('扩写返回为空');
+    return out;
+  }
+  return generateText(f, input, { system: FREE_GEN_SYSTEM, images });
+}
+
+async function runTextSkill(deps: ExecuteDeps, node: Node, overrides: AnyData, signal?: AbortSignal): Promise<ExecuteResult> {
   const f = deps.fetch ?? fetch;
   const data = (node.data || {}) as AnyData;
   const d = { ...data, ...overrides };
   const skill = normalizeTextSkill(overrides.skill_id ?? data.skill_id);
   const input = String(overrides.prompt ?? data.prompt ?? data.text ?? '').trim();
   if (!input) throw new Error(skill === 'free_generation' ? '请先输入生成指令' : '没有可处理的文本');
-  const tool = TEXT_TOOL[skill];
-  deps.updateNodeData(node.id, { agent_state: { status: 'running', tool, updated_at: nowIso() } });
+  const streaming = STREAM_SKILLS.has(skill);
+  const tool = streaming ? `llm/generate/stream:${skill}` : TEXT_TOOL[skill];
+  const startedAt = nowIso();
+  deps.updateNodeData(node.id, { agent_state: { status: 'running', tool, updated_at: startedAt } });
+
+  // —— 流式写回：增量节流追加进正文（text / prompt 同写），首个增量时标记 streaming（节点据此显示正文而不是整块转圈）——
+  const original = { text: data.text, prompt: data.prompt };
+  let acc = '';
+  let wrote = false;
+  let lastFlush = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const flush = () => {
+    timer = undefined;
+    lastFlush = Date.now();
+    const patch: AnyData = { text: acc, prompt: acc };
+    if (!wrote) patch.agent_state = { status: 'running', tool, streaming: true, updated_at: startedAt };
+    wrote = true;
+    deps.updateNodeData(node.id, patch);
+  };
+  const stopTimer = () => { if (timer !== undefined) { clearTimeout(timer); timer = undefined; } };
+  const onDelta = (_delta: string, all: string) => {
+    acc = all;
+    const wait = STREAM_FLUSH_MS - (Date.now() - lastFlush);
+    if (wait <= 0) { stopTimer(); flush(); } else if (timer === undefined) timer = setTimeout(flush, wait);
+  };
+
   try {
     let out = '';
     const extra: AnyData = {};
+    const images = Array.isArray(overrides.reference_images) ? overrides.reference_images.filter((u: unknown) => typeof u === 'string' && u) : [];
     if (skill === 'script_generation') {
       const res: AnyData = await apiService.parseScript(input, d.style_preset || 'donghua_xianxia', d.aspect_ratio || '9:16');
       out = formatScript(res) || input;
       extra.script_data = res;
-    } else if (skill === 'proposal_generation') {
-      // REQ-toonflow-canvas：与后端 text_skills.PROPOSAL_GENERATION 一致，直接用策划案系统提示走通用 LLM。
-      // 旧实现调 MCP split_novel_script：它返回的是分场/分镜拆解（不是策划案），带项目上下文时还会写入项目；
-      // 且成功时读 result.content||result.project 取不到值，直接抛「策划案返回为空」，降级分支永远走不到。
-      out = await generateText(f, input, { system: PROPOSAL_SYSTEM });
-    } else if (skill === 'prompt_expansion') {
-      out = await apiService.expandPrompt(input, 'image');
-      if (!out) throw new Error('扩写返回为空');
     } else {
-      const images = Array.isArray(overrides.reference_images) ? overrides.reference_images.filter((u: unknown) => typeof u === 'string' && u) : [];
-      out = await generateText(f, input, { system: FREE_GEN_SYSTEM, images });
+      // REQ-toonflow-canvas 策划案：与后端 text_skills.PROPOSAL_GENERATION 一致（策划案系统提示走通用 LLM），
+      // 不调 MCP split_novel_script（它返回分场 / 分镜拆解，不是策划案，带项目上下文时还会写入项目）
+      try {
+        out = await streamLlmText(
+          { prompt: input, skill: skill as StreamSkill, images: skill === 'free_generation' && images.length ? images : undefined },
+          { onDelta, signal, fetch: f },
+        );
+      } catch (e) {
+        if (!(e instanceof StreamUnavailableError)) throw e;
+        out = await runTextOnce(f, skill, input, images);
+      }
+      stopTimer();
+      out = out.trim();
+      if (!out) throw new Error(skill === 'prompt_expansion' ? '扩写返回为空' : 'LLM 返回为空');
     }
     // N1：text 与 prompt 写同一内容
     deps.updateNodeData(node.id, { text: out, prompt: out, ...extra, agent_state: { status: 'completed', tool, updated_at: nowIso() } });
+    return { text: out };
   } catch (e) {
-    deps.updateNodeData(node.id, { agent_state: { status: 'failed', tool, error: errText(e), updated_at: nowIso() } });
+    stopTimer();
+    if (isAbort(e, signal)) {
+      // 停止生成：保留已生成的部分（Toonflow 同款），状态复位为 idle，不算失败
+      const patch: AnyData = { agent_state: { status: 'idle', tool, updated_at: nowIso() } };
+      if (acc) { patch.text = acc; patch.prompt = acc; }
+      deps.updateNodeData(node.id, patch);
+      return { text: acc || undefined };
+    }
+    // 失败：流式已改写过正文的，还原成执行前的正文（undefined = 删键，即原本就没有）
+    const fail: AnyData = { agent_state: { status: 'failed', tool, error: errText(e), updated_at: nowIso() } };
+    if (wrote) { fail.text = original.text; fail.prompt = original.prompt; }
+    deps.updateNodeData(node.id, fail);
     throw e;
   }
 }
@@ -223,27 +293,36 @@ async function runCanvasNodeExecute(deps: ExecuteDeps, node: Node, overrides: An
 }
 
 /** CanvasHost.execute 实现。 */
+/**
+ * CanvasHost.execute 实现。
+ * `overrides.signal`（AbortSignal）只给文本流式技能用于「停止生成」，不进任何请求体。
+ * 返回 ExecuteResult：媒体生成带产物 url（调用方不必再从 nodesRef 读，nodesRef 要等下一次渲染才更新，D4）。
+ */
 export function createExecuteRouter(deps: ExecuteDeps) {
-  return async function execute(nodeId: string, overrides?: Record<string, unknown>): Promise<void> {
+  return async function execute(nodeId: string, overrides?: Record<string, unknown>): Promise<ExecuteResult> {
     const node = deps.getNode(nodeId);
     if (!node) throw new Error('节点不存在');
-    const ov = (overrides || {}) as AnyData;
+    const { signal: rawSignal, ...rest } = (overrides || {}) as AnyData;
+    const signal = rawSignal && typeof (rawSignal as AbortSignal).aborted === 'boolean' ? (rawSignal as AbortSignal) : undefined;
+    const ov = rest as AnyData;
     switch (node.type) {
       case 'prompt':
-        return runTextSkill(deps, node, ov);
+        return runTextSkill(deps, node, ov, signal);
       case 'image':
       case 'video':
       case 'audio':
-        await runHostGeneration(deps, node, ov);
-        return;
+        return runHostGeneration(deps, node, ov);
       case 'director3d':
-        return runDirectorPlan(deps, node, ov);
-      case 'custom':
+        await runDirectorPlan(deps, node, ov);
+        return {};
+      case 'custom': {
         // /custom-nodes/run：overrides = N7 collectDynamicInputs（声明端口 id → 上游值），执行器按 input_schema 拆 inputs / params
-        await executeAgentNode({ node: { id: node.id, type: node.type, data: node.data }, override: ov, updateNodeData: deps.updateNodeData });
-        return;
+        const payload: AnyData = await executeAgentNode({ node: { id: node.id, type: node.type, data: node.data }, override: ov, updateNodeData: deps.updateNodeData });
+        return { url: payload?.image_url || payload?.video_url || payload?.audio_url || payload?.url || undefined };
+      }
       default:
-        return runCanvasNodeExecute(deps, node, ov);
+        await runCanvasNodeExecute(deps, node, ov);
+        return {};
     }
   };
 }

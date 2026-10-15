@@ -107,3 +107,7 @@
   cursor: pointer;
 }
 .cv-host-dialog__close:hover { background: var(--cv-fill); color: var(--cv-text-1); }
+
+/* 小地图挡住选中节点的卡片 / 提示词面板时淡出且不拦截鼠标（host/AutoHideMiniMap.tsx） */
+.cv-canvas .react-flow__minimap.cv-minimap { transition: opacity 0.15s ease; }
+.cv-canvas .react-flow__minimap.cv-minimap--away { opacity: 0; pointer-events: none; }

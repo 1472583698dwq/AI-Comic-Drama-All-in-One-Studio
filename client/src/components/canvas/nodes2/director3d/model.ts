@@ -75,6 +75,9 @@ export interface Director3DData extends Record<string, unknown> {
   export_new_node?: boolean;
   image_url?: string;
   video_url?: string;
+  /** REQ-toonflow-canvas：导出时登记的素材库 id（「保存到素材库」据此置灰，见 exportMedia.exportSavedPatch） */
+  image_asset_id?: string;
+  video_asset_id?: string;
 }
 
 /** 归一后的舞台参数（缺省值与旧节点 / 3D 片场一致） */

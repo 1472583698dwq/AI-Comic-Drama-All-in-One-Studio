@@ -46,6 +46,23 @@ function harness(nodes: Node[], edges: Edge[] = [], fetchImpl?: typeof fetch) {
 }
 const node = (id: string, type: string, data: AnyData = {}): Node => ({ id, type, position: { x: 0, y: 0 }, data });
 
+/** SSE 响应（COORDINATION 14）：每个事件一块 `data: {...}\n\n`；gapMs 控制事件间隔，signal 中止时报 AbortError。 */
+function sse(events: AnyData[], opts: { gapMs?: number; signal?: AbortSignal; onEvent?: (i: number) => void } = {}): Response {
+  const enc = new TextEncoder();
+  let i = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    async pull(c) {
+      if (opts.gapMs && i > 0) await new Promise((r) => setTimeout(r, opts.gapMs));
+      if (opts.signal?.aborted) { c.error(new DOMException('The operation was aborted.', 'AbortError')); return; }
+      if (i >= events.length) { c.close(); return; }
+      c.enqueue(enc.encode(`data: ${JSON.stringify(events[i])}\n\n`));
+      opts.onEvent?.(i);
+      i++;
+    },
+  });
+  return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+}
+
 beforeEach(() => {
   for (const f of Object.values(api)) f.mockReset?.();
   api.listProviders.mockResolvedValue({ providers: [] });
@@ -60,14 +77,80 @@ describe('文本节点技能路由', () => {
     expect(normalizeTextSkill('prompt_expansion')).toBe('prompt_expansion');
   });
 
-  it('free_generation → POST /llm/generate，text 与 prompt 写同一内容（overrides 不落盘）', async () => {
-    const h = harness([node('t', 'prompt', { prompt: '旧正文', text: '旧正文' })]);
-    await h.execute('t', { skill_id: 'free_generation', prompt: '写一段开场白', reference_images: ['/a.png'] });
+  it('free_generation → 流式 POST /llm/generate/stream：增量写进正文（text 与 prompt 同写），done 写最终全文（overrides 不落盘）', async () => {
+    const h = harness([node('t', 'prompt', { prompt: '旧正文', text: '旧正文' })], [], async () => sse([{ delta: '生成' }, { delta: '的' }, { delta: '正文' }, { done: true, text: '生成的正文' }]));
+    const res = await h.execute('t', { skill_id: 'free_generation', prompt: '写一段开场白', reference_images: ['/a.png'] });
     const [url, init] = h.fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toMatch(/\/llm\/generate$/);
-    expect(JSON.parse(String(init.body))).toMatchObject({ prompt: '写一段开场白', images: ['/a.png'] });
-    expect(h.data('t')).toMatchObject({ text: '生成的正文', prompt: '生成的正文', agent_state: { status: 'completed', tool: 'llm/generate' } });
+    expect(url).toMatch(/\/llm\/generate\/stream$/);
+    const body = JSON.parse(String(init.body));
+    expect(body).toEqual({ prompt: '写一段开场白', skill: 'free_generation', images: ['/a.png'] });
+    // 系统提示由后端按 skill 取，前端不传
+    expect(body.system).toBeUndefined();
+    // 第一个增量立刻写进正文，并标记 streaming（节点据此显示正文而不是整块转圈）
+    const firstText = h.writes.find(([, p]) => 'text' in p)![1];
+    expect(firstText).toMatchObject({ text: '生成', prompt: '生成', agent_state: { status: 'running', streaming: true } });
+    expect(h.data('t')).toMatchObject({ text: '生成的正文', prompt: '生成的正文', agent_state: { status: 'completed' } });
     expect(h.data('t').skill_id).toBeUndefined();
+    expect(res).toEqual({ text: '生成的正文' });
+  });
+
+  it('流式增量按 ~80ms 节流写回（间隔够长的增量各写一次，最后以 done 的全文为准）', async () => {
+    const h = harness([node('t', 'prompt', {})], [], async () => sse([{ delta: 'a' }, { delta: 'b' }, { delta: 'c' }, { done: true, text: 'abc!' }], { gapMs: 120 }));
+    await h.execute('t', { skill_id: 'free_generation', prompt: 'x' });
+    const texts = h.writes.filter(([, p]) => 'text' in p).map(([, p]) => p.text);
+    expect(texts).toEqual(['a', 'ab', 'abc', 'abc!']);
+  });
+
+  it('同一时刻涌来的增量合并写（不逐字写）', async () => {
+    const deltas = Array.from({ length: 30 }, (_, i) => ({ delta: String(i % 10) }));
+    const h = harness([node('t', 'prompt', {})], [], async () => sse([...deltas, { done: true, text: 'END' }]));
+    await h.execute('t', { skill_id: 'free_generation', prompt: 'x' });
+    const texts = h.writes.filter(([, p]) => 'text' in p).map(([, p]) => p.text);
+    expect(texts.length).toBeLessThanOrEqual(3);
+    expect(texts[texts.length - 1]).toBe('END');
+  });
+
+  it('流中途 error 事件 → reject、写 failed，并把正文还原成执行前的内容', async () => {
+    const h = harness([node('t', 'prompt', { prompt: '旧正文', text: '旧正文' })], [], async () => sse([{ delta: '半截' }, { error: '上游超时' }]));
+    await expect(h.execute('t', { skill_id: 'prompt_expansion', prompt: '旧正文' })).rejects.toThrow('上游超时');
+    expect(h.writes.some(([, p]) => p.text === '半截')).toBe(true);
+    expect(h.data('t')).toMatchObject({ text: '旧正文', prompt: '旧正文', agent_state: { status: 'failed', error: '上游超时' } });
+  });
+
+  it('流没有 done 就断开 → reject（正文还原）', async () => {
+    const h = harness([node('t', 'prompt', {})], [], async () => sse([{ delta: '半截' }]));
+    await expect(h.execute('t', { skill_id: 'free_generation', prompt: 'x' })).rejects.toThrow(/意外结束/);
+    expect(h.data('t').text).toBeUndefined();
+    expect(h.data('t').prompt).toBeUndefined();
+  });
+
+  it('停止生成：overrides.signal 中止 → resolve，保留已生成部分，状态 idle；signal 不进请求体', async () => {
+    const ctrl = new AbortController();
+    const h = harness([node('t', 'prompt', { prompt: '旧', text: '旧' })], [], async (_u, init) => sse([{ delta: '已生成' }, { delta: '的部分' }, { done: true, text: 'x' }], {
+      gapMs: 60, signal: (init as RequestInit).signal ?? undefined, onEvent: (i) => { if (i === 0) ctrl.abort(); },
+    }));
+    const res = await h.execute('t', { skill_id: 'free_generation', prompt: 'x', signal: ctrl.signal });
+    const body = JSON.parse(String((h.fetchMock.mock.calls[0] as [string, RequestInit])[1].body));
+    expect(body.signal).toBeUndefined();
+    expect(h.data('t')).toMatchObject({ text: '已生成', prompt: '已生成', agent_state: { status: 'idle' } });
+    expect(res).toEqual({ text: '已生成' });
+  });
+
+  it('HTTP 失败 → reject，正文不动', async () => {
+    const h = harness([node('t', 'prompt', { prompt: '旧', text: '旧' })], [], async () => new Response(JSON.stringify({ detail: 'LLM 生成失败: no key' }), { status: 502 }));
+    await expect(h.execute('t', { skill_id: 'free_generation', prompt: 'x' })).rejects.toThrow(/no key/);
+    expect(h.data('t')).toMatchObject({ text: '旧', prompt: '旧', agent_state: { status: 'failed' } });
+  });
+
+  it('后端还没有流式接口（404）→ 退回一次性 /llm/generate', async () => {
+    const h = harness([node('t', 'prompt', {})], [], async (u) => (String(u).endsWith('/stream')
+      ? new Response('Not Found', { status: 404 })
+      : new Response(JSON.stringify({ status: 'success', text: '一次性正文' }), { status: 200 })));
+    await h.execute('t', { skill_id: 'free_generation', prompt: '写', reference_images: ['/a.png'] });
+    const [url2, init2] = h.fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(url2).toMatch(/\/llm\/generate$/);
+    expect(JSON.parse(String(init2.body))).toMatchObject({ prompt: '写', images: ['/a.png'] });
+    expect(h.data('t')).toMatchObject({ text: '一次性正文', prompt: '一次性正文', agent_state: { status: 'completed' } });
   });
 
   it('失败要 reject，并写 agent_state.failed', async () => {
@@ -93,23 +176,43 @@ describe('文本节点技能路由', () => {
     expect(h.data('t').script_data).toBe(res);
   });
 
-  it('策划案：走 /llm/generate + 策划案系统提示（与后端 text_skills 一致），不再调 split_novel_script', async () => {
-    const h = harness([node('t', 'prompt', {})]);
+  it('策划案：流式 skill=proposal_generation（系统提示后端按 skill 取，与 text_skills 一致），不调 split_novel_script', async () => {
+    const h = harness([node('t', 'prompt', {})], [], async () => sse([{ delta: '# 策划案' }, { done: true, text: '# 策划案\n世界观' }]));
     await h.execute('t', { skill_id: 'proposal_generation', prompt: '仙侠题材' });
     expect(api.callMcpTool).not.toHaveBeenCalled();
     const [url, init] = h.fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toMatch(/\/llm\/generate$/);
-    const body = JSON.parse(String(init.body));
-    expect(body.prompt).toBe('仙侠题材');
-    expect(body.system).toMatch(/策划案/);
-    expect(h.data('t').text).toBe('生成的正文');
+    expect(url).toMatch(/\/llm\/generate\/stream$/);
+    expect(JSON.parse(String(init.body))).toEqual({ prompt: '仙侠题材', skill: 'proposal_generation' });
+    expect(h.data('t').text).toBe('# 策划案\n世界观');
     expect(h.data('t').prompt).toBe(h.data('t').text);
   });
 
-  it('扩写返回空 → reject', async () => {
-    api.expandPrompt.mockResolvedValue('');
-    const h = harness([node('t', 'prompt', { prompt: '短' })]);
+  it('策划案流式不可用 → 退回 /llm/generate + 策划案系统提示', async () => {
+    const h = harness([node('t', 'prompt', {})], [], async (u) => (String(u).endsWith('/stream')
+      ? new Response('', { status: 405 })
+      : new Response(JSON.stringify({ status: 'success', text: '生成的正文' }), { status: 200 })));
+    await h.execute('t', { skill_id: 'proposal_generation', prompt: '仙侠题材' });
+    const body = JSON.parse(String((h.fetchMock.mock.calls[1] as [string, RequestInit])[1].body));
+    expect(body.system).toMatch(/策划案/);
+    expect(h.data('t').text).toBe('生成的正文');
+  });
+
+  it('扩写：流式 skill=prompt_expansion；返回空 → reject', async () => {
+    const ok = harness([node('t', 'prompt', { prompt: '短' })], [], async () => sse([{ delta: 'long ' }, { delta: 'prompt' }, { done: true, text: 'long prompt' }]));
+    await ok.execute('t', { skill_id: 'prompt_expansion', prompt: '短' });
+    expect(JSON.parse(String((ok.fetchMock.mock.calls[0] as [string, RequestInit])[1].body))).toEqual({ prompt: '短', skill: 'prompt_expansion' });
+    expect(api.expandPrompt).not.toHaveBeenCalled();
+    expect(ok.data('t')).toMatchObject({ text: 'long prompt', prompt: 'long prompt' });
+
+    const h = harness([node('t', 'prompt', { prompt: '短' })], [], async () => sse([{ done: true, text: '  ' }]));
     await expect(h.execute('t', { skill_id: 'prompt_expansion' })).rejects.toThrow(/为空/);
+  });
+
+  it('扩写流式不可用 → 退回 /llm/expand；返回空 → reject', async () => {
+    api.expandPrompt.mockResolvedValue('');
+    const h = harness([node('t', 'prompt', { prompt: '短' })], [], async () => new Response('', { status: 404 }));
+    await expect(h.execute('t', { skill_id: 'prompt_expansion' })).rejects.toThrow(/为空/);
+    expect(api.expandPrompt).toHaveBeenCalledWith('短', 'image');
   });
 });
 
@@ -137,6 +240,13 @@ describe('custom / script-split / ext-node', () => {
     const h = harness([node('c', 'custom', { custom_node_id: 'up' })]);
     await h.execute('c', { video: '/v.mp4' });
     expect(executeAgentNode).toHaveBeenCalledWith(expect.objectContaining({ node: expect.objectContaining({ id: 'c', type: 'custom' }), override: { video: '/v.mp4' } }));
+  });
+  it('custom：overrides 里的 signal 不交给执行器；返回产物 url', async () => {
+    vi.mocked(executeAgentNode).mockResolvedValueOnce({ status: 'success', video_url: '/o.mp4' });
+    const h = harness([node('c', 'custom', { custom_node_id: 'up' })]);
+    const res = await h.execute('c', { video: '/v.mp4', signal: new AbortController().signal });
+    expect(vi.mocked(executeAgentNode).mock.calls[0][0].override).toEqual({ video: '/v.mp4' });
+    expect(res).toEqual({ url: '/o.mp4' });
   });
   it('custom 执行失败 → reject', async () => {
     vi.mocked(executeAgentNode).mockRejectedValue(new Error('缺少输入视频'));
@@ -194,6 +304,12 @@ describe('媒体生成（宿主侧）：按连线组装参考 → runGeneration'
     expect(call).toMatchObject({ nodeId: 'v', nodeType: 'video', kind: 'video', providerId: 'kling', params: { duration: 5 } });
     expect(call.assembled.prompt).toBe('少女回眸');
     expect(call.assembled.canonical.first_frame).toBe('/a.png');
+  });
+  it('execute 返回产物 url（D4：分镜子图自动运行据此回写，不读渲染前的 nodesRef）', async () => {
+    api.getProvider.mockResolvedValue({ provider: { id: 'comfyui_video', input_schema: { properties: { prompt: { type: 'string' } } } } });
+    vi.mocked(runGeneration).mockResolvedValueOnce({ url: '/storage/videos/out.mp4', patch: {} });
+    const h = harness([node('v', 'video', { prompt: 'x', provider_id: 'comfyui_video' })]);
+    await expect(h.execute('v')).resolves.toEqual({ url: '/storage/videos/out.mp4' });
   });
   it('生成失败 → reject', async () => {
     vi.mocked(runGeneration).mockRejectedValueOnce(new Error('请先在节点内选择生成源'));

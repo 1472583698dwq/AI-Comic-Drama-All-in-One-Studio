@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
-  ReactFlow, Background, BackgroundVariant, ConnectionLineType, Controls, ControlButton, MiniMap, PanOnScrollMode,
+  ReactFlow, Background, BackgroundVariant, ConnectionLineType, Controls, ControlButton, PanOnScrollMode,
   useNodesState, useEdgesState, addEdge, ReactFlowProvider, useReactFlow,
   type Connection, type Edge, type Node, type FinalConnectionState, type NodeTypes, type OnConnectEnd,
 } from '@xyflow/react';
@@ -41,12 +41,15 @@ import { findPort } from './kit/connection';
 import { resolveDynamicPorts } from './nodes2/legacy-b/ports';
 import { registerCustomNodeDefs } from './nodes2/legacy-b/customNodeDefs';
 import { prepareLoadedCanvas, buildSaveSnapshot, createBackupGate, resolveOverlaps } from './host/canvasLoad';
+import { measuredSizeKey, useSettledRun } from './host/settleLayout';
 import { applyPatches, downstreamPatches } from './host/propagation';
 import { newNodeData } from './host/createNodes';
 import { TEMPLATES, buildTemplate, buildCreatorTemplate, linkNodes, type CanvasTemplate } from './host/templates';
 import { buildShotSubgraph } from './host/shotSubgraph';
+import { autoRunShotSubgraph } from './host/shotAutoRun';
 import { useCanvasHostController } from './host/useCanvasHost';
 import { UnsupportedNode } from './host/UnsupportedNode';
+import { AutoHideMiniMap } from './host/AutoHideMiniMap';
 import {
   EdgeDisconnectButton, FullscreenViewer, NodeAddMenu, ShotWriteBackDialog, useRenderedEdges,
   type EdgeDisconnectState, type NodeMenuItem, type NodeMenuState,
@@ -306,6 +309,7 @@ const InnerCanvas: React.FC = () => {
         const prepared = hydrateCanvas(snap, reqCanvas);
         fitPendingRef.current = true;
         deoverlapPendingRef.current = prepared.changed;
+        setDeoverlapArmed(false);
         setNodes(prepared.nodes);
         setEdges(prepared.edges);
       }
@@ -327,6 +331,16 @@ const InnerCanvas: React.FC = () => {
     return () => { clearTimeout(timer); window.removeEventListener('asset-refresh', onAssetRefresh as any); };
   }, [pid, canvasId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 画布下拉里当前画布的节点数跟着画布实时变（原先只在载入 / 切画布时拉一次列表，要切走再切回才刷新）
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    const cid = canvasIdRef.current;
+    const count = nodes.length;
+    setCanvasList((list) => (list.some((c) => c.id === cid && c.node_count !== count)
+      ? list.map((c) => (c.id === cid ? { ...c, node_count: count } : c))
+      : list));
+  }, [nodes.length, canvasList.length]);
+
   // 800ms 防抖同步（带当前画布 id）；快照带 schema_version 2
   useEffect(() => {
     if (!pid || !loadedRef.current || !hydratedRef.current) return;
@@ -344,16 +358,29 @@ const InnerCanvas: React.FC = () => {
   const fitPendingRef = useRef(false);
   /** 刚迁移过的旧画布：测量完后做一次去重叠（新卡片尺寸与旧位置不匹配，见 resolveOverlaps） */
   const deoverlapPendingRef = useRef(false);
+  const [deoverlapArmed, setDeoverlapArmed] = useState(false);
   useEffect(() => {
     if (!nodesInitialized || !fitPendingRef.current || !nodes.length) return;
     fitPendingRef.current = false;
     if (deoverlapPendingRef.current) {
       deoverlapPendingRef.current = false;
-      setNodes((nds) => resolveOverlaps(nds));
+      // 去重叠要等媒体尺寸确定（图片 / 视频加载后卡片才长高），见 host/settleLayout.ts
+      setDeoverlapArmed(true);
     }
     const t = window.setTimeout(() => { try { fitView({ padding: 0.15, maxZoom: 1 }); } catch { /* ignore */ } }, 80);
     return () => window.clearTimeout(t);
   }, [nodesInitialized, nodes.length, fitView, setNodes]);
+  useSettledRun(
+    deoverlapArmed,
+    () => {
+      setDeoverlapArmed(false);
+      if (resolveOverlaps(nodesRef.current) === nodesRef.current) return;
+      setNodes((nds) => resolveOverlaps(nds));
+      window.setTimeout(() => { try { fitView({ padding: 0.15, maxZoom: 1, duration: 200 }); } catch { /* ignore */ } }, 80);
+    },
+    () => measuredSizeKey(nodesRef.current),
+    () => wrapperRef.current?.querySelector('.react-flow__nodes'),
+  );
 
   // 连线显示层：平滑贝塞尔 + 与选中 / 拖动节点相连的边高亮（cv-edge-active）
   const renderedEdges = useRenderedEdges(nodes, edges);
@@ -665,24 +692,16 @@ const InnerCanvas: React.FC = () => {
       toast.info('子图已建好：该分镜未绑定视频源，请在视频节点内选择生成源后手动生成');
       return;
     }
-    // 自动生成：导演机位 → 视频 → 回写分镜
-    await new Promise(r => setTimeout(r, 800));
-    try { await execute(sub.directorNodeId); } catch (e) { console.warn('[Canvas] 3D 导演规划失败', e); }
-    await new Promise(r => setTimeout(r, 400));
-    try {
-      await execute(sub.videoNodeId);
-    } catch (e: any) {
-      toast.error(`视频生成失败：${e?.message || e}（子图已建好，可在视频节点内重试）`);
-      return;
-    }
-    const vd: any = (nodesRef.current || []).find((n: any) => n.id === sub.videoNodeId)?.data;
-    if (vd?.video_url) {
-      const wb = writeBackToShot({ shotId: shot.id, field: 'video_url', value: vd.video_url });
-      if (wb.ok) toast.success(`分镜 #${shot.shot_index || ''} 视频已生成并回写`);
-      else toast.warning(`视频已生成，回写分镜失败：${wb.error || '未知错误'}（可在节点右键「回写到分镜」手动回写）`);
-    } else {
-      toast.info('已在画布建好子图，视频未自动产出，请在视频节点内手动生成');
-    }
+    // 自动生成：导演机位 → 视频 → 回写分镜（D4：视频 url 取 execute 返回值，见 host/shotAutoRun.ts）
+    await autoRunShotSubgraph(
+      { shotId: shot.id, shotIndex: shot.shot_index || '', directorNodeId: sub.directorNodeId, videoNodeId: sub.videoNodeId },
+      {
+        execute,
+        readNodeData: (id) => (nodesRef.current || []).find((n) => n.id === id)?.data as Record<string, unknown> | undefined,
+        writeBack: (o) => writeBackToShot(o),
+        notify: (level, msg) => toast[level](msg),
+      },
+    );
   };
 
   const processShotImport = (payload: any) => {
@@ -1395,7 +1414,7 @@ const InnerCanvas: React.FC = () => {
                 </ControlButton>
               </Controls>
               {/* pannable / zoomable 必须显式打开（@xyflow/react 12 的 MiniMap 默认 false） */}
-              <MiniMap
+              <AutoHideMiniMap
                 className="!bg-surface/80 !border-white/70 dark:border-white/12 !rounded-xl cursor-grab active:cursor-grabbing"
                 maskColor={isLight ? 'rgba(15,23,42,0.12)' : 'rgba(10,10,12,0.8)'}
                 maskStrokeColor={isLight ? '#7C3AED' : '#ffffff'}

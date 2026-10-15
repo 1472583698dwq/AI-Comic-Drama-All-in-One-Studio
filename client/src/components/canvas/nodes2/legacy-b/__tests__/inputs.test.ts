@@ -112,6 +112,10 @@ describe('生成源透传（provider 口 → 下游 provider_id / provider / mod
   it('providerPatchFor：选了源才透传；definition.id 兜底', () => {
     expect(providerPatchFor(prov)).toEqual({ provider_id: 'comfyui_wf_3d96b356', provider: 'comfyui_wf_3d96b356', model: 'krea2' });
     expect(providerPatchFor({ id: 'p', type: 'provider-video', data: { definition: { id: 'kling' } } })).toEqual({ provider_id: 'kling', provider: 'kling' });
+    // D2：没有 model 的源也带上 model 键（值 undefined → 宿主合并补丁时删掉下游残留的旧 model）
+    const noModel = providerPatchFor({ id: 'p', type: 'provider-image', data: { provider_id: 'comfyui', model: '  ' } })!;
+    expect(Object.prototype.hasOwnProperty.call(noModel, 'model')).toBe(true);
+    expect(noModel.model).toBeUndefined();
     expect(providerPatchFor({ id: 'p', type: 'provider-video', data: {} })).toBeNull();
     expect(providerPatchFor(video)).toBeNull();
     expect(readOutputValue(prov, 'provider', 'IMAGE')).toBe('comfyui_wf_3d96b356');
