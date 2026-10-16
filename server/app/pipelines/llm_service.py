@@ -564,7 +564,58 @@ class LLMService:
                 return "".join(chunks).strip()
         except Exception as e:
             stream_error = e
+        # REQ-toonflow-canvas FX-B 兜底单次调用抽成 _one_shot_completion（流式增量接口 chat_completion_stream 共用）
+        return await self._one_shot_completion(messages, temperature=temperature, timeout=timeout,
+                                               extra_headers=extra_headers, stream_error=stream_error)
 
+    async def chat_completion_stream(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.3,
+        max_tokens: int = 4096,
+        timeout: float = 120.0,
+        extra_headers: Optional[Dict[str, str]] = None,
+    ) -> AsyncGenerator[str, None]:
+        """REQ-toonflow-canvas FX-B 流式增量接口：逐段 yield 文本增量（OpenAI 兼容 ``stream: true``）。
+
+        - 流式通道与 :meth:`chat_completion` 相同（含整体时限、思考标签剥离）；
+        - 上游不支持流式 / 流式失败且**尚未产出任何内容**时退化为一次性调用，整段 yield 一次；
+        - 已产出部分内容后流中断 → 抛 LLMServiceError（不再补一次性结果，否则前半段会重复）。
+        """
+        emitted = False
+        stream_error: Optional[Exception] = None
+        budget = float(os.environ.get("LLM_TOTAL_TIMEOUT_S") or timeout or 120.0)
+        try:
+            async for chunk in _with_deadline(
+                self.chat_stream(messages, temperature=temperature, max_tokens=max_tokens, timeout=timeout, extra_headers=extra_headers),
+                budget,
+            ):
+                if not chunk:
+                    continue
+                emitted = True
+                yield chunk
+        except Exception as e:
+            if emitted:
+                if isinstance(e, LLMServiceError):
+                    raise
+                raise LLMServiceError(f"大模型流式响应中断: {_err_text(e)}") from e
+            stream_error = e
+        if emitted:
+            return
+        text = await self._one_shot_completion(messages, temperature=temperature, timeout=timeout,
+                                               extra_headers=extra_headers, stream_error=stream_error)
+        if text:
+            yield text
+
+    async def _one_shot_completion(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.3,
+        timeout: float = 120.0,
+        extra_headers: Optional[Dict[str, str]] = None,
+        stream_error: Optional[Exception] = None,
+    ) -> str:
+        """兜底非流式单次调用（Responses API → /chat/completions）；stream_error 为此前流式失败的原因（拼进报错）。"""
         # 兜底非流式单次调用
         provider = (settings.LLM_PROVIDER or "openai_compatible").lower()
         api_type = (settings.LLM_API_TYPE or "chat_completions").lower()

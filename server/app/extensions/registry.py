@@ -145,12 +145,12 @@ class ExtensionRegistry:
             return {"result": str(res)}
 
     async def _exec_custom_node(self, nid: str, args: Dict[str, Any]) -> Dict[str, Any]:
-        from app.custom_nodes.manager import custom_node_manager, run_custom_node
+        from app.custom_nodes.manager import custom_node_manager, run_custom_node, split_run_args
         definition = custom_node_manager.get(nid)
         if not definition:
             raise ValueError(f"代码节点不存在: {nid}")
-        inputs = args.get("inputs") or {}
-        params = args.get("params") or {k: v for k, v in args.items() if k != "inputs"}
+        # REQ-toonflow-canvas 扁平 args（画布扩展节点 / 直调）按 input_schema 拆 inputs/params；嵌套 {inputs, params} 原样
+        inputs, params = split_run_args(definition, args)
         return await run_custom_node(definition, inputs, params)
 
     async def _exec_mcp_tool(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:

@@ -1,6 +1,7 @@
 """
 画布 DAG 执行引擎 — 复用现有 Providers + MCP 工具
 节点类型映射到真实生成能力：
+  prompt -> canvas/text_skills（自由生成 / 扩写 / 剧本拆解 / 策划案；无技能时透传正文）
   brief / script-split -> llm_service / script_agent
   shot-card -> image_registry (可选 workflow)
   comfy-workflow -> image_registry (workflow_id 必选)
@@ -9,10 +10,15 @@
   director3d -> mcp director_3d_stage_plan
   asset -> 透传
 支持拓扑排序、逐节点执行、连线自动注入（image/prompt/asset）
+REQ-toonflow-canvas：生成类节点的入参统一由 app.canvas.inputs 解析（单一 in 口 + 有序参考列表，
+兼容旧具名口）；group（分组）节点不参与执行。
 """
 import time
 import asyncio
 from typing import Dict, Any, List, Optional, Set, Tuple
+
+from app.canvas import inputs as canvas_inputs
+from app.canvas import text_skills
 
 
 def topo_sort(nodes: List[Dict[str, Any]], edges: List[Dict[str, Any]]) -> List[str]:
@@ -62,11 +68,102 @@ def _extract_url_from_src(src_res: Optional[Dict[str, Any]], src_data: Dict[str,
     return None
 
 
+# REQ-toonflow-canvas FX-B 各类节点「已有产出」看哪些数据键（节点数据里有值 = 不必为下游重新执行）
+_TEXT_TYPES = frozenset({"prompt", "text-prompt", "brief"})
+_IMAGE_TYPES = frozenset({"image", "generate-image", "load-image", "shot-card", "comfy-workflow", "asset"})
+_VIDEO_TYPES = frozenset({"video", "video-node", "video-legacy", "load-video"})
+_AUDIO_TYPES = frozenset({"audio", "tts", "voice", "load-audio"})
+_STATIC_OUTPUT_KEYS: Dict[str, Tuple[str, ...]] = {
+    **{t: ("prompt", "text", "brief") for t in _TEXT_TYPES},
+    **{t: ("image_url", "result_url", "file_url", "thumb_url") for t in _IMAGE_TYPES},
+    "load-image-batch": ("images", "image_urls", "reference_images"),
+    **{t: ("video_url", "file_url") for t in _VIDEO_TYPES},
+    **{t: ("audio_url", "file_url") for t in _AUDIO_TYPES},
+    "director3d": ("camera_prompt", "minimax_camera_prompt", "image_url", "video_url"),
+}
+
+
+def static_outputs(node: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """节点数据里已有的产出（按节点类型取产出键，非空才算）；类型未知 → {}（视为没有产出）。"""
+    data = canvas_inputs.node_data(node)
+    out: Dict[str, Any] = {}
+    for k in _STATIC_OUTPUT_KEYS.get((node or {}).get("type") or "", ()):
+        v = data.get(k)
+        if (isinstance(v, str) and v.strip()) or (isinstance(v, list) and any(isinstance(x, str) and x.strip() for x in v)):
+            out[k] = v
+    return out
+
+
+def upstream_needs_run(src: Dict[str, Any], edge: Dict[str, Any], tgt: Dict[str, Any]) -> bool:
+    """这条边的来源是否必须先执行才能给目标供数（来源节点数据里已有对应产出 → 不执行，直接读数据）。
+
+    - provider* 配置节点：只透传 provider_id/model，读节点数据即可 → 不执行；
+    - 参考边（in 口 / 生成节点旧具名口）：按 inputs 规则取该参考的类型与值，有值 → 不执行；
+    - 其余边：按来源类型的产出键看节点数据；类型未知（custom / ext-node / script-split…）→ 执行（同修复前）。
+    """
+    st = src.get("type") or ""
+    if st in canvas_inputs.PROVIDER_NODE_TYPES:
+        return False
+    if canvas_inputs.is_ref_edge(edge, tgt.get("type"), st):
+        sh = str(edge.get("sourceHandle") or edge.get("source_handle") or "")
+        kind = canvas_inputs.source_kind(src, sh)
+        return not (kind and canvas_inputs.source_values(kind, src, sh))
+    return not static_outputs(src)
+
+
+def execution_set(nodes: List[Dict[str, Any]], edges: List[Dict[str, Any]], target_ids: List[str]) -> Set[str]:
+    """REQ-toonflow-canvas FX-B 指定 target_ids 时实际要执行的节点（COORDINATION 第 16 条）。
+
+    = 目标节点 + 为给它们供数而**必须**执行的上游（产出缺失的祖先，逐级向上）。
+    产出已在的祖先只读数据、不执行；祖先的其他下游（兄弟生成节点）与目标的下游一律不执行——
+    原先闭包是「目标的祖先 + 整个闭包的下游」，执行一个视频节点会把共享上游文本的另一个图片节点也重跑一遍（E2E-3）。
+    """
+    by_id = {n["id"]: n for n in nodes if isinstance(n, dict) and n.get("id")}
+    incoming: Dict[str, List[Dict[str, Any]]] = {}
+    for e in edges:
+        s, t = e.get("source"), e.get("target")
+        if s in by_id and t in by_id:
+            incoming.setdefault(t, []).append(e)
+    run: Set[str] = {t for t in target_ids if t in by_id}
+    stack = list(run)
+    while stack:
+        cur = stack.pop()
+        for e in incoming.get(cur, []):
+            sid = e["source"]
+            if sid in run:
+                continue
+            src = by_id[sid]
+            if src.get("type") == canvas_inputs.GROUP_TYPE:
+                continue
+            if upstream_needs_run(src, e, by_id[cur]):
+                run.add(sid)
+                stack.append(sid)
+    return run
+
+
 def collect_upstream_data(node_id: str, nodes: List[Dict], edges: List[Dict], results: Dict[str, Any]) -> Dict[str, Any]:
     """收集上游节点已产生的可注入数据（全量 Provider 系统复用：动态句柄 + 多模态聚合）"""
-    incoming = [e for e in edges if e.get("target")==node_id]
     data: Dict[str, Any] = {}
     id_to_node = {n["id"]: n for n in nodes}
+    tgt_node_obj = id_to_node.get(node_id, {})
+    tgt_type = tgt_node_obj.get("type")
+    # REQ-toonflow-canvas 参考边（in 口 / 生成节点的旧具名口）统一走 inputs.collect_inputs，新旧连法同一份槽位；
+    # 其余边（provider 源、动态句柄、非生成节点）仍走下方原逻辑
+    incoming = []
+    has_ref_edges = False
+    for e in edges:
+        if e.get("target") != node_id:
+            continue
+        if canvas_inputs.is_ref_edge(e, tgt_type, (id_to_node.get(e.get("source")) or {}).get("type")):
+            has_ref_edges = True
+            continue
+        incoming.append(e)
+    if has_ref_edges:
+        resolved = canvas_inputs.collect_inputs(tgt_node_obj, edges, id_to_node, results)
+        data.update(canvas_inputs.to_engine_upstream(resolved["slots"], resolved.get("has_text_refs", False)))
+        if tgt_type == "prompt":
+            # REQ-toonflow-canvas F2 文本节点技能输入：指令 gen_prompt + 全部文本参考（N1，见 canvas/text_skills.py）
+            data[text_skills.SKILL_INPUT_KEY] = text_skills.skill_refs_input(tgt_node_obj, resolved)
     for e in incoming:
         src_id = e.get("source")
         tgt_handle = (e.get("targetHandle") or e.get("target_handle") or "").strip()
@@ -199,15 +296,16 @@ def collect_upstream_data(node_id: str, nodes: List[Dict], edges: List[Dict], re
                     data["reference_images"].append(url)
             continue
         if tgt_handle in ("video","audio"):
+            # REQ-toonflow-canvas FX-B 来源本次没执行（已有产出、只读数据）时取节点数据里的产出
             if tgt_handle=="video":
-                url = src_res.get("video_url") if src_res else None
+                url = src_res.get("video_url") if src_res else static_outputs(src_node).get("video_url")
                 if url:
                     data.setdefault("videos", [])
                     if url not in data["videos"]:
                         data["videos"].append(url)
                     data.setdefault("video_url", url)
             else:
-                url = src_res.get("audio_url") if src_res else None
+                url = src_res.get("audio_url") if src_res else static_outputs(src_node).get("audio_url")
                 if url:
                     data.setdefault("audios", [])
                     if url not in data["audios"]:
@@ -269,6 +367,9 @@ def collect_upstream_data(node_id: str, nodes: List[Dict], edges: List[Dict], re
         if tgt_handle in ("provider", "provider_video", "provider_image", "provider_audio"):
             pass
         if not src_res:
+            # REQ-toonflow-canvas FX-B 来源本次没执行（只读数据）：用节点数据里的产出兜底透传
+            src_res = static_outputs(src_node)
+        if not src_res:
             continue
         # 兜底透传：仅当无显式句柄命中时，按白名单透传已产生的多模态结果
         for k in ("image_url","file_url","thumb_url","prompt","image_prompt","brief","audio_url","video_url","minimax_camera_prompt","provider","provider_id","model"):
@@ -280,6 +381,14 @@ def collect_upstream_data(node_id: str, nodes: List[Dict], edges: List[Dict], re
             data.setdefault("visual_prompt", src_res["visual_prompt"])
         if src_res.get("result_url"):
             data.setdefault("image_url", src_res["result_url"])
+    # REQ-toonflow-canvas T6 ext-node / custom 目标：上游值按连线 targetHandle 落到**声明的端口 id**
+    # （upscale_ext 的 video 口 → data["video"]，不再只有 video_url/videos）。execute_node 里这两个分支按端口 id
+    # 先读 upstream 再读节点数据，所以上游重新生成后 DAG 用的是本次产出而不是节点上旧的传播值。
+    # 上面旧启发式写的兼容键保留，同名键以这里为准。
+    if tgt_type in canvas_inputs.DYNAMIC_PORT_NODE_TYPES:
+        ports = canvas_inputs.resolve_dynamic_ports(tgt_node_obj)
+        if ports:
+            data.update(canvas_inputs.collect_port_inputs(tgt_node_obj, ports[0], edges, id_to_node, results))
     return data
 
 
@@ -329,56 +438,43 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
     merged = {**upstream, **{k:v for k,v in data.items() if v not in (None,"")}}
     # 将 upstream 额外注入便于调试
     merged["_upstream"] = upstream
+    # REQ-toonflow-canvas 文本参考已与节点自身文本组装好（own + 「参考 N：…」，见 canvas/inputs.py 规则 6），
+    # 覆盖节点自身的提示词键，否则「节点数据优先」会把上游文本参考吞掉
+    assembled = upstream.get(canvas_inputs.ASSEMBLED_PROMPT_KEY)
+    if not (isinstance(assembled, str) and assembled.strip()):
+        assembled = ""
+    if assembled and ntype in ("image", "video", "audio", "director3d"):
+        for _pk in ("prompt", "text", "image_prompt", "video_prompt"):
+            if _pk in ("prompt", "text") or merged.get(_pk):
+                merged[_pk] = assembled
     start = time.time()
     try:
         # 新 6 核心：prompt 智能体能力分发
         if ntype == "prompt":
-            txt = data.get("prompt") or data.get("text") or upstream.get("prompt") or upstream.get("text") or ""
-            if not txt.strip() and upstream.get("prompt"):
-                txt = upstream.get("prompt")
-            skill_id = data.get("skill_id") or merged.get("skill_id")
-            if skill_id == "script_generation" and txt.strip():
-                try:
-                    from app.pipelines.script_agent import script_agent
-                    style = data.get("style_preset") or merged.get("style_preset") or "donghua_xianxia"
-                    ratio = data.get("aspect_ratio") or merged.get("aspect_ratio") or "9:16"
-                    proj = await script_agent.parse_novel_to_project(txt, style, ratio)
-                    script_lines = []
-                    for s in proj.scenes:
-                        script_lines.append(f"【场景 {s.scene_index}】")
-                        for sh in s.shots:
-                            script_lines.append(f"镜头 {sh.shot_index}: [{sh.camera_framing}] {sh.action_desc}\n台词: {sh.dialogue or '（无对白）'}")
-                    script_text = "\n\n".join(script_lines)
-                    return {"status": "success", "prompt": script_text, "text": script_text, "script_data": proj.model_dump(), "elapsed_ms": int((time.time()-start)*1000)}
-                except Exception as e:
-                    print(f"[Canvas] script_generation failed: {e}")
-            elif skill_id == "proposal_generation" and txt.strip():
-                try:
-                    from app.pipelines.llm_service import llm_service
-                    res = await llm_service.chat_completion(
-                        messages=[
-                            {"role": "system", "content": "你是一位金牌影视与漫剧总策划。根据用户输入的主题或题材，生成一份高吸引力的策划案，包括世界观、主角人设、核心矛盾与前三集爆点大纲。"},
-                            {"role": "user", "content": txt}
-                        ]
-                    )
-                    content = res.get("content", txt)
-                    return {"status": "success", "prompt": content, "text": content, "elapsed_ms": int((time.time()-start)*1000)}
-                except Exception as e:
-                    print(f"[Canvas] proposal_generation failed: {e}")
-            elif skill_id == "prompt_expansion" and txt.strip():
-                try:
-                    from app.pipelines.llm_service import llm_service
-                    res = await llm_service.chat_completion(
-                        messages=[
-                            {"role": "system", "content": "你是一位电影级视觉提示词工程师。请将用户的简要描述扩写为细节丰富、电影质感强烈的专业提示词（包含景别、光影、构图、色温与胶片颗粒感）。直接输出提示词。"},
-                            {"role": "user", "content": txt}
-                        ]
-                    )
-                    content = res.get("content", txt)
-                    return {"status": "success", "prompt": content, "text": content, "elapsed_ms": int((time.time()-start)*1000)}
-                except Exception as e:
-                    print(f"[Canvas] prompt_expansion failed: {e}")
-            return {"status":"success","prompt": txt, "text": txt, "elapsed_ms": int((time.time()-start)*1000)}
+            txt_out = data.get("prompt") or data.get("text") or upstream.get("prompt") or upstream.get("text") or ""
+            if not isinstance(txt_out, str):
+                txt_out = str(txt_out)
+            if not txt_out.strip() and isinstance(upstream.get("prompt"), str):
+                txt_out = upstream.get("prompt")
+            # REQ-toonflow-canvas F2 文本技能（自由生成 / 扩写 / 剧本拆解 / 策划案）：指令 gen_prompt + 文本参考为输入，
+            # 与前端宿主 runTextSkill 同口径（canvas/text_skills.py）；不执行技能时原样透传节点文本
+            skill = text_skills.effective_skill(data.get("skill_id") or merged.get("skill_id"), data.get("gen_prompt"))
+            if skill:
+                skill_txt, skill_src, skill_imgs = text_skills.skill_input(skill, data, upstream)
+                if skill_txt.strip():
+                    try:
+                        out = await text_skills.run_text_skill(
+                            skill, skill_txt, images=skill_imgs,
+                            style_preset=data.get("style_preset") or merged.get("style_preset"),
+                            aspect_ratio=data.get("aspect_ratio") or merged.get("aspect_ratio"),
+                        )
+                    except Exception as e:
+                        print(f"[Canvas] text skill {skill} failed: {e}")
+                        return {"status": "error", "error": f"{text_skills.SKILL_LABELS[skill]}失败: {e}", "skill_id": skill,
+                                "elapsed_ms": int((time.time()-start)*1000)}
+                    return {"status": "success", **out, "skill_id": skill, "input_source": skill_src,
+                            "elapsed_ms": int((time.time()-start)*1000)}
+            return {"status":"success","prompt": txt_out, "text": txt_out, "elapsed_ms": int((time.time()-start)*1000)}
         if ntype == "export":
             # 聚合上游视频/音频/图片，透传即可，真实导出由前端触发 saveProjectContent/ exportJianYing
             vids = []
@@ -477,6 +573,9 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
                 if not definition.enabled:
                     return {"status":"error","error":f"自定义节点已禁用: {cnid}"}
                 declared_in = list(((definition.input_schema or {}).get("properties") or {}).keys())
+                if not declared_in:
+                    # REQ-toonflow-canvas T6 没有 input_schema 时与卡片兜底输入口一致（prompt / video / reference_images）
+                    declared_in = [p["id"] for p in canvas_inputs.CUSTOM_FALLBACK_INPUTS]
                 inputs: Dict[str, Any] = {}
                 for k in declared_in:
                     v = upstream.get(k, merged.get(k, None))
@@ -605,6 +704,8 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
                     if extra.get("style_preset"): mcp_args["style_preset"] = extra["style_preset"]
                     if model: mcp_args["model"] = model
                     if dyn.get("reference_images"): mcp_args["reference_images"] = dyn["reference_images"]
+                    # REQ-toonflow-canvas 机位提示词槽与前端一致按 camera_prompt 键下发（源未声明则进 dynamic_inputs）
+                    if isinstance(merged.get("camera_prompt"), str) and merged["camera_prompt"].strip(): mcp_args["camera_prompt"] = merged["camera_prompt"].strip()
                     # 其余异构透传
                     for k,v in extra.items():
                         if k not in mcp_args and v not in (None,""):
@@ -665,7 +766,11 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
             return {"status":"success","image_url": res.image_url, "result_url": res.image_url, "provider": res.provider, "elapsed_ms": res.elapsed_ms or int((time.time()-start)*1000)}
         elif ntype in ("video","video-node"):
             prompt = merged.get("video_prompt") or merged.get("prompt") or merged.get("image_prompt") or merged.get("action_desc") or upstream.get("prompt") or "cinematic motion"
-            mode = merged.get("mode") or "i2v"
+            # REQ-toonflow-canvas data.mode 既可能是旧的生成源模式（i2v/r2v/t2v），也可能是新参考模式
+            # （text/singleImage/startEnd/multiReference）；新模式换算成生成源模式
+            raw_mode = merged.get("mode") if isinstance(merged.get("mode"), str) else ""
+            _ref_mode = canvas_inputs.normalize_video_mode(raw_mode)
+            mode = canvas_inputs.PROVIDER_MODE_BY_VIDEO_MODE.get(_ref_mode) or raw_mode or "i2v"
             first_frame = merged.get("first_frame") or merged.get("first_frame_url") or merged.get("image_url") or upstream.get("first_frame") or upstream.get("first_frame_url") or upstream.get("image_url") or upstream.get("reference")
             last_frame = merged.get("last_frame") or merged.get("last_frame_url") or upstream.get("last_frame") or upstream.get("last_frame_url") or (merged.get("dynamic_inputs") or {}).get("last_frame_url")
             ref_imgs = merged.get("reference_images") or upstream.get("reference_images") or merged.get("reference") or upstream.get("reference")
@@ -678,6 +783,8 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
                 ref_vids = [ref_vids.strip()]
             elif not isinstance(ref_vids, list):
                 ref_vids = None
+            # REQ-toonflow-canvas 显式参考视频（参考列表 reference_video 槽 / 节点数据）随 MCP 入参下发；预演兜底只给注册表回退
+            ref_vids_explicit = list(ref_vids) if ref_vids else None
             # 白模动态预演自动作为视频参考（分镜挂载的 previz_video_url；有声明的源才消费）
             if not ref_vids:
                 _pv = merged.get("previz_video_url") or upstream.get("previz_video_url")
@@ -694,7 +801,11 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
             elif skill_id == "first_last_frame" or (first_frame and last_frame):
                 mode = "i2v"
             if mode == "i2v" and not first_frame and not ref_imgs:
-                return {"status":"error","error":"视频生成需要首帧图像或参考图（请连入上游 image 或在底部控制台挂载）"}
+                # REQ-toonflow-canvas 未指定模式时按参考自动匹配：没有图 = 文生视频，只有参考视频 = 多参考
+                if not raw_mode:
+                    mode = "r2v" if ref_vids_explicit else "t2v"
+                else:
+                    return {"status":"error","error":"视频生成需要首帧图像或参考图（请连入上游 image 或在底部控制台挂载）"}
             from app.providers.video.registry import video_registry
             from app.providers.video.base import VideoGenerateRequest
             prov = merged.get("provider_id") or merged.get("provider") or merged.get("video_provider") or merged.get("provider_video") or upstream.get("provider_id") or upstream.get("provider_video") or upstream.get("provider") or data.get("provider_id") or data.get("provider")
@@ -759,6 +870,11 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
                     }
                     if fps is not None: mcp_args_v["fps"] = fps
                     if model: mcp_args_v["model"] = model
+                    # REQ-toonflow-canvas 尾帧/参考视频/参考音频/机位提示词此前未进 MCP 入参（startEnd、多参考在引擎路径失效）
+                    if isinstance(last_frame, str) and last_frame.strip(): mcp_args_v["last_frame"] = last_frame.strip()
+                    if ref_vids_explicit: mcp_args_v["reference_videos"] = ref_vids_explicit
+                    if isinstance(ref_auds, list) and ref_auds: mcp_args_v["reference_audios"] = ref_auds
+                    if isinstance(merged.get("camera_prompt"), str) and merged["camera_prompt"].strip(): mcp_args_v["camera_prompt"] = merged["camera_prompt"].strip()
                     # 透传其余
                     for k,v in extra.items():
                         if k not in mcp_args_v and v not in (None,""):
@@ -933,50 +1049,40 @@ class CanvasEngine:
     async def execute_dag(self, nodes: List[Dict], edges: List[Dict], project_id: Optional[str]=None, target_ids: Optional[List[str]]=None, on_progress=None) -> Dict[str, Any]:
         """
         执行画布 DAG
-        - target_ids: 仅执行这些节点及其下游（为 None 则执行全部拓扑序）
+        - target_ids: 仅执行这些节点 + 产出缺失、必须先执行的上游（见 execution_set；为 None 则执行全部拓扑序）。
+          不执行目标的下游，也不执行祖先的其他下游（兄弟生成节点）；结果不落盘，由调用方 persist（canvas/persist.py）
         """
         if not nodes:
             return {"results":{}, "order":[]}
-        # 若指定 target_ids，计算闭包（target + 下游）
+        # REQ-toonflow-canvas 指定执行分组 = 执行分组里的全部节点（含嵌套分组的子孙）
+        if target_ids and any(n.get("type") == canvas_inputs.GROUP_TYPE and n.get("id") in target_ids for n in nodes):
+            expanded = list(target_ids)
+            frontier = [t for t in target_ids]
+            while frontier:
+                pid = frontier.pop()
+                for n in nodes:
+                    if n.get("parentId") == pid and n["id"] not in expanded:
+                        expanded.append(n["id"])
+                        frontier.append(n["id"])
+            target_ids = expanded
+        # REQ-toonflow-canvas 分组（group）只是容器：无端口、不执行，也不进拓扑
+        group_ids = {n["id"] for n in nodes if n.get("type") == canvas_inputs.GROUP_TYPE}
+        if group_ids:
+            nodes = [n for n in nodes if n["id"] not in group_ids]
+            edges = [e for e in edges if e.get("source") not in group_ids and e.get("target") not in group_ids]
+        # 上下文（取上游数据用）始终是整张图；指定 target_ids 时只执行目标 + 缺产出的必要上游（execution_set）
+        ctx_nodes, ctx_edges = nodes, edges
         if target_ids:
-            # 计算闭包：上游依赖 + 下游影响，确保单点执行时上游数据可注入
-            adj: Dict[str,List[str]]={}
-            rev: Dict[str,List[str]]={}
-            for n in nodes:
-                adj[n["id"]]=[]
-                rev[n["id"]]=[]
-            for e in edges:
-                s = e.get("source"); t = e.get("target")
-                if s in adj and t in adj:
-                    adj[s].append(t)
-                    rev[t].append(s)
-            # 1) 上游祖先
-            closure=set(target_ids)
-            q=list(target_ids)
-            while q:
-                cur=q.pop(0)
-                for pre in rev.get(cur,[]):
-                    if pre not in closure:
-                        closure.add(pre); q.append(pre)
-            # 2) 下游后继（基于已包含上游的闭包）
-            q=list(closure)
-            visited_down=set(closure)
-            while q:
-                cur=q.pop(0)
-                for nb in adj.get(cur,[]):
-                    if nb not in visited_down:
-                        visited_down.add(nb); q.append(nb)
-                        closure.add(nb)
-            nodes = [n for n in nodes if n["id"] in closure]
-            edges = [e for e in edges if e.get("source") in closure and e.get("target") in closure]
-
+            run_ids = execution_set(nodes, edges, list(target_ids))
+            nodes = [n for n in nodes if n["id"] in run_ids]
+            edges = [e for e in edges if e.get("source") in run_ids and e.get("target") in run_ids]
         order = topo_sort(nodes, edges)
         results: Dict[str, Any] = {}
         for nid in order:
             node = next((n for n in nodes if n["id"]==nid), None)
             if not node:
                 continue
-            upstream = collect_upstream_data(nid, nodes, edges, results)
+            upstream = collect_upstream_data(nid, ctx_nodes, ctx_edges, results)
             if on_progress:
                 try: await on_progress({"event":"node_start","node_id":nid,"type":node.get("type")})
                 except: pass

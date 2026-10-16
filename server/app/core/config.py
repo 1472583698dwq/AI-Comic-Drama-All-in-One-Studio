@@ -205,6 +205,8 @@ class Settings(BaseModel):
     RESPONSES_API_URL: str = os.getenv("RESPONSES_API_URL", "https://api.openai.com/v1/responses")
     RESPONSES_API_KEY: str = os.getenv("RESPONSES_API_KEY", "")
     RESPONSES_MODEL: str = os.getenv("RESPONSES_MODEL", "gpt-5.2")
+    # REQ-toonflow-canvas FX-B 画布节点「智能规划」LLM 总预算（秒，缺省 90；超时降级规则规划，见 canvas/agent_plan.py）
+    CANVAS_AGENT_PLAN_TIMEOUT_S: str = os.getenv("CANVAS_AGENT_PLAN_TIMEOUT_S", "90")
 
     # Image Generation Providers
     # 默认走 OpenAI 兼容生图（gpt-image 系列）；未配置时注册表会自动回退到已配置的其它源（如 ComfyUI）

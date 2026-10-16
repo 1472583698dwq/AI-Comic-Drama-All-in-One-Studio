@@ -9,7 +9,7 @@ import os
 import re
 import time
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.custom_nodes.models import CustomNodeDefinition
 
@@ -125,6 +125,53 @@ class CustomNodeManager:
 
 
 custom_node_manager = CustomNodeManager()
+
+
+def _schema_keys(schema: Optional[Dict[str, Any]]) -> List[str]:
+    props = (schema or {}).get("properties") if isinstance(schema, dict) else None
+    return list(props.keys()) if isinstance(props, dict) else []
+
+
+def split_run_args(definition: CustomNodeDefinition, args: Optional[Dict[str, Any]],
+                   input_keys: Optional[Any] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """REQ-toonflow-canvas 统一执行口参数 → (inputs, params)。
+
+    - 嵌套形状（含 ``inputs`` / ``params`` dict）：保持原语义——``inputs`` 原样、没给 ``params`` 时取其余键；
+      仅把顶层同名的已声明输入键补进 inputs（不覆盖已有值）。
+    - 扁平形状（画布扩展节点 build_run_args、/extensions/execute 直调）：``input_schema`` 声明的属性键 → inputs，
+      其余 → params；同时也在 params_schema 里声明的键两边都给。
+    - ``input_keys``：调用方额外认定的输入键（如扩展节点从输入端口装配出的键）。代码节点自己没声明成输入的，
+      inputs / params 两边都给（老节点可能从 params 读，向后兼容）；声明成参数的只进 params。
+    """
+    args = dict(args or {})
+    declared_in = set(_schema_keys(definition.input_schema))
+    declared_params = set(_schema_keys(definition.params_schema))
+    extra_in = {str(k) for k in (input_keys or ())} - declared_in - declared_params
+    nested_in = args.get("inputs") if isinstance(args.get("inputs"), dict) else None
+    nested_params = args.get("params") if isinstance(args.get("params"), dict) else None
+    if nested_in is not None or nested_params is not None:
+        inputs = dict(nested_in or {})
+        if nested_params is not None:
+            params = dict(nested_params)
+        else:  # 与旧实现一致：没给 params 时取除 inputs 外的其余键
+            params = {k: v for k, v in args.items() if k != "inputs"}
+        for k in declared_in | extra_in:
+            if k not in inputs and args.get(k) not in (None, "", []):
+                inputs[k] = args[k]
+        return inputs, params
+    inputs: Dict[str, Any] = {}
+    params: Dict[str, Any] = {}
+    for k, v in args.items():
+        if k in declared_in:
+            inputs[k] = v
+            if k in declared_params:
+                params[k] = v
+        elif k in extra_in:
+            inputs[k] = v
+            params[k] = v
+        else:
+            params[k] = v
+    return inputs, params
 
 
 async def run_custom_node(definition: CustomNodeDefinition, inputs: Dict[str, Any],

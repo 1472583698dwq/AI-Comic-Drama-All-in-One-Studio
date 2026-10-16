@@ -6,8 +6,8 @@
  *   ① 悬浮胶囊 / 可拖拽浮窗（`AgentChatDrawer`）→ 画布页不再渲染（见 App.tsx 的 activeTab 闸门）
  *   ② 底部全局编排条（上游旧 `FloatingAgentPromptBar` 的全局态）**已废弃**：它与本侧栏同属
  *      "一句话让 Agent 编排画布"的入口，而有会话能力的是本侧栏 → 全局输入统一走这里；
- *      底部的"节点态"（选中生成节点 → `NodeAgentConsole`）改由本地版内联的 `NodeControlBar` 承接，
- *      只服务当前选中的生成节点。
+ *      底部的"节点态"（旧 `NodeAgentConsole` / 内联 `NodeControlBar`）已随 REQ-toonflow-canvas 移除：
+ *      每个节点自带 Toonflow 式提示词面板（kit PromptPanel），选中即在节点下方出现。
  *
  * 会话共用页面版 `useAgentStore`（与「AI 导演」页同一份会话），所以在这里发的消息，
  * 切到 AI 导演页能看到完整后续。`bindProject` / `agentSocket.ensure()` 都是幂等的，
@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { useCanvasStore } from '../../stores/useCanvasStore';
-import { getNodeSpec } from './nodeRegistry';
+import { getNodeDef } from './kit/registry';
 import { agentSocket } from '../agent/agentSocket';
 import { useAgentStore } from '../agent/agentStore';
 import { AgentMessageList } from '../agent/AgentMessageList';
@@ -137,7 +137,7 @@ export const CanvasAgentSidebar: React.FC = () => {
     .filter(Boolean)
     .map((n: any) => ({
       id: n.id,
-      label: getNodeSpec(String(n.type || ''))?.label || n.type || '节点',
+      label: String(n.data?.label || '') || getNodeDef(String(n.type || ''))?.label || n.type || '节点',
       title: String(n.data?.prompt || n.data?.text || n.data?.brief || n.data?.ai_directive || '').slice(0, 14),
     }));
 

@@ -1,0 +1,27 @@
+# 跨任务约定（协调人维护，W2/W3 agent 必读）
+
+1. **端口 id 以真实数据为准**（T4 盘点了 29 张真实画布）：
+   - 文本节点 `prompt` 的输出端口 id 是 **`prompt`**（不是 design 里写的 `text`），18 条现存连线都用它。
+   - 生成类节点（`image`/`video`/`audio`/`prompt`/`director3d`）的输入端口统一为 **`in`**；输出端口沿用：`image`→`image`，`video`→`video`，`audio`→`audio`，`director3d`→`camera_prompt`（新增 `image`、`video` 两个输出），`load-image`→`image`，`load-video`→`video`，`load-audio`→`audio`。
+   - 没有 sourceHandle 的旧边，迁移时补成源节点的主输出（见 `migrate.ts` 的 `PRIMARY_OUTPUT_PORT`）。
+2. **迁移辅助函数**直接复用 `client/src/components/canvas/migrate.ts`：`edgeKey`、`toInPort`、`legacySlotFor`、`NEW_IN_PORT`、`SLOT_PRIORITY`、`PRIMARY_OUTPUT_PORT`。不要重复实现。
+3. 迁移后旧视频 `data.mode` 可能是 `i2v`/`r2v`/`t2v`，视频节点读取时要兼容映射：`i2v`→`singleImage`（或首尾帧时 `startEnd`），`r2v`→`multiReference`，`t2v`→`text`。
+4. 迁移不删任何旧数据键；转换过的节点带 `_migrated_from`；拆分的批量节点首个保留原 id，其余 `${id}__${i}`。
+5. 后端保存画布要保留 `schema_version`（已派给 T2）。
+6. 后端的 `in`+`refRoles` 组装规则以 T5 的 `server/app/canvas/inputs.py` 为准，前端 `kit/assembleInputs.ts` 必须与之一致（W3 校对）。
+
+## W2 约定（协调人 2026-10-15 补）
+
+7. **媒体生成统一用 `kit/useGeneration`**：节点里写 `const gen = useNodeGeneration(id)`（K1 新增，回写走 `useKitNodeActions(id).update`）；需要自定义回写时用 `useGeneration(id, (nodeId, patch) => …)`——注意它的回写签名是 `(nodeId, patch)`，**不能**直接传 `actions.update`（只收 patch）。`gen.run({nodeType, kind, data, assembled: assembleInputs({...}), providerId, params, smartPlan, intent, inputKeys?})`。它负责直接生成 / 智能规划两条路径、视频轮询、`agent_state`、`history` 追加，直接生成时会用 `stripStaleSlotKeys` 去掉节点 data 里的旧槽位键（`inputKeys` 可追加生成源 input_schema 键）；`gen.cancel()` 停止等待并丢弃结果。不要自己调 `executeAgentNode` / `canvasAgentGenerate`。
+8. **生成源列表**用 `kit/useProviderSources(kind)`、定义用 `useProviderDefinition(id)`；槽位用 `providerSkills.extractSlotsFromProvider(def)`，参数控件用 `providerSkills.paramsSchemaToSpecs` + `controls/DynamicControl`（保留 x-agent 徽标）。
+9. **宿主能力只经 `useKitNodeActions(id)`**：`update`、`rename`、`remove`、`copy`、`duplicate`、`saveToAssets`、`openFullscreen`、`execute(overrides)`（文本技能 / director3d 规划 / custom / ext-node 等走宿主原有分支）、`createNodes(specs, {placement, connectFrom})`（宫格切分、截帧、分离音轨、截取、变速、3D 导出等产物落成新节点）、`navigate(tab, payload)`、`projectId`。
+10. **媒体处理接口**用 `client/src/services/mediaOps.ts`（契约见 progress/T2.md）。上传素材沿用现有 `apiService` 的上传 / 素材接口（看 `nodes/LoaderNodes.tsx` 现在怎么传）。
+11. **节点文件只写在自己的 `nodes2/<dir>/` 下**，用 `defineNode` 注册，并在 `nodes2/<dir>/index.ts` 导出；**不要**改 `CreativeCanvas.tsx`、`nodes2/index.ts`、`kit/**`（kit 有缺陷就在 progress 里写清楚，协调人统一改）。
+12. **自测**：各自起临时 vite（端口见下）+ `__dev__/*Showcase.tsx` 演示页，`VITE_API_ORIGIN=http://127.0.0.1:8001`（后端 CORS 放行任意 localhost 端口）。测完停掉、删临时 HTML。端口：N1 5191、N2 5192、N3 5193、N4 5194、N5 5195、N6 5196、N7 5197。不要用 5180（集成实例）。
+13. 并行期间 `tsc -b` 可能报出别人目录的错误：只修自己目录里的。
+
+## E2E 修复轮约定（协调人 2026-10-15）
+
+14. **文本流式生成接口**（FX-B 实现后端、FX-F 接前端）：`POST /api/v1/llm/generate/stream`，请求体 `{prompt: string, skill?: 'free_generation'|'prompt_expansion'|'proposal_generation' (默认 free_generation), system?: string, images?: string[]}`；系统提示由后端按 skill 取 `canvas/text_skills` 里的同款（free_generation=FREE_GEN_SYSTEM、proposal_generation=PROPOSAL_SYSTEM、prompt_expansion=与 /llm/expand 相同的扩写提示），`system` 只在调用方显式传入时覆盖。响应 `text/event-stream`：每个增量 `data: {"delta":"…"}\n\n`；结束 `data: {"done":true,"text":"<完整文本>"}\n\n`；出错 `data: {"error":"…"}\n\n` 后结束。上游不支持流式时后端退化为一次性返回（发一条 delta + done）。剧本拆解不走流式。
+15. 视频 `mode`：前端执行器放行 `mode`（视频节点）；后端 MCP 生成工具在缺 `mode` 时按入参推断：有 first_frame→i2v，只有 reference_images/reference_video→r2v，否则 t2v。
+16. `canvas_execute` 的结果必须写回画布节点（产出键、agent_state、history 追加）并按显式 canvas id 保存；只执行目标节点（及缺结果的必要上游），**不得**连带重跑兄弟生成节点。

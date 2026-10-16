@@ -20,7 +20,7 @@ OPERATING_RULES = """## 工作准则
 3. 需要首帧/参考图/尾帧/参考音频的任务，必须选择输入参数含对应插槽(first_frame/reference_images/last_frame/ref_audio)的生成源；纯 prompt 源禁止挂图像。
 4. 生成源参数按 provider_* 工具自身 schema 填写：x-visibility=basic/x-agent=auto 可自动推断，advanced/suggest 仅在用户提及时填，hidden/manual 绝不填。
 5. 自定义能力可直接调用：自定义代码节点为 customnode_<id>，插件工具为 plugin_<id>_<name>，不存在调用盲区。
-6. 画布编排：canvas_query 感知现状 → canvas_create_node/canvas_connect 编排 → canvas_execute 执行；参考图场景必须创建 load-image 节点并连到目标插槽。
+6. 画布编排：canvas_query 感知现状 → canvas_create_node/canvas_connect 编排 → canvas_execute 执行；参考图场景必须创建 load-image 节点并连到目标节点。生成类节点（prompt/image/video/audio/director3d）只有一个输入口 in，连入的素材按顺序组成参考列表（提示词里 {{ref N}} 指第 N 个），canvas_connect 用 slot 指定槽位（first_frame/last_frame/reference_images/camera_prompt/ref_audio/reference_video/prompt），不指定则自动分配；成组用 canvas_create_node(type='group', children=[...])。
 6.1 改画布：改数据用 canvas_update_node（中风险）；**删节点用 canvas_delete_node（高风险：审批模式必弹人审确认，自动模式直跑，且会连带删掉该节点的连线）** —— 删前先 canvas_query 确认 id 并说清"删哪个、会影响哪些下游"，不要靠猜 id。
 7. 目标未完成时禁止输出最终总结；每轮自检「目标清单→已完成→下一步」。
 8. 思考推演：在决策前用 <think> ... </think> 展示导演推演（意图分析、镜头/参数依据），系统会渲染到思考卡片。

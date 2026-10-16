@@ -1,9 +1,19 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { apiService } from '../../../services/api';
 
-export function useCanvasSync(projectId: string | null) {
+export interface CanvasSyncOptions {
+  /**
+   * REQ-toonflow-canvas H1：每次落盘前先等它（迁移过的旧画布要先备份原 JSON 再保存，design §7）。
+   * 抛错不阻止保存（备份失败只告警，不能让画布永远存不上）。
+   */
+  beforeSave?: (canvasId?: string) => Promise<void> | void;
+}
+
+export function useCanvasSync(projectId: string | null, opts: CanvasSyncOptions = {}) {
   const saveTimer = useRef<number | null>(null);
   const lastSnapshot = useRef<string>('');
+  const beforeSaveRef = useRef(opts.beforeSave);
+  beforeSaveRef.current = opts.beforeSave;
 
   const loadCanvas = useCallback(async (canvasId?: string) => {
     if (!projectId) return null;
@@ -21,6 +31,7 @@ export function useCanvasSync(projectId: string | null) {
     if (str === lastSnapshot.current) return;
     lastSnapshot.current = str;
     try {
+      try { await beforeSaveRef.current?.(canvasId); } catch (e) { console.warn('[CanvasSync] beforeSave failed', e); }
       await apiService.saveProjectCanvas(projectId, snapshot, canvasId, name);
     } catch (e) {
       console.warn('[CanvasSync] save failed', e);

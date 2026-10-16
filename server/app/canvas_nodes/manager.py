@@ -137,6 +137,38 @@ def build_run_args(spec: CanvasNodeSpec,
     return args
 
 
+def input_arg_keys(spec: CanvasNodeSpec, args: Dict[str, Any]) -> List[str]:
+    """REQ-toonflow-canvas build_run_args 产出里「值来自输入端口」的键：同名透传的端口 + ``$in.`` 映射目标
+    （被 ``$param.`` / 字面量映射覆盖的同名键不算）。"""
+    mapping = spec.run.map or {}
+    keys = []
+    for port in spec.inputs:
+        expr = mapping.get(port.id)
+        if port.id in args and (expr is None or str(expr).startswith("$in.")):
+            keys.append(port.id)
+    for target, expr in mapping.items():
+        if str(expr or "").startswith("$in.") and target in args and target not in keys:
+            keys.append(target)
+    return keys
+
+
+def _custom_node_args(spec: CanvasNodeSpec, args: Dict[str, Any]) -> Dict[str, Any]:
+    """REQ-toonflow-canvas 目标是代码节点时装成嵌套 ``{inputs, params}``：代码节点 input_schema 为准，
+    再补上从输入端口装配出的键（见 custom_nodes.manager.split_run_args）。代码节点不存在 → 原样（由执行口报错）。"""
+    kind, _, local_id = spec.run.extension.partition(":")
+    if kind != "custom_node":
+        return args
+    try:
+        from app.custom_nodes.manager import custom_node_manager, split_run_args
+        definition = custom_node_manager.get(local_id)
+    except Exception:
+        definition = None
+    if not definition:
+        return args
+    inputs, params = split_run_args(definition, args, input_keys=input_arg_keys(spec, args))
+    return {"inputs": inputs, "params": params}
+
+
 def _map_outputs(spec: CanvasNodeSpec, result: Dict[str, Any]) -> Dict[str, Any]:
     outputs: Dict[str, Any] = {}
     for port in spec.outputs:
@@ -154,7 +186,7 @@ async def run_canvas_node(spec: CanvasNodeSpec,
     from app.extensions import guard
     guard.ensure_enabled("canvas_node", spec.id, project_id)
 
-    args = build_run_args(spec, inputs, params)
+    args = _custom_node_args(spec, build_run_args(spec, inputs, params))
     from app.extensions.registry import extension_registry
     result = await extension_registry.execute(
         spec.run.extension, args=args,

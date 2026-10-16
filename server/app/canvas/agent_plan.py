@@ -12,7 +12,29 @@ from typing import Any, Dict, List, Optional
 
 # 规划阶段 LLM 总预算（秒）：流式聚合→非流式→多 provider 降级链全程串行，
 # 不设总预算时最坏 120s×N 级回退挂 3~5 分钟；规则规划本身可用，超时直接降级。
-LLM_PLAN_BUDGET_S = 30.0
+# REQ-toonflow-canvas FX-B 原先写死 30s，慢网关（规划请求系统提示长、max_tokens 1200）30s 内回不来、必定降级（E2E-2 B5）；
+# 改为可配置：环境变量 / 配置 CANVAS_AGENT_PLAN_TIMEOUT_S（秒），缺省 90，合法范围 5~600。
+LLM_PLAN_BUDGET_S = 90.0
+_PLAN_BUDGET_ENV = "CANVAS_AGENT_PLAN_TIMEOUT_S"
+
+
+def llm_plan_budget_s() -> float:
+    """当前规划预算（每次调用时读取，改环境变量 / 配置无需重启）；非法值回落缺省 90s。"""
+    import os
+    raw = os.environ.get(_PLAN_BUDGET_ENV)
+    if raw in (None, ""):
+        try:
+            from app.core.config import settings
+            raw = getattr(settings, _PLAN_BUDGET_ENV, None)
+        except Exception:
+            raw = None
+    try:
+        val = float(raw) if raw not in (None, "") else LLM_PLAN_BUDGET_S
+    except (TypeError, ValueError):
+        val = LLM_PLAN_BUDGET_S
+    if val != val or val <= 0:  # NaN / 非正数
+        val = LLM_PLAN_BUDGET_S
+    return max(5.0, min(val, 600.0))
 
 # 技能目录（与前端 providerSkills.ts 对齐）
 SKILL_CATALOG = {
@@ -270,6 +292,7 @@ async def plan_node_agent(node_type: str, idea: str, provider_id: str = "", slot
     if extra_hint:
         user_payload["补充要求"] = extra_hint[:500]
     plan = None
+    budget = llm_plan_budget_s()
     try:
         from app.pipelines.llm_service import llm_service
         # 总预算护栏：LLM 降级链（流式→非流式→多 provider）全程串行，
@@ -279,13 +302,13 @@ async def plan_node_agent(node_type: str, idea: str, provider_id: str = "", slot
                 messages=[{"role": "system", "content": system}, {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)}],
                 temperature=0.3,
                 max_tokens=1200,
-                timeout=LLM_PLAN_BUDGET_S,
+                timeout=budget,
             ),
-            timeout=LLM_PLAN_BUDGET_S + 3.0,
+            timeout=budget + 3.0,
         )
         plan = _extract_json(raw or "")
     except Exception as e:
-        print(f"[AgentPlanner] LLM plan failed（预算 {LLM_PLAN_BUDGET_S:.0f}s，超时/失败自动降级规则规划）: {e}")
+        print(f"[AgentPlanner] LLM plan failed（预算 {budget:.0f}s，可用 {_PLAN_BUDGET_ENV} 调整；超时/失败自动降级规则规划）: {str(e) or type(e).__name__}")
     if not plan or not isinstance(plan, dict) or not plan.get("prompt"):
         rule = _rule_plan(node_type, idea, provider_id, slots, forced_skill)
         rule["plan_source"] = "rule"

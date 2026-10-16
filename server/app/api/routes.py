@@ -1078,10 +1078,10 @@ AGENT_SYSTEM_PROMPT_BODY = """你是「AI漫剧导演 Agent」，运行在 MiniM
 
 **无限画布（Canvas DAG，可视化编排）：**
 20. canvas_query —— 查询画布摘要与节点清单，感知当前画布状态
-21. canvas_create_node —— 创建节点。参数：type(prompt/image/video/audio/director3d/export/custom/brief/script-split/shot-card/comfy-workflow/provider-image/provider-video/provider-audio/tts/load-image/load-image-batch/load-video/load-audio/text-prompt/timeline-export), position{x,y}, params(可选内部参数；type=custom 时 params 必带 custom_node_id，即 customnode_<id> 工具去掉前缀的 id，可直接调该工具执行)
+21. canvas_create_node —— 创建节点。参数：type(prompt/image/video/audio/director3d/group/export/custom/brief/script-split/shot-card/comfy-workflow/provider-image/provider-video/provider-audio/load-image/load-image-batch/load-video/load-audio/timeline-export；group 用 children 传子节点 id), position{x,y}, params(可选内部参数；type=custom 时 params 必带 custom_node_id，即 customnode_<id> 工具去掉前缀的 id，可直接调该工具执行)
 22. canvas_update_node —— 更新节点。参数：node_id, patch(要更新的 data 字段)
 22.5 canvas_delete_node —— 删除节点（连带删除挂在它身上的连线）。参数：node_id。【高危：审批模式必弹人审确认，自动模式直跑】删前先用 canvas_query 确认真实 id，并说清会影响哪些下游
-23. canvas_connect —— 连线。参数：source, sourceHandle, target, targetHandle（类型需匹配 image/video/audio/text/provider）
+23. canvas_connect —— 连线。参数：source, sourceHandle, target, targetHandle, slot。生成类节点(prompt/image/video/audio/director3d)只有输入口 in，用 slot(first_frame/last_frame/reference_images/camera_prompt/ref_audio/reference_video/prompt) 指定槽位，不填自动分配；旧端口名会自动转成 in+槽位
 24. canvas_execute —— 执行画布 DAG。参数：target_ids(可选，仅执行选中), project_id
 
 **策略指引：**
@@ -1092,7 +1092,7 @@ AGENT_SYSTEM_PROMPT_BODY = """你是「AI漫剧导演 Agent」，运行在 MiniM
 - 如需确认可用 provider/工作流/音色/素材，先调用对应的 list_* 查询工具再决策
 - 可组合调用：例如“生成战斗画面并配怒吼”可同时调用 generate_image + generate_voice
 - 多生成源：画布中每个 Provider 节点可独立存在，生图/视频/TTS 节点通过连线绑定具体 Provider，不再全局单选
-- 用户说“画布/无限画布/连线/节点/批量生成/参考图/用工作流/让画布执行” → 优先 canvas_query 感知画布，再用 canvas_create_node/canvas_connect 编排，最后 canvas_execute 触发。参考图场景必须创建 load-image/load-image-batch 并连到 video.reference_images 或 comfy-workflow 的 image 输入
+- 用户说“画布/无限画布/连线/节点/批量生成/参考图/用工作流/让画布执行” → 优先 canvas_query 感知画布，再用 canvas_create_node/canvas_connect 编排，最后 canvas_execute 触发。参考图场景必须创建 load-image 并连到生成节点的 in 口（canvas_connect 的 slot 指定 first_frame/reference_images 等）或 comfy-workflow 的 image 输入
 
 **多轮执行策略（循环模式专用-防一步即停）：**
 - 把用户目标拆解为步骤清单，逐轮执行：每轮基于上一轮工具结果决定下一个动作
@@ -1159,8 +1159,9 @@ def _provider_tools_brief() -> str:
         return (
             "\n\n**动态生成源 Tools v2（当前已注册 " + str(len(lines)) + " 个，一源一Tool，基础常显 高级需点⚙ auto可自动 suggest需确认 manual仅手填）：**\n"
             + "\n".join(lines[:90])
-            + "\n\n**编排画布时：** 用 canvas_create_node 创建 prompt/image/video/audio 节点，data 内直接写 provider_id(即Tool名去掉provider_前缀)、prompt/idea、skill_id 与挂载的 first_frame/reference_images/ref_audio；"
-            "canvas_connect 按句柄(prompt/image/first_frame/last_frame/reference_images/ref_audio/text)连线后 canvas_execute 一键执行。"
+            + "\n\n**编排画布时：** 用 canvas_create_node 创建 prompt/image/video/audio 节点，data 内直接写 provider_id(即Tool名去掉provider_前缀)、prompt/idea、skill_id 与挂载的 first_frame/reference_images/ref_audio"
+            "（文本节点 prompt 例外：正文写 prompt，要执行文本技能时指令写 gen_prompt）；"
+            "canvas_connect 连到生成节点的 in 口、用 slot(first_frame/last_frame/reference_images/camera_prompt/ref_audio/reference_video/prompt) 指定槽位后 canvas_execute 一键执行。"
             "生成源参数异构一律按该 provider_* Tool 自己的 schema 填写，含 x-visibility/x-agent：basic/auto 可由你自动按项目画幅推断，advanced/suggest 仅在用户提及时填写，hidden/manual 绝不填。"
             "\n**生成源选择铁律：** 需要首帧/参考图/尾帧/参考音频时，必须选择输入参数里含对应插槽(first_frame/reference_images/last_frame/ref_audio)的源；"
             "输入参数只有 prompt 的纯文本源不接受任何图像/音频，禁止把参考图挂给它（否则外部 API 会报参数错误）。选源前可先调 get_provider_code 查看其 input_schema 确认。"
@@ -1185,26 +1186,90 @@ class PromptExpandRequest(BaseModel):
 @router.post("/llm/expand")
 async def expand_prompt(req: PromptExpandRequest):
     """电影级提示词扩写：短描述 → 专业影视分镜提示词（导演 Agent 技能后端）"""
-    from app.pipelines.llm_service import llm_service, LLMServiceError
+    from app.pipelines.llm_service import LLMServiceError
+    from app.canvas import text_skills
     if not req.prompt.strip():
         raise HTTPException(status_code=400, detail="prompt 不能为空")
-    kind_hint = {
-        "image": "生图提示词（主体、构图、景别、光线、材质风格、画质词，英文逗号短语）",
-        "video": "视频运动提示词（主体动作、运镜轨迹、节奏、光影变化，中文一句到三句）",
-        "dialogue": "角色台词与情绪标注（中文，带情绪标签）",
-    }.get(req.kind, "生图提示词")
     try:
-        text = await llm_service.chat_completion(
-            messages=[
-                {"role": "system", "content": f"你是漫剧影视级提示词扩写引擎。把用户的简短画面构思扩写为专业{kind_hint}。只输出提示词本身，不要解释、不要引号、不要 markdown。"},
-                {"role": "user", "content": req.prompt.strip()[:2000]},
-            ],
-            temperature=0.7,
-            max_tokens=600,
-        )
-        return {"status": "success", "expanded": (text or "").strip()[:1200]}
+        # REQ-toonflow-canvas F2 实现移到 canvas/text_skills.expand_prompt（画布引擎「扩写」技能共用）
+        return {"status": "success", "expanded": await text_skills.expand_prompt(req.prompt, req.kind)}
     except LLMServiceError as e:
         raise HTTPException(status_code=502, detail=f"LLM 扩写失败: {e}")
+
+
+class TextGenerateRequest(BaseModel):
+    prompt: str
+    system: Optional[str] = None
+    images: Optional[List[str]] = None  # 预留：参考图（当前 LLM 通道为纯文本，只把地址列进提示词）
+    temperature: float = 0.7
+    max_tokens: int = 2000
+
+
+@router.post("/llm/generate")
+async def generate_text(req: TextGenerateRequest):
+    """REQ-toonflow-canvas H1 通用文本生成：画布文本节点「自由生成」技能（按提示词生成 Markdown）。"""
+    from app.pipelines.llm_service import LLMServiceError
+    from app.canvas import text_skills
+    if not (req.prompt or "").strip():
+        raise HTTPException(status_code=400, detail="prompt 不能为空")
+    try:
+        # REQ-toonflow-canvas F2 实现移到 canvas/text_skills.generate_text（画布引擎「自由生成 / 策划案」技能共用）
+        text = await text_skills.generate_text(req.prompt, system=req.system, images=req.images,
+                                               temperature=req.temperature, max_tokens=req.max_tokens)
+    except text_skills.EmptyResultError:
+        raise HTTPException(status_code=502, detail="LLM 返回为空")
+    except LLMServiceError as e:
+        raise HTTPException(status_code=502, detail=f"LLM 生成失败: {e}")
+    return {"status": "success", "text": text}
+
+
+class TextStreamRequest(BaseModel):
+    prompt: str
+    skill: Optional[str] = None  # free_generation（默认）/ prompt_expansion / proposal_generation
+    system: Optional[str] = None  # 仅调用方显式传入时覆盖技能的系统提示
+    images: Optional[List[str]] = None
+
+
+def _sse_data(payload: Dict[str, Any]) -> str:
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+@router.post("/llm/generate/stream")
+async def generate_text_stream(req: TextStreamRequest):
+    """REQ-toonflow-canvas FX-B 文本节点流式生成（SSE，契约见 progress/COORDINATION.md 第 14 条）。
+
+    每个增量 ``data: {"delta": "…"}``；结束 ``data: {"done": true, "text": "<完整文本>"}``；
+    出错 ``data: {"error": "…"}`` 后结束（参数错误同样以 error 事件返回）。上游不支持流式时退化为一条 delta + done。
+    系统提示与非流式技能共用 canvas/text_skills（自由生成 / 扩写 / 策划案），剧本拆解不走流式。
+    """
+    from app.canvas import text_skills
+    skill = (req.skill or "").strip() or text_skills.FREE_GENERATION
+
+    async def events():
+        if not (req.prompt or "").strip():
+            yield _sse_data({"error": "prompt 不能为空"})
+            return
+        if skill not in text_skills.STREAM_SKILLS:
+            yield _sse_data({"error": f"不支持的流式技能: {skill}（可选 {' / '.join(text_skills.STREAM_SKILLS)}）"})
+            return
+        parts: List[str] = []
+        try:
+            async for delta in text_skills.stream_text(skill, req.prompt, system=req.system, images=req.images):
+                parts.append(delta)
+                yield _sse_data({"delta": delta})
+        except Exception as e:  # LLMServiceError / 网络异常：已下发的增量作废，前端按 error 处理
+            yield _sse_data({"error": f"LLM 生成失败: {e}"})
+            return
+        text = "".join(parts).strip()
+        if skill == text_skills.PROMPT_EXPANSION:
+            text = text[:text_skills.EXPAND_MAX_CHARS]
+        if not text:
+            yield _sse_data({"error": "LLM 返回为空"})
+            return
+        yield _sse_data({"done": True, "text": text})
+
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 

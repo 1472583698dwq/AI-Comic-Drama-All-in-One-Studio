@@ -1,0 +1,472 @@
+/* REQ-toonflow-canvas N7 独有节点换皮 B：卡片内控件（Toonflow el-input / el-select / el-button / el-tag 外观）。
+ * 颜色一律取 kit/theme.css 的 --cv-* 变量（跟随深浅色与插件主题包），不写死色值；
+ * 作用域挂在 .cv-node（节点卡片）、.cv-lb-pop（工具栏「回写分镜」弹层，FX-2）与 .cv-lb-polish-host（挂到 body 的润色弹窗容器）上，不影响其他节点。
+ * 本文件是普通（无 layer）样式，天然压过 Tailwind 的 @layer utilities，改 DynamicControl 内部外观不需要 !important。 */
+
+.cv-lb {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  color: var(--cv-text-1);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.cv-lb-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.cv-lb-row--between { justify-content: space-between; }
+.cv-lb-wrap { flex-wrap: wrap; }
+.cv-lb-grow { flex: 1; min-width: 0; }
+.cv-lb-push { margin-left: auto; }
+.cv-lb-center { text-align: center; }
+.cv-lb-strong { color: var(--cv-text-1); font-weight: 600; }
+.cv-lb-accent,
+.cv-lb-label.cv-lb-accent { color: var(--cv-primary); }
+.cv-lb-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.cv-lb-ellipsis {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cv-lb-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.cv-lb-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--cv-text-2);
+  font-size: 12px;
+  font-weight: 500;
+}
+.cv-lb-hint {
+  color: var(--cv-text-3);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.cv-lb-hint.cv-lb-row { gap: 4px; }
+.cv-lb-desc {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--cv-text-2);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.cv-lb-code {
+  padding: 0 4px;
+  border: 1px solid var(--cv-border-lighter);
+  border-radius: var(--cv-radius-sm);
+  background: var(--cv-fill);
+  color: var(--cv-text-2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+.cv-lb-required { margin-left: 2px; color: var(--cv-danger); }
+
+/* ---------- 输入框 / 文本域 / 下拉（el-input / el-select）---------- */
+:is(.cv-node, .cv-lb-pop) .cv-lb-input,
+:is(.cv-node, .cv-lb-pop) .cv-lb-textarea,
+:is(.cv-node, .cv-lb-pop) .cv-lb-select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--cv-border-light);
+  border-radius: var(--cv-radius);
+  outline: none;
+  background: var(--cv-bg);
+  color: var(--cv-text-1);
+  font: inherit;
+  font-size: 12px;
+  line-height: 20px;
+  transition: border-color 120ms ease-out;
+}
+:is(.cv-node, .cv-lb-pop) .cv-lb-input { height: 30px; padding: 4px 8px; }
+:is(.cv-node, .cv-lb-pop) .cv-lb-textarea {
+  display: block;
+  padding: 6px 8px;
+  resize: vertical;
+  min-height: 52px;
+  max-height: 320px;
+}
+:is(.cv-node, .cv-lb-pop) .cv-lb-input::placeholder,
+:is(.cv-node, .cv-lb-pop) .cv-lb-textarea::placeholder { color: var(--cv-text-3); }
+:is(.cv-node, .cv-lb-pop) .cv-lb-input:hover,
+:is(.cv-node, .cv-lb-pop) .cv-lb-textarea:hover,
+:is(.cv-node, .cv-lb-pop) .cv-lb-select:hover { border-color: var(--cv-border); }
+:is(.cv-node, .cv-lb-pop) .cv-lb-input:focus,
+:is(.cv-node, .cv-lb-pop) .cv-lb-textarea:focus,
+:is(.cv-node, .cv-lb-pop) .cv-lb-select:focus { border-color: var(--cv-primary); }
+:is(.cv-node, .cv-lb-pop) .cv-lb-input:disabled,
+:is(.cv-node, .cv-lb-pop) .cv-lb-textarea:disabled,
+:is(.cv-node, .cv-lb-pop) .cv-lb-select:disabled {
+  background: var(--cv-fill);
+  color: var(--cv-text-3);
+  cursor: not-allowed;
+}
+
+.cv-lb-select-wrap {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+.cv-lb-select-wrap.cv-lb-grow { display: flex; }
+.cv-lb-field > .cv-lb-select-wrap,
+.cv-lb-section > .cv-lb-select-wrap { display: flex; width: 100%; }
+:is(.cv-node, .cv-lb-pop) .cv-lb-select {
+  height: 30px;
+  padding: 4px 26px 4px 8px;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  text-overflow: ellipsis;
+}
+/* 原生下拉列表跟随应用主题（不是系统主题） */
+:is(.cv-node, .cv-lb-pop) .cv-lb-select { color-scheme: dark; }
+:root[data-theme="light"] :is(.cv-node, .cv-lb-pop) .cv-lb-select,
+.light :is(.cv-node, .cv-lb-pop) .cv-lb-select { color-scheme: light; }
+.cv-lb-select-caret {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  color: var(--cv-text-3);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+/* ---------- 按钮（el-button default / primary / danger / text）---------- */
+:is(.cv-node, .cv-lb-pop) .cv-lb-btn {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  box-sizing: border-box;
+  height: 30px;
+  margin: 0;
+  padding: 0 12px;
+  border: 1px solid var(--cv-border-light);
+  border-radius: var(--cv-radius);
+  background: var(--cv-bg);
+  color: var(--cv-text-1);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
+}
+:is(.cv-node, .cv-lb-pop) .cv-lb-btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--cv-primary) 50%, var(--cv-border-light));
+  background: var(--cv-primary-soft);
+  color: var(--cv-primary);
+}
+:is(.cv-node, .cv-lb-pop) .cv-lb-btn:focus-visible { outline: 2px solid var(--cv-primary); outline-offset: 1px; }
+:is(.cv-node, .cv-lb-pop) .cv-lb-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+:is(.cv-node, .cv-lb-pop) .cv-lb-btn--block { width: 100%; }
+:is(.cv-node, .cv-lb-pop) .cv-lb-btn--primary {
+  border-color: var(--cv-primary);
+  background: var(--cv-primary);
+  color: var(--cv-on-accent);
+}
+:is(.cv-node, .cv-lb-pop) .cv-lb-btn--primary:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--cv-primary) 82%, var(--cv-on-accent));
+  background: color-mix(in srgb, var(--cv-primary) 82%, var(--cv-on-accent));
+  color: var(--cv-on-accent);
+}
+:is(.cv-node, .cv-lb-pop) .cv-lb-btn--danger { color: var(--cv-danger); }
+:is(.cv-node, .cv-lb-pop) .cv-lb-btn--danger:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--cv-danger) 50%, var(--cv-border-light));
+  background: color-mix(in srgb, var(--cv-danger) 10%, transparent);
+  color: var(--cv-danger);
+}
+:is(.cv-node, .cv-lb-pop) .cv-lb-btn--text {
+  height: 24px;
+  padding: 0 4px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--cv-primary);
+}
+:is(.cv-node, .cv-lb-pop) .cv-lb-btn--text:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--cv-primary-soft);
+}
+
+/* ---------- 标签 / 状态点 / 提示框 ---------- */
+.cv-lb-tag {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  max-width: 160px;
+  height: 20px;
+  padding: 0 6px;
+  overflow: hidden;
+  border: 1px solid var(--cv-border-lighter);
+  border-radius: var(--cv-radius-sm);
+  background: var(--cv-fill);
+  color: var(--cv-text-2);
+  font-size: 11px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cv-lb-tag--primary {
+  border-color: color-mix(in srgb, var(--cv-primary) 35%, transparent);
+  background: var(--cv-primary-soft);
+  color: var(--cv-primary);
+}
+.cv-lb-tag--danger {
+  border-color: color-mix(in srgb, var(--cv-danger) 35%, transparent);
+  background: color-mix(in srgb, var(--cv-danger) 10%, transparent);
+  color: var(--cv-danger);
+}
+
+.cv-lb-dot {
+  display: inline-block;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--cv-text-3);
+}
+.cv-lb-dot--ok { background: var(--cv-primary); }
+.cv-lb-dot--error { background: var(--cv-danger); }
+.cv-lb-dot--primary { border: 2px solid var(--cv-primary); background: transparent; }
+
+.cv-lb-alert {
+  padding: 6px 8px;
+  border-radius: var(--cv-radius);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+.cv-lb-alert--danger {
+  background: color-mix(in srgb, var(--cv-danger) 10%, transparent);
+  color: var(--cv-danger);
+}
+.cv-lb-alert--primary {
+  background: var(--cv-primary-soft);
+  color: var(--cv-primary);
+}
+.cv-lb-alert--muted {
+  background: var(--cv-fill);
+  color: var(--cv-text-2);
+}
+
+/* 引用块：上游简报摘要 / 文本结果 */
+.cv-lb-quote {
+  display: -webkit-box;
+  max-height: 92px;
+  padding: 6px 8px;
+  overflow: hidden;
+  border-left: 2px solid var(--cv-border);
+  border-radius: var(--cv-radius-sm);
+  background: var(--cv-fill);
+  color: var(--cv-text-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+.cv-lb-quote.is-empty { color: var(--cv-text-3); }
+
+/* ---------- 分组框（参数 / 回写 / 生成源详情）---------- */
+.cv-lb-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--cv-border-lighter);
+  border-radius: var(--cv-radius);
+}
+.cv-lb-section--dashed { border-style: dashed; border-color: var(--cv-border); }
+.cv-lb-section__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-height: 24px;
+}
+
+/* ---------- 声明端口清单 ---------- */
+.cv-lb-ports {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cv-lb-port {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: var(--cv-radius-sm);
+  background: var(--cv-fill);
+  color: var(--cv-text-2);
+}
+.cv-lb-port__type { flex-shrink: 0; color: var(--cv-text-3); }
+.cv-lb-port__label {
+  flex-shrink: 0;
+  max-width: 50%;
+  overflow: hidden;
+  color: var(--cv-text-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cv-lb-port__state {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cv-text-3);
+  font-size: 11px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cv-lb-port__conn { flex-shrink: 0; color: var(--cv-text-3); }
+.cv-lb-port.is-connected .cv-lb-port__state { color: var(--cv-text-2); }
+.cv-lb-port.is-connected .cv-lb-port__conn,
+.cv-lb-port.is-connected .cv-lb-port__type { color: var(--cv-primary); }
+
+/* ---------- 产出预览 ----------
+ * REQ-toonflow-canvas FX-2：固定高度的产出框（Toonflow 媒体节点空态同高 144px）。媒体等比缩进框内（不裁切），
+ * 文本在框内滚动，错误贴框底；出结果前后卡片高度不变，不会长高压住下方节点。 */
+.cv-lb-output {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  height: 144px;
+  overflow: hidden;
+  border: 1px solid var(--cv-border-lighter);
+  border-radius: var(--cv-radius);
+  background: var(--cv-fill);
+}
+.cv-lb-output__media {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+.cv-lb-output--image .cv-lb-output__media { background: transparent; }
+.cv-lb-output__text {
+  align-self: stretch;
+  justify-self: stretch;
+  min-height: 0;
+  padding: 6px 8px;
+  overflow-y: auto;
+  border-left: 2px solid var(--cv-primary);
+  color: var(--cv-text-1);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.cv-lb-output__empty {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  color: var(--cv-text-3);
+  font-size: 12px;
+}
+.cv-lb-output__error {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  max-height: 50%;
+  padding: 4px 8px;
+  overflow-y: auto;
+  background: color-mix(in srgb, var(--cv-danger) 16%, var(--cv-bg-overlay, var(--cv-fill)));
+  color: var(--cv-danger);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+.cv-lb-output__error.is-full {
+  top: 0;
+  max-height: none;
+  background: color-mix(in srgb, var(--cv-danger) 10%, transparent);
+}
+.cv-lb-audio { display: block; width: 100%; height: 36px; }
+.cv-lb-output .cv-lb-audio { width: calc(100% - 16px); }
+/* 工具栏「回写分镜」弹层 */
+.cv-lb-pop { width: min(320px, calc(100vw - 24px)); padding: 12px; }
+
+/* ---------- 参数区：DynamicControl 内部外观对齐 --cv-*（保留其 x-agent 徽标的语义，只换配色）---------- */
+.cv-lb-dyn {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+:is(.cv-node, .cv-lb-pop) .cv-lb-dyn .text-\[11px\] { color: var(--cv-text-1); font-size: 12px; }
+:is(.cv-node, .cv-lb-pop) .cv-lb-dyn .text-\[10px\] { color: var(--cv-text-3); }
+:is(.cv-node, .cv-lb-pop) .cv-lb-dyn select,
+:is(.cv-node, .cv-lb-pop) .cv-lb-dyn textarea,
+:is(.cv-node, .cv-lb-pop) .cv-lb-dyn input[type="text"],
+:is(.cv-node, .cv-lb-pop) .cv-lb-dyn input[type="number"] {
+  border: 1px solid var(--cv-border-light);
+  border-radius: var(--cv-radius);
+  background: var(--cv-bg);
+  color: var(--cv-text-1);
+  font-size: 12px;
+}
+:is(.cv-node, .cv-lb-pop) .cv-lb-dyn select:focus,
+:is(.cv-node, .cv-lb-pop) .cv-lb-dyn textarea:focus,
+:is(.cv-node, .cv-lb-pop) .cv-lb-dyn input[type="text"]:focus,
+:is(.cv-node, .cv-lb-pop) .cv-lb-dyn input[type="number"]:focus { border-color: var(--cv-primary); }
+:is(.cv-node, .cv-lb-pop) .cv-lb-dyn input[type="range"],
+:is(.cv-node, .cv-lb-pop) .cv-lb-dyn input[type="checkbox"] { accent-color: var(--cv-primary); }
+:is(.cv-node, .cv-lb-pop) .cv-lb-dyn label.border-dashed {
+  border-color: var(--cv-border-light);
+  border-radius: var(--cv-radius);
+  background: var(--cv-fill);
+}
+:is(.cv-node, .cv-lb-pop) .cv-lb-dyn label.border-dashed:hover { border-color: var(--cv-primary); }
+:is(.cv-node, .cv-lb-pop) .cv-lb-dyn .text-red-500 { color: var(--cv-danger); }
+:is(.cv-node, .cv-lb-pop) .cv-lb-dyn .text-brand { color: var(--cv-primary); }
+/* x-agent 徽标：Agent 可填 = 主色，建议 = 次级文字，手填 = 弱文字（只换配色，文案与含义不变） */
+:is(.cv-node, .cv-lb-pop) .cv-lb-dyn span[title^="Agent 可自动代填"] {
+  border-color: color-mix(in srgb, var(--cv-primary) 35%, transparent);
+  background: var(--cv-primary-soft);
+  color: var(--cv-primary);
+}
+:is(.cv-node, .cv-lb-pop) .cv-lb-dyn span[title^="Agent 仅在"] {
+  border-color: var(--cv-border-light);
+  background: var(--cv-fill);
+  color: var(--cv-text-2);
+}
+:is(.cv-node, .cv-lb-pop) .cv-lb-dyn span[title^="仅手填"] {
+  border-color: var(--cv-border-lighter);
+  background: transparent;
+  color: var(--cv-text-3);
+}
+
+/* ---------- AI 润色：AiPolishButton 挂到 body，自带触发按钮隐藏，由节点按钮代点 ---------- */
+.cv-lb-polish-host {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1500;
+  width: 0;
+  height: 0;
+}
+.cv-lb-polish-host > button { display: none; }

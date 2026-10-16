@@ -1,10 +1,12 @@
 import os
 import json
+import re
 import zipfile
 import io
-from typing import Optional
+from datetime import datetime
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query
+from fastapi import APIRouter, Body, HTTPException, UploadFile, File, Form, Query
 from pydantic import BaseModel
 
 from app.models.project_meta import ProjectMetaCreate, ProjectMetaUpdate
@@ -278,6 +280,105 @@ async def delete_project_canvas(project_id: str, canvas_id: str):
         raise HTTPException(status_code=404 if isinstance(e, FileNotFoundError) else 400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"删除失败: {e}")
+
+
+# ── REQ-toonflow-canvas 画布备份：旧画布自动迁移后、第一次保存前，先把原 JSON 留一份 ──
+_CANVAS_BACKUP_KEEP = 20  # 每个画布最多保留的备份份数（只在迁移时触发，超出删最旧的兜底防膨胀）
+
+
+def _read_stored_canvas_raw(pid: str, canvas_id: str) -> Optional[Dict[str, Any]]:
+    """读 canvas.json 里该画布的**原始条目**（不经 get_canvas 裁剪，保留 updated_at 等全部字段）。"""
+    from app.providers.project import manager as pm
+
+    p = pm._canvas_path(pid)
+    if not os.path.exists(p):
+        return None
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"画布文件损坏，无法备份: {e}")
+    if not isinstance(data, dict):
+        return None
+    canvases = data.get("canvases")
+    if isinstance(canvases, dict):
+        entry = canvases.get(canvas_id)
+        return {"canvas_id": canvas_id, **entry} if isinstance(entry, dict) else None
+    # 存量单画布文件：只有 default 一张，整份原样备份
+    if canvas_id == "default" and isinstance(data.get("nodes"), list):
+        return dict(data)
+    return None
+
+
+@router.post("/projects/{project_id}/canvases/{canvas_id}/backup")
+async def backup_project_canvas(project_id: str, canvas_id: str, body: Optional[Dict[str, Any]] = Body(None)):
+    """备份画布 JSON 到 storage/projects/{pid}/canvas_backups/{cid}-{yyyyMMdd-HHmmss}.json。
+
+    - 不带 body（或 body 无 canvas）：备份当前已存的画布条目；画布不存在 → 404；
+    - body = {canvas: {...}}：备份前端给的原始 JSON（迁移前的 raw 画布，比已存条目更全）。
+    """
+    from app.core.config import settings
+    from app.providers.project import manager as pm
+
+    pid = pm._resolve_id(project_id)
+    if not project_manager.get_meta(pid):
+        raise HTTPException(status_code=404, detail=f"项目不存在: {project_id}")
+    payload = body.get("canvas") if isinstance(body, dict) else None
+    if payload is not None and not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="canvas 必须是 JSON 对象")
+    source = "payload"
+    if payload is None:
+        payload = _read_stored_canvas_raw(pid, canvas_id)
+        source = "stored"
+        if payload is None:
+            raise HTTPException(status_code=404, detail=f"画布不存在: {canvas_id}")
+
+    backup_dir = os.path.join(pm.PROJECTS_ROOT, pid, "canvas_backups")
+    os.makedirs(backup_dir, exist_ok=True)
+    # 画布 id 来自 URL：只留安全字符做文件名（cv_xxx / default 原样不变），杜绝 .. 之类穿越
+    stem = re.sub(r"[^A-Za-z0-9_-]+", "_", canvas_id).strip("_")[:80] or "canvas"
+    now = datetime.now()
+    stamp = now.strftime("%Y%m%d-%H%M%S")
+    target = None
+    for i in range(100):  # 同一秒重复备份：-1、-2… 避让，O_EXCL 真占位防并发撞名
+        name = f"{stem}-{stamp}{'' if i == 0 else f'-{i}'}.json"
+        cand = os.path.join(backup_dir, name)
+        try:
+            fd = os.open(cand, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            continue
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        target = cand
+        break
+    if not target:
+        raise HTTPException(status_code=429, detail="同一秒内备份过多，请稍后重试")
+
+    pattern = re.compile(rf"^{re.escape(stem)}-\d{{8}}-\d{{6}}(-\d+)?\.json$")
+    olds = sorted(
+        (os.path.join(backup_dir, n) for n in os.listdir(backup_dir) if pattern.match(n)),
+        key=lambda x: (os.path.getmtime(x), x),
+    )
+    for stale in olds[:-_CANVAS_BACKUP_KEEP]:
+        if stale != target:
+            try:
+                os.remove(stale)
+            except OSError:
+                pass
+
+    storage_root = os.path.realpath(settings.STORAGE_DIR)
+    real = os.path.realpath(target)
+    inside = real.startswith(storage_root + os.sep)
+    rel = os.path.relpath(real, storage_root).replace(os.sep, "/") if inside else real
+    return {
+        "status": "success",
+        "path": rel,
+        "url": f"/storage/{rel}" if inside else None,
+        "file": os.path.basename(target),
+        "canvas_id": canvas_id,
+        "source": source,
+        "created_at": now.isoformat(timespec="seconds"),
+    }
 
 
 @router.get("/projects/{project_id}/agent-sessions")

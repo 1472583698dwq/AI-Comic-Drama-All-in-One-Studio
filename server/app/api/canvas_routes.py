@@ -18,6 +18,9 @@ class CanvasExecuteRequest(BaseModel):
     edges: List[Dict[str, Any]]
     target_ids: Optional[List[str]] = None
     project_id: Optional[str] = None
+    # REQ-toonflow-canvas FX-B 结果写回哪张画布（缺省 = 项目当前激活画布；只合并画布里存在的节点 id）
+    canvas_id: Optional[str] = None
+    persist: bool = True
 
 class CanvasNodeExecuteRequest(BaseModel):
     node: Dict[str, Any]
@@ -135,15 +138,20 @@ async def canvas_agent_generate(req: CanvasAgentGenerateRequest):
 async def execute_canvas(req: CanvasExecuteRequest):
     """
     执行画布 DAG，返回各节点执行结果
-    前端可传入完整 nodes/edges + 可选 target_ids（仅执行选中及其下游）
+    前端可传入完整 nodes/edges + 可选 target_ids（仅执行选中 + 产出缺失的必要上游，不重跑兄弟 / 下游节点）。
+    REQ-toonflow-canvas FX-B 带 project_id 时结果写回画布（canvas_id 缺省 = 当前激活画布，persist=false 可关闭）。
     """
     if not req.nodes:
         raise HTTPException(status_code=400, detail="nodes 为空")
     try:
         result = await canvas_engine.execute_dag(req.nodes, req.edges, project_id=req.project_id, target_ids=req.target_ids)
-        return {"status": "success", **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"画布执行失败: {e}")
+    out = {"status": "success", **result}
+    if req.project_id and req.persist:
+        from app.canvas.persist import persist_execution_results
+        out["persisted"] = persist_execution_results(req.project_id, req.canvas_id, result.get("results") or {})
+    return out
 
 
 @router.post("/canvas/node/execute")
@@ -205,21 +213,27 @@ async def query_canvas_assets(project_id: Optional[str] = Query(None)):
 
 @router.post("/projects/{project_id}/canvas/execute")
 async def execute_project_canvas(project_id: str, body: Dict[str, Any]):
-    """兼容按项目维度执行（nodes/edges 在 body 或存储中）"""
+    """兼容按项目维度执行（nodes/edges 在 body 或存储中）；REQ-toonflow-canvas FX-B 结果写回画布（body.canvas_id 缺省 = 当前激活画布）"""
     nodes = body.get("nodes")
     edges = body.get("edges")
     target_ids = body.get("target_ids")
+    canvas_id = str(body.get("canvas_id") or "").strip() or None
     if not nodes or not edges:
         from app.providers.project.manager import project_manager
-        snap = project_manager.get_canvas(project_id)
+        snap = project_manager.get_canvas(project_id, canvas_id) if canvas_id else project_manager.get_canvas(project_id)
         if not snap:
             raise HTTPException(status_code=404, detail="画布快照不存在，请先保存")
         nodes = snap.get("nodes") or []
         edges = snap.get("edges") or []
+        canvas_id = canvas_id or snap.get("canvas_id")
     if not nodes:
         raise HTTPException(status_code=400, detail="画布节点为空")
     try:
         result = await canvas_engine.execute_dag(nodes, edges, project_id=project_id, target_ids=target_ids)
-        return {"status": "success", "project_id": project_id, **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"画布执行失败: {e}")
+    out = {"status": "success", "project_id": project_id, **result}
+    if body.get("persist", True) is not False:
+        from app.canvas.persist import persist_execution_results
+        out["persisted"] = persist_execution_results(project_id, canvas_id, result.get("results") or {})
+    return out

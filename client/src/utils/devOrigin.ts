@@ -11,7 +11,9 @@ export const isDev: boolean =
   typeof window !== 'undefined' && /^51\d\d$/.test(window.location.port);
 
 /** 后端 API 源：dev 直连本机 8000；生产走同源反代（空串前缀） */
-export const API_ORIGIN: string = isDev ? 'http://127.0.0.1:8000' : '';
+export const API_ORIGIN: string = isDev
+  ? ((import.meta.env?.VITE_API_ORIGIN as string | undefined) || 'http://127.0.0.1:8000')
+  : '';
 
 /** REST API 基址 */
 export const API_BASE_URL: string = isDev ? `${API_ORIGIN}/api/v1` : '/api/v1';

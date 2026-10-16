@@ -23,6 +23,35 @@ export const GlobalAiPolish: React.FC<{ markProps?: Record<string, string> }> = 
   const [polishing, setPolishing] = useState<string | null>(null);
   const [skills, setSkills] = useState<any[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
+  const polishingRef = useRef<string | null>(null);
+  polishingRef.current = polishing;
+
+  // REQ-toonflow-canvas：锚点输入框被卸载（弹窗关闭 / 节点改名回车后输入框消失）时 Chrome 不派发 blur / focusout，
+  // 浮钮会一直悬在旧位置；画布平移是 transform，不触发 scroll，浮钮也不跟随。
+  // 聚焦期间每帧核对一次：锚点已不在文档里 / 已不可见 → 隐藏；位置变了 → 跟随。
+  useEffect(() => {
+    if (!activeEl) return;
+    let raf = 0;
+    const tick = () => {
+      if (!activeEl.isConnected) {
+        setActiveEl(null);
+        setOpen(false);
+        return;
+      }
+      const r = activeEl.getBoundingClientRect();
+      if (!r.width && !r.height) {
+        // display:none / 折叠：先藏起来，重新聚焦时会再出现
+        setPos(null);
+      } else {
+        setPos((p) => (p && p.top === r.top && p.left === r.left && p.width === r.width && p.height === r.height
+          ? p
+          : { top: r.top, left: r.left, width: r.width, height: r.height }));
+      }
+      raf = window.requestAnimationFrame(tick);
+    };
+    raf = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(raf);
+  }, [activeEl]);
 
   useEffect(() => {
     apiService.listSkills().then((list) => {
@@ -82,6 +111,10 @@ export const GlobalAiPolish: React.FC<{ markProps?: Record<string, string> }> = 
         // 若点击在面板内，不隐藏
         const related = e.relatedTarget as HTMLElement;
         if (related && containerRef.current?.contains(related)) return;
+        // 润色中保留（结果要写回该输入框）；否则焦点离开文本框即隐藏（原先从不清除，浮钮会一直悬着）
+        if (polishingRef.current) return;
+        setActiveEl(null);
+        setOpen(false);
       }, 150);
     };
 

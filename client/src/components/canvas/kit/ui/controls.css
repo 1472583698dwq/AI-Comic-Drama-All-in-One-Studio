@@ -1,0 +1,231 @@
+/* REQ-toonflow-canvas K1 通用表单控件（kit/ui/controls.tsx）
+ * Toonflow 用的 Element Plus 外观：输入框 / 下拉 / 按钮高 32（.cv-ctl--sm 为 28）、圆角 8、1px 边框，
+ * 悬停边框加深、聚焦主色；颜色只用 --cv-*（深浅色跟随 MiniMax 主题）。类名统一 .cv-ctl-* 前缀，不依赖 .cv-node 作用域。 */
+
+/* ---------- 字段：标签 + 控件 + 提示 ---------- */
+.cv-ctl-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.cv-ctl-field__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.cv-ctl-field__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.cv-ctl-field--inline {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+}
+.cv-ctl-field--inline > .cv-ctl-field__head {
+  flex: 0 0 72px;
+  min-height: 32px;
+}
+.cv-ctl-field--inline > .cv-ctl-field__body { flex: 1; }
+.cv-ctl-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  color: var(--cv-text-2);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+}
+.cv-ctl-required { color: var(--cv-danger); }
+.cv-ctl-hint {
+  color: var(--cv-text-3);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+.cv-ctl-hint.is-error { color: var(--cv-danger); }
+
+/* ---------- 输入框 / 文本域 / 下拉（el-input / el-select）---------- */
+.cv-ctl-input,
+.cv-ctl-textarea,
+.cv-ctl-select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--cv-border-light);
+  border-radius: var(--cv-radius);
+  outline: none;
+  background: var(--cv-bg);
+  color: var(--cv-text-1);
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  transition: border-color 120ms ease-out;
+}
+.cv-ctl-input { height: 32px; padding: 5px 11px; }
+.cv-ctl-textarea {
+  display: block;
+  min-height: 60px;
+  max-height: 320px;
+  padding: 5px 11px;
+  resize: vertical;
+}
+.cv-ctl-input::placeholder,
+.cv-ctl-textarea::placeholder { color: var(--cv-text-3); }
+.cv-ctl-input:hover,
+.cv-ctl-textarea:hover,
+.cv-ctl-select:hover { border-color: var(--cv-border); }
+.cv-ctl-input:focus,
+.cv-ctl-textarea:focus,
+.cv-ctl-select:focus { border-color: var(--cv-primary); }
+.cv-ctl-input.is-invalid,
+.cv-ctl-textarea.is-invalid { border-color: var(--cv-danger); }
+.cv-ctl-input:disabled,
+.cv-ctl-textarea:disabled,
+.cv-ctl-select:disabled {
+  background: var(--cv-fill);
+  color: var(--cv-text-3);
+  cursor: not-allowed;
+}
+
+.cv-ctl-select-wrap {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+.cv-ctl-field__body > .cv-ctl-select-wrap { display: flex; width: 100%; }
+.cv-ctl-select {
+  height: 32px;
+  padding: 5px 28px 5px 11px;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  text-overflow: ellipsis;
+  /* 原生下拉列表跟随应用主题（不是系统主题） */
+  color-scheme: dark;
+}
+:root[data-theme="light"] .cv-ctl-select,
+.light .cv-ctl-select { color-scheme: light; }
+.cv-ctl-select-caret {
+  position: absolute;
+  top: 50%;
+  right: 9px;
+  color: var(--cv-text-3);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+/* ---------- 按钮（el-button default / primary / danger / text）---------- */
+.cv-ctl-btn {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  box-sizing: border-box;
+  height: 32px;
+  margin: 0;
+  padding: 0 15px;
+  border: 1px solid var(--cv-border-light);
+  border-radius: var(--cv-radius);
+  background: var(--cv-bg);
+  color: var(--cv-text-1);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
+}
+.cv-ctl-btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--cv-primary) 50%, var(--cv-border-light));
+  background: var(--cv-primary-soft);
+  color: var(--cv-primary);
+}
+.cv-ctl-btn:focus-visible { outline: 2px solid var(--cv-primary); outline-offset: 1px; }
+.cv-ctl-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.cv-ctl-btn--block { width: 100%; }
+.cv-ctl-btn--primary {
+  border-color: var(--cv-primary);
+  background: var(--cv-primary);
+  color: var(--cv-on-accent);
+}
+.cv-ctl-btn--primary:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--cv-primary) 82%, var(--cv-on-accent));
+  background: color-mix(in srgb, var(--cv-primary) 82%, var(--cv-on-accent));
+  color: var(--cv-on-accent);
+}
+.cv-ctl-btn--danger { color: var(--cv-danger); }
+.cv-ctl-btn--danger:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--cv-danger) 50%, var(--cv-border-light));
+  background: color-mix(in srgb, var(--cv-danger) 10%, transparent);
+  color: var(--cv-danger);
+}
+.cv-ctl-btn--text {
+  padding: 0 6px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--cv-primary);
+}
+.cv-ctl-btn--text:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--cv-primary-soft);
+}
+
+/* 小号（输入框 / 下拉 / 按钮通用） */
+.cv-ctl-input.cv-ctl--sm,
+.cv-ctl-select.cv-ctl--sm { height: 28px; padding-top: 3px; padding-bottom: 3px; font-size: 12px; }
+.cv-ctl-btn.cv-ctl--sm { height: 28px; padding: 0 11px; font-size: 12px; }
+.cv-ctl-btn--text.cv-ctl--sm { height: 24px; padding: 0 4px; }
+
+/* ---------- 标签（el-tag）/ 提示框（el-alert）---------- */
+.cv-ctl-tag {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  max-width: 160px;
+  height: 20px;
+  padding: 0 6px;
+  overflow: hidden;
+  border: 1px solid var(--cv-border-lighter);
+  border-radius: var(--cv-radius-sm);
+  background: var(--cv-fill);
+  color: var(--cv-text-2);
+  font-size: 11px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cv-ctl-tag--primary {
+  border-color: color-mix(in srgb, var(--cv-primary) 35%, transparent);
+  background: var(--cv-primary-soft);
+  color: var(--cv-primary);
+}
+.cv-ctl-tag--warning {
+  border-color: color-mix(in srgb, var(--cv-warning) 35%, transparent);
+  background: color-mix(in srgb, var(--cv-warning) 12%, transparent);
+  color: var(--cv-warning);
+}
+.cv-ctl-tag--danger {
+  border-color: color-mix(in srgb, var(--cv-danger) 35%, transparent);
+  background: color-mix(in srgb, var(--cv-danger) 10%, transparent);
+  color: var(--cv-danger);
+}
+.cv-ctl-alert {
+  padding: 6px 8px;
+  border-radius: var(--cv-radius);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+.cv-ctl-alert--info { background: var(--cv-fill); color: var(--cv-text-2); }
+.cv-ctl-alert--primary { background: var(--cv-primary-soft); color: var(--cv-primary); }
+.cv-ctl-alert--warning { background: color-mix(in srgb, var(--cv-warning) 12%, transparent); color: var(--cv-warning); }
+.cv-ctl-alert--danger { background: color-mix(in srgb, var(--cv-danger) 10%, transparent); color: var(--cv-danger); }

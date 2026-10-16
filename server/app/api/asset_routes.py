@@ -75,7 +75,8 @@ async def batch_create_assets(
                 "project_id": eff_proj,
                 "scope": eff_scope,
             }
-            asset = asset_manager.create_asset(data, file_bytes=data_bytes, filename=fname)
+            # REQ-toonflow-canvas 带上 content-type：文件名没有可用扩展名时据此保留真实格式
+            asset = asset_manager.create_asset(data, file_bytes=data_bytes, filename=fname, content_type=uf.content_type)
             created.append(asset.model_dump())
         except Exception as e:
             errors.append(f"{uf.filename}: {e}")
@@ -267,12 +268,14 @@ async def create_asset(
     }
     file_bytes = None
     filename = None
+    content_type = None
     if file:
         file_bytes = await file.read()
         filename = file.filename or "upload.png"
+        content_type = file.content_type  # REQ-toonflow-canvas 文件名给不出扩展名时按 content-type 保留真实格式
         if not file_bytes:
             raise HTTPException(status_code=400, detail="上传文件为空")
-    asset = asset_manager.create_asset(data, file_bytes=file_bytes, filename=filename)
+    asset = asset_manager.create_asset(data, file_bytes=file_bytes, filename=filename, content_type=content_type)
     return asset
 
 @router.put("/assets/{asset_id}")
@@ -343,10 +346,12 @@ async def update_asset(
         updates["project_id"] = project_id
     file_bytes = None
     filename = None
+    content_type = None
     if file:
         file_bytes = await file.read()
         filename = file.filename or "upload.png"
-    updated = asset_manager.update_asset(asset_id, updates, file_bytes=file_bytes, filename=filename)
+        content_type = file.content_type  # REQ-toonflow-canvas 同 create_asset
+    updated = asset_manager.update_asset(asset_id, updates, file_bytes=file_bytes, filename=filename, content_type=content_type)
     return updated
 
 @router.post("/assets/{asset_id}/share")
