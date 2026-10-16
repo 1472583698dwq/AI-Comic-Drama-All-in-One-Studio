@@ -527,7 +527,7 @@ export const AssetLibrary: React.FC = () => {
   const selected = assets.find((a: any) => a.id === selectedId) || detailAsset;
 
   return (
-    <div className="flex-1 flex h-[calc(100vh-56px)] bg-background overflow-hidden">
+    <div className="flex-1 min-h-0 flex bg-background overflow-hidden">
       <div className="w-[260px] bg-surface/80 border-r border-white/70 dark:border-white/12 flex flex-col shrink-0">
         <div className="h-12 px-3 border-b border-white/70 dark:border-white/12 flex items-center gap-2 shrink-0">
           <div className="w-7 h-7 rounded-lg bg-brand/10 border border-brand/20 flex items-center justify-center"><Library className="w-3.5 h-3.5 text-brand" /></div>

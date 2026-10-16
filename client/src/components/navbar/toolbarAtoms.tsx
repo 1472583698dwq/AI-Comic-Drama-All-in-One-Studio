@@ -11,8 +11,8 @@ import type { LucideIcon } from 'lucide-react';
 
 /** 顶栏「更多」菜单里的菜单项（导入小说 / 扩展工具 / 退出项目 共用） */
 export const MENU_ITEM =
-  'w-full flex items-center gap-2 px-2.5 py-2 rounded-md text-left text-[11.5px] ' +
-  'text-gray-300 hover:text-white hover:bg-surface/80 transition-colors';
+  'w-full flex items-center gap-3 h-9 px-2.5 rounded-lg text-left text-[13px] [color:var(--color-text-secondary)] ' +
+  'hover:[color:var(--color-text-main)] hover:bg-black/[.045] dark:hover:bg-white/[.06] transition-colors';
 
 /** 侧栏底部工具按钮（生成源 / 主题切换；收起成图标轨时只留图标） */
 export const UtilButton: React.FC<{

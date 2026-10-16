@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Sparkles, FolderKanban, Film, ChevronDown, ChevronRight, Lock, LogOut,
-  MoreHorizontal, Wand2, Check, LayoutGrid,
+  Sparkles, FolderKanban, Film, ChevronsUpDown, ChevronDown, ChevronRight, Lock, LogOut,
+  MoreHorizontal, Wand2, Wrench, Server, Check, LayoutGrid, BookOpen, ArrowRight,
 } from 'lucide-react';
-import { useProjectStore } from '../../stores/useProjectStore';
+import { useProjectStore, selectSidebarCollapsed } from '../../stores/useProjectStore';
 import { useProjectListStore } from '../../stores/useProjectListStore';
 import { resolveTab } from '../../stores/usePageStore';
 import { toast } from '../../stores/useDialogStore';
@@ -21,32 +21,84 @@ interface HeaderProps {
    */
 }
 
-/** 面包屑第二段：当前视图名 */
-const VIEW_LABEL: Record<string, string> = {
-  home: '首页',
-  projects: '项目看板',
-  assets: '素材库',
-  characters: '角色设定',
-  agent: 'AI 导演',
-  canvas: '创意画布',
-  config: '设置',
-};
-
-interface Crumb {
-  label: string;
-  onClick?: () => void;
-  current?: boolean;
-  warn?: boolean;
+/** 项目头像底色：按项目 id 稳定取色，同一个项目永远同一个颜色（JetBrains 项目组件同款） */
+const PROJECT_TINTS = [
+  'from-violet-500 to-fuchsia-500',
+  'from-sky-500 to-indigo-500',
+  'from-emerald-500 to-teal-500',
+  'from-amber-500 to-orange-500',
+  'from-rose-500 to-pink-500',
+  'from-cyan-500 to-blue-500',
+];
+function projectTint(id?: string): string {
+  if (!id) return 'from-gray-500 to-gray-600';
+  let h = 0;
+  for (let k = 0; k < id.length; k++) h = (h * 31 + id.charCodeAt(k)) | 0;
+  return PROJECT_TINTS[Math.abs(h) % PROJECT_TINTS.length];
+}
+/** 头像缩写：中文取前 2 个字，英文取前两个单词首字母 */
+function projectInitials(title?: string): string {
+  const t = (title || '').trim();
+  if (!t) return '?';
+  if (/^[\x00-\x7F]/.test(t)) {
+    const words = t.split(/[\s_\-·]+/).filter(Boolean);
+    return (words.length >= 2 ? words[0][0] + words[1][0] : t.slice(0, 2)).toUpperCase();
+  }
+  return Array.from(t.replace(/[\s·・]/g, '')).slice(0, 2).join('');
 }
 
-/**
- * 图标按钮：视觉 36×36（--r-sm 6px），命中区由 ::after 外扩补足到 44×44。
+/* ── 顶栏设计 ──────────────────────────────────────────────
+ * 栏高 56px（与素材库 / 角色页原本按 56px 预留的高度一致），左右 16px 留白。
+ * 结构参照 Linear / Vercel 的工作区切换器 + JetBrains New UI 的项目组件：
+ *   [品牌区 = 侧栏同宽] │ [项目切换器：头像 + 名称 / 概况两行] ……… [更多] [导出剪映]
+ * 控件高度只有两档：项目切换器 40px，其余按钮 36px；字号只有三档：14 / 13 / 11.5px。
+ * 颜色全走主题变量，浅色模式不会再出现白字压浅底。
  */
+const T_MAIN = '[color:var(--color-text-main)]';
+const T_SEC = '[color:var(--color-text-secondary)]';
+const T_MUTED = '[color:var(--color-text-muted)]';
+const HOVER_BG = 'hover:bg-black/[.045] dark:hover:bg-white/[.06]';
+const ACTIVE_BG = 'bg-black/[.06] dark:bg-white/[.08]';
+const FOCUS = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60';
+const HAIRLINE = 'border-black/[.09] dark:border-white/[.09]';
+
 const ICON_BTN =
-  'relative w-9 h-9 inline-flex items-center justify-center rounded-md text-gray-400 ' +
-  'hover:text-white hover:bg-surface/80 transition-colors ' +
-  'after:absolute after:-inset-1 after:content-[""] ' +
-  'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand';
+  `relative w-9 h-9 inline-flex items-center justify-center rounded-lg ${T_MUTED} ` +
+  `hover:[color:var(--color-text-main)] ${HOVER_BG} transition-colors ${FOCUS}`;
+
+const MENU_PANEL =
+  'absolute top-[calc(100%+8px)] p-1.5 rounded-2xl bg-white dark:bg-[#18181f] ' +
+  `border ${HAIRLINE} ` +
+  'shadow-[0_24px_48px_-16px_rgba(15,23,42,.28),0_2px_6px_rgba(15,23,42,.06)] ' +
+  'dark:shadow-[0_24px_48px_-16px_rgba(0,0,0,.75),0_2px_6px_rgba(0,0,0,.3)] z-40 ' +
+  'transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none';
+
+const MENU_LABEL = `px-2.5 pt-2 pb-1.5 text-[11.5px] font-medium ${T_MUTED}`;
+const MENU_SEP = 'h-px bg-black/[.06] dark:bg-white/[.07] mx-1.5 my-1.5';
+
+/** 「3 分钟前」式相对时间 */
+function relTime(iso?: string): string {
+  if (!iso) return '';
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return '';
+  const d = Math.max(0, (Date.now() - t) / 1000);
+  if (d < 60) return '刚刚';
+  if (d < 3600) return `${Math.floor(d / 60)} 分钟前`;
+  if (d < 86400) return `${Math.floor(d / 3600)} 小时前`;
+  if (d < 86400 * 30) return `${Math.floor(d / 86400)} 天前`;
+  const dt = new Date(t);
+  return `${dt.getMonth() + 1}/${dt.getDate()}`;
+}
+
+/** 镜数 · 时长 · 更新时间，缺哪段就省哪段 */
+function projectMeta(shots?: number, seconds?: number, updatedAt?: string): string {
+  const parts: string[] = [];
+  parts.push(`${shots || 0} 镜`);
+  if (seconds && seconds > 0) parts.push(`${Math.round(seconds)}s`);
+  const rt = relTime(updatedAt);
+  if (rt) parts.push(`${rt}更新`);
+  return parts.join(' · ');
+}
 
 /**
  * 顶部栏（设计基线 §4 / §5.1）：高 44px，只承担「全局上下文 + 全局动作」。
@@ -57,6 +109,8 @@ const ICON_BTN =
  */
 export const Header: React.FC<HeaderProps> = ({ onOpenExport }) => {
   const { project, closeProject, activeTab, setActiveTab, totalDuration } = useProjectStore();
+  // 品牌区与左侧导航同宽：项目切换器正好从内容区左边缘起，竖向分隔线和侧栏右边框连成一条
+  const sidebarCollapsed = useProjectStore(selectSidebarCollapsed);
   const { projects: projectList, fetchProjects, isLoading: isLoadingProjects } = useProjectListStore();
 
   const [moreOpen, setMoreOpen] = useState(false);
@@ -82,10 +136,9 @@ export const Header: React.FC<HeaderProps> = ({ onOpenExport }) => {
     setActiveTab((resolveTab(id) || 'home') as any);
   const goProjects = () => goTab('projects');
   const goHome = () => goTab('home');
-  const goCanvas = () => {
-    if (!project) { toast.info('请先在项目看板创建或打开项目'); return; }
-    goTab('canvas');
-  };
+
+  // 挂载时先拉一次：顶栏的「X 前更新」要用项目索引里的时间，不能等到下拉展开才有
+  useEffect(() => { fetchProjects({ sort: 'updated_at' }).catch(() => {}); }, [project?.id]);
 
   // 下拉展开时拉取最新项目列表（按最近更新排序）
   useEffect(() => {
@@ -132,128 +185,145 @@ export const Header: React.FC<HeaderProps> = ({ onOpenExport }) => {
     };
   }, [moreOpen]);
 
-  const viewLabel = VIEW_LABEL[activeTab] || '工作台';
   const toggleProjMenu = () => setProjOpen((v) => !v);
-  const crumbs: Crumb[] = project
-    ? [
-        { label: project.title || '未命名项目', onClick: toggleProjMenu },
-        { label: viewLabel, current: true },
-      ]
-    : activeTab === 'home'
-      ? [{ label: '首页', current: true }]
-      : activeTab === 'agent'
-        ? [{ label: 'AI 对话', current: true }]
-        : activeTab === 'config'
-          ? [{ label: '设置', current: true }]
-          : [{ label: '未选择项目', onClick: toggleProjMenu, warn: true }];
+  // 更新时间取两处里较新的：工程内容里的 updated_at 只在加载时读一次，
+  // 项目索引里的会随保存刷新——只用前者的话顶栏会显示「7 天前」而下拉里显示「刚刚」
+  const currentUpdatedAt = [
+    (project as any)?.updated_at,
+    projectList.find((p) => p.id === project?.id)?.updated_at,
+  ].filter(Boolean).sort().pop() as string | undefined;
 
   // 层级：顶栏自身必须 ≥ 画布「画布操作台」悬浮条（CreativeCanvas 里 z-30）。
   // z-index 会建立堆叠上下文，面板写再大的 z-40 也越不出顶栏这一层，
   // 所以下拉要压住悬浮条，只能把顶栏整体抬到 z-40。
+  const avatar = (id: string | undefined, title: string | undefined, big = false) => (
+    <span
+      className={`${big ? 'w-8 h-8 rounded-[9px] text-[12px]' : 'w-7 h-7 rounded-lg text-[11px]'} bg-gradient-to-br ${projectTint(id)} flex items-center justify-center shrink-0 font-semibold [color:#fff] leading-none tracking-tight shadow-[inset_0_1px_0_rgba(255,255,255,.25),0_1px_2px_rgba(0,0,0,.15)]`}
+      aria-hidden="true"
+    >
+      {projectInitials(title)}
+    </span>
+  );
+
   return (
-    <header className="h-11 bg-surface-hover/80 dark:bg-black/50 backdrop-blur-2xl border-b border-white/60 dark:border-white/10 px-3.5 flex items-center gap-3 select-none z-40 relative shrink-0">
-      {/* ── 左：品牌 22px + 名称 ── */}
-      <button
-        onClick={goHome}
-        title="返回首页"
-        aria-label="返回首页"
-        className="flex items-center gap-2 shrink-0 rounded-md focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand"
+    <header className={`h-14 shrink-0 relative z-40 flex items-stretch select-none bg-surface/80 backdrop-blur-2xl border-b ${HAIRLINE}`}>
+      {/* ── 品牌区：与左侧导航同宽，右边框和侧栏右边框连成一条线 ── */}
+      <div
+        className={`shrink-0 flex items-center border-r border-white/60 dark:border-white/10 transition-[width] duration-[260ms] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none ${
+          sidebarCollapsed ? 'w-[60px] justify-center' : 'w-[264px] px-4'
+        }`}
       >
-        <span className="w-[22px] h-[22px] rounded-md bg-brand flex items-center justify-center shadow-sm shadow-brand/25 shrink-0">
-          <Sparkles className="w-3.5 h-3.5 text-white" strokeWidth={1.7} />
-        </span>
-        <span className="hidden lg:inline text-[13px] font-semibold tracking-tight text-white whitespace-nowrap">
-          AI 漫剧 Studio
-        </span>
-      </button>
+        <button
+          onClick={goHome}
+          title="返回首页"
+          aria-label="返回首页"
+          className={`flex items-center gap-2.5 min-w-0 h-10 rounded-xl ${sidebarCollapsed ? 'px-1.5' : 'pl-1.5 pr-3 -ml-1.5'} ${HOVER_BG} transition-colors ${FOCUS}`}
+        >
+          <span className="w-8 h-8 rounded-[9px] bg-gradient-to-br from-[color:var(--color-brand-light)] to-[color:var(--color-brand)] flex items-center justify-center shrink-0 shadow-[inset_0_1px_0_rgba(255,255,255,.3),0_4px_12px_-4px_rgba(124,58,237,.6)]">
+            <Sparkles className="w-4 h-4 [color:#fff]" strokeWidth={2} />
+          </span>
+          {!sidebarCollapsed && (
+            <span className="flex items-baseline gap-1.5 whitespace-nowrap">
+              <span className={`text-[15px] font-semibold tracking-tight ${T_MAIN}`}>AI 漫剧</span>
+              <span className={`text-[13px] font-medium ${T_MUTED}`}>Studio</span>
+            </span>
+          )}
+        </button>
+      </div>
 
-      {/* ── 左：面包屑（项目 / 视图） ── */}
-      <nav aria-label="面包屑" className="flex items-center gap-1.5 min-w-0 flex-1">
-        {crumbs.map((c, i) => (
-          <React.Fragment key={`${c.label}-${i}`}>
-            {i > 0 && (
-              <ChevronRight className="w-3 h-3 text-gray-500 shrink-0" strokeWidth={1.7} aria-hidden="true" />
-            )}
-            {c.onClick ? (
-              <div className="relative min-w-0" ref={i === 0 ? projRef : undefined}>
-                <button
-                  onClick={c.onClick}
-                  title={c.warn ? '选择项目' : '点击切换项目'}
-                  aria-haspopup="menu"
-                  aria-expanded={i === 0 ? projOpen : undefined}
-                  className={`flex items-center gap-1 min-w-0 px-1.5 py-0.5 -mx-1.5 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand ${
-                    c.warn
-                      ? 'text-amber-400 hover:text-amber-300 hover:bg-surface/80'
-                      : 'text-gray-300 hover:text-white hover:bg-surface/80'
-                  }`}
-                >
-                  {c.warn && <FolderKanban className="w-3.5 h-3.5 shrink-0" strokeWidth={1.7} />}
-                  <span className="text-[11.5px] font-medium truncate max-w-[110px] md:max-w-[200px]">{c.label}</span>
-                  <ChevronDown
-                    className={`w-3 h-3 shrink-0 opacity-60 transition-transform ${i === 0 && projOpen ? 'rotate-180' : ''}`}
-                    strokeWidth={1.7}
-                  />
-                </button>
-
-                {/* 项目下拉切换面板（仅面包屑第一位实装） */}
-                {i === 0 && (
-                  <div
-                    role="menu"
-                    aria-label="切换项目"
-                    aria-hidden={!projOpen}
-                    className={`absolute left-0 top-[calc(100%+8px)] w-[268px] p-1.5 rounded-2xl bg-white/90 dark:bg-[#15151b]/95 backdrop-blur-2xl border border-white/70 dark:border-white/12 shadow-[0_28px_60px_-24px_rgba(15,23,42,.6)] z-40 origin-top-left transition-all duration-[260ms] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none ${
-                      projOpen
-                        ? 'opacity-100 scale-100 visible'
-                        : 'opacity-0 scale-[.97] invisible pointer-events-none'
-                    }`}
-                  >
-                    <div className="px-2.5 pt-1 pb-1 text-[10.5px] font-semibold tracking-wider text-gray-500">
-                      切换项目
-                    </div>
-                    <div className="max-h-[264px] overflow-y-auto">
-                      {projectList.length === 0 && !isLoadingProjects ? (
-                        <div className="px-2.5 py-3 text-[11px] text-gray-500">暂无其他项目</div>
-                      ) : (
-                        projectList.map((p) => (
-                          <button
-                            key={p.id}
-                            role="menuitem"
-                            onClick={() => switchProject(p.id, p.title)}
-                            className={`${MENU_ITEM} ${
-                              p.id === project?.id ? 'text-white bg-surface/80' : ''
-                            }`}
-                          >
-                            <FolderKanban className="w-4 h-4 shrink-0 opacity-70" strokeWidth={1.7} />
-                            <span className="truncate flex-1">{p.title || '未命名项目'}</span>
-                            {p.id === project?.id && (
-                              <Check className="w-3.5 h-3.5 shrink-0 text-brand" strokeWidth={2.2} />
-                            )}
-                          </button>
-                        ))
-                      )}
-                    </div>
-                    <div className="h-px bg-border-subtle mx-1 my-1" />
-                    <button
-                      role="menuitem"
-                      className={MENU_ITEM}
-                      onClick={() => { setProjOpen(false); goProjects(); }}
-                    >
-                      <LayoutGrid className="w-4 h-4 shrink-0" strokeWidth={1.7} />项目看板（管理 / 新建）
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <span aria-current="page" className="text-[13px] font-semibold text-white truncate px-0.5">
-                {c.label}
+      {/* ── 主区：项目切换器 ……… 动作组 ── */}
+      <div className="flex-1 min-w-0 flex items-center gap-3 px-4">
+        <div className="relative min-w-0" ref={projRef}>
+          <button
+            onClick={toggleProjMenu}
+            title={project ? '切换项目' : '选择项目'}
+            aria-haspopup="menu"
+            aria-expanded={projOpen}
+            className={`flex items-center gap-2.5 min-w-0 h-10 pl-1.5 pr-2.5 rounded-xl border transition-colors ${FOCUS} ${
+              projOpen
+                ? `border-brand/50 ${ACTIVE_BG}`
+                : project
+                  ? `${HAIRLINE} bg-black/[.02] dark:bg-white/[.03] hover:border-black/20 dark:hover:border-white/20 ${HOVER_BG}`
+                  : 'border-amber-500/40 bg-amber-500/[.06] hover:border-amber-500/70 hover:bg-amber-500/10'
+            }`}
+          >
+            {project
+              ? avatar(project.id, project.title)
+              : (
+                <span className="w-7 h-7 rounded-lg bg-amber-500/15 flex items-center justify-center shrink-0">
+                  <FolderKanban className="w-4 h-4 text-amber-500" strokeWidth={1.8} />
+                </span>
+              )}
+            <span className="flex flex-col items-start min-w-0 text-left leading-tight">
+              <span
+                className={`text-[13px] font-semibold truncate max-w-[180px] md:max-w-[320px] ${
+                  project ? T_MAIN : 'text-amber-600 dark:text-amber-400'
+                }`}
+              >
+                {project ? (project.title || '未命名项目') : '未选择项目'}
               </span>
-            )}
-          </React.Fragment>
-        ))}
-      </nav>
+              <span className={`text-[11.5px] ${T_MUTED} truncate max-w-[180px] md:max-w-[320px] tabular-nums`}>
+                {project ? projectMeta(shotsCount, totalDuration, currentUpdatedAt) : '点击选择或新建项目'}
+              </span>
+            </span>
+            <ChevronsUpDown className={`w-4 h-4 ml-1 shrink-0 ${T_MUTED}`} strokeWidth={1.8} />
+          </button>
 
-      {/* ── 右：更多 → 导出 → 生成（主题切换已按需求移除） ── */}
-      <div className="flex items-center gap-1 shrink-0">
+          <div
+            role="menu"
+            aria-label="切换项目"
+            aria-hidden={!projOpen}
+            className={`${MENU_PANEL} left-0 w-[360px] origin-top-left ${
+              projOpen ? 'opacity-100 translate-y-0 visible' : 'opacity-0 -translate-y-1 invisible pointer-events-none'
+            }`}
+          >
+            <div className={`${MENU_LABEL} flex items-center justify-between`}>
+              <span>最近项目</span>
+              {projectList.length > 0 && <span className="tabular-nums">{projectList.length}</span>}
+            </div>
+            <div className="max-h-[360px] overflow-y-auto">
+              {projectList.length === 0 && !isLoadingProjects ? (
+                <div className={`px-2.5 py-4 text-[13px] ${T_MUTED}`}>还没有项目</div>
+              ) : (
+                projectList.map((p) => {
+                  const current = p.id === project?.id;
+                  return (
+                    <button
+                      key={p.id}
+                      role="menuitem"
+                      onClick={() => switchProject(p.id, p.title)}
+                      className={`w-full flex items-center gap-3 h-12 px-2 rounded-xl text-left transition-colors ${current ? ACTIVE_BG : HOVER_BG}`}
+                    >
+                      {avatar(p.id, p.title, true)}
+                      <span className="flex-1 min-w-0 flex flex-col leading-tight">
+                        <span className={`text-[13px] font-medium truncate ${T_MAIN}`}>{p.title || '未命名项目'}</span>
+                        <span className={`text-[11.5px] truncate tabular-nums ${T_MUTED}`}>
+                          {projectMeta(p.stats?.shots, p.stats?.duration, p.updated_at)}
+                        </span>
+                      </span>
+                      {current && <Check className="w-4 h-4 shrink-0 text-brand" strokeWidth={2.4} />}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+            <div className={MENU_SEP} />
+            <button
+              role="menuitem"
+              className={`${MENU_ITEM} group`}
+              onClick={() => { setProjOpen(false); goProjects(); }}
+            >
+              <LayoutGrid className="w-4 h-4 shrink-0" strokeWidth={1.8} />
+              <span className="flex-1">项目看板</span>
+              <span className={`text-[11.5px] ${T_MUTED}`}>管理 / 新建</span>
+              <ArrowRight className="w-3.5 h-3.5 shrink-0 opacity-0 -translate-x-1 group-hover:opacity-100 group-hover:translate-x-0 transition-all" strokeWidth={2} />
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1" />
+
+        {/* ── 动作组：更多 · 导出剪映 ── */}
         <div className="relative" ref={moreRef}>
           <button
             onClick={() => setMoreOpen((v) => !v)}
@@ -261,9 +331,9 @@ export const Header: React.FC<HeaderProps> = ({ onOpenExport }) => {
             aria-expanded={moreOpen}
             aria-label="更多"
             title="更多"
-            className={`${ICON_BTN} ${moreOpen ? 'text-white bg-surface/80' : ''}`}
+            className={`${ICON_BTN} ${moreOpen ? `${ACTIVE_BG} ${T_MAIN}` : ''}`}
           >
-            <MoreHorizontal className="w-4 h-4" strokeWidth={1.7} />
+            <MoreHorizontal className="w-[18px] h-[18px]" strokeWidth={1.8} />
           </button>
 
           {/* 常驻 DOM + 显隐过渡：保证面板开合有 260ms 动效，且关闭时不进入 Tab 序列。
@@ -273,48 +343,25 @@ export const Header: React.FC<HeaderProps> = ({ onOpenExport }) => {
             role="menu"
             aria-label="更多"
             aria-hidden={!moreOpen}
-            className={`absolute right-0 top-[calc(100%+8px)] w-[248px] p-1.5 rounded-2xl bg-white/90 dark:bg-[#15151b]/95 backdrop-blur-2xl border border-white/70 dark:border-white/12 shadow-[0_28px_60px_-24px_rgba(15,23,42,.6)] z-40 origin-top-right transition-all duration-[260ms] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none ${
-              moreOpen
-                ? 'opacity-100 scale-100 visible'
-                : 'opacity-0 scale-[.97] invisible pointer-events-none'
+            className={`${MENU_PANEL} right-0 w-[240px] origin-top-right ${
+              moreOpen ? 'opacity-100 translate-y-0 visible' : 'opacity-0 -translate-y-1 invisible pointer-events-none'
             }`}
           >
             {/* 低频动作条目（host=header.menu）：导入小说 */}
             <UISlot host={HEADER_MENU_HOST} />
-            <div className="h-px bg-border-subtle mx-1 my-1" />
-
-            {/* 项目信息：低频信息收入菜单，不常驻顶栏（宿主 chrome，不进注册表） */}
-            {project && (
-              <>
-                <div className="px-2.5 pt-1.5 pb-2 flex items-center gap-3 text-[10.5px] text-gray-500">
-                  <span className="flex items-center gap-1">
-                    <Film className="w-3 h-3" strokeWidth={1.7} />{shotsCount} 镜
-                  </span>
-                  <span className="tabular-nums">{totalDuration.toFixed(0)}s</span>
-                </div>
-                <div className="h-px bg-border-subtle mx-1 mb-1" />
-              </>
-            )}
-
-            <div className="px-2.5 pt-1 pb-1 text-[10.5px] font-semibold tracking-wider text-gray-500">
-              扩展工具
-            </div>
+            <div className={MENU_SEP} />
+            <div className={MENU_LABEL}>扩展工具</div>
             {/* 扩展工具组条目（host=header.tools）：技能工坊 / MCP 工具 / 生成源管理（插件可继续加） */}
             <UISlot host={HEADER_TOOLS_HOST} />
-
             {project && (
               <>
-                <div className="h-px bg-border-subtle mx-1 my-1" />
+                <div className={MENU_SEP} />
                 <button
                   role="menuitem"
-                  className={`${MENU_ITEM} text-red-400 hover:text-red-300 hover:bg-red-500/10`}
-                  onClick={() => {
-                    setMoreOpen(false);
-                    closeProject();
-                    toast.info('已退出当前项目，返回项目看板');
-                  }}
+                  className={`${MENU_ITEM} !text-red-500 dark:!text-red-400 hover:!bg-red-500/10`}
+                  onClick={() => { setMoreOpen(false); closeProject(); toast.info('已退出当前项目，返回项目看板'); }}
                 >
-                  <LogOut className="w-4 h-4 shrink-0" strokeWidth={1.7} />退出当前项目
+                  <LogOut className="w-4 h-4 shrink-0" strokeWidth={1.8} />退出当前项目
                 </button>
               </>
             )}
@@ -329,23 +376,10 @@ export const Header: React.FC<HeaderProps> = ({ onOpenExport }) => {
             onOpenExport();
           }}
           title={!project ? '请先创建或打开项目以导出剪映工程' : '导出剪映 / CapCut 草稿工程'}
-          className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-md border border-white/60 dark:border-white/12 text-[11.5px] font-medium text-gray-300 hover:text-white hover:bg-surface/80 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand"
+          className={`h-9 px-3.5 inline-flex items-center gap-2 rounded-lg border ${HAIRLINE} bg-black/[.02] dark:bg-white/[.03] text-[13px] font-medium ${T_SEC} hover:[color:var(--color-text-main)] hover:border-black/20 dark:hover:border-white/20 ${HOVER_BG} transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent ${FOCUS}`}
         >
-          {project
-            ? <Film className="w-4 h-4" strokeWidth={1.7} />
-            : <Lock className="w-4 h-4" strokeWidth={1.7} />}
-          <span className="hidden sm:inline">导出剪映</span>
-          <span className="sm:hidden">导出</span>
-        </button>
-
-        <button
-          disabled={!project}
-          onClick={goCanvas}
-          title={project ? '进入创意画布开始生成' : '请先创建或打开项目'}
-          className="h-8 px-3 inline-flex items-center gap-1.5 rounded-md bg-brand text-white text-[11.5px] font-semibold shadow-sm shadow-brand/25 hover:bg-brand-light transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-brand focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-glow"
-        >
-          <Wand2 className="w-4 h-4" strokeWidth={1.7} />
-          生成
+          {project ? <Film className="w-4 h-4" strokeWidth={1.8} /> : <Lock className="w-4 h-4" strokeWidth={1.8} />}
+          导出剪映
         </button>
       </div>
     </header>

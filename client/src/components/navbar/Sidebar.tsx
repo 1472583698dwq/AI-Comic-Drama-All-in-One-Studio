@@ -69,8 +69,10 @@ export const Sidebar: React.FC = () => {
 
   /** 分组 → 条目（只含开启的页；config 沉底、projects 看板保留，首页保留在导航） */
   const groups = useMemo(() => {
-    // agent（AI 对话）不进导航：入口已上移为顶部「新建任务」+ 聊天历史，避免重复
-    const enabled = pages.filter((p) => p.id !== 'config' && p.id !== 'agent' && values[p.id] === true);
+    // 不进导航的页：agent（入口在「新建任务」+ 聊天历史）、projects（入口在顶栏项目下拉）、
+    // characters（已并入素材库，作为素材库里的「角色」标签页）。页本身照常注册，路由与功能开关不受影响。
+    const HIDDEN_IN_NAV = ['config', 'agent', 'projects', 'characters'];
+    const enabled = pages.filter((p) => !HIDDEN_IN_NAV.includes(p.id) && values[p.id] === true);
     const labelOf = (gid: string) => groupMeta.find((g) => g.id === gid)?.label
       || (gid === OTHER_GROUP ? '其他' : gid);
     const orderOf = (gid: string) => groupMeta.find((g) => g.id === gid)?.order ?? 9999;
@@ -175,7 +177,7 @@ export const Sidebar: React.FC = () => {
                 <div className="space-y-0.5">
                   {g.items.map((item) => {
                     const locked = !isGlobalPage(item.id) && !project;
-                    const active = activeTab === item.id;
+                    const active = activeTab === item.id || (item.id === 'assets' && activeTab === 'characters');
                     const Icon = item.icon;
                     return (
                       <button

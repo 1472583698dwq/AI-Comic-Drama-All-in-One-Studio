@@ -1,8 +1,7 @@
 import React, { Suspense } from 'react';
 import { HomeView } from '../../views/HomeView';
 import { ProjectDashboard } from '../../views/ProjectDashboard';
-import { AssetLibrary } from '../../components/asset/AssetLibrary';
-import { CharacterStudio } from '../../components/character/CharacterStudio';
+import { AssetsHub } from '../../components/asset/AssetsHub';
 import { ShotInspector } from '../../components/storyboard/ShotInspector';
 import { Director3DStage } from '../../components/director3d/Director3DStage';
 import { MultiTrackTimeline } from '../../components/timeline/MultiTrackTimeline';
@@ -158,8 +157,9 @@ const GLOBAL_PAGE_IDS: readonly string[] = ['home', 'projects', 'config'];
 const PAGE_IMPLS: PageImpl[] = [
   { id: 'home', order: 10, view: HomeView },
   { id: 'projects', order: 20, view: ProjectDashboard, nextView: NextProjectsPage },
-  { id: 'assets', order: 30, view: AssetLibrary },
-  { id: 'characters', order: 40, view: CharacterStudio },
+  // 角色设定并入素材库：两个页签都落到同一个容器，按页签决定显示「素材」还是「角色」
+  { id: 'assets', order: 30, view: AssetsHub },
+  { id: 'characters', order: 40, view: AssetsHub },
   { id: 'studio', order: 50, view: ShotInspector, layout: StageLayout },
   { id: 'onekey', order: 55, view: OneKeyPage },
   { id: 'director3d', order: 60, view: Director3DStage, layout: StageLayout },

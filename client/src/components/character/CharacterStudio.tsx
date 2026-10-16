@@ -126,7 +126,7 @@ export const CharacterStudio: React.FC = () => {
   };
 
   return (
-    <div className="flex-1 flex h-[calc(100vh-3.5rem)] bg-background overflow-hidden">
+    <div className="flex-1 min-h-0 flex bg-background overflow-hidden">
       {/* 1. Left Character List */}
       <div className="w-72 bg-surface/80 border-r border-white/70 dark:border-white/12 flex flex-col shrink-0">
         <div className="p-3.5 border-b border-white/70 dark:border-white/12 flex items-center justify-between">
