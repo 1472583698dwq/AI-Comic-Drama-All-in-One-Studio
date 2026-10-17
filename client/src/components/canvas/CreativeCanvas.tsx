@@ -201,6 +201,11 @@ const InnerCanvas: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   // 多画布：隶属画布切换（默认 default；分镜右键可新建/隶属）
   const [canvasId, setCanvasId] = useState<string>('default');
+  const activeEpisodeId = useProjectStore((s) => s.activeEpisodeId);
+  useEffect(() => {
+    const scoped = activeEpisodeId && activeEpisodeId !== 'none' && activeEpisodeId !== 'all' ? `ep_${activeEpisodeId}` : 'default';
+    setCanvasId(scoped);
+  }, [activeEpisodeId]);
   const [canvasList, setCanvasList] = useState<Array<{ id: string; name: string; updated_at: string; node_count: number }>>([]);
   const [showManager, setShowManager] = useState(false);
   // 左侧工作台：悬浮条 + 下拉面板（不再占用画布宽度）

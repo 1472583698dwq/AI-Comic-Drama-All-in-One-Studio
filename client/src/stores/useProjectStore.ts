@@ -1,16 +1,40 @@
 import { create } from 'zustand';
-import { Project, StoryboardShot, Character, AspectRatio, StylePreset } from '../types';
+import { Project, StoryboardShot, Character, AspectRatio, StylePreset, Episode, Scene } from '../types';
 import { apiService } from '../services/api';
 import { resolveTab } from './usePageStore';
 import { useProjectListStore } from './useProjectListStore';
+import { scenesInEpisode, ALL_EPISODES, UNASSIGNED_EPISODE } from '../utils/episodeScope';
 
 /** 页签 id 与后端功能页 id（page）一一对应；'home' 为跨项目首页 */
-export type ActiveTab = 'home' | 'projects' | 'studio' | 'director3d' | 'timeline' | 'characters' | 'assets' | 'mcp' | 'config' | 'canvas' | 'agent' | 'onekey';
+export type ActiveTab = 'home' | 'projects' | 'episodes' | 'studio' | 'director3d' | 'timeline' | 'characters' | 'assets' | 'mcp' | 'config' | 'canvas' | 'agent' | 'onekey';
+
+const nextIndex = (items: any[], key: string) =>
+  items.reduce((m: number, it: any) => Math.max(m, Number(it?.[key]) || 0), 0) + 1;
+
+/** 建一个空场；episodeId 传 'all'/'none'/空 → 不落任何分集（未分集） */
+const makeScene = (sceneIndex: number, episodeId?: string | null): Scene => ({
+  id: `scene-${sceneIndex}-${Math.random().toString(36).slice(2, 8)}`,
+  scene_index: sceneIndex,
+  title: `场景 ${sceneIndex}`,
+  location: '',
+  time_of_day: 'day',
+  atmosphere: 'epic',
+  shots: [],
+  ...(episodeId && episodeId !== ALL_EPISODES && episodeId !== UNASSIGNED_EPISODE ? { episode_id: episodeId } : {}),
+});
+
+/** 当前分集视角内没有场时补一个：镜头必须有去处，否则"新建分镜"会静默写进别的集 */
+function sceneForEmptyScope(proj: Project, episodeId: string | null): { scenes: Scene[]; sceneIndex: number } {
+  const sceneIndex = nextIndex(proj.scenes as any[], 'scene_index');
+  return { scenes: [...proj.scenes, makeScene(sceneIndex, episodeId)], sceneIndex };
+}
 
 interface ProjectState {
   project: Project | null;
   activeProjectId: string | null; // P0: 关联 ProjectMeta
   activeShotId: string | null;
+  /** 当前工作空间所在的集。null = 还在集看板；'all' = 不分集视角；'none' = 未分集。 */
+  activeEpisodeId: string | null;
   activeTab: ActiveTab;
   workspace: 'production' | 'creative'; // P0: 双工作台
   platformMode: 'desktop' | 'mobile';
@@ -44,6 +68,10 @@ interface ProjectState {
   setProject: (project: Project) => void;
   setActiveShotId: (shotId: string | null) => void;
   setActiveTab: (tab: ActiveTab) => void;
+  /** 从集看板进入某一集的工作空间 */
+  enterEpisode: (episodeId: string) => void;
+  /** 离开工作空间，回到集看板 */
+  leaveEpisode: () => void;
   /** 切换系统左侧栏 收起（仅图标）/ 展开（图标 + 文字）：画布页只改本次画布态，其余页面改偏好 */
   toggleSidebar: () => void;
   setWorkspace: (w: 'production'|'creative') => void;
@@ -59,10 +87,18 @@ interface ProjectState {
   updateCharacter: (charId: string, updates: Partial<Character>) => void;
   addCharacter: (character: Character) => void;
   deleteCharacter: (charId: string) => void;
-  addShot: (sceneIndex: number, afterShotId?: string) => void;
+  addShot: (sceneIndex?: number, afterShotId?: string) => void;
   duplicateShot: (shotId: string) => void;
   deleteShot: (shotId: string) => void;
   reorderShots: (sourceIndex: number, destIndex: number) => void;
+  // 分集（项目 → 分集 → 场/镜；归属写在 Scene.episode_id）
+  addEpisode: (title?: string) => Episode | null;
+  renameEpisode: (episodeId: string, title: string) => void;
+  deleteEpisode: (episodeId: string, moveTo?: string | null) => void;
+  /** 按 scene_index 批量为场设置分集归属（episodeId=null → 移出分集） */
+  assignScenesToEpisode: (sceneIndexes: number[], episodeId: string | null) => void;
+  /** 把全部场按顺序均分为 count 集（重建分集归属） */
+  autoSplitEpisodes: (count: number) => void;
   // 2026 片场与全链路资产联动增强 Actions
   bindCharacterToShot: (shotId: string, charId: string) => void;
   unbindCharacterFromShot: (shotId: string, charId: string) => void;
@@ -116,6 +152,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   project: null,
   activeProjectId: localStorage.getItem('activeProjectId') || null,
   activeShotId: null,
+  activeEpisodeId: null,
   activeTab: (localStorage.getItem('activeProjectId') ? ((localStorage.getItem('app_active_tab') as any) || 'projects') : 'projects'),
   workspace: (localStorage.getItem('app_workspace') as any) || 'production',
   platformMode: (localStorage.getItem('app_platform_mode') as any) || 'desktop',
@@ -157,6 +194,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       } else {
         get().setProject(buildBlankProject(pid, meta || content));
       }
+      const tab = get().activeTab;
+      const inWorkspace = tab === 'studio' || tab === 'director3d' || tab === 'timeline' || tab === 'onekey' || tab === 'canvas';
+      const savedEp = inWorkspace ? localStorage.getItem('active_episode_' + pid) : null;
+      set({ activeEpisodeId: savedEp && savedEp !== 'all' ? savedEp : null });
     } catch (e: any) {
       console.warn('Failed to auto-load active project:', e);
       get().closeProject();
@@ -186,6 +227,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       project: null,
       activeProjectId: null,
       activeShotId: null,
+      activeEpisodeId: null,
       activeTab: backTab,
       isPlaying: false,
       currentTime: 0,
@@ -201,6 +243,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       ...(project as any),
       scenes: rawScenes.map((s: any) => ({ ...s, shots: Array.isArray(s?.shots) ? s.shots : [] })),
       characters: Array.isArray((project as any)?.characters) ? (project as any).characters : [],
+      episodes: Array.isArray((project as any)?.episodes) ? (project as any).episodes : [],
     } as Project;
     const total = safe.scenes.flatMap((s) => s.shots).reduce((sum, sh) => sum + sh.duration, 0);
     const savedShotId = localStorage.getItem('active_shot_id_' + safe.id);
@@ -230,6 +273,31 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (pid && shotId) localStorage.setItem('active_shot_id_' + pid, shotId);
     set({ activeShotId: shotId });
   },
+  enterEpisode: (episodeId) => {
+    if (!episodeId || episodeId === 'all') {
+      get().leaveEpisode();
+      return;
+    }
+    const pid = get().project?.id || get().activeProjectId;
+    if (pid) {
+      try { localStorage.setItem('active_episode_' + pid, episodeId); } catch { /* ignore */ }
+    }
+    set({ activeEpisodeId: episodeId });
+    const tab = get().activeTab;
+    if (tab !== 'studio' && tab !== 'director3d' && tab !== 'timeline' && tab !== 'onekey' && tab !== 'canvas') {
+      get().setActiveTab('studio');
+    }
+  },
+
+  leaveEpisode: () => {
+    const pid = get().project?.id || get().activeProjectId;
+    if (pid) {
+      try { localStorage.removeItem('active_episode_' + pid); } catch { /* ignore */ }
+    }
+    set({ activeEpisodeId: null });
+    get().setActiveTab('episodes');
+  },
+
   setActiveTab: (tab) => {
     // 未选择项目时，严禁切换到项目内部功能（全局页 home / projects / config 放行）
     if (!get().project && tab !== 'home' && tab !== 'projects' && tab !== 'config') {
@@ -298,6 +366,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         autoBindShotCharacters(proj as any);
       } catch {}
       get().setProject(proj);
+      get().leaveEpisode();
     } catch (e: any) {
       set({ apiError: e?.message || '小说拆解失败' });
       throw e;
@@ -464,14 +533,27 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     persistProject(nextProj, pid);
   },
 
-  addShot: (sceneIndex = 1, afterShotId) => {
+  addShot: (sceneIndex, afterShotId) => {
     const proj = get().project;
     if (!proj) return;
+    const episodeId = get().activeEpisodeId;
+    // 目标场必须在"当前分集视角"内，否则宁可换视角内的场：写到视角外的场等于点了没反应
+    const scope = scenesInEpisode(proj, episodeId) as Scene[];
+    let scenes = proj.scenes as Scene[];
+    let targetIndex: number | null =
+      sceneIndex != null && scope.some((s) => s.scene_index === sceneIndex)
+        ? sceneIndex
+        : (scope[0]?.scene_index ?? null);
+    if (targetIndex === null) {
+      const created = sceneForEmptyScope(proj, episodeId);
+      scenes = created.scenes;
+      targetIndex = created.sceneIndex;
+    }
 
     const newShot: StoryboardShot = {
       id: 'shot-' + Date.now(),
       shot_index: 99,
-      scene_index: sceneIndex,
+      scene_index: targetIndex,
       camera_framing: 'medium',
       camera_motion: 'push_in',
       action_desc: '新分镜描述...',
@@ -482,9 +564,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       status: 'ready',
     };
 
-    const newScenes = proj.scenes.map((sc) => {
-      if (sc.scene_index === sceneIndex) {
-        const list = [...sc.shots];
+    const newScenes = scenes.map((sc) => {
+      if (sc.scene_index === targetIndex) {
+        const list = [...(sc.shots || [])];
         if (afterShotId) {
           const idx = list.findIndex((s) => s.id === afterShotId);
           list.splice(idx + 1, 0, newShot);
@@ -577,15 +659,103 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!proj || !proj.scenes[0]) return;
 
     const shots = [...proj.scenes[0].shots];
+    if (sourceIndex < 0 || sourceIndex >= shots.length) return;
     const [removed] = shots.splice(sourceIndex, 1);
-    shots.splice(destIndex, 0, removed);
+    shots.splice(Math.max(0, Math.min(destIndex, shots.length)), 0, removed);
 
     const updatedShots = shots.map((s, i) => ({ ...s, shot_index: i + 1 }));
-    const newScenes = [{ ...proj.scenes[0], shots: updatedShots }];
+    // 修复：只重排第 1 场的镜头，其余场必须原样保留（此前会把其它场整场丢弃）
+    const newScenes = proj.scenes.map((sc, i) => (i === 0 ? { ...sc, shots: updatedShots } : sc));
     const nextProj = { ...proj, scenes: newScenes };
     set({ project: nextProj });
     const pid = nextProj.id || get().activeProjectId;
     persistProject(nextProj, pid);
+  },
+
+  // ── 分集 ────────────────────────────────────────────────
+  /** 新建一集，并给它配一个空场：否则进入后是 0 场 0 镜的死视图 */
+  addEpisode: (title) => {
+    const proj = get().project;
+    if (!proj) return null;
+    const eps = [...((proj as any).episodes || [])];
+    const idx = nextIndex(eps, 'episode_index');
+    const ep: Episode = { id: `ep_${Math.random().toString(36).slice(2, 10)}`, episode_index: idx, title: title?.trim() || `第${idx}集` };
+    const sceneIndex = nextIndex(proj.scenes as any[], 'scene_index');
+    const nextProj = { ...(proj as any), episodes: [...eps, ep], scenes: [...(proj.scenes as any[]), makeScene(sceneIndex, ep.id)] };
+    set({ project: nextProj });
+    persistProject(nextProj, nextProj.id || get().activeProjectId);
+    return ep;
+  },
+
+  renameEpisode: (episodeId, title) => {
+    const proj = get().project;
+    if (!proj || !title.trim()) return;
+    const nextProj = { ...(proj as any), episodes: ((proj as any).episodes || []).map((e: any) => e.id === episodeId ? { ...e, title: title.trim() } : e) };
+    set({ project: nextProj });
+    persistProject(nextProj, nextProj.id || get().activeProjectId);
+  },
+
+  deleteEpisode: (episodeId, moveTo = null) => {
+    const proj = get().project;
+    if (!proj) return;
+    const scenes = proj.scenes.map((sc: any) => {
+      if (sc.episode_id !== episodeId) return sc;
+      if (moveTo) return { ...sc, episode_id: moveTo };
+      const { episode_id, ...rest } = sc;
+      return rest;
+    });
+    const eps = ((proj as any).episodes || [])
+      .filter((e: any) => e.id !== episodeId)
+      .map((e: any, i: number) => {
+        const t = String(e.title || '');
+        const isDefault = !t || (t.startsWith('第') && t.endsWith('集') && /^\d+$/.test(t.slice(1, -1)));
+        return { ...e, episode_index: i + 1, title: isDefault ? `第${i + 1}集` : t };
+      });
+    const nextProj = { ...(proj as any), scenes, episodes: eps };
+    set({ project: nextProj });
+    persistProject(nextProj, nextProj.id || get().activeProjectId);
+  },
+
+  assignScenesToEpisode: (sceneIndexes, episodeId) => {
+    const proj = get().project;
+    if (!proj) return;
+    const want = new Set(sceneIndexes.map(Number));
+    const scenes = proj.scenes.map((sc: any) => {
+      if (!want.has(Number(sc.scene_index))) return sc;
+      if (episodeId) return { ...sc, episode_id: episodeId };
+      const { episode_id, ...rest } = sc;
+      return rest;
+    });
+    const nextProj = { ...(proj as any), scenes };
+    set({ project: nextProj });
+    persistProject(nextProj, nextProj.id || get().activeProjectId);
+  },
+
+  autoSplitEpisodes: (count) => {
+    const proj = get().project;
+    if (!proj || count < 1) return;
+    const scenes = [...proj.scenes].sort((a: any, b: any) => (a.scene_index || 0) - (b.scene_index || 0));
+    const n = scenes.length;
+    if (n === 0 || count > n) return;
+    const eps: Episode[] = Array.from({ length: count }, (_, i) => ({ id: `ep_${Math.random().toString(36).slice(2, 10)}`, episode_index: i + 1, title: `第${i + 1}集` }));
+    const base = Math.floor(n / count);
+    const extra = n % count;
+    let cursor = 0;
+    // 按排序后的顺序依次分配
+    const assigned: any[] = [];
+    for (let i = 0; i < count; i++) {
+      const size = base + (i < extra ? 1 : 0);
+      for (const sc of scenes.slice(cursor, cursor + size)) {
+        assigned.push({ ...sc, episode_id: eps[i].id });
+      }
+      cursor += size;
+    }
+    // 保持原先的场顺序（按 scene_index 排序后回填）
+    const byIndex = new Map(assigned.map((s: any) => [Number(s.scene_index), s]));
+    const merged = proj.scenes.map((sc: any) => byIndex.get(Number(sc.scene_index)) || sc);
+    const nextProj = { ...(proj as any), scenes: merged, episodes: eps };
+    set({ project: nextProj });
+    persistProject(nextProj, nextProj.id || get().activeProjectId);
   },
 
   // 2026 片场增强 Actions

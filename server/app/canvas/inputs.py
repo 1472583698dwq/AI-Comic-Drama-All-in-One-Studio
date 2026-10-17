@@ -119,6 +119,7 @@ REF_TOKEN_RE = re.compile(r"\{\{ref (\d+)\}\}")
 PRIMARY_OUTPUT_PORT = {
     "prompt": "prompt", "image": "image", "video": "video", "audio": "audio", "director3d": "camera_prompt",
     "load-image": "image", "load-video": "video", "load-audio": "audio",
+    "asset-source": "out",
 }
 
 _TEXT_KEYS = ("prompt", "text", "brief", "image_prompt", "video_prompt")

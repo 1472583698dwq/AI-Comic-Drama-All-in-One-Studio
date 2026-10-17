@@ -6,6 +6,8 @@
 - 后续每行一个事件 JSON；追加批次一次 write + flush + fsync。
 - 崩溃可能留下半行 JSON：读取时丢弃最后一个非法行（撕裂尾），不返回给调用方。
 - 已提交文件永不原地重写；只有显式 clear 才删除整个会话目录。
+- 单写者：进程内线程锁 + 跨进程 best-effort 文件锁（同会话目录 `.write.lock`），
+  双开时后到者在短暂等待后放弃锁并继续（围栏是防并发写坏，不是拒绝服务）。
 """
 import json
 import os
@@ -36,6 +38,60 @@ def safe_session_id(session_id: str) -> str:
     return s or "default"
 
 
+class _CrossProcessLock:
+    """best-effort 跨进程写锁（同机同盘）：拿不到锁（超时）也放行，绝不阻断会话写入。"""
+
+    def __init__(self, lock_path: Path, timeout_s: float = 3.0):
+        self.lock_path = lock_path
+        self.timeout_s = timeout_s
+        self._fh = None
+        self._acquired = False
+
+    def __enter__(self):
+        try:
+            self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+            self._fh = open(self.lock_path, "a+b")
+            deadline = time.time() + self.timeout_s
+            while True:
+                try:
+                    if os.name == "nt":
+                        import msvcrt
+                        self._fh.seek(0)
+                        msvcrt.locking(self._fh.fileno(), msvcrt.LK_NBLCK, 1)
+                    else:
+                        import fcntl
+                        fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    self._acquired = True
+                    break
+                except Exception:
+                    if time.time() >= deadline:
+                        break
+                    time.sleep(0.1)
+        except Exception:
+            self._acquired = False
+        return self
+
+    def __exit__(self, *exc):
+        try:
+            if self._acquired and self._fh is not None:
+                if os.name == "nt":
+                    import msvcrt
+                    self._fh.seek(0)
+                    msvcrt.locking(self._fh.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
+        except Exception:
+            pass
+        try:
+            if self._fh is not None:
+                self._fh.close()
+        except Exception:
+            pass
+        self._fh = None
+        return False
+
+
 class SessionStore:
     """单文件 append-only 日志；单进程线程锁保证单写者。"""
 
@@ -63,11 +119,12 @@ class SessionStore:
             "created_at": time.time(),
         }
         with _LOCK:
-            if not p.exists():
-                with open(p, "a", encoding="utf-8", newline="\n") as f:
-                    f.write(json.dumps(header, ensure_ascii=False) + "\n")
-                    f.flush()
-                    os.fsync(f.fileno())
+            with _CrossProcessLock(self.dir_for(session_id) / ".write.lock"):
+                if not p.exists():
+                    with open(p, "a", encoding="utf-8", newline="\n") as f:
+                        f.write(json.dumps(header, ensure_ascii=False) + "\n")
+                        f.flush()
+                        os.fsync(f.fileno())
 
     def append(self, session_id: str, batch: List[Dict[str, Any]]) -> None:
         if not batch:
@@ -76,10 +133,11 @@ class SessionStore:
         lines = [json.dumps(ev, ensure_ascii=False, default=str) for ev in batch]
         p = self.path_for(session_id)
         with _LOCK:
-            with open(p, "a", encoding="utf-8", newline="\n") as f:
-                f.write("\n".join(lines) + "\n")
-                f.flush()
-                os.fsync(f.fileno())
+            with _CrossProcessLock(self.dir_for(session_id) / ".write.lock"):
+                with open(p, "a", encoding="utf-8", newline="\n") as f:
+                    f.write("\n".join(lines) + "\n")
+                    f.flush()
+                    os.fsync(f.fileno())
 
     def read(self, session_id: str) -> List[Dict[str, Any]]:
         """读取全部事件；容忍撕裂尾（最后一个非法 JSON 行丢弃）。"""

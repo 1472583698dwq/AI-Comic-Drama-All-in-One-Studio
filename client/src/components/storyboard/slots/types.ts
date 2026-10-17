@@ -94,7 +94,7 @@ export interface ShotSlotContext {
   // ---- store actions ----
   setActiveShotId: (id: string | null) => void;
   updateShot: (shotId: string, updates: any) => void;
-  addShot: (sceneIndex: number, afterShotId?: string) => void;
+  addShot: (sceneIndex?: number, afterShotId?: string) => void;
   duplicateShot: (shotId: string) => void;
   deleteShot: (shotId: string) => void;
   setActiveTab: (tab: any) => void;
@@ -170,6 +170,11 @@ export interface ShotSlotContext {
   handlePlayTTS: () => void;
   handleRegenerateImage: (customCount?: number) => void;
   handleGenerateVideo: () => void;
+  /** 把上一镜的视频尾帧（没有视频时用它的画面）写成本镜首帧 */
+  carryPreviousFrame: () => Promise<void>;
+  /** 进入下一镜且当前镜没有画面时，自动承接上一镜尾帧/画面 */
+  autoCarryPreviousFrame: boolean;
+  setAutoCarryPreviousFrame: (enabled: boolean) => void;
   handleBatchAllImages: () => void;
   handleBatchAllTTS: () => void;
   handleBatchAllVideos: () => void;

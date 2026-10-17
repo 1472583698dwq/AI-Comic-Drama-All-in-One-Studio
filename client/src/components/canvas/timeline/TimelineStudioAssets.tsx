@@ -67,7 +67,7 @@ export const TimelineStudioAssets: React.FC<Props> = ({
     }
     setUploading(true);
     apiService
-      .batchImportAssets(list)
+      .batchImportAssets(list, { project_id: projectId })
       .then((res: any) => {
         const urls = (res?.assets || []).map((a: any) => a.file_url || a.thumb_url).filter(Boolean);
         if (urls.length) {

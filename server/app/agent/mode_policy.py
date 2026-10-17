@@ -41,6 +41,7 @@ PLAN_READONLY_TOOLS = frozenset({
     "creator_inspect_runtime",
     "list_custom_nodes",
     "todo_write",
+    "ask_user_question",   # 问询无副作用（只读交流）→ 计划模式允许向用户确认需求
     "view_media",
     "job_list", "job_status",
     "task_status",
@@ -59,8 +60,13 @@ TOOL_RISK: Dict[str, str] = {
     "list_voices": "low", "list_comfyui_workflows": "low", "list_custom_providers": "low",
     "get_provider_code": "low", "canvas_query": "low", "canvas_query_assets": "low",
     "fs_read": "low", "read_skill": "low", "view_media": "low",
+    "ask_user_question": "low",
     "director_3d_stage_plan": "low", "stage_get_state": "low",
     "split_novel_script": "medium",
+    # 素材库：创建/发布是单条资产变更（发布=全局可见，可收回）→ medium，人审由执行维决定
+    "create_asset": "medium", "publish_asset": "medium",
+    # 分集管理：改的是项目结构（场归属/分集列表），单项目内可逆 → medium
+    "episode_manage": "medium",
     # 生成
     "generate_image": "medium", "comfyui_render_node": "medium",
     "generate_voice": "medium", "generate_minimax_voice": "medium",
@@ -69,6 +75,7 @@ TOOL_RISK: Dict[str, str] = {
     "canvas_execute": "high", "canvas_dispatch_skill": "high",
     # 3D导演台控制（落盘 + 前端实时应用；单镜舞台变更，非破坏性）
     "stage_control": "medium",
+    "stage_export_clay": "medium",
     # 删节点不可逆（连带删线），且会打断已有链路 → 与 canvas_execute 同档。
     # 是否人审由执行维决定（审批=确认，自动=直跑），plan 模式无此工具（只读白名单外）。
     "canvas_delete_node": "high",

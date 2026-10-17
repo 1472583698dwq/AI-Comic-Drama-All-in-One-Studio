@@ -8,6 +8,7 @@ import {
 import { apiService } from '../../services/api';
 import { toast, confirmAsync } from '../../stores/useDialogStore';
 import { ComfyWorkflowList } from './ComfyWorkflowList';
+import { ModelPlaza } from '../../components/llm/ModelPlaza';
 import {
   CAPABILITIES, channelFilled, currentChannelId, channelsOf, unmatchedRoute,
   capabilityIdForKind, customChannelFrom,
@@ -568,11 +569,12 @@ const CapabilityDetail: React.FC<{
       </div>
 
       <div className="px-5 py-4">
-        <div className="grid grid-cols-1 lg:grid-cols-[224px_1fr] gap-4 items-start">
-          {/* 通道列表 */}
-          <div className="space-y-1.5">
-            <div className="text-[10.5px] font-bold uppercase tracking-wider text-gray-500 px-0.5">
-              通道（{chs.length}）
+        {cap.id === 'llm' && <ModelPlaza />}
+        <div className={`${cap.id === 'llm' ? 'mt-4' : ''} grid grid-cols-1 ${cap.id === 'llm' ? '' : 'lg:grid-cols-[224px_1fr]'} gap-4 items-start`}>
+          {/* 通道列表。文本大模型改成一排切换：模型选择在广场，这里只留拆剧本用的地址和 Key */}
+          <div className={cap.id === 'llm' ? 'flex flex-wrap items-center gap-1.5' : 'space-y-1.5'}>
+            <div className={`text-[10.5px] font-bold uppercase tracking-wider text-gray-500 ${cap.id === 'llm' ? 'w-full' : 'px-0.5'}`}>
+              {cap.id === 'llm' ? '拆剧本默认通道' : `通道（${chs.length}）`}
             </div>
             {chs.map((c) => {
               const active = c.id === ch.id;
@@ -583,7 +585,7 @@ const CapabilityDetail: React.FC<{
                   key={c.id}
                   onClick={() => p.onView(c.id)}
                   title={c.legacy ? `${c.summary}\n旧版通道：${c.legacy}` : c.summary}
-                  className={`w-full text-left rounded-xl px-3 py-2 border transition-all ${
+                  className={`${cap.id === 'llm' ? 'px-3 py-1.5' : 'w-full px-3 py-2'} text-left rounded-xl border transition-all ${
                     active
                       ? 'bg-brand/15 border-brand/50 ring-1 ring-brand/30'
                       : 'bg-surface/80 border-white/70 dark:border-white/12 hover:border-brand/40'
@@ -598,7 +600,7 @@ const CapabilityDetail: React.FC<{
                     <span className={`text-[11.5px] font-medium truncate flex-1 ${active ? 'text-[color:var(--color-text-main)]' : 'text-gray-300'}`}>{c.name}</span>
                     {done && <Check className="w-3 h-3 shrink-0 text-emerald-400" />}
                   </div>
-                  <div className="flex items-center gap-1 flex-wrap mt-1">
+                  <div className={`flex items-center gap-1 flex-wrap ${cap.id === 'llm' ? 'hidden' : 'mt-1'}`}>
                     <span className={`text-[9px] px-1 rounded ${done ? 'bg-emerald-500/15 text-emerald-300' : 'bg-surface-hover/80 text-gray-500'}`}>
                       {done ? '已填' : '未填'}
                     </span>
@@ -611,7 +613,7 @@ const CapabilityDetail: React.FC<{
                       </span>
                     )}
                   </div>
-                  <div className="mt-1.5 h-[3px] rounded-full bg-surface-hover/80 overflow-hidden">
+                  <div className={`${cap.id === 'llm' ? 'hidden' : 'mt-1.5'} h-[3px] rounded-full bg-surface-hover/80 overflow-hidden`}>
                     <div className="h-full bg-emerald-400" style={{ width: `${pctOf(c)}%` }} />
                   </div>
                 </button>
@@ -640,7 +642,11 @@ const CapabilityDetail: React.FC<{
                   )}
               </span>
             </div>
-            <p className="text-[11.5px] text-gray-400 leading-relaxed mt-1.5">{ch.summary}</p>
+            <p className="text-[11.5px] text-gray-400 leading-relaxed mt-1.5">
+              {cap.id === 'llm'
+                ? '对话里换模型用上面的广场，按供应商分开。这里只填拆剧本、润色时走的地址和 Key。'
+                : ch.summary}
+            </p>
 
             {ch.docUrl && (
               <a
@@ -782,6 +788,7 @@ const CapabilityDetail: React.FC<{
         </div>
       </div>
 
+      {cap.id !== 'llm' && (
       <div className="border-t border-white/60 dark:border-white/12 bg-white/40 dark:bg-white/[.03] px-5 py-3 flex items-start gap-2.5">
         <ChevronRight className="w-4 h-4 text-brand-light shrink-0 mt-0.5" />
         <div className="text-[11.5px] text-gray-400 leading-relaxed">
@@ -791,6 +798,7 @@ const CapabilityDetail: React.FC<{
           新建的代码源（生图 / 生视频 / 配音）会自动并入本能力的通道列表，可在这里设为默认通道并就地填 Key。
         </div>
       </div>
+      )}
     </section>
   );
 };

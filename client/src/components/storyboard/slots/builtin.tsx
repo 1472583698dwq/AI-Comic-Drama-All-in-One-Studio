@@ -23,10 +23,7 @@ export function registerBuiltinSlots() {
     order: 10,
     icon: '🎬',
     color: 'text-violet-400',
-    label: (ctx) => {
-      const pm = ctx.productionMode;
-      return pm === 'comic' ? '漫画画面与角色' : pm === 'motion_comic' ? '角色与运镜' : '首帧画面与角色';
-    },
+    label: () => '画面',
     render: (ctx) => <VisualTab ctx={ctx} />,
   }, 'builtin');
   registerSlotEntry('tabs', {
@@ -34,7 +31,7 @@ export function registerBuiltinSlots() {
     order: 20,
     icon: '🗣️',
     color: 'text-pink-400',
-    label: (ctx) => (ctx.productionMode === 'comic' ? '气泡与对白' : '台词与配音'),
+    label: () => '台词',
     render: (ctx) => <DialogueTab ctx={ctx} />,
   }, 'builtin');
   registerSlotEntry('tabs', {
@@ -42,9 +39,7 @@ export function registerBuiltinSlots() {
     order: 30,
     icon: '🎥',
     color: 'text-orange-400',
-    // 漫画模式无运镜页（与原 `productionMode !== 'comic'` 条件一致）
-    when: (ctx) => ctx.productionMode !== 'comic',
-    label: () => '视频与运镜',
+    label: () => '视频',
     render: (ctx) => <MotionTab ctx={ctx} />,
   }, 'builtin');
 
@@ -63,7 +58,6 @@ export function registerBuiltinSlots() {
   registerSlotEntry('actions', {
     id: 'batch-image',
     order: 10,
-    when: (ctx) => ctx.productionMode !== 'motion_comic',
     render: (ctx) => (
       <button onClick={ctx.handleBatchAllImages} className="flex-1 py-1 rounded-lg bg-brand/20 hover:bg-brand/30 border border-brand/30 text-brand-light font-bold flex items-center justify-center gap-1 transition-all" title="对所有选中/全部镜头批量并发生成画面">
         <Sparkles className="w-3 h-3 text-brand" /> 批量生图
@@ -82,7 +76,6 @@ export function registerBuiltinSlots() {
   registerSlotEntry('actions', {
     id: 'batch-tts',
     order: 20,
-    when: (ctx) => ctx.productionMode !== 'comic',
     render: (ctx) => (
       <button onClick={ctx.handleBatchAllTTS} className="flex-1 py-1 rounded-lg bg-pink-500/15 hover:bg-pink-500/25 border border-pink-500/30 text-pink-300 font-bold flex items-center justify-center gap-1 transition-all" title="批量合成全剧台词配音">
         <Volume2 className="w-3 h-3 text-pink-400" /> 批量配音
@@ -92,9 +85,8 @@ export function registerBuiltinSlots() {
   registerSlotEntry('actions', {
     id: 'batch-video',
     order: 30,
-    when: (ctx) => ctx.productionMode !== 'comic',
     render: (ctx) => (
-      <button onClick={ctx.handleBatchAllVideos} className="flex-1 py-1 rounded-lg bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/30 text-orange-300 font-bold flex items-center justify-center gap-1 transition-all" title="为选中 / 全部镜头批量生成动态视频（按各镜当前制作模式执行）">
+      <button onClick={ctx.handleBatchAllVideos} className="flex-1 py-1 rounded-lg bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/30 text-orange-300 font-bold flex items-center justify-center gap-1 transition-all" title="为选中 / 全部镜头批量生成动态视频（按各镜保存的视频输入）">
         <Film className="w-3 h-3 text-orange-400" /> 批量生视频
       </button>
     ),

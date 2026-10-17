@@ -7,10 +7,10 @@ import {
   Sparkles, ChevronDown, Check, Copy, Pencil, X, Music,
 } from 'lucide-react';
 import { MarkdownText } from './MarkdownText';
-import { ArtifactCard, CapabilityProposalCard, ErrorCard } from './AgentCards';
+import { ArtifactCard, CapabilityProposalCard, ErrorCard, QuestionCard } from './AgentCards';
 import { AgentToolSteps, AgentTodoPanel } from './AgentToolSteps';
 import { API_ORIGIN } from '../../utils/devOrigin';
-import type { AgentAttachment, ApprovalInfo, ChatMsg } from './agentTypes';
+import type { AgentAttachment, ApprovalInfo, ChatMsg, QuestionInfo } from './agentTypes';
 
 const resolveMediaUrl = (u?: string) => (!u ? '' : (u.startsWith('/') ? API_ORIGIN + u : u));
 
@@ -56,6 +56,9 @@ export interface AgentMessageListProps {
   approvals?: Record<string, ApprovalInfo>;
   autoAllowTools?: Record<string, boolean>;
   onApprove?: (aid: string, ok: boolean, always: boolean) => void;
+  /** 模型问询卡（ask_user_question）：待答清单 + 回答回调 */
+  questions?: Record<string, QuestionInfo>;
+  onAnswerQuestion?: (qid: string, selections: string[], custom?: string) => void;
 }
 
 export const AgentMessageList: React.FC<AgentMessageListProps> = ({
@@ -71,6 +74,8 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
   approvals,
   autoAllowTools,
   onApprove,
+  questions,
+  onAnswerQuestion,
 }) => {
   const [expandedThinking, setExpandedThinking] = useState<Record<string, boolean>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -320,6 +325,21 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
           </div>
         );
       })}
+      {/* 模型问询卡：附在消息流末尾（已回答的保留只读，供回看） */}
+      {questions && Object.entries(questions).map(([qid, q]) => (
+        <div key={qid} className="flex justify-start">
+          <div className={`${compact ? 'max-w-[92%]' : 'max-w-[85%]'} w-full`}>
+            <QuestionCard
+              question={q.question}
+              options={q.options || []}
+              multiSelect={q.multi_select}
+              detail={q.detail}
+              answered={q.answered}
+              onAnswer={(sels, custom) => onAnswerQuestion?.(qid, sels, custom)}
+            />
+          </div>
+        </div>
+      ))}
     </>
   );
 };

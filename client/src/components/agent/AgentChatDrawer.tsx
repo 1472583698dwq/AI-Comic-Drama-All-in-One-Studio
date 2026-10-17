@@ -20,8 +20,8 @@ export const AgentChatDrawer: React.FC<{ markProps?: Record<string, string> }> =
   const [proposalBusy, setProposalBusy] = useState<Record<string, string>>({});
 
   const {
-    messages, isRunning, wsStatus, approvals, subagents, runMode, permission, autoAllowTools,
-    bindProject, setRunMode, setPermission, send, steer, abort, clearAll, approve, setAutoAllow,
+    messages, isRunning, wsStatus, approvals, questions, subagents, runMode, permission, autoAllowTools,
+    bindProject, setRunMode, setPermission, send, steer, abort, clearAll, approve, answerQuestion, setAutoAllow,
     executePlan, proposalAction, applyArtifact,
   } = useAgentFloatStore();
 
@@ -325,6 +325,8 @@ export const AgentChatDrawer: React.FC<{ markProps?: Record<string, string> }> =
               approvals={approvals}
               autoAllowTools={autoAllowTools}
               onApprove={handleApprove}
+              questions={questions}
+              onAnswerQuestion={answerQuestion}
             />
             <div ref={messagesEndRef} />
           </div>

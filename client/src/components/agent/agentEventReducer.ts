@@ -119,6 +119,18 @@ export function reduceAgentEvent(msg: ChatMsg, ev: AgentEvent): ReduceResult {
           sideEffects.push({ type: 'stage_patch', tool: name, shot_id: r.shot_id, shot_index: r.shot_index, patch: {}, created_shot: r.created_shot, project_id: r.project_id });
         }
       }
+      if (name === 'stage_export_clay' && ev.status === 'success' && (ev.result as any)?.stage_action === 'export_clay') {
+        const r = ev.result as any;
+        sideEffects.push({
+          type: 'stage_export_clay',
+          tool: name,
+          shot_id: r.shot_id,
+          shot_index: r.shot_index,
+          project_id: r.project_id,
+          duration: r.duration,
+          fps: r.fps,
+        });
+      }
       if (name === 'split_novel_script' && ev.status === 'success' && (ev.result as any)?.persisted) {
         sideEffects.push({ type: 'project_refresh', tool: name });
       }
@@ -206,6 +218,18 @@ export function dispatchSideEffects(sideEffects: SideEffect[]) {
         case 'stage_patch':
           window.dispatchEvent(new CustomEvent('agent-stage-patch', {
             detail: { tool: se.tool, shot_id: se.shot_id, shot_index: se.shot_index, patch: se.patch, created_shot: se.created_shot, project_id: se.project_id },
+          }));
+          break;
+        case 'stage_export_clay':
+          window.dispatchEvent(new CustomEvent('agent-stage-export-clay', {
+            detail: {
+              tool: se.tool,
+              shot_id: se.shot_id,
+              shot_index: se.shot_index,
+              project_id: se.project_id,
+              duration: se.duration,
+              fps: se.fps,
+            },
           }));
           break;
         case 'project_refresh':

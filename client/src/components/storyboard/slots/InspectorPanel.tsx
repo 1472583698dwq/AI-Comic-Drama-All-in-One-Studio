@@ -1,10 +1,10 @@
 import React from 'react';
 import { Copy, Layers, Sliders, Trash2 } from 'lucide-react';
 import type { ShotSlotContext } from './types';
-import { getMode } from './registry';
 import { useTabDefs } from '../../../ui-registry/adapters/storyboardSlots';
 import { SlotOutlet } from './PluginRender';
 import { SlotManagerButton } from './SlotManagerModal';
+import { lanesOf } from '../shotLanes';
 
 /**
  * 右栏：分镜参数检查器宿主（shot.inspector）。
@@ -12,21 +12,24 @@ import { SlotManagerButton } from './SlotManagerModal';
  * 队列脚与头操作区保持原样。
  * （自 ShotInspector 原样搬移，标识符改为 ctx.*，零行为变化）
  */
-export const InspectorPanel: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
+export const InspectorPanel: React.FC<{ ctx: ShotSlotContext; embedded?: boolean }> = ({ ctx, embedded = false }) => {
   const {
-    activeShot, productionMode, inspectorTab, setInspectorTab,
+    activeShot, inspectorTab, setInspectorTab, updateShot,
     duplicateShot, deleteShot, openShotCtxMenu, openSlotManager, queue,
   } = ctx;
-  const mode = getMode(productionMode);
   // 槽从注册表取（内置 + 插件同一条管线），when(ctx) 过滤仍在宿主侧
   const tabs = useTabDefs(ctx);
+  const lanes = lanesOf(activeShot);
+  const flipLane = (key: 'image' | 'video' | 'audio') => {
+    updateShot(activeShot.id, { lanes: { ...lanes, [key]: !lanes[key] } } as any);
+  };
   return (
-    <div className="w-[380px] bg-surface border border-border rounded-2xl flex flex-col overflow-hidden shrink-0 shadow-sm">
+    <div className={`${embedded ? 'w-full rounded-none border-0 shadow-none' : 'w-[380px] rounded-2xl border shadow-sm'} bg-surface flex flex-col overflow-hidden shrink-0`}>
       <div className="h-11 px-3 border-b border-border flex items-center justify-between bg-surface-secondary/50 shrink-0">
         <div className="flex items-center gap-1.5">
           <Sliders className="w-3.5 h-3.5 text-brand" />
           <span className="text-xs font-bold text-white">
-            {mode.inspectorTitle}
+            这一镜
           </span>
           <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-surface border border-border text-gray-400 font-mono">#{activeShot.shot_index}</span>
           <SlotManagerButton onOpen={openSlotManager} />
@@ -41,11 +44,30 @@ export const InspectorPanel: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
       </div>
 
       <div className="flex items-center gap-1 p-1.5 bg-surface-secondary/50 border-b border-border shrink-0">
-        {tabs.map(t=>(
-          <button key={t.id} onClick={()=> { setInspectorTab(t.id as any); localStorage.setItem('storyboard_inspector_tab', t.id); }} className={`flex-1 py-1.5 rounded-full text-xs font-bold flex items-center justify-center gap-1 transition-all ${inspectorTab===t.id ? 'bg-brand text-white shadow-sm' : 'text-gray-400 hover:text-white hover:bg-surface-secondary'}`}>
-            <span>{t.icon}</span><span>{t.label(ctx)}</span>
-          </button>
-        ))}
+        {tabs.map((t) => {
+          const laneKey = t.id === 'visual' ? 'image' : t.id === 'dialogue' ? 'audio' : t.id === 'motion' ? 'video' : null;
+          const on = laneKey ? lanes[laneKey] : true;
+          const selected = inspectorTab === t.id;
+          return (
+            <button
+              key={t.id}
+              onClick={() => { setInspectorTab(t.id as any); localStorage.setItem('storyboard_inspector_tab', t.id); }}
+              className={`flex-1 py-1.5 rounded-full text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${selected ? 'bg-brand text-white shadow-sm' : 'text-gray-400 hover:text-white hover:bg-surface-secondary'}`}
+            >
+              <span>{t.icon}</span>
+              <span>{t.label(ctx)}</span>
+              {laneKey && (
+                <span
+                  role="switch"
+                  aria-checked={on}
+                  title={on ? `关闭本镜${t.label(ctx)}生成` : `打开本镜${t.label(ctx)}生成`}
+                  onClick={(e) => { e.stopPropagation(); flipLane(laneKey); }}
+                  className={`w-2 h-2 rounded-full shrink-0 ${on ? (selected ? 'bg-white' : 'bg-brand') : 'border border-current bg-transparent'}`}
+                />
+              )}
+            </button>
+          );
+        })}
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-4 custom-scrollbar">

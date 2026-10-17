@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  ArrowRight, Activity, Eye, GitBranch, Languages, Layers, ListTree, Lock, Package, Power, SlidersHorizontal,
+  ArrowRight, Activity, Eye, GitBranch, Languages, Layers, ListTree, Lock, Package, Power, SlidersHorizontal, Trash2,
 } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { usePageStore, resolveTab } from '../../stores/usePageStore';
@@ -8,7 +8,7 @@ import { isGlobalPage } from '../../ui-registry/pageTabs';
 import { useFeatureStore, type FeatureItem } from '../../stores/useFeatureStore';
 import { UI_SWITCH_DEFS, useUiPrefsStore, PAGE_VARIANT_PREFIX, type UiSwitchItem } from '../../stores/useUiPrefsStore';
 import { useProjectStore } from '../../stores/useProjectStore';
-import { toast } from '../../stores/useDialogStore';
+import { confirmAsync, toast } from '../../stores/useDialogStore';
 import { pageIcon } from '../../utils/pageIcons';
 import { T_MAIN } from '../../components/ui/designKit';
 import { usePageVariants } from '../../ui-registry/entries/pageVariants';
@@ -133,8 +133,8 @@ const VariantCard: React.FC<{ index: number; pageId: string; label: string; icon
  *    打开即生效（侧栏入口出现、后端接口恢复），关闭即关干净（入口隐藏、页签归一回落、接口 404）。
  * ② 功能开关 —— 管「这一页里的进阶能力开不开」。真相源后端 `/api/v1/features`，出厂默认全关。
  * ③ UI 偏好 —— 纯本机呈现偏好（localStorage），不碰后端能力与接口准入。
- * ④ 插件 —— 第 4 类开关：一个包的全部贡献整体上下线。列表读 `/extensions` 的插件发现结果，
- *    开关走后端 enable/disable（与「设置 → 扩展」是同一份真相源，互不新增契约）。
+ * ④ 插件 —— 第 4 类开关：一个包的全部贡献整体上下线。列表读插件发现结果，
+ *    开关走后端 enable/disable，删除走已有的 uninstall（与「设置 → 扩展」同一份真相源）。
  * ⑤ 前端版本 —— 管「这一页用哪一版界面」。本机单选（`page_variant.<页面 id>`），
  *    当前实现登记为「测试初期版本（保底）」默认激活，重构新版以占位条目登记。
  *
@@ -259,6 +259,30 @@ export const FeaturesPanel: React.FC = () => {
       try { window.dispatchEvent(new Event('plugin-list-refresh')); } catch { /* ignore */ }
     } catch (e: any) {
       toast.error(e?.message || t('toast.toggleFailed'));
+    } finally {
+      setPluginBusy(null);
+    }
+  };
+
+  /** 删除插件包：先确认，再走 uninstall（先停用回滚贡献，成功后才删目录） */
+  const removePlugin = async (p: any) => {
+    const name = p.name || p.id;
+    const ok = await confirmAsync({
+      title: t('plugin.deleteTitle'),
+      message: t('plugin.deleteMessage', { name }),
+      isDanger: true,
+      confirmText: t('plugin.deleteConfirmBtn'),
+      cancelText: t('plugin.deleteCancel'),
+    });
+    if (!ok) return;
+    setPluginBusy(p.id);
+    try {
+      await apiService.uninstallPlugin(p.id);
+      toast.success(t('plugin.deleted', { name }));
+      await loadPlugins();
+      try { window.dispatchEvent(new Event('plugin-list-refresh')); } catch { /* ignore */ }
+    } catch (e: any) {
+      toast.error(e?.message || t('plugin.deleteFailed'));
     } finally {
       setPluginBusy(null);
     }
@@ -471,6 +495,16 @@ export const FeaturesPanel: React.FC = () => {
             checked={!!p.enabled}
             busy={pluginBusy === p.id}
             onToggle={() => { void togglePlugin(p); }}
+            extra={(
+              <button
+                type="button"
+                onClick={() => { void removePlugin(p); }}
+                disabled={pluginBusy === p.id}
+                className="self-start px-2.5 py-1 rounded-lg text-[11px] border border-red-500/30 bg-red-500/10 text-red-300 hover:text-white disabled:opacity-40 inline-flex items-center gap-1"
+              >
+                <Trash2 className="w-3 h-3" />{t('plugin.delete')}
+              </button>
+            )}
             tags={(
               <>
                 <CardTag text={p.enabled ? t('plugin.enabled') : t('plugin.disabled')} tone={p.enabled ? 'on' : 'off'} />

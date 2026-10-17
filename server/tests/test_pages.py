@@ -30,7 +30,7 @@ from app.extensions.registry import extension_registry  # noqa: E402
 
 # 契约默认集：默认全开（用户口径：原有功能页不能因播种被关掉）；locked 的 config 也不可关。
 # 关闭仍可运行：设置 → 功能开关 逐页 toggle（覆盖层写 storage/extensions/state.json）
-DEFAULT_ON = {"home", "projects", "assets", "characters", "studio", "onekey",
+DEFAULT_ON = {"home", "projects", "episodes", "assets", "characters", "studio", "onekey",
               "director3d", "timeline", "agent", "canvas", "config"}
 DEFAULT_OFF: set = set()
 

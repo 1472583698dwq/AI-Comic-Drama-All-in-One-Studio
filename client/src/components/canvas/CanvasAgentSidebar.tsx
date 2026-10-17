@@ -44,8 +44,8 @@ export const CanvasAgentSidebar: React.FC = () => {
   const clearAgentFocusNodes = useCanvasStore((s) => s.clearAgentFocusNodes);
 
   const {
-    messages, isRunning, wsStatus, approvals, runMode, permission,
-    bindProject, send, steer, abort, clearAll, approve,
+    messages, isRunning, wsStatus, approvals, questions, subagents, autoAllowTools, runMode, permission,
+    bindProject, send, steer, abort, clearAll, approve, answerQuestion, setAutoAllow,
     executePlan, proposalAction, applyArtifact,
     setRunMode, setPermission,
   } = useAgentStore();
@@ -272,6 +272,14 @@ export const CanvasAgentSidebar: React.FC = () => {
           onProposalAction={handleProposalAction}
           proposalBusy={proposalBusy}
           onApplyArtifact={applyArtifact}
+          approvals={approvals}
+          autoAllowTools={autoAllowTools}
+          onApprove={(aid, ok, always) => {
+            if (always && ok && approvals[aid]?.tool_name) setAutoAllow(approvals[aid].tool_name, true);
+            approve(aid, ok);
+          }}
+          questions={questions}
+          onAnswerQuestion={answerQuestion}
         />
         <div ref={messagesEndRef} />
       </div>

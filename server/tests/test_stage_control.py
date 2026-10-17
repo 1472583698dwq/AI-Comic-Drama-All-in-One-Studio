@@ -52,6 +52,19 @@ class TestStageState(unittest.TestCase):
             ops.stage_state(_content(), shot_index=99)
         self.assertIn("未找到指定分镜", str(ctx.exception))
 
+    def test_state_includes_clay_fields(self):
+        c = _content()
+        shot = c["scenes"][0]["shots"][0]
+        shot["clay_video_url"] = "/storage/videos/clay_1.mp4"
+        shot["previz_video_url"] = "/storage/videos/clay_1.mp4"
+        shot["clay_first_frame_url"] = "/storage/generated/f1.jpg"
+        shot["clay_last_frame_url"] = "/storage/generated/f2.jpg"
+        st = ops.stage_state(c)
+        self.assertEqual(st["clay_video_url"], "/storage/videos/clay_1.mp4")
+        self.assertEqual(st["previz_video_url"], "/storage/videos/clay_1.mp4")
+        self.assertEqual(st["clay_first_frame_url"], "/storage/generated/f1.jpg")
+        self.assertEqual(st["clay_last_frame_url"], "/storage/generated/f2.jpg")
+
     def test_create_shot_on_empty_project_unlocks_stage(self):
         empty = {"id": "p", "title": "空项目", "scenes": [{"scene_index": 1, "title": "场景 1", "shots": []}]}
         out = ops.apply_stage_control(empty, {
@@ -148,6 +161,18 @@ class TestStageControl(unittest.TestCase):
                                     "payload": {"cast_layout": "duel"}})
         self.assertEqual(shot["cast_layout"], "duel")
 
+    def test_set_shot_text_updates_text_fields(self):
+        c = _content()
+        out = ops.apply_stage_control(c, {"action": "set_shot_text", "shot_index": 1,
+                                          "payload": {"action_desc": "双忍雨夜对峙", "dialogue": "你终于来了。"}})
+        shot = c["scenes"][0]["shots"][0]
+        self.assertEqual(shot["action_desc"], "双忍雨夜对峙")
+        self.assertEqual(shot["dialogue"], "你终于来了。")
+        self.assertEqual(out["stage_patch"]["action_desc"], "双忍雨夜对峙")
+        # 不给任何文字字段 → 明错（不静默）
+        with self.assertRaises(ops.StageControlError):
+            ops.apply_stage_control(c, {"action": "set_shot_text", "shot_index": 1, "payload": {}})
+
     def test_entity_whitelist_rejects_junk(self):
         c = _content()
         with self.assertRaises(ops.StageControlError):
@@ -201,12 +226,100 @@ class TestFsReadDirListing(unittest.TestCase):
         self.assertIn("storage/projects", str(ctx.exception))
 
 
+class TestClayPending(unittest.TestCase):
+    """白模导出回执对账：按 project+shot 记住发起会话，回执只通知这个会话。"""
+
+    def setUp(self):
+        from app.director_stage import pending
+        self.p = pending
+        with pending._LOCK:
+            pending._PENDING.clear()
+
+    def tearDown(self):
+        with self.p._LOCK:
+            self.p._PENDING.clear()
+
+    def test_register_and_pop_by_id_or_index(self):
+        self.p.register("proj1", "sh1", 2, "proj_proj1_sess1")
+        self.assertEqual(self.p.pending_count(), 1)
+        e = self.p.pop("proj1", shot_index=2)  # index 也能命中（id/index 双键）
+        self.assertIsNotNone(e)
+        self.assertEqual(e.session_id, "proj_proj1_sess1")
+        self.assertEqual(self.p.pending_count(), 0)
+        self.assertIsNone(self.p.pop("proj1", shot_id="sh1"))  # 同一登记的双键一并清除
+        self.assertIsNone(self.p.pop("proj1", shot_index=2))
+
+    def test_no_session_id_is_ignored(self):
+        self.p.register("proj1", "sh1", 1, "")
+        self.assertEqual(self.p.pending_count(), 0)
+
+    def test_stale_entries_expire(self):
+        self.p.register("proj2", "sh2", None, "s2")
+        with self.p._LOCK:
+            for e in self.p._PENDING.values():
+                e.created_at -= self.p.TTL_SECONDS + 1
+        self.assertEqual(self.p.pending_count(), 0)
+        self.assertIsNone(self.p.pop("proj2", shot_id="sh2"))
+
+    def test_project_isolation(self):
+        self.p.register("projA", "sh1", 1, "sessA")
+        self.assertIsNone(self.p.pop("projB", shot_id="sh1"))
+        self.assertIsNotNone(self.p.pop("projA", shot_id="sh1"))
+
+
+class TestClayResultRoute(unittest.TestCase):
+    """POST /agent/stage/clay-result：回执路由接线与对账（无登记不打扰任何会话）。"""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            from fastapi.testclient import TestClient
+            from app import main as main_mod
+        except Exception as e:
+            raise unittest.SkipTest(f"TestClient / app.main 不可用: {e}")
+        cls.client = TestClient(main_mod.app)
+
+    def setUp(self):
+        from app.director_stage import pending
+        self.p = pending
+        with pending._LOCK:
+            pending._PENDING.clear()
+
+    def tearDown(self):
+        with self.p._LOCK:
+            self.p._PENDING.clear()
+
+    def test_no_pending_returns_no_pending(self):
+        r = self.client.post("/api/v1/agent/stage/clay-result", json={
+            "project_id": "proj_x", "shot_id": "sh1", "shot_index": 1,
+            "ok": True, "video_url": "/storage/videos/x.mp4",
+        })
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json().get("status"), "no_pending")
+
+    def test_pending_without_live_session_consumes_and_returns_no_session(self):
+        self.p.register("proj_x", "sh1", 1, "proj_proj_x_sess_dead")
+        r = self.client.post("/api/v1/agent/stage/clay-result", json={
+            "project_id": "proj_x", "shot_id": "sh1", "shot_index": 1,
+            "ok": True, "video_url": "/storage/videos/x.mp4", "secs": 2.5,
+        })
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json().get("status"), "no_session")
+        self.assertEqual(self.p.pending_count(), 0)
+        # 回执被消费：同一登记再来一次就是 no_pending（不会重复唤醒）
+        r2 = self.client.post("/api/v1/agent/stage/clay-result", json={
+            "project_id": "proj_x", "shot_id": "sh1",
+        })
+        self.assertEqual(r2.json().get("status"), "no_pending")
+
+
 class TestMcpSurface(unittest.TestCase):
     def test_tools_registered(self):
         from app.mcp.server import mcp_registry
         names = {t.name for t in mcp_registry.get_all_tools()}
         self.assertIn("stage_get_state", names)
         self.assertIn("stage_control", names)
+        self.assertIn("stage_export_clay", names)
 
     def test_mode_policy_entries(self):
         from app.agent import mode_policy

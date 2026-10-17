@@ -47,7 +47,7 @@ class AgentLoop:
         max_steps: Optional[int] = None,
         agent_profile: Any = None,
     ):
-        self.session = Session.open(session_id, store=store)
+        self.session = Session.open(session_id, store=store, strict=True)
         try:
             from app.agent.mode_policy import normalize_run_mode, behavior_of
             self.run_mode = normalize_run_mode(run_mode)
@@ -60,7 +60,22 @@ class AgentLoop:
         # /plan off 回到进入计划前的行为（如 创造+自动），避免把行为维度一并重置
         self._pre_plan_run_mode = "approve"
         self.context: Dict[str, Any] = dict(context or {})
-        self.inbox = Inbox(on_wake=self._wake)
+        # durable inbox：重启恢复未消费输入（排除 goal 提醒——由目标驱动重新生成，防重复计轮）
+        _restore: List[Dict[str, Any]] = []
+        try:
+            _restore = [
+                x for x in self.session.pending_inbox_snapshot()
+                if str(((x or {}).get("message") or {}).get("source") or "") != "goal"
+            ]
+        except Exception:
+            _restore = []
+        self.inbox = Inbox(on_wake=self._wake, session=self.session, restore=_restore)
+        # 自动唤醒预算（对标 dsh maxConsecutiveWakes）：后台任务/子代理连环完成最多自动开 N 轮，
+        # 用户消息被领取即重置；超预算降级为静默注入，防自激唤醒环。
+        self._auto_wake_budget = _env_int("AGENT_AUTO_WAKE_BUDGET", 3)
+        self._auto_wake_full = self._auto_wake_budget
+        self._header_logged_this_turn = 0
+        self._turn_system_text = ""
         self._sinks: List[Sink] = []
         self._driver: Optional[asyncio.Task] = None
         self._open_turn = False
@@ -92,7 +107,7 @@ class AgentLoop:
         try:
             from app.agent.runtime.jobs import JobManager
             self.jobs = JobManager(self.session, self._emit, self.pipeline.execute)
-            self.jobs.notify_fn = lambda text: self.inbox.followup(text, source="job")
+            self.jobs.notify_fn = self._notify_job_done
             # 后台任务执行时读取实时 run_mode：运行中切「自动」也能立即生效
             self.jobs.get_run_mode = lambda: self.run_mode
             self.pipeline.jobs = self.jobs
@@ -157,6 +172,14 @@ class AgentLoop:
             except Exception:
                 plan_text = str(approved)
             text = f"{text}\n\n【用户已批准的执行计划（请严格按步骤执行；偏离需说明理由）】\n{plan_text[:6000]}"
+            # 计划批准审计（对标 dsh plan/approve 决议留痕）：批准事实落账，可回放
+            try:
+                self.session.append(E.PLAN_APPROVED, {
+                    "source": "user", "plan_chars": len(plan_text),
+                    "run_mode": self.run_mode,
+                })
+            except Exception:
+                pass
         self.inbox.followup(text, source="user", meta={"attachments": attachments} if attachments else None)
 
     def set_run_mode(self, run_mode: str) -> None:
@@ -231,6 +254,32 @@ class AgentLoop:
 
     def resolve_approval(self, approval_id: str, approved: bool) -> bool:
         return self.pipeline.resolve_approval(approval_id, approved)
+
+    def resolve_question(self, question_id: str, selections: Optional[List[str]] = None,
+                         custom: str = "") -> bool:
+        return self.pipeline.resolve_question(question_id, selections, custom)
+
+    def notify(self, text: str, source: str = "system") -> None:
+        """外部完成通知（后台任务 / 前端回执等）：运行中→插话（进当前轮下一步）；空闲→唤醒新轮（受预算约束）。
+
+        对齐 dsh：busy → steer/inject；idle → followup 但受 maxConsecutiveWakes 约束，
+        超预算降级静默注入（结果仍可达、不丢，但不再无界自激开轮）。
+        """
+        try:
+            if self.is_running():
+                self.inbox.steer(text, source=source)
+                return
+        except Exception:
+            pass
+        if self._auto_wake_budget <= 0:
+            self.inbox.inject(text, source=source, form="notice")
+            return
+        self._auto_wake_budget -= 1
+        self.inbox.followup(text, source=source)
+
+    def _notify_job_done(self, text: str) -> None:
+        """后台任务/子代理完成通知（保留原入口，语义与 notify 一致）。"""
+        self.notify(text, source="job")
 
     async def abort(self, cause: str = "user") -> None:
         self.inbox.clear()
@@ -318,6 +367,13 @@ class AgentLoop:
         claimed = self.inbox.claim()
         if not claimed:
             return
+        # 用户消息被领取 → 重置自动唤醒预算（人已接手推进，解除后台通知的防自激限流）
+        try:
+            if any(getattr(m, "source", "") == "user" for m in claimed):
+                self._auto_wake_budget = self._auto_wake_full
+        except Exception:
+            pass
+        self._header_logged_this_turn = 0
         self._turn_seq += 1
         self._run_id = f"{self.session.id}_{int(time.time())}_{uuid.uuid4().hex[:6]}"
         self._turn_started_at = time.time()
@@ -332,6 +388,13 @@ class AgentLoop:
         reason = "completed"
         final_text = ""
         safety_cap = self._max_steps
+        _llm_token = None
+        try:
+            from app.agent.llm.adapter import push_chat_override
+            from app.llm.plaza import chat_override_from_context
+            _llm_token = push_chat_override(chat_override_from_context(self.context))
+        except Exception:
+            _llm_token = None
         try:
             for m in claimed:
                 self.session.append(E.USER_MESSAGE, m.to_event_data())
@@ -349,11 +412,12 @@ class AgentLoop:
                     system_text = f"{system_text}\n\n{_profile.system_prompt}"
                 except Exception:
                     pass
-            self.session.append(E.SYSTEM_MESSAGE, {"text": system_text})
+            self._turn_system_text = system_text
+            # 幂等 append：系统提示词/运行时上下文与上次一致时不重复落账（稳定 KV-cache 前缀）
+            self.session.append_system_if_changed(system_text)
             context_block = build_context_block(self.context)
             if context_block:
-                # 运行时上下文是模型可见输入：以 user 消息形式落账，附在本轮输入之后
-                self.session.append(E.USER_MESSAGE, {"text": context_block, "source": "system", "form": "context"})
+                self.session.append_context_if_changed(context_block)
             # 画布「加入会话」节点的已有产出：自动作为媒体附件注入（图片始终；视频/音频按开关）
             try:
                 from app.agent.runtime.attachments import attachments_from_focus_nodes
@@ -389,20 +453,17 @@ class AgentLoop:
                 try:
                     try:
                         from app.agent.runtime.compaction import maintain_context
-                        await maintain_context(self.session, emit=self._emit)
+                        await maintain_context(self.session, emit=self._emit,
+                                               system_text=self._turn_system_text or None)
                     except Exception:
                         pass
                     messages = self.session.derive_messages(system_text=system_text)
                     cfg = adapter.resolve()
-                    self.session.append(E.REQUEST_HEADER, {
-                        "provider": cfg.get("endpoint", ""),
-                        "model": cfg.get("model", ""),
-                        "tools_count": len(tools),
-                        "purpose": "plan" if self.plan_mode else self.mode,
-                    })
+                    self._log_request_header(cfg, tools)
                     reply = await self._call_model(messages, tools)
                     truncated = reply.finish_reason == "length"
-                    tool_calls = [] if truncated else list(reply.tool_calls)
+                    # 截断时也保留模型实际发出的调用（日志事实）；非法参数在被丢弃时补错误结果配对
+                    tool_calls = list(reply.tool_calls)
                     self.session.append(E.ASSISTANT_MESSAGE, {
                         "text": reply.content or "",
                         "thinking": reply.reasoning or "",
@@ -416,22 +477,37 @@ class AgentLoop:
                     if truncated:
                         trunc_streak += 1
                         # 长思考/长参数吃满输出上限（reasoning 也计入 completion_tokens）时
-                        # finish_reason=length：截断的工具调用一律丢弃（JSON 不可信），
-                        # 但不因此结束回合——明确要求"停止展开思考、参数从简、立刻给出可解析调用"后继续下一步，
-                        # 让同一回合内仍能产出执行指令；连续多次截断才终止，避免死循环。
-                        if reply.tool_calls:
-                            await self._emit({"event": "error", "message": "模型输出达到长度上限，工具调用被截断已丢弃；正在要求模型精简参数后重试…"})
+                        # finish_reason=length：块级保留（对标 dsh BlockAssembler）——
+                        # 只丢弃参数非法/不完整的调用，完整合法的调用照常执行；
+                        # 随后注入"停止展开思考、参数从简"提示并在同一回合内继续；
+                        # 连续多次截断才终止，避免死循环。
+                        _good_t = [tc for tc in reply.tool_calls if getattr(tc, "arguments_valid", True)]
+                        _bad_t = [tc for tc in reply.tool_calls if not getattr(tc, "arguments_valid", True)]
+                        if _bad_t:
+                            await self._emit({"event": "error",
+                                              "message": f"模型输出达到长度上限：{len(_bad_t)} 个不完整工具调用已丢弃"
+                                                         + (f"，{len(_good_t)} 个完整调用照常执行" if _good_t else "")
+                                                         + "…"})
+                        for tc in _bad_t:
+                            _err_t = "工具参数 JSON 不完整（输出被截断），已跳过执行；请精简参数后重试。"
+                            self.session.append(E.TOOL_CALL, {"call_id": tc.id, "name": tc.name, "arguments": {}})
+                            self.session.append(E.TOOL_RESULT, {"call_id": tc.id, "name": tc.name,
+                                                                "status": "error", "result": None, "error": _err_t})
+                        if _good_t:
+                            # 完整合法的调用照常执行（块级保留：截断不牵连可用调用）
+                            await self._execute_tools(_good_t)
                         if trunc_streak <= 2:
                             await self._emit({"event": "agent_thinking", "message": f"输出达到长度上限被截断（第 {trunc_streak} 次），正压缩思考继续执行…"})
                             self.session.append(E.USER_MESSAGE, {
                                 "text": (
                                     "[系统] 你上一条回复在思考/输出中途因输出长度上限被截断，"
-                                    "其中不完整的工具调用已全部丢弃，尚未产出可执行指令。"
+                                    "不完整的工具调用已丢弃（完整合法的已执行）。"
                                     "请立刻直接行动：不要复述思考、不要解释，优先输出下一步工具调用；"
                                     "参数务必从简且一次给出完整合法 JSON（长文档/长文本拆成多次调用分步提交）。"
                                 ),
                                 "source": "system", "form": "notice",
                             })
+                            self._claim_steers()
                             continue
                         reason = "max-tokens"
                         final_text = ("模型输出连续达到长度上限，未能产出完整执行指令；"
@@ -494,6 +570,12 @@ class AgentLoop:
                 if reason in ("error", "max-steps"):
                     break
         finally:
+            if _llm_token is not None:
+                try:
+                    from app.agent.llm.adapter import pop_chat_override
+                    pop_chat_override(_llm_token)
+                except Exception:
+                    pass
             if self._open_turn:
                 self._close_turn(reason)
             self._last_turn_reason = reason
@@ -525,6 +607,31 @@ class AgentLoop:
             self._open_step = False
 
     # ── 工具执行 ─────────────────────────────────────────
+    # 并发安全工具（只读/查询为主）：同一步内相邻调用并行执行（对标 dsh 并行工具调度）。
+    # 未列出的工具一律独占执行（变更/生成类不并行；保守优先，宁可慢不撞车）。
+    _PARALLEL_SAFE_TOOLS = frozenset({
+        "list_assets", "get_asset", "canvas_query", "canvas_query_assets",
+        "list_image_providers", "list_voice_providers", "list_video_providers",
+        "list_voices", "list_comfyui_workflows", "list_custom_providers",
+        "get_provider_code", "provider_key_status", "fs_read", "read_skill",
+        "view_media", "search_tools", "job_list", "job_status", "task_status",
+        "subagent_list", "subagent_status", "onekey_summary", "onekey_review",
+        "stage_get_state", "list_custom_nodes",
+    })
+
+    @classmethod
+    def _is_parallel_safe(cls, name: str) -> bool:
+        try:
+            if name in cls._PARALLEL_SAFE_TOOLS:
+                return True
+            from app.agent.tools.registry import tool_view
+            t = tool_view.get(name)
+            if t is not None and getattr(t, "concurrency_safe", None) is True:
+                return True
+        except Exception:
+            pass
+        return False
+
     def _fill_tool_results(self, tool_calls: List[Any], error: str) -> None:
         """中断/异常时为未结算的工具调用补错误结果，保证历史 tool_calls 全部有响应。"""
         for tc in tool_calls:
@@ -534,7 +641,47 @@ class AgentLoop:
             })
 
     async def _execute_tools(self, tool_calls: List[Any]) -> None:
-        for idx, tc in enumerate(tool_calls):
+        max_par = max(1, min(_env_int("AGENT_MAX_PARALLEL_TOOL_CALLS", 4), 8))
+        i, n = 0, len(tool_calls)
+        while i < n:
+            if max_par > 1 and self._is_parallel_safe(getattr(tool_calls[i], "name", "")):
+                j = i
+                while (j < n and (j - i) < max_par
+                       and self._is_parallel_safe(getattr(tool_calls[j], "name", ""))):
+                    j += 1
+                if j - i >= 2:
+                    await self._execute_tools_parallel(tool_calls[i:j])
+                    i = j
+                    continue
+            await self._execute_tool(tool_calls[i])
+            i += 1
+
+    async def _execute_tool(self, tc: Any) -> None:
+        self.session.append(E.TOOL_CALL, {
+            "call_id": tc.id, "name": tc.name, "arguments": tc.parsed or {},
+        })
+        await self._emit({
+            "event": "tool_calling", "tool_name": tc.name,
+            "arguments": tc.parsed or {}, "status": "executing",
+        })
+        _t0 = time.time()
+        try:
+            outcome = await self.pipeline.execute(
+                tc.id, tc.name, tc.parsed or {},
+                project_context=(self.context or {}).get("project"),
+                run_mode=self.run_mode,
+            )
+        except asyncio.CancelledError:
+            self._fill_tool_results([tc], "用户中止，工具结果未知（恢复后请先检查外部状态再重试）。")
+            raise
+        except Exception as e:
+            self._fill_tool_results([tc], f"工具执行异常: {e}")
+            raise
+        await self._settle_tool_result(tc, outcome, _t0)
+
+    async def _execute_tools_parallel(self, group: List[Any]) -> None:
+        """并行执行一组并发安全调用；事件与结果按模型序落账（与顺序路径完全同形）。"""
+        for tc in group:
             self.session.append(E.TOOL_CALL, {
                 "call_id": tc.id, "name": tc.name, "arguments": tc.parsed or {},
             })
@@ -542,65 +689,137 @@ class AgentLoop:
                 "event": "tool_calling", "tool_name": tc.name,
                 "arguments": tc.parsed or {}, "status": "executing",
             })
-            _t0 = time.time()
+        t0s = {id(tc): time.time() for tc in group}
+
+        async def _one(tc: Any) -> Any:
             try:
-                outcome = await self.pipeline.execute(
+                return await self.pipeline.execute(
                     tc.id, tc.name, tc.parsed or {},
                     project_context=(self.context or {}).get("project"),
                     run_mode=self.run_mode,
                 )
             except asyncio.CancelledError:
-                self._fill_tool_results(tool_calls[idx:],
-                                        "用户中止，工具结果未知（恢复后请先检查外部状态再重试）。")
                 raise
             except Exception as e:
-                self._fill_tool_results(tool_calls[idx:], f"工具执行异常: {e}")
-                raise
-            self.session.append(E.TOOL_RESULT, {
-                "call_id": tc.id, "name": tc.name, "status": outcome.status,
-                "result": outcome.result if outcome.status == "success" else None,
-                "model_content": outcome.model_content or "",
-                "error": outcome.error, "meta": outcome.meta or None,
-            })
-            await self._emit({
-                "event": "tool_result", "tool_name": tc.name, "status": outcome.status,
-                "result": outcome.result if outcome.status == "success" else None,
-                "error": outcome.error, "meta": outcome.meta or None,
-            })
-            # 审计：被拒（denied）/超时（error）也会走到这里，正好把"没执行成功"的原因留痕
-            self._trace("tool", {
-                "name": tc.name,
-                "status": outcome.status,
-                "elapsed_ms": int((time.time() - _t0) * 1000),
-                "error": ((outcome.error or "")[:300] or None),
-                # 只记参数名不记值（provider_* 会带 api_key）
-                "arg_keys": sorted((tc.parsed or {}).keys()),
-                "spill": (outcome.meta or {}).get("spill_path"),
-            })
-            if outcome.additional_context:
-                self.inbox.inject(outcome.additional_context, source="plugin", form="notice")
-            # 多模态回投：工具产物（图/视频/音频）作为附件注入，让模型下一步"看到"结果
-            if outcome.status == "success":
-                try:
-                    atts = list((outcome.meta or {}).get("media_attachments") or [])
-                    if not atts:
-                        from app.agent.runtime.attachments import attachments_from_tool_result
-                        atts = attachments_from_tool_result(tc.name, outcome.result)
-                    atts = [a for a in atts if a.get("ref") and a["ref"] not in self._seen_media_refs]
-                    if atts:
-                        for a in atts:
-                            self._seen_media_refs.add(a["ref"])
-                        self.session.append(E.USER_MESSAGE, {
-                            "text": f"【工具 {tc.name} 的媒体产物（自动附带）】",
-                            "source": "tool-media", "form": "notice",
-                            "meta": {"attachments": atts},
-                        })
-                        await self._emit({"event": "media_attached", "tool_name": tc.name,
-                                          "items": [{k: a.get(k) for k in ("kind", "name", "ref")} for a in atts]})
-                except Exception:
-                    pass
+                from app.agent.tools.pipeline import ToolOutcome
+                return ToolOutcome(tc.id, tc.name, "error", error=f"工具执行异常: {e}")
+
+        tasks = [asyncio.create_task(_one(tc)) for tc in group]
+        try:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+        except asyncio.CancelledError:
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
+            self._fill_tool_results(group, "用户中止，工具结果未知（恢复后请先检查外部状态再重试）。")
+            raise
+        for tc, res in zip(group, results):
+            if isinstance(res, BaseException):
+                err = "已取消（结果未知）" if isinstance(res, asyncio.CancelledError) else str(res)[:300]
+                self.session.append(E.TOOL_RESULT, {
+                    "call_id": tc.id, "name": tc.name, "status": "error", "result": None, "error": err,
+                })
+                await self._emit({"event": "tool_result", "tool_name": tc.name,
+                                  "status": "error", "result": None, "error": err})
+                continue
+            await self._settle_tool_result(tc, res, t0s.get(id(tc), time.time()))
+
+    async def _settle_tool_result(self, tc: Any, outcome: Any, _t0: float) -> None:
+        """工具结果结算（单执行/并行共用）：落账 → 实时事件 → 审计 → 上下文注入 → 媒体回投。"""
+        self.session.append(E.TOOL_RESULT, {
+            "call_id": tc.id, "name": tc.name, "status": outcome.status,
+            "result": outcome.result if outcome.status == "success" else None,
+            "model_content": outcome.model_content or "",
+            "error": outcome.error, "meta": outcome.meta or None,
+        })
+        await self._emit({
+            "event": "tool_result", "tool_name": tc.name, "status": outcome.status,
+            "result": outcome.result if outcome.status == "success" else None,
+            "error": outcome.error, "meta": outcome.meta or None,
+        })
+        # 审计：被拒（denied）/超时（error）也会走到这里，正好把"没执行成功"的原因留痕
+        self._trace("tool", {
+            "name": tc.name,
+            "status": outcome.status,
+            "elapsed_ms": int((time.time() - _t0) * 1000),
+            "error": ((outcome.error or "")[:300] or None),
+            # 只记参数名不记值（provider_* 会带 api_key）
+            "arg_keys": sorted((tc.parsed or {}).keys()),
+            "spill": (outcome.meta or {}).get("spill_path"),
+        })
+        if outcome.additional_context:
+            self.inbox.inject(outcome.additional_context, source="plugin", form="notice")
+        # 多模态回投：工具产物（图/视频/音频）作为附件注入，让模型下一步"看到"结果
+        if outcome.status == "success":
+            try:
+                atts = list((outcome.meta or {}).get("media_attachments") or [])
+                if not atts:
+                    from app.agent.runtime.attachments import attachments_from_tool_result
+                    atts = attachments_from_tool_result(tc.name, outcome.result)
+                atts = [a for a in atts if a.get("ref") and a["ref"] not in self._seen_media_refs]
+                if atts:
+                    for a in atts:
+                        self._seen_media_refs.add(a["ref"])
+                    self.session.append(E.USER_MESSAGE, {
+                        "text": f"【工具 {tc.name} 的媒体产物（自动附带）】",
+                        "source": "tool-media", "form": "notice",
+                        "meta": {"attachments": atts},
+                    })
+                    await self._emit({"event": "media_attached", "tool_name": tc.name,
+                                      "items": [{k: a.get(k) for k in ("kind", "name", "ref")} for a in atts]})
+            except Exception:
+                pass
 
     # ── 模型调用（流式 + 重试）────────────────────────────
+    def _log_request_header(self, cfg: Dict[str, Any], tools: List[Dict[str, Any]]) -> None:
+        """请求头按变更落账（对标 dsh request/header）：首次/路由变更/每轮首步才记录。
+
+        模型热切换时写入 durable 用户可见通知（dsh modelSwitchNotice 同形）：
+        上一段助手回复由旧模型生成、会话从此刻起使用新模型——宁可重复，不可丢失。
+        """
+        key = {
+            "provider": str(cfg.get("endpoint", "")),
+            "model": str(cfg.get("model", "")),
+            "tools_count": len(tools),
+            "purpose": "plan" if self.plan_mode else self.mode,
+        }
+        prev: Optional[Dict[str, Any]] = None
+        try:
+            for ev in reversed(self.session.events):
+                if ev.get("type") == E.REQUEST_HEADER:
+                    prev = ev.get("data") or {}
+                    break
+        except Exception:
+            prev = None
+        route_changed = bool(prev) and (
+            prev.get("provider") != key["provider"] or prev.get("model") != key["model"]
+        )
+        if route_changed:
+            try:
+                self.session.append(E.USER_MESSAGE, {
+                    "text": (
+                        f"[模型已切换：{prev.get('model') or '未知'} → {key['model'] or '未知'}；"
+                        f"此前的助手回复由 {prev.get('model') or '旧模型'} 生成，会话继续使用 {key['model'] or '新模型'}]"
+                    ),
+                    "source": "system", "form": "notice",
+                })
+            except Exception:
+                pass
+        need = (
+            prev is None
+            or route_changed
+            or self._header_logged_this_turn == 0
+            or prev.get("tools_count") != key["tools_count"]
+            or prev.get("purpose") != key["purpose"]
+        )
+        if need:
+            reason = "initial" if prev is None else ("change" if route_changed else "series")
+            try:
+                self.session.append(E.REQUEST_HEADER, {**key, "reason": reason})
+            except Exception:
+                pass
+        self._header_logged_this_turn += 1
+
     def _tool_schemas(self) -> List[Dict[str, Any]]:
         if self.mode != "execute":
             return []
@@ -624,7 +843,9 @@ class AgentLoop:
             from app.agent.runtime.compaction import is_context_overflow_error, maybe_compact
             if used >= 2 or not is_context_overflow_error(err):
                 return False
-            await maybe_compact(self.session, emit=self._emit, force=True)
+            await maybe_compact(self.session, emit=self._emit, force=True,
+                                system_text=(self._turn_system_text or None),
+                                trigger="context-overflow")
             await self._emit({"event": "agent_thinking", "message": "模型上下文超限，已压缩历史后重试本步…"})
             return True
         except Exception:
@@ -680,8 +901,23 @@ class AgentLoop:
                     await self._emit({"event": "agent_thinking_end"})
                 self.session.append(E.ASSISTANT_ATTEMPT, {"attempt": attempt, "error": str(e)[:500]})
                 if attempt <= retries:
+                    delay = min(1.5 * attempt, 5.0)
+                    try:
+                        from app.agent.llm.adapter import error_code_of
+                        _code = error_code_of(e)
+                    except Exception:
+                        _code = ""
+                    try:
+                        # 重试留账（对标 dsh llm/retry）：等待排定先落账，崩溃后可见"已安排的重试"
+                        self.session.append(E.LLM_RETRY, {
+                            "attempt": attempt, "max_retries": retries,
+                            "delay_ms": int(delay * 1000), "code": _code or None,
+                            "error": str(e)[:300],
+                        })
+                    except Exception:
+                        pass
                     await self._emit({"event": "agent_thinking", "message": f"模型调用失败，重试 {attempt}/{retries} …"})
-                    await asyncio.sleep(min(1.5 * attempt, 5.0))
+                    await asyncio.sleep(delay)
         raise last_err or LLMTransportError("模型调用失败")
 
     # ── 插话领取 ─────────────────────────────────────────

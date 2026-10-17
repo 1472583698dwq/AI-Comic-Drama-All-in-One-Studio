@@ -61,6 +61,13 @@ export const UI_TEXT = {
   'plugin.goExtensions': { zh: '去扩展页', en: 'Open Extensions' },
   'plugin.on': { zh: '已启用「{name}」，它的贡献即时上线', en: '“{name}” enabled — its contributions are live' },
   'plugin.off': { zh: '已停用「{name}」，它带进来的贡献已按来源回滚', en: '“{name}” disabled — its contributions rolled back by source' },
+  'plugin.delete': { zh: '删除', en: 'Delete' },
+  'plugin.deleteTitle': { zh: '删除插件', en: 'Delete plugin' },
+  'plugin.deleteMessage': { zh: '确定删除「{name}」吗？这个包带进来的生成源、技能、主题等会一并回滚，同名的自建内容不会动。', en: 'Delete “{name}”? Contributions it brought in (providers, skills, themes, and the rest) are rolled back. Standalone items with the same name are left alone.' },
+  'plugin.deleteConfirmBtn': { zh: '确认删除', en: 'Delete' },
+  'plugin.deleteCancel': { zh: '取消', en: 'Cancel' },
+  'plugin.deleted': { zh: '已删除「{name}」', en: 'Deleted “{name}”' },
+  'plugin.deleteFailed': { zh: '删除失败', en: 'Delete failed' },
 
   /* ── 前端版本分区 ── */
   'variant.hint': { zh: '上面四类管「存不存在」，这里管「用哪一版」——切版本不改后端能力、不改接口准入，只换这一页的渲染实现。当前实现登记为保底版本（默认激活），重构新版以占位条目登记，用来验证「切过去 → 即时生效 → 切回来」。', en: 'The four families above control existence; this one controls form. Switching changes neither backend capability nor API admission — only the page implementation. The current build is registered as the fallback version (active by default); the refactor registers a placeholder so the switch-back path is verifiable today.' },

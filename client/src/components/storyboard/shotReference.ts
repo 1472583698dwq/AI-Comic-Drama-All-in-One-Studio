@@ -123,6 +123,33 @@ export function cameraIntentSuffix(shot: any): string {
   return ` [运镜: ${[f, m].filter(Boolean).join(' · ')}${lens}]`;
 }
 
+/**
+ * 参考图点名。顺序与 buildShotReferenceInputs 的 reference_images 一致：
+ * 角色，然后场景，然后构图白模。提示词里已经写了 @图片 时不再追加。
+ */
+export function referenceMentionSuffix(shot: any, project: any): string {
+  const lines: string[] = [];
+  let n = 1;
+  for (const r of boundCharRefs(shot, project)) {
+    lines.push(`@图片${n} 作为角色「${r.name}」的参考`);
+    n += 1;
+  }
+  if (shot?.scene_ref_image) {
+    lines.push(`@图片${n} 作为场景参考`);
+    n += 1;
+  }
+  if (shot?.previz_url) {
+    lines.push(`@图片${n} 作为构图参考`);
+  }
+  return lines.length ? `\n${lines.join('\n')}` : '';
+}
+
+export function withReferenceMentions(prompt: string, shot: any, project: any): string {
+  if (!prompt || /@图片\d+/.test(prompt)) return prompt;
+  const suffix = referenceMentionSuffix(shot, project);
+  return suffix ? `${prompt}${suffix}` : prompt;
+}
+
 /** 把相机意图补进 prompt；已含 [Camera: / [运镜: 的不动（导演台保存的优先） */
 export function withCameraIntent(prompt: string, shot: any): string {
   if (!prompt) return prompt;

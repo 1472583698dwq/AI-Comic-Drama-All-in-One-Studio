@@ -1,6 +1,7 @@
 import React, { Suspense } from 'react';
 import { HomeView } from '../../views/HomeView';
 import { ProjectDashboard } from '../../views/ProjectDashboard';
+import { EpisodesBoard } from '../../views/EpisodesBoard';
 import { AssetsHub } from '../../components/asset/AssetsHub';
 import { ShotInspector } from '../../components/storyboard/ShotInspector';
 import { Director3DStage } from '../../components/director3d/Director3DStage';
@@ -157,6 +158,7 @@ const GLOBAL_PAGE_IDS: readonly string[] = ['home', 'projects', 'config'];
 const PAGE_IMPLS: PageImpl[] = [
   { id: 'home', order: 10, view: HomeView },
   { id: 'projects', order: 20, view: ProjectDashboard, nextView: NextProjectsPage },
+  { id: 'episodes', order: 25, view: EpisodesBoard },
   // 角色设定并入素材库：两个页签都落到同一个容器，按页签决定显示「素材」还是「角色」
   { id: 'assets', order: 30, view: AssetsHub },
   { id: 'characters', order: 40, view: AssetsHub },

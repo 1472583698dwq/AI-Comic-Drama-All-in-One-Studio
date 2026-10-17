@@ -95,6 +95,8 @@ storage/setup.json
 storage/config_store.json
 # 功能级开关（L2）的运行时状态：与 config_store.json 同类，本机自持、不入库
 storage/features.json
+# LLM 广场（自定义 LLM 源）：内含用户填写的 API Key，与 config_store.json 同类，严禁入库
+storage/llm_plaza.json
 
 # ===== Temp =====
 tmp/

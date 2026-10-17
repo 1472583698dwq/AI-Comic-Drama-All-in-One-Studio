@@ -8,13 +8,33 @@ from app.providers.asset.manager import asset_manager
 
 router = APIRouter()
 
+def _project_exists(project_id: str) -> bool:
+    """目标项目是否存在（用于共享/复制的目标校验）。"""
+    try:
+        from app.providers.project.manager import PROJECTS_ROOT, _resolve_id
+        rid = _resolve_id(project_id)
+        return os.path.isdir(os.path.join(PROJECTS_ROOT, rid))
+    except Exception:
+        return False
+
+def _parse_json_list(raw: Optional[str]) -> List[str]:
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return [str(x) for x in parsed]
+        return [str(parsed)]
+    except Exception:
+        return [t.strip() for t in raw.split(",") if t.strip()]
+
 @router.get("/assets/stats")
-async def get_asset_stats():
-    return asset_manager.get_stats()
+async def get_asset_stats(project_id: Optional[str] = Query(None, description="项目口径统计（默认全局）")):
+    return asset_manager.get_stats(project_id=project_id)
 
 @router.get("/assets/tags")
-async def get_asset_tags(q: Optional[str] = None):
-    return {"tags": asset_manager.search_tags(q)}
+async def get_asset_tags(q: Optional[str] = None, project_id: Optional[str] = Query(None)):
+    return {"tags": asset_manager.search_tags(q, project_id=project_id)}
 
 @router.get("/assets")
 async def list_assets(
@@ -23,15 +43,63 @@ async def list_assets(
     tag: Optional[str] = Query(None),
     q: Optional[str] = Query(None, description="关键词搜索 名称/描述/提示词/标签"),
     project_id: Optional[str] = Query(None),
-    scope: Optional[str] = Query(None, description="project|global|all"),
+    scope: Optional[str] = Query(None, description="project|global|shared|all（shared=别人共享给我的）"),
     include_shared: bool = Query(True, description="是否包含共享到当前项目的资产"),
     page: int = Query(1, ge=1),
     limit: int = Query(24, ge=1, le=100),
     sort: str = Query("updated_at", description="updated_at|created_at|name"),
+    group: Optional[str] = Query(None, description="分组过滤：分组路径（含子级）或 __none__=未分组"),
 ):
     # scope=all 时不传 scope 过滤
     eff_scope = None if (not scope or scope == "all") else scope
-    return asset_manager.list_assets(category=category, status=status, tag=tag, q=q, project_id=project_id, page=page, limit=limit, sort=sort, scope=eff_scope, include_shared=include_shared)
+    return asset_manager.list_assets(category=category, status=status, tag=tag, q=q, project_id=project_id, page=page, limit=limit, sort=sort, scope=eff_scope, include_shared=include_shared, group=group)
+
+
+# ── 素材分组（L2 分级）────────────────────────────────────────
+# 注意：必须注册在 /assets/{asset_id} 之前，否则 "groups" 会被当成素材 id
+
+@router.get("/assets/groups")
+async def list_asset_groups(project_id: Optional[str] = Query(None)):
+    from app.providers.asset.groups import list_groups, group_counts
+    res = list_groups(project_id)
+    res["counts"] = group_counts(project_id)
+    return res
+
+@router.post("/assets/groups")
+async def create_asset_group(body: dict):
+    from app.providers.asset.groups import create_group
+    scope = body.get("scope") or "project"
+    if scope not in ("project", "global"):
+        raise HTTPException(status_code=400, detail="scope 仅支持 project/global")
+    try:
+        return create_group(body.get("path", ""), project_id=body.get("project_id"), scope=scope)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.put("/assets/groups")
+async def rename_asset_group(body: dict):
+    from app.providers.asset.groups import rename_group
+    scope = body.get("scope") or "project"
+    if scope not in ("project", "global"):
+        raise HTTPException(status_code=400, detail="scope 仅支持 project/global")
+    try:
+        return rename_group(body.get("old_path", ""), body.get("new_path", ""), project_id=body.get("project_id"), scope=scope)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.delete("/assets/groups")
+async def delete_asset_group(
+    path: str = Query(...),
+    project_id: Optional[str] = Query(None),
+    scope: str = Query("project"),
+):
+    from app.providers.asset.groups import delete_group
+    if scope not in ("project", "global"):
+        raise HTTPException(status_code=400, detail="scope 仅支持 project/global")
+    try:
+        return delete_group(path, project_id=project_id, scope=scope)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/assets/batch")
 async def batch_create_assets(
@@ -63,8 +131,6 @@ async def batch_create_assets(
                 continue
             fname = uf.filename or "upload.png"
             base_name = os.path.splitext(fname)[0] or "素材"
-            eff_scope = scope if scope in ("project","global") else "project"
-            eff_proj = None if eff_scope=="global" else project_id
             data = {
                 "name": base_name,
                 "category": category,
@@ -72,8 +138,8 @@ async def batch_create_assets(
                 "tags": tag_list,
                 "visual_prompt": visual_prompt or "",
                 "source": "upload",
-                "project_id": eff_proj,
-                "scope": eff_scope,
+                "project_id": project_id,
+                "scope": scope,
             }
             # REQ-toonflow-canvas 带上 content-type：文件名没有可用扩展名时据此保留真实格式
             asset = asset_manager.create_asset(data, file_bytes=data_bytes, filename=fname, content_type=uf.content_type)
@@ -176,8 +242,6 @@ async def generate_asset(
         with open(src_path, "rb") as f:
             file_bytes = f.read()
         filename = os.path.basename(src_path)
-        eff_scope = scope if scope in ("project","global") else "project"
-        eff_proj = None if eff_scope=="global" else project_id
         data = {
             "name": name,
             "category": category,
@@ -185,8 +249,8 @@ async def generate_asset(
             "tags": tag_list,
             "visual_prompt": prompt,
             "style_preset": style_preset,
-            "project_id": eff_proj,
-            "scope": eff_scope,
+            "project_id": project_id,
+            "scope": scope,
             "source": "generate",
             "extra": {"provider": res.provider, "engine": res.engine, "seed": res.seed, "workflow_id": workflow_id},
         }
@@ -236,17 +300,8 @@ async def create_asset(
                 tag_list = [str(parsed)]
         except Exception:
             tag_list = [t.strip() for t in tags.split(",") if t.strip()]
-    # P0: scope/shared_to 解析
-    parsed_shared = []
-    if shared_to:
-        try:
-            parsed = json.loads(shared_to)
-            parsed_shared = parsed if isinstance(parsed, list) else [str(parsed)]
-        except Exception:
-            parsed_shared = [s.strip() for s in shared_to.split(",") if s.strip()]
-    # scope校验与 project_id 联动
-    eff_scope = scope if scope in ("project", "global") else "project"
-    eff_project_id = None if eff_scope == "global" else project_id
+    # scope/shared_to 解析（归属不变式由 manager 统一收口）
+    parsed_shared = _parse_json_list(shared_to)
     data = {
         "name": name,
         "category": category,
@@ -256,8 +311,8 @@ async def create_asset(
         "visual_prompt": visual_prompt or "",
         "content": content or "",
         "style_preset": style_preset,
-        "project_id": eff_project_id,
-        "scope": eff_scope,
+        "project_id": project_id,
+        "scope": scope,
         "shared_to": parsed_shared,
         "status": status,
         "file_url": file_url,
@@ -297,11 +352,16 @@ async def update_asset(
     scope: Optional[str] = Form(None, description="project|global"),
     shared_to: Optional[str] = Form(None, description="JSON数组"),
     project_id: Optional[str] = Form(None),
+    group_path: Optional[str] = Form(None, description="项目内分组路径，如 角色/主角；空字符串=移出分组"),
     file: Optional[UploadFile] = File(None),
+    actor_project_id: Optional[str] = Form(None, description="操作者项目上下文（写防护）"),
 ):
     existing = asset_manager.get_asset(asset_id)
     if not existing:
         raise HTTPException(status_code=404, detail=f"素材不存在: {asset_id}")
+    actor = actor_project_id or project_id
+    if not asset_manager.writable_by(existing, actor):
+        raise HTTPException(status_code=403, detail="该素材属于其他项目（或为他人共享给你），请先复制到本项目再修改")
     updates = {}
     if name is not None:
         updates["name"] = name
@@ -312,12 +372,7 @@ async def update_asset(
     if description is not None:
         updates["description"] = description
     if tags is not None:
-        try:
-            parsed = json.loads(tags)
-            tag_list = parsed if isinstance(parsed, list) else [str(parsed)]
-        except Exception:
-            tag_list = [t.strip() for t in tags.split(",") if t.strip()]
-        updates["tags"] = tag_list
+        updates["tags"] = _parse_json_list(tags)
     if visual_prompt is not None:
         updates["visual_prompt"] = visual_prompt
     if content is not None:
@@ -334,14 +389,12 @@ async def update_asset(
         updates["lora_trigger"] = lora_trigger
     if voice_id is not None:
         updates["voice_id"] = voice_id
+    if group_path is not None:
+        updates["group_path"] = group_path or None
     if scope is not None:
         updates["scope"] = scope
     if shared_to is not None:
-        try:
-            parsed = json.loads(shared_to)
-            updates["shared_to"] = parsed if isinstance(parsed, list) else [str(parsed)]
-        except Exception:
-            updates["shared_to"] = [s.strip() for s in shared_to.split(",") if s.strip()]
+        updates["shared_to"] = _parse_json_list(shared_to)
     if project_id is not None:
         updates["project_id"] = project_id
     file_bytes = None
@@ -354,51 +407,158 @@ async def update_asset(
     updated = asset_manager.update_asset(asset_id, updates, file_bytes=file_bytes, filename=filename, content_type=content_type)
     return updated
 
-@router.post("/assets/{asset_id}/share")
-async def share_asset(asset_id: str, body: dict):
-    """设为全局或共享到指定项目"""
+@router.post("/assets/{asset_id}/publish")
+async def publish_asset(asset_id: str, body: dict = None):
+    """发布共享：项目素材原地提升为全局（URL 不变，已引用方零影响）。"""
+    body = body or {}
+    actor = body.get("project_id") or body.get("actor_project_id")
+    try:
+        updated = asset_manager.publish_asset(asset_id, actor_project_id=actor)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    if not updated:
+        raise HTTPException(status_code=404, detail=f"素材不存在: {asset_id}")
+    return updated
+
+@router.post("/assets/{asset_id}/unpublish")
+async def unpublish_asset(asset_id: str, body: dict = None):
+    """收回共享：全局素材退回出生项目。force=false 时若有其他项目引用，返回 409 + 引用清单。"""
+    body = body or {}
+    actor = body.get("project_id") or body.get("actor_project_id")
+    force = bool(body.get("force"))
     asset = asset_manager.get_asset(asset_id)
     if not asset:
         raise HTTPException(status_code=404, detail=f"素材不存在: {asset_id}")
-    scope = body.get("scope")  # project | global
-    target_ids = body.get("target_project_ids") or body.get("shared_to") or []
-    updates: dict = {}
-    if scope:
-        if scope not in ("project", "global"):
-            raise HTTPException(status_code=400, detail="scope 仅支持 project/global")
-        updates["scope"] = scope
-        if scope == "global":
-            updates["project_id"] = None
+    origin = asset.origin_project_id
+    refs = [r for r in asset_manager.find_references(asset_id) if r.get("project_id") != origin]
+    if refs and not force:
+        raise HTTPException(status_code=409, detail={
+            "code": "asset_referenced",
+            "message": "该素材已被其他项目引用，回收共享会让对方引用失效。可先复制到那些项目，或强制收回。",
+            "references": refs,
+        })
+    try:
+        updated = asset_manager.unpublish_asset(asset_id, actor_project_id=actor)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    return updated
+
+@router.post("/assets/{asset_id}/share")
+async def share_asset(asset_id: str, body: dict):
+    """共享管理：
+    - scope=global → 发布到全局（等价 /publish）
+    - scope=project → 收回共享（等价 /unpublish，退回出生项目）
+    - target_project_ids → 定向共享给指定项目（接收方只读可见）
+    """
+    asset = asset_manager.get_asset(asset_id)
+    if not asset:
+        raise HTTPException(status_code=404, detail=f"素材不存在: {asset_id}")
+    actor = body.get("project_id") or body.get("actor_project_id")
+    target_ids = body.get("target_project_ids") or body.get("shared_to")
+    scope = body.get("scope")
+    if scope == "global":
+        try:
+            updated = asset_manager.publish_asset(asset_id, actor_project_id=actor)
+        except PermissionError as e:
+            raise HTTPException(status_code=403, detail=str(e))
+        return updated
+    if scope == "project":
+        try:
+            updated = asset_manager.unpublish_asset(asset_id, actor_project_id=actor)
+        except PermissionError as e:
+            raise HTTPException(status_code=403, detail=str(e))
+    elif not asset_manager.writable_by(asset, actor):
+        raise HTTPException(status_code=403, detail="该素材属于其他项目（或为他人共享给你），请先复制到本项目再共享")
     if target_ids is not None:
         if isinstance(target_ids, str):
-            try:
-                target_ids = json.loads(target_ids)
-            except Exception:
-                target_ids = [t.strip() for t in target_ids.split(",") if t.strip()]
-        updates["shared_to"] = target_ids if isinstance(target_ids, list) else []
-    if not updates:
-        raise HTTPException(status_code=400, detail="无可更新字段")
-    updated = asset_manager.update_asset(asset_id, updates)
-    return updated
+            target_ids = _parse_json_list(target_ids)
+        if not isinstance(target_ids, list):
+            raise HTTPException(status_code=400, detail="target_project_ids 需为数组")
+        # 目标项目校验 + 归一
+        from app.providers.asset.manager import _resolve_shared_targets
+        resolved = _resolve_shared_targets(target_ids)
+        invalid = [t for t in target_ids if not _project_exists(str(t))]
+        if invalid:
+            raise HTTPException(status_code=400, detail={"code": "invalid_targets", "message": "以下目标项目不存在", "invalid": invalid})
+        # 不能共享给自己；全局素材无需定向共享
+        cur_asset = asset_manager.get_asset(asset_id)
+        if cur_asset and (cur_asset.scope or "project") == "global":
+            raise HTTPException(status_code=400, detail="全局素材对所有项目可见，无需定向共享")
+        own_pid = cur_asset.project_id if cur_asset else None
+        resolved = [t for t in resolved if t != own_pid]
+        updated = asset_manager.update_asset(asset_id, {"shared_to": resolved})
+        return updated
+    if scope is None:
+        raise HTTPException(status_code=400, detail="无可更新字段（scope / target_project_ids 至少一项）")
+    return asset_manager.get_asset(asset_id)
+
+@router.post("/assets/share/batch")
+async def batch_share_assets(body: dict):
+    """批量共享：{asset_ids, scope?: 'global'|'project', target_project_ids?: [], project_id?: actor}"""
+    asset_ids = body.get("asset_ids") or []
+    if not isinstance(asset_ids, list) or not asset_ids:
+        raise HTTPException(status_code=400, detail="asset_ids 不能为空")
+    results: List[Dict[str, Any]] = []
+    errors: List[Dict[str, Any]] = []
+    for aid in asset_ids:
+        try:
+            cur = asset_manager.get_asset(aid)
+            if not cur:
+                errors.append({"asset_id": aid, "error": "素材不存在"})
+                continue
+            if body.get("scope") == "global":
+                results.append(asset_manager.publish_asset(aid, actor_project_id=body.get("project_id")).model_dump())
+            else:
+                target_ids = body.get("target_project_ids")
+                if target_ids is None:
+                    errors.append({"asset_id": aid, "error": "缺少 target_project_ids"})
+                    continue
+                updated = await share_asset(aid, {"target_project_ids": target_ids, "project_id": body.get("project_id")})
+                results.append(updated.model_dump() if hasattr(updated, "model_dump") else updated)
+        except PermissionError as e:
+            errors.append({"asset_id": aid, "error": str(e)})
+        except HTTPException as e:
+            errors.append({"asset_id": aid, "error": e.detail})
+        except Exception as e:
+            errors.append({"asset_id": aid, "error": str(e)})
+    return {"shared": len(results), "failed": len(errors), "assets": results, "errors": errors}
 
 @router.post("/assets/{asset_id}/copy")
 async def copy_asset(asset_id: str, body: dict):
-    """复制素材到目标项目（文件级拷贝）"""
+    """复制素材到目标项目（文件级拷贝；副本不继承共享关系与发布状态）"""
     target_project_id = body.get("target_project_id") or body.get("project_id")
     if not target_project_id:
         raise HTTPException(status_code=400, detail="需提供 target_project_id")
+    if not _project_exists(target_project_id):
+        raise HTTPException(status_code=400, detail=f"目标项目不存在: {target_project_id}")
     src = asset_manager.get_asset(asset_id)
     if not src:
         raise HTTPException(status_code=404, detail=f"素材不存在: {asset_id}")
     dup = asset_manager.duplicate_asset(asset_id)
     if not dup:
         raise HTTPException(status_code=500, detail="复制失败")
-    # 修正为目标项目归属
-    updated = asset_manager.update_asset(dup.id, {"project_id": target_project_id, "scope": "project"})
+    # 修正为目标项目归属（出生项目=目标项目）
+    updated = asset_manager.update_asset(dup.id, {"project_id": target_project_id, "scope": "project", "origin_project_id": target_project_id, "shared_to": []})
     return updated
 
 @router.delete("/assets/{asset_id}")
-async def delete_asset(asset_id: str):
+async def delete_asset(
+    asset_id: str,
+    project_id: Optional[str] = Query(None, description="操作者项目上下文（写防护）"),
+    force: bool = Query(False, description="跳过引用检查强制删除"),
+):
+    asset = asset_manager.get_asset(asset_id)
+    if not asset:
+        raise HTTPException(status_code=404, detail=f"素材不存在: {asset_id}")
+    if not asset_manager.writable_by(asset, project_id):
+        raise HTTPException(status_code=403, detail="该素材属于其他项目（或为他人共享给你），无法删除")
+    refs = asset_manager.find_references(asset_id)
+    if refs and not force:
+        raise HTTPException(status_code=409, detail={
+            "code": "asset_referenced",
+            "message": "该素材仍被以下项目/画布引用，删除后引用会失效。确认删除请加 force=true。",
+            "references": refs,
+        })
     ok = asset_manager.delete_asset(asset_id)
     if not ok:
         raise HTTPException(status_code=404, detail=f"素材不存在: {asset_id}")

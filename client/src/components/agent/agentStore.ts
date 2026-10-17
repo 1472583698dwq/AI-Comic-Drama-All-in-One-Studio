@@ -11,6 +11,7 @@ import { useProjectStore } from '../../stores/useProjectStore';
 import { useCanvasStore } from '../../stores/useCanvasStore';
 import { getNodeDef } from '../canvas/kit/registry';
 import { toast } from '../../stores/useDialogStore';
+import { useLlmPlazaStore } from '../llm/plazaStore';
 import { agentSocket } from './agentSocket';
 import { clearAgentDraft, useAgentDraftStore } from './agentDraftStore';
 import { collectFromExecutedTools, dispatchSideEffects, reduceAgentEvent } from './agentEventReducer';
@@ -18,7 +19,7 @@ import {
   behaviorOfRunMode, composeRunMode, executionOfRunMode,
 } from './agentTypes';
 import type {
-  AgentAttachment, AgentEvent, AgentMode, AgentSession, ApprovalInfo, BehaviorMode, ChatMsg, ExecutionMode, RunMode, SubAgentInfo, WsStatus,
+  AgentAttachment, AgentEvent, AgentMode, AgentSession, ApprovalInfo, BehaviorMode, ChatMsg, ExecutionMode, QuestionInfo, RunMode, SubAgentInfo, WsStatus,
 } from './agentTypes';
 
 export type AgentScope = 'page' | 'float';
@@ -151,6 +152,8 @@ interface AgentStoreState {
   wsStatus: WsStatus;
   streamingMsgId: string | null;
   approvals: Record<string, ApprovalInfo>;
+  /** 模型结构化问询（ask_user_question）：待回答的选项卡 */
+  questions: Record<string, QuestionInfo>;
   /** 子代理集群（父会话可见的并行子代理状态） */
   subagents: Record<string, SubAgentInfo>;
   mode: AgentMode;
@@ -183,6 +186,8 @@ interface AgentStoreState {
   executePlan(msgId: string): Promise<void>;
   abort(): void;
   approve(aid: string, ok: boolean): void;
+  /** 回填模型问询（ask_user_question）：选项卡选择或自定义文本 */
+  answerQuestion(qid: string, selections: string[], custom?: string): void;
   clearAll(): Promise<void>;
   applyAgentEvent(ev: AgentEvent): void;
   proposalAction(msgId: string, proposalId: string, kind: 'start' | 'persist' | 'discard' | 'rollback'): Promise<void>;
@@ -404,6 +409,7 @@ export function createAgentStore(scope: AgentScope) {
       wsStatus: agentSocket.status,
       streamingMsgId: null,
       approvals: {},
+      questions: {},
       subagents: {},
       mode: prefs.mode,
       runMode: prefs.runMode,
@@ -416,7 +422,7 @@ export function createAgentStore(scope: AgentScope) {
 
       bindProject(projectId, preferSessionId) {
         if (!projectId) {
-          set({ projectId: null, sessions: [], activeSessionId: '', messages: [], isRunning: false, streamingMsgId: null, approvals: {} });
+          set({ projectId: null, sessions: [], activeSessionId: '', messages: [], isRunning: false, streamingMsgId: null, approvals: {}, questions: {} });
           clearAgentDraft();
           return;
         }
@@ -438,6 +444,7 @@ export function createAgentStore(scope: AgentScope) {
           isRunning: false,
           streamingMsgId: null,
           approvals: {},
+      questions: {},
         });
         const { mode, runMode } = get();
         apiService
@@ -524,6 +531,7 @@ export function createAgentStore(scope: AgentScope) {
           activeSessionId: sess.id,
           messages: sess.messages,
           approvals: {},
+      questions: {},
           streamingMsgId: null,
           isRunning: false,
         });
@@ -546,6 +554,7 @@ export function createAgentStore(scope: AgentScope) {
           mode: target.mode || get().mode,
           ...dimsOf(token),
           approvals: {},
+      questions: {},
           streamingMsgId: null,
           isRunning: false,
           sessions: get().sessions.map((s) => (s.id === id ? { ...s, updated_at: new Date().toISOString() } : s)),
@@ -568,7 +577,7 @@ export function createAgentStore(scope: AgentScope) {
         if (remaining.length === 0) {
           const { mode, runMode } = get();
           const sess = makeSession(scope, '新会话', mode, runMode);
-          set({ sessions: [sess], activeSessionId: sess.id, messages: sess.messages, approvals: {} });
+          set({ sessions: [sess], activeSessionId: sess.id, messages: sess.messages, approvals: {}, questions: {} });
         } else if (activeSessionId === id) {
           const first = [...remaining].sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')))[0];
           const token = composeRunMode(
@@ -582,6 +591,7 @@ export function createAgentStore(scope: AgentScope) {
             mode: first.mode || get().mode,
             ...dimsOf(token),
             approvals: {},
+      questions: {},
             streamingMsgId: null,
             isRunning: false,
           });
@@ -600,6 +610,10 @@ export function createAgentStore(scope: AgentScope) {
         if ((!text && atts.length === 0) || st.isRunning || !st.projectId || !st.activeSessionId) return;
         const isPlanMode = st.behavior === 'plan';
         const ctx: Record<string, any> = { ...buildContext(), run_mode: st.runMode, plan_mode: isPlanMode };
+        const llmPick = useLlmPlazaStore.getState().active;
+        if (llmPick?.supplier_id && llmPick?.model) {
+          ctx.llm = { supplier_id: llmPick.supplier_id, model: llmPick.model };
+        }
         // 长文本粘贴标记：随消息落账，消息列表据此折叠展示（此标记只对当前这条生效）
         let pastedBulk = false;
         try {
@@ -622,7 +636,7 @@ export function createAgentStore(scope: AgentScope) {
           planMode: isPlanMode,
         };
         commitMessages((prev) => [...prev, userMsg, agentMsg]);
-        set({ isRunning: true, streamingMsgId: agentMsg.id, approvals: {}, subagents: {} });
+        set({ isRunning: true, streamingMsgId: agentMsg.id, approvals: {}, questions: {}, subagents: {} });
         // 「添加到会话」是给**这一条消息**指定目标：上面的 buildContext 已经把节点定义
         // 随上下文带出去了，消息发出即消费掉 —— 否则下一轮还挂着上次的焦点会误指向。
         try { useCanvasStore.getState().clearAgentFocusNodes(); } catch { /* ignore */ }
@@ -662,6 +676,10 @@ export function createAgentStore(scope: AgentScope) {
         get().setRunMode(nextToken);
         const text = '按已批准的计划执行';
         const ctx: Record<string, any> = { ...buildContext(), run_mode: nextToken, approved_plan: planText };
+        const llmPick = useLlmPlazaStore.getState().active;
+        if (llmPick?.supplier_id && llmPick?.model) {
+          ctx.llm = { supplier_id: llmPick.supplier_id, model: llmPick.model };
+        }
         const userMsg: ChatMsg = { id: uid('u'), sender: 'user', text, time: nowTime() };
         const agentMsg: ChatMsg = { id: uid('m'), sender: 'agent', text: '', mode: 'execute', time: nowTime(), thinking: '', isThinkingStreaming: true };
         commitMessages((prev) => [
@@ -669,7 +687,7 @@ export function createAgentStore(scope: AgentScope) {
           userMsg,
           agentMsg,
         ]);
-        set({ isRunning: true, streamingMsgId: agentMsg.id, approvals: {}, subagents: {} });
+        set({ isRunning: true, streamingMsgId: agentMsg.id, approvals: {}, questions: {}, subagents: {} });
         await dispatchRun(agentMsg.id, text, ctx, 'execute', nextToken);
       },
 
@@ -699,6 +717,17 @@ export function createAgentStore(scope: AgentScope) {
         set((s) => (s.approvals[aid] ? { approvals: { ...s.approvals, [aid]: { ...s.approvals[aid], decided: ok } } } : {}));
       },
 
+      answerQuestion(qid, selections, custom) {
+        const payload = { action: 'answer_question', question_id: qid, session_id: sessionKey(), selections: selections || [], custom: custom || '' };
+        const sent = agentSocket.send(payload);
+        if (!sent) {
+          apiService.agentAnswerQuestion(sessionKey(), qid, selections || [], custom || '').catch(() => {
+            toast.warning('回答无法送达，后端可能已超时');
+          });
+        }
+        set((s) => (s.questions[qid] ? { questions: { ...s.questions, [qid]: { ...s.questions[qid], answered: true } } } : {}));
+      },
+
       async clearAll() {
         const st = get();
         if (st.isRunning) st.abort();
@@ -707,7 +736,7 @@ export function createAgentStore(scope: AgentScope) {
         agentSocket.send({ action: 'clear_history', session_id: key });
         const reset: ChatMsg[] = [{ id: uid('welcome_'), sender: 'agent', mode: st.mode, text: '记忆已清空，从头开始吧。', time: '就绪' }];
         commitMessages(() => reset);
-        set({ approvals: {}, subagents: {}, streamingMsgId: null, isRunning: false });
+        set({ approvals: {}, questions: {}, subagents: {}, streamingMsgId: null, isRunning: false });
         toast.info('已清空当前会话记忆');
       },
 
@@ -755,6 +784,31 @@ export function createAgentStore(scope: AgentScope) {
           const aid = String(ev.approval_id || '');
           if (aid) {
             set((s) => (s.approvals[aid] ? { approvals: { ...s.approvals, [aid]: { ...s.approvals[aid], decided: !!ev.approved } } } : {}));
+          }
+          return;
+        }
+        if (ev.event === 'question_required') {
+          const qid = String(ev.question_id || '');
+          if (qid) {
+            set((s) => ({
+              questions: {
+                ...s.questions,
+                [qid]: {
+                  question: String(ev.question || ''),
+                  options: Array.isArray(ev.options) ? ev.options.map((o: any) => String(o)) : [],
+                  multi_select: !!ev.multi_select,
+                  detail: String(ev.detail || '') || undefined,
+                  createdAt: Date.now(),
+                },
+              },
+            }));
+          }
+          return;
+        }
+        if (ev.event === 'question_ack') {
+          const qid = String(ev.question_id || '');
+          if (qid) {
+            set((s) => (s.questions[qid] ? { questions: { ...s.questions, [qid]: { ...s.questions[qid], answered: true } } } : {}));
           }
           return;
         }
@@ -849,7 +903,11 @@ export function createAgentStore(scope: AgentScope) {
         if (!shotId || !artifact) return;
         const patch: any = { status: 'completed' };
         if (artifact.kind === 'image') { patch.image_url = artifact.url; patch.image_provider = artifact.tool; }
-        if (artifact.kind === 'video') { patch.video_url = artifact.url; patch.video_provider = artifact.tool; }
+        if (artifact.kind === 'video') {
+          // 白模/预演视频：应用 = 写回本镜参考视频（不覆盖成片 video_url）
+          if (artifact.applyAs === 'previz_video') patch.previz_video_url = artifact.url;
+          else { patch.video_url = artifact.url; patch.video_provider = artifact.tool; }
+        }
         if (artifact.kind === 'audio') { patch.audio_url = artifact.url; patch.audio_provider = artifact.tool; }
         try { ps.updateShot(shotId, patch); } catch {}
         patchMsg(msgId, (m) => ({ ...m, artifacts: (m.artifacts || []).map((x, xi) => (xi === index ? { ...x, applied: true } : x)) }));

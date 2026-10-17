@@ -147,11 +147,11 @@ export const AgentModeView: React.FC = () => {
 
   const {
     sessions, activeSessionId, loadingSessions,
-    messages, isRunning, wsStatus, approvals, subagents, autoAllowTools,
+    messages, isRunning, wsStatus, approvals, questions, subagents, autoAllowTools,
     runMode, permission,
     bindProject, setRunMode, setPermission, setAutoAllow,
     createSession, selectSession, deleteSession,
-    send, steer, executePlan, abort, approve, clearAll, proposalAction, applyArtifact,
+    send, steer, executePlan, abort, approve, answerQuestion, clearAll, proposalAction, applyArtifact,
   } = useAgentStore();
 
   // 项目切换：绑定/加载该项目的页面版会话（与悬浮窗会话隔离）
@@ -282,6 +282,8 @@ export const AgentModeView: React.FC = () => {
                 approvals={approvals}
                 autoAllowTools={autoAllowTools}
                 onApprove={handleApprove}
+                questions={questions}
+                onAnswerQuestion={answerQuestion}
               />
             </div>
           </div>

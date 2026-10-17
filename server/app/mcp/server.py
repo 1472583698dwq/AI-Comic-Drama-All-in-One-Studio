@@ -430,6 +430,20 @@ class MCPServerRegistry:
             return proj.model_dump()
 
         @mcp_app.tool
+        async def episode_manage(action: str = "list", project_id: str = "", episode_id: str = "", title: str = "", scene_indices: list = None, move_to: str = "", count: int = 0) -> dict:
+            """分集管理：list/create/rename/delete/assign/auto_split（项目 → 分集 → 场/镜）"""
+            args: Dict[str, Any] = {"action": action, "count": count}
+            if project_id: args["project_id"] = project_id
+            if episode_id: args["episode_id"] = episode_id
+            if title: args["title"] = title
+            if move_to: args["move_to"] = move_to
+            if scene_indices is not None: args["scene_indices"] = scene_indices
+            res = await mcp_registry.execute_tool("episode_manage", args)
+            if res.status == "success":
+                return res.result or {}
+            raise RuntimeError(res.error or "episode_manage 失败")
+
+        @mcp_app.tool
         async def generate_image(prompt: str, provider: str = "", workflow_id: str = "", aspect_ratio: str = "9:16", style_preset: str = "donghua_xianxia", negative_prompt: str = "", seed: int = 0) -> dict:
             """通用图片生成（动态Provider + 工作流）"""
             from app.providers.image.base import ImageGenerateRequest
@@ -495,26 +509,41 @@ class MCPServerRegistry:
             return {"providers": reg.list_providers()}
 
         @mcp_app.tool
-        async def list_assets(category: str = "", tag: str = "", q: str = "", page: int = 1, limit: int = 12) -> dict:
-            """搜索/列出素材库（支持按 category/tag/q 过滤）"""
+        async def list_assets(category: str = "", tag: str = "", q: str = "", page: int = 1, limit: int = 12, project_id: str = "", scope: str = "all") -> dict:
+            """搜索/列出素材库（默认按当前项目可见性过滤：全局 ∪ 本项目 ∪ 共享给我）"""
             mgr = _lazy_asset_manager()
-            res = mgr.list_assets(category=category or None, tag=tag or None, q=q or None, page=page, limit=limit)
+            res = mgr.list_assets(category=category or None, tag=tag or None, q=q or None, page=page, limit=limit,
+                                  project_id=project_id or None, scope=None if scope in ("", "all") else scope)
             return res
 
         @mcp_app.tool
-        async def get_asset(asset_id: str) -> dict:
-            """获取单个素材详情"""
+        async def get_asset(asset_id: str, project_id: str = "") -> dict:
+            """获取单个素材详情（带 project_id 时校验可见性，防止跨项目读取）"""
             mgr = _lazy_asset_manager()
             asset = mgr.get_asset(asset_id)
             if not asset:
                 raise ValueError(f"素材不存在: {asset_id}")
+            if project_id and not mgr.visible_to(asset, project_id, include_shared=True):
+                raise ValueError(f"素材 {asset_id} 不属于当前项目，也未共享给当前项目")
             return asset.model_dump()
 
         @mcp_app.tool
-        async def create_asset(name: str, category: str = "character", visual_prompt: str = "", description: str = "") -> dict:
-            """创建素材（常用于将生成结果固化为可复用资产）"""
+        async def create_asset(name: str, category: str = "character", visual_prompt: str = "", description: str = "", project_id: str = "", scope: str = "project", tags: list = None) -> dict:
+            """创建素材（默认归属当前项目；无项目上下文时明确落为全局素材）"""
             mgr = _lazy_asset_manager()
-            asset = mgr.create_asset({"name": name, "category": category, "visual_prompt": visual_prompt, "description": description})
+            asset = mgr.create_asset({"name": name, "category": category, "visual_prompt": visual_prompt, "description": description, "project_id": project_id or None, "scope": scope or "project", "tags": tags or []})
+            return asset.model_dump()
+
+        @mcp_app.tool
+        async def publish_asset(asset_id: str, project_id: str = "") -> dict:
+            """把项目素材发布共享到全局素材库（所有项目可见；仅出生项目可发布/收回）"""
+            mgr = _lazy_asset_manager()
+            try:
+                asset = mgr.publish_asset(asset_id, actor_project_id=project_id or None)
+            except PermissionError as e:
+                raise RuntimeError(str(e))
+            if not asset:
+                raise ValueError(f"素材不存在: {asset_id}")
             return asset.model_dump()
 
         @mcp_app.tool
@@ -630,8 +659,32 @@ class MCPServerRegistry:
                     "aspect_ratio": {"type": "string", "enum": ["9:16", "16:9", "1:1"], "default": "9:16"},
                     "project_id": {"type": "string", "description": "落盘目标项目 id（缺省=当前会话项目；无项目上下文则仅返回 JSON）"},
                     "persist": {"type": "boolean", "default": True, "description": "是否落盘到项目（false=只返回摘要，不改项目）"},
+                    "episode_count": {"type": "integer", "minimum": 0, "description": "可选：落盘时按顺序把场均分为 N 集（创建分集并写入 episode_id；0/不传=不分集）"},
                 },
                 "required": ["novel_text"]
+            }
+        ))
+
+        # 1.1 分集管理（项目 → 分集 → 场/镜；加法式结构，既有链路零破坏）
+        self.register_tool(MCPToolDefinition(
+            name="episode_manage",
+            description="[分集] 管理项目分集：list(默认)/create/rename/delete/assign/auto_split。分集归属写在场的 episode_id；分镜台可按集筛选，既有成片/导出链路照旧消费全部场。",
+            category="utility",
+            icon="ListOrdered",
+            author="Studio Core",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list", "create", "rename", "delete", "assign", "auto_split"], "default": "list"},
+                    "project_id": {"type": "string", "description": "目标项目 id（缺省=当前项目上下文）"},
+                    "episode_id": {"type": "string", "description": "rename/delete/assign 的目标分集"},
+                    "title": {"type": "string", "description": "create/rename 的标题"},
+                    "scene_indices": {"type": "array", "items": {"type": "integer"}, "description": "assign：要归集的场序号（scene_index）；传空数组+episode_id 留空=移出分集"},
+                    "move_to": {"type": "string", "description": "delete：把被删分集的场转入哪个分集（缺省=变为未分集）"},
+                    "count": {"type": "integer", "minimum": 1, "description": "auto_split：均分为几集（会重建全部分集归属）"},
+                },
+                "required": []
             }
         ))
 
@@ -828,7 +881,7 @@ class MCPServerRegistry:
         # 9.1 素材库 - 列出/搜索
         self.register_tool(MCPToolDefinition(
             name="list_assets",
-            description="[素材库] 搜索/列出素材，支持按 category(character/scene/prop/background/effect/ui)、tag、关键词q 过滤，分页返回。Agent可通过此工具发现可复用的角色/场景/道具。",
+            description="[素材库] 搜索/列出素材（按项目可见性过滤：全局 ∪ 本项目 ∪ 共享给我），支持按 category(character/scene/prop/background/effect/ui)、tag、关键词q 过滤，分页返回。",
             category="utility",
             icon="Library",
             author="Asset Library",
@@ -839,6 +892,8 @@ class MCPServerRegistry:
                     "category": {"type": "string", "enum": ["character", "scene", "prop", "background", "effect", "ui", "other"], "description": "按类别过滤"},
                     "tag": {"type": "string", "description": "按标签过滤"},
                     "q": {"type": "string", "description": "关键词搜索 名称/描述/提示词/标签"},
+                    "project_id": {"type": "string", "description": "当前项目 id（按项目可见性过滤；不传=不过滤）"},
+                    "scope": {"type": "string", "enum": ["all", "project", "global", "shared"], "description": "范围：project=项目域 / global=全局库 / shared=别人共享给我的 / all=全部"},
                     "page": {"type": "integer", "default": 1},
                     "limit": {"type": "integer", "default": 12},
                 },
@@ -849,7 +904,7 @@ class MCPServerRegistry:
         # 9.2 素材库 - 获取详情
         self.register_tool(MCPToolDefinition(
             name="get_asset",
-            description="[素材库] 获取单个素材详情，含文件URL、视觉提示词、标签、一致性参数。",
+            description="[素材库] 获取单个素材详情，含文件URL、视觉提示词、标签、一致性参数。传 project_id 时会校验可见性（防止跨项目读取）。",
             category="utility",
             icon="FileSearch",
             author="Asset Library",
@@ -857,7 +912,8 @@ class MCPServerRegistry:
             input_schema={
                 "type": "object",
                 "properties": {
-                    "asset_id": {"type": "string", "description": "素材ID，如 ast_xxx"}
+                    "asset_id": {"type": "string", "description": "素材ID，如 ast_xxx"},
+                    "project_id": {"type": "string", "description": "当前项目 id（校验可见性）"},
                 },
                 "required": ["asset_id"]
             }
@@ -866,7 +922,7 @@ class MCPServerRegistry:
         # 9.3 素材库 - 创建
         self.register_tool(MCPToolDefinition(
             name="create_asset",
-            description="[素材库] 创建新素材，常用于将生成结果固化为可复用资产。Agent可在生成后调用此工具入库。",
+            description="[素材库] 创建新素材（默认归属当前项目；无项目上下文时明确落为全局素材）。Agent可在生成后调用此工具入库。",
             category="ai_generation",
             icon="FolderPlus",
             author="Asset Library",
@@ -879,8 +935,28 @@ class MCPServerRegistry:
                     "visual_prompt": {"type": "string", "description": "视觉提示词，用于一致性生成"},
                     "description": {"type": "string", "description": "描述"},
                     "tags": {"type": "array", "items": {"type": "string"}, "description": "标签列表"},
+                    "project_id": {"type": "string", "description": "归属项目 id（不传则用当前项目上下文）"},
+                    "scope": {"type": "string", "enum": ["project", "global"], "default": "project", "description": "隔离域：project=项目私有 / global=全局"},
                 },
                 "required": ["name"]
+            }
+        ))
+
+        # 9.4 素材库 - 发布共享到全局
+        self.register_tool(MCPToolDefinition(
+            name="publish_asset",
+            description="[素材库] 把本项目素材发布共享到全局素材库（所有项目可见，URL 不变，已引用镜头不受影响）。只有出生项目可以发布与收回；收回请引导用户在素材库页面操作。",
+            category="utility",
+            icon="Share2",
+            author="Asset Library",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "asset_id": {"type": "string", "description": "素材ID，如 ast_xxx"},
+                    "project_id": {"type": "string", "description": "当前项目 id（发布者身份；不传则用项目上下文）"},
+                },
+                "required": ["asset_id"]
             }
         ))
 
@@ -945,7 +1021,7 @@ class MCPServerRegistry:
         ))
         self.register_tool(MCPToolDefinition(
             name="stage_control",
-            description="[3D导演台] 控制分镜舞台并即时落盘+前端实时应用：create_shot(新建分镜,0镜项目先走这步)/set_pose(姿态预设)/set_joints(逐关节[弧度])/clear_joints/set_transform(实体位置·旋转·缩放)/set_camera(景别·运镜·焦距·roll·站位·保存机位)/set_waypoints(主角走位≤6点)/set_props(道具)/set_lighting(三点光)/set_cast_layout(站位阵型)。双人打斗类镜头：set_cast_layout=duel + set_pose(fight) + set_camera(orbit/shake)。",
+            description="[3D导演台] 控制分镜舞台并即时落盘+前端实时应用：create_shot(新建分镜,0镜项目先走这步)/set_pose(姿态预设)/set_joints(逐关节[弧度])/clear_joints/set_transform(实体位置·旋转·缩放)/set_camera(景别·运镜·焦距·roll·站位·保存机位)/set_waypoints(主角走位≤6点)/set_props(道具)/set_lighting(三点光)/set_cast_layout(站位阵型)/set_shot_text(改动作描述/台词/旁白/提示词等文字字段)。双人打斗类镜头：set_cast_layout=duel + set_pose(fight) + set_camera(orbit/shake)。",
             category="workflow",
             icon="Sliders",
             author="Director Stage",
@@ -953,14 +1029,34 @@ class MCPServerRegistry:
             input_schema={
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["create_shot", "set_pose", "set_joints", "clear_joints", "set_transform", "set_camera", "set_waypoints", "set_props", "set_lighting", "set_cast_layout"], "description": "控制动作"},
+                    "action": {"type": "string", "enum": ["create_shot", "set_pose", "set_joints", "clear_joints", "set_transform", "set_camera", "set_waypoints", "set_props", "set_lighting", "set_cast_layout", "set_shot_text"], "description": "控制动作"},
                     "project_id": {"type": "string", "description": "项目 id（缺省=当前会话项目）"},
                     "shot_id": {"type": "string", "description": "分镜 id（缺省=当前激活/第一镜）"},
                     "shot_index": {"type": "integer", "description": "分镜号（与 shot_id 二选一）"},
                     "scene_index": {"type": "integer", "description": "create_shot 时指定场景号（缺省=第一个场景，无场景则自动建场景 1）"},
-                    "payload": {"type": "object", "description": "动作参数：entity=实体名；joints={关节:[x,y,z]弧度}；p/r/s；camera_framing/camera_motion/focal_length_mm/camera_roll_deg/motion_speed/cast_layout；camera={pos,quat,fov,name}；points=[{x,z}]；props=[...]；灯光字段；create_shot 可用 action_desc/duration/pose_preset 等"},
+                    "payload": {"type": "object", "description": "动作参数：entity=实体名；joints={关节:[x,y,z]弧度}；p/r/s；camera_framing/camera_motion/focal_length_mm/camera_roll_deg/motion_speed/cast_layout；camera={pos,quat,fov,name}；points=[{x,z}]；props=[...]；灯光字段；create_shot 可用 action_desc/duration/pose_preset 等；set_shot_text 用 action_desc/dialogue/voiceover/speaker_name/image_prompt/video_prompt/subtitle_text"},
                 },
                 "required": ["action"]
+            }
+        ))
+
+        self.register_tool(MCPToolDefinition(
+            name="stage_export_clay",
+            description="[3D导演台/白模] 请求前端导演台把指定分镜当前的 3D 舞台切换为统一灰模，并从运镜起点到终点录制一段**连续运镜视频**（所有运镜预设都会产生真实相机运动，走位路径会带主体移动；固定机位只有静态构图价值），同时导出首帧、尾帧和 clay_prompt，上传资产库并挂回 clay_video_url/previz_video_url。该动作由浏览器执行：录制需要 3D 片场处于打开且窗口可见；若片场未打开，前端会自动切页并接手。导出完成（或失败）时系统会把结果作为系统通知自动回投发起会话，**无需轮询**——收到通知后用 view_media 检查视频并回复用户。导出前应先 read_skill('seedance-white-model') 并确认 stage_get_state。",
+            category="workflow",
+            icon="Video",
+            author="Director Stage",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "project_id": {"type": "string", "description": "项目 id（缺省=当前会话项目）"},
+                    "shot_id": {"type": "string", "description": "分镜 id（缺省=当前激活/第一镜）"},
+                    "shot_index": {"type": "integer", "description": "分镜号（与 shot_id 二选一）"},
+                    "duration": {"type": "number", "description": "可选：白模录制时长（秒），默认使用当前运镜预设"},
+                    "fps": {"type": "integer", "description": "可选：录制帧率，默认 30"},
+                },
+                "required": []
             }
         ))
 
@@ -1550,7 +1646,8 @@ class MCPServerRegistry:
         return list(self.tools.values())
 
     async def execute_tool(self, tool_name: str, arguments: Dict[str, Any], project_context: Any = None,
-                           on_progress: Optional[Callable[[str], None]] = None) -> MCPToolCallResponse:
+                           on_progress: Optional[Callable[[str], None]] = None,
+                           session_id: Optional[str] = None) -> MCPToolCallResponse:
         start_time = time.time()
         if tool_name not in self.tools:
             return MCPToolCallResponse(tool_name=tool_name, status="error", result=None, error=f"MCP Tool '{tool_name}' not found", execution_time_ms=0)
@@ -1791,13 +1888,23 @@ class MCPServerRegistry:
                 if not _pid_split and isinstance(project_context, dict):
                     _pid_split = str(project_context.get("id") or project_context.get("project_id") or "")
                 _persist = arguments.get("persist", True) is not False
+                _episode_count = int(arguments.get("episode_count") or 0)
                 if _pid_split and _persist:
                     from app.providers.project.manager import project_manager as _pm_split
                     _content_split = _pm_split.get_content(_pid_split)
                     if not isinstance(_content_split, dict):
                         _content_split = {}
                     _content_split["characters"] = full.get("characters", [])
-                    _content_split["scenes"] = full.get("scenes", [])
+                    _split_scenes = full.get("scenes", [])
+                    # 可选：按集拆解（创建分集并写入 episode_id）
+                    if _episode_count > 1:
+                        try:
+                            from app.pipelines.episode_ops import split_scenes_into_episodes
+                            _eps, _ = split_scenes_into_episodes(_split_scenes, _episode_count)
+                            _content_split["episodes"] = _eps
+                        except Exception as _e_ep:
+                            print(f"[split] 分集切分跳过: {_e_ep}")
+                    _content_split["scenes"] = _split_scenes
                     if text:
                         _content_split["original_novel"] = text
                     if not _content_split.get("title") or _content_split.get("title") in ("未命名项目", "AI 漫剧项目"):
@@ -1811,6 +1918,7 @@ class MCPServerRegistry:
                         "characters_total": len(_content_split.get("characters") or []),
                         "scenes_total": len(_content_split.get("scenes") or []),
                         "shots_total": shots_total,
+                        "episodes_total": len(_content_split.get("episodes") or []),
                         **_brief_split(full),
                         "note": "已写入当前项目；下一步用 stage_get_state 侦察 3D 导演台状态，再 stage_control 摆姿势/运镜",
                     }
@@ -1943,12 +2051,17 @@ class MCPServerRegistry:
 
             elif tool_name == "list_assets":
                 mgr = _lazy_asset_manager()
+                _pid = arguments.get("project_id") or ""
+                if not _pid and isinstance(project_context, dict):
+                    _pid = str(project_context.get("id") or project_context.get("project_id") or "")
                 result = mgr.list_assets(
                     category=arguments.get("category"),
                     tag=arguments.get("tag"),
                     q=arguments.get("q"),
                     page=int(arguments.get("page", 1)),
                     limit=int(arguments.get("limit", 12)),
+                    project_id=_pid or None,
+                    scope=arguments.get("scope") if arguments.get("scope") not in (None, "", "all") else None,
                 )
 
             elif tool_name == "get_asset":
@@ -1957,18 +2070,70 @@ class MCPServerRegistry:
                 asset = mgr.get_asset(asset_id)
                 if not asset:
                     raise ValueError(f"素材不存在: {asset_id}")
+                _pid = arguments.get("project_id") or ""
+                if not _pid and isinstance(project_context, dict):
+                    _pid = str(project_context.get("id") or project_context.get("project_id") or "")
+                if _pid and not mgr.visible_to(asset, _pid, include_shared=True):
+                    raise ValueError(f"素材 {asset_id} 不属于当前项目，也未共享给当前项目")
                 result = asset.model_dump()
 
             elif tool_name == "create_asset":
                 mgr = _lazy_asset_manager()
+                _pid = arguments.get("project_id") or ""
+                if not _pid and isinstance(project_context, dict):
+                    _pid = str(project_context.get("id") or project_context.get("project_id") or "")
                 asset = mgr.create_asset({
                     "name": arguments.get("name", "未命名素材"),
                     "category": arguments.get("category", "character"),
                     "visual_prompt": arguments.get("visual_prompt", ""),
                     "description": arguments.get("description", ""),
                     "tags": arguments.get("tags", []),
+                    "project_id": _pid or None,
+                    "scope": arguments.get("scope") or ("project" if _pid else "global"),
                 })
                 result = asset.model_dump()
+
+            elif tool_name == "publish_asset":
+                mgr = _lazy_asset_manager()
+                _pid = arguments.get("project_id") or ""
+                if not _pid and isinstance(project_context, dict):
+                    _pid = str(project_context.get("id") or project_context.get("project_id") or "")
+                asset_id = arguments.get("asset_id", "")
+                if not asset_id:
+                    raise ValueError("publish_asset 需要 asset_id")
+                try:
+                    asset = mgr.publish_asset(asset_id, actor_project_id=_pid or None)
+                except PermissionError as e:
+                    raise ValueError(f"发布失败：{e}")
+                if not asset:
+                    raise ValueError(f"素材不存在: {asset_id}")
+                result = asset.model_dump()
+
+            elif tool_name == "episode_manage":
+                from app.pipelines import episode_ops
+                action = str(arguments.get("action") or "list").strip()
+                _pid_ep = str(arguments.get("project_id") or "").strip()
+                if not _pid_ep and isinstance(project_context, dict):
+                    _pid_ep = str(project_context.get("id") or project_context.get("project_id") or "")
+                if not _pid_ep:
+                    raise ValueError("episode_manage 需要 project_id 或项目上下文")
+                try:
+                    if action == "list":
+                        result = episode_ops.list_episodes(_pid_ep)
+                    elif action == "create":
+                        result = episode_ops.create_episode(_pid_ep, arguments.get("title"))
+                    elif action == "rename":
+                        result = episode_ops.rename_episode(_pid_ep, str(arguments.get("episode_id") or ""), str(arguments.get("title") or ""))
+                    elif action == "delete":
+                        result = episode_ops.delete_episode(_pid_ep, str(arguments.get("episode_id") or ""), arguments.get("move_to") or None)
+                    elif action == "assign":
+                        result = episode_ops.assign_scenes(_pid_ep, list(arguments.get("scene_indices") or []), arguments.get("episode_id") or None)
+                    elif action == "auto_split":
+                        result = episode_ops.auto_split(_pid_ep, int(arguments.get("count") or 0))
+                    else:
+                        raise ValueError(f"未知 action: {action}（支持 list/create/rename/delete/assign/auto_split）")
+                except ValueError as _e_epm:
+                    raise ValueError(str(_e_epm))
 
             elif tool_name == "export_jianyin_draft":
                 project_payload = project_context or arguments.get("project")
@@ -2963,7 +3128,7 @@ class MCPServerRegistry:
                 else:
                     result = {"tool": tool_name, "arguments": arguments, "hint": "前端画布将执行此指令", "directive": True}
 
-            elif tool_name in ("stage_get_state", "stage_control"):
+            elif tool_name in ("stage_get_state", "stage_control", "stage_export_clay"):
                 from app.director_stage import ops as _stage_ops
                 from app.providers.project.manager import project_manager as _pm_stage
                 _pid_s = str(arguments.get("project_id") or "").strip()
@@ -2986,9 +3151,34 @@ class MCPServerRegistry:
                         shot_id=str(arguments.get("shot_id") or ""),
                         shot_index=arguments.get("shot_index"),
                     )
-                else:
+                elif tool_name == "stage_control":
                     result = _stage_ops.apply_stage_control(_content_s, arguments)
                     _pm_stage.save_content(_pid_s, _content_s)
+                else:
+                    _shot = _stage_ops.find_shot(
+                        _content_s,
+                        shot_id=str(arguments.get("shot_id") or ""),
+                        shot_index=arguments.get("shot_index"),
+                    )
+                    if _shot is None:
+                        raise ValueError("未找到要导出的分镜：请先 stage_get_state，或传入有效 shot_id/shot_index")
+                    result = {
+                        "stage_action": "export_clay",
+                        "browser_action_required": True,
+                        "shot_id": _shot.get("id"),
+                        "shot_index": _shot.get("shot_index"),
+                        "duration": arguments.get("duration"),
+                        "fps": arguments.get("fps") or 30,
+                        "note": "已请求当前浏览器中的 3D 导演台导出白模；导出完成（或失败）时系统会作为通知自动回投本会话——无需轮询，收到通知后用 view_media 检查视频再回复用户。",
+                    }
+                    # 登记「发起会话」：前端回执到达时只唤醒它核对结果（无登记则不通知任何人）
+                    try:
+                        from app.director_stage import pending as _clay_pending
+                        _clay_pending.register(
+                            _pid_s, str(_shot.get("id") or ""), _shot.get("shot_index"), session_id or "",
+                        )
+                    except Exception:
+                        pass
                 result["project_id"] = _pid_s
 
             elif tool_name == "director_3d_stage_plan":

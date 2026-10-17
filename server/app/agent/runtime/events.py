@@ -60,6 +60,22 @@ SUBAGENT_METRICS = "subagent/metrics"    # data: {batch_id, total, success, fail
 COMPACTION_SUMMARY = "compaction/summary"  # data: {text, shadowed_seqs}
 COMPACTION_PRUNE = "compaction/prune"      # data: {shadowed_seqs, replacements}
 
+# ── 对齐 dsh 的扩展事件（全部 log-only，不进模型历史）─────
+# LLM 重试等待留账：等待前先落账，崩溃后可见"已排定的重试等待"
+LLM_RETRY = "llm/retry"                    # data: {attempt, delay_ms, provider, model, code, error}
+# Inbox 持久化：每次队列变更落账（durable inbox，重启回放）
+INBOX_MUTATION = "inbox/spliced"           # data: {target, removed, inserted, outcome}
+# 子代理委派策略钉柱（SEC 契约：权限在派生时固定，审计可见）
+DELEGATION_POLICY = "delegation/policy"    # data: {run_mode, agent, subagent_id, source}
+# 计划批准审计（计划模式产出 → 用户批准执行）
+PLAN_APPROVED = "plan/approved"            # data: {source, plan_chars}
+# 压缩事务：start 即 durable 锁（到 end 释放），success/error 都必须有配对的 end
+COMPACTION_START = "compaction/start"      # data: {compaction_id, trigger}
+COMPACTION_END = "compaction/end"          # data: {compaction_id, status, error}
+# 模型面向用户的结构化问询（fail-closed：无交互通道/超时 = no_answer）
+QUESTION_ASKED = "question/asked"          # data: {question_id, question, options, multi_select}
+QUESTION_ANSWERED = "question/answered"    # data: {question_id, selections, custom, outcome}
+
 # 所有已声明类型（未知类型拒绝重建）
 KNOWN_EVENT_TYPES = {
     TURN_START, TURN_END, STEP_START, STEP_END,
@@ -70,6 +86,8 @@ KNOWN_EVENT_TYPES = {
     JOB_STARTED, JOB_SETTLED,
     SUBAGENT_STARTED, SUBAGENT_PROGRESS, SUBAGENT_SETTLED, SUBAGENT_METRICS,
     COMPACTION_SUMMARY, COMPACTION_PRUNE,
+    LLM_RETRY, INBOX_MUTATION, DELEGATION_POLICY, PLAN_APPROVED,
+    COMPACTION_START, COMPACTION_END, QUESTION_ASKED, QUESTION_ANSWERED,
 }
 
 # 模型可见事件（derive_messages 的输入面）

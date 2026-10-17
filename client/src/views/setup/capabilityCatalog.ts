@@ -111,12 +111,7 @@ export const CAPABILITIES: Capability[] = [
         extraOnSelect: { LLM_API_TYPE: 'chat_completions' },
         fields: [
           KEY('OPENAI_API_KEY', 'API Key', { placeholder: 'sk-...' }),
-          KEY('OPENAI_BASE_URL', '接口地址', { kind: 'url', placeholder: 'https://api.deepseek.com/v1', hint: '留空则用默认的 DeepSeek' , required: false }),
-          KEY('OPENAI_MODEL', '模型名', {
-            kind: 'text', placeholder: 'deepseek-v4-flash', required: false,
-            options: ['deepseek-v4-flash', 'deepseek-chat', 'deepseek-reasoner', 'deepseek-v4-pro', 'MiniMax-M3', 'MiniMax-M2.5', 'qwen3.7-plus'],
-            hint: '点输入框可下拉选常见档；中转站的模型名以对方文档为准，可直接手填',
-          }),
+          KEY('OPENAI_BASE_URL', '接口地址', { kind: 'url', placeholder: 'https://api.deepseek.com/v1', hint: '留空则用默认的 DeepSeek。对话里换模型去下面的广场。' , required: false }),
           KEY('OPENAI_CUSTOM_HEADERS', '自定义请求头', { kind: 'text', required: false, placeholder: '{"X-Foo":"bar"}', hint: 'JSON 格式，接私有网关时才需要', advanced: true }),
         ],
       },
@@ -131,29 +126,6 @@ export const CAPABILITIES: Capability[] = [
         fields: [
           KEY('RESPONSES_API_KEY', 'API Key', { placeholder: 'sk-...' }),
           KEY('RESPONSES_API_URL', '接口地址', { kind: 'url', placeholder: 'https://api.openai.com/v1/responses', required: false }),
-          KEY('RESPONSES_MODEL', '模型名', {
-            kind: 'text', placeholder: 'gpt-5.2', required: false,
-            options: ['gpt-5.2', 'gpt-5', 'gpt-4o', 'gpt-5.5', 'gpt-5.4-mini', 'gpt-4.1', 'deepseek-v4-flash'],
-          }),
-        ],
-      },
-      {
-        id: 'minimax',
-        name: 'MiniMax 文本',
-        where: 'cloud',
-        summary: '一把 Key 同时供文本、配音、视频三种能力用。',
-        test: 'minimax',
-        docUrl: 'https://platform.minimaxi.com/document',
-        extraOnSelect: { LLM_API_TYPE: 'chat_completions' },
-        fields: [
-          KEY('MINIMAX_API_KEY', 'API Key'),
-          KEY('MINIMAX_GROUP_ID', 'Group ID', { kind: 'text' }),
-          KEY('MINIMAX_BASE_URL', '接口地址', { kind: 'url', placeholder: 'https://api.minimax.chat/v1', required: false }),
-          KEY('LLM_MODEL', '模型名', {
-            kind: 'text', placeholder: 'MiniMax-M2.5', required: false,
-            options: ['MiniMax-M2.5', 'abab6.5s-chat', 'MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.1', 'MiniMax-M2'],
-            hint: 'abab 系列是旧版文本模型，官方现行档为 MiniMax-M2.5',
-          }),
         ],
       },
     ],
@@ -305,7 +277,7 @@ export const CAPABILITIES: Capability[] = [
         id: 'minimax_h3',
         name: 'MiniMax H3',
         where: 'cloud',
-        summary: '与 MiniMax 文本/配音共用同一把 Key，768P~2K、4~15 秒。',
+        summary: '与 MiniMax 配音共用同一把 Key，768P~2K、4~15 秒。',
         test: 'minimax_h3',
         docUrl: 'https://platform.minimax.io/docs/api-reference/video-generation-v2-query',
         fields: [

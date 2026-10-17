@@ -10,8 +10,12 @@ ASSET_STATUS = ["draft", "approved", "archived"]
 class Asset(BaseModel):
     id: str = Field(default_factory=lambda: f"ast_{uuid.uuid4().hex[:8]}")
     project_id: Optional[str] = None  # 所属项目/集合，None为全局
-    scope: str = "project"  # project | global —— P0 新增：隔离域
-    shared_to: List[str] = Field(default_factory=list)  # 共享到哪些项目 id
+    scope: str = "project"  # project | global —— 隔离域（owner）
+    shared_to: List[str] = Field(default_factory=list)  # 定向共享到哪些项目 id（接收方只读可见）
+    # 分级/共享扩展
+    origin_project_id: Optional[str] = None  # 出生项目：项目素材=归属项目；发布到全局后用于追溯与收回
+    group_path: Optional[str] = None  # 项目内分组路径，如 "角色/主角"（L2 分级）
+    published_at: Optional[str] = None  # 发布到全局的时间（撤回后清空）
     name: str
     category: str = "character"  # character | scene | prop | background | effect | ui | other
     subcategory: Optional[str] = None  # 细分，如 character: protagonist/supporting, scene: interior/exterior

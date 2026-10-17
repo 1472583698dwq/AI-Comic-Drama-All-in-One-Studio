@@ -25,6 +25,7 @@ import { useProjectStore } from '../../stores/useProjectStore';
 import { apiService } from '../../services/api';
 import { useEscapeClose } from '../../hooks/useEscapeClose';
 import { AutoRatioMedia } from '../ui/AutoRatioMedia';
+import { appendAssetOwnership } from '../../utils/assetScope';
 
 import { API_ORIGIN } from '../../utils/devOrigin';
 // 相对产物 URL（/storage、/assets）在 dev 下必须回源，否则缩略图 404；存值保持原样，仅展示拼接
@@ -216,6 +217,8 @@ export const CanvasResourcePickerModal: React.FC<Props> = ({
           fd.append('file', file);
           fd.append('name', file.name.replace(/\.[^/.]+$/, ''));
           fd.append('category', isAudio ? 'audio' : isVideo ? 'video' : 'character');
+          // 归属统一：有当前项目 → 项目私有；无项目 → 全局（不再悄悄变全局）
+          appendAssetOwnership(fd, undefined, useProjectStore.getState().activeProjectId || project?.id || null);
           try {
             const assetRes: any = await apiService.createAsset(fd);
             const u = assetRes?.asset?.file_url || assetRes?.file_url || assetRes?.url;

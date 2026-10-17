@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import os
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
@@ -32,7 +33,13 @@ _CONTEXT_OVERFLOW_PHRASES = (
 
 
 def is_context_overflow_error(err: Any) -> bool:
-    """判断异常是否为"上下文超限"（强制压缩后重试的触发条件）。"""
+    """判断异常是否为"上下文超限"（强制压缩后重试的触发条件）。错误码优先，关键词兜底。"""
+    try:
+        from app.agent.llm.adapter import error_code_of, ERROR_CONTEXT_OVERFLOW
+        if error_code_of(err) == ERROR_CONTEXT_OVERFLOW:
+            return True
+    except Exception:
+        pass
     s = f"{type(err).__name__}: {err}".lower()
     if any(p in s for p in _CONTEXT_OVERFLOW_PHRASES):
         return True
@@ -200,59 +207,97 @@ def _transcript_of(session, surface: List[Dict[str, Any]], cut: int, limit_chars
     return text[:limit_chars]
 
 
-async def maybe_compact(session, emit=None, force: bool = False) -> Optional[Dict[str, Any]]:
+async def maybe_compact(session, emit=None, force: bool = False,
+                        system_text: Optional[str] = None, trigger: str = "") -> Optional[Dict[str, Any]]:
     """压力超阈值时摘要旧历史；force=True 时跳过阈值检查（上游报上下文超限后的应急压缩）。
-    失败不阻塞主流程（返回 None）。"""
+
+    事务协议（对标 dsh compaction）：先落 `compaction/start`（durable 锁），
+    任何退出路径都恰好一次配对的 `compaction/end`；失败不阻塞主流程（返回 None）。
+    system_text 提供时并入摘要请求前缀（暖前缀，复用主请求 KV cache）。
+    """
+    if not force and not should_compact(session):
+        return None
+    cid = f"cmp_{uuid.uuid4().hex[:10]}"
     try:
-        if not force and not should_compact(session):
-            return None
-        window = context_window()
-        try:
-            keep_ratio = float(os.environ.get("AGENT_COMPACT_KEEP_RATIO") or 0.2)
-        except Exception:
-            keep_ratio = 0.2
-        surface = _surface_sequence(session)
-        cut = select_shadow_range(surface, keep_tokens=int(window * keep_ratio))
-        if cut is None:
-            return None
-        transcript = _transcript_of(session, surface, cut)
-        if not transcript.strip():
-            return None
-        from app.agent.llm.adapter import adapter
-        reply = await adapter.complete(
-            messages=[
-                {"role": "system", "content": _SUMMARY_SYSTEM},
-                {"role": "user", "content": transcript},
-            ],
-            tools=None, temperature=0.2, max_tokens=1200, timeout=120,
-        )
-        text = (reply.content or "").strip()
-        if not text:
-            return None
-        shadowed_seqs = [x["seq"] for x in surface[:cut]]
-        ev = session.append(E.COMPACTION_SUMMARY, {"text": text, "shadowed_seqs": shadowed_seqs})
-        if emit is not None:
-            try:
-                await emit({
-                    "event": "agent_thinking",
-                    "message": f"上下文压缩完成（遮蔽 {len(shadowed_seqs)} 条旧消息）",
-                })
-            except Exception:
-                pass
-        return ev
+        session.append(E.COMPACTION_START, {
+            "compaction_id": cid,
+            "trigger": trigger or ("context-overflow" if force else "pressure"),
+        })
+    except Exception:
+        return None
+
+    ev: Optional[Dict[str, Any]] = None
+    err_text = ""
+    try:
+        ev = await _do_compact(session, emit=emit, system_text=system_text)
     except Exception as e:
+        err_text = str(e)[:300]
         try:
             print(f"[AgentCompaction] failed: {e}")
         except Exception:
             pass
+    try:
+        session.append(E.COMPACTION_END, {
+            "compaction_id": cid,
+            "status": "success" if ev else ("error" if err_text else "skipped"),
+            "error": err_text or None,
+        })
+    except Exception:
+        pass
+    return ev
+
+
+async def _do_compact(session, emit=None, system_text: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    window = context_window()
+    try:
+        keep_ratio = float(os.environ.get("AGENT_COMPACT_KEEP_RATIO") or 0.2)
+    except Exception:
+        keep_ratio = 0.2
+    surface = _surface_sequence(session)
+    cut = select_shadow_range(surface, keep_tokens=int(window * keep_ratio))
+    if cut is None:
         return None
+    transcript = _transcript_of(session, surface, cut)
+    if not transcript.strip():
+        return None
+    # 暖前缀：把当前系统提示词并入摘要请求 system（同一前缀可复用主请求 KV cache），
+    # 摘要指令沿用 _SUMMARY_SYSTEM（压缩器可被识别/审计）。
+    sys_content = _SUMMARY_SYSTEM
+    if system_text:
+        sys_content = f"{system_text}\n\n{_SUMMARY_SYSTEM}"
+    from app.agent.llm.adapter import adapter
+    reply = await adapter.complete(
+        messages=[
+            {"role": "system", "content": sys_content},
+            {"role": "user", "content": transcript},
+        ],
+        tools=None, temperature=0.2, max_tokens=1200, timeout=120,
+    )
+    text = (reply.content or "").strip()
+    if not text:
+        return None
+    # shrink 校验：摘要必须比被遮蔽的历史更小，否则拒绝提交（防"越压越大"）
+    shadowed_tokens = sum(x["tokens"] for x in surface[:cut])
+    if estimate_text(text) >= max(1, shadowed_tokens):
+        return None
+    shadowed_seqs = [x["seq"] for x in surface[:cut]]
+    ev = session.append(E.COMPACTION_SUMMARY, {"text": text, "shadowed_seqs": shadowed_seqs})
+    if emit is not None:
+        try:
+            await emit({
+                "event": "agent_thinking",
+                "message": f"上下文压缩完成（遮蔽 {len(shadowed_seqs)} 条旧消息）",
+            })
+        except Exception:
+            pass
+    return ev
 
 
-async def maintain_context(session, emit=None) -> None:
+async def maintain_context(session, emit=None, system_text: Optional[str] = None) -> None:
     """每步请求前的例行动作：先剪裁超大工具结果，再按压力压缩。"""
     try:
         maybe_prune_tool_results(session)
     except Exception:
         pass
     if should_compact(session):
-        await maybe_compact(session, emit=emit)
+        await maybe_compact(session, emit=emit, system_text=system_text)

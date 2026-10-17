@@ -141,6 +141,181 @@ APPROVAL_VERDICT_TEXT = {
 }
 
 
+# ── 扩展缝：pre/post tool hooks（对标 dsh tools/pre-execute、tools/post-execute）──
+# 内置管线保持开箱即用；hooks 让外部（插件/用户脚本）在工具执行前后叠加决策：
+#   PreToolUse：deny（拒绝执行）；PostToolUse：deny（把成功结果替换为失败/反馈）。
+# 两个来源：storage/agent_hooks/hooks.json（外部命令，与 CC hooks 同形）与进程内注册函数。
+_GLOBAL_PRE_HOOKS: List[Any] = []
+_GLOBAL_POST_HOOKS: List[Any] = []
+_CONFIG_HOOKS_CACHE: Dict[str, Any] = {"mtime": -1.0, "data": {}}
+
+
+def register_pre_hook(fn: Any) -> None:
+    """注册进程内 pre-tool hook：async fn(name, args, pipeline) -> {"decision": "deny", "reason": str} | None。"""
+    if callable(fn) and fn not in _GLOBAL_PRE_HOOKS:
+        _GLOBAL_PRE_HOOKS.append(fn)
+
+
+def unregister_pre_hook(fn: Any) -> None:
+    try:
+        _GLOBAL_PRE_HOOKS.remove(fn)
+    except ValueError:
+        pass
+
+
+def register_post_hook(fn: Any) -> None:
+    """注册进程内 post-tool hook：async fn(name, args, outcome) -> {"decision": "deny", "reason": str, "additional_context": str} | None。"""
+    if callable(fn) and fn not in _GLOBAL_POST_HOOKS:
+        _GLOBAL_POST_HOOKS.append(fn)
+
+
+def unregister_post_hook(fn: Any) -> None:
+    try:
+        _GLOBAL_POST_HOOKS.remove(fn)
+    except ValueError:
+        pass
+
+
+def _hooks_config_path() -> Optional[str]:
+    try:
+        from app.core.config import settings
+        base = Path(settings.STORAGE_DIR) / "agent_hooks"
+    except Exception:
+        base = Path("storage") / "agent_hooks"
+    p = base / "hooks.json"
+    try:
+        return str(p) if p.exists() else None
+    except Exception:
+        return None
+
+
+def _load_config_hooks() -> Dict[str, List[Dict[str, Any]]]:
+    """读取 hooks.json（mtime 缓存）：{"PreToolUse": [{"matcher","command","timeout_s"}], "PostToolUse": [...]}。
+
+    文件不存在 → {}（零成本、零风险）；读取/解析失败 → 空表并告警一次（fail-open 不阻断生成链）。
+    """
+    p = _hooks_config_path()
+    if not p:
+        return {}
+    try:
+        mtime = os.path.getmtime(p)
+    except Exception:
+        return {}
+    cached = _CONFIG_HOOKS_CACHE.get("data") or {}
+    if _CONFIG_HOOKS_CACHE.get("mtime") == mtime:
+        return cached
+    data: Dict[str, List[Dict[str, Any]]] = {}
+    try:
+        raw = json.loads(Path(p).read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            for key in ("PreToolUse", "PostToolUse"):
+                items = raw.get(key)
+                if isinstance(items, list):
+                    data[key] = [it for it in items if isinstance(it, dict) and str(it.get("command") or "").strip()]
+    except Exception as e:
+        try:
+            print(f"[AgentHooks] hooks.json 解析失败（本次忽略）: {e}")
+        except Exception:
+            pass
+        data = {}
+    _CONFIG_HOOKS_CACHE["mtime"] = mtime
+    _CONFIG_HOOKS_CACHE["data"] = data
+    return data
+
+
+def _matcher_ok(matcher: Any, name: str) -> bool:
+    m = str(matcher or "*").strip()
+    if not m or m == "*":
+        return True
+    try:
+        import fnmatch
+        return fnmatch.fnmatchcase(name, m)
+    except Exception:
+        return False
+
+
+class QuestionService:
+    """模型面向用户的结构化问询（对齐 dsh user-questions）——不是审批，是"多选项提问"。
+
+    fail-closed：无交互通道 / 超时 → no_answer（调用方据此引导模型按假设继续或改文本提问）。
+    事件：question/asked + question/answered 落账；实时 event=question_required 供前端出选项卡。
+    """
+
+    def __init__(self, session_id: str, emit, interactive: bool = True,
+                 timeout_s: Optional[float] = None, session: Any = None):
+        self.session_id = session_id
+        self.emit = emit
+        self.interactive = bool(interactive)
+        self.session = session
+        try:
+            self.timeout_s = float(timeout_s or os.environ.get("AGENT_QUESTION_TIMEOUT") or 300)
+        except Exception:
+            self.timeout_s = 300.0
+        self._pending: Dict[str, asyncio.Future] = {}
+
+    def _log(self, event_type: str, data: Dict[str, Any]) -> None:
+        if self.session is None:
+            return
+        try:
+            self.session.append(event_type, data)
+        except Exception:
+            pass
+
+    async def request(self, question: str, options: Optional[List[str]] = None,
+                      multi_select: bool = False, detail: str = "") -> Dict[str, Any]:
+        qid = f"q_{uuid.uuid4().hex[:8]}"
+        options = [str(o)[:200] for o in (options or []) if str(o).strip()][:8]
+        self._log(E.QUESTION_ASKED, {
+            "question_id": qid, "question": str(question)[:2000],
+            "options": options, "multi_select": bool(multi_select),
+        })
+        result: Dict[str, Any] = {"question_id": qid, "outcome": "no_answer",
+                                  "selections": [], "custom": ""}
+        if not self.interactive:
+            result["outcome"] = "no_interactive"
+        else:
+            loop = asyncio.get_running_loop()
+            fut: asyncio.Future = loop.create_future()
+            self._pending[qid] = fut
+            try:
+                await self.emit({
+                    "event": "question_required",
+                    "question_id": qid,
+                    "question": str(question)[:2000],
+                    "options": options,
+                    "multi_select": bool(multi_select),
+                    "detail": str(detail or "")[:1000],
+                })
+                try:
+                    ans = await asyncio.wait_for(fut, timeout=self.timeout_s)
+                except asyncio.TimeoutError:
+                    ans = None
+            finally:
+                self._pending.pop(qid, None)
+            if isinstance(ans, dict):
+                result["outcome"] = "answered"
+                result["selections"] = [str(s)[:200] for s in (ans.get("selections") or [])][:8]
+                result["custom"] = str(ans.get("custom") or "")[:2000]
+            else:
+                result["outcome"] = "timeout"
+        self._log(E.QUESTION_ANSWERED, {
+            "question_id": qid, "outcome": result["outcome"],
+            "selections": result["selections"], "custom": result["custom"],
+        })
+        return result
+
+    def resolve(self, question_id: str, selections: Optional[List[str]] = None,
+                custom: str = "") -> bool:
+        fut = self._pending.get(question_id)
+        if fut is None or fut.done():
+            return False
+        try:
+            fut.set_result({"selections": list(selections or []), "custom": custom or ""})
+            return True
+        except Exception:
+            return False
+
+
 class ApprovalService:
     """人审接缝：ask/never 策略 + fail-closed。无交互通道时 ask=拒绝。"""
 
@@ -352,12 +527,155 @@ class ToolPipeline:
         self.agent_profile = agent_profile
         self.approvals = ApprovalService(session_id, emit, policy=approval_policy,
                                          interactive=interactive, session=session)
+        self.questions = QuestionService(session_id, emit, interactive=interactive, session=session)
         self.guard = RepeatToolGuard()
         # 已成功读取的技能名（提示词技能门：读一个即解锁本会话生成/写提示词调用）
         self.skills_read: set = set()
+        # 扩展缝（实例级 hooks；与模块级 _GLOBAL_* 合并执行）
+        self._pre_hooks: List[Any] = []
+        self._post_hooks: List[Any] = []
 
     def resolve_approval(self, approval_id: str, approved: bool) -> bool:
         return self.approvals.resolve(approval_id, approved)
+
+    def resolve_question(self, question_id: str, selections: Optional[List[str]] = None,
+                         custom: str = "") -> bool:
+        return self.questions.resolve(question_id, selections, custom)
+
+    async def _ask_user(self, call_id: str, args: Dict[str, Any]) -> "ToolOutcome":
+        """ask_user_question 内置工具：结构化多选项问询（fail-closed，不阻塞主流程）。"""
+        q = str(args.get("question") or "").strip()
+        if not q:
+            msg = "ask_user_question 需要非空 question"
+            return ToolOutcome(call_id, "ask_user_question", "error", error=msg,
+                               model_content=json.dumps({"error": msg}, ensure_ascii=False))
+        raw_opts = args.get("options")
+        options = [str(o).strip()[:200] for o in raw_opts if str(o).strip()][:8] if isinstance(raw_opts, list) else []
+        self.questions.interactive = bool(getattr(self.approvals, "interactive", True))
+        res = await self.questions.request(
+            q, options, multi_select=bool(args.get("multi_select")), detail=str(args.get("detail") or ""),
+        )
+        if res.get("outcome") != "answered":
+            note = {
+                "no_interactive": "当前通道无交互，无法等待用户回答。不要重复提问；按最合理解读继续，并在结论里说明假设。",
+                "timeout": "用户未在时限内回答。不要重复等待；按最合理默认继续，并在结论里说明假设。",
+            }.get(str(res.get("outcome")), "用户未回答。不要重复提问；按最合理解读继续。")
+            payload = {**res, "note": note}
+            return ToolOutcome(call_id, "ask_user_question", "success", result=payload,
+                               model_content=json.dumps(payload, ensure_ascii=False))
+        return ToolOutcome(call_id, "ask_user_question", "success", result=res,
+                           model_content=json.dumps(res, ensure_ascii=False))
+
+    # ── 扩展缝：pre/post hook 执行 ─────────────────────────
+    async def _run_command_hook(self, phase: str, hk: Dict[str, Any], name: str,
+                                args: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """运行一个外部命令 hook：stdin 收 JSON 事件，exit 2 = 拦截；stdout JSON 可给决策。
+
+        fail-open：命令执行失败/超时一律放行（外部脚本错误不得阻断生成链）。
+        """
+        try:
+            payload = json.dumps({
+                "event": phase, "tool_name": name,
+                "arguments": args if isinstance(args, dict) else {},
+                "session_id": self.session_id,
+            }, ensure_ascii=False)
+            proc = await asyncio.create_subprocess_shell(
+                str(hk.get("command")),
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                out_b, err_b = await asyncio.wait_for(
+                    proc.communicate(payload.encode("utf-8")),
+                    timeout=float(hk.get("timeout_s") or 30),
+                )
+            except asyncio.TimeoutError:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                return None
+            out = (out_b or b"").decode(errors="ignore").strip()
+            err = (err_b or b"").decode(errors="ignore").strip()
+            if proc.returncode == 2:
+                return {"deny": True, "reason": err or out or "hook 拦截"}
+            if out.startswith("{"):
+                try:
+                    d = json.loads(out)
+                    dec = str(d.get("decision") or "").lower()
+                    return {
+                        "deny": dec in ("deny", "block", "reject"),
+                        "reason": str(d.get("reason") or err or ""),
+                        "additional_context": d.get("additional_context") or d.get("additionalContext") or None,
+                    }
+                except Exception:
+                    return None
+            return None
+        except Exception:
+            return None
+
+    async def _run_pre_hooks(self, name: str, args: Dict[str, Any]) -> Optional[str]:
+        """返回拒绝原因（None = 放行）。"""
+        for hk in _load_config_hooks().get("PreToolUse", []):
+            if not _matcher_ok(hk.get("matcher"), name):
+                continue
+            verdict = await self._run_command_hook("PreToolUse", hk, name, args)
+            if verdict and verdict.get("deny"):
+                return str(verdict.get("reason") or "pre-hook 拒绝")[:300]
+        for fn in list(_GLOBAL_PRE_HOOKS) + list(self._pre_hooks):
+            try:
+                r = fn(name, args, self)
+                if asyncio.iscoroutine(r):
+                    r = await r
+                if isinstance(r, dict) and str(r.get("decision") or "") == "deny":
+                    return str(r.get("reason") or "pre-hook 拒绝")[:300]
+            except Exception:
+                continue
+        return None
+
+    async def _apply_post_hooks(self, name: str, args: Dict[str, Any],
+                                outcome: "ToolOutcome") -> "ToolOutcome":
+        """post-hook：deny → 把结果改写为失败反馈；additional_context 合并注入。"""
+        contexts: List[str] = []
+        blocked_reason = ""
+        for hk in _load_config_hooks().get("PostToolUse", []):
+            if not _matcher_ok(hk.get("matcher"), name):
+                continue
+            verdict = await self._run_command_hook("PostToolUse", hk, name, args)
+            if not verdict:
+                continue
+            if verdict.get("additional_context"):
+                contexts.append(str(verdict["additional_context"])[:2000])
+            if verdict.get("deny"):
+                blocked_reason = str(verdict.get("reason") or "post-hook 拦截")[:300]
+                break
+        if not blocked_reason:
+            for fn in list(_GLOBAL_POST_HOOKS) + list(self._post_hooks):
+                try:
+                    r = fn(name, args, outcome)
+                    if asyncio.iscoroutine(r):
+                        r = await r
+                    if not isinstance(r, dict):
+                        continue
+                    if r.get("additional_context"):
+                        contexts.append(str(r["additional_context"])[:2000])
+                    if str(r.get("decision") or "") == "deny":
+                        blocked_reason = str(r.get("reason") or "post-hook 拦截")[:300]
+                        break
+                except Exception:
+                    continue
+        if blocked_reason:
+            msg = f"工具 {name} 的结果被 hook 拦截：{blocked_reason}"
+            blocked = ToolOutcome(name=name, call_id=outcome.call_id, status="error",
+                                  error=msg, model_content=json.dumps({"error": msg}, ensure_ascii=False))
+            if contexts:
+                blocked.additional_context = "\n".join(contexts)
+            return blocked
+        if contexts:
+            note = "\n".join(contexts)
+            outcome.additional_context = (f"{outcome.additional_context}\n{note}" if outcome.additional_context else note)
+        return outcome
 
     async def execute(self, call_id: str, name: str, args: Dict[str, Any],
                       project_context: Any = None, run_mode: str = "approve",
@@ -438,6 +756,10 @@ class ToolPipeline:
                 pass
             return ToolOutcome(call_id, name, "success", result=counts,
                                model_content=json.dumps(counts, ensure_ascii=False))
+
+        # ③ 内置工具：结构化问询（模型面向用户的选项卡提问，非审批）
+        if name == "ask_user_question":
+            return await self._ask_user(call_id, args)
 
         # ③ 内置工具：媒体查看（只读）——把画布节点产物/素材/URL 变成多模态附件
         if name == "view_media":
@@ -572,10 +894,11 @@ class ToolPipeline:
                 to = None
             from app.agent.runtime.subagent import subagent_pool
             ctx_arg = args.get("context") if isinstance(args.get("context"), dict) else None
+            out_schema = args.get("output_schema") if isinstance(args.get("output_schema"), dict) else None
             if isinstance(batch, list) and batch:
                 result = await subagent_pool.spawn_batch(
                     parent, agent, batch, background=background, context=ctx_arg,
-                    max_steps=ms, timeout_s=to)
+                    max_steps=ms, timeout_s=to, output_schema=out_schema)
             else:
                 task = str(args.get("task") or "").strip()
                 if not task:
@@ -583,7 +906,7 @@ class ToolPipeline:
                     return ToolOutcome(call_id, name, "error", error=msg, model_content=json.dumps({"error": msg}, ensure_ascii=False))
                 result = await subagent_pool.spawn(
                     parent, agent, task, context=ctx_arg, background=background,
-                    max_steps=ms, timeout_s=to, auto_bg_ok=auto_bg_ok)
+                    max_steps=ms, timeout_s=to, auto_bg_ok=auto_bg_ok, output_schema=out_schema)
             if result.get("status") in ("error",):
                 return ToolOutcome(call_id, name, "error", error=str(result.get("error") or "子代理失败"),
                                    result=result, model_content=json.dumps(result, ensure_ascii=False)[:4000])
@@ -702,6 +1025,13 @@ class ToolPipeline:
             return ToolOutcome(call_id, name, "success", result=data,
                                model_content=json.dumps(data, ensure_ascii=False, default=str)[:6000])
 
+        # ③.9 扩展缝：外部 pre-tool hooks（hooks.json 命令 + 进程内注册）；命中 deny 直接拒绝
+        _hook_reason = await self._run_pre_hooks(name, args)
+        if _hook_reason:
+            msg = f"已拦截 {name}（pre-hook: {_hook_reason}）"
+            return ToolOutcome(call_id, name, "denied", error=msg,
+                               model_content=json.dumps({"error": msg}, ensure_ascii=False))
+
         # ④ 人审：破坏性调用 / 模式策略要求的高风险调用
         need_confirm = is_destructive(name, args)
         if not need_confirm:
@@ -733,7 +1063,8 @@ class ToolPipeline:
         try:
             from app.mcp.server import mcp_registry
             res = await asyncio.wait_for(
-                mcp_registry.execute_tool(name, args, project_context=project_context, on_progress=_on_tool_progress),
+                mcp_registry.execute_tool(name, args, project_context=project_context,
+                                          on_progress=_on_tool_progress, session_id=self.session_id),
                 timeout=timeout,
             )
             status = getattr(res, "status", "error")
@@ -771,8 +1102,15 @@ class ToolPipeline:
             call_id=call_id, name=name, status=status, result=result, error=error,
             meta=meta, model_content=model_content,
         )
+        # ⑤.5 扩展缝：post-tool hooks（deny → 结果改写为失败；additional_context 合并）
+        try:
+            outcome = await self._apply_post_hooks(name, args, outcome)
+        except Exception:
+            pass
         # ⑤ 哨兵提醒（只建议不拦截）
         note = self.guard.observe(name, args, status)
         if note:
-            outcome.additional_context = note
+            outcome.additional_context = (
+                f"{outcome.additional_context}\n{note}" if outcome.additional_context else note
+            )
         return outcome

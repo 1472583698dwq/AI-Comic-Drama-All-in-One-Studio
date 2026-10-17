@@ -49,7 +49,8 @@ _TODO_TOOL_SCHEMA: Dict[str, Any] = {
     },
 }
 
-INTERNAL_TOOL_NAMES = {"todo_write", "view_media", "job_start", "job_list", "job_status", "job_cancel",
+INTERNAL_TOOL_NAMES = {"todo_write", "view_media", "ask_user_question",
+                       "job_start", "job_list", "job_status", "job_cancel",
                        "subagent_run", "subagent_wait", "subagent_list", "subagent_status", "subagent_cancel", "subagent_steer",
                        "batch_run", "task_status", "task_wait", "task_cancel",
                        "onekey_split", "onekey_style_lock", "onekey_scene_image", "onekey_role_image", "onekey_shot_image",
@@ -77,6 +78,20 @@ _VIEW_MEDIA_SCHEMA = _internal_schema(
     [],
 )
 
+# 结构化问询（对齐 dsh ask_user_question）：模型面向用户的选项卡提问，不是审批
+_ASK_USER_SCHEMA = _internal_schema(
+    "ask_user_question",
+    "向用户提出一个结构化问题（可带选项按钮）。适合：关键决策二选一（如画风/比例）、"
+    "缺关键信息无法继续时。一次只问一个问题；用户超过时限未答会返回 no_answer，"
+    "此时不要重复提问，按最合理默认继续并在结论里说明假设。",
+    {"question": {"type": "string", "description": "要问的问题（简洁、具体、可决策）"},
+     "options": {"type": "array", "items": {"type": "string"},
+                 "description": "可选项（≤8 个短标签；用户点选即回填，也可自定义输入）"},
+     "multi_select": {"type": "boolean", "description": "是否允许多选（默认 false）"},
+     "detail": {"type": "string", "description": "可选：补充说明/背景，帮助用户决策"}},
+    ["question"],
+)
+
 
 _JOB_START_SCHEMA = _internal_schema(
     "job_start",
@@ -93,13 +108,16 @@ _JOB_CANCEL_SCHEMA = _internal_schema("job_cancel", "取消一个运行中的后
 _SUBAGENT_SCHEMA = _internal_schema(
     "subagent_run",
     "委派子任务给专家子代理（独立上下文，只回最终结果）。默认同步阻塞直到结果返回；background=true 立即返回句柄（完成自动通知，"
-    "关键节点用 subagent_wait 阻塞等待）。同质任务用 batch 数组一次扇出并行。",
+    "关键节点用 subagent_wait 阻塞等待）。同质任务用 batch 数组一次扇出并行。"
+    "需要结构化结果时传 output_schema（子代理必须以 JSON 返回，不合规即失败）。",
     {"agent": {"type": "string", "description": "专家角色名（默认 generalist=全工具通用）"},
      "task": {"type": "string", "description": "清晰、自包含的子任务描述（带上全部必要上下文，如 draft_id/镜头号）"},
      "context": {"type": "object", "description": "随任务下发的上下文键值对（如 {\"draft_id\": \"ok_xxx\"}），会注入子代理提示词，子代理无需再传"},
      "background": {"type": "boolean", "description": "缺省=按角色默认（多数同步阻塞）；true=后台执行立即返回；false=强制同步阻塞"},
      "batch": {"type": "array", "items": {"type": "object"},
                "description": "同质任务批量扇出：[{task, context?}, ...]，并行执行并汇总（与 task 二选一）"},
+     "output_schema": {"type": "object",
+                       "description": "可选：要求子代理以符合该 JSON Schema 的单对象返回（抽取/校验失败视为子代理失败）"},
      "max_steps": {"type": "integer", "description": "子代理最大步数（默认按角色画像）"},
      "timeout_s": {"type": "integer", "description": "子代理超时秒数（默认 1200；长任务显式调大）"}},
     ["agent"],
@@ -315,7 +333,7 @@ class ToolRegistryView:
                 })
         except Exception as e:
             print(f"[RuntimeTools] schemas failed: {e}")
-        internal = [_TODO_TOOL_SCHEMA]
+        internal = [_TODO_TOOL_SCHEMA, _ASK_USER_SCHEMA]
         if multimodal:
             # 多模态功能关闭 → view_media 不出现在工具清单（提示词里的说明仍是无害的软描述）
             internal.append(_VIEW_MEDIA_SCHEMA)

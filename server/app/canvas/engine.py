@@ -80,6 +80,8 @@ _STATIC_OUTPUT_KEYS: Dict[str, Tuple[str, ...]] = {
     **{t: ("video_url", "file_url") for t in _VIDEO_TYPES},
     **{t: ("audio_url", "file_url") for t in _AUDIO_TYPES},
     "director3d": ("camera_prompt", "minimax_camera_prompt", "image_url", "video_url"),
+    # REQ 素材节点：持有哪个类型的素材由数据键决定，产出键按全部类型列出
+    "asset-source": ("image_url", "result_url", "file_url", "thumb_url", "video_url", "audio_url", "prompt", "text"),
 }
 
 
@@ -1031,6 +1033,10 @@ async def execute_node(node: Dict[str, Any], upstream: Dict[str, Any], project_i
         elif ntype == "asset":
             # 透传资产本身
             return {"status":"success","image_url": data.get("file_url") or data.get("thumb_url"), "visual_prompt": data.get("visual_prompt"), "asset": data}
+        elif ntype == "asset-source":
+            # REQ 素材节点：只读来源，透传自身持有的素材（图/视频/音频/文本），绝不触发生成
+            return {"status": "success", **static_outputs(node), "asset_id": data.get("asset_id"),
+                    "elapsed_ms": int((time.time()-start)*1000)}
         else:
             # 通用：若有 prompt 则尝试生图
             if merged.get("prompt") or merged.get("image_prompt") or merged.get("brief"):

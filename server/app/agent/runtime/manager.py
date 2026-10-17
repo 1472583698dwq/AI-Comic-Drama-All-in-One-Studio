@@ -104,6 +104,17 @@ class AgentManager:
         await lp.steer(text, attachments=attachments)
         return True
 
+    async def notify(self, session_id: str, text: str, source: str = "system") -> bool:
+        """向会话投递完成通知（后台任务/前端回执）：busy→插话；idle→唤醒一轮（预算内）。
+
+        会话不在注册表（进程重启/被清理）返回 False —— 通知不会凭空创建一个空会话。
+        """
+        lp = self._loops.get(session_id)
+        if lp is None:
+            return False
+        lp.notify(text, source=source)
+        return True
+
     async def set_run_mode(self, session_id: str, run_mode: str) -> Optional[str]:
         """热切换会话运行模式（审批/自动），对当前运行轮立即生效。
 
@@ -146,6 +157,14 @@ class AgentManager:
         if lp is None:
             return False
         return lp.resolve_approval(approval_id, approved)
+
+    async def resolve_question(self, session_id: str, question_id: str,
+                               selections: Optional[List[str]] = None, custom: str = "") -> bool:
+        """回填模型问询（ask_user_question）的用户答案；会话不在运行返回 False。"""
+        lp = self._loops.get(session_id)
+        if lp is None:
+            return False
+        return lp.resolve_question(question_id, selections=selections, custom=custom)
 
     async def abort(self, session_id: str, cause: str = "user") -> bool:
         lp = self._loops.get(session_id)

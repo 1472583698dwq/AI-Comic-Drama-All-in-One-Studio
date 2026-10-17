@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Search, Plus, Layers, Users, Mountain, Box, Image as ImageIcon, Sparkles, Copy, Trash2, Tag, Filter, Library, Upload, Wand2, X, Loader2, Check, Files, Pencil, Save, Edit3, Clapperboard, Send, FileText } from 'lucide-react';
+import { Search, Plus, Layers, Users, Mountain, Box, Image as ImageIcon, Sparkles, Copy, Trash2, Tag, Filter, Library, Upload, Wand2, X, Loader2, Check, Files, Pencil, Save, Edit3, Clapperboard, Send, FileText, Folder as FolderIcon } from 'lucide-react';
 import { useAssetStore } from '../../stores/useAssetStore';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { useProjectListStore } from '../../stores/useProjectListStore';
+import { appendAssetOwnership } from '../../utils/assetScope';
 import { apiService } from '../../services/api';
 import { AssetCategory } from '../../types';
 import { AutoRatioMedia } from '../ui/AutoRatioMedia';
-import { confirmAsync, toast } from '../../stores/useDialogStore';
+import { confirmAsync, promptAsync, toast } from '../../stores/useDialogStore';
 import { useEscapeClose } from '../../hooks/useEscapeClose';
 
 const CATEGORY_TABS: { key: AssetCategory | 'all'; label: string; icon: React.ReactNode }[] = [
@@ -25,11 +26,23 @@ import { API_ORIGIN } from '../../utils/devOrigin';
 const resolveUrl = (u?: string) => u && u.startsWith('/') ? API_ORIGIN + u : u;
 
 export const AssetLibrary: React.FC = () => {
-  const { assets, total, category, q, isLoading, selectedId, fetchAssets, setCategory, selectAsset, createAsset, updateAsset, batchImport, generateAsset, deleteAsset, duplicateAsset } = useAssetStore() as any;
+  const { assets, total, category, q, isLoading, selectedId, fetchAssets, setCategory, setGroup, scope: scopeFilter, group: groupFilter, selectAsset, createAsset, updateAsset, batchImport, generateAsset, deleteAsset, duplicateAsset, publishAsset, unpublishAsset, shareAsset, copyAssetToProject } = useAssetStore() as any;
   const { project, updateShot } = useProjectStore();
+  const activePid = useProjectListStore((s: any) => s.activeProjectId) || project?.id;
+  const projects = useProjectListStore((s: any) => s.projects) || [];
   const [searchInput, setSearchInput] = useState(q);
   const [stats, setStats] = useState<any>(null);
   const [detailAsset, setDetailAsset] = useState<any>(null);
+  /** L2 分组：可见分组树（项目桶 + 全局桶）+ 每个分组的素材计数 */
+  const [groups, setGroups] = useState<{ global: string[]; project: string[]; counts: Record<string, number> }>({ global: [], project: [], counts: {} });
+  const loadGroups = async () => {
+    try { setGroups(await apiService.listAssetGroups(activePid || undefined) as any); } catch {}
+  };
+  /** 共享/复制目标选择：mode=share（定向共享，多选）| copy（复制到项目，单选） */
+  const [shareCtx, setShareCtx] = useState<{ asset: any; mode: 'share' | 'copy' } | null>(null);
+  const [shareTargets, setShareTargets] = useState<string[]>([]);
+  const [shareBusy, setShareBusy] = useState(false);
+  const projName = (pid?: string) => projects.find((p: any) => p.id === pid)?.title || pid || '';
 
   const [showImport, setShowImport] = useState(false);
   const [showGenerate, setShowGenerate] = useState(false);
@@ -74,7 +87,8 @@ export const AssetLibrary: React.FC = () => {
   const editFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { fetchAssets({ category, page: 1 }); }, []);
-  useEffect(() => { apiService.getAssetStats().then(setStats).catch(()=>{}); }, [assets.length]);
+  useEffect(() => { apiService.getAssetStats(activePid || undefined).then(setStats).catch(()=>{}); }, [assets.length, activePid]);
+  useEffect(() => { loadGroups(); }, [assets.length, activePid]);
 
   useEffect(() => {
     if (showGenerate) {
@@ -124,7 +138,7 @@ export const AssetLibrary: React.FC = () => {
     return () => { dead = true; };
   }, [showGenerate, liveDetail]);
 
-  const refreshStats = () => apiService.getAssetStats().then(setStats).catch(()=>{});
+  const refreshStats = () => apiService.getAssetStats(activePid || undefined).then(setStats).catch(()=>{});
 
   const handleSearch = () => fetchAssets({ q: searchInput, page: 1 });
 
@@ -140,6 +154,7 @@ export const AssetLibrary: React.FC = () => {
       fd.append('content', textForm.content);
       fd.append('description', textForm.content.slice(0, 80));
       if (textForm.tags.trim()) fd.append('tags', textForm.tags.trim());
+      appendAssetOwnership(fd, undefined, activePid || null);
       await createAsset(fd as any);
       setShowText(false);
       setTextForm({ name: '', content: '', tags: '' });
@@ -153,9 +168,8 @@ export const AssetLibrary: React.FC = () => {
     if (importFiles.length === 0) { alert('请选择至少一个文件'); return; }
     setImporting(true);
     try {
-      const activePid = (useProjectListStore.getState() as any).activeProjectId || (useProjectStore.getState() as any).activeProjectId || null;
-      const curScope = (useAssetStore.getState() as any).scope || 'all';
-      const effScope = curScope === 'global' ? 'global' : (activePid ? 'project' : 'global');
+      // 归属统一：全局 tab 下导入 → 全局；否则默认当前项目（无项目 → 全局）
+      const putsGlobal = (useAssetStore.getState() as any).scope === 'global';
       if (importFiles.length === 1) {
         const fd = new FormData();
         const f = importFiles[0];
@@ -164,29 +178,18 @@ export const AssetLibrary: React.FC = () => {
         fd.append('category', importMeta.category);
         fd.append('visual_prompt', importMeta.visual_prompt);
         if (importMeta.tags) fd.append('tags', importMeta.tags);
-        fd.append('scope', effScope);
-        if (activePid && effScope === 'project') fd.append('project_id', activePid);
+        appendAssetOwnership(fd, putsGlobal ? 'global' : undefined, activePid || null);
         fd.append('file', f);
         await createAsset(fd);
       } else {
-        // batchImport 暂不支持 project_id，逐个创建以保证归属
-        if (activePid && effScope === 'project') {
-          for (const f of importFiles) {
-            const fd = new FormData();
-            const base = f.name.replace(/\.[^.]+$/, '') || '素材';
-            fd.append('name', base);
-            fd.append('category', importMeta.category);
-            fd.append('visual_prompt', importMeta.visual_prompt);
-            if (importMeta.tags) fd.append('tags', importMeta.tags);
-            fd.append('scope', effScope);
-            fd.append('project_id', activePid);
-            fd.append('file', f);
-            await createAsset(fd);
-          }
-        } else {
-          const res = await batchImport(importFiles, { category: importMeta.category, tags: importMeta.tags, visual_prompt: importMeta.visual_prompt });
-          if (res.errors?.length) alert(`部分失败：\n${res.errors.join('\n')}`);
-        }
+        const res = await batchImport(importFiles, {
+          category: importMeta.category,
+          tags: importMeta.tags,
+          visual_prompt: importMeta.visual_prompt,
+          project_id: putsGlobal ? undefined : (activePid || undefined),
+          scope: putsGlobal ? 'global' : undefined,
+        });
+        if (res.errors?.length) alert(`部分失败：\n${res.errors.join('\n')}`);
       }
       setShowImport(false);
       setImportFiles([]);
@@ -321,6 +324,7 @@ export const AssetLibrary: React.FC = () => {
       fd.append('content', editForm.content || '');
       if (editForm.tags) fd.append('tags', editForm.tags);
       if (editForm.status) fd.append('status', editForm.status);
+      if (activePid) fd.append('actor_project_id', activePid);
       if (editFile) fd.append('file', editFile);
       const updated: any = await (updateAsset as any)(selected.id, fd);
       setDetailAsset(updated);
@@ -524,7 +528,165 @@ export const AssetLibrary: React.FC = () => {
     setShowImport(true);
   };
 
+  /** 卡片徽标：全局 / 共享给我 / 已共享到全局（发布） */
+  const badgeOf = (a: any) => {
+    const arr: { label: string; cls: string }[] = [];
+    if (a.scope === 'global') arr.push({ label: '全局', cls: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' });
+    if (activePid && a.project_id && a.project_id !== activePid && (a.shared_to || []).includes(activePid)) {
+      arr.push({ label: `共享:${projName(a.project_id)}`, cls: 'bg-sky-500/20 text-sky-300 border-sky-500/30' });
+    }
+    if (a.scope === 'global' && activePid && a.origin_project_id === activePid) {
+      arr.push({ label: '已共享到全局', cls: 'bg-brand/20 text-brand-light border-brand/30' });
+    }
+    return arr;
+  };
+
   const selected = assets.find((a: any) => a.id === selectedId) || detailAsset;
+  const selIsGlobal = selected?.scope === 'global';
+  const selOwnedByMe = !!selected && !!activePid && selected.project_id === activePid;
+  const selSharedToMe = !!selected && !!activePid && !!selected.project_id && selected.project_id !== activePid && (selected.shared_to || []).includes(activePid);
+
+  const handlePublish = async (a: any) => {
+    const ok = await confirmAsync({ title: '共享到全局', message: `将「${a.name}」发布到全局素材库？\n发布后所有项目可见，文件与 URL 不变，已引用它的镜头不受影响。`, confirmText: '共享到全局', cancelText: '取消' });
+    if (!ok) return;
+    try {
+      const res = await publishAsset(a.id);
+      setDetailAsset((prev: any) => prev && prev.id === a.id ? { ...prev, ...res } : prev);
+      toast.success('已共享到全局');
+      refreshStats();
+      try { window.dispatchEvent(new CustomEvent('asset-refresh')); } catch {}
+    }
+    catch (e: any) { toast.error(e?.message || '共享失败'); }
+  };
+
+  const handleUnpublish = async (a: any) => {
+    const ok = await confirmAsync({ title: '收回共享', message: `将「${a.name}」收回本项目？收回后其他项目将不可见它。`, isDanger: true, confirmText: '收回', cancelText: '取消' });
+    if (!ok) return;
+    const applyResult = (res: any) => setDetailAsset((prev: any) => prev && prev.id === a.id ? { ...prev, ...res } : prev);
+    try {
+      applyResult(await unpublishAsset(a.id));
+      toast.success('已收回共享');
+      refreshStats();
+      try { window.dispatchEvent(new CustomEvent('asset-refresh')); } catch {}
+    }
+    catch (e: any) {
+      const detail = e?.detail;
+      if (e?.status === 409 && detail?.references?.length) {
+        const refs = detail.references.map((r: any) => `${projName(r.project_id)}（${r.file}）`).join('\n');
+        const force = await confirmAsync({ title: '素材被其他项目引用', message: `以下项目仍在引用它：\n${refs}\n\n强制收回会让对方引用失效（404）。建议先“复制到项目”。`, isDanger: true, confirmText: '强制收回', cancelText: '取消' });
+        if (force) {
+          try { applyResult(await unpublishAsset(a.id, true)); toast.success('已强制收回'); refreshStats(); }
+          catch (e2: any) { toast.error(e2?.message || '收回失败'); }
+        }
+      } else toast.error(e?.message || '收回失败');
+    }
+  };
+
+  const openShareTargets = (a: any, mode: 'share' | 'copy') => {
+    setShareCtx({ asset: a, mode });
+    setShareTargets(mode === 'share' ? (a.shared_to || []).filter((t: string) => t !== activePid) : []);
+  };
+
+  // ── L2 分组 ─────────────────────────────────────────────
+  /** 当前上下文的分组桶：全局 tab → 全局桶；否则有项目 → 项目桶，无项目 → 全局桶 */
+  const groupScope = (): 'project' | 'global' => (scopeFilter === 'global' ? 'global' : (activePid ? 'project' : 'global'));
+
+  const handleCreateGroup = async () => {
+    const raw = await promptAsync({ title: '新建分组', message: '分组名（最多两级，可用 / 分隔，如：角色/主角）', placeholder: '分组名', confirmText: '创建' });
+    if (!raw || !raw.trim()) return;
+    try {
+      await apiService.createAssetGroup({ path: raw.trim(), project_id: activePid || undefined, scope: groupScope() });
+      await loadGroups();
+      toast.success('分组已创建');
+    } catch (e: any) { toast.error(e?.message || '创建失败'); }
+  };
+
+  const handleRenameGroup = async (path: string, scope: 'project' | 'global') => {
+    const raw = await promptAsync({ title: '重命名分组', message: `把「${path}」重命名为（子分组会一起迁移）`, defaultValue: path, confirmText: '重命名' });
+    if (!raw || !raw.trim() || raw.trim() === path) return;
+    try {
+      const res: any = await apiService.renameAssetGroup({ old_path: path, new_path: raw.trim(), project_id: activePid || undefined, scope });
+      await loadGroups();
+      if (groupFilter === path || String(groupFilter).startsWith(path + '/')) setGroup(raw.trim() + String(groupFilter).slice(path.length));
+      else fetchAssets({ page: 1 });
+      toast.success('已重命名');
+    } catch (e: any) { toast.error(e?.message || '重命名失败'); }
+  };
+
+  const handleDeleteGroup = async (path: string, scope: 'project' | 'global') => {
+    const ok = await confirmAsync({ title: '删除分组', message: `删除分组「${path}」（含子分组）？组内素材不会被删除，只会变为未分组。`, isDanger: true, confirmText: '删除分组', cancelText: '取消' });
+    if (!ok) return;
+    try {
+      await apiService.deleteAssetGroup({ path, project_id: activePid || undefined, scope });
+      await loadGroups();
+      if (groupFilter === path || String(groupFilter).startsWith(path + '/')) setGroup('all');
+      else fetchAssets({ page: 1 });
+      toast.success('分组已删除');
+    } catch (e: any) { toast.error(e?.message || '删除失败'); }
+  };
+
+  const handleMoveGroup = async (a: any, path: string) => {
+    try {
+      const fd = new FormData();
+      fd.append('group_path', path);
+      if (activePid) fd.append('actor_project_id', activePid);
+      const updated: any = await updateAsset(a.id, fd);
+      setDetailAsset((prev: any) => prev && prev.id === a.id ? { ...prev, ...updated } : prev);
+      await loadGroups();
+      toast.success(path ? `已移动到「${path}」` : '已移出分组');
+    } catch (e: any) { toast.error(e?.message || '移动失败'); }
+  };
+
+  /** 渲染一个桶的分组树（两级：父 + 子）；父行点击=按前缀过滤（含子级） */
+  const renderGroupTree = (paths: string[], scope: 'project' | 'global') => {
+    const roots = paths.filter(p => !p.includes('/'));
+    const childrenOf = (root: string) => paths.filter(p => p.startsWith(root + '/'));
+    return roots.map(root => (
+      <div key={`${scope}:${root}`}>
+        <div className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-[11px] cursor-pointer transition-colors ${groupFilter === root ? 'bg-brand/15 text-white' : 'text-gray-400 hover:bg-surface/80 hover:text-white'}`}
+          onClick={() => setGroup(root)}>
+          <span className="flex items-center gap-1.5 min-w-0 truncate"><FolderIcon className="w-3 h-3 shrink-0" /><span className="truncate">{root}</span></span>
+          <span className="flex items-center gap-1">
+            <span className="text-[9px] text-gray-500">{groups.counts?.[root] ?? ''}</span>
+            <button onClick={(e)=>{e.stopPropagation(); handleRenameGroup(root, scope);}} className="p-0.5 rounded hover:bg-white/10 text-gray-500 hover:text-white" title="重命名"><Pencil className="w-2.5 h-2.5" /></button>
+            <button onClick={(e)=>{e.stopPropagation(); handleDeleteGroup(root, scope);}} className="p-0.5 rounded hover:bg-red-500/20 text-gray-500 hover:text-red-300" title="删除分组（不删素材）"><Trash2 className="w-2.5 h-2.5" /></button>
+          </span>
+        </div>
+        {childrenOf(root).map(child => (
+          <div key={`${scope}:${child}`}
+            className={`ml-3 w-[calc(100%-0.75rem)] flex items-center justify-between px-2 py-1.5 rounded-lg text-[11px] cursor-pointer transition-colors ${groupFilter === child ? 'bg-brand/15 text-white' : 'text-gray-500 hover:bg-surface/80 hover:text-white'}`}
+            onClick={() => setGroup(child)}>
+            <span className="flex items-center gap-1.5 min-w-0 truncate"><FolderIcon className="w-3 h-3 shrink-0" /><span className="truncate">{child.split('/').slice(1).join('/')}</span></span>
+            <span className="flex items-center gap-1">
+              <span className="text-[9px] text-gray-500">{groups.counts?.[child] ?? ''}</span>
+              <button onClick={(e)=>{e.stopPropagation(); handleRenameGroup(child, scope);}} className="p-0.5 rounded hover:bg-white/10 text-gray-500 hover:text-white" title="重命名"><Pencil className="w-2.5 h-2.5" /></button>
+              <button onClick={(e)=>{e.stopPropagation(); handleDeleteGroup(child, scope);}} className="p-0.5 rounded hover:bg-red-500/20 text-gray-500 hover:text-red-300" title="删除分组（不删素材）"><Trash2 className="w-2.5 h-2.5" /></button>
+            </span>
+          </div>
+        ))}
+      </div>
+    ));
+  };
+
+  const confirmShareTargets = async () => {
+    if (!shareCtx || !shareTargets.length) return;
+    setShareBusy(true);
+    try {
+      if (shareCtx.mode === 'share') {
+        const merged = Array.from(new Set([...(shareCtx.asset.shared_to || []), ...shareTargets])).filter((t: string) => t !== activePid);
+        await shareAsset(shareCtx.asset.id, merged);
+        toast.success('已共享');
+      } else {
+        for (const pid of shareTargets) await copyAssetToProject(shareCtx.asset.id, pid);
+        toast.success(`已复制到 ${shareTargets.length} 个项目`);
+        fetchAssets({ page: 1 });
+      }
+      setShareCtx(null);
+      setShareTargets([]);
+      try { window.dispatchEvent(new CustomEvent('asset-refresh')); } catch {}
+    } catch (e: any) { toast.error(e?.message || '操作失败'); }
+    finally { setShareBusy(false); }
+  };
 
   return (
     <div className="flex-1 min-h-0 flex bg-background overflow-hidden">
@@ -537,8 +699,8 @@ export const AssetLibrary: React.FC = () => {
         </div>
         <div className="p-3 border-b border-white/70 dark:border-white/12 space-y-2">
           <div className="flex rounded-full bg-surface/80 border border-white/70 dark:border-white/12 p-1 gap-1">
-            {(['all','project','global'] as const).map(s=> (
-              <button key={s} onClick={()=>fetchAssets({ scope: s, page: 1 })} className={`flex-1 py-1 rounded-full text-[11px] font-bold transition-all ${((useAssetStore as any).getState?.().scope||'all')===s ? 'bg-brand text-white shadow-sm' : 'text-gray-500 hover:text-white'}`}>{s==='all'?'全部':s==='project'?'项目':'全局'}</button>
+            {(['all','project','global','shared'] as const).map(s=> (
+              <button key={s} onClick={()=>fetchAssets({ scope: s, page: 1 })} className={`flex-1 py-1 rounded-full text-[10.5px] font-bold transition-all whitespace-nowrap ${scopeFilter===s ? 'bg-brand text-white shadow-sm' : 'text-gray-500 hover:text-white'}`}>{s==='all'?'全部':s==='project'?'本项目':s==='global'?'全局':'共享给我'}</button>
             ))}
           </div>
           <div className="flex items-center gap-2 rounded-full bg-surface/80 border border-white/70 dark:border-white/12 px-3 py-1.5 focus-within:border-brand/40">
@@ -555,6 +717,33 @@ export const AssetLibrary: React.FC = () => {
               {t.key==='all' && <span className="text-[10px] bg-surface-hover/80 px-1.5 py-0.5 rounded">{stats?.total||total}</span>}
             </button>
           ))}
+
+          {/* L2 分组树：点击过滤（父分组含子级）；+ 新建；行内重命名/删除（不删素材） */}
+          <div className="pt-2 mt-1 border-t border-white/70 dark:border-white/12">
+            <div className="flex items-center justify-between px-2 pb-1">
+              <span className="text-[10px] font-bold tracking-wide text-gray-500">分组</span>
+              <button onClick={handleCreateGroup} className="p-0.5 rounded hover:bg-white/10 text-gray-500 hover:text-white" title={`新建分组（${groupScope()==='global'?'全局桶':'项目桶'}）`}><Plus className="w-3 h-3" /></button>
+            </div>
+            <div className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-[11px] cursor-pointer transition-colors ${groupFilter==='all' ? 'bg-brand/15 text-white' : 'text-gray-400 hover:bg-surface/80 hover:text-white'}`} onClick={()=>setGroup('all')}>
+              <span>全部分组</span>
+            </div>
+            <div className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-[11px] cursor-pointer transition-colors ${groupFilter==='__none__' ? 'bg-brand/15 text-white' : 'text-gray-400 hover:bg-surface/80 hover:text-white'}`} onClick={()=>setGroup('__none__')}>
+              <span>未分组</span>
+              <span className="text-[9px] text-gray-500">{groups.counts?.['__none__'] ?? ''}</span>
+            </div>
+            {groups.project?.length > 0 && (
+              <div className="mt-1">
+                <div className="px-2 pb-0.5 text-[9px] text-gray-600">本项目</div>
+                {renderGroupTree(groups.project, 'project')}
+              </div>
+            )}
+            {groups.global?.length > 0 && (
+              <div className="mt-1">
+                <div className="px-2 pb-0.5 text-[9px] text-gray-600">全局库</div>
+                {renderGroupTree(groups.global, 'global')}
+              </div>
+            )}
+          </div>
         </div>
         <div className="p-3 border-t border-white/70 dark:border-white/12 space-y-2">
           <div className="grid grid-cols-2 gap-2">
@@ -579,6 +768,12 @@ export const AssetLibrary: React.FC = () => {
             <span className="text-white font-medium truncate">{category==='all'?'全部素材':CATEGORY_TABS.find(c=>c.key===category)?.label}</span>
             <span className="text-gray-500">·</span>
             <span className="text-gray-400">{total} 个</span>
+            {groupFilter!=='all' && (
+              <span className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-full bg-sky-500/10 border border-sky-500/20 text-sky-300 text-xs">
+                <FolderIcon className="w-3 h-3" />{groupFilter==='__none__' ? '未分组' : groupFilter}
+                <button onClick={()=>setGroup('all')} className="hover:text-white"><X className="w-3 h-3" /></button>
+              </span>
+            )}
             {q && <span className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-full bg-brand/10 border border-brand/20 text-brand-light text-xs">"{q}"</span>}
           </div>
           <div className="flex-1" />
@@ -631,6 +826,7 @@ export const AssetLibrary: React.FC = () => {
                       <div className="aspect-square bg-surface/80 relative overflow-hidden p-3">
                         <div className="absolute top-2 left-2 flex items-center space-x-1 z-10">
                           <span className="text-[9px] px-1.5 py-0.5 rounded-full border font-medium bg-sky-500/15 text-sky-400 border-sky-500/30">text</span>
+                          {badgeOf(a).map(b => <span key={b.label} className={`text-[9px] px-1.5 py-0.5 rounded-full border font-medium ${b.cls}`}>{b.label}</span>)}
                         </div>
                         <div className="text-[10px] text-gray-400 leading-relaxed overflow-hidden whitespace-pre-wrap break-words" style={{ display: '-webkit-box', WebkitLineClamp: 7, WebkitBoxOrient: 'vertical' }}>
                           {(a.content || a.visual_prompt || '').slice(0, 240) || '（空文本素材）'}
@@ -652,6 +848,7 @@ export const AssetLibrary: React.FC = () => {
                       <div className="absolute top-2 left-2 flex items-center space-x-1">
                         <span className={`text-[9px] px-1.5 py-0.5 rounded-full border font-medium ${a.category==='character'?'bg-accent-pink/20 text-accent-pink border-accent-pink/30': a.category==='scene'?'bg-accent-green/20 text-accent-green border-accent-green/30':'bg-brand/20 text-brand-light border-brand/30'}`}>{a.category}</span>
                         {a.status!=='approved' && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">{a.status}</span>}
+                        {badgeOf(a).map(b => <span key={b.label} className={`text-[9px] px-1.5 py-0.5 rounded-full border font-medium ${b.cls}`}>{b.label}</span>)}
                       </div>
                       {a.source==='generate' && <span className="absolute top-2 right-2 text-[8px] px-1.5 py-0.5 rounded-full bg-violet-500/90 text-white font-bold">AI</span>}
                       <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-2 space-x-1">
@@ -730,6 +927,55 @@ export const AssetLibrary: React.FC = () => {
               <div className="mt-1.5 text-[10px] text-gray-500 flex items-center gap-1"><span>💡 拖拽卡片到分镜垫图槽可直接作为参考图</span></div>
             </div>
             {selected.tags?.length>0 && <div className="flex flex-wrap gap-1.5">{selected.tags.map((t:string)=><span key={t} className="text-xs px-2 py-1 rounded-full bg-brand/15 text-brand-light border border-brand/30">{t}</span>)}</div>}
+            <div className="bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl p-3 space-y-2">
+              <div className="text-xs font-semibold text-white flex items-center gap-1.5">
+                <span>归属与共享</span>
+                {selIsGlobal && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">全局库</span>}
+                {selOwnedByMe && !selIsGlobal && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-brand/15 text-brand-light border border-brand/30">本项目</span>}
+                {selSharedToMe && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30">共享给我</span>}
+              </div>
+              <div className="text-[10.5px] text-gray-400 leading-4 space-y-0.5">
+                {selIsGlobal ? (
+                  <div>
+                    所有项目可见{selected.origin_project_id ? ` · 来自「${projName(selected.origin_project_id)}」发布` : ''}
+                    {selected.published_at ? ` · ${selected.published_at.slice(0, 10)} 发布` : ''}
+                  </div>
+                ) : selOwnedByMe ? (
+                  <div>仅本项目可见{selSharedToMe ? '' : '；可单条或批量共享到全局'}</div>
+                ) : selSharedToMe ? (
+                  <div>由「{projName(selected.project_id)}」共享给你（只读）；想修改请先复制到本项目</div>
+                ) : (
+                  <div>归属：{selected.project_id ? projName(selected.project_id) : '未记录'}</div>
+                )}
+                {(selected.shared_to||[]).length>0 && <div>已共享给：{selected.shared_to.map((t:string)=>projName(t)).join('、')}</div>}
+                {(selOwnedByMe || selIsGlobal || selSharedToMe) && (
+                  <div className="flex items-center gap-1.5 pt-0.5">
+                    <span className="shrink-0">分组：</span>
+                    <select
+                      value={selected.group_path || ''}
+                      onChange={e=>handleMoveGroup(selected, e.target.value)}
+                      className="flex-1 min-w-0 bg-surface/80 border border-white/70 dark:border-white/12 rounded-md px-1.5 py-0.5 text-[10.5px] text-gray-200 focus:outline-none focus:border-brand"
+                    >
+                      <option value="">不分组</option>
+                      {groups.project?.map((p: string) => <option key={`p:${p}`} value={p}>{p}</option>)}
+                      {groups.global?.map((p: string) => <option key={`g:${p}`} value={p}>{p}（全局）</option>)}
+                    </select>
+                  </div>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {selOwnedByMe && !selIsGlobal && (
+                  <button onClick={()=>handlePublish(selected)} className="py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-[11px] text-emerald-300 hover:bg-emerald-500/25">共享到全局</button>
+                )}
+                {selOwnedByMe && !selIsGlobal && (
+                  <button onClick={()=>openShareTargets(selected, 'share')} className="py-1.5 rounded-lg bg-sky-500/15 border border-sky-500/30 text-[11px] text-sky-300 hover:bg-sky-500/25">共享到项目</button>
+                )}
+                {selIsGlobal && activePid && selected.origin_project_id === activePid && (
+                  <button onClick={()=>handleUnpublish(selected)} className="py-1.5 rounded-lg bg-amber-500/15 border border-amber-500/30 text-[11px] text-amber-300 hover:bg-amber-500/25">收回共享</button>
+                )}
+                <button onClick={()=>openShareTargets(selected, 'copy')} className="py-1.5 rounded-lg bg-surface-hover/80 border border-white/70 dark:border-white/12 text-[11px] text-gray-300 hover:text-white">复制到项目</button>
+              </div>
+            </div>
             <div className="grid grid-cols-2 gap-2 text-xs">
               <div className="bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl p-2">
                 <div className="text-gray-500">尺寸</div><div className="text-white font-mono">{selected.width && selected.height ? `${selected.width}×${selected.height}` : '—'}</div>
@@ -749,10 +995,28 @@ export const AssetLibrary: React.FC = () => {
                     confirmText: '确认删除',
                     cancelText: '取消'
                   })) { 
-                    await deleteAsset(selected.id); 
-                    setDetailAsset(null); 
-                    selectAsset(null); 
-                    toast.success('素材已删除');
+                    try {
+                      await deleteAsset(selected.id); 
+                      setDetailAsset(null); 
+                      selectAsset(null); 
+                      toast.success('素材已删除');
+                      refreshStats();
+                    } catch (e: any) {
+                      const detail = e?.detail;
+                      if (e?.status === 409 && detail?.references?.length) {
+                        const refs = detail.references.map((r: any) => `${projName(r.project_id)}（${r.file}）`).join('\n');
+                        const force = await confirmAsync({ title: '素材仍被引用', message: `该素材被以下项目引用：\n${refs}\n\n强制删除会让引用失效（404）。`, isDanger: true, confirmText: '强制删除', cancelText: '取消' });
+                        if (force) {
+                          try {
+                            await deleteAsset(selected.id, { force: true });
+                            setDetailAsset(null);
+                            selectAsset(null);
+                            toast.success('素材已删除');
+                            refreshStats();
+                          } catch (e2: any) { toast.error(e2?.message || '删除失败'); }
+                        }
+                      } else toast.error(e?.message || '删除失败');
+                    }
                   } 
                 }} 
                 className="py-2 rounded-xl bg-red-500/15 border border-red-500/30 hover:bg-red-500/25 text-xs text-red-300 flex items-center justify-center space-x-1 transition-colors"
@@ -1168,6 +1432,55 @@ export const AssetLibrary: React.FC = () => {
                 className="px-5 py-2 rounded-xl bg-gradient-to-r from-violet-600 to-brand text-white text-xs font-bold disabled:opacity-40 flex items-center space-x-1.5"
                 title={!genForm.provider ? '请先选择生成源' : `用「${provLabel}」生成并入库`}
               >{generating? <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span>生成中…</span></> : <><Sparkles className="w-3.5 h-3.5" /><span>生成并入库</span></>}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {shareCtx && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={()=>{ if(!shareBusy) setShareCtx(null); }}>
+          <div className="bg-surface border border-white/70 dark:border-white/12 rounded-2xl w-full max-w-md p-5 space-y-3" onClick={e=>e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white">
+                {shareCtx.mode === 'share' ? '共享到项目' : '复制到项目'}「{shareCtx.asset.name}」
+              </h3>
+              <button onClick={()=>{ if(!shareBusy) setShareCtx(null); }} className="text-gray-400 hover:text-white"><X className="w-4 h-4" /></button>
+            </div>
+            <p className="text-[11px] text-gray-400 leading-4">
+              {shareCtx.mode === 'share'
+                ? '共享给对方后，对方可在素材库「共享给我」中看到并只读使用；想修改需复制到对方项目。'
+                : '复制会在对方项目生成一份独立副本（文件级拷贝），之后两边互不影响。'}
+            </p>
+            {projects.filter((p: any) => p.id !== activePid).length === 0 ? (
+              <div className="text-xs text-gray-400 py-4 text-center">没有其他项目可选</div>
+            ) : (
+              <div className="max-h-60 overflow-y-auto space-y-1">
+                {projects.filter((p: any) => p.id !== activePid).map((p: any) => {
+                  const checked = shareTargets.includes(p.id);
+                  return (
+                    <button
+                      key={p.id}
+                      onClick={()=>setShareTargets(prev => checked ? prev.filter(t=>t!==p.id) : [...prev, p.id])}
+                      className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl border text-left text-xs transition-colors ${checked ? 'bg-brand/15 border-brand text-white' : 'bg-surface/80 border-white/70 dark:border-white/12 text-gray-300 hover:text-white'}`}
+                    >
+                      <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${checked ? 'bg-brand border-brand' : 'border-gray-500'}`}>{checked && <Check className="w-3 h-3 text-white" />}</span>
+                      <span className="truncate flex-1">{p.title || p.id}</span>
+                      <span className="text-[9px] text-gray-500 font-mono shrink-0">{p.id}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <div className="flex justify-end gap-2 pt-1">
+              <button onClick={()=>{ if(!shareBusy) setShareCtx(null); }} className="px-4 py-2 rounded-xl bg-surface/80 border border-white/70 dark:border-white/12 text-xs text-white">取消</button>
+              <button
+                onClick={confirmShareTargets}
+                disabled={shareBusy || shareTargets.length === 0}
+                className="px-5 py-2 rounded-xl bg-brand text-white text-xs font-bold disabled:opacity-40 flex items-center gap-1.5"
+              >
+                {shareBusy && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                <span>{shareCtx.mode === 'share' ? '共享' : '复制'}（{shareTargets.length}）</span>
+              </button>
             </div>
           </div>
         </div>

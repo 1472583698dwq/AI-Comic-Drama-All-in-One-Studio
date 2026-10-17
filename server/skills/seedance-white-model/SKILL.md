@@ -4,7 +4,7 @@ description: 白模（灰模/clay render）参考工作流：用 3D 导演台的
 version: 1.0.0
 author: Studio（本地整理：对齐 Seedance 2.5 白模参考官方口径）
 category: video
-tools: [generate_video, onekey_shot_video, stage_control, stage_get_state]
+tools: [generate_video, onekey_shot_video, stage_control, stage_get_state, stage_export_clay]
 ---
 
 # 白模参考工作流（Seedance 2.5 / 其他场景）
@@ -30,6 +30,13 @@ tools: [generate_video, onekey_shot_video, stage_control, stage_get_state]
    - **首帧 / 尾帧 PNG**（尾帧用于首尾帧模型或收口检查）；
    - **结构化 prompt 草稿**（`clay_prompt`，本次机位/运镜/时长/轨迹已量化写入）；
 3. 白模要"干净"：不加贴图、不调好看，灰色 uniform 材质 + 地面接触关系清晰即可；细节越多越容易被模型当风格抄走。
+4. **白模视频必须是"连续运镜视频"**：参考价值来自**整段相机运动轨迹与主体运动**，不是某个固定机位的画面。
+   导出会录制从起点到终点的完整运镜（推/拉/摇/移/环绕/升降/跟随/滚转等所有运镜预设都会产生真实相机运动，
+   走位路径会带主角移动）；固定机位（static）导出的是静态构图，只适合首帧/尾帧用途，**不要当运镜参考**。
+   录制要求窗口保持可见（后台标签页会被浏览器暂停，录出静止或空文件）；Agent 远控用 `stage_export_clay`
+   （可传 duration/fps），前端会自动切到 3D 片场并开录，产物写回 `clay_video_url` / `previz_video_url`。
+   **导出完成/失败会自动作为系统通知回投发起会话**：收到通知后立即 `view_media(视频地址)` 看抽帧
+   （对照运镜/构图/节奏判定 pass/fail），把结论告知用户——不需要反复轮询。
 
 ## 2. 写 Seedance 2.5 R2V 提示词（参考生视频）
 

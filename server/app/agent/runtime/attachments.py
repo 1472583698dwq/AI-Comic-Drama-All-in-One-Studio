@@ -291,8 +291,10 @@ def attachments_from_focus_nodes(context: Optional[Dict[str, Any]], limit: int =
 
 
 # 会产生媒体产物的工具（前缀 + 显式名单）；只有这些工具的结果值得回投给模型"看"
+# stage_get_state 也入列：白模/预演视频（clay_video_url / previz_video_url）随状态阅读回投，
+# 让模型在导出完成后直接"看到"运镜结果（视频自动抽帧），不用额外再喊一次 view_media。
 MEDIA_TOOL_PREFIXES = ("generate_", "comfyui_", "customnode_", "provider_", "onekey_shot_", "onekey_role_")
-MEDIA_TOOL_NAMES = {"canvas_execute", "canvas_dispatch_skill", "task_wait", "view_media"}
+MEDIA_TOOL_NAMES = {"canvas_execute", "canvas_dispatch_skill", "task_wait", "view_media", "stage_get_state"}
 
 
 def attachments_from_tool_result(name: str, result: Any, limit: int = 2) -> List[Dict[str, Any]]:
@@ -312,10 +314,11 @@ def attachments_from_tool_result(name: str, result: Any, limit: int = 2) -> List
     if not isinstance(result, dict):
         return []
     out: List[Dict[str, Any]] = []
-    img = result.get("image_url") or result.get("result_url")
+    img = result.get("image_url") or result.get("result_url") or result.get("clay_first_frame_url")
     if isinstance(img, str) and img.strip():
         out.append(_entry(img.strip(), "image", f"{name} · 画面", "tool"))
-    vid = result.get("video_url")
+    # 视频产物（含 3D 导演台白模/预演）：模型看不了原片时自动抽帧回投
+    vid = result.get("video_url") or result.get("clay_video_url") or result.get("previz_video_url")
     if isinstance(vid, str) and vid.strip():
         vid = vid.strip()
         if kind_enabled("video"):

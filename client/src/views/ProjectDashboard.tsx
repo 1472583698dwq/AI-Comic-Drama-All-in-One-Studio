@@ -65,7 +65,7 @@ export const ProjectDashboard: React.FC = () => {
     // 双 store 的 activeProjectId 保持一致（画布/素材按它隔离）
     try { useProjectListStore.getState().setActiveProjectId(meta.id); } catch {}
     try { localStorage.setItem('activeProjectId', meta.id); } catch {}
-    useProjectStore.getState().setActiveTab('studio');
+    useProjectStore.getState().leaveEpisode();
   };
 
   const handleCreate = async () => {
@@ -101,7 +101,7 @@ export const ProjectDashboard: React.FC = () => {
       try {
         const data = await apiService.getProject(res.id);
         if (data?.content?.scenes) setProject({ ...data.content, id: res.id });
-        useProjectStore.getState().setActiveTab('studio');
+        useProjectStore.getState().leaveEpisode();
       } catch {}
     } catch (err: any) { toast.error(err.message || '导入项目失败'); }
     e.target.value = '';
@@ -114,7 +114,7 @@ export const ProjectDashboard: React.FC = () => {
       if (data?.content?.scenes) {
         // 项目身份以目录 id 为准（content.id 可能是剧本导入留下的 UUID）
         setProject({ ...data.content, id });
-        useProjectStore.getState().setActiveTab('studio');
+        useProjectStore.getState().leaveEpisode();
       } else {
         // 空白项目：创建一个默认空 Project 供编辑
         const meta = projects.find(p=>p.id===id);
@@ -129,7 +129,7 @@ export const ProjectDashboard: React.FC = () => {
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         } as any);
-        useProjectStore.getState().setActiveTab('studio');
+        useProjectStore.getState().leaveEpisode();
       }
     } catch (e:any) { toast.error(e.message || '打开项目失败'); }
   };

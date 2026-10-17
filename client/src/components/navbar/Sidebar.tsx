@@ -3,6 +3,7 @@ import {
   Lock, MessageCirclePlus, type LucideIcon,
 } from 'lucide-react';
 import { useProjectStore, selectSidebarCollapsed } from '../../stores/useProjectStore';
+import { WORKSPACE_TABS } from '../../utils/episodeScope';
 import { usePageStore } from '../../stores/usePageStore';
 import { isGlobalPage } from '../../ui-registry/pageTabs';
 
@@ -43,7 +44,7 @@ const OTHER_GROUP = 'other';
  * - 宽度 264px ⇄ 60px 图标轨；画布页默认收起的行为不变。
  */
 export const Sidebar: React.FC = () => {
-  const { project, activeTab, setActiveTab } = useProjectStore();
+  const { project, activeTab, setActiveTab, activeEpisodeId } = useProjectStore();
   const sidebarCollapsed = useProjectStore(selectSidebarCollapsed);
   const pages = usePageStore((s) => s.items);
   const values = usePageStore((s) => s.values);
@@ -175,7 +176,7 @@ export const Sidebar: React.FC = () => {
                   </div>
                 )}
                 <div className="space-y-0.5">
-                  {g.items.map((item) => {
+                  {g.items.filter((item) => activeEpisodeId || !(WORKSPACE_TABS as readonly string[]).includes(item.id)).map((item) => {
                     const locked = !isGlobalPage(item.id) && !project;
                     const active = activeTab === item.id || (item.id === 'assets' && activeTab === 'characters');
                     const Icon = item.icon;

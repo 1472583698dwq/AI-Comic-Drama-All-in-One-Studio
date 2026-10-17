@@ -16,6 +16,8 @@ const BY_KEY: Record<string, LucideIcon> = {
   home: Home,
   house: Home, // lucide 的别名写法
   projects: FolderKanban,
+  episodes: Film,
+  film: Film,
   projectdashboard: FolderKanban,
   folderkanban: FolderKanban,
   kanban: FolderKanban,
@@ -45,7 +47,6 @@ const BY_KEY: Record<string, LucideIcon> = {
   sparkles: Sparkles,
   config: Settings,
   settings: Settings,
-  film: Film,
   boxes: Boxes,
 };
 

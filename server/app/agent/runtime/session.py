@@ -77,20 +77,97 @@ def _safe_tool_arguments(args: Any) -> str:
 
 class Session:
     def __init__(self, session_id: str, events: Optional[List[Dict[str, Any]]] = None,
-                 store: Optional[SessionStore] = None):
+                 store: Optional[SessionStore] = None, strict: bool = False):
         self.id = session_id
         self.store = store or default_store
+        self.strict = bool(strict)  # strict=True（AgentLoop）→ 提交时强制 invariant
         self._events: List[Dict[str, Any]] = list(events or [])
         self._next_seq = (self._events[-1]["seq"] + 1) if self._events else 1
         self._messages_cache: Optional[List[Dict[str, Any]]] = None
         self._messages_cache_key: Any = None
+        # invariant 状态机缓存（对标 dsh session invariant：提交时校验，拒绝坏写入）
+        self._rebuild_invariant_state()
+
+    # ── invariant（提交时拒绝而非事后修复）────────────────
+    def _rebuild_invariant_state(self) -> None:
+        """从历史事件重建校验游标：open turn/step 与未结算 tool calls。"""
+        self._open_turn = False
+        self._open_step = False
+        self._pending_calls: set = set()
+        for ev in self._events:
+            t = ev.get("type")
+            d = ev.get("data") or {}
+            if t == E.TURN_START:
+                self._open_turn, self._open_step = True, False
+            elif t == E.TURN_END:
+                self._open_turn, self._open_step = False, False
+            elif t == E.STEP_START:
+                self._open_step = True
+            elif t == E.STEP_END:
+                self._open_step = False
+            elif t == E.TOOL_CALL:
+                cid = str(d.get("call_id") or "")
+                if cid:
+                    self._pending_calls.add(cid)
+            elif t == E.TOOL_RESULT:
+                self._pending_calls.discard(str(d.get("call_id") or ""))
+
+    def _check_transition(self, event_type: str, data: Dict[str, Any]) -> None:
+        """append 前的纯校验：不变量失败即抛（可见历史永不 partly-invalid）。"""
+        if event_type == E.TURN_START:
+            if self._open_turn:
+                raise RuntimeError(f"会话 {self.id} 已有未闭合 turn，拒绝嵌套 turn/start")
+            if self._open_step:
+                raise RuntimeError(f"会话 {self.id} step 未闭合就开新 turn")
+        elif event_type == E.TURN_END:
+            if not self._open_turn:
+                if not self._events:
+                    return  # 空 seed 会话从不该直接 close；此处容忍历史迁移
+                raise RuntimeError(f"会话 {self.id} 无开放 turn 却写入 turn/end")
+        elif event_type == E.STEP_START:
+            if not self._open_turn:
+                raise RuntimeError(f"会话 {self.id} 无开放 turn 就写入 step/start")
+            if self._open_step:
+                raise RuntimeError(f"会话 {self.id} 已有开放 step，拒绝嵌套 step/start")
+        elif event_type == E.STEP_END:
+            if not self._open_step:
+                raise RuntimeError(f"会话 {self.id} 无开放 step 却写入 step/end")
+        elif event_type == E.TOOL_CALL:
+            if not self._open_turn:
+                raise RuntimeError(f"会话 {self.id} 工具调用必须在开放 turn 内")
+        elif event_type == E.TOOL_RESULT:
+            if not self._open_turn:
+                raise RuntimeError(f"会话 {self.id} 工具结果必须在开放 turn 内")
+            cid = str(data.get("call_id") or "")
+            # 合成错误结果（中断补账/跳过占位）允许无前导 tool/call；成功结果必须配对
+            if cid and cid not in self._pending_calls and data.get("status") != "error":
+                raise RuntimeError(f"会话 {self.id} 工具结果无配对调用（call_id={cid}）")
+
+    def _apply_transition(self, event_type: str, data: Dict[str, Any]) -> None:
+        if event_type == E.TURN_START:
+            self._open_turn, self._open_step = True, False
+        elif event_type == E.TURN_END:
+            self._open_turn, self._open_step = False, False
+            if self._pending_calls:
+                self._pending_calls.clear()
+        elif event_type == E.STEP_START:
+            self._open_step = True
+        elif event_type == E.STEP_END:
+            self._open_step = False
+        elif event_type == E.TOOL_CALL:
+            cid = str(data.get("call_id") or "")
+            if cid:
+                self._pending_calls.add(cid)
+        elif event_type == E.TOOL_RESULT:
+            self._pending_calls.discard(str(data.get("call_id") or ""))
 
     # ── 生命周期 ──────────────────────────────────────────
     @classmethod
-    def open(cls, session_id: str, store: Optional[SessionStore] = None, repair: bool = True) -> "Session":
+    def open(cls, session_id: str, store: Optional[SessionStore] = None, repair: bool = True,
+             strict: bool = False) -> "Session":
         st = store or default_store
         events = [ev for ev in st.read(session_id) if ev.get("type") != "session/header"]
-        s = cls(session_id, events, st)
+        s = cls(session_id, events, st, strict=strict)
         if repair:
             s.repair_interrupted()
         return s
@@ -114,10 +191,15 @@ class Session:
 
     # ── 写入 ─────────────────────────────────────────────
     def append(self, event_type: str, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        ev = {"type": event_type, "seq": self._next_seq, "time": time.time(), "data": data or {}}
-        E.validate_event(ev)
+        data = data or {}
+        E.validate_event({"type": event_type, "data": data})
+        # invariant 在校验通过后才入 log：失败时什么都不会改变（strict 会话强制）
+        if self.strict:
+            self._check_transition(event_type, data)
+        ev = {"type": event_type, "seq": self._next_seq, "time": time.time(), "data": data}
         self._next_seq += 1
         self._events.append(ev)
+        self._apply_transition(event_type, data)
         self._messages_cache = None
         try:
             self.store.append(self.id, [ev])
@@ -125,6 +207,65 @@ class Session:
             # 落盘失败必须显式暴露：模型可见的东西没能记下来，历史不再可信
             raise RuntimeError(f"会话日志写入失败({self.id}): {e}") from e
         return ev
+
+    # ── 幂等 append（稳定 KV-cache 前缀，对标 dsh 投影去重）──
+    def last_system_text(self) -> str:
+        for ev in reversed(self._events):
+            if ev.get("type") == E.SYSTEM_MESSAGE:
+                return str((ev.get("data") or {}).get("text") or "")
+        return ""
+
+    def append_system_if_changed(self, text: str) -> Optional[Dict[str, Any]]:
+        """系统提示词只在变化时落账（历史里永远指向最后一条）。"""
+        if text == self.last_system_text():
+            return None
+        return self.append(E.SYSTEM_MESSAGE, {"text": text})
+
+    def last_context_text(self) -> str:
+        """最后一条运行时上下文 user 消息（form=context，非用户直发）。"""
+        for ev in reversed(self._events):
+            if ev.get("type") != E.USER_MESSAGE:
+                continue
+            d = ev.get("data") or {}
+            if d.get("form") == "context" and d.get("source") != "user":
+                return str(d.get("text") or "")
+        return ""
+
+    def append_context_if_changed(self, text: str) -> Optional[Dict[str, Any]]:
+        """运行时上下文与上一次完全一致时不重复落账（幂等快照）。"""
+        if text and text == self.last_context_text():
+            return None
+        return self.append(E.USER_MESSAGE, {"text": text, "source": "system", "form": "context"})
+
+    # ── durable inbox 回放（重启恢复排队输入）─────────────
+    def pending_inbox_snapshot(self) -> List[Dict[str, Any]]:
+        """折叠 INBOX_MUTATION 事件，重建重启前的排队输入。
+
+        返回 ``[{"target": "next-step"|"next-turn", "message": {...}}]``，
+        顺序与 claim 优先序一致（next-step 先于 next-turn）。
+        """
+        queues: Dict[str, List[Dict[str, Any]]] = {"next-turn": [], "next-step": []}
+        for ev in self._events:
+            if ev.get("type") != E.INBOX_MUTATION:
+                continue
+            d = ev.get("data") or {}
+            target = str(d.get("target") or "")
+            if target not in queues:
+                continue
+            if d.get("outcome") == "canceled":
+                queues[target].clear()
+            for mid in (d.get("removed") or []):
+                for lst in queues.values():
+                    lst[:] = [m for m in lst if m.get("id") != mid]
+            for msg in (d.get("inserted") or []):
+                if isinstance(msg, dict) and msg.get("id"):
+                    if not any(m.get("id") == msg.get("id") for m in queues[target]):
+                        queues[target].append(msg)
+        out: List[Dict[str, Any]] = []
+        for target in ("next-step", "next-turn"):
+            for m in queues[target]:
+                out.append({"target": target, "message": dict(m)})
+        return out
 
     # ── 读取 ─────────────────────────────────────────────
     @property

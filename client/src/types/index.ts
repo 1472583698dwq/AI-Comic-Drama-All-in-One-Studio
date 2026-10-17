@@ -177,7 +177,15 @@ export interface Scene {
   location: string;
   time_of_day: 'day' | 'night' | 'dusk' | 'dawn';
   atmosphere: 'epic' | 'tense' | 'peaceful' | 'eerie';
+  episode_id?: string | null; // 所属分集（空=未分集）
   shots: StoryboardShot[];
+}
+
+export interface Episode {
+  id: string;
+  episode_index: number;
+  title: string;
+  summary?: string;
 }
 
 export interface Project {
@@ -188,6 +196,7 @@ export interface Project {
   aspect_ratio: AspectRatio;
   characters: Character[];
   scenes: Scene[];
+  episodes?: Episode[]; // 分集元数据（归属由 Scene.episode_id 表达）
   bgm_name?: string;
   bgm_url?: string | null;
   bgm_volume?: number;
@@ -246,6 +255,11 @@ export type AssetStatus = 'draft' | 'approved' | 'archived';
 export interface Asset {
   id: string;
   project_id?: string;
+  scope?: 'project' | 'global';
+  shared_to?: string[];
+  origin_project_id?: string;
+  group_path?: string;
+  published_at?: string;
   name: string;
   category: AssetCategory;
   subcategory?: string;

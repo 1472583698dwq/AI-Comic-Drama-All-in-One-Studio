@@ -11,10 +11,16 @@ interface Preset { id: string; label: string; hint?: string; fields: Field[]; se
 
 const LLM_PRESETS: Preset[] = [
   {
-    id: 'minimax', label: 'MiniMax（推荐 · 一个 Key 通吃 文本/配音/视频）',
-    hint: '填 MiniMax 按量 Key，文本理解之外还能启用配音与视频',
-    fields: [{ key: 'MINIMAX_API_KEY', label: 'MINIMAX_API_KEY', password: true, placeholder: 'MiniMax 按量 API Key' }],
-    set: { LLM_PROVIDER: 'minimax' }, testTarget: 'minimax',
+    id: 'minimax', label: 'MiniMax（一把 Key：文本走兼容接口，配音和视频共用）',
+    hint: '文本不再单独占一档通道，和别的模型一起进模型广场；这里把同一把 Key 写入文本默认通道',
+    fields: [{ key: 'OPENAI_API_KEY', label: 'API Key', password: true, placeholder: 'MiniMax 按量 API Key' }],
+    set: {
+      LLM_PROVIDER: 'openai_compatible',
+      LLM_API_TYPE: 'chat_completions',
+      OPENAI_BASE_URL: 'https://api.minimaxi.com/v1',
+      OPENAI_MODEL: 'MiniMax-M2.5',
+    },
+    testTarget: 'openai',
   },
   {
     id: 'deepseek', label: 'DeepSeek',
@@ -158,13 +164,15 @@ export const FirstRunWizard: React.FC = () => {
     if (missing.length) { setResult({ ok: false, detail: `请填写：${missing.map((m) => m.label).join('、')}` }); return; }
     setBusy(true); setResult(null);
     try {
-      await apiService.saveConfig({ ...values, ...preset.set });
+      const payload: Record<string, string> = { ...values, ...preset.set };
+      if (preset.id === 'minimax' && values.OPENAI_API_KEY) payload.MINIMAX_API_KEY = values.OPENAI_API_KEY;
+      await apiService.saveConfig(payload);
       let r: any;
       if (preset.testProvider) {
         r = await apiService.testProvider(preset.testProvider);
         window.dispatchEvent(new Event('provider-list-refresh'));
       } else {
-        r = await apiService.testConfig(preset.testTarget, values);
+        r = await apiService.testConfig(preset.testTarget, payload);
       }
       const ok = !!r?.ok;
       setResult({ ok, detail: r?.detail || (ok ? '连通正常' : '测试未通过') });

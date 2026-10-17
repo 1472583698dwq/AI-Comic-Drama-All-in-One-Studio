@@ -37,6 +37,11 @@ PAGE_DEFS: List[Dict[str, Any]] = [
         "description": "项目看板：管理全部工程与制作进度",
     },
     {
+        "id": "episodes", "label": "集看板", "icon": "Film", "group": "工作区",
+        "order": 25, "default": True, "locked": False, "host": "episodes",
+        "description": "集看板：打开项目后先看每一集，点进一集才进入工作空间",
+    },
+    {
         "id": "assets", "label": "素材库", "icon": "Library", "group": "工作区",
         "order": 30, "default": True, "locked": False, "host": "assets",
         "description": "素材库：图片 / 视频 / 音频统一归档",

@@ -252,7 +252,7 @@ export const OneKeyStudioView: React.FC = () => {
     }
   };
 
-  const handleOpenProject = async (tab: 'canvas' | 'studio') => {
+  const handleOpenProject = async (_tab: 'canvas' | 'studio') => {
     const proj = result?.project;
     if (!proj) return;
     setSaving(true);
@@ -267,7 +267,7 @@ export const OneKeyStudioView: React.FC = () => {
       try { autoBindShotCharacters(proj as any); } catch { /* ignore */ }
       await apiService.saveProjectContent(pid, { ...proj, id: pid });
       await useProjectStore.getState().loadActiveProject(pid);
-      useProjectStore.getState().setActiveTab(tab as any);
+      useProjectStore.getState().leaveEpisode();
     } catch (e: any) {
       setError(e?.message || '落盘失败');
     } finally {

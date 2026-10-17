@@ -1,6 +1,9 @@
 import React from 'react';
 import { Image as ImageIcon, Paintbrush, Sliders, Sparkles, Link2 } from 'lucide-react';
 import type { ShotSlotContext } from './types';
+import { FRAMING_PRESETS } from '../../director3d/directorPresets';
+import { referenceMentionSuffix } from '../shotReference';
+import { imageLayoutOf, lanesOf } from '../shotLanes';
 import { useAnchorDefs } from '../../../ui-registry/adapters/storyboardSlots';
 import { ProviderSlotList } from './ProviderSlotList';
 import { SlotOutlet } from './PluginRender';
@@ -13,20 +16,28 @@ import { AiPolishButton } from '../../ui/AiPolishButton';
  */
 export const VisualTab: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
   const {
-    activeShot, updateShot, productionMode,
+    project, activeShot, updateShot,
     synthesizeShotPrompt,
     imageProvider, imageProviderDef, imageProviderParams,
     setImageProvider, setImageProviderParams,
     shotDynamicInputs, resolveRenderSlots,
     setSlotValue, handleSlotUploadFile, pickAssetForSlot, injectCharacterToSlot,
-    uploadingInputKey, getMediaUrl, handleRegenerateImage, isRegenerating,
-    setInspectingWorkflowId, probeProvider, regenError,
+    uploadingInputKey, getMediaUrl,
+    setInspectingWorkflowId, probeProvider,
     handleOneClickBind, hasBindUndo, undoLastBind,
+    handleRegenerateImage, isRegenerating, regenError,
   } = ctx;
   // 锚点槽从注册表取（内置 + 插件同一条管线），when(ctx) 过滤仍在宿主侧
   const anchors = useAnchorDefs(ctx);
+  const imageOn = lanesOf(activeShot).image;
+  const layout = imageLayoutOf(activeShot);
+  const imageState = !imageOn ? '已关闭' : !activeShot.image_url ? '未生成' : layout === 'grid' ? '四宫格' : ((activeShot.candidates?.length || 0) > 1 ? '选优' : '单张');
   return (
     <div className="space-y-3.5">
+      <div className="flex items-center justify-between text-[11px] text-gray-400">
+        <span>出画面</span>
+        <span className={imageOn ? 'text-gray-200' : 'text-gray-500'}>{imageState}</span>
+      </div>
       {anchors.map((a) => (
         <SlotOutlet key={a.id} slotKey={a.id} render={a.render} ctx={ctx} />
       ))}
@@ -37,15 +48,25 @@ export const VisualTab: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
           <AiPolishButton value={activeShot.action_desc} onPolish={(v: any) => updateShot(activeShot.id, { action_desc: v })} contextType="prompt" size="xs" />
         </div>
         <textarea value={activeShot.action_desc} onChange={(e) => updateShot(activeShot.id, { action_desc: e.target.value })} rows={2} className="mt-1 w-full bg-surface-secondary border border-border rounded-xl p-2.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand leading-relaxed" placeholder="描述人物动作、情景与交互..."/>
+        <label className="mt-2 block text-[11px] text-gray-400">景别</label>
+        <select
+          value={activeShot.camera_framing || 'medium'}
+          onChange={(e) => {
+            const id = e.target.value;
+            const short = (FRAMING_PRESETS.find((f) => f.id === id)?.label || id).replace(/\s*\(.*$/, '');
+            const prev = activeShot.action_desc || '';
+            const next = /景别：[^，。\n]*/.test(prev)
+              ? prev.replace(/景别：[^，。\n]*/, `景别：${short}`)
+              : (prev ? `${prev} 景别：${short}` : `景别：${short}`);
+            updateShot(activeShot.id, { camera_framing: id, action_desc: next } as any);
+          }}
+          className="mt-1 w-full bg-surface-secondary border border-border rounded-lg px-2 py-1.5 text-xs text-white"
+        >
+          {FRAMING_PRESETS.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
+        </select>
       </div>
 
-      {/* 4. 生图源专属表单（直出模式隐藏：立绘直驱视频，无需单张生图） */}
       {(() => {
-        // NOTE: 条件与原代码一致 —— motion_comic 隐藏生图表单
-        const hide = productionMode === 'motion_comic';
-        if (hide) {
-          return <div className="text-[11px] text-gray-500 bg-surface-secondary/60 border border-border rounded-lg px-2.5 py-1.5">漫剧模式跳过生图：绑定上方角色 / 场景 / 道具后，直接去「视频与运镜」页生成视频</div>;
-        }
         return (
         <div className="p-3 rounded-2xl bg-surface-secondary/50 border border-border space-y-3">
           <div className="flex items-center justify-between">
@@ -135,6 +156,9 @@ export const VisualTab: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
                     className="w-full bg-surface-secondary border border-border rounded-xl p-2.5 text-xs font-mono text-white placeholder-gray-500 focus:outline-none focus:border-brand"
                     placeholder={inProps?.prompt?.description ? `${inProps.prompt.description}...` : '输入画面提示词...'}
                   />
+                  {referenceMentionSuffix(activeShot, project) && (
+                    <p className="text-[10px] text-gray-500 whitespace-pre-wrap leading-relaxed">生成时附在提示词后：{referenceMentionSuffix(activeShot, project).trim()}</p>
+                  )}
                 </div>
 
                 <ProviderSlotList
@@ -147,56 +171,24 @@ export const VisualTab: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
                   onInjectCharacter={injectCharacterToSlot}
                   resolveUrl={getMediaUrl}
                 />
+                <button
+                  type="button"
+                  onClick={() => handleRegenerateImage()}
+                  disabled={!imageOn || isRegenerating}
+                  className="w-full py-2.5 rounded-xl bg-brand text-white text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-40"
+                >
+                  <Sparkles className={`w-3.5 h-3.5 ${isRegenerating ? 'animate-spin' : ''}`} />
+                  <span>{isRegenerating ? '生成中…' : layout === 'grid' ? '用此源生成四宫格' : '用此源生成画面'}</span>
+                </button>
+                {regenError && <div className="text-xs text-red-300">{regenError}</div>}
               </div>
             );
           })()}
 
-          <div className="flex gap-2">
-            <button
-              onClick={() => handleRegenerateImage(1)}
-              disabled={isRegenerating}
-              className="flex-1 py-2.5 rounded-xl bg-surface-tertiary hover:bg-surface-hover border border-border text-white text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-40 transition-all"
-            >
-              <span>单张生成</span>
-            </button>
-            <button
-              onClick={() => handleRegenerateImage(4)}
-              disabled={isRegenerating}
-              className="flex-[2] py-2.5 rounded-xl bg-gradient-to-r from-brand to-brand-light text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-lg shadow-brand/20 hover:opacity-90 disabled:opacity-40 transition-all"
-            >
-              <Sparkles className={`w-3.5 h-3.5 ${isRegenerating ? 'animate-spin' : ''}`} />
-              <span>{isRegenerating ? '4 抽并发中…' : '1 镜 4 抽 (推荐 ⚡)'}</span>
-            </button>
-          </div>
-          {regenError && <div className="text-xs text-red-300">{regenError}</div>}
         </div>
         );
       })()}
 
-      {/* 镜头机位与运动预设 */}
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <label className="text-[11px] text-gray-400">景别构图</label>
-          <select value={activeShot.camera_framing} onChange={(e) => updateShot(activeShot.id, { camera_framing: e.target.value as any })} className="w-full mt-1 bg-surface-secondary border border-border rounded-lg px-2 py-1.5 text-xs text-white">
-            <option value="close_up">特写 (Close-Up)</option>
-            <option value="medium">中景 (Medium)</option>
-            <option value="full">全景 (Full)</option>
-            <option value="long">远景 (Long)</option>
-            <option value="bird_eye">俯视 (Bird Eye)</option>
-            <option value="low_angle">仰视 (Low Angle)</option>
-          </select>
-        </div>
-        <div>
-          <label className="text-[11px] text-gray-400">镜头运动</label>
-          <select value={activeShot.camera_motion} onChange={(e) => updateShot(activeShot.id, { camera_motion: e.target.value as any })} className="w-full mt-1 bg-surface-secondary border border-border rounded-lg px-2 py-1.5 text-xs text-white">
-            <option value="static">静止 (Static)</option>
-            <option value="push_in">推近 (Push In)</option>
-            <option value="pull_out">拉远 (Pull Out)</option>
-            <option value="orbit">环绕 (Orbit)</option>
-            <option value="shake">震颤 (Shake)</option>
-          </select>
-        </div>
-      </div>
     </div>
   );
 };

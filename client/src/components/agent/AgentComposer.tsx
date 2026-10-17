@@ -22,6 +22,7 @@ import {
 import { useAgentDraftStore, MAX_ATTACHMENTS } from './agentDraftStore';
 import { AgentAttachmentPicker, kindOfUrl } from './AgentAttachmentPicker';
 import { apiService } from '../../services/api';
+import { ModelSwitcher } from '../llm/ModelSwitcher';
 import { API_ORIGIN } from '../../utils/devOrigin';
 import { toast } from '../../stores/useDialogStore';
 import type { AgentAttachment, RunMode, WsStatus } from './agentTypes';
@@ -472,6 +473,8 @@ export const AgentComposer: React.FC<AgentComposerProps> = ({
               onClosed={focusInput}
             />
           )}
+
+          <ModelSwitcher />
 
           <span className={`flex-1 min-w-0 text-[9px] [color:var(--color-text-main)] truncate ${hasMenu ? '' : 'pl-1'}`}>
             {isRunning

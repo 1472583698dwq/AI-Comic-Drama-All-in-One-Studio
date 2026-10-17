@@ -21,6 +21,15 @@ class Character(BaseModel):
     avatar_url: Optional[str] = None
     three_views: Dict[str, str] = Field(default_factory=dict) # {"front": url, "side": url, "three_quarter": url}
 
+class Episode(BaseModel):
+    # 分集（项目 → 分集 → 场/镜）：加法式结构，scenes 仍为扁平数组，既有链路零破坏
+    model_config = {"extra": "allow"}
+
+    id: str
+    episode_index: int
+    title: str = ""
+    summary: str = ""
+
 class StoryboardShot(BaseModel):
     # extra=allow：分镜上挂着大量前端扩展字段（character_ids/character_weights/scene_ref_image/
     # previz_url/previz_video_url/stage_cameras/previz_shots/lighting_config/walk_path/history…），
@@ -65,6 +74,7 @@ class Scene(BaseModel):
     image_prompt: str = ""
     props: List[str] = Field(default_factory=list)
     ref_image_url: Optional[str] = None
+    episode_id: Optional[str] = None  # 所属分集（None=未分集）
     shots: List[StoryboardShot] = Field(default_factory=list)
 
 class Project(BaseModel):
@@ -78,6 +88,7 @@ class Project(BaseModel):
     aspect_ratio: str = "9:16" # 9:16 (mobile vertical), 16:9 (desktop horizontal), 1:1
     characters: List[Character] = Field(default_factory=list)
     scenes: List[Scene] = Field(default_factory=list)
+    episodes: List[Episode] = Field(default_factory=list)  # 分集元数据（分集归属由 Scene.episode_id 表达）
     bgm_name: Optional[str] = "Epic_Battle_Orchestra.mp3"
     bgm_url: Optional[str] = None  # 真实 BGM 音频地址；导出剪映时按素材长度平铺到 bgm 轨
     bgm_volume: float = 0.5

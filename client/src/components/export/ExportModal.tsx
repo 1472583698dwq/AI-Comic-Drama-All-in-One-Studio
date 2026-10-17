@@ -23,6 +23,7 @@ import { EXPORTER_ROWS_HOST } from '../../ui-registry/types';
 import { useEscapeClose } from '../../hooks/useEscapeClose';
 import { AutoRatioMedia } from '../ui/AutoRatioMedia';
 import { AssetPickerModal } from '../asset/AssetPickerModal';
+import { scenesInEpisode } from '../../utils/episodeScope';
 
 interface ExportModalProps {
   isOpen: boolean;
@@ -30,7 +31,11 @@ interface ExportModalProps {
 }
 
 export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => {
-  const { project, totalDuration, setProject } = useProjectStore();
+  const { project, setProject, activeEpisodeId } = useProjectStore();
+  const exportProject = project && activeEpisodeId
+    ? { ...project, scenes: scenesInEpisode(project, activeEpisodeId) }
+    : project;
+  const totalDuration = (exportProject?.scenes || []).flatMap((s) => s.shots || []).reduce((sum, sh) => sum + (Number(sh.duration) || 0), 0);
   const [isExporting, setIsExporting] = useState(false);
   const [exportedDraft, setExportedDraft] = useState<any>(null);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -85,12 +90,15 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
     setExporterBusyId(spec.id);
     setExporterResults((prev) => ({ ...prev, [spec.id]: undefined }));
     try {
-      const shots = project.scenes.flatMap((s) => s.shots);
+      const scoped = activeEpisodeId
+        ? { ...project, scenes: scenesInEpisode(project, activeEpisodeId) }
+        : project;
+      const shots = scoped.scenes.flatMap((s) => s.shots);
       const res = await apiService.runExporter({
         exporter_id: spec.id,
         project_id: project.id,
         payload: {
-          project,
+          project: scoped,
           shots,
           characters: project.characters || [],
           meta: { title: project.title, aspect_ratio: project.aspect_ratio, style_preset: project.style_preset },
@@ -102,7 +110,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
     } finally {
       setExporterBusyId('');
     }
-  }, [project]);
+  }, [project, activeEpisodeId]);
 
   /** 注入给导出器条目的桥接：条目只报 id，spec 由宿主查（注册表不认识回调，见设计 §12 规则 2） */
   const exportBridge = useMemo(() => ({
@@ -124,7 +132,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
     setExportError(null);
     setExportedDraft(null);
     try {
-      const res = await apiService.exportJianYingDraft(project);
+      const res = await apiService.exportJianYingDraft(exportProject || project);
       setExportedDraft(res);
     } catch (e: any) {
       setExportError(e?.message || '导出失败');

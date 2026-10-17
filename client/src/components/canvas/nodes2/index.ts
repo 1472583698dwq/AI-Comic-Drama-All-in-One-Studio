@@ -9,13 +9,14 @@ import './text';
 import './image';
 import './video';
 import './audio';
+import './asset';
 import './director3d';
 import './legacy-a';
 import './legacy-b';
 
 /** 本目录注册的节点类型（不含 kit 的 group），供宿主 / 测试核对。 */
 export const NODES2_TYPES = [
-  'prompt', 'load-image', 'image', 'load-video', 'video', 'load-audio', 'audio', 'director3d',
+  'prompt', 'load-image', 'image', 'load-video', 'video', 'load-audio', 'audio', 'asset-source', 'director3d',
   'shot-card', 'comfy-workflow', 'timeline', 'timeline-export', 'export',
   'brief', 'script-split', 'custom', 'ext-node', 'provider', 'provider-image', 'provider-video', 'provider-audio', 'provider-llm',
 ] as const;

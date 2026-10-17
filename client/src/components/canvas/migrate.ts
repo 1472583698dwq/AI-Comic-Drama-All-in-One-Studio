@@ -91,6 +91,7 @@ export const PRIMARY_OUTPUT_PORT: Readonly<Record<string, string>> = Object.free
   'load-image': 'image',
   'load-video': 'video',
   'load-audio': 'audio',
+  'asset-source': 'out',
 });
 
 /** 生成源节点：连到生成节点的线不改（provider 节点保留，design §2.4） */
@@ -128,6 +129,7 @@ export const CURRENT_NODE_TYPES: readonly string[] = Object.freeze([
   'load-image',
   'load-video',
   'load-audio',
+  'asset-source',
   'group',
   'export',
   'timeline',

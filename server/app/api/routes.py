@@ -1349,6 +1349,29 @@ async def websocket_agent_endpoint(websocket: WebSocket):
                     await websocket.send_json({"event": "error", "message": f"审批回执失败: {e}"})
                 continue
 
+            # ── 模型问询回填（ask_user_question）──
+            if action == "answer_question":
+                _qid = str(data.get("question_id") or "")
+                _sel = data.get("selections")
+                if isinstance(_sel, str):
+                    _sel = [_sel]
+                if not isinstance(_sel, list):
+                    _sel = []
+                _sid_q = str(data.get("session_id") or session_id)
+                _resolved_q = False
+                if AGENT_V2:
+                    try:
+                        _resolved_q = await agent_manager.resolve_question(
+                            _sid_q, _qid,
+                            selections=[str(s)[:200] for s in _sel][:8],
+                            custom=str(data.get("custom") or "")[:2000],
+                        )
+                    except Exception:
+                        _resolved_q = False
+                await websocket.send_json({"event": "question_ack", "question_id": _qid,
+                                           "selections": _sel, "resolved": _resolved_q})
+                continue
+
             # ── v2 重连挂载：把本 socket 挂到已有会话，补发快照并续播实时事件 ──
             if action == "attach_session":
                 if AGENT_V2:
@@ -2546,6 +2569,57 @@ async def agent_session_steer(session_id: str, req: AgentChatRequest):
     return {"status": "accepted" if ok else "no_session", "session_id": session_id}
 
 
+class StageClayResultRequest(BaseModel):
+    """前端白模导出回执（stage_export_clay 的前端代理完成上报）。"""
+    project_id: str = Field(default="")
+    shot_id: str = Field(default="")
+    shot_index: Optional[int] = Field(default=None)
+    video_url: str = Field(default="")
+    first_frame_url: str = Field(default="")
+    secs: float = Field(default=0.0)
+    ok: bool = Field(default=True)
+    error: str = Field(default="")
+
+
+@router.post("/agent/stage/clay-result")
+async def agent_stage_clay_result(req: StageClayResultRequest):
+    """白模导出完成回执：把结果通知投给**发起 stage_export_clay 的会话**，让它查看并反馈质量。
+
+    - 回执与登记（project + shot）对账失败（手动导出/后端重启）→ ``no_pending``，不打扰任何会话；
+    - 命中登记但会话已不在内存（重启/清理）→ ``no_session``（不凭空新建会话）。
+    """
+    from app.director_stage import pending as clay_pending
+    entry = clay_pending.pop(req.project_id, shot_id=req.shot_id, shot_index=req.shot_index)
+    if entry is None:
+        return {"status": "no_pending"}
+    label = f"#{req.shot_index}" if req.shot_index is not None else (
+        f"分镜 {req.shot_id}" if (req.shot_id or "").strip() else "分镜"
+    )
+    video_url = (req.video_url or "").strip()
+    first_url = (req.first_frame_url or "").strip()
+    if req.ok and video_url:
+        text = (
+            f"[系统通知] 白模导出完成：分镜 {label} 的连续运镜视频已生成并上传资产库"
+            f"（{video_url}，{req.secs:.1f}s）"
+            + (f"；白模首帧 {first_url}" if first_url else "")
+            + "。请立即 view_media(视频地址) 查看抽帧，对照该镜的运镜/构图/动作判定 pass/fail，"
+              "并调用 stage_get_state 收口，把结论（含视频地址）告知用户。"
+              "用户可在对话产物卡里直接查看该视频；生成成片时把它作为参考视频（@video1）。"
+        )
+    else:
+        why = (req.error or "录制未产出视频").strip()
+        text = (
+            f"[系统通知] 白模导出未完成：分镜 {label} 没有产出视频（{why}）。"
+            "请如实告知用户，并给出下一步：确认 3D 片场监视器已开启、窗口保持可见后重试 "
+            "stage_export_clay（或手动点「导出白模参考」）。"
+        )
+    notified = await agent_manager.notify(entry.session_id, text, source="stage")
+    return {
+        "status": "notified" if notified else "no_session",
+        "session_id": entry.session_id,
+    }
+
+
 class AgentRunModeRequest(BaseModel):
     run_mode: str = Field(default="approve", description="组合运行模式 token（approve/auto/create/create_auto/plan/plan_auto）")
 
@@ -2606,6 +2680,25 @@ async def agent_approve_http(body: Dict[str, Any] = {}):
         str(body.get("session_id") or ""),
         str(body.get("approval_id") or ""),
         bool(body.get("approved", False)),
+    )
+    return {"resolved": ok}
+
+
+@router.post("/agent/answer_question")
+async def agent_answer_question_http(body: Dict[str, Any] = {}):
+    """ask_user_question 结构化问询的答案回填（HTTP/SSE 兜底；WS 走 answer_question 动作）。"""
+    if not AGENT_V2:
+        raise HTTPException(status_code=400, detail="仅 v2 内核支持")
+    selections = body.get("selections")
+    if isinstance(selections, str):
+        selections = [selections]
+    if not isinstance(selections, list):
+        selections = []
+    ok = await agent_manager.resolve_question(
+        str(body.get("session_id") or ""),
+        str(body.get("question_id") or ""),
+        selections=[str(s)[:200] for s in selections][:8],
+        custom=str(body.get("custom") or "")[:2000],
     )
     return {"resolved": ok}
 

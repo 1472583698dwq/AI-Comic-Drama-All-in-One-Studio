@@ -25,6 +25,8 @@ import { useModalIntentsStore } from './ui-registry/modalIntents';
 import { useShellStatusStore } from './ui-registry/shellStatus';
 import { startExtensionsStream } from './services/extensionsStream';
 import { useProjectStore } from './stores/useProjectStore';
+import { stashClayExportIntent } from './components/director3d/clayExportIntent';
+import { WORKSPACE_TABS } from './utils/episodeScope';
 import { useFeatureStore } from './stores/useFeatureStore';
 import { useMcpStore } from './stores/useMcpStore';
 
@@ -33,6 +35,7 @@ export function App() {
   // 注意：apiError / mcpError 两条横幅已搬进锁定壳条目（shell.banner.*），App 不再持有它们；
   // platformMode / 引导卡条件也随 ContextTipCard 一起搬进了 `tip.*` 条目
   const { project, activeTab, isLoading, activeProjectId } = useProjectStore();
+  const activeEpisodeId = useProjectStore((s) => s.activeEpisodeId);
   const { fetchTools } = useMcpStore();
   // 功能页运行时开关：页签准入的唯一依据（后端 /api/v1/pages）
   const pagesLoaded = usePageStore((s) => s.loaded);
@@ -88,6 +91,21 @@ export function App() {
     window.addEventListener('theme-list-refresh', syncThemes as any);
     window.addEventListener('open-skill-studio', onOpenSkillStudio as any);
     window.addEventListener('open-mcp-tools', onOpenMcpTools as any);
+    // 系统 Agent 的 3D 白模导出请求（stage_export_clay 是前端代理型工具）：片场已挂载时它自己接手
+    // （同步置 detail.__handled）；未挂载则存下意图并自动切到 3D 片场，由片场挂载后自动开录。
+    // 没有这层兜底，Agent 调用返回"成功"但前端无人录制，白模产物永远为零。
+    const onAgentClayExport = (ev: any) => {
+      const detail = ev?.detail || {};
+      window.setTimeout(() => {
+        if (detail.__handled) return;
+        const st = useProjectStore.getState();
+        if (!st.project) { toast.error('系统 Agent 请求导出白模，但当前没有打开项目'); return; }
+        stashClayExportIntent(detail);
+        st.setActiveTab('director3d');
+        toast.info('系统 Agent 请求导出白模：已切到 3D 片场，将自动开始录制（请保持窗口可见）');
+      }, 0);
+    };
+    window.addEventListener('agent-stage-export-clay', onAgentClayExport as any);
     return () => {
       stopExtensionsStream();
       window.removeEventListener('open-provider-manager', onOpenProviderManager as any);
@@ -99,6 +117,7 @@ export function App() {
       window.removeEventListener('theme-list-refresh', syncThemes as any);
       window.removeEventListener('open-skill-studio', onOpenSkillStudio as any);
       window.removeEventListener('open-mcp-tools', onOpenMcpTools as any);
+      window.removeEventListener('agent-stage-export-clay', onAgentClayExport as any);
     };
   }, []);
 
@@ -114,6 +133,14 @@ export function App() {
       useProjectStore.getState().setActiveTab((resolveTab('home') || 'projects') as any);
     }
   }, [project, activeTab, isLoading, pagesLoaded]);
+
+  // 进了项目但还没选集：工作空间页签退回集看板
+  useEffect(() => {
+    if (isLoading || !pagesLoaded || !project) return;
+    if ((WORKSPACE_TABS as readonly string[]).includes(activeTab) && !activeEpisodeId) {
+      useProjectStore.getState().setActiveTab('episodes');
+    }
+  }, [project, activeTab, activeEpisodeId, isLoading, pagesLoaded]);
 
   /** 启动恢复中（有缓存项目正在拉取）：先占位，别先闪一眼首页/看板再跳 */
   const restoring = isLoading && !project && !!activeProjectId;

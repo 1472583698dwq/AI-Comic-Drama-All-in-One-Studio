@@ -1,9 +1,9 @@
 import React from 'react';
 import { Volume2, Zap } from 'lucide-react';
 import type { ShotSlotContext } from './types';
-import { getMode } from './registry';
 import { ProviderPicker, ProviderParamForm } from '../../ui/ProviderPicker';
 import { AiPolishButton } from '../../ui/AiPolishButton';
+import { lanesOf } from '../shotLanes';
 
 /**
  * dialogue Tab：台词与配音。
@@ -19,9 +19,14 @@ export const DialogueTab: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
     autoFitShotDuration, handlePlayTTS, isPlayingAudio,
     ttsError, getMediaUrl,
   } = ctx;
-  const canTts = getMode(ctx.productionMode).caps.canTts;
+  const audioOn = lanesOf(activeShot).audio;
+  const audioState = !audioOn ? '已关闭，台词保留' : activeShot.audio_url ? '已有配音' : '未合成';
   return (
     <div className="space-y-3.5">
+      <div className="flex items-center justify-between text-[11px] text-gray-400">
+        <span>出配音</span>
+        <span className={audioOn ? 'text-gray-200' : 'text-gray-500'}>{audioState}</span>
+      </div>
       <div className="p-3 rounded-2xl bg-pink-500/5 border border-pink-500/20 space-y-3">
         <div className="flex items-center justify-between">
           <span className="text-xs font-bold text-pink-300 flex items-center gap-1.5">
@@ -62,12 +67,6 @@ export const DialogueTab: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
           className="w-full bg-surface-secondary border border-border rounded-xl px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-pink-500/50 resize-none leading-relaxed"
         />
 
-        {/* 漫画模式仅编辑对白文字：隐藏语音源/TTS试听（切到漫剧/图生模式可配音） */}
-        {!canTts && (
-          <div className="text-[11px] text-gray-500 bg-surface-secondary/60 border border-border rounded-lg px-2.5 py-1.5">漫画模式仅编辑对白与字幕，切到「漫剧制作 / 图生视频」可配音</div>
-        )}
-        {canTts && (
-          <>
         <ProviderPicker
           kind="audio"
           value={audioProvider}
@@ -102,8 +101,6 @@ export const DialogueTab: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
             />
           </div>
         )}
-          </>
-        )}
 
         <div className="flex items-center gap-2">
           <select value={activeShot.speaker_name || project?.characters[0]?.name || ''} onChange={(e) => updateShot(activeShot.id, { speaker_name: e.target.value })} className="flex-1 bg-surface-secondary border border-border rounded-lg px-2 py-1.5 text-xs text-white">
@@ -132,16 +129,15 @@ export const DialogueTab: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
           </button>
         </div>
 
-        {canTts && (
-          <>
-        <button onClick={handlePlayTTS} disabled={isPlayingAudio} className="w-full py-2.5 rounded-xl bg-gradient-to-r from-pink-500 to-violet-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-md shadow-pink-500/20 hover:opacity-95 disabled:opacity-40">
-          <Volume2 className={`w-3.5 h-3.5 ${isPlayingAudio ? 'animate-bounce' : ''}`} />
-          <span>{isPlayingAudio ? '合成并播放中...' : '试听配音 (按 T 快捷生成)'}</span>
-        </button>
+        {audioOn && audioProvider && (
+          <button onClick={handlePlayTTS} disabled={isPlayingAudio} className="w-full py-2.5 rounded-xl bg-gradient-to-r from-pink-500 to-violet-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-md shadow-pink-500/20 hover:opacity-95 disabled:opacity-40">
+            <Volume2 className={`w-3.5 h-3.5 ${isPlayingAudio ? 'animate-bounce' : ''}`} />
+            <span>{isPlayingAudio ? '合成并播放中...' : '试听配音 (按 T 快捷生成)'}</span>
+          </button>
+        )}
+        {!audioOn && <div className="text-[11px] text-gray-500">台词还在。这一镜不合成配音，也不会送进视频。</div>}
         {ttsError && <div className="text-xs text-red-300">{ttsError}</div>}
         {activeShot.audio_url && <audio controls src={getMediaUrl(activeShot.audio_url)} className="w-full mt-1" />}
-          </>
-        )}
       </div>
 
       <div className="p-3 rounded-2xl bg-surface-secondary/40 border border-border space-y-1.5">

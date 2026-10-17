@@ -32,7 +32,7 @@ export const ShotListRail: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
           ) : (
             <button onClick={()=> setBatchSelected(new Set(shots.map(s=> s.id)))} className="text-[10px] px-2 py-1 rounded-full bg-surface-tertiary border border-border text-gray-400 hover:text-white">全选</button>
           )}
-          <button onClick={() => addShot(1)} className="w-7 h-7 rounded-full bg-brand text-white flex items-center justify-center hover:bg-brand-light shadow-sm transition-transform active:scale-95" title="添加分镜"><Plus className="w-3.5 h-3.5" /></button>
+          <button onClick={() => addShot()} className="w-7 h-7 rounded-full bg-brand text-white flex items-center justify-center hover:bg-brand-light shadow-sm transition-transform active:scale-95" title="添加分镜（落到当前场/当前分集）"><Plus className="w-3.5 h-3.5" /></button>
         </div>
       </div>
 
@@ -77,7 +77,26 @@ export const ShotListRail: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
                 className="absolute top-2 left-2 w-3.5 h-3.5 rounded border border-white/30 bg-surface/85 accent-brand z-10"
               />
 
-              {shot.image_url ? (
+              {shot.video_url ? (
+                <AutoRatioMedia
+                  kind="video"
+                  src={getMediaUrl(shot.video_url)}
+                  fallbackAspect="16/9"
+                  className="rounded-lg bg-surface-secondary mb-1.5 ml-5"
+                  videoProps={{ controls: true, muted: true, playsInline: true, preload: 'metadata' }}
+                >
+                  <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-surface/85 text-[9px] font-mono text-brand-light font-bold">
+                    #{shot.shot_index}
+                  </span>
+                  <span className="absolute top-1 right-1 px-1 py-0.5 rounded bg-accent-orange/90 text-[8px] font-bold text-white uppercase tracking-wider flex items-center space-x-0.5">
+                    <Film className="w-2.5 h-2.5" />
+                    <span>VID</span>
+                  </span>
+                  <span className="absolute bottom-1 right-1 px-1 rounded bg-surface/85 text-[9px] text-gray-300 font-mono">
+                    {shot.duration}s
+                  </span>
+                </AutoRatioMedia>
+              ) : shot.image_url ? (
                 <AutoRatioMedia
                   src={getMediaUrl(shot.image_url)}
                   fallbackAspect="16/9"
@@ -131,6 +150,15 @@ export const ShotListRail: React.FC<{ ctx: ShotSlotContext }> = ({ ctx }) => {
               )}
 
               <div className="ml-5 space-y-0.5">
+                <div className="flex items-center gap-1.5">
+                  {([
+                    [Boolean(shot.image_url), '画面'],
+                    [Boolean(shot.video_url), '视频'],
+                    [Boolean(shot.audio_url), '配音'],
+                  ] as const).map(([on, name]) => (
+                    <span key={name} title={on ? `已有${name}` : `还没有${name}`} className={`w-1.5 h-1.5 rounded-full ${on ? 'bg-brand' : 'border border-gray-500'}`} />
+                  ))}
+                </div>
                 <p className="text-[11px] text-gray-200 truncate font-medium">{shot.action_desc || shot.image_prompt}</p>
                 {shot.dialogue && (
                   <p className="text-[10px] text-accent-pink truncate">🗣️ {shot.dialogue}</p>

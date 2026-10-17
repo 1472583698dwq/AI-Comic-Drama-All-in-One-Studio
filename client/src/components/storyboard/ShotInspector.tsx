@@ -3,17 +3,19 @@ import { useProjectStore } from '../../stores/useProjectStore';
 import { StoryboardShot } from '../../types';
 import { apiService } from '../../services/api';
 import { extractSlotsFromProvider } from '../canvas/providerSkills';
-import { buildShotReferenceInputs, promptWithCharacterTags, withCameraIntent } from './shotReference';
+import { buildShotReferenceInputs, promptWithCharacterTags, withCameraIntent, withReferenceMentions } from './shotReference';
+import { grabLastVideoFrame } from '../../utils/videoFrame';
 import { collectResources, planBinding, missingBoundCharacters, LEGACY_SLOT_ALIASES } from './referenceBinder';
+import { providerVideoOffers, videoInputOf, providerAudioSlot } from './videoInput';
+import { appendVideoLinks, imageLayoutOf, lanesOf, videoUsesOf, withGridPrompt } from './shotLanes';
 import { BindPreviewModal } from './slots/BindPreviewModal';
-import { getMode } from './slots/registry';
 import { registerBuiltinSlots } from './slots/builtin';
 import { syncStoryboardSlots } from './slots/loader';
-import { ShotListRail } from './slots/ShotListRail';
-import { PreviewStage } from './slots/PreviewStage';
-import { InspectorPanel } from './slots/InspectorPanel';
+import { StoryboardBoard } from './StoryboardBoard';
+import { ShotDetailDrawer } from './ShotDetailDrawer';
 import { ShotOverlays } from './slots/Overlays';
 import { SlotManagerModal } from './slots/SlotManagerModal';
+import { EpisodeBar } from './slots/EpisodeBar';
 import { toast } from '../../stores/useDialogStore';
 import type { ProductionMode, ShotSlotContext } from './slots/types';
 
@@ -80,7 +82,7 @@ export const ShotInspector: React.FC = () => {
   );
   const [productionMode, setProductionMode] = useState<ProductionMode>('image_to_video');
   // 三模式预览锁定收敛到模式 caps：漫画锁图、直出锁视频、图生可切（避免跨模式串台）
-  const effectivePreviewTab = getMode(productionMode).caps.lockPreview ?? previewTab;
+  const effectivePreviewTab = previewTab;
   // 预览框跟随项目画幅（9:16 / 16:9 / 1:1），不再写死竖屏
   const previewAspect = (project?.aspect_ratio || '9:16').replace(':', '/');
   // 生成/播放态按镜头隔离：A 镜头生成中不锁死 B 镜头（多镜可并行提交与轮询）
@@ -88,9 +90,15 @@ export const ShotInspector: React.FC = () => {
   const [videoGenIds, setVideoGenIds] = useState<Set<string>>(new Set());
   const [audioPlayingIds, setAudioPlayingIds] = useState<Set<string>>(new Set());
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [candidateCount, setCandidateCount] = useState<1 | 4>(
-    (Number(localStorage.getItem('storyboard_candidate_count')) as 1 | 4) || 4
-  );
+  // 默认单张：4 抽是显式的“选优”操作，不应成为首次进入分镜台的隐含成本。
+  // 旧版本曾把默认值写成 4；没有明确用户选择记录时，把旧值迁回单张。
+  const [candidateCount, setCandidateCount] = useState<1 | 4>(() => {
+    const saved = Number(localStorage.getItem('storyboard_candidate_count'));
+    const userSelected = localStorage.getItem('storyboard_candidate_count_user_set') === '1';
+    if (saved === 4 && userSelected) return 4;
+    if (saved === 4) localStorage.setItem('storyboard_candidate_count', '1');
+    return 1;
+  });
   const [videoMode, setVideoMode] = useState<'i2v' | 'r2v' | 't2v'>(
     (localStorage.getItem('storyboard_video_mode') as any) || 'i2v'
   );
@@ -123,8 +131,13 @@ export const ShotInspector: React.FC = () => {
   const [autoFitNotification, setAutoFitNotification] = useState<string | null>(null);
   const [showHotkeysHint, setShowHotkeysHint] = useState(true);
   const [savingAsset, setSavingAsset] = useState(false);
+  const [autoCarryPreviousFrame, setAutoCarryPreviousFrameState] = useState(() => localStorage.getItem('storyboard_auto_carry_previous_frame') === '1');
+  const carryPreviousFrameRef = useRef<(() => Promise<void>) | null>(null);
+  const autoCarryKeyRef = useRef<string | null>(null);
   // P1 插件槽：弹窗开关 + 注册表版本号（同步后 bump 触发重渲染）
   const [slotMgrOpen, setSlotMgrOpen] = useState(false);
+  // 默认先看完整镜头板；高级镜头编辑按需打开抽屉，避免首次进入就被参数面板占满。
+  const [detailOpen, setDetailOpen] = useState(false);
 
 
   // 旧分镜可能只存了 workflow_id 而没选源，仅作为未选源时的兜底
@@ -161,8 +174,24 @@ export const ShotInspector: React.FC = () => {
     onSelect: () => {},
   });
 
-  const shots: StoryboardShot[] = project?.scenes.flatMap((s) => s.shots) || [];
+  // 分集视角跟项目状态走：从集看板点进来的那一集。'none' = 未分集。
+  const activeEpisodeId = useProjectStore((s) => s.activeEpisodeId) || 'none';
+  const setActiveEpisodeId = (id: string) => useProjectStore.getState().enterEpisode(id);
+  const episodes = ((project as any)?.episodes || []) as any[];
+  const knownEpisodeIds = new Set(episodes.map((e: any) => e.id));
+  const episodeScenes = (project?.scenes || []).filter((s: any) => {
+    if (activeEpisodeId === 'all') return true;
+    if (activeEpisodeId === 'none') return !s.episode_id || !knownEpisodeIds.has(s.episode_id);
+    return s.episode_id === activeEpisodeId;
+  });
+
+  const shots: StoryboardShot[] = episodeScenes.flatMap((s) => s.shots);
   const activeShot = shots.find((s) => s.id === activeShotId) || shots[0];
+
+  /** 新分镜落到"当前上下文"的场：选中镜所在场 → 当前分集第一个场；分集内一个场都没有时由 store 补建 */
+  const handleAddShot = () => {
+    addShot((activeShot as any)?.scene_index ?? (episodeScenes[0] as any)?.scene_index);
+  };
 
   // 按镜头派生：只有"当前镜头"在生成/播放时才禁用其按钮，其他镜头可并行操作
   const isRegenerating = activeShot ? imageGenIds.has(activeShot.id) : false;
@@ -174,8 +203,7 @@ export const ShotInspector: React.FC = () => {
     if (!bindPreview) return null;
     const shot = shots.find((s) => s.id === bindPreview.shotId);
     if (!shot) return null;
-    const caps = getMode(((shot as any).production_mode || productionMode) as ProductionMode).caps;
-    const includeFirstFrame = bindPreview.kind === 'video' && !caps.direct && (videoMode === 'i2v' || !!caps.needsFirstFrame);
+    const includeFirstFrame = bindPreview.kind === 'video' && videoInputOf(shot, providerVideoOffers(bindPreview.def)) === 'frame';
     const slots = extractSlotsFromProvider(bindPreview.def, bindPreview.kind) as any[];
     const resources = collectResources({
       shot, project, projectAssets: _projectAssets, kind: bindPreview.kind, includeFirstFrame,
@@ -184,7 +212,7 @@ export const ShotInspector: React.FC = () => {
       resources,
       plan: planBinding(resources, slots, (shot as any).dynamic_inputs || {}, { overwrite: bindPreview.overwrite }),
     };
-  }, [bindPreview, shots, project, _projectAssets, productionMode, videoMode]);
+  }, [bindPreview, shots, project, _projectAssets]);
   const bindPlan = bindPreviewData?.plan ?? null;
 
   // 已绑定但无立绘/三视图的角色：预览里显式提示（否则弹框会"空"得没有理由）
@@ -193,14 +221,6 @@ export const ShotInspector: React.FC = () => {
     const shot = shots.find((s) => s.id === bindPreview.shotId);
     return missingBoundCharacters(shot, project);
   }, [bindPreview, shots, project]);
-
-  useEffect(() => {
-    if (activeShot?.production_mode) {
-      setProductionMode(activeShot.production_mode);
-      if (activeShot.production_mode === 'comic') setPreviewTab('image');
-      if (activeShot.production_mode === 'motion_comic') setPreviewTab('video');
-    }
-  }, [activeShot?.id, activeShot?.production_mode]);
 
   useEffect(() => {
     loadProjectAssets();
@@ -246,8 +266,7 @@ export const ShotInspector: React.FC = () => {
   useEffect(()=>{
     if(!activeShot) return;
     const s:any = activeShot;
-    const mode = s.production_mode || (project?.id ? localStorage.getItem(`storyboard_mode_${project.id}`) : null) || 'image_to_video';
-    setProductionMode(mode as any);
+    setVideoMode(videoInputOf(s, { frame: true, cast: true }) === 'frame' ? 'i2v' : 'r2v');
     if(s.image_provider !== undefined) setImageProvider(s.image_provider || localStorage.getItem('default_image_provider') || '');
     if(s.video_provider !== undefined) setVideoProvider(s.video_provider || localStorage.getItem('default_video_provider') || '');
     if(s.audio_provider !== undefined) setAudioProvider(s.audio_provider || localStorage.getItem('default_audio_provider') || '');
@@ -257,6 +276,20 @@ export const ShotInspector: React.FC = () => {
     if(s.provider_params?.video) setVideoProviderParams(s.provider_params.video);
     if(s.provider_params?.audio) setAudioProviderParams(s.provider_params.audio);
   }, [activeShot?.id, project?.id]);
+
+  // 自动连续性：进入没有首帧的镜头时，承接上一镜视频尾帧；没有视频则承接上一镜画面。
+  // 只在用户开启开关且目标镜头为空时执行，不覆盖用户已经生成/选择的首帧。
+  useEffect(() => {
+    if (!autoCarryPreviousFrame || !activeShot || activeShot.image_url) return;
+    const idx = shots.findIndex((s) => s.id === activeShot.id);
+    const prev = idx > 0 ? shots[idx - 1] : null;
+    if (!prev || (!(prev as any).video_url && !prev.image_url)) return;
+    const key = `${activeShot.id}:${prev.id}`;
+    if (autoCarryKeyRef.current === key) return;
+    autoCarryKeyRef.current = key;
+    const run = carryPreviousFrameRef.current?.();
+    if (run) void run.catch(() => { autoCarryKeyRef.current = null; });
+  }, [autoCarryPreviousFrame, activeShot, activeShot?.id, activeShot?.image_url, shots]);
 
   const probeProvider = async (pid: string) => {
     if(!pid) return;
@@ -336,21 +369,18 @@ export const ShotInspector: React.FC = () => {
 
       if (e.code === 'KeyR' && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
-        if (getMode(productionMode).caps.canImage === false) return;
         handleRegenerateImage();
         return;
       }
 
       if (e.code === 'KeyV' && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
-        if (getMode(productionMode).caps.canVideo === false) return;
         handleGenerateVideo();
         return;
       }
 
       if (e.code === 'KeyT' && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
-        if (getMode(productionMode).caps.canTts === false) return;
         handlePlayTTS();
         return;
       }
@@ -377,9 +407,12 @@ export const ShotInspector: React.FC = () => {
 
   if (!activeShot) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center text-gray-500 text-sm space-y-2 p-8">
-        <span>请选择或添加分镜</span>
-        {project && <button onClick={() => addShot(1)} className="px-3 py-1 rounded bg-brand text-white text-xs">新建分镜</button>}
+      <div className="flex-1 flex flex-col min-h-0">
+        <EpisodeBar activeEpisodeId={activeEpisodeId} onChange={setActiveEpisodeId} />
+        <div className="flex-1 flex flex-col items-center justify-center text-gray-500 text-sm space-y-2 p-8">
+          <span>{episodeScenes.length === 0 ? '这一集还没有场，下面这个按钮会自动补一个空场' : '请选择或添加分镜'}</span>
+          {project && <button onClick={handleAddShot} className="px-3 py-1 rounded bg-brand text-white text-xs">新建分镜</button>}
+        </div>
       </div>
     );
   }
@@ -387,8 +420,7 @@ export const ShotInspector: React.FC = () => {
   const handlePlayTTS = async () => {
     const shot = activeShot;
     if (!shot) return;
-    // 漫画模式仅编辑对白文字：拦截试听配音
-    if (getMode(productionMode).caps.canTts === false) { setTtsError('漫画模式仅编辑对白，切到视频模式再试听配音'); return; }
+    if (!lanesOf(shot).audio) { setTtsError('这一镜的音频已关闭'); return; }
     const textToSpeak = shot.dialogue || shot.voiceover || '';
     if (!textToSpeak.trim()) { setTtsError('当前分镜无台词/旁白，无法配音'); return; }
     // 播放器单例（起新的先停旧的），生成/播放态按镜头隔离：不同镜头可并行合成
@@ -613,7 +645,6 @@ export const ShotInspector: React.FC = () => {
 
   // 单镜双源编排（图片源 + 视频源各自的声明槽位），批量绑定复用
   const planBindForShot = async (shot: any, overwrite: boolean) => {
-    const caps = getMode(((shot as any).production_mode || productionMode) as ProductionMode).caps;
     const out: { patch: Record<string, any>; filledCount: number; gapCount: number } = { patch: {}, filledCount: 0, gapCount: 0 };
     const runs: Array<{ pid: string; kind: 'image' | 'video' }> = [
       { pid: (shot as any).image_provider || imageProvider || '', kind: 'image' },
@@ -625,7 +656,7 @@ export const ShotInspector: React.FC = () => {
       if (!def) continue;
       const slots = extractSlotsFromProvider(def, kind) as any[];
       if (!slots.length) continue;
-      const includeFirstFrame = kind === 'video' && !caps.direct && (videoMode === 'i2v' || !!caps.needsFirstFrame);
+      const includeFirstFrame = kind === 'video' && videoInputOf(shot, providerVideoOffers(def)) === 'frame';
       const resources = collectResources({ shot, project, projectAssets: _projectAssets, kind, includeFirstFrame });
       const plan = planBinding(resources, slots, { ...((shot as any).dynamic_inputs || {}), ...out.patch }, { overwrite });
       Object.assign(out.patch, plan.patch);
@@ -658,8 +689,7 @@ export const ShotInspector: React.FC = () => {
   };
 
   const handleRegenerateImage = async (customCount?: number) => {
-    // 直出模式无需单张生图：角色立绘直接驱动视频，避免误触污染首帧
-    if (getMode(productionMode).caps.canImage === false) { setRegenError('漫剧模式无需生图，直接点下方「立绘直接生成视频」'); return; }
+    if (!lanesOf(activeShot).image) { setRegenError('这一镜的画面已关闭'); return; }
     if (!activeShot.image_prompt?.trim()) { setRegenError('生图提示词为空'); return; }
     setRegenError(null);
     addShotId(setImageGenIds, activeShot.id);
@@ -667,10 +697,11 @@ export const ShotInspector: React.FC = () => {
 
     // 角色标签 + 相机意图统一装配（shotReference 唯一口径）：全量绑定角色进 prompt，
     // 景别/运镜自动补后缀（已含 [Camera: / [运镜: 的不动，导演台保存的优先）
-    let promptWithCharacters = withCameraIntent(
-      promptWithCharacterTags(activeShot.image_prompt, activeShot, project),
+    let promptWithCharacters = withGridPrompt(withReferenceMentions(
+      withCameraIntent(promptWithCharacterTags(activeShot.image_prompt, activeShot, project), activeShot),
       activeShot,
-    );
+      project,
+    ), activeShot);
 
     try {
       // 工作流来自所选生成源本身；仅在未选源时回退旧分镜遗留的 workflow_id
@@ -697,7 +728,7 @@ export const ShotInspector: React.FC = () => {
         };
       }
 
-      const count = customCount || candidateCount;
+      const count = imageLayoutOf(activeShot) === 'grid' ? 1 : (customCount || candidateCount);
       if (count === 4) {
         const seeds = [Math.floor(Math.random()*1000000), Math.floor(Math.random()*1000000), Math.floor(Math.random()*1000000), Math.floor(Math.random()*1000000)];
         const reqs = seeds.map(s => apiService.generateShotImage({
@@ -758,31 +789,35 @@ export const ShotInspector: React.FC = () => {
   };
 
   const handleGenerateVideo = async () => {
-    // 漫画模式为纯生图流：拦截视频生成（含快捷键/兜底入口）
-    if (getMode(productionMode).caps.canVideo === false) {
-      setVideoError('漫画模式仅生图，切到「漫剧制作 / 图生视频」再生成动态视频');
-      return;
-    }
+    if (!lanesOf(activeShot).video) { setVideoError('这一镜的视频已关闭'); return; }
     const rawPrompt = activeShot.video_prompt?.trim() || activeShot.action_desc || activeShot.image_prompt;
     // 相机意图兜底：没去过导演台也按分镜自身景别/运镜补后缀（已有 [Camera: / [运镜: 的不动）
-    const prompt = withCameraIntent(rawPrompt, activeShot);
-    if (!prompt) {
-      setVideoError('请填写视频运动运镜提示词');
-      return;
-    }
-
-    // 直出（多参考 r2v）只吃绑定：角色/场景/道具进参考槽，旧首帧一律不注入；
-    // 图生（i2v）才用真首帧。无绑定的直出走 t2v。
-    const caps = getMode(productionMode).caps;
-    const isDirect = caps.direct;
+    const layout = imageLayoutOf(activeShot);
+    const uses = videoUsesOf(activeShot);
+    const lanes = lanesOf(activeShot);
+    const useGrid = uses.grid && layout === 'grid' && !!activeShot.image_url && lanes.image;
+    const useAudio = uses.audio && !!(activeShot as any).audio_url && lanes.audio;
+    let choice = videoInputOf(activeShot, providerVideoOffers(videoProviderDef));
+    if (layout === 'grid') choice = 'cast';
+    const isDirect = choice === 'cast';
     const shotRefs = buildShotReferenceInputs(activeShot, project, 'video');
-    const refImage = isDirect ? '' : (activeShot.image_url || '');
-    const hasVideoRefs = shotRefs.reference_images.length > 0;
+    const frameStill = choice === 'frame' && layout === 'pick' && !!activeShot.image_url;
+    const refImage = frameStill ? (activeShot.image_url || '') : '';
+    const hasVideoRefs = shotRefs.reference_images.length > 0 || useGrid;
 
-    if (caps.needsFirstFrame && !activeShot.image_url) {
-      setVideoError('图生视频模式需要先在步骤 1 生成首帧画面');
+    if (choice === 'frame' && !refImage && !useGrid) {
+      setVideoError('用本镜画面需要先生成画面，或改成用角色和场景');
       return;
     }
+
+    let prompt = withReferenceMentions(withCameraIntent(rawPrompt, activeShot), activeShot, project);
+    if (!prompt) { setVideoError('请填写视频运动运镜提示词'); return; }
+    prompt = appendVideoLinks(prompt, {
+      grid: useGrid,
+      frameStill,
+      audio: false,
+      refCount: shotRefs.reference_images.length,
+    });
 
     setVideoError(null);
     addShotId(setVideoGenIds, activeShot.id);
@@ -799,6 +834,22 @@ export const ShotInspector: React.FC = () => {
         ...(shotRefs.previz_video_url ? { previz_video_url: shotRefs.previz_video_url } : {}),
         ...keepDeclaredOnly(videoProviderDef, shotDynamicInputs),
       };
+      if (useGrid && activeShot.image_url) {
+        const refs = Array.isArray(merged.reference_images) ? [...merged.reference_images] : [];
+        if (!refs.includes(activeShot.image_url)) refs.push(activeShot.image_url);
+        merged.reference_images = refs;
+        if (!merged.reference_image) merged.reference_image = refs[0];
+      }
+      if (useAudio) {
+        const slot = providerAudioSlot(videoProviderDef);
+        if (slot) {
+          const key = slot.originalKey || slot.key;
+          if (!merged[key]) merged[key] = (activeShot as any).audio_url;
+          prompt = appendVideoLinks(prompt, { grid: false, frameStill: false, audio: true, refCount: 0 });
+        } else {
+          toast.info('当前视频源没有音频槽，配音留在时间线上');
+        }
+      }
       if (refImage) {
         // 首帧喂给哪个键：按该源 input_schema 声明的插槽，无声明再回退 first_frame_url
         const vSlots = extractSlotsFromProvider(videoProviderDef, 'video');
@@ -812,7 +863,7 @@ export const ShotInspector: React.FC = () => {
       });
       const dynamic_inputs = Object.keys(merged).length ? merged : undefined;
       await generateShotVideo(activeShot.id, {
-        mode: isDirect ? (hasVideoRefs ? 'r2v' : 't2v') : 'i2v',
+        mode: isDirect ? (hasVideoRefs ? 'r2v' : 't2v') : (refImage ? 'i2v' : 't2v'),
         prompt,
         duration: Math.round(activeShot.duration) || 5,
         provider: videoProvider,
@@ -835,7 +886,7 @@ export const ShotInspector: React.FC = () => {
   };
 
   const handleBatchAllImages = async () => {
-    const targetShots = batchSelected.size > 0 ? shots.filter(s => batchSelected.has(s.id)) : shots;
+    const targetShots = (batchSelected.size > 0 ? shots.filter(s => batchSelected.has(s.id)) : shots).filter((s) => lanesOf(s).image);
     if (targetShots.length === 0) return;
     const ids = targetShots.map(s => s.id);
     const jobs = ids.map(id => ({ id, type: 'image' as const, status: 'queued' as const }));
@@ -854,7 +905,7 @@ export const ShotInspector: React.FC = () => {
           ...shotBatchInputs(sh, 'image'),
         };
         const res = await apiService.generateShotImage({
-          prompt: withCameraIntent(promptWithCharacterTags(sh.image_prompt, sh, project), sh),
+          prompt: withGridPrompt(withReferenceMentions(withCameraIntent(promptWithCharacterTags(sh.image_prompt, sh, project), sh), sh, project), sh),
           aspect_ratio: project?.aspect_ratio || '9:16',
           style_preset: project?.style_preset,
           workflow_id: (sh as any).workflow_id || undefined,
@@ -872,7 +923,7 @@ export const ShotInspector: React.FC = () => {
   };
 
   const handleBatchAllTTS = async () => {
-    const targetShots = batchSelected.size > 0 ? shots.filter(s => batchSelected.has(s.id)) : shots.filter(s => (s.dialogue || s.voiceover));
+    const targetShots = batchSelected.size > 0 ? shots.filter(s => batchSelected.has(s.id) && lanesOf(s).audio) : shots.filter(s => lanesOf(s).audio && (s.dialogue || s.voiceover));
     if (targetShots.length === 0) { alert('没有需要配音的分镜（台词为空）'); return; }
     const ids = targetShots.map(s => s.id);
     const jobs = ids.map(id => ({ id, type: 'audio' as const, status: 'queued' as const }));
@@ -947,8 +998,9 @@ export const ShotInspector: React.FC = () => {
   };
 
   const handleBatchAllVideos = async () => {
-    const targetShots = batchSelected.size > 0 ? shots.filter(s => batchSelected.has(s.id)) : shots.filter(s => s.image_url);
-    if (targetShots.length === 0) { alert('没有可转视频的分镜（请先生成首帧图片）'); return; }
+    const ready = (sh: StoryboardShot) => lanesOf(sh).video && (videoInputOf(sh, { frame: true, cast: true }) === 'cast' || imageLayoutOf(sh) === 'grid' || !!sh.image_url);
+    const targetShots = (batchSelected.size > 0 ? shots.filter(s => batchSelected.has(s.id)) : shots).filter(ready);
+    if (targetShots.length === 0) { alert('没有可生成视频的分镜。用本镜画面的镜头需要先有画面。'); return; }
     const ids = targetShots.map(s => s.id);
     const jobs = ids.map(id => ({ id, type: 'video' as const, status: 'queued' as const }));
     setQueue(q => [...q, ...jobs]);
@@ -957,8 +1009,7 @@ export const ShotInspector: React.FC = () => {
       try {
         const prov = (sh as any).video_provider || videoProvider;
         // 批量与单镜同口径：直出镜跳过旧首帧（纯绑定驱动 r2v/t2v），图生镜首帧只放真首帧
-        const shCaps = getMode(((sh as any).production_mode || productionMode) as ProductionMode).caps;
-        const shDirect = shCaps.direct;
+        const shDirect = videoInputOf(sh, { frame: true, cast: true }) === 'cast';
         const bvRefs = buildShotReferenceInputs(sh, project, 'video');
         const bvInputs: Record<string, any> = {
           ...(bvRefs.reference_images.length ? { reference_images: bvRefs.reference_images, reference_image: bvRefs.reference_images[0] } : {}),
@@ -975,8 +1026,8 @@ export const ShotInspector: React.FC = () => {
           }
         }
         await generateShotVideo(sh.id, {
-          mode: shDirect ? (bvRefs.reference_images.length ? 'r2v' : 't2v') : videoMode,
-          prompt: withCameraIntent(sh.video_prompt || sh.action_desc || sh.image_prompt, sh),
+          mode: shDirect ? (bvRefs.reference_images.length ? 'r2v' : 't2v') : (sh.image_url ? 'i2v' : 't2v'),
+          prompt: withReferenceMentions(withCameraIntent(sh.video_prompt || sh.action_desc || sh.image_prompt, sh), sh, project),
           duration: Math.round(sh.duration) || 5,
           provider: prov,
           workflow_id: (sh as any).workflow_id || undefined,
@@ -1015,6 +1066,51 @@ export const ShotInspector: React.FC = () => {
     } catch (e:any) { alert(e.message || '保存失败'); } finally { setSavingAsset(false); }
   };
 
+  const carryPreviousFrame = async () => {
+    const idx = shots.findIndex((s) => s.id === activeShot.id);
+    const prev = idx > 0 ? shots[idx - 1] : null;
+    if (!prev) { toast.info('这是这一集的第一镜'); return; }
+    const applyStill = (url: string, message: string) => {
+      updateShot(activeShot.id, { image_url: url, video_input: 'frame' } as any);
+      setVideoMode('i2v');
+      toast.success(message);
+    };
+    if ((prev as any).video_url) {
+      try {
+        const blob = await grabLastVideoFrame(getMediaUrl((prev as any).video_url));
+        const file = new File([blob], `shot-${prev.shot_index || idx}-last.jpg`, { type: 'image/jpeg' });
+        const fd = new FormData();
+        fd.append('name', `镜头${prev.shot_index || idx}尾帧`);
+        fd.append('category', 'scene');
+        fd.append('scope', 'project');
+        if (project?.id) fd.append('project_id', project.id);
+        fd.append('tags', '尾帧');
+        fd.append('file', file);
+         const asset = await apiService.createAsset(fd);
+         const url = asset?.asset?.file_url || asset?.asset?.thumb_url || asset?.file_url || asset?.thumb_url;
+        if (!url) throw new Error('尾帧没有可引用的地址');
+        applyStill(url, '已接上上一镜的视频尾帧');
+        return;
+      } catch (e: any) {
+        if (prev.image_url) {
+          applyStill(prev.image_url, '尾帧截取失败，已改接上一镜画面');
+          return;
+        }
+        toast.error(e?.message || '无法截取上一镜尾帧');
+        return;
+      }
+    }
+    if (prev.image_url) {
+      applyStill(prev.image_url, '上一镜还没有视频，已接上它的画面');
+      return;
+    }
+    toast.info('上一镜还没有画面或视频');
+  };
+
+  // 函数定义位于宿主 handler 区域，但自动同步 effect 必须在 early return 之前注册；
+  // 用 ref 连接两者，避免违反 Hooks 顺序，也保证执行时拿到当前镜头。
+  carryPreviousFrameRef.current = carryPreviousFrame;
+
   const getMediaUrl = (url?: string | null) => {
     if (!url) return '';
     return url.startsWith('/') ? API_ORIGIN + url : url;
@@ -1023,7 +1119,7 @@ export const ShotInspector: React.FC = () => {
   // ---- Slot 上下文组装（宿主唯一出口，P1 插件槽按此接口拿数） ----
   const ctx: ShotSlotContext = {
     project, shots, activeShot,
-    setActiveShotId, updateShot, addShot, duplicateShot, deleteShot,
+    setActiveShotId, updateShot, addShot: handleAddShot, duplicateShot, deleteShot,
     setActiveTab, setWorkspace, generateShotVideo,
     bindCharacterToShot, unbindCharacterFromShot, setCharacterWeight,
     bindSceneToShot, unbindSceneFromShot, bindPropToShot,
@@ -1032,7 +1128,13 @@ export const ShotInspector: React.FC = () => {
     inspectorTab, setInspectorTab: (t: string) => setInspectorTab(t as any),
     productionMode, setProductionMode,
     isPlayingAudio, isRegenerating, isGeneratingVid,
-    candidateCount, setCandidateCount, videoMode, setVideoMode,
+    candidateCount,
+    setCandidateCount: (count: 1 | 4) => {
+      // 记录显式选择，避免下一次挂载把用户主动选的 4 抽误判为旧默认值。
+      localStorage.setItem('storyboard_candidate_count_user_set', '1');
+      setCandidateCount(count);
+    },
+    videoMode, setVideoMode,
     videoProvider,
     setVideoProvider: (pid: string, def?: any) => { setVideoProvider(pid); setVideoProviderDef(def || null); },
     videoProviderDef, videoProviderParams, setVideoProviderParams,
@@ -1049,7 +1151,13 @@ export const ShotInspector: React.FC = () => {
     inspectingWorkflowId, setInspectingWorkflowId,
     slotPicker, setSlotPicker, assetPickerConfig, setAssetPickerConfig,
     ctxMenu, setCtxMenu, ctxCanvases, ctxLoadingCanvas,
-    handlePlayTTS, handleRegenerateImage, handleGenerateVideo,
+     handlePlayTTS, handleRegenerateImage, handleGenerateVideo, carryPreviousFrame,
+     autoCarryPreviousFrame,
+     setAutoCarryPreviousFrame: (enabled: boolean) => {
+       setAutoCarryPreviousFrameState(enabled);
+       localStorage.setItem('storyboard_auto_carry_previous_frame', enabled ? '1' : '0');
+       if (!enabled) autoCarryKeyRef.current = null;
+     },
     handleBatchAllImages, handleBatchAllTTS, handleBatchAllVideos,
     handleOneClickBind, handleBatchBind, hasBindUndo: !!bindUndo?.length, undoLastBind,
     handleSaveShotToAsset, sendShotToCanvas, openShotCtxMenu,
@@ -1060,35 +1168,43 @@ export const ShotInspector: React.FC = () => {
   };
 
   return (
-    <div className="flex-1 flex gap-3 p-3 overflow-hidden bg-background relative">
-      <ShotListRail ctx={ctx} />
-      <PreviewStage ctx={ctx} />
-      <InspectorPanel ctx={ctx} />
-      <ShotOverlays ctx={ctx} />
-      {slotMgrOpen && (
-        <SlotManagerModal
-          projectId={project?.id}
-          onClose={() => setSlotMgrOpen(false)}
-          // 同上：注册表订阅负责让槽宿主刷新，不再手动 setState（审查 L3）
-          onChanged={() => { void syncStoryboardSlots(project?.id).catch(() => {}); }}
+    <div className="flex-1 flex flex-col overflow-hidden bg-background relative">
+      <EpisodeBar activeEpisodeId={activeEpisodeId} onChange={setActiveEpisodeId} />
+      <div className="flex-1 flex overflow-hidden relative">
+        <StoryboardBoard
+          ctx={ctx}
+          onOpenShot={(shotId) => {
+            if (shotId) setActiveShotId(shotId);
+            setDetailOpen(true);
+          }}
         />
-      )}
+        {detailOpen && <ShotDetailDrawer ctx={ctx} onClose={() => setDetailOpen(false)} />}
+        <ShotOverlays ctx={ctx} />
+        {slotMgrOpen && (
+          <SlotManagerModal
+            projectId={project?.id}
+            onClose={() => setSlotMgrOpen(false)}
+            // 同上：注册表订阅负责让槽宿主刷新，不再手动 setState（审查 L3）
+            onChanged={() => { void syncStoryboardSlots(project?.id).catch(() => {}); }}
+          />
+        )}
 
-      {/* 一键绑定预览抽屉（资源 → 源声明插槽） */}
-      <BindPreviewModal
-        open={!!bindPreview}
-        kind={bindPreview?.kind || 'image'}
-        providerName={bindPreview?.def?.display_name || bindPreview?.def?.name || bindPreview?.def?.id}
-        shotLabel={activeShot?.shot_index ? `#${activeShot.shot_index}` : ''}
-        plan={bindPlan}
-        resources={bindPreviewData?.resources}
-        missingChars={bindMissingChars}
-        overwrite={!!bindPreview?.overwrite}
-        onToggleOverwrite={(v) => setBindPreview((p) => (p ? { ...p, overwrite: v } : p))}
-        onApply={applyBind}
-        onClose={() => setBindPreview(null)}
-        resolveUrl={getMediaUrl}
-      />
+        {/* 一键绑定预览抽屉（资源 → 源声明插槽） */}
+        <BindPreviewModal
+          open={!!bindPreview}
+          kind={bindPreview?.kind || 'image'}
+          providerName={bindPreview?.def?.display_name || bindPreview?.def?.name || bindPreview?.def?.id}
+          shotLabel={activeShot?.shot_index ? `#${activeShot.shot_index}` : ''}
+          plan={bindPlan}
+          resources={bindPreviewData?.resources}
+          missingChars={bindMissingChars}
+          overwrite={!!bindPreview?.overwrite}
+          onToggleOverwrite={(v) => setBindPreview((p) => (p ? { ...p, overwrite: v } : p))}
+          onApply={applyBind}
+          onClose={() => setBindPreview(null)}
+          resolveUrl={getMediaUrl}
+        />
+      </div>
     </div>
   );
 };

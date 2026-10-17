@@ -68,6 +68,18 @@ def is_mutable(rel: str) -> bool:
     return os.path.basename(rel) in MUTABLE_BASENAMES
 
 
+def _asset_tombstoned(rel: str) -> bool:
+    """rel 指向 assets/<id>/... 时检查墓碑（本地已删除的素材不再从云端拉回）。"""
+    parts = rel.replace("\\", "/").split("/")
+    if len(parts) < 3 or parts[0] != "assets":
+        return False
+    try:
+        from app.providers.asset.manager import is_tombstoned
+        return is_tombstoned(parts[1])
+    except Exception:
+        return False
+
+
 def in_scope(rel: str) -> bool:
     """这条相对路径要不要同步。"""
     if not rel or rel.startswith("."):
@@ -279,6 +291,8 @@ class StorageMirror:
         """本地缺这个素材时去 OpenList 取回来。命中返回 True。"""
         if not self.enabled() or not in_scope(rel) or is_mutable(rel):
             return False
+        if _asset_tombstoned(rel):
+            return False  # 已删除的素材（墓碑）：不再拉回，避免"复活"
         local = os.path.join(settings.STORAGE_DIR, rel)
         if os.path.isfile(local):
             return True
@@ -340,6 +354,8 @@ class StorageMirror:
     async def _pull_state_file(self, rel: str) -> str:
         """拉一个可变文件的最新快照，按「谁都改过就不覆盖」处理冲突。"""
         assert self.client
+        if _asset_tombstoned(rel):
+            return "已删除（墓碑跳过）"
         snap = await self._newest_snapshot(self.state_dir(rel))
         if not snap:
             return "远端无快照"

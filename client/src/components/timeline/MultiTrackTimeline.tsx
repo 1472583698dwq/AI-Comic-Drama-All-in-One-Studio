@@ -17,6 +17,7 @@ import {
 import { useProjectStore } from '../../stores/useProjectStore';
 import { StoryboardShot } from '../../types';
 import { API_ORIGIN } from '../../utils/devOrigin';
+import { shotsInEpisode } from '../../utils/episodeScope';
 
 export const MultiTrackTimeline: React.FC = () => {
   const { 
@@ -28,7 +29,7 @@ export const MultiTrackTimeline: React.FC = () => {
     setIsPlaying, 
     currentTime, 
     setCurrentTime, 
-    totalDuration,
+    activeEpisodeId,
     updateShot
   } = useProjectStore();
 
@@ -42,7 +43,8 @@ export const MultiTrackTimeline: React.FC = () => {
     setIsCollapsed(activeTab !== 'timeline');
   }, [activeTab]);
 
-  const shots: StoryboardShot[] = project?.scenes.flatMap((s) => s.shots) || [];
+  const shots: StoryboardShot[] = shotsInEpisode(project, activeEpisodeId);
+  const totalDuration = shots.reduce((sum, sh) => sum + (Number(sh.duration) || 0), 0);
 
   // Playback timer ticker
   useEffect(() => {

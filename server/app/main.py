@@ -278,6 +278,13 @@ for _mod, _name, _path in (
         print(f"[Main] FrontendExt routes mounted at {_path}")
     except Exception as e:
         print(f"[Main] FrontendExt routes mount failed ({_mod}): {e}")
+# 模型广场（文本供应商 + 从 base URL 拉模型）
+try:
+    from app.api.llm_plaza_routes import router as llm_plaza_router
+    app.include_router(llm_plaza_router, prefix=settings.API_V1_STR)
+    print("[Main] LLM plaza routes mounted at /api/v1/llm/plaza")
+except Exception as e:
+    print(f"[Main] LLM plaza routes mount failed: {e}")
 # 首次启动引导路由（安装向导状态）
 try:
     from app.api.setup_routes import router as setup_router

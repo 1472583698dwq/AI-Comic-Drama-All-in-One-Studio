@@ -18,6 +18,8 @@ import {
 } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { useProjectStore } from '../../stores/useProjectStore';
+import { useProjectListStore } from '../../stores/useProjectListStore';
+import { appendAssetOwnership } from '../../utils/assetScope';
 import { AssetCategory } from '../../types';
 import { useEscapeClose } from '../../hooks/useEscapeClose';
 import { AutoRatioMedia } from '../ui/AutoRatioMedia';
@@ -26,8 +28,9 @@ interface AssetPickerModalProps {
   isOpen: boolean;
   title?: string;
   defaultCategory?: AssetCategory | 'all';
-  mediaType?: 'image' | 'audio';
-  onSelect: (asset: { id: string; name: string; url: string; category: string; visual_prompt?: string }) => void;
+  /** 'image' / 'audio' 保持既有行为；'all' = 图 / 视频 / 音频 / 文本全类型（素材节点用）。 */
+  mediaType?: 'image' | 'audio' | 'all';
+  onSelect: (asset: { id: string; name: string; url: string; category: string; visual_prompt?: string; content?: string }) => void;
   onClose: () => void;
 }
 
@@ -49,6 +52,8 @@ const resolveUrl = (u?: string) => {
 
 const AUDIO_EXT_RE = /\.(mp3|wav|m4a|aac|flac|ogg|opus|wma)(\?|#|$)/i;
 const isAudioUrl = (u?: string) => !!u && AUDIO_EXT_RE.test(u);
+const VIDEO_EXT_RE = /\.(mp4|m4v|mov|webm|mkv|avi|ogv)(\?|#|$)/i;
+const isVideoUrl = (u?: string) => !!u && VIDEO_EXT_RE.test(u);
 
 export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
   isOpen,
@@ -59,10 +64,13 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
   onClose,
 }) => {
   const isAudio = mediaType === 'audio';
+  const includeText = mediaType === 'all';
   const { project } = useProjectStore();
+  /** 当前项目 id（列表 store 优先，兼容 project store；用于共享徽标与归属） */
+  const activePid = () => useProjectListStore.getState().activeProjectId || project?.id || null;
   const [selectedCat, setSelectedCat] = useState<AssetCategory | 'all'>(defaultCategory);
   const [searchQuery, setSearchQuery] = useState('');
-  const [scope, setScope] = useState<'all' | 'project' | 'global'>('all');
+  const [scope, setScope] = useState<'all' | 'project' | 'global'>('project');
   const [assets, setAssets] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -83,6 +91,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
         category: selectedCat === 'all' ? undefined : selectedCat,
         q: searchQuery || undefined,
         scope: scope === 'all' ? undefined : scope,
+        include_shared: scope !== 'project',
         page: 1,
         limit: 80,
       });
@@ -98,14 +107,15 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
   const handleQuickUploadToLibrary = async (file: File) => {
     setIsUploading(true);
     try {
-      const pid = project?.id || (useProjectStore.getState() as any).activeProjectId || undefined;
-      const cat = selectedCat === 'all' ? (isAudio ? 'other' : 'character') : selectedCat;
+      const pid = useProjectListStore.getState().activeProjectId || project?.id || (useProjectStore.getState() as any).activeProjectId || undefined;
+      const isVideoFile = (file.type || '').startsWith('video/');
+      const cat = selectedCat === 'all' ? ((isAudio || isVideoFile) ? 'other' : 'character') : selectedCat;
       const fd = new FormData();
       const baseName = file.name.replace(/\.[^.]+$/, '') || '新素材';
       fd.append('name', baseName);
       fd.append('category', cat);
-      fd.append('scope', pid ? 'project' : 'global');
-      if (pid) fd.append('project_id', pid);
+      // 归属统一：有当前项目 → 项目私有；无项目 → 全局
+      appendAssetOwnership(fd, undefined, pid ?? null);
       fd.append('file', file);
       
       const created = await apiService.createAsset(fd);
@@ -119,6 +129,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
           url: imgUrl,
           category: created.category || cat,
           visual_prompt: created.visual_prompt,
+          content: created.content,
         });
         onClose();
       }
@@ -160,7 +171,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
             <input
               ref={fileInputRef}
               type="file"
-              accept={isAudio ? 'audio/*' : 'image/*'}
+              accept={isAudio ? 'audio/*' : mediaType === 'all' ? 'image/*,video/*,audio/*' : 'image/*'}
               className="hidden"
               onChange={e => e.target.files?.[0] && handleQuickUploadToLibrary(e.target.files[0])}
             />
@@ -234,8 +245,48 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5 items-start">
               {assets.map((asset) => {
                 const img = asset.file_url || asset.thumb_url || asset.image_url;
-                if (!img) return null;
                 const catLabel = CATEGORY_TABS.find(c => c.key === asset.category)?.label || '素材';
+
+                // 文本素材（无文件地址，正文在 content/visual_prompt）：仅素材节点（mediaType='all'）可选
+                if (!img) {
+                  const textContent = String(asset.content || asset.visual_prompt || '');
+                  if (!includeText || !textContent) return null;
+                  return (
+                    <div
+                      key={asset.id}
+                      onClick={() => {
+                        onSelect({
+                          id: asset.id,
+                          name: asset.name,
+                          url: '',
+                          category: asset.category || 'text',
+                          visual_prompt: asset.visual_prompt,
+                          content: textContent,
+                        });
+                        onClose();
+                      }}
+                      className="group rounded-2xl overflow-hidden border border-white/70 dark:border-white/12 bg-surface/80 cursor-pointer hover:border-brand hover:ring-2 hover:ring-brand/40 transition-all flex flex-col relative shadow-sm"
+                    >
+                      <div className="aspect-[3/4] bg-surface/80 overflow-hidden relative">
+                        <div className="w-full h-full flex flex-col items-center justify-center gap-2 p-3 bg-gradient-to-br from-surface-secondary to-surface-tertiary">
+                          <span className="text-[11px] leading-relaxed text-gray-300 line-clamp-6 text-center">{textContent.slice(0, 160)}</span>
+                        </div>
+                        <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-surface/80 dark:bg-black/50 text-[9px] text-gray-200 border border-white/10 font-mono">
+                          {catLabel}
+                        </span>
+                        <div className="absolute inset-0 bg-brand/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                          <span className="px-3 py-1 rounded-full bg-brand text-white text-xs font-bold shadow-lg flex items-center gap-1">
+                            <Check className="w-3 h-3" /> 点击选用
+                          </span>
+                        </div>
+                      </div>
+                      <div className="p-2">
+                        <p className="text-xs font-bold text-white truncate">{asset.name}</p>
+                        <p className="text-[10px] text-gray-400 truncate mt-0.5">文本素材</p>
+                      </div>
+                    </div>
+                  );
+                }
 
                 return (
                   <div
@@ -247,6 +298,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
                         url: img,
                         category: asset.category,
                         visual_prompt: asset.visual_prompt,
+                        content: asset.content,
                       });
                       onClose();
                     }}
@@ -270,10 +322,12 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
                     ) : (
                       <AutoRatioMedia
                         src={resolveUrl(img)}
+                        kind={isVideoUrl(img) ? 'video' : 'image'}
                         alt={asset.name}
                         fallbackAspect="3/4"
                         className="bg-surface/80"
                         mediaClassName="group-hover:scale-105 transition-transform duration-300"
+                        videoProps={{ muted: true }}
                       >
                         <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-surface/80 dark:bg-black/50 text-[9px] text-gray-200 border border-white/10 font-mono">
                           {catLabel}
@@ -281,6 +335,11 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
                         {asset.scope === 'global' && (
                           <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded bg-brand/80 text-[8px] text-white font-bold">
                             全局
+                          </span>
+                        )}
+                        {asset.scope !== 'global' && asset.project_id && activePid() && asset.project_id !== activePid() && (asset.shared_to || []).includes(activePid() || '') && (
+                          <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded bg-sky-500/80 text-[8px] text-white font-bold" title={`由「${asset.project_id}」共享给你`}>
+                            共享
                           </span>
                         )}
                         <div className="absolute inset-0 bg-brand/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">

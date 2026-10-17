@@ -48,6 +48,7 @@ import {
   Mic,
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
+import { shotsInEpisode } from '../../utils/episodeScope';
 import { useMcpStore } from '../../stores/useMcpStore';
 import { apiService } from '../../services/api';
 import { confirmAsync, toast } from '../../stores/useDialogStore';
@@ -75,7 +76,11 @@ import {
 } from './scene/mannequin';
 import { BUILTIN_PROP_OPTIONS, createRealisticSword, createRealisticShield, createRealisticMagicCircle, createIncenseBurner, createBattleFlag } from './scene/props';
 import { buildStageEnvironment } from './scene/environments';
-import { createOrbitState, applyOrbitToCamera, applyCameraRoll, calculateMotionWaypoints, applyMotionFrame } from './scene/camera';
+import {
+  createOrbitState, applyOrbitToCamera, applyCameraRoll, calculateMotionWaypoints,
+  motionPresetKeyframes, sampleCameraKeyframes, applyCameraState, readCameraState,
+} from './scene/camera';
+import { pickRecorderMimeType } from './scene/stageCore';
 import { raycasterAt, pickStageRoot, pickJoint, dragRotateJoint } from './scene/picking';
 import { createStageRenderer, createThreePointLights, applyLightingConfig } from './scene/stageSetup';
 import { syncDirectorPacks, listDirectorPackProps, listDirectorPackEnvironments, getDirectorPackEnv } from './directorPackSpecs';
@@ -84,6 +89,7 @@ import { DirectorPackBridgeContext } from '../../ui-registry/directorPackBridge'
 import { syncDirectorPackEntries, clearDirectorPackEntries } from '../../ui-registry/adapters/directorPackEntries';
 import { useUIEntries } from '../../ui-registry/resolveEnabled';
 import { DIRECTOR_ENVS_HOST, DIRECTOR_PROPS_HOST } from '../../ui-registry/types';
+import { consumeClayExportIntent } from './clayExportIntent';
 
 // ============================================================
 // MiniMax Design 3D Director - 重构版
@@ -119,14 +125,14 @@ export const Director3DStage: React.FC = () => {
   const pipContainerRef = useRef<HTMLDivElement>(null);
   const pipBoxRef = useRef<HTMLDivElement>(null);
   const [pipFrame, setPipFrame] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
-  const { project, activeShotId, setActiveShotId, updateShot } = useProjectStore();
+  const { project, activeShotId, setActiveShotId, updateShot, activeEpisodeId } = useProjectStore();
   const { invokeTool } = useMcpStore();
 
   // 画幅唯一真源：项目 aspect_ratio（与生成结果一致）
   const projectAspect = project?.aspect_ratio || '9:16';
   const projectAspectNum = ratioToNumber(projectAspect);
 
-  const shots = project?.scenes.flatMap((s) => s.shots) || [];
+  const shots = shotsInEpisode(project, activeEpisodeId);
   const activeShot = shots.find((sh) => sh.id === activeShotId) || shots[0];
 
   // 1. Stage & Optical States
@@ -260,7 +266,7 @@ export const Director3DStage: React.FC = () => {
   // 同步 activeShot（仅跟随 activeShotId，避免任何 project 更新都重置未保存的手动调整）
   useEffect(() => {
     const st = useProjectStore.getState();
-    const shots = st.project?.scenes.flatMap((s) => s.shots) || [];
+    const shots = shotsInEpisode(st.project, st.activeEpisodeId);
     const shot = shots.find((sh) => sh.id === st.activeShotId) || shots[0];
     if (!shot) return;
     if (shot.camera_framing) setFraming(shot.camera_framing);
@@ -417,9 +423,16 @@ export const Director3DStage: React.FC = () => {
   const clayModeRef = useRef(false);
   const clayRestoreRef = useRef<null | (() => void)>(null);
   const clayExportResolveRef = useRef<((v: { url: string; secs: number } | null) => void) | null>(null);
+  const claySafetyTimerRef = useRef<number | null>(null);
+  // stage_export_clay 可覆盖录制时长/帧率（Agent 远端发起时生效，仅本次录制，用完即清）
+  const clayDurationOverrideRef = useRef<number | null>(null);
+  const clayFpsOverrideRef = useRef<number | null>(null);
+  // 本次运镜模拟的实际时长（秒）：recordSecsRefValue 与安全超时按它收口（含覆盖）
+  const lastSimDurationSecRef = useRef<number | null>(null);
   const clayFirstFrameRef = useRef<string | null>(null);
   const clayLastFrameRef = useRef<string | null>(null);
   const pipSizeBackupRef = useRef<{ w: number; h: number } | null>(null);
+  const handleExportClayRef = useRef<(() => Promise<void>) | null>(null);
   // —— 物体摆放操控 refs（对标三家：Gizmo + 选中高亮 + 撤销 + 持久化）——
   const transformControlsRef = useRef<TransformControls | null>(null);
   const selectionBoxRef = useRef<THREE.BoxHelper | null>(null);
@@ -992,7 +1005,7 @@ export const Director3DStage: React.FC = () => {
     const applySavedJoints = (obj: THREE.Group, entityName: string) => {
       try {
         const store = useProjectStore.getState();
-        const allShots = store.project?.scenes.flatMap((s) => s.shots) || [];
+        const allShots = shotsInEpisode(store.project, store.activeEpisodeId);
         const shot = allShots.find((sh) => sh.id === store.activeShotId) || allShots[0];
         const joints = (shot as any)?.mannequin_pose?.entities?.[entityName]?.joints;
         if (joints) applyMannequinJoints(obj, joints);
@@ -1215,16 +1228,27 @@ export const Director3DStage: React.FC = () => {
       walkTotal += len;
     }
     // REQ-toonflow-canvas T3：运镜时长 / 缓动 / 每帧位移抽到 scene/presets + scene/camera（画布 director3d 同源）
-    const duration = motionDurationMs(motionSpeed);
+    // 关键帧采样版（与画布 N5 同源）：**所有**运镜预设（摇/俯仰/滚转/跟随/降镜/贴地侧滑…）都有真实位移。
+    // 旧版 applyMotionFrame 只覆盖 10 种运镜，其余（pan/tilt/roll/tracking/boom_down…）机位原地不动，
+    // 导致白模导出拍出固定机位的"参考视频"——而白模参考的全部价值就是按帧承载运镜与运动。
+    // 白模导出可覆盖时长（stage_export_clay.duration）：仅本次录制生效，用完即清
+    const overrideSec = clayDurationOverrideRef.current;
+    clayDurationOverrideRef.current = null;
+    const durationSec = overrideSec && overrideSec > 0 ? overrideSec : motionDurationMs(motionSpeed) / 1000;
+    const duration = durationSec * 1000;
+    lastSimDurationSecRef.current = durationSec;
+    const camKeyframes = motionPresetKeyframes(motion, readCameraState(cam, new THREE.Vector3(0, 1.25, 0), cameraRoll), {
+      durationSec,
+      easing: motionEasing,
+      samples: Math.max(24, Math.round(durationSec * 12)),
+    });
     const step = (now: number) => {
       const elapsed = now - startTime;
       const progress = Math.min(1, elapsed / duration);
       setScrubberProgress(progress);
       const ease = easeMotionProgress(progress, motionEasing);
-      applyMotionFrame(cam, motion, startPos, startFov, ease, progress);
-      cam.lookAt(0, 1.25, 0);
-      applyCameraRoll(cam, cameraRoll);
-      cam.updateProjectionMatrix();
+      // 关键帧里已烘焙同一套缓动：按进度取机位（连续轨迹，与画布导出同一条路径）
+      applyCameraState(cam, sampleCameraKeyframes(camKeyframes, progress * durationSec));
       // 主角沿走位路径等速行走，朝向行进方向（与运镜同一 easing 共进退）
       if (walkPath.length > 1 && walkTotal > 0.001 && protagonistGroupRef.current) {
         const target = ease * walkTotal;
@@ -1382,7 +1406,7 @@ export const Director3DStage: React.FC = () => {
           if (root) {
             const joints = serializeMannequinJoints(root);
             const store = useProjectStore.getState();
-            const allShots = store.project?.scenes.flatMap((s) => s.shots) || [];
+            const allShots = shotsInEpisode(store.project, store.activeEpisodeId);
             const shot = allShots.find((sh) => sh.id === store.activeShotId) || allShots[0];
             if (shot) {
               const prevEntities = ((shot as any).mannequin_pose?.entities || {}) as Record<string, any>;
@@ -1684,7 +1708,10 @@ export const Director3DStage: React.FC = () => {
   // 预演录制：录制监视器（导演机位视角）画面为 webm；随运镜模拟同起同止
   const finalizeRecording = useCallback(() => {
     try {
-      const blob = new Blob(recordChunksRef.current, { type: 'video/webm' });
+      // 容器按录制器实际产出走（Chromium 优先 MP4/H.264——Seedance 等云端模型对 mp4 参考视频兼容性最好）
+      const recMime = recorderRef.current?.mimeType || 'video/webm';
+      const ext = recMime.includes('mp4') ? 'mp4' : 'webm';
+      const blob = new Blob(recordChunksRef.current, { type: recMime });
       recordChunksRef.current = [];
       if (blob.size === 0) { setRecordMsg('录制失败：未采集到画面（请确认监视器已开启）'); return; }
       const secs = recordSecsRefValue();
@@ -1695,7 +1722,7 @@ export const Director3DStage: React.FC = () => {
       // 自动下载一份到本地
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${isClay ? 'clay' : 'previz'}_${activeShot?.shot_index ?? 'shot'}_${Date.now()}.webm`;
+      a.download = `${isClay ? 'clay' : 'previz'}_${activeShot?.shot_index ?? 'shot'}_${Date.now()}.${ext}`;
       document.body.appendChild(a); a.click(); a.remove();
       const pid = project?.id;
       const form = new FormData();
@@ -1704,27 +1731,27 @@ export const Director3DStage: React.FC = () => {
         form.append('name', `白模导出_分镜${activeShot?.shot_index ?? ''}_${new Date().toLocaleString()}`);
         form.append('tags', 'previz,clay,白模');
         if (pid) form.append('project_id', pid);
-        form.append('file', new File([blob], 'clay.webm', { type: 'video/webm' }));
+        form.append('file', new File([blob], `clay.${ext}`, { type: blob.type || 'video/webm' }));
         setClayMsg('白模视频已录制，正在上传资产库…');
         apiService.createAsset(form).then((r: any) => {
           const assetUrl = r?.asset?.file_url || r?.asset?.url || r?.file_url || '';
           if (assetUrl) setLastRecordAssetUrl(assetUrl);
           clayExportResolveRef.current?.({ url: assetUrl, secs });
           clayExportResolveRef.current = null;
-          setRecordMsg(`白模已导出 ${secs.toFixed(1)}s（webm 已下载${assetUrl ? '，已上传资产库' : '，资产库上传失败'}）`);
+          setRecordMsg(`白模已导出 ${secs.toFixed(1)}s（${ext} 已下载${assetUrl ? '，已上传资产库' : '，资产库上传失败'}）`);
         }).catch(() => {
           clayExportResolveRef.current?.({ url: '', secs });
           clayExportResolveRef.current = null;
-          setRecordMsg('白模录制完成，但资产库上传失败（本地 webm 已下载）');
+          setRecordMsg(`白模录制完成，但资产库上传失败（本地 ${ext} 已下载）`);
         });
         return;
       }
-      setRecordMsg(`已录制 ${secs.toFixed(1)}s 预演（webm 已下载，正在上传资产库…）`);
+      setRecordMsg(`已录制 ${secs.toFixed(1)}s 预演（${ext} 已下载，正在上传资产库…）`);
       // 同步上传资产库（失败不阻塞，本地文件已落盘）
       form.append('name', `导演预演_${activeShot?.shot_index ?? ''}_${new Date().toLocaleString()}`);
       form.append('tags', 'previz,导演预演');
       if (pid) form.append('project_id', pid);
-      form.append('file', new File([blob], 'previz.webm', { type: 'video/webm' }));
+      form.append('file', new File([blob], `previz.${ext}`, { type: blob.type || 'video/webm' }));
       apiService.createAsset(form).then((r: any) => {
         const assetUrl = r?.asset?.file_url || r?.asset?.url || r?.file_url || '';
         if (assetUrl) {
@@ -1742,8 +1769,8 @@ export const Director3DStage: React.FC = () => {
   }, [activeShot, project]);
 
   const recordSecsRefValue = () => {
-    // 录制时长按当前运镜模拟时长估算（与模拟同起同止）
-    return motionDurationMs(motionSpeed) / 1000;
+    // 与模拟同起同止：优先用本次模拟的实际时长（含 stage_export_clay 的时长覆盖），否则按速度档估算
+    return lastSimDurationSecRef.current || motionDurationMs(motionSpeed) / 1000;
   };
 
   // 录制结果显式设为本镜视频参考（上传成功即资产地址；仅本地时提示会话有效期）
@@ -1755,18 +1782,23 @@ export const Director3DStage: React.FC = () => {
     setRecordMsg(lastRecordAssetUrl ? '已设为本镜视频参考' : '已设为本镜视频参考（本地预览，刷新后失效，建议等待上传完成）');
   };
 
-  const handleToggleRecording = () => {    if (isRecording) {
+  /** 开始/停止预演录制；返回 false = 未启动（调用方据此立即收口，避免白等一个永远不会 resolve 的 Promise） */
+  const handleToggleRecording = (): boolean => {
+    if (isRecording) {
       if (recorderRef.current && recorderRef.current.state !== 'inactive') { try { recorderRef.current.stop(); } catch {} }
       if (recordTimerRef.current) { clearTimeout(recordTimerRef.current); recordTimerRef.current = null; }
       setIsRecording(false);
-      return;
+      return true;
     }
     const canvas = pipRendererRef.current?.domElement as HTMLCanvasElement | undefined;
-    if (!canvas || !showPip) { setRecordMsg('请先开启监视器（右上 Monitor）再录制'); return; }
+    if (!canvas || !showPip) { setRecordMsg('请先开启监视器（右上 Monitor）再录制'); return false; }
     try {
-      const stream = canvas.captureStream(30);
-      const mime = (window as any).MediaRecorder && MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-        ? 'video/webm;codecs=vp9' : 'video/webm';
+      // 帧率可被 stage_export_clay.fps 覆盖（仅本次录制，用完即清）
+      const fps = clayFpsOverrideRef.current && clayFpsOverrideRef.current > 0 ? clayFpsOverrideRef.current : 30;
+      clayFpsOverrideRef.current = null;
+      const stream = canvas.captureStream(fps);
+      // 优先 MP4(H.264)，再退 WebM：白模参考视频要上传给云端模型，mp4 兼容性最好
+      const mime = pickRecorderMimeType() || 'video/webm';
       const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8_000_000 });
       recordChunksRef.current = [];
       rec.ondataavailable = (ev) => { if (ev.data && ev.data.size) recordChunksRef.current.push(ev.data); };
@@ -1783,8 +1815,10 @@ export const Director3DStage: React.FC = () => {
       recordTimerRef.current = setTimeout(() => {
         if (recorderRef.current && recorderRef.current.state !== 'inactive') { try { recorderRef.current.stop(); } catch {} }
       }, 12000);
+      return true;
     } catch (e: any) {
       setRecordMsg(`录制启动失败：${e?.message || e}（该浏览器可能不支持 MediaRecorder）`);
+      return false;
     }
   };
 
@@ -1841,12 +1875,39 @@ export const Director3DStage: React.FC = () => {
     framing, motion, focalLength, cameraRoll, motionSpeed, aspect: projectAspect, secs, waypoints: waypointsRef.current,
   }), [framing, motion, focalLength, cameraRoll, motionSpeed, projectAspect]);
 
+  /** 白模导出回执：把完成/失败结果上报后端，由它通知发起 stage_export_clay 的 Agent 会话查看质量。 */
+  const reportClayResult = (
+    shotId: string,
+    shotIndex: any,
+    payload: { ok: boolean; video_url?: string; first_frame_url?: string; secs?: number; error?: string },
+  ) => {
+    const pid = project?.id || (useProjectStore.getState() as any).activeProjectId || '';
+    if (!pid) return;
+    apiService.agentStageClayResult({
+      project_id: pid,
+      shot_id: shotId,
+      shot_index: typeof shotIndex === 'number' ? shotIndex : undefined,
+      ...payload,
+    }).catch(() => {});
+  };
+
   const handleExportClay = async () => {
     if (!activeShot) { setClayMsg('请先选择分镜'); return; }
     if (clayExporting || isRecording) return;
     if (!pipRendererRef.current || !showPip) { setClayMsg('请先开启监视器（右上 Monitor）再导出白模'); return; }
+    // 回执用的分镜身份在导出开始时锁定（录制期间切镜不应把结果记到别的分镜）
+    const clayShotId = activeShot.id;
+    const clayShotIndex = activeShot.shot_index;
+    // MediaRecorder + WebGL 在后台标签页会被浏览器节流/暂停：录不到画面（静止帧或空文件），
+    // 白模参考视频的全部价值是按帧承载运镜，必须在窗口可见时录制。
+    if (typeof document !== 'undefined' && document.hidden) {
+      setClayMsg('白模导出需要窗口保持可见：切到后台标签页会让录制停摆，请回到本窗口后重试');
+      return;
+    }
     setClayExporting(true);
-    setClayMsg('白模导出中：正在切换灰模材质并录制运镜…');
+    setClayMsg(motion === 'static' && waypointsRef.current.length === 0
+      ? '当前运镜是固定机位：将导出静态构图参考（适合首帧/尾帧）；要运镜参考请选择会移动的运镜（推/拉/摇/移/环绕/升降…）'
+      : '白模导出中：正在切换灰模材质并录制连续运镜…');
     clayFirstFrameRef.current = null;
     clayLastFrameRef.current = null;
     try {
@@ -1864,27 +1925,61 @@ export const Director3DStage: React.FC = () => {
       clayFirstFrameRef.current = captureFrameDataUrl();
       const result = await new Promise<{ url: string; secs: number } | null>((resolve) => {
         clayExportResolveRef.current = resolve;
-        handleToggleRecording();
+        if (!handleToggleRecording()) {
+          // 录制没启动（监视器关闭/不支持）：立即收口，别让导出永远挂着
+          clayExportResolveRef.current = null;
+          resolve(null);
+          return;
+        }
+        // 兜底：正常情况下运镜模拟结束会触发 stop；超出 2 倍运镜时长仍未收口时强制结束，避免卡死导出按钮
+        if (claySafetyTimerRef.current) window.clearTimeout(claySafetyTimerRef.current);
+        claySafetyTimerRef.current = window.setTimeout(() => {
+          claySafetyTimerRef.current = null;
+          if (!clayExportResolveRef.current) return;
+          try {
+            if (recorderRef.current && recorderRef.current.state !== 'inactive') recorderRef.current.stop();
+          } catch {}
+          if (clayExportResolveRef.current) {
+            clayExportResolveRef.current(null);
+            clayExportResolveRef.current = null;
+            setRecordMsg('白模录制超时已收口：请确认监视器开启且窗口保持可见');
+          }
+        }, recordSecsRefValue() * 1000 * 2 + 8000);
       });
-      const secs = result?.secs || recordSecsRefValue();
+      if (!result) {
+        setClayMsg('白模导出未完成：没有录到视频（请开启监视器、保持窗口可见后重试）');
+        reportClayResult(clayShotId, clayShotIndex, { ok: false, error: '录制未产出视频（监视器关闭、窗口不可见或不支持 MediaRecorder）' });
+        return;
+      }
+      const secs = result.secs || recordSecsRefValue();
       const prompt = buildClayPrompt(secs);
       const patch: Record<string, any> = {
         clay_prompt: prompt,
-        clay_video_url: result?.url || (activeShot as any).clay_video_url || '',
-        previz_video_url: result?.url || (activeShot as any).previz_video_url || '',
+        clay_video_url: result.url || (activeShot as any).clay_video_url || '',
+        previz_video_url: result.url || (activeShot as any).previz_video_url || '',
         clay_first_frame_url: clayFirstFrameRef.current || (activeShot as any).clay_first_frame_url || '',
         clay_last_frame_url: clayLastFrameRef.current || (activeShot as any).clay_last_frame_url || '',
       };
       try { updateShot(activeShot.id, patch as any); } catch {}
       try { await navigator.clipboard.writeText(prompt); } catch {}
       setClayMsg(
-        `白模导出完成：${secs.toFixed(1)}s 视频 + 首/尾帧已落分镜（clay_video_url / clay_first_frame_url / clay_last_frame_url）；`
+        `白模导出完成：${secs.toFixed(1)}s 连续运镜视频 + 首/尾帧已落分镜（clay_video_url / clay_first_frame_url / clay_last_frame_url）；`
         + '结构化提示词已复制到剪贴板并写入 clay_prompt。生成时把白模视频作为参考视频（@video1），先 read_skill("seedance-white-model")。',
       );
       toast.success('白模导出完成');
+      // 回执给后端：命中 stage_export_clay 登记时，发起会话会收到通知并 view_media 复查运镜
+      reportClayResult(clayShotId, clayShotIndex, {
+        ok: !!result.url,
+        video_url: result.url || '',
+        first_frame_url: clayFirstFrameRef.current || '',
+        secs,
+        error: result.url ? '' : '视频已录制但资产库上传失败（本地文件可用）',
+      });
     } catch (e: any) {
       setClayMsg(`白模导出失败：${e?.message || e}`);
+      reportClayResult(clayShotId, clayShotIndex, { ok: false, error: String(e?.message || e) });
     } finally {
+      if (claySafetyTimerRef.current) { window.clearTimeout(claySafetyTimerRef.current); claySafetyTimerRef.current = null; }
       if (clayRestoreRef.current) { try { clayRestoreRef.current(); } catch {} clayRestoreRef.current = null; }
       clayModeRef.current = false;
       clayExportResolveRef.current = null;
@@ -1896,6 +1991,7 @@ export const Director3DStage: React.FC = () => {
       setClayExporting(false);
     }
   };
+  handleExportClayRef.current = handleExportClay;
 
   // Agent 舞台控制实时应用：stage_control → tool_result → agent-stage-patch → 落盘 + 3D 即时更新
   useEffect(() => {
@@ -1909,7 +2005,7 @@ export const Director3DStage: React.FC = () => {
         if (!detail.project_id || !activeId || String(detail.project_id) === String(activeId)) {
           store.loadActiveProject().then(() => {
             const st2 = useProjectStore.getState();
-            const all = st2.project?.scenes.flatMap((s) => s.shots) || [];
+            const all = shotsInEpisode(st2.project, st2.activeEpisodeId);
             const created = all.find((sh) => sh.id === detail.created_shot?.id)
               || all.find((sh) => Number(sh.shot_index) === Number(detail.created_shot?.shot_index));
             if (created) {
@@ -1923,7 +2019,7 @@ export const Director3DStage: React.FC = () => {
         return;
       }
       if (!patch) return;
-      const allShots = store.project?.scenes.flatMap((s) => s.shots) || [];
+      const allShots = shotsInEpisode(store.project, store.activeEpisodeId);
       let shot = allShots.find((sh) => sh.id === detail.shot_id)
         || allShots.find((sh) => Number(sh.shot_index) === Number(detail.shot_index));
       if (!shot && !detail.shot_id && !detail.shot_index) {
@@ -1992,10 +2088,57 @@ export const Director3DStage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 系统 Agent 入口：stage_export_clay 由后端发出请求，真正的 WebGL/MediaRecorder 导出必须在浏览器舞台执行。
+  // 两条路都收口到同一个 handler：
+  //   · 片场已挂载 → 事件直达（同步置 __handled，App 兜底看到后不再切页）；
+  //   · 片场未挂载 → App 存意图并切到本页，挂载后 consume 自动开录。
+  const handleAgentClayExportRef = useRef<((detail: any) => void) | null>(null);
+  handleAgentClayExportRef.current = (detail: any) => {
+    const store = useProjectStore.getState();
+    const currentProjectId = store.activeProjectId || store.project?.id;
+    if (detail?.project_id && currentProjectId && String(detail.project_id) !== String(currentProjectId)) {
+      toast.error('系统 Agent 请求导出白模，但目标项目与当前打开的项目不一致：请先切到该项目再重试');
+      return;
+    }
+    const allShots = shotsInEpisode(store.project, store.activeEpisodeId);
+    const shot = allShots.find((sh) => sh.id === detail?.shot_id)
+      || allShots.find((sh) => Number(sh.shot_index) === Number(detail?.shot_index))
+      || allShots.find((sh) => sh.id === store.activeShotId)
+      || allShots[0];
+    if (!shot) {
+      toast.error('系统 Agent 请求导出白模，但当前项目没有分镜');
+      return;
+    }
+    store.setActiveShotId(shot.id);
+    // stage_export_clay 的时长/帧率覆盖：只作用于紧随其后的这一次录制
+    if (Number(detail?.duration) > 0) clayDurationOverrideRef.current = Math.min(60, Number(detail.duration));
+    if (Number(detail?.fps) > 0) clayFpsOverrideRef.current = Math.max(10, Math.min(60, Math.round(Number(detail.fps))));
+    toast.info('系统 Agent 请求导出白模：正在切换灰模并录制连续运镜（请保持窗口可见）');
+    // 等切镜状态和 Three 场景完成同步后再调用导出，避免录到上一镜。
+    window.setTimeout(() => { void handleExportClayRef.current?.(); }, 180);
+  };
+
+  useEffect(() => {
+    const onAgentClayExport = (ev: any) => {
+      // 标记已接手：App 的全局兜底（切页）在同一个事件派发后检查该标记
+      if (ev?.detail) ev.detail.__handled = true;
+      handleAgentClayExportRef.current?.(ev?.detail || {});
+    };
+    window.addEventListener('agent-stage-export-clay', onAgentClayExport as any);
+    // 从 Agent 页面跳转过来：接手 App 暂存的导出意图（舞台已挂载后再开录）
+    const pending = consumeClayExportIntent();
+    if (pending) {
+      window.setTimeout(() => { handleAgentClayExportRef.current?.(pending); }, 260);
+    }
+    return () => window.removeEventListener('agent-stage-export-clay', onAgentClayExport as any);
+    // handler 通过 ref 读取最新闭包；监听器只需挂载一次，避免每次舞台渲染反复重绑。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // 姿态预设优先：清除本镜自定义关节（鼠标拖过的关节）后再应用预设
   const clearCustomJoints = () => {
     const store = useProjectStore.getState();
-    const allShots = store.project?.scenes.flatMap((s) => s.shots) || [];
+    const allShots = shotsInEpisode(store.project, store.activeEpisodeId);
     const shot = allShots.find((sh) => sh.id === store.activeShotId) || allShots[0];
     if (shot && (shot as any).mannequin_pose) {
       try { store.updateShot(shot.id, { mannequin_pose: undefined } as any); } catch {}

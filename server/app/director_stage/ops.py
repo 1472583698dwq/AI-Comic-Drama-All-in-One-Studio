@@ -177,7 +177,10 @@ def stage_state(content: Any, shot_id: str = "", shot_index: Any = None) -> Dict
         "props_config": shot.get("props_config") or [],
         "lighting_config": shot.get("lighting_config") or {},
         "previz_video_url": shot.get("previz_video_url") or "",
+        "clay_video_url": shot.get("clay_video_url") or "",
         "clay_prompt": shot.get("clay_prompt") or "",
+        "clay_first_frame_url": shot.get("clay_first_frame_url") or "",
+        "clay_last_frame_url": shot.get("clay_last_frame_url") or "",
         "available": available,
     }
 
@@ -220,7 +223,7 @@ def apply_stage_control(content: Any, arguments: Dict[str, Any]) -> Dict[str, An
     action = str(args.get("action") or "").strip()
     if not action:
         raise StageControlError("stage_control 需要 action（create_shot/set_pose/set_joints/clear_joints/set_transform/"
-                                "set_camera/set_waypoints/set_props/set_lighting/set_cast_layout）")
+                                "set_camera/set_waypoints/set_props/set_lighting/set_cast_layout/set_shot_text）")
     payload = args.get("payload") if isinstance(args.get("payload"), dict) else {}
     patch: Dict[str, Any] = {}
     note = ""
@@ -435,6 +438,19 @@ def apply_stage_control(content: Any, arguments: Dict[str, Any]) -> Dict[str, An
         shot["cast_layout"] = val
         patch["cast_layout"] = val
         note = f"已设置站位阵型「{val}」（Antagonist/Supporting 布偶会自动就位）"
+
+    elif action == "set_shot_text":
+        # 文字字段（分镜台手工编辑的同一组）：Agent 能改动作描述/台词/提示词，不再只能改舞台参数
+        text_fields = ("action_desc", "dialogue", "voiceover", "speaker_name", "image_prompt", "video_prompt", "subtitle_text")
+        for key in text_fields:
+            if key not in payload:
+                continue
+            limit = 500 if key in ("image_prompt", "video_prompt") else 200
+            shot[key] = str(payload.get(key) or "")[:limit]
+            patch[key] = shot[key]
+        if not patch:
+            raise StageControlError("set_shot_text 需要至少一个文字字段：" + "/".join(text_fields))
+        note = "已更新分镜文字: " + ",".join(patch.keys())
 
     else:
         raise StageControlError(f"未知 action: {action}")

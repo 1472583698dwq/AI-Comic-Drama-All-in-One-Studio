@@ -39,6 +39,7 @@ export type SideEffect =
   | { type: 'canvas_tool'; tool: string; status: string; result?: any; error?: string }
   | { type: 'canvas_updated'; tool: string }
   | { type: 'stage_patch'; tool: string; shot_id?: string; shot_index?: number; patch: any; created_shot?: any; project_id?: string }
+  | { type: 'stage_export_clay'; tool: string; shot_id?: string; shot_index?: number; project_id?: string; duration?: number; fps?: number }
   | { type: 'project_refresh'; tool: string };
 
 export interface ToolStep {
@@ -86,6 +87,8 @@ export interface AgentArtifact {
   tool: string;
   label: string;
   applied?: boolean;
+  /** 一键应用的目标覆盖：previz_video = 写回本镜参考视频（白模/预演），其余按 kind 默认字段 */
+  applyAs?: 'previz_video';
 }
 
 export interface AgentErrorCard {
@@ -168,6 +171,17 @@ export interface ApprovalInfo {
   args: Record<string, any>;
   decided?: boolean;
   /** 审批请求到达时间戳（ms），用于 120s 自动拒绝倒计时 */
+  createdAt?: number;
+}
+
+/** 模型结构化问询（ask_user_question）：选项卡 + 自定义输入 */
+export interface QuestionInfo {
+  question: string;
+  options: string[];
+  multi_select?: boolean;
+  detail?: string;
+  /** 已回填（question_ack 或用户点选后） */
+  answered?: boolean;
   createdAt?: number;
 }
 

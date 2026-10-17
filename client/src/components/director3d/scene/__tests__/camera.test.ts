@@ -148,4 +148,22 @@ describe('scene/camera · 运镜预设 → 关键帧', () => {
       expect(Number.isFinite(s.fov)).toBe(true);
     }
   });
+
+  it('除 static 外所有运镜都产生可观测运动（白模参考必须承载运镜，不能是固定机位）', () => {
+    for (const m of MOTION_PRESETS) {
+      if (m.id === 'static') continue;
+      const kf = motionPresetKeyframes(m.id, base, { rand: () => 0.9 });
+      const first = kf[0].camera;
+      const maxDelta = Math.max(...kf.map((k) => {
+        const p = k.camera.position, t = k.camera.target;
+        return Math.max(
+          Math.hypot(p[0] - first.position[0], p[1] - first.position[1], p[2] - first.position[2]),
+          Math.hypot(t[0] - first.target[0], t[1] - first.target[1], t[2] - first.target[2]),
+          Math.abs(k.camera.fov - first.fov),
+          Math.abs((k.camera.roll || 0) - (first.roll || 0)),
+        );
+      }));
+      expect(maxDelta, `运镜 ${m.id} 必须产生真实运动（否则白模导出会拍成固定机位）`).toBeGreaterThan(0.02);
+    }
+  });
 });

@@ -32,8 +32,20 @@ function extractErrorMessage(res: Response, body: any): string {
   if (body?.detail) {
     if (typeof body.detail === 'string') return body.detail;
     if (Array.isArray(body.detail)) return body.detail.map((d: any) => d.msg || JSON.stringify(d)).join('; ');
+    if (typeof body.detail === 'object') {
+      if (typeof body.detail.message === 'string') return body.detail.message;
+      return JSON.stringify(body.detail);
+    }
   }
   return `请求失败 (HTTP ${res.status})`;
+}
+
+/** 带结构化 detail 的请求错误（如 409 引用清单），供 UI 二次确认。 */
+function makeApiError(res: Response, body: any): Error {
+  const err = new Error(extractErrorMessage(res, body)) as any;
+  err.status = res.status;
+  err.detail = body?.detail;
+  return err;
 }
 
 export const apiService = {
@@ -610,6 +622,22 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
+  /**
+   * 白模导出回执：前端浏览器录制收口后上报，后端把结果通知投给发起 stage_export_clay 的会话
+   * （无登记 = 手动导出/后端重启 → no_pending，不打扰任何会话）。
+   */
+  async agentStageClayResult(payload: {
+    project_id?: string; shot_id?: string; shot_index?: number;
+    video_url?: string; first_frame_url?: string; secs?: number;
+    ok?: boolean; error?: string;
+  }): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/agent/stage/clay-result`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
   /** 附件上传：存 storage/agent_uploads（不进素材库），返回 {kind,name,ref,size,mime} */
   async uploadAgentAttachment(file: File): Promise<{ kind: string; name: string; ref: string; size: number; mime: string }> {
     const form = new FormData();
@@ -631,6 +659,15 @@ export const apiService = {
     const res = await fetch(`${API_BASE_URL}/agent/approve`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: sessionId, approval_id: approvalId, approved }),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  /** ask_user_question 结构化问询的答案回填（WS 不可用时的 HTTP 兜底） */
+  async agentAnswerQuestion(sessionId: string, questionId: string, selections: string[], custom?: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/agent/answer_question`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, question_id: questionId, selections: selections || [], custom: custom || '' }),
     });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
@@ -855,7 +892,7 @@ export const apiService = {
   },
 
   // ── 素材库 Asset Library ──
-  async listAssets(params?: { category?: string; status?: string; tag?: string; q?: string; project_id?: string; scope?: string; include_shared?: boolean; page?: number; limit?: number; sort?: string }): Promise<{ assets: any[]; total: number; page: number; limit: number; has_more?: boolean }> {
+  async listAssets(params?: { category?: string; status?: string; tag?: string; q?: string; project_id?: string; scope?: string; include_shared?: boolean; page?: number; limit?: number; sort?: string; group?: string }): Promise<{ assets: any[]; total: number; page: number; limit: number; has_more?: boolean }> {
     const qs = new URLSearchParams();
     if (params) Object.entries(params).forEach(([k, v]) => { if (v != null && v !== '' && (k!=='scope' || v!=='all')) qs.set(k, String(v)); else if(k==='scope'&&v==='all'){} else if(v!=null) qs.set(k,String(v)); });
     const res = await fetch(`${API_BASE_URL}/assets?${qs.toString()}`);
@@ -877,13 +914,56 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
-  async deleteAsset(assetId: string): Promise<any> {
-    const res = await fetch(`${API_BASE_URL}/assets/${encodeURIComponent(assetId)}`, { method: 'DELETE' });
-    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+  async deleteAsset(assetId: string, opts?: { project_id?: string; force?: boolean }): Promise<any> {
+    const qs = new URLSearchParams();
+    if (opts?.project_id) qs.set('project_id', opts.project_id);
+    if (opts?.force) qs.set('force', 'true');
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    const res = await fetch(`${API_BASE_URL}/assets/${encodeURIComponent(assetId)}${suffix}`, { method: 'DELETE' });
+    if (!res.ok) throw makeApiError(res, await res.json().catch(() => null));
     return await res.json();
   },
   async duplicateAsset(assetId: string): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/assets/${encodeURIComponent(assetId)}/duplicate`, { method: 'POST' });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async publishAsset(assetId: string, projectId?: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/assets/${encodeURIComponent(assetId)}/publish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project_id: projectId }) });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async unpublishAsset(assetId: string, projectId?: string, force?: boolean): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/assets/${encodeURIComponent(assetId)}/unpublish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project_id: projectId, force: !!force }) });
+    if (!res.ok) throw makeApiError(res, await res.json().catch(() => null));
+    return await res.json();
+  },
+  async batchShareAssets(params: { asset_ids: string[]; scope?: 'global' | 'project'; target_project_ids?: string[]; project_id?: string }): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/assets/share/batch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(params) });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async listAssetGroups(project_id?: string): Promise<{ global: string[]; project: string[]; counts: Record<string, number> }> {
+    const qs = project_id ? `?project_id=${encodeURIComponent(project_id)}` : '';
+    const res = await fetch(`${API_BASE_URL}/assets/groups${qs}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async createAssetGroup(params: { path: string; project_id?: string; scope?: string }): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/assets/groups`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(params) });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async renameAssetGroup(params: { old_path: string; new_path: string; project_id?: string; scope?: string }): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/assets/groups`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(params) });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async deleteAssetGroup(params: { path: string; project_id?: string; scope?: string }): Promise<any> {
+    const qs = new URLSearchParams({ path: params.path });
+    if (params.project_id) qs.set('project_id', params.project_id);
+    if (params.scope) qs.set('scope', params.scope);
+    const res = await fetch(`${API_BASE_URL}/assets/groups?${qs.toString()}`, { method: 'DELETE' });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
@@ -913,18 +993,21 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
-  async batchImportAssets(files: File[], meta?: { category?: string; tags?: string; visual_prompt?: string }): Promise<{ imported: number; assets: any[]; errors: string[] }> {
+  async batchImportAssets(files: File[], meta?: { category?: string; tags?: string; visual_prompt?: string; project_id?: string; scope?: string }): Promise<{ imported: number; assets: any[]; errors: string[] }> {
     const fd = new FormData();
     files.forEach(f => fd.append('files', f));
     if (meta?.category) fd.append('category', meta.category);
     if (meta?.tags) fd.append('tags', meta.tags);
     if (meta?.visual_prompt) fd.append('visual_prompt', meta.visual_prompt);
+    if (meta?.project_id) fd.append('project_id', meta.project_id);
+    if (meta?.scope) fd.append('scope', meta.scope);
     const res = await fetch(`${API_BASE_URL}/assets/batch`, { method: 'POST', body: fd });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
-  async getAssetStats(): Promise<any> {
-    const res = await fetch(`${API_BASE_URL}/assets/stats`);
+  async getAssetStats(project_id?: string): Promise<any> {
+    const qs = project_id ? `?project_id=${encodeURIComponent(project_id)}` : '';
+    const res = await fetch(`${API_BASE_URL}/assets/stats${qs}`);
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
@@ -933,7 +1016,7 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
-  async shareAsset(assetId: string, params: { scope?: string; target_project_ids?: string[] }): Promise<any> {
+  async shareAsset(assetId: string, params: { scope?: string; target_project_ids?: string[]; project_id?: string }): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/assets/${encodeURIComponent(assetId)}/share`, { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(params) });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
@@ -1114,6 +1197,37 @@ export const apiService = {
   async migrateProviderInlineKey(providerId: string, rewrite_code = true): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/providers/${encodeURIComponent(providerId)}/migrate-inline-key`, {
       method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ rewrite_code }),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  // 模型广场
+  async getLlmPlaza(): Promise<{ suppliers: any[]; active: { supplier_id: string; model: string } }> {
+    const res = await fetch(`${API_BASE_URL}/llm/plaza`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async addLlmSupplier(body: { name: string; base_url: string; api_key?: string; protocol?: 'openai' | 'claude' }): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/llm/suppliers`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async deleteLlmSupplier(id: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/llm/suppliers/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async refreshLlmSupplier(id: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/llm/suppliers/${encodeURIComponent(id)}/refresh`, { method: 'POST' });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async setLlmActive(supplierId: string, model: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/llm/active`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ supplier_id: supplierId, model }),
     });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();

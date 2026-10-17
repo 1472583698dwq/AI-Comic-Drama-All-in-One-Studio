@@ -1,10 +1,86 @@
 import React from 'react';
-import { Image as ImageIcon, Film, Mic, AlertTriangle, ExternalLink, Copy, Check, Wand2, Lightbulb, FlaskConical, PackageCheck, Trash2 } from 'lucide-react';
+import { Image as ImageIcon, Film, Mic, AlertTriangle, ExternalLink, Copy, Check, Wand2, Lightbulb, FlaskConical, PackageCheck, Trash2, HelpCircle, Send } from 'lucide-react';
 import type { CreatorProposal } from './agentTypes';
 import { resolveMediaUrl } from '../../utils/devOrigin';
 
 // 兼容旧引用：类型口径已收敛到 agentTypes.ts
 export type { PlanStep, PlanPreview, CreatorProposal } from './agentTypes';
+
+/** 模型结构化问询卡（ask_user_question）：选项卡点选（支持多选）+ 自定义文本；已回填后只读 */
+export const QuestionCard: React.FC<{
+  question: string;
+  options: string[];
+  multiSelect?: boolean;
+  detail?: string;
+  answered?: boolean;
+  onAnswer: (selections: string[], custom?: string) => void;
+}> = ({ question, options, multiSelect, detail, answered, onAnswer }) => {
+  const [selected, setSelected] = React.useState<string[]>([]);
+  const [custom, setCustom] = React.useState('');
+  const toggle = (opt: string) => {
+    if (answered) return;
+    if (multiSelect) setSelected((prev) => (prev.includes(opt) ? prev.filter((x) => x !== opt) : [...prev, opt]));
+    else setSelected([opt]);
+  };
+  const canSubmit = !answered && (selected.length > 0 || custom.trim().length > 0);
+  const submit = () => {
+    if (!canSubmit) return;
+    onAnswer(selected, custom.trim() || undefined);
+  };
+  return (
+    <div className="mt-2 rounded-xl border border-sky-500/30 bg-sky-500/5 p-2.5 text-[11px] leading-5">
+      <div className="font-bold text-sky-600 dark:text-sky-300 flex items-center gap-1.5">
+        <HelpCircle className="w-3.5 h-3.5" />模型问询{answered ? '（已回答）' : ''}
+      </div>
+      <div className="[color:var(--color-text-main)] mt-1 whitespace-pre-wrap break-words">{question}</div>
+      {detail && <div className="[color:var(--color-text-muted)] mt-0.5 whitespace-pre-wrap break-words">{detail}</div>}
+      {options.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {options.map((opt) => {
+            const on = selected.includes(opt);
+            return (
+              <button
+                key={opt}
+                type="button"
+                disabled={answered}
+                onClick={() => toggle(opt)}
+                className={`px-2.5 py-1 rounded-lg border text-[11px] transition-colors ${
+                  on
+                    ? 'bg-sky-500 text-white border-sky-500 font-bold'
+                    : 'border-sky-500/40 [color:var(--color-text-main)] hover:border-sky-500 disabled:opacity-50'
+                }`}
+              >
+                {opt}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {!answered && (
+        <div className="mt-1.5 flex gap-1.5">
+          <input
+            value={custom}
+            onChange={(e) => setCustom(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+            placeholder={options.length > 0 ? '或输入自定义回答…' : '输入回答…'}
+            className="flex-1 px-2 py-1 rounded-lg border border-sky-500/30 bg-transparent [color:var(--color-text-main)] outline-none focus:border-sky-500 text-[11px]"
+          />
+          <button
+            type="button"
+            disabled={!canSubmit}
+            onClick={submit}
+            className="px-2.5 py-1 rounded-lg bg-sky-500 text-white text-[11px] font-bold flex items-center gap-1 disabled:opacity-40"
+          >
+            <Send className="w-3 h-3" />回答
+          </button>
+        </div>
+      )}
+      {answered && selected.length > 0 && (
+        <div className="mt-1 text-[10px] text-emerald-600 dark:text-emerald-300">已选择：{selected.join('、')}</div>
+      )}
+    </div>
+  );
+};
 
 /** 产物卡：图/视频/音频 inline 预览 + 一键应用到本镜 */
 export const ArtifactCard: React.FC<{

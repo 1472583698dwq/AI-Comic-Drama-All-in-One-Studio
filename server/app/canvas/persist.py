@@ -28,7 +28,7 @@ _AUDIO_TYPES = frozenset({"audio", "tts", "voice"})
 _TEXT_TYPES = frozenset({"prompt"})
 # 只读 / 容器 / 配置节点：执行结果只是透传自身数据，不写回
 _PASSIVE_TYPES = frozenset({
-    "group", "load-image", "load-image-batch", "load-video", "load-audio", "asset", "brief",
+    "group", "load-image", "load-image-batch", "load-video", "load-audio", "asset", "asset-source", "brief",
     "provider", "provider-image", "provider-video", "provider-audio", "provider-llm",
 })
 

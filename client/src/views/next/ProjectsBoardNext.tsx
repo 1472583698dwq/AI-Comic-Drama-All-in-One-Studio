@@ -125,7 +125,7 @@ export const ProjectsBoardNext: React.FC = () => {
     }
     try { useProjectListStore.getState().setActiveProjectId(meta.id); } catch {}
     try { localStorage.setItem('activeProjectId', meta.id); } catch {}
-    useProjectStore.getState().setActiveTab('studio');
+    useProjectStore.getState().leaveEpisode();
   };
 
   const handleCreate = async () => {
@@ -159,7 +159,7 @@ export const ProjectsBoardNext: React.FC = () => {
       try {
         const data = await apiService.getProject(res.id);
         if (data?.content?.scenes) setProject({ ...data.content, id: res.id });
-        useProjectStore.getState().setActiveTab('studio');
+        useProjectStore.getState().leaveEpisode();
       } catch {}
     } catch (err: any) { toast.error(err.message || '导入项目失败'); }
     e.target.value = '';
@@ -185,7 +185,7 @@ export const ProjectsBoardNext: React.FC = () => {
           updated_at: new Date().toISOString(),
         } as any);
       }
-      useProjectStore.getState().setActiveTab('studio');
+      useProjectStore.getState().leaveEpisode();
     } catch (e: any) { toast.error(e.message || '打开项目失败'); }
   };
 

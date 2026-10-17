@@ -63,6 +63,7 @@ interface PageState {
 const FALLBACK_PAGES: PageItem[] = [
   { id: 'home', label: '首页', icon: 'home', group: '工作区', order: 10, enabled: true, host: 'home' },
   { id: 'projects', label: '项目看板', icon: 'folder-kanban', group: '工作区', order: 20, enabled: true, host: 'projects' },
+  { id: 'episodes', label: '集看板', icon: 'film', group: '工作区', order: 25, enabled: true, host: 'episodes' },
   { id: 'assets', label: '素材库', icon: 'library', group: '工作区', order: 30, enabled: true, host: 'assets' },
   { id: 'characters', label: '角色设定', icon: 'users', group: '工作区', order: 40, enabled: true, host: 'characters' },
   { id: 'studio', label: '分镜台', icon: 'layers', group: '漫剧工坊', order: 50, enabled: true, host: 'studio' },
