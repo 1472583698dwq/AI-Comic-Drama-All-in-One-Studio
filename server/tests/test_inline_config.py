@@ -27,13 +27,13 @@ from app.core.config import settings  # noqa: E402
 from app.models.provider_definition import ProviderDefinition  # noqa: E402
 from app.providers.custom import inline_config as ic  # noqa: E402
 
-# 真实 AutoDL 源的写法（取值同 storage/providers/custom/*.json，测试只用于识别/改写）
-REAL_KEY = "3jfV2WXEzzGkSW1gcuZwAtTAMbDhruqwgphMu9mXQ5EIKapd"
+# AutoDL 源的写法样例（测试只用于识别/改写；值用假 Key，真实 Key 不进仓库）
+TEST_KEY = "FakeKey9xQ2mN0RealAbCdEfGh7jKlMnOpQrSt"
 
 MODULE_CONST_CODE = f'''import httpx
 
 AUTODL_BASE = "https://autodl.art/api/v1"
-AUTODL_API_KEY = "{REAL_KEY}"
+AUTODL_API_KEY = "{TEST_KEY}"
 WORKFLOW_ID = "minimax_h3_image_audio_to_video_v2_15s"
 
 
@@ -44,18 +44,18 @@ async def generate(ctx, api):
 '''
 
 CTX_FALLBACK_CODE = f'''async def generate(ctx, api):
-    key = ctx.get("api_key") or "{REAL_KEY}"
+    key = ctx.get("api_key") or "{TEST_KEY}"
     return {{"image_url": key}}
 '''
 
 # 真机同款（storage/providers/custom/prov_e3a19229.json）：ctx 读之后夹了一层延迟链
 LAMBDA_CHAIN_CODE = f'''async def generate(ctx, api):
     DEFAULT_WORKFLOW_ID = "minimax_h3_lightx2v_no_pic"
-    API_KEY = ctx.get("api_key") or api.get("get_api_key", lambda: "")() or "{REAL_KEY}"
+    API_KEY = ctx.get("api_key") or api.get("get_api_key", lambda: "")() or "{TEST_KEY}"
     return {{"image_url": API_KEY + "|" + DEFAULT_WORKFLOW_ID}}
 '''
 
-NO_ENTRY_CODE = f'''AUTODL_API_KEY = "{REAL_KEY}"
+NO_ENTRY_CODE = f'''AUTODL_API_KEY = "{TEST_KEY}"
 ALREADY_BROKEN = True
 '''
 
@@ -102,10 +102,10 @@ class TestScan(unittest.TestCase):
         scan = ic.scan_code_config(MODULE_CONST_CODE)
         key = next(c for c in scan["constants"] if c["name"] == "AUTODL_API_KEY")
         self.assertNotEqual(key["masked"], key["value"])
-        self.assertNotIn(REAL_KEY[10:30], key["masked"])
-        self.assertTrue(key["masked"].startswith(REAL_KEY[:4]))
-        self.assertTrue(key["masked"].endswith(REAL_KEY[-4:]))
-        self.assertEqual(key["masked"], ic.mask_secret(REAL_KEY))
+        self.assertNotIn(TEST_KEY[10:30], key["masked"])
+        self.assertTrue(key["masked"].startswith(TEST_KEY[:4]))
+        self.assertTrue(key["masked"].endswith(TEST_KEY[-4:]))
+        self.assertEqual(key["masked"], ic.mask_secret(TEST_KEY))
 
     def test_module_level_flag_and_line(self):
         scan = ic.scan_code_config(MODULE_CONST_CODE)
@@ -117,7 +117,7 @@ class TestScan(unittest.TestCase):
         scan = ic.scan_code_config(CTX_FALLBACK_CODE)
         self.assertEqual(scan["constants"], [])
         self.assertEqual(len(scan["ctx_fallbacks"]), 1)
-        self.assertEqual(scan["ctx_fallbacks"][0]["value"], REAL_KEY)
+        self.assertEqual(scan["ctx_fallbacks"][0]["value"], TEST_KEY)
 
     def test_empty_code(self):
         self.assertEqual(
@@ -128,17 +128,17 @@ class TestScan(unittest.TestCase):
     def test_lambda_chain_fallback_detected(self):
         """真机同款：ctx.get(...) or api.get("get_api_key", lambda: "")() or "密钥"。"""
         scan = ic.scan_code_config(LAMBDA_CHAIN_CODE)
-        self.assertEqual([f["value"] for f in scan["ctx_fallbacks"]], [REAL_KEY])
+        self.assertEqual([f["value"] for f in scan["ctx_fallbacks"]], [TEST_KEY])
         # 不能把 DEFAULT_WORKFLOW_ID 这类 slug 一起抓进来
         self.assertEqual(scan["loose_literals"], [])
         self.assertEqual([c["value"] for c in scan["constants"]], ["minimax_h3_lightx2v_no_pic"])
 
     def test_loose_literal_scan_catches_nameless_secret(self):
-        code = 'async def generate(ctx, api):\n    return {"image_url": "' + REAL_KEY + '"}\n'
+        code = 'async def generate(ctx, api):\n    return {"image_url": "' + TEST_KEY + '"}\n'
         scan = ic.scan_code_config(code)
         self.assertEqual(scan["constants"], [])
         self.assertEqual(scan["ctx_fallbacks"], [])
-        self.assertEqual([x["value"] for x in scan["loose_literals"]], [REAL_KEY])
+        self.assertEqual([x["value"] for x in scan["loose_literals"]], [TEST_KEY])
 
 
 class TestEffectiveConfig(TempStorage):
@@ -167,14 +167,14 @@ class TestEffectiveConfig(TempStorage):
         """真机 prov_e3a19229 的口径：内联来源是 ctx 兜底字面量，且代码确实读 ctx。"""
         eff = ic.effective_config(self.defn("prov_lambda_0", LAMBDA_CHAIN_CODE))
         self.assertEqual(eff["key_source"], "inline")
-        self.assertEqual(eff["inline_key"], REAL_KEY)
+        self.assertEqual(eff["inline_key"], TEST_KEY)
         self.assertEqual(eff["inline_key_origin"], "ctx_fallback")
         self.assertTrue(eff["reads_ctx_key"])
 
     def test_inline_when_only_code_has_key(self):
         eff = ic.effective_config(self.defn("prov_inline_1", MODULE_CONST_CODE))
         self.assertEqual(eff["key_source"], "inline")
-        self.assertEqual(eff["inline_key"], REAL_KEY)
+        self.assertEqual(eff["inline_key"], TEST_KEY)
         self.assertEqual(eff["inline_key_name"], "AUTODL_API_KEY")
         self.assertEqual(eff["stored_key"], "")
         self.assertFalse(eff["reads_ctx_key"])
@@ -187,10 +187,10 @@ class TestEffectiveConfig(TempStorage):
         self.assertEqual(eff["stored_key"], "storedKey1234567890")
         self.assertEqual(eff["env_name"], f"CUSTOM_PROVIDER_{pid}")
         # 代码里那句仍在（只是变成兜底），所以两个字段都要如实给出
-        self.assertEqual(eff["inline_key"], REAL_KEY)
+        self.assertEqual(eff["inline_key"], TEST_KEY)
 
     def test_none_when_nothing_configured(self):
-        eff = ic.effective_config(self.defn("prov_inline_3", CTX_FALLBACK_CODE.replace(REAL_KEY, "")))
+        eff = ic.effective_config(self.defn("prov_inline_3", CTX_FALLBACK_CODE.replace(TEST_KEY, "")))
         self.assertEqual(eff["key_source"], "none")
         self.assertEqual(eff["inline_key"], "")
         self.assertTrue(eff["reads_ctx_key"])
@@ -199,12 +199,12 @@ class TestEffectiveConfig(TempStorage):
 class TestRewrite(unittest.TestCase):
     def test_constant_rewrite_shape(self):
         new, notes = ic.rewrite_inline_key(
-            MODULE_CONST_CODE, "python", REAL_KEY, "AUTODL_API_KEY", "CUSTOM_PROVIDER_prov_x",
+            MODULE_CONST_CODE, "python", TEST_KEY, "AUTODL_API_KEY", "CUSTOM_PROVIDER_prov_x",
         )
         self.assertNotEqual(new, MODULE_CONST_CODE)
         self.assertIn('AUTODL_API_KEY = ""', new)
         self.assertIn("global AUTODL_API_KEY", new)
-        self.assertNotIn(REAL_KEY, new)               # 明文密钥不再留在源码里
+        self.assertNotIn(TEST_KEY, new)               # 明文密钥不再留在源码里
         self.assertIn("WORKFLOW_ID", new)             # 其他常量原样保留
         self.assertEqual(len(notes), 2)
 
@@ -212,7 +212,7 @@ class TestRewrite(unittest.TestCase):
         """行为不变：改写后跑真实沙箱，拿到的必须是 ctx 里注入的 Key。"""
         from app.providers.generic import code_provider as cp
         new, _ = ic.rewrite_inline_key(
-            MODULE_CONST_CODE, "python", REAL_KEY, "AUTODL_API_KEY", "CUSTOM_PROVIDER_prov_x",
+            MODULE_CONST_CODE, "python", TEST_KEY, "AUTODL_API_KEY", "CUSTOM_PROVIDER_prov_x",
         )
         out = asyncio.run(cp._execute_python_code(new, "generate", {"api_key": "stored-key-abc"}, timeout=30))
         self.assertEqual(
@@ -224,21 +224,21 @@ class TestRewrite(unittest.TestCase):
         """没配 Key 时不再回落到明文（宁可空，也不静默用旧密钥）。"""
         from app.providers.generic import code_provider as cp
         new, _ = ic.rewrite_inline_key(
-            MODULE_CONST_CODE, "python", REAL_KEY, "AUTODL_API_KEY", "CUSTOM_PROVIDER_prov_x",
+            MODULE_CONST_CODE, "python", TEST_KEY, "AUTODL_API_KEY", "CUSTOM_PROVIDER_prov_x",
         )
         out = asyncio.run(cp._execute_python_code(new, "generate", {}, timeout=30))
         self.assertTrue(out["image_url"].startswith("Bearer |"))
 
     def test_expression_literal_removed(self):
-        new, notes = ic.rewrite_inline_key(CTX_FALLBACK_CODE, "python", REAL_KEY, None, "CUSTOM_PROVIDER_prov_y")
-        self.assertNotIn(REAL_KEY, new)
+        new, notes = ic.rewrite_inline_key(CTX_FALLBACK_CODE, "python", TEST_KEY, None, "CUSTOM_PROVIDER_prov_y")
+        self.assertNotIn(TEST_KEY, new)
         self.assertIn('ctx.get("api_key") or ""', new)
         self.assertEqual(len(notes), 1)
 
     def test_no_entry_means_no_change(self):
         """找不到 generate 入口时一个字都不能改（否则会把源改坏）。"""
         new, notes = ic.rewrite_inline_key(
-            NO_ENTRY_CODE, "python", REAL_KEY, "AUTODL_API_KEY", "CUSTOM_PROVIDER_prov_z",
+            NO_ENTRY_CODE, "python", TEST_KEY, "AUTODL_API_KEY", "CUSTOM_PROVIDER_prov_z",
         )
         self.assertEqual(new, NO_ENTRY_CODE)
         self.assertEqual(len(notes), 1)
@@ -246,7 +246,7 @@ class TestRewrite(unittest.TestCase):
 
     def test_javascript_never_rewritten(self):
         new, notes = ic.rewrite_inline_key(
-            MODULE_CONST_CODE, "javascript", REAL_KEY, "AUTODL_API_KEY", "CUSTOM_PROVIDER_prov_js",
+            MODULE_CONST_CODE, "javascript", TEST_KEY, "AUTODL_API_KEY", "CUSTOM_PROVIDER_prov_js",
         )
         self.assertEqual(new, MODULE_CONST_CODE)
         self.assertEqual(notes, [])
@@ -260,9 +260,9 @@ class TestRewrite(unittest.TestCase):
         """真机同款延迟链：去掉字面量后仍优先读 ctx，且不误伤其他常量。"""
         from app.providers.generic import code_provider as cp
         new, notes = ic.rewrite_inline_key(
-            LAMBDA_CHAIN_CODE, "python", REAL_KEY, None, "CUSTOM_PROVIDER_prov_lambda",
+            LAMBDA_CHAIN_CODE, "python", TEST_KEY, None, "CUSTOM_PROVIDER_prov_lambda",
         )
-        self.assertNotIn(REAL_KEY, new)
+        self.assertNotIn(TEST_KEY, new)
         self.assertIn("DEFAULT_WORKFLOW_ID", new)
         self.assertEqual(len(notes), 1)
         out = asyncio.run(cp._execute_python_code(new, "generate", {"api_key": "k-from-store"}, timeout=30))
@@ -283,9 +283,9 @@ class TestEffectiveConfigAfterMigration(TempStorage):
         pd.auth.key_env = f"CUSTOM_PROVIDER_{pid}"
         after = ic.effective_config(pd)
         self.assertEqual(after["key_source"], "stored")
-        self.assertEqual(after["stored_key"], REAL_KEY)
+        self.assertEqual(after["stored_key"], TEST_KEY)
         self.assertEqual(after["inline_key"], "")     # 明文密钥已从源码里消失
-        self.assertNotIn(REAL_KEY, pd.code)
+        self.assertNotIn(TEST_KEY, pd.code)
         self.assertEqual([c for c in after["constants"] if c["kind"] == "secret"], [])
         # 地址 / 工作流 ID 这类非密钥常量原样保留（不是迁移对象）
         self.assertEqual(
