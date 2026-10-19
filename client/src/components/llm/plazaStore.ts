@@ -5,7 +5,7 @@
 import { create } from 'zustand';
 import { apiService } from '../../services/api';
 
-export type PlazaProtocol = 'openai' | 'claude';
+export type PlazaProtocol = 'openai' | 'claude' | 'responses';
 
 export interface PlazaModel {
   id: string;
@@ -20,6 +20,8 @@ export interface PlazaSupplier {
   base_url: string;
   has_key: boolean;
   api_key_hint?: string;
+  /** 高级：私有网关 / OpenCode 的自定义请求头 */
+  headers?: Record<string, string>;
   models: PlazaModel[];
   fetched_at?: string;
   error?: string;
@@ -30,23 +32,37 @@ export interface PlazaActive {
   model: string;
 }
 
+export interface PlazaSupplierInput {
+  name: string;
+  base_url: string;
+  api_key?: string;
+  protocol?: PlazaProtocol;
+  headers?: Record<string, string>;
+}
+
 interface PlazaState {
   suppliers: PlazaSupplier[];
+  /** 全局默认模型（拆剧本 / 润色 / 对话都用它） */
+  default: PlazaActive;
+  /** 对话里的临时覆盖（只影响本次对话） */
   active: PlazaActive;
   loaded: boolean;
   loading: boolean;
   error: string;
   load: () => Promise<void>;
-  add: (body: { name: string; base_url: string; api_key?: string; protocol?: PlazaProtocol }) => Promise<void>;
+  add: (body: PlazaSupplierInput) => Promise<PlazaSupplier | undefined>;
+  update: (id: string, body: Partial<PlazaSupplierInput>) => Promise<PlazaSupplier | undefined>;
   remove: (id: string) => Promise<void>;
-  refresh: (id: string) => Promise<void>;
+  refresh: (id: string) => Promise<PlazaSupplier | undefined>;
   setActive: (supplierId: string, model: string) => Promise<void>;
+  setDefault: (supplierId: string, model: string) => Promise<void>;
 }
 
 const emptyActive = (): PlazaActive => ({ supplier_id: '', model: '' });
 
 export const useLlmPlazaStore = create<PlazaState>((set, get) => ({
   suppliers: [],
+  default: emptyActive(),
   active: emptyActive(),
   loaded: false,
   loading: false,
@@ -59,6 +75,7 @@ export const useLlmPlazaStore = create<PlazaState>((set, get) => ({
       const r = await apiService.getLlmPlaza();
       set({
         suppliers: r?.suppliers || [],
+        default: r?.default || emptyActive(),
         active: r?.active || emptyActive(),
         loaded: true,
         loading: false,
@@ -70,13 +87,26 @@ export const useLlmPlazaStore = create<PlazaState>((set, get) => ({
 
   add: async (body) => {
     const r = await apiService.addLlmSupplier(body);
-    const sup = r?.supplier;
+    const sup: PlazaSupplier | undefined = r?.supplier;
     set((s) => ({
       suppliers: sup
         ? [...s.suppliers.filter((x) => x.id !== sup.id), sup]
         : s.suppliers,
       active: r?.active || s.active,
     }));
+    return sup;
+  },
+
+  update: async (id, body) => {
+    const r = await apiService.updateLlmSupplier(id, body);
+    const sup: PlazaSupplier | undefined = r?.supplier;
+    if (sup) {
+      set((s) => ({
+        suppliers: s.suppliers.map((x) => (x.id === sup.id ? sup : x)),
+        active: r?.active || s.active,
+      }));
+    }
+    return sup;
   },
 
   remove: async (id) => {
@@ -89,15 +119,21 @@ export const useLlmPlazaStore = create<PlazaState>((set, get) => ({
 
   refresh: async (id) => {
     const r = await apiService.refreshLlmSupplier(id);
-    const sup = r?.supplier;
-    if (!sup) return;
+    const sup: PlazaSupplier | undefined = r?.supplier;
+    if (!sup) return undefined;
     set((s) => ({
       suppliers: s.suppliers.map((x) => (x.id === sup.id ? sup : x)),
     }));
+    return sup;
   },
 
   setActive: async (supplierId, model) => {
     const r = await apiService.setLlmActive(supplierId, model);
     set({ active: r?.active || { supplier_id: supplierId, model } });
+  },
+
+  setDefault: async (supplierId, model) => {
+    const r = await apiService.setLlmDefault(supplierId, model);
+    set({ default: r?.default || { supplier_id: supplierId, model } });
   },
 }));

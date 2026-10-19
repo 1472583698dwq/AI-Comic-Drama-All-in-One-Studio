@@ -451,9 +451,9 @@ class AssetManager:
         if file_bytes and filename:
             asset = self._attach_file(asset, file_bytes, filename, content_type)
         elif data.get("file_url"):
-            # 直接引用已有URL（如 /storage/generated/xxx.png 或 http）
+            # 直接引用已有URL（如 /storage/generated/xxx.png 或 http）；thumb 可单独给，默认同 file
             asset.file_url = data["file_url"]
-            asset.thumb_url = data["file_url"]
+            asset.thumb_url = data.get("thumb_url") or data["file_url"]
         _save_asset(asset)
         return asset
 

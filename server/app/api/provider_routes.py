@@ -704,11 +704,17 @@ async def list_providers(kind: Optional[str] = None, scope: Optional[str] = None
                     info["kind"] = reg_kind
                     info["builtin"] = True
                     info["provider_type"] = "builtin"
-                    info["enabled"] = True
-                    # 生产可用口径：内置源 = 已配置（填了 Key）即上架，不再强制测试；
+                    # 内置源也支持「软停用」（扩展覆盖层）：状态如实回给前端，停用后不再进生产下拉
+                    try:
+                        from app.extensions.guard import is_enabled as _ext_is_enabled
+                        _enabled = _ext_is_enabled("provider", pid)
+                    except Exception:
+                        _enabled = True
+                    info["enabled"] = _enabled
+                    # 生产可用口径：内置源 = 已配置（填了 Key）且未停用即上架，不再强制测试；
                     # 未配置 Key 的内置源不显示（配置端始终可见）。
                     info["verified"] = verification.is_verified(pid)
-                    info["production_ready"] = bool(info.get("is_configured", True))
+                    info["production_ready"] = bool(info.get("is_configured", True)) and _enabled
                     # 内置源也补 x-*，保证画布/分镜分组与人机徽标一致
                     try:
                         raw_ps = info.get("params_schema")
@@ -1054,6 +1060,55 @@ async def delete_provider(provider_id: str):
     except Exception as e:
         print(f"[ProviderRoutes] unregister failed: {e}")
     return {"status": "deleted", "provider_id": provider_id}
+
+
+def _set_provider_enabled(provider_id: str, enabled: bool) -> Dict[str, Any]:
+    """生成源启停（统一口径）：
+    - 自定义源（含 ComfyUI 工作流派生 / 代码源）：原生生命周期 —— 改写定义 enabled + 注册/注销；
+    - 内置源：软停用（扩展覆盖层，守卫在执行前拦截），定义在代码内，不做注册表增删。
+    """
+    from app.extensions import state as ext_state
+    pd = custom_provider_manager.get_definition(provider_id)
+    if pd is not None and not getattr(pd, "builtin", False):
+        pd.enabled = bool(enabled)
+        custom_provider_manager.save_definition(pd)
+        try:
+            from app.providers.init_providers import (
+                register_single_custom_provider, unregister_single_custom_provider)
+            if enabled:
+                register_single_custom_provider(pd)
+            else:
+                unregister_single_custom_provider(pd.id, getattr(pd, "kind", "image"))
+        except Exception as e:
+            print(f"[ProviderRoutes] toggle register failed: {e}")
+        return {"status": "success", "provider_id": provider_id, "enabled": bool(enabled),
+                "mode": "native", "builtin": False}
+    # 内置（或登记在注册表里的其它源）：软停用覆盖层
+    registered = False
+    try:
+        from app.providers.image.registry import image_registry
+        from app.providers.video.registry import video_registry
+        from app.providers.audio.registry import audio_registry
+        registered = any(provider_id in reg.list_ids() for reg in (image_registry, video_registry, audio_registry))
+    except Exception:
+        registered = False
+    if registered or (pd is not None and getattr(pd, "builtin", False)):
+        ext_state.set_disabled(f"provider:{provider_id}", not enabled, "")
+        return {"status": "success", "provider_id": provider_id, "enabled": bool(enabled),
+                "mode": "overlay", "builtin": True}
+    raise HTTPException(status_code=404, detail=f"Provider 不存在: {provider_id}")
+
+
+@router.post("/providers/{provider_id}/enable")
+async def enable_provider(provider_id: str):
+    """启用生成源（自定义源重新注册；内置源解除软停用）。"""
+    return _set_provider_enabled(provider_id, True)
+
+
+@router.post("/providers/{provider_id}/disable")
+async def disable_provider(provider_id: str):
+    """停用生成源（自定义源注销注册；内置源软停用；定义保留，可随时再启用）。"""
+    return _set_provider_enabled(provider_id, False)
 
 
 class ProviderNotFound(ValueError):

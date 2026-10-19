@@ -19,7 +19,7 @@ const ENV_ONLY: Array<{ key: string; def: string; desc: string }> = [
   { key: 'AGENT_MAX_TOKENS',         def: '32768', desc: '单次回复最大输出 token（含思考 tokens，长思考被截断就调大）' },
   { key: 'AGENT_TOOL_TIMEOUT_S',     def: '900',   desc: '单个工具执行超时（秒），视频类固定 1800' },
   { key: 'AGENT_APPROVAL_TIMEOUT',   def: '120',   desc: '破坏性工具等你点头的超时（秒），超时按拒绝' },
-  { key: 'AGENT_CONTEXT_WINDOW',     def: '800000', desc: '上下文窗口（token）；达到窗口 80%（默认约 64 万 token）才触发压缩' },
+  { key: 'AGENT_CONTEXT_WINDOW',     def: '1000000', desc: '上下文窗口（token）；达到窗口 80%（默认约 80 万 token）才触发压缩' },
   { key: 'AGENT_COMPACT_KEEP_RATIO', def: '0.2',   desc: '压缩时保留的比例' },
   { key: 'AGENT_MAX_JOBS',           def: '4',     desc: '后台任务并发上限' },
   { key: 'AGENT_SUBAGENT_MAX_DEPTH', def: '1',     desc: '子代理委派深度' },

@@ -171,6 +171,7 @@ def _python_trusted_env(ctx: Dict[str, Any]):
     }
     g: Dict[str, Any] = {
         "__builtins__": _builtins,
+        "__name__": "provider_trusted",
         "httpx": httpx,
         "asyncio": asyncio,
         "json": json,
@@ -251,6 +252,7 @@ def _python_sandbox(ctx: Dict[str, Any], trusted: bool = False):
         return mod
 
     g: Dict[str, Any] = {
+        "__name__": "provider_sandbox",
         "__builtins__": {
             "__import__": _guarded_import,
             "len": len, "str": str, "int": int, "float": float, "bool": bool,
@@ -263,12 +265,26 @@ def _python_sandbox(ctx: Dict[str, Any], trusted: bool = False):
             "repr": repr, "format": format, "hash": hash, "callable": callable,
             "bytes": bytes, "bytearray": bytearray, "divmod": divmod, "pow": pow,
             "iter": iter, "next": next, "reversed": reversed, "slice": slice,
+            # 常用安全内置（历史误伤：type(e).__name__ 被判成"未定义的全局名"）
+            "type": type, "object": object, "super": super, "property": property,
+            "classmethod": classmethod, "staticmethod": staticmethod,
+            "map": map, "filter": filter, "id": id, "dir": dir, "vars": vars,
+            "chr": chr, "ord": ord, "bin": bin, "hex": hex, "oct": oct, "ascii": ascii,
+            "complex": complex, "memoryview": memoryview,
+            "NotImplemented": NotImplemented, "__build_class__": __build_class__,
             # 异常类：用户代码常需 raise RuntimeError/ValueError 等
             "Exception": Exception, "RuntimeError": RuntimeError, "ValueError": ValueError,
             "TypeError": TypeError, "KeyError": KeyError, "IndexError": IndexError,
             "TimeoutError": TimeoutError, "StopIteration": StopIteration,
             "ArithmeticError": ArithmeticError, "AttributeError": AttributeError,
             "ZeroDivisionError": ZeroDivisionError, "NotImplementedError": NotImplementedError,
+            "AssertionError": AssertionError, "ImportError": ImportError, "NameError": NameError,
+            "LookupError": LookupError, "OSError": OSError, "IOError": IOError,
+            "PermissionError": PermissionError, "ConnectionError": ConnectionError,
+            "MemoryError": MemoryError, "OverflowError": OverflowError,
+            "RecursionError": RecursionError, "EOFError": EOFError,
+            "UnicodeError": UnicodeError, "UnicodeDecodeError": UnicodeDecodeError,
+            "UnicodeEncodeError": UnicodeEncodeError,
             "json": json, "re": re, "time": time, "uuid": uuidlib,
             "httpx": httpx, "asyncio": asyncio,
         },

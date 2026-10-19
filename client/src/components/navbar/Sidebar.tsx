@@ -15,6 +15,7 @@ import { pageIcon } from '../../utils/pageIcons';
 import { NewProjectModal } from '../project/NewProjectModal';
 import { UISlot } from '../../ui-registry/UISlot';
 import { SIDEBAR_HOST, SIDEBAR_FOOTER_HOST } from '../../ui-registry/types';
+import { startNewTaskInProject } from '../../utils/newTaskFlow';
 import type { ProjectMeta } from '../../stores/useProjectListStore';
 
 interface NavItem {
@@ -35,7 +36,7 @@ const OTHER_GROUP = 'other';
  * 顶部「新建任务」→ 功能导航（后端页开关驱动，排除 config/agent——对话入口即新建任务与聊天历史；首页保留）→
  * 下半部聊天历史（会话/项目双视图 + 筛选 + 归档，ChatHistory）→ 底部「生成源/设置/收起」。
  *
- * - 新建任务：无项目时静默创建「新任务」项目承接；已有项目且当前会话未开始则直接复用，
+ * - 新建任务：无项目时弹「名称+风格模板」引导（创建后直接进对话）；已有项目且当前会话未开始则直接复用，
  *   否则新建一段会话 —— 对应 ZCode 的 draft 语义（空会话不重复堆积）。
  * - 聊天历史点击 → 切项目（双 store 同步）→ 选中目标会话 → 进 AI 对话页。
  * - 聊天历史受 UI 开关控制（设置 → 功能开关 → UI 开关首项「会话与项目快捷侧栏」）：
@@ -109,21 +110,7 @@ export const Sidebar: React.FC = () => {
 
   /** 新建任务：有项目直接进对话（空会话复用不堆积）；无项目先走「名称+风格模板」引导弹窗 */
   const handleNewTask = () => {
-    if (!project) {
-      setNewProjectOpen(true);
-      return;
-    }
-    setActiveTab('agent');
-    const agent = useAgentStore.getState();
-    if (agent.projectId !== project.id) {
-      // 换了项目：绑定后由 bindProject 在空项目上自建「新会话」草稿
-      agent.bindProject(project.id);
-    } else {
-      const cur = agent.sessions.find((s) => s.id === agent.activeSessionId);
-      const started = (cur?.messages || []).some((m) => m.sender === 'user');
-      if (started) agent.createSession();
-    }
-    void refreshHistory();
+    if (!startNewTaskInProject()) setNewProjectOpen(true);
   };
 
   const handleTaskProjectCreated = async (meta: ProjectMeta) => {

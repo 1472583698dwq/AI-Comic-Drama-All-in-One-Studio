@@ -90,6 +90,8 @@ import { syncDirectorPackEntries, clearDirectorPackEntries } from '../../ui-regi
 import { useUIEntries } from '../../ui-registry/resolveEnabled';
 import { DIRECTOR_ENVS_HOST, DIRECTOR_PROPS_HOST } from '../../ui-registry/types';
 import { consumeClayExportIntent } from './clayExportIntent';
+import { resyncStageFromServer, findClayTargetShot } from './clayExportSync';
+import { createBeatTicker, workerSleep } from './recordBeat';
 
 // ============================================================
 // MiniMax Design 3D Director - 重构版
@@ -264,6 +266,8 @@ export const Director3DStage: React.FC = () => {
   const presetKeyRef = useRef('');
 
   // 同步 activeShot（仅跟随 activeShotId，避免任何 project 更新都重置未保存的手动调整）
+  // stageSyncRev：手动触发的一次性重灌（如远控导出前刚把服务端最新状态拉回内存，同镜也要重灌）
+  const [stageSyncRev, setStageSyncRev] = useState(0);
   useEffect(() => {
     const st = useProjectStore.getState();
     const shots = shotsInEpisode(st.project, st.activeEpisodeId);
@@ -319,7 +323,7 @@ export const Director3DStage: React.FC = () => {
       setExposure(lc.exposure ?? 1.15);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeShotId]);
+  }, [activeShotId, stageSyncRev]);
 
   // 灯光面板 → 基础三点光实时应用（主光方位绕 Y 轴旋转，高度固定）
   useEffect(() => {
@@ -419,6 +423,12 @@ export const Director3DStage: React.FC = () => {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recordChunksRef = useRef<Blob[]>([]);
   const recordTimerRef = useRef<any>(null);
+  /** 录制采集轨（手动 requestFrame 模式：不依赖 rAF 出帧，窗口被遮挡也能录全） */
+  const recordTrackRef = useRef<MediaStreamTrack | null>(null);
+  /** 录制驱动器句柄（setTimeout 网格推进时相；stop 用于手动提前收口） */
+  const recordDriverRef = useRef<{ stop: () => void } | null>(null);
+  /** 一次 take 的起点快照（机位 + 主角位姿），结束/中断时复位 */
+  const takeSnapshotRef = useRef<{ camPos: THREE.Vector3; camFov: number; prot: { x: number; z: number; rotY: number } | null } | null>(null);
   // 白模导出（clay pass：flat 灰材质 + 隐藏辅助物；录制链路复用预演录制）
   const clayModeRef = useRef(false);
   const clayRestoreRef = useRef<null | (() => void)>(null);
@@ -1195,85 +1205,122 @@ export const Director3DStage: React.FC = () => {
     return () => { if (trajectoryLineRef.current && sceneRef.current) sceneRef.current.remove(trajectoryLineRef.current); };
   }, [motion, framing, showTrajectory]);
 
-  const handleToggleSimulation = () => {
-    if (!virtualCameraRef.current) return;
-    if (isSimulating) {
-      setIsSimulating(false);
-      // 手动停止时同样落回起点并停止录制，避免角色/机位停在半程
-      const prot = protagonistGroupRef.current;
-      if (prot && walkBaseRef.current) { prot.position.x = walkBaseRef.current.x; prot.position.z = walkBaseRef.current.z; prot.rotation.y = walkBaseRef.current.rotY; }
-      if (recorderRef.current && recorderRef.current.state !== 'inactive') { try { recorderRef.current.stop(); } catch {} }
-      return;
-    }
-    setIsSimulating(true);
+  /**
+   * 一次「运镜 take」的计划：关键帧 + 走位路径 + 时长。模拟与录制共用同一条轨迹。
+   * 白模导出可覆盖时长（stage_export_clay.duration）：仅本次生效，用完即清。
+   */
+  const buildTakePlan = () => {
     const cam = virtualCameraRef.current;
-    const startPos = cam.position.clone();
-    const startFov = cam.fov;
-    const startTime = performance.now();
-    // 记录主角走位起点（模拟结束/中断时复位，保证预演可重复）
+    if (!cam) return null;
     const prot = protagonistGroupRef.current;
     if (prot) walkBaseRef.current = { x: prot.position.x, z: prot.position.z, rotY: prot.rotation.y };
     else walkBaseRef.current = null;
-    const walkPath = waypointsRef.current.length > 0 && walkBaseRef.current
+    const walkPts = waypointsRef.current.length > 0 && walkBaseRef.current
       ? [{ x: walkBaseRef.current.x, z: walkBaseRef.current.z }, ...waypointsRef.current]
       : [];
-    // 走位路径总长度（按折线等速行走）
-    let walkSegLens: number[] = [];
-    let walkTotal = 0;
-    for (let i = 1; i < walkPath.length; i++) {
-      const dx = walkPath[i].x - walkPath[i - 1].x;
-      const dz = walkPath[i].z - walkPath[i - 1].z;
-      const len = Math.hypot(dx, dz);
-      walkSegLens.push(len);
-      walkTotal += len;
+    const lens: number[] = [];
+    let total = 0;
+    for (let i = 1; i < walkPts.length; i++) {
+      const len = Math.hypot(walkPts[i].x - walkPts[i - 1].x, walkPts[i].z - walkPts[i - 1].z);
+      lens.push(len);
+      total += len;
     }
-    // REQ-toonflow-canvas T3：运镜时长 / 缓动 / 每帧位移抽到 scene/presets + scene/camera（画布 director3d 同源）
-    // 关键帧采样版（与画布 N5 同源）：**所有**运镜预设（摇/俯仰/滚转/跟随/降镜/贴地侧滑…）都有真实位移。
-    // 旧版 applyMotionFrame 只覆盖 10 种运镜，其余（pan/tilt/roll/tracking/boom_down…）机位原地不动，
-    // 导致白模导出拍出固定机位的"参考视频"——而白模参考的全部价值就是按帧承载运镜与运动。
-    // 白模导出可覆盖时长（stage_export_clay.duration）：仅本次录制生效，用完即清
     const overrideSec = clayDurationOverrideRef.current;
     clayDurationOverrideRef.current = null;
     const durationSec = overrideSec && overrideSec > 0 ? overrideSec : motionDurationMs(motionSpeed) / 1000;
-    const duration = durationSec * 1000;
-    lastSimDurationSecRef.current = durationSec;
-    const camKeyframes = motionPresetKeyframes(motion, readCameraState(cam, new THREE.Vector3(0, 1.25, 0), cameraRoll), {
+    // REQ-toonflow-canvas T3：运镜时长 / 缓动 / 每帧位移抽到 scene/presets + scene/camera（画布 director3d 同源）
+    // 关键帧采样版（与画布 N5 同源）：**所有**运镜预设（摇/俯仰/滚转/跟随/降镜/贴地侧滑…）都有真实位移。
+    const keyframes = motionPresetKeyframes(motion, readCameraState(cam, new THREE.Vector3(0, 1.25, 0), cameraRoll), {
       durationSec,
       easing: motionEasing,
       samples: Math.max(24, Math.round(durationSec * 12)),
     });
+    lastSimDurationSecRef.current = durationSec;
+    takeSnapshotRef.current = {
+      camPos: cam.position.clone(),
+      camFov: cam.fov,
+      prot: prot ? { x: prot.position.x, z: prot.position.z, rotY: prot.rotation.y } : null,
+    };
+    return { durationSec, keyframes, walk: { pts: walkPts, lens, total } };
+  };
+
+  /** 把 take 推进到 tSec：写机位（关键帧已烘焙缓动）+ 主角沿走位路径等速行走 */
+  const applyTakeFrame = (
+    plan: NonNullable<ReturnType<typeof buildTakePlan>>,
+    tSec: number,
+    walkEase: number,
+  ) => {
+    const cam = virtualCameraRef.current;
+    if (cam) applyCameraState(cam, sampleCameraKeyframes(plan.keyframes, tSec));
+    const p = protagonistGroupRef.current;
+    const { pts, lens, total } = plan.walk;
+    if (!p || pts.length < 2 || total <= 0.001) return;
+    const target = walkEase * total;
+    let acc = 0;
+    let px = pts[pts.length - 1].x;
+    let pz = pts[pts.length - 1].z;
+    let dirX = 0;
+    let dirZ = -1;
+    for (let i = 1; i < pts.length; i++) {
+      if (target <= acc + lens[i - 1] || i === pts.length - 1) {
+        const segLen = lens[i - 1] || 1;
+        const t = Math.max(0, Math.min(1, (target - acc) / segLen));
+        px = pts[i - 1].x + (pts[i].x - pts[i - 1].x) * t;
+        pz = pts[i - 1].z + (pts[i].z - pts[i - 1].z) * t;
+        dirX = pts[i].x - pts[i - 1].x;
+        dirZ = pts[i].z - pts[i - 1].z;
+        break;
+      }
+      acc += lens[i - 1];
+    }
+    p.position.x = px;
+    p.position.z = pz;
+    if (Math.hypot(dirX, dirZ) > 0.001) p.rotation.y = Math.atan2(dirX, dirZ);
+  };
+
+  /** take 结束/中断：机位与主角复位到起点 */
+  const restoreTakeSnapshot = () => {
+    const snap = takeSnapshotRef.current;
+    takeSnapshotRef.current = null;
+    const cam = virtualCameraRef.current;
+    if (cam && snap) {
+      cam.position.copy(snap.camPos);
+      cam.fov = snap.camFov;
+      cam.lookAt(0, 1.25, 0);
+      if (cameraRoll !== 0) cam.rotation.z = (cameraRoll * Math.PI) / 180;
+      cam.updateProjectionMatrix();
+    }
+    const prot = protagonistGroupRef.current;
+    if (prot && snap?.prot) {
+      prot.position.x = snap.prot.x;
+      prot.position.z = snap.prot.z;
+      prot.rotation.y = snap.prot.rotY;
+    }
+    setScrubberProgress(0);
+  };
+
+  const handleToggleSimulation = () => {
+    if (!virtualCameraRef.current) return;
+    if (isSimulating) {
+      setIsSimulating(false);
+      // 录制驱动器开着时一起收口（含机位复位）；纯预览则只复位
+      if (recordDriverRef.current) { recordDriverRef.current.stop(); recordDriverRef.current = null; }
+      else {
+        restoreTakeSnapshot();
+        if (recorderRef.current && recorderRef.current.state !== 'inactive') { try { recorderRef.current.stop(); } catch {} }
+      }
+      return;
+    }
+    setIsSimulating(true);
+    const plan = buildTakePlan();
+    if (!plan) return;
+    const startTime = performance.now();
+    const duration = plan.durationSec * 1000;
     const step = (now: number) => {
       const elapsed = now - startTime;
       const progress = Math.min(1, elapsed / duration);
       setScrubberProgress(progress);
-      const ease = easeMotionProgress(progress, motionEasing);
-      // 关键帧里已烘焙同一套缓动：按进度取机位（连续轨迹，与画布导出同一条路径）
-      applyCameraState(cam, sampleCameraKeyframes(camKeyframes, progress * durationSec));
-      // 主角沿走位路径等速行走，朝向行进方向（与运镜同一 easing 共进退）
-      if (walkPath.length > 1 && walkTotal > 0.001 && protagonistGroupRef.current) {
-        const target = ease * walkTotal;
-        let acc = 0;
-        let px = walkPath[walkPath.length - 1].x;
-        let pz = walkPath[walkPath.length - 1].z;
-        let dirX = 0;
-        let dirZ = -1;
-        for (let i = 1; i < walkPath.length; i++) {
-          if (target <= acc + walkSegLens[i - 1] || i === walkPath.length - 1) {
-            const segLen = walkSegLens[i - 1] || 1;
-            const t = Math.max(0, Math.min(1, (target - acc) / segLen));
-            px = walkPath[i - 1].x + (walkPath[i].x - walkPath[i - 1].x) * t;
-            pz = walkPath[i - 1].z + (walkPath[i].z - walkPath[i - 1].z) * t;
-            dirX = walkPath[i].x - walkPath[i - 1].x;
-            dirZ = walkPath[i].z - walkPath[i - 1].z;
-            break;
-          }
-          acc += walkSegLens[i - 1];
-        }
-        const p = protagonistGroupRef.current;
-        p.position.x = px;
-        p.position.z = pz;
-        if (Math.hypot(dirX, dirZ) > 0.001) p.rotation.y = Math.atan2(dirX, dirZ);
-      }
+      applyTakeFrame(plan, progress * plan.durationSec, easeMotionProgress(progress, motionEasing));
       if (progress < 1) requestAnimationFrame(step);
       else {
         // 白模导出：模拟结束会把相机复位，先抓运镜终点帧再复位
@@ -1283,7 +1330,11 @@ export const Director3DStage: React.FC = () => {
             if (cvs) clayLastFrameRef.current = cvs.toDataURL('image/jpeg', 0.9);
           } catch {}
         }
-        cam.position.copy(startPos); cam.fov = startFov; cam.lookAt(0, 1.25, 0); if (cameraRoll !== 0) cam.rotation.z = (cameraRoll * Math.PI) / 180; cam.updateProjectionMatrix(); if (protagonistGroupRef.current && walkBaseRef.current) { protagonistGroupRef.current.position.x = walkBaseRef.current.x; protagonistGroupRef.current.position.z = walkBaseRef.current.z; protagonistGroupRef.current.rotation.y = walkBaseRef.current.rotY; } if (recorderRef.current && recorderRef.current.state !== 'inactive') { try { recorderRef.current.stop(); } catch {} } setIsSimulating(false); setScrubberProgress(0); }
+        restoreTakeSnapshot();
+        if (recorderRef.current && recorderRef.current.state !== 'inactive') { try { recorderRef.current.stop(); } catch {} }
+        setIsSimulating(false);
+        setScrubberProgress(0);
+      }
     };
     requestAnimationFrame(step);
   };
@@ -1785,36 +1836,110 @@ export const Director3DStage: React.FC = () => {
   /** 开始/停止预演录制；返回 false = 未启动（调用方据此立即收口，避免白等一个永远不会 resolve 的 Promise） */
   const handleToggleRecording = (): boolean => {
     if (isRecording) {
-      if (recorderRef.current && recorderRef.current.state !== 'inactive') { try { recorderRef.current.stop(); } catch {} }
+      recordDriverRef.current?.stop();
+      recordDriverRef.current = null;
       if (recordTimerRef.current) { clearTimeout(recordTimerRef.current); recordTimerRef.current = null; }
+      if (recorderRef.current && recorderRef.current.state !== 'inactive') { try { recorderRef.current.stop(); } catch {} }
       setIsRecording(false);
       return true;
     }
     const canvas = pipRendererRef.current?.domElement as HTMLCanvasElement | undefined;
     if (!canvas || !showPip) { setRecordMsg('请先开启监视器（右上 Monitor）再录制'); return false; }
+    const plan = buildTakePlan();
+    if (!plan) { setRecordMsg('录制启动失败：找不到导演机位'); return false; }
     try {
       // 帧率可被 stage_export_clay.fps 覆盖（仅本次录制，用完即清）
       const fps = clayFpsOverrideRef.current && clayFpsOverrideRef.current > 0 ? clayFpsOverrideRef.current : 30;
       clayFpsOverrideRef.current = null;
-      const stream = canvas.captureStream(fps);
+      // 手动 requestFrame 模式：帧由录制驱动器按 1/fps 网格显式产出，
+      // 不再依赖全局 rAF 画布合成——窗口被遮挡时 rAF 会被浏览器节流，旧实现因此只录到 1 帧。
+      const stream0 = canvas.captureStream(0);
+      const track0 = stream0.getVideoTracks()[0] as any;
+      let stream: MediaStream;
+      let track: any;
+      if (typeof track0?.requestFrame === 'function') {
+        stream = stream0;
+        track = track0;
+      } else {
+        // 不支持 requestFrame 的浏览器：退回按 fps 自动采集（帧由我们的渲染驱动）
+        stream = canvas.captureStream(fps);
+        track = stream.getVideoTracks()[0];
+      }
+      recordTrackRef.current = track || null;
       // 优先 MP4(H.264)，再退 WebM：白模参考视频要上传给云端模型，mp4 兼容性最好
       const mime = pickRecorderMimeType() || 'video/webm';
       const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8_000_000 });
       recordChunksRef.current = [];
       rec.ondataavailable = (ev) => { if (ev.data && ev.data.size) recordChunksRef.current.push(ev.data); };
-      rec.onstop = () => { setIsRecording(false); finalizeRecording(); };
+      rec.onstop = () => {
+        setIsRecording(false);
+        recordTrackRef.current = null;
+        finalizeRecording();
+      };
       rec.start(200);
       recorderRef.current = rec;
       setIsRecording(true);
+      setIsSimulating(true); // 录制期间进度条跟随 take 进度（用户可随时停止）
       setRecordMsg(null);
       setRecordUrl(null);
       setLastRecordAssetUrl(null);
-      // 与运镜模拟同起；12s 兜底停（模拟最长 4.5s，正常由模拟结束触发 stop）
-      if (!isSimulating) handleToggleSimulation();
+
+      // —— 录制驱动器：Worker 节拍按 1/fps 网格推进时相并显式出帧 ——
+      // （主线程 rAF 在窗口被遮挡时会停摆、setTimeout 会被节流到 ~1s，都靠不住；见 recordBeat.ts）
+      const scene = sceneRef.current;
+      const pip = pipRendererRef.current;
+      const cam = virtualCameraRef.current;
+      const interval = 1000 / fps;
+      const durationMs = plan.durationSec * 1000;
+      const lastAtMs = Math.max(interval, durationMs - interval); // 末帧机位在 duration 前一帧落定，成片时长≈duration
+      const t0 = performance.now();
+      let stopped = false;
+      let stopBeat: (() => void) | null = null;
+      const drawAtWall = (elapsedMs: number) => {
+        const k = Math.min(1, elapsedMs / lastAtMs);
+        applyTakeFrame(plan, k * plan.durationSec, easeMotionProgress(k, motionEasing));
+        if (pip && scene && cam) pip.render(scene, cam);
+        try { (track as any)?.requestFrame?.(); } catch { /* 非手动模式没有 requestFrame */ }
+        setScrubberProgress(k);
+      };
+      const stopNow = () => {
+        if (stopped) return;
+        stopped = true;
+        if (stopBeat) { stopBeat(); stopBeat = null; }
+        if (recordDriverRef.current) recordDriverRef.current = null;
+        if (recorderRef.current && recorderRef.current.state !== 'inactive') { try { recorderRef.current.stop(); } catch {} }
+        setIsRecording(false);
+        setIsSimulating(false);
+        restoreTakeSnapshot();
+      };
+      const tick = () => {
+        if (stopped) return;
+        const elapsed = performance.now() - t0;
+        if (elapsed >= lastAtMs) {
+          drawAtWall(lastAtMs);
+          // 白模导出：末帧（运镜终点）在复位前抓下来
+          if (clayModeRef.current) {
+            try {
+              const cvs = pipRendererRef.current?.domElement as HTMLCanvasElement | undefined;
+              if (cvs) clayLastFrameRef.current = cvs.toDataURL('image/jpeg', 0.9);
+            } catch {}
+          }
+          // 末帧画完：等采集/编码把末帧收进录制器再 stop（避免尾部丢帧），随后收口
+          if (stopBeat) { stopBeat(); stopBeat = null; }
+          workerSleep(Math.max(120, interval * 3)).then(() => stopNow());
+          return;
+        }
+        drawAtWall(elapsed);
+      };
+      // 手动提前停止：驱动器收口（停录 + 复位机位）
+      recordDriverRef.current = { stop: () => { stopNow(); } };
+      drawAtWall(0); // 首帧（起点机位）
+      // 12s 兜底停 / 或 2×时长+8s（取大者，模拟最长 60s 的覆盖时长也照顾）
       if (recordTimerRef.current) clearTimeout(recordTimerRef.current);
       recordTimerRef.current = setTimeout(() => {
         if (recorderRef.current && recorderRef.current.state !== 'inactive') { try { recorderRef.current.stop(); } catch {} }
-      }, 12000);
+      }, Math.max(12000, durationMs * 2 + 8000));
+      stopBeat = createBeatTicker(interval, tick);
       return true;
     } catch (e: any) {
       setRecordMsg(`录制启动失败：${e?.message || e}（该浏览器可能不支持 MediaRecorder）`);
@@ -1899,9 +2024,9 @@ export const Director3DStage: React.FC = () => {
     const clayShotId = activeShot.id;
     const clayShotIndex = activeShot.shot_index;
     // MediaRecorder + WebGL 在后台标签页会被浏览器节流/暂停：录不到画面（静止帧或空文件），
-    // 白模参考视频的全部价值是按帧承载运镜，必须在窗口可见时录制。
+    // 白模参考视频的全部价值是按帧承载运镜，必须在窗口可见时录制（最小化/后台标签页会停摆）。
     if (typeof document !== 'undefined' && document.hidden) {
-      setClayMsg('白模导出需要窗口保持可见：切到后台标签页会让录制停摆，请回到本窗口后重试');
+      setClayMsg('白模导出需要窗口保持可见：请勿最小化或切到后台标签页；窗口被其他窗口挡住没关系（已改为 Worker 节拍出帧）');
       return;
     }
     setClayExporting(true);
@@ -1921,7 +2046,9 @@ export const Director3DStage: React.FC = () => {
         const h = Math.max(480, Math.round(720 / projectAspectNum));
         pip.setSize(720, h, false);
       }
-      await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+      // 等一帧让灰模材质生效（Worker 计时：窗口被遮挡时 rAF 停摆也不会卡在这里）；
+      // captureFrameDataUrl 内部会强制渲染监视器，拿到的就是灰模首帧
+      await workerSleep(60);
       clayFirstFrameRef.current = captureFrameDataUrl();
       const result = await new Promise<{ url: string; secs: number } | null>((resolve) => {
         clayExportResolveRef.current = resolve;
@@ -2094,28 +2221,31 @@ export const Director3DStage: React.FC = () => {
   //   · 片场未挂载 → App 存意图并切到本页，挂载后 consume 自动开录。
   const handleAgentClayExportRef = useRef<((detail: any) => void) | null>(null);
   handleAgentClayExportRef.current = (detail: any) => {
-    const store = useProjectStore.getState();
-    const currentProjectId = store.activeProjectId || store.project?.id;
-    if (detail?.project_id && currentProjectId && String(detail.project_id) !== String(currentProjectId)) {
-      toast.error('系统 Agent 请求导出白模，但目标项目与当前打开的项目不一致：请先切到该项目再重试');
-      return;
-    }
-    const allShots = shotsInEpisode(store.project, store.activeEpisodeId);
-    const shot = allShots.find((sh) => sh.id === detail?.shot_id)
-      || allShots.find((sh) => Number(sh.shot_index) === Number(detail?.shot_index))
-      || allShots.find((sh) => sh.id === store.activeShotId)
-      || allShots[0];
-    if (!shot) {
-      toast.error('系统 Agent 请求导出白模，但当前项目没有分镜');
-      return;
-    }
-    store.setActiveShotId(shot.id);
-    // stage_export_clay 的时长/帧率覆盖：只作用于紧随其后的这一次录制
-    if (Number(detail?.duration) > 0) clayDurationOverrideRef.current = Math.min(60, Number(detail.duration));
-    if (Number(detail?.fps) > 0) clayFpsOverrideRef.current = Math.max(10, Math.min(60, Math.round(Number(detail.fps))));
-    toast.info('系统 Agent 请求导出白模：正在切换灰模并录制连续运镜（请保持窗口可见）');
-    // 等切镜状态和 Three 场景完成同步后再调用导出，避免录到上一镜。
-    window.setTimeout(() => { void handleExportClayRef.current?.(); }, 180);
+    void (async () => {
+      const store = useProjectStore.getState();
+      const currentProjectId = store.activeProjectId || store.project?.id;
+      if (detail?.project_id && currentProjectId && String(detail.project_id) !== String(currentProjectId)) {
+        toast.error('系统 Agent 请求导出白模，但目标项目与当前打开的项目不一致：请先切到该项目再重试');
+        return;
+      }
+      // 关键一步：远控摆台（stage_control）只写服务端，浏览器内存可能整份是旧的。
+      // 录制前先以服务端为准对齐内存，否则会录到旧舞台，并把旧状态回写覆盖服务端新状态。
+      await resyncStageFromServer();
+      const shot = findClayTargetShot(detail);
+      if (!shot) {
+        toast.error('系统 Agent 请求导出白模，但当前项目没有分镜');
+        return;
+      }
+      useProjectStore.getState().setActiveShotId(shot.id);
+      // 同镜也要重灌：把服务端刚拉回的状态重新应用到组件 state 与 3D 场景（布偶 / 走位 / 机位）
+      setStageSyncRev((v) => v + 1);
+      // stage_export_clay 的时长/帧率覆盖：只作用于紧随其后的这一次录制
+      if (Number(detail?.duration) > 0) clayDurationOverrideRef.current = Math.min(60, Number(detail.duration));
+      if (Number(detail?.fps) > 0) clayFpsOverrideRef.current = Math.max(10, Math.min(60, Math.round(Number(detail.fps))));
+      toast.info('系统 Agent 请求导出白模：正在切换灰模并录制连续运镜（请保持窗口可见）');
+      // 等切镜状态和 Three 场景完成同步后再调用导出，避免录到上一镜。
+      window.setTimeout(() => { void handleExportClayRef.current?.(); }, 260);
+    })();
   };
 
   useEffect(() => {

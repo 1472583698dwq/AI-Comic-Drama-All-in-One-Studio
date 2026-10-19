@@ -64,8 +64,13 @@ interface ProjectState {
    */
   ensureActiveProject: () => Promise<'restored' | 'empty'>;
   closeProject: () => void;
+  /**
+   * 从服务端重拉 content：合并进内存但不回写（persist:false）。
+   * 用于「浏览器内存可能落后于服务端」的场景（如 Agent 远控改了舞台后要录制/导出）。
+   */
+  reloadProjectContent: () => Promise<Project | null>;
   // Actions
-  setProject: (project: Project) => void;
+  setProject: (project: Project, opts?: { persist?: boolean }) => void;
   setActiveShotId: (shotId: string | null) => void;
   setActiveTab: (tab: ActiveTab) => void;
   /** 从集看板进入某一集的工作空间 */
@@ -190,9 +195,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (content && Array.isArray(content.scenes)) {
         // 项目身份以目录 id（pid）为准：剧本导入等路径落盘的 content.id 可能是一个 UUID，
         // 直接沿用会让 activeProjectId / 自动保存 / 会话绑定全部指向一个不存在的项目
-        get().setProject({ ...(content as any), id: pid });
+        get().setProject({ ...(content as any), id: pid }, { persist: false });
       } else {
-        get().setProject(buildBlankProject(pid, meta || content));
+        get().setProject(buildBlankProject(pid, meta || content), { persist: false });
       }
       const tab = get().activeTab;
       const inWorkspace = tab === 'studio' || tab === 'director3d' || tab === 'timeline' || tab === 'onekey' || tab === 'canvas';
@@ -236,7 +241,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     });
   },
 
-  setProject: (project) => {
+  /** 服务端重拉：只读对齐（不回写），录制/远控场景在动作前调用 */
+  reloadProjectContent: async () => {
+    const pid = get().activeProjectId || get().project?.id;
+    if (!pid) return null;
+    const p = await apiService.getProject(pid);
+    const content = (p as any)?.content ?? (p as any)?.project;
+    if (content && Array.isArray(content.scenes)) {
+      get().setProject({ ...(content as any), id: pid }, { persist: false });
+    }
+    return get().project;
+  },
+
+  setProject: (project, opts) => {
     // 归一化兜底：任何缺 scenes/characters 的畸形内容都不得打崩整屏黑屏
     const rawScenes = Array.isArray((project as any)?.scenes) ? (project as any).scenes : [];
     const safe: Project = {
@@ -261,9 +278,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     } else {
       set({ project: safe, totalDuration: total, activeShotId: firstShotId, apiError: null });
     }
-    // 自动保存到后端（若有 activeProjectId）
+    // 自动保存到后端（若有 activeProjectId）。
+    // 注意：刚从服务端拉回来的内容不要再整份 PUT 回去——拉取与写入之间发生的服务端改动
+    // （如 Agent 远控 stage_patch）会被这份"看似一样"的旧内容覆盖掉。拉取路径统一传 persist:false。
     const pid = safe?.id || get().activeProjectId;
-    if (pid && safe) {
+    if (pid && safe && opts?.persist !== false) {
       persistProject(safe, pid);
     }
   },

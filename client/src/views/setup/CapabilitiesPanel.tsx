@@ -3,12 +3,13 @@ import {
   Check, AlertTriangle, Loader2, Eye, EyeOff, Cloud, HardDrive,
   CircleDot, Plug, ChevronRight, FolderOpen, FolderSearch,
   ExternalLink, History, FlaskConical, KeyRound, Landmark,
-  FileCode2, ArrowRight, LayoutGrid, ArrowLeftRight,
+  FileCode2, ArrowRight, LayoutGrid, ArrowLeftRight, Power, Trash2,
 } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { toast, confirmAsync } from '../../stores/useDialogStore';
 import { ComfyWorkflowList } from './ComfyWorkflowList';
 import { ModelPlaza } from '../../components/llm/ModelPlaza';
+import { useLlmPlazaStore } from '../../components/llm/plazaStore';
 import {
   CAPABILITIES, channelFilled, currentChannelId, channelsOf, unmatchedRoute,
   capabilityIdForKind, customChannelFrom,
@@ -83,6 +84,10 @@ export const CapabilitiesArea: React.FC<Props> = ({ tab, cfg, draft, setDraft, l
   /** 就地填 Key：源 id → 输入中的值 */
   const [keyDraft, setKeyDraft] = useState<Record<string, string>>({});
   const [keyBusy, setKeyBusy] = useState('');
+  /** 内置生成源启停状态（provider id → enabled）；自定义源的状态随 customsByCap 一起拉 */
+  const [builtinEnabled, setBuiltinEnabled] = useState<Record<string, boolean>>({});
+  /** 正在启停的通道 provider id */
+  const [chanBusy, setChanBusy] = useState('');
   const [bulk, setBulk] = useState<{ running: boolean; done: number; total: number }>({
     running: false, done: 0, total: 0,
   });
@@ -106,9 +111,19 @@ export const CapabilitiesArea: React.FC<Props> = ({ tab, cfg, draft, setDraft, l
       setCustomsReady(true);
     }
   };
-  useEffect(() => { loadCustoms(); }, []);
+  const loadBuiltinEnabled = async () => {
+    try {
+      const res = await apiService.listProviders({ include_builtin: true });
+      const m: Record<string, boolean> = {};
+      (res?.providers || []).forEach((p: any) => { if (p?.builtin) m[p.id] = p.enabled !== false; });
+      setBuiltinEnabled(m);
+    } catch {
+      // 后端不可用时保持未知：不显示停用态，也不误拦配置
+    }
+  };
+  useEffect(() => { loadCustoms(); loadBuiltinEnabled(); }, []);
   useEffect(() => {
-    const h = () => loadCustoms();
+    const h = () => { loadCustoms(); loadBuiltinEnabled(); };
     window.addEventListener('provider-list-refresh', h);
     return () => window.removeEventListener('provider-list-refresh', h);
   }, []);
@@ -120,7 +135,12 @@ export const CapabilitiesArea: React.FC<Props> = ({ tab, cfg, draft, setDraft, l
   }, [tab]);
 
   const customsOf = (c: Capability) => customsByCap[c.id] || [];
-  const channelsFor = (c: Capability) => channelsOf(c, customsOf(c));
+  const channelsFor = (c: Capability) => channelsOf(c, customsOf(c)).map((ch) => {
+    // 内置通道的 id 与 provider id 一致；未拉到状态时保持原样（不误报停用）
+    if (ch.custom) return ch;
+    const en = builtinEnabled[ch.id];
+    return en === undefined ? ch : { ...ch, disabled: en === false };
+  });
   /** 默认通道（状态统计用它：默认通道填没填才算数） */
   const defaultOf = (c: Capability): Channel | undefined => {
     const list = channelsFor(c);
@@ -134,7 +154,18 @@ export const CapabilitiesArea: React.FC<Props> = ({ tab, cfg, draft, setDraft, l
     return defaultOf(c);
   };
 
+  /** 文本大模型：唯一真源是模型广场的「默认模型」（旧直连通道仅后端兜底，不再出现在界面上） */
+  const plazaDefault = useLlmPlazaStore((s) => s.default);
+  const plazaSuppliers = useLlmPlazaStore((s) => s.suppliers);
+  const plazaLoaded = useLlmPlazaStore((s) => s.loaded);
+  const llmReady = !!(plazaDefault?.supplier_id && plazaDefault?.model);
+  useEffect(() => {
+    // 让左右导航的状态点/默认模型文案在没打开过广场时也准确（首次会自动从旧配置落种子）
+    if (!plazaLoaded) useLlmPlazaStore.getState().load();
+  }, [plazaLoaded]);
+
   const readyOf = (c: Capability) => {
+    if (c.id === 'llm') return llmReady;
     const ch = defaultOf(c);
     return !!ch && channelFilled(ch, merged);
   };
@@ -236,6 +267,74 @@ export const CapabilitiesArea: React.FC<Props> = ({ tab, cfg, draft, setDraft, l
     }
   };
 
+  /** 自定义源启停：定义 enabled + 注册/注销（内置源走软停用，后端统一口径） */
+  const toggleCustomEnabled = async (ch: Channel) => {
+    const pid = ch.providerId as string;
+    if (!pid) return;
+    try {
+      if (ch.disabled) await apiService.enableProvider(pid);
+      else await apiService.disableProvider(pid);
+      toast.success(ch.disabled
+        ? `已启用「${ch.name}」`
+        : `已停用「${ch.name}」（生成时会被守卫拦下，可随时恢复）`);
+      await loadCustoms();
+      window.dispatchEvent(new Event('provider-list-refresh'));
+    } catch (e: any) {
+      toast.error(e?.message || '操作失败');
+    }
+  };
+
+  /** 删除自定义源：不可恢复；引用它的画布节点/分镜要重新指定 */
+  const deleteCustom = async (ch: Channel) => {
+    const pid = ch.providerId as string;
+    if (!pid) return;
+    const ok = await confirmAsync({
+      title: '删除生成源',
+      isDanger: true,
+      confirmText: '确认删除',
+      cancelText: '取消',
+      message: `删除「${ch.name}」不可恢复；引用它的画布节点 / 分镜需要重新指定生成源。`,
+    });
+    if (!ok) return;
+    try {
+      await apiService.deleteProvider(pid);
+      toast.success(`已删除「${ch.name}」`);
+      await loadCustoms();
+      window.dispatchEvent(new Event('provider-list-refresh'));
+    } catch (e: any) {
+      toast.error(e?.message || '删除失败');
+    }
+  };
+
+  /** 内置源启停：软停用（守卫拦下生成，可随时恢复）。自定义源用下面的 toggleCustomEnabled */
+  const toggleBuiltinChannel = async (ch: Channel) => {
+    const pid = ch.id;
+    if (!pid || chanBusy) return;
+    if (!ch.disabled) {
+      const ok = await confirmAsync({
+        title: `停用「${ch.name}」`,
+        message: '内置源将被软停用：下拉里不再可选、生成时会被守卫拦下；随时可再启用。',
+        confirmText: '确认停用',
+        cancelText: '取消',
+      });
+      if (!ok) return;
+    }
+    setChanBusy(pid);
+    try {
+      if (ch.disabled) await apiService.enableProvider(pid);
+      else await apiService.disableProvider(pid);
+      toast.success(ch.disabled
+        ? `已启用「${ch.name}」`
+        : `已停用「${ch.name}」（生成时会被守卫拦下，可随时恢复）`);
+      await loadBuiltinEnabled();
+      window.dispatchEvent(new Event('provider-list-refresh'));
+    } catch (e: any) {
+      toast.error(e?.message || '操作失败');
+    } finally {
+      setChanBusy('');
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center text-xs text-gray-500 gap-2">
@@ -248,17 +347,22 @@ export const CapabilitiesArea: React.FC<Props> = ({ tab, cfg, draft, setDraft, l
   const query = q.trim().toLowerCase();
   const searchHits: Array<{ cap: Capability; ch: Channel }> = [];
   if (query) {
-    groupCaps.forEach((c) => channelsFor(c).forEach((ch) => {
-      const hay = [ch.name, ch.id, ...(ch.fields || []).map((f) => `${f.key} ${f.label}`)].join(' ').toLowerCase();
-      if (hay.includes(query)) searchHits.push({ cap: c, ch });
-    }));
+    groupCaps.forEach((c) => {
+      // 文本大模型已整体收进模型广场，旧直连通道不再出现在界面上，也不进搜索
+      if (c.id === 'llm') return;
+      channelsFor(c).forEach((ch) => {
+        const hay = [ch.name, ch.id, ...(ch.fields || []).map((f) => `${f.key} ${f.label}`)].join(' ').toLowerCase();
+        if (hay.includes(query)) searchHits.push({ cap: c, ch });
+      });
+    });
   }
 
   const readyCount = CAPABILITIES.filter(readyOf).length;
   const essentialMissing = CAPABILITIES.filter((c) => c.essential && !readyOf(c));
 
-  const navItem = (active: boolean, onClick: () => void, dot: ReadyState | null, label: React.ReactNode, extra?: React.ReactNode) => (
+  const navItem = (active: boolean, onClick: () => void, dot: ReadyState | null, label: React.ReactNode, extra?: React.ReactNode, key?: string) => (
     <button
+      key={key}
       onClick={onClick}
       className={`w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-[11.5px] font-medium transition-all text-left ${
         active ? 'bg-brand/15 text-[color:var(--color-text-main)] ring-1 ring-brand/30' : 'text-gray-400 hover:text-[color:var(--color-text-main)] hover:bg-surface/80'
@@ -300,6 +404,8 @@ export const CapabilitiesArea: React.FC<Props> = ({ tab, cfg, draft, setDraft, l
                   {ch.name}
                   <span className="block text-[9.5px] text-gray-500">{c.name}</span>
                 </span>,
+                undefined,
+                `${c.id}:${ch.id}`,
               ))}
             </>
           ) : (
@@ -315,7 +421,10 @@ export const CapabilitiesArea: React.FC<Props> = ({ tab, cfg, draft, setDraft, l
                 () => setCap(c.id),
                 stateOf(c),
                 c.name,
-                <span className="text-[9.5px] font-mono text-gray-500">{channelsFor(c).length}</span>,
+                <span className="text-[9.5px] font-mono text-gray-500">
+                  {c.id === 'llm' ? plazaSuppliers.length : channelsFor(c).length}
+                </span>,
+                c.id,
               ))}
             </>
           )}
@@ -343,7 +452,14 @@ export const CapabilitiesArea: React.FC<Props> = ({ tab, cfg, draft, setDraft, l
               bulk={bulk}
               onRunAll={runAllTests}
               stateOf={stateOf}
-              defaultNameOf={(c) => defaultOf(c)?.name || '—'}
+              defaultNameOf={(c) => {
+                if (c.id === 'llm') {
+                  if (!llmReady) return '未设置（去模型广场挑一个）';
+                  const sup = plazaSuppliers.find((s) => s.id === plazaDefault.supplier_id);
+                  return `${sup?.name || '供应商'} · ${plazaDefault.model}`;
+                }
+                return defaultOf(c)?.name || '—';
+              }}
               channelCountOf={(c) => channelsFor(c).length}
               onJump={(id) => setCap(id)}
             />
@@ -364,6 +480,7 @@ export const CapabilitiesArea: React.FC<Props> = ({ tab, cfg, draft, setDraft, l
                 onTest={() => { const ch = viewedOf(c); if (ch) runTest(c, ch); }}
                 moreOpen={!!more[c.id]}
                 onToggleMore={() => setMore((m) => ({ ...m, [c.id]: !m[c.id] }))}
+                llmReady={llmReady}
                 revealed={revealed}
                 onReveal={(k) => setRevealed((r) => ({ ...r, [k]: !r[k] }))}
                 customsReady={customsReady}
@@ -372,6 +489,10 @@ export const CapabilitiesArea: React.FC<Props> = ({ tab, cfg, draft, setDraft, l
                 keyBusy={keyBusy}
                 onSaveKey={saveCustomKey}
                 reloadCustoms={loadCustoms}
+                onToggleCustomEnabled={toggleCustomEnabled}
+                onDeleteCustom={deleteCustom}
+                chanBusy={chanBusy}
+                onToggleBuiltinChannel={toggleBuiltinChannel}
               />
             );
           })()}
@@ -521,6 +642,16 @@ const CapabilityDetail: React.FC<{
   keyBusy: string;
   onSaveKey: (ch: Channel) => Promise<void>;
   reloadCustoms: () => Promise<void>;
+  /** 自定义源：停用/启用 */
+  onToggleCustomEnabled: (ch: Channel) => Promise<void>;
+  /** 自定义源：删除 */
+  onDeleteCustom: (ch: Channel) => Promise<void>;
+  /** 内置源：正在启停的 provider id */
+  chanBusy: string;
+  /** 内置源：停用/启用（软停用，可随时恢复） */
+  onToggleBuiltinChannel: (ch: Channel) => Promise<void>;
+  /** 文本大模型：模型广场已设默认模型（此时直连通道只是兼容回退） */
+  llmReady?: boolean;
 }> = (p) => {
   const { cap, merged } = p;
   const chs = p.channelsFor(cap);
@@ -557,7 +688,7 @@ const CapabilityDetail: React.FC<{
               ? <span className="text-[10.5px] text-gray-400 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" />测试中</span>
               : t.ok === true
                 ? <span className="text-[10.5px] text-emerald-400 flex items-center gap-1"><Check className="w-3 h-3" />已测通</span>
-                : defCh && channelFilled(defCh, merged)
+                : (cap.id === 'llm' ? p.llmReady : !!defCh && channelFilled(defCh, merged))
                   ? <span className="text-[10.5px] text-amber-300 flex items-center gap-1"><CircleDot className="w-3 h-3" />已填，待测试</span>
                   : <span className="text-[10.5px] text-gray-500 flex items-center gap-1"><CircleDot className="w-3 h-3" />未配置</span>}
           </span>
@@ -569,12 +700,14 @@ const CapabilityDetail: React.FC<{
       </div>
 
       <div className="px-5 py-4">
-        {cap.id === 'llm' && <ModelPlaza />}
-        <div className={`${cap.id === 'llm' ? 'mt-4' : ''} grid grid-cols-1 ${cap.id === 'llm' ? '' : 'lg:grid-cols-[224px_1fr]'} gap-4 items-start`}>
+        {cap.id === 'llm' ? (
+          <ModelPlaza />
+        ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-[224px_1fr] gap-4 items-start">
           {/* 通道列表。文本大模型改成一排切换：模型选择在广场，这里只留拆剧本用的地址和 Key */}
-          <div className={cap.id === 'llm' ? 'flex flex-wrap items-center gap-1.5' : 'space-y-1.5'}>
-            <div className={`text-[10.5px] font-bold uppercase tracking-wider text-gray-500 ${cap.id === 'llm' ? 'w-full' : 'px-0.5'}`}>
-              {cap.id === 'llm' ? '拆剧本默认通道' : `通道（${chs.length}）`}
+          <div className="space-y-1.5">
+            <div className="text-[10.5px] font-bold uppercase tracking-wider text-gray-500 px-0.5">
+              {`通道（${chs.length}）`}
             </div>
             {chs.map((c) => {
               const active = c.id === ch.id;
@@ -585,7 +718,7 @@ const CapabilityDetail: React.FC<{
                   key={c.id}
                   onClick={() => p.onView(c.id)}
                   title={c.legacy ? `${c.summary}\n旧版通道：${c.legacy}` : c.summary}
-                  className={`${cap.id === 'llm' ? 'px-3 py-1.5' : 'w-full px-3 py-2'} text-left rounded-xl border transition-all ${
+                  className={`w-full px-3 py-2 text-left rounded-xl border transition-all ${
                     active
                       ? 'bg-brand/15 border-brand/50 ring-1 ring-brand/30'
                       : 'bg-surface/80 border-white/70 dark:border-white/12 hover:border-brand/40'
@@ -600,7 +733,7 @@ const CapabilityDetail: React.FC<{
                     <span className={`text-[11.5px] font-medium truncate flex-1 ${active ? 'text-[color:var(--color-text-main)]' : 'text-gray-300'}`}>{c.name}</span>
                     {done && <Check className="w-3 h-3 shrink-0 text-emerald-400" />}
                   </div>
-                  <div className={`flex items-center gap-1 flex-wrap ${cap.id === 'llm' ? 'hidden' : 'mt-1'}`}>
+                  <div className="flex items-center gap-1 flex-wrap mt-1">
                     <span className={`text-[9px] px-1 rounded ${done ? 'bg-emerald-500/15 text-emerald-300' : 'bg-surface-hover/80 text-gray-500'}`}>
                       {done ? '已填' : '未填'}
                     </span>
@@ -613,7 +746,7 @@ const CapabilityDetail: React.FC<{
                       </span>
                     )}
                   </div>
-                  <div className={`${cap.id === 'llm' ? 'hidden' : 'mt-1.5'} h-[3px] rounded-full bg-surface-hover/80 overflow-hidden`}>
+                  <div className="mt-1.5 h-[3px] rounded-full bg-surface-hover/80 overflow-hidden">
                     <div className="h-full bg-emerald-400" style={{ width: `${pctOf(c)}%` }} />
                   </div>
                 </button>
@@ -629,7 +762,25 @@ const CapabilityDetail: React.FC<{
                 {ch.where === 'local' ? '本地' : '云端'}
               </span>
               {ch.custom && <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 font-bold">自定义源</span>}
-              <span className="ml-auto">
+              {ch.disabled && <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 font-bold">已停用</span>}
+              <span className="ml-auto flex items-center gap-1.5">
+                {!ch.custom && (
+                  <button
+                    onClick={() => p.onToggleBuiltinChannel(ch)}
+                    disabled={p.chanBusy === ch.id}
+                    title={ch.disabled
+                      ? '启用这个源（解除软停用，生成立即可用）'
+                      : '停用这个源（下拉里不再可选，生成时被守卫拦下；定义保留可随时恢复）'}
+                    className={`px-2 py-0.5 rounded-lg border text-[10.5px] flex items-center gap-1 disabled:opacity-40 ${
+                      ch.disabled
+                        ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300 hover:border-emerald-400'
+                        : 'bg-surface/80 border-white/70 dark:border-white/12 text-gray-300 hover:text-white hover:border-brand/50'
+                    }`}
+                  >
+                    {p.chanBusy === ch.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Power className="w-3 h-3" />}
+                    {ch.disabled ? '启用这个源' : '停用这个源'}
+                  </button>
+                )}
                 {isDefault
                   ? <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-brand text-white font-bold">✓ 当前默认通道</span>
                   : (
@@ -642,11 +793,7 @@ const CapabilityDetail: React.FC<{
                   )}
               </span>
             </div>
-            <p className="text-[11.5px] text-gray-400 leading-relaxed mt-1.5">
-              {cap.id === 'llm'
-                ? '对话里换模型用上面的广场，按供应商分开。这里只填拆剧本、润色时走的地址和 Key。'
-                : ch.summary}
-            </p>
+            <p className="text-[11.5px] text-gray-400 leading-relaxed mt-1.5">{ch.summary}</p>
 
             {ch.docUrl && (
               <a
@@ -680,8 +827,8 @@ const CapabilityDetail: React.FC<{
               <div className="mt-2.5 flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2">
                 <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
                 <div className="text-[11px] text-amber-200 leading-relaxed">
-                  这个生成源在「扩展」页被停用了。即使选成默认通道，生成时也会被守卫拦下
-                  ——先去「扩展」页把它启用。
+                  这个生成源当前被停用：即使选成默认通道，生成时也会被守卫拦下。
+                  {ch.custom ? '用下面的「启用这个源」即可恢复。' : '点右上「启用这个源」即可恢复。'}
                 </div>
               </div>
             )}
@@ -741,7 +888,7 @@ const CapabilityDetail: React.FC<{
               />
             )}
 
-            {/* 自定义源：Key 不走 .env，就地写 CUSTOM_PROVIDER_<id> */}
+            {/* 自定义源：Key 不走 .env，就地写 CUSTOM_PROVIDER_<id>；启停/删除也在这里 */} 
             {ch.custom && ch.providerId && (
               <CustomSourceBox
                 channel={ch}
@@ -755,6 +902,8 @@ const CapabilityDetail: React.FC<{
                 onMigrated={async () => {
                   await p.reloadCustoms();
                 }}
+                onToggleEnabled={() => p.onToggleCustomEnabled(ch)}
+                onDelete={() => p.onDeleteCustom(ch)}
               />
             )}
 
@@ -786,6 +935,7 @@ const CapabilityDetail: React.FC<{
             </div>
           </div>
         </div>
+        )}
       </div>
 
       {cap.id !== 'llm' && (
@@ -811,7 +961,11 @@ const CustomSourceBox: React.FC<{
   onChange: (v: string) => void;
   onSave: () => void;
   onMigrated: () => void;
-}> = ({ channel, value, busy, onChange, onSave, onMigrated }) => {
+  /** 停用/启用这个源（自定义源原生生命周期 / 内置源软停用） */
+  onToggleEnabled: () => void;
+  /** 删除这个源（不可恢复） */
+  onDelete: () => void;
+}> = ({ channel, value, busy, onChange, onSave, onMigrated, onToggleEnabled, onDelete }) => {
   const pid = channel.providerId as string;
   const [eff, setEff] = useState<any>(null);
   const [revealed, setRevealed] = useState(false);
@@ -907,6 +1061,31 @@ const CustomSourceBox: React.FC<{
         存到 <code className="font-mono">CUSTOM_PROVIDER_{channel.providerId}</code>，源码里用
         <code className="font-mono"> api.get("api_key")</code> / <code className="font-mono">ctx.get("api_key")</code> 取。
         {eff?.stored_key ? <> 当前配置存储里已有值：<code className="font-mono">{revealed ? eff.stored_key : eff.stored_masked}</code>。</> : null}
+      </div>
+
+      {/* ── 启停 / 删除：生成源生命周期就地进行 ── */}
+      <div className="mt-2.5 flex items-center gap-1.5 flex-wrap border-t border-white/60 dark:border-white/12 pt-2.5">
+        <button
+          type="button" onClick={onToggleEnabled} disabled={busy}
+          title={channel.disabled ? '启用这个源（重新注册，进下拉与执行链）' : '停用这个源（不进下拉/执行链，定义保留可随时恢复）'}
+          className={`px-2.5 py-1 rounded-lg border text-[11px] flex items-center gap-1 disabled:opacity-40 ${
+            channel.disabled
+              ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300 hover:border-emerald-400'
+              : 'bg-surface/80 border-white/70 dark:border-white/12 text-gray-300 hover:border-brand'
+          }`}
+        >
+          <Power className="w-3 h-3" />{channel.disabled ? '启用这个源' : '停用这个源'}
+        </button>
+        <button
+          type="button" onClick={onDelete} disabled={busy}
+          title="删除这个生成源（不可恢复）"
+          className="px-2.5 py-1 rounded-lg border border-red-500/30 bg-red-500/10 text-red-300 text-[11px] flex items-center gap-1 hover:text-white disabled:opacity-40"
+        >
+          <Trash2 className="w-3 h-3" />删除这个源
+        </button>
+        <span className="text-[10px] text-gray-600">
+          {channel.disabled ? '当前已停用：生成时会被守卫拦下' : '停用后不进下拉与执行链；删除不可恢复'}
+        </span>
       </div>
 
       {/* ── 隐式配置：代码里写死的那一侧（只列 接口地址 + API Key） ── */}

@@ -335,7 +335,7 @@ export const ExtensionsPanel: React.FC = () => {
           {kind && <div className="mt-2 text-[11px] text-gray-500 leading-relaxed">{KIND_META[kind].desc}</div>}
           {!showBuiltin && hiddenBuiltin > 0 && (
             <div className="mt-2 text-[11px] text-gray-500 leading-relaxed">
-              已隐藏 {hiddenBuiltin} 个程序自带的内置项（删不掉，唯一要配的 Key 在「能力配置」页填）。点「内置」可展开。
+              已隐藏 {hiddenBuiltin} 个程序自带的内置项（不可删除，但可以停用/启用；生成源的 Key 在「核心能力」页填）。点「内置」可展开。
             </div>
           )}
         </div>
@@ -403,13 +403,14 @@ export const ExtensionsPanel: React.FC = () => {
                         <Act onClick={async () => { setBusy(e.id); try { await apiService.reloadPlugin(e.local_id); toast.success('已热重载'); await load(); } catch (err: any) { toast.error(err?.message || '重载失败'); } finally { setBusy(null); } }}
                           disabled={busy === e.id} icon={RefreshCw} label="热重载" />
                       )}
-                      {isBuiltin ? (
+                      {isBuiltin && e.kind !== 'provider' ? (
                         <span className="text-[10.5px] text-gray-600 px-1">内置常驻，不可停用/删除</span>
                       ) : (
                         <>
                           <Act onClick={() => toggleExt(e)} disabled={busy === e.id}
-                            icon={Power} label={e.status === 'enabled' ? '停用' : '启用'} />
-                          {DELETABLE_KINDS.has(e.kind) && (
+                            icon={Power} label={e.status === 'enabled' || e.status === 'builtin' ? '停用' : '启用'}
+                            title={isBuiltin ? '内置生成源：软停用（守卫拦下生成，可随时恢复）；不可删除' : '停用后不进下拉与执行链；定义保留'} />
+                          {!isBuiltin && DELETABLE_KINDS.has(e.kind) && (
                             <Act onClick={() => removeExt(e)} disabled={busy === e.id} icon={Trash2} label="删除" accent="red" />
                           )}
                         </>
@@ -510,15 +511,15 @@ const EntryCard: React.FC<{ icon: any; iconCls: string; title: string; desc: str
 
 const Act: React.FC<{
   onClick: () => void; icon: any; label: string;
-  disabled?: boolean; accent?: 'red' | 'brand'; spin?: boolean;
-}> = ({ onClick, icon: Icon, label, disabled, accent, spin }) => {
+  disabled?: boolean; accent?: 'red' | 'brand'; spin?: boolean; title?: string;
+}> = ({ onClick, icon: Icon, label, disabled, accent, spin, title }) => {
   const cls = accent === 'red'
     ? 'bg-red-500/10 border-red-500/30 text-red-300 hover:text-white'
     : accent === 'brand'
       ? 'bg-brand/20 border-brand/50 text-brand-light'
       : 'bg-surface/80 border-white/70 dark:border-white/12 text-gray-200 hover:border-brand';
   return (
-    <button onClick={onClick} disabled={disabled}
+    <button onClick={onClick} disabled={disabled} title={title}
       className={`px-2.5 py-1 rounded-lg border text-[11px] flex items-center gap-1 disabled:opacity-40 transition-colors ${cls}`}>
       <Icon className={`w-3 h-3 ${spin ? 'animate-spin' : ''}`} />{label}
     </button>

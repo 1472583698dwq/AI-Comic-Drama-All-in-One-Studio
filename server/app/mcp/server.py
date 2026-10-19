@@ -9,9 +9,12 @@ import asyncio
 import time
 from typing import Dict, Any, List, Optional, Callable
 
+from app.core.logging_config import get_logger
 from app.models.schemas import MCPToolDefinition, MCPToolCallResponse, Project
 from app.pipelines.script_agent import script_agent
 from app.pipelines.jianyin_exporter import jianyin_exporter
+
+logger = get_logger("mcp.server")
 
 # Open-Source Integration: fastmcp
 try:
@@ -21,6 +24,44 @@ try:
 except ImportError:
     HAS_FASTMCP = False
     mcp_app = None
+
+
+async def finalize_video_async_result(res: Any, provider_id: str, project_context: Any,
+                                      arguments: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
+    """统一异步任务抽象（TaskCenter）：提交即返 task_id 的视频源，登记进任务中心再返回。
+
+    此前 generate_video 具名工具拿到 task_id 直接返回、不登记，task_wait/task_status 会报
+    「任务不存在」，云端任务成孤儿。行为对齐 provider_* 动态工具路径：
+    - 默认（wait 不为 False）：登记后阻塞到成片/失败/超时（复用 TaskCenter 全局唯一轮询）；
+    - wait=False：登记后立即返回 SUBMITTED，让调用方用 task_wait / task_status 续查。
+    register 幂等（同 task_id 只记一次），canvas/onekey 等已自行登记的路径不受影响。
+    """
+    if getattr(res, "video_url", "") or not getattr(res, "task_id", ""):
+        return result
+    from app.providers.tasks import task_center
+    _pid_ctx = str((project_context or {}).get("id") or "") if isinstance(project_context, dict) else ""
+    task_center.register(
+        str(res.task_id), str(provider_id or getattr(res, "provider", "") or ""), "video",
+        request={"mode": str(arguments.get("mode") or "")},
+        project_id=_pid_ctx,
+    )
+    if arguments.get("wait") is False:
+        result["status"] = "SUBMITTED"
+        result["note"] = "任务已提交，可用 task_wait / task_status 查询进度"
+    else:
+        rec = await task_center.wait(str(res.task_id))
+        result["status"] = rec.status
+        if rec.status == "SUCCESS" and rec.video_url:
+            result["video_url"] = rec.video_url
+            result["local_path"] = rec.local_path or result.get("local_path")
+        elif rec.status == "FAILED":
+            raise RuntimeError(rec.error or "视频任务失败")
+        else:
+            result["note"] = (
+                f"视频仍在生成（{rec.status}，已等待 {int(rec.age_s)}s），"
+                f"可稍后用 task_wait 继续等待或 task_status 查询"
+            )
+    return result
 
 
 # ========== A档可信模式：文件编辑 + 命令执行共用闸门与沙盒围栏 ==========
@@ -494,13 +535,14 @@ class MCPServerRegistry:
             return {"providers": reg.list_providers()}
 
         @mcp_app.tool
-        async def generate_video(prompt: str, mode: str = "i2v", first_frame_url: str = "", reference_images: list = None, reference_videos: list = None, duration: int = 5, provider: str = "") -> dict:
+        async def generate_video(prompt: str, mode: str = "i2v", first_frame_url: str = "", reference_images: list = None, reference_videos: list = None, duration: int = 5, provider: str = "", wait: bool = True) -> dict:
             """通用视频生成（图生视频/参考生视频/文生视频）"""
             from app.providers.video.base import VideoGenerateRequest
             reg = _lazy_video_registry()
             req = VideoGenerateRequest(prompt=prompt, mode=mode, first_frame_url=first_frame_url or None, reference_images=reference_images, reference_videos=reference_videos, duration=duration, provider=provider or None)
             res = await reg.generate(req, provider_id=provider or None)
-            return {"video_url": res.video_url, "duration": res.duration, "provider": res.provider, "engine": res.engine, "task_id": res.task_id}
+            result = {"video_url": res.video_url, "duration": res.duration, "provider": res.provider, "engine": res.engine, "task_id": res.task_id}
+            return await finalize_video_async_result(res, provider or res.provider or "", None, {"mode": mode, "wait": wait}, result)
 
         @mcp_app.tool
         async def list_video_providers() -> dict:
@@ -528,10 +570,15 @@ class MCPServerRegistry:
             return asset.model_dump()
 
         @mcp_app.tool
-        async def create_asset(name: str, category: str = "character", visual_prompt: str = "", description: str = "", project_id: str = "", scope: str = "project", tags: list = None) -> dict:
-            """创建素材（默认归属当前项目；无项目上下文时明确落为全局素材）"""
+        async def create_asset(name: str, category: str = "character", visual_prompt: str = "", description: str = "", project_id: str = "", scope: str = "project", tags: list = None, file_url: str = "", thumb_url: str = "") -> dict:
+            """创建素材（默认归属当前项目；无项目上下文时明确落为全局素材；传 file_url 可一步挂图）"""
             mgr = _lazy_asset_manager()
-            asset = mgr.create_asset({"name": name, "category": category, "visual_prompt": visual_prompt, "description": description, "project_id": project_id or None, "scope": scope or "project", "tags": tags or []})
+            payload = {"name": name, "category": category, "visual_prompt": visual_prompt, "description": description, "project_id": project_id or None, "scope": scope or "project", "tags": tags or []}
+            if file_url:
+                payload["file_url"] = file_url
+            if thumb_url:
+                payload["thumb_url"] = thumb_url
+            asset = mgr.create_asset(payload)
             return asset.model_dump()
 
         @mcp_app.tool
@@ -833,7 +880,8 @@ class MCPServerRegistry:
                     "reference_images": {"type": "array", "items": {"type": "string"}, "description": "参考图 URL 列表 (r2v 模式)"},
                     "reference_videos": {"type": "array", "items": {"type": "string"}, "description": "参考视频 URL 列表（白模预演/运动参考；不填则自动使用当前镜头的 previz_video_url）"},
                     "duration": {"type": "integer", "default": 5, "description": "视频时长秒数"},
-                    "provider": {"type": "string", "enum": _video_ids, "description": "指定视频源，不填则使用系统默认 VIDEO_PROVIDER"}
+                    "provider": {"type": "string", "enum": _video_ids, "description": "指定视频源，不填则使用系统默认 VIDEO_PROVIDER"},
+                    "wait": {"type": "boolean", "default": True, "description": "异步源是否阻塞等到成片（默认 true）；false=提交即返回 task_id，用 task_wait/task_status 续查"}
                 },
                 "required": ["prompt"]
             }
@@ -934,6 +982,8 @@ class MCPServerRegistry:
                     "category": {"type": "string", "enum": ["character", "scene", "prop", "background", "effect", "ui", "other"], "default": "character"},
                     "visual_prompt": {"type": "string", "description": "视觉提示词，用于一致性生成"},
                     "description": {"type": "string", "description": "描述"},
+                    "file_url": {"type": "string", "description": "已有图片/媒体 URL（如 /storage/generated/xxx.png 或 http 直链）；生成完成后可一步挂图入库"},
+                    "thumb_url": {"type": "string", "description": "缩略图 URL（可选，不传则与 file_url 相同）"},
                     "tags": {"type": "array", "items": {"type": "string"}, "description": "标签列表"},
                     "project_id": {"type": "string", "description": "归属项目 id（不传则用当前项目上下文）"},
                     "scope": {"type": "string", "enum": ["project", "global"], "default": "project", "description": "隔离域：project=项目私有 / global=全局"},
@@ -1662,6 +1712,17 @@ class MCPServerRegistry:
                 )
         except Exception:
             pass
+        # 未声明的参数会被各工具分支静默忽略（历史陷阱：create_asset 曾吞掉 file_url，
+        # 调用方以为挂图成功）。不改行为，只落一条警告日志，便于发现「传了但没生效」。
+        try:
+            _schema_props = ((self.tools[tool_name].input_schema or {}).get("properties") or {})
+            if _schema_props:
+                _unknown = [k for k in (arguments or {}) if k not in _schema_props and not str(k).startswith("_")]
+                if _unknown:
+                    logger.warning("MCP 工具 %s 收到未声明的参数（已忽略）: %s", tool_name,
+                                   ", ".join(map(str, _unknown)))
+        except Exception:
+            pass
         try:
             result = None
             # Agent检索：关键词取工具子集，防provider全量爆context（Anthropic Code Mode同思路）
@@ -2026,6 +2087,9 @@ class MCPServerRegistry:
                     "elapsed_ms": vid_res.elapsed_ms,
                     "task_id": vid_res.task_id,
                 }
+                result = await finalize_video_async_result(
+                    vid_res, provider or vid_res.provider or "", project_context, arguments, result
+                )
 
             elif tool_name == "list_video_providers":
                 reg = _lazy_video_registry()
@@ -2082,7 +2146,7 @@ class MCPServerRegistry:
                 _pid = arguments.get("project_id") or ""
                 if not _pid and isinstance(project_context, dict):
                     _pid = str(project_context.get("id") or project_context.get("project_id") or "")
-                asset = mgr.create_asset({
+                _asset_payload = {
                     "name": arguments.get("name", "未命名素材"),
                     "category": arguments.get("category", "character"),
                     "visual_prompt": arguments.get("visual_prompt", ""),
@@ -2090,7 +2154,13 @@ class MCPServerRegistry:
                     "tags": arguments.get("tags", []),
                     "project_id": _pid or None,
                     "scope": arguments.get("scope") or ("project" if _pid else "global"),
-                })
+                }
+                # 生成后挂图：file_url/thumb_url 直通 manager（此前被映射表丢弃，只留档案没有图）
+                if arguments.get("file_url"):
+                    _asset_payload["file_url"] = arguments["file_url"]
+                if arguments.get("thumb_url"):
+                    _asset_payload["thumb_url"] = arguments["thumb_url"]
+                asset = mgr.create_asset(_asset_payload)
                 result = asset.model_dump()
 
             elif tool_name == "publish_asset":

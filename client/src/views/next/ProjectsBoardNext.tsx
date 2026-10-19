@@ -1,11 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import {
   FolderKanban, Plus, Upload, Search, Trash2, Copy, ExternalLink,
-  Sparkles, Clock, Film, Users, Zap,
+  Sparkles, Clock, Film, Users,
 } from 'lucide-react';
 import { useProjectListStore } from '../../stores/useProjectListStore';
 import { useProjectStore } from '../../stores/useProjectStore';
-import { usePageStore } from '../../stores/usePageStore';
 import { apiService } from '../../services/api';
 import { confirmAsync, toast } from '../../stores/useDialogStore';
 import { useEscapeClose } from '../../hooks/useEscapeClose';
@@ -16,7 +15,7 @@ import { Ambience, CTA_GRADIENT, GLASS_SOFT, PILL, T_MAIN, T_MUTED, T_SEC } from
  *
  * 与保底版（`views/ProjectDashboard.tsx`）的关系（设计 §2.4.1 / §9.2）：
  *   · **能力零变化**：数据与动作全部走同一批 store（`useProjectListStore` /
- *     `useProjectStore` / `usePageStore`）+ 同一个 `apiService`；后端契约、页开关、
+ *     `useProjectStore`）+ 同一个 `apiService`；后端契约、页开关、
  *     接口准入一概不动 —— 这正是「切版本不改能力」的可验证点；
  *   · **表现层重排**：页头（身份 + 计数 + 主操作）／筛选条（玻璃卡）／内容区分段，
  *     卡片抽成 `ProjectCard`，加载与空态统一；配色一律走设计套件
@@ -80,12 +79,6 @@ const ProjectCard: React.FC<{ p: any; onOpen: (id: string) => void; onCopy: (id:
 export const ProjectsBoardNext: React.FC = () => {
   const { projects, fetchProjects, createBlank, importProjectFile, openProject, deleteProject, duplicateProject, isLoading } = useProjectListStore();
   const { setProject } = useProjectStore();
-  const pagesLoaded = usePageStore((s) => s.loaded);
-  const studioEnabled = usePageStore((s) => s.values?.studio === true);
-  const onekeyEnabled = usePageStore((s) => s.values?.onekey === true);
-  const oneKeyDepsHint = pagesLoaded && !studioEnabled && !onekeyEnabled
-    ? '一键成片依赖「分镜台」或「成片工作室」页：两页当前都关闭，调用会返回 404。请先在 设置 → 功能开关 打开'
-    : undefined;
 
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('all');
@@ -221,10 +214,6 @@ export const ProjectsBoardNext: React.FC = () => {
               <Upload className="w-3.5 h-3.5" /> 导入
               <input type="file" accept=".json,.zip" className="hidden" onChange={handleImport} />
             </label>
-            <button onClick={() => useProjectStore.getState().setActiveTab('onekey')} title={oneKeyDepsHint}
-              className="px-4 py-2 rounded-full bg-surface border border-border text-xs font-bold text-amber-400 hover:border-amber-500/50 flex items-center gap-1.5">
-              <Zap className="w-3.5 h-3.5" /> 一键成片
-            </button>
             <button onClick={() => setShowCreate(true)} className={`${CTA_GRADIENT} px-4 py-2 text-xs`}>
               <Plus className="w-3.5 h-3.5" /> 新建项目
             </button>

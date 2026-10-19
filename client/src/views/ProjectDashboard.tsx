@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { FolderKanban, Plus, Upload, Search, Trash2, Copy, Archive, ExternalLink, Sparkles, Clock, Film, Users, Filter, Zap } from 'lucide-react';
+import { FolderKanban, Plus, Upload, Search, Trash2, Copy, ExternalLink, Sparkles, Clock, Film, Users } from 'lucide-react';
 import { useProjectListStore } from '../stores/useProjectListStore';
 import { useProjectStore } from '../stores/useProjectStore';
-import { usePageStore } from '../stores/usePageStore';
 import { apiService } from '../services/api';
 import { confirmAsync, toast } from '../stores/useDialogStore';
 import { useEscapeClose } from '../hooks/useEscapeClose';
@@ -17,13 +16,6 @@ const STYLE_TEMPLATES = [
 export const ProjectDashboard: React.FC = () => {
   const { projects, fetchProjects, createBlank, importProjectFile, openProject, deleteProject, duplicateProject, isLoading } = useProjectListStore();
   const { setProject } = useProjectStore();
-  // 一键成片已页面化（host=onekey）：这里只负责跳页；页开关未加载完不提示，避免误报。
-  const pagesLoaded = usePageStore((s) => s.loaded);
-  const studioEnabled = usePageStore((s) => s.values?.studio === true);
-  const onekeyEnabled = usePageStore((s) => s.values?.onekey === true);
-  const oneKeyDepsHint = pagesLoaded && !studioEnabled && !onekeyEnabled
-    ? '一键成片依赖「分镜台」或「成片工作室」页：两页当前都关闭，调用会返回 404。请先在 设置 → 功能开关 打开'
-    : undefined;
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('all');
   const [sort, setSort] = useState('updated_at');
@@ -162,7 +154,6 @@ export const ProjectDashboard: React.FC = () => {
           <label className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface border border-border text-xs font-medium text-[color:var(--color-text-main)] hover:border-border-active cursor-pointer">
             <Upload className="w-3.5 h-3.5"/> 导入 <input type="file" accept=".json,.zip" className="hidden" onChange={handleImport} />
           </label>
-          <button onClick={()=>useProjectStore.getState().setActiveTab('onekey')} title={oneKeyDepsHint} className="px-4 py-1.5 rounded-full bg-gradient-to-r from-amber-500 to-brand text-white text-xs font-bold shadow-md flex items-center gap-1.5"><Zap className="w-3.5 h-3.5"/> 一键成片</button>
           <button onClick={()=>setShowCreate(true)} className="px-4 py-1.5 rounded-full bg-brand text-white text-xs font-bold shadow-md shadow-brand/20 hover:bg-brand-light flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/> 新建项目</button>
         </div>
       </div>

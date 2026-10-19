@@ -103,6 +103,34 @@ class TestProviderVerification(unittest.TestCase):
         self.assertEqual(res.status, "success")
         self.assertTrue((res.result or {}).get("verified"))
 
+    def test_compile_check_accepts_common_builtins(self):
+        """type/len/str 等常用内置不再被"未定义的全局名"体检误伤（含类定义）。"""
+        from app.providers.generic.code_provider import compile_check_code
+        code = (
+            "async def generate(ctx, api):\n"
+            "    class Helper:\n"
+            "        name = 'helper'\n"
+            "    try:\n"
+            "        raise ValueError('x')\n"
+            "    except ValueError as e:\n"
+            "        return {'kind': type(e).__name__, 'n': len([1, 2]), 'cls': Helper.name}\n"
+        )
+        res = compile_check_code("python", code)
+        self.assertTrue(res.get("ok"), res.get("error"))
+
+    def test_sandbox_runtime_exposes_type_builtin(self):
+        """体检放行的内置在真实执行环境同样可用（体检环境=运行环境）。"""
+        from app.providers.generic.code_provider import _execute_python_code
+        code = (
+            "async def generate(ctx, api):\n"
+            "    try:\n"
+            "        raise ValueError('x')\n"
+            "    except ValueError as e:\n"
+            "        return {'kind': type(e).__name__}\n"
+        )
+        out = asyncio.run(_execute_python_code(code, "generate", {}))
+        self.assertEqual(out.get("kind"), "ValueError")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -9,12 +9,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Hash, Folder, ListFilter, Archive, ArchiveX, Trash2, Check, ChevronDown, ChevronRight, Check as CheckIcon,
-  Maximize2, Minimize2, Plus,
+  Maximize2, Minimize2, Plus, MessageCirclePlus,
 } from 'lucide-react';
 import { useChatHistoryStore, type ChatHistoryEntry } from '../../stores/useChatHistoryStore';
 import { useProjectStore } from '../../stores/useProjectStore';
+import { useAgentStore } from '../agent/agentStore';
 import { toast } from '../../stores/useDialogStore';
 import { NewProjectModal } from '../project/NewProjectModal';
+import { startNewTaskInProject } from '../../utils/newTaskFlow';
 
 const MAIN = '[color:var(--color-text-main)]';
 
@@ -50,6 +52,8 @@ export const ChatHistory: React.FC<{
   /** 收起全部：项目分组整列隐藏，只留一行「项目」可下拉展开 */
   const [projectsFolded, setProjectsFolded] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  /** 新建弹窗的用途：项目视图「+」建项目；会话空态「新建任务」建完直接进对话 */
+  const [createIntent, setCreateIntent] = useState<'project' | 'task'>('project');
   const filterRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { void refresh(); }, [refresh]);
@@ -111,6 +115,14 @@ export const ChatHistory: React.FC<{
   const doRemove = async (e: ChatHistoryEntry) => {
     await removeSession(e.projectId, e.session.id);
     setConfirmActionId(null);
+  };
+
+  /** 空态「新建任务」：有项目直接进对话；无项目先弹「名称+风格模板」引导（与侧栏顶部按钮同流程） */
+  const handleStartTask = () => {
+    if (!startNewTaskInProject()) {
+      setCreateIntent('task');
+      setCreateOpen(true);
+    }
   };
 
   const actionBtn = 'p-1 rounded-md hover:bg-surface-tertiary [color:var(--color-text-main)] shrink-0';
@@ -271,8 +283,18 @@ export const ChatHistory: React.FC<{
         )}
 
         {!loading && entries.length === 0 && (
-          <div className={`px-2.5 py-4 text-[11px] ${MAIN} opacity-60 leading-5`}>
-            还没有会话。点上方「新建任务」开始第一段对话。
+          <div className={`px-2.5 py-3 ${MAIN}`}>
+            <div className="text-[11px] opacity-60 leading-5">还没有会话</div>
+            <button
+              type="button"
+              onClick={handleStartTask}
+              className="mt-2 w-full h-7 rounded-lg bg-gradient-to-r from-brand to-brand-blue text-white text-[11px] font-bold inline-flex items-center justify-center gap-1.5 hover:opacity-95 active:scale-[0.99] transition-all"
+            >
+              <MessageCirclePlus className="w-3.5 h-3.5" />新建任务
+            </button>
+            <div className="mt-1.5 text-[10px] opacity-50 leading-4">
+              无项目时会先引导起个项目名、挑风格模板，创建后直接开始 AI 对话。
+            </div>
           </div>
         )}
 
@@ -309,7 +331,7 @@ export const ChatHistory: React.FC<{
               <button
                 type="button"
                 title="新建项目"
-                onClick={() => setCreateOpen(true)}
+                onClick={() => { setCreateIntent('project'); setCreateOpen(true); }}
                 className="p-1 rounded-md hover:bg-surface-hover [color:var(--color-text-main)] shrink-0"
               >
                 <Plus className="w-3.5 h-3.5" />
@@ -346,11 +368,21 @@ export const ChatHistory: React.FC<{
         <NewProjectModal
           open={createOpen}
           onClose={() => setCreateOpen(false)}
+          hint={createIntent === 'task'
+            ? '起个项目名、挑个风格模板，创建后直接开始 AI 对话。'
+            : undefined}
           onCreated={async (meta) => {
             setCreateOpen(false);
             await useProjectStore.getState().loadActiveProject(meta.id);
-            toast.success(`已切换到「${meta.title}」`);
-            void refresh();
+            if (createIntent === 'task') {
+              // 与侧栏顶部「新建任务」同语义：建完项目直接进对话页
+              useProjectStore.getState().setActiveTab('agent');
+              useAgentStore.getState().bindProject(meta.id);
+              void refresh();
+            } else {
+              toast.success(`已切换到「${meta.title}」`);
+              void refresh();
+            }
           }}
         />
       </div>

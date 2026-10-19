@@ -168,7 +168,8 @@ interface AgentStoreState {
   /** 本会话始终自动允许的工具（行内审批"始终允许"持久化于此，IDE 式免打扰） */
   autoAllowTools: Record<string, boolean>;
 
-  bindProject(projectId: string | null, preferSessionId?: string): void;
+  /** 绑定项目（异步加载会话列表；返回 Promise 便于调用方在加载完成后继续动作） */
+  bindProject(projectId: string | null, preferSessionId?: string): void | Promise<void>;
   setMode(m: AgentMode): void;
   setRunMode(r: RunMode): void;
   /** 切换权限（三选一）：计划进行中仅记录、不退出计划；其余情况直接切换 run_mode */
@@ -447,7 +448,7 @@ export function createAgentStore(scope: AgentScope) {
       questions: {},
         });
         const { mode, runMode } = get();
-        apiService
+        return apiService
           .getProjectAgentSessions(projectId, scope)
           .then((res) => {
             if (get().projectId !== projectId) return;

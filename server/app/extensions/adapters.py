@@ -77,6 +77,13 @@ def list_provider_extensions() -> List[ExtensionInfo]:
                 else:
                     source, detail = ExtensionSource.BUILTIN, ""
                     status = ExtensionStatus.BUILTIN
+                    # 内置生成源支持软停用（覆盖层）：状态如实反映，列表/开关才认得出来
+                    try:
+                        from app.extensions import state as _ext_state
+                        if _ext_state.match_disabled(ExtensionKind.PROVIDER, pid) is not None:
+                            status = ExtensionStatus.DISABLED
+                    except Exception:
+                        pass
                 derived = ""
                 if pid.startswith("comfyui_wf_"):
                     # 工作流 sync 出的独立源：派生关系，去重删除时联动

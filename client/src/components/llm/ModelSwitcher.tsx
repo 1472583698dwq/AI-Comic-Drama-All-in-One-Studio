@@ -63,7 +63,7 @@ export const ModelSwitcher: React.FC = () => {
             onClick={() => pick('', '')}
             className="w-full px-2 py-1.5 rounded-lg text-left text-[11px] hover:bg-surface-hover flex items-center gap-2"
           >
-            <span className="flex-1 [color:var(--color-text-main)]">跟随设置里的默认通道</span>
+            <span className="flex-1 [color:var(--color-text-main)]">跟随默认模型</span>
             {!active.model && <Check className="w-3.5 h-3.5 text-brand shrink-0" />}
           </button>
           {choices.length === 0 && (

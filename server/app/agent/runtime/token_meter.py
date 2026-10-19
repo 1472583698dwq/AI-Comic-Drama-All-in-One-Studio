@@ -41,11 +41,11 @@ def estimate_messages(messages: Iterable[Dict[str, Any]]) -> int:
 
 
 def context_window() -> int:
-    """上下文窗口（tokens）。可用 AGENT_CONTEXT_WINDOW 覆盖，默认 800k（压缩在窗口 80% 才触发）。"""
+    """上下文窗口（tokens）。可用 AGENT_CONTEXT_WINDOW 覆盖，默认 1M（压缩在窗口 80% 触发，约 80 万 token）。"""
     try:
-        return int(os.environ.get("AGENT_CONTEXT_WINDOW") or 800000)
+        return int(os.environ.get("AGENT_CONTEXT_WINDOW") or 1000000)
     except Exception:
-        return 800000
+        return 1000000
 
 
 def latest_context_tokens(session) -> int:

@@ -323,6 +323,11 @@ class ExtensionRegistry:
             else:
                 unregister_single_custom_provider(d.id, getattr(d, "kind", "image"))
             return {"extension": ext.id, "enabled": enabled, "mode": "native"}
+        # 内置生成源：软停用（覆盖层）——定义在代码内不做注册表增删，守卫在执行前拦截；
+        # 与「内置常驻」的其它 kind 不同，生成源是可替换的执行方，允许用户关掉不用的。
+        if ext.kind == ExtensionKind.PROVIDER:
+            return {"extension": ext.id, "enabled": enabled, "mode": "overlay",
+                    "detail": state.set_disabled(ext.id, not enabled, scope)}
         # 功能页（page）：内置但对用户可开关，一律走覆盖层（进/出 global.disabled）
         if ext.kind == ExtensionKind.PAGE:
             return {"extension": ext.id, "enabled": enabled, "mode": "overlay",

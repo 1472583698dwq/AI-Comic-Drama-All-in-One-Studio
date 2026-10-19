@@ -228,15 +228,36 @@ def pop_chat_override(token) -> None:
 class OpenAICompatAdapter:
     """OpenAI 兼容 /chat/completions 流式适配器（含 tool_calls 增量组装）。"""
 
-    def resolve(self) -> Dict[str, str]:
+    def resolve(self) -> Dict[str, Any]:
+        def _from_plaza(pick: Dict[str, Any]) -> Dict[str, Any]:
+            """广场选中项 → 适配器配置。Responses 协议在会话侧统一降级到同站点 chat/completions。"""
+            proto = pick.get("protocol") or "openai"
+            endpoint = pick["endpoint"]
+            if proto == "responses":
+                endpoint = pick.get("fallback_endpoint") or endpoint
+                proto = "openai"
+            return {
+                "endpoint": endpoint,
+                "api_key": pick["api_key"],
+                "model": pick["model"],
+                "protocol": proto,
+                # 广场供应商自己的自定义请求头（如 OpenCode 的 x-opencode-session）
+                "headers": pick.get("headers") or {},
+                # 标记来自广场：此时不要再叠全局 OPENAI_CUSTOM_HEADERS，避免串站
+                "from_plaza": True,
+            }
+
         override = _chat_override.get()
         if override and override.get("endpoint") and override.get("api_key") and override.get("model"):
-            return {
-                "endpoint": override["endpoint"],
-                "api_key": override["api_key"],
-                "model": override["model"],
-                "protocol": override.get("protocol") or "openai",
-            }
+            return _from_plaza(override)
+        # 对话没有单独选模型时，跟随模型广场的全局默认模型（与拆剧本同一口径）
+        try:
+            from app.llm import plaza
+            default = plaza.resolve_default()
+        except Exception:
+            default = None
+        if default and default.get("endpoint") and default.get("api_key") and default.get("model"):
+            return _from_plaza(default)
         provider = (getattr(settings, "LLM_PROVIDER", "") or "openai_compatible").lower()
         api_type = (getattr(settings, "LLM_API_TYPE", "") or "chat_completions").lower()
         if provider == "minimax" and not getattr(settings, "OPENAI_API_KEY", ""):
@@ -265,13 +286,17 @@ class OpenAICompatAdapter:
             "model": model,
         }
 
-    def _headers(self, api_key: str) -> Dict[str, str]:
+    def _headers(self, api_key: str, extra: Optional[Dict[str, str]] = None,
+                 use_global: bool = True) -> Dict[str, str]:
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-        try:
-            from app.pipelines.llm_service import llm_service
-            headers.update(llm_service._get_custom_headers() or {})
-        except Exception:
-            pass
+        if use_global:
+            try:
+                from app.pipelines.llm_service import llm_service
+                headers.update(llm_service._get_custom_headers() or {})
+            except Exception:
+                pass
+        if extra:
+            headers.update(extra)
         return headers
 
     def _build_payload(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]],
@@ -305,7 +330,8 @@ class OpenAICompatAdapter:
             async for chunk in self._stream_claude(cfg, messages, tools, temperature, max_tokens, timeout):
                 yield chunk
             return
-        headers = self._headers(cfg["api_key"])
+        headers = self._headers(cfg["api_key"], cfg.get("headers") or None,
+                                use_global=not cfg.get("from_plaza"))
         payload = self._build_payload(messages, tools, temperature, max_tokens, cfg["model"])
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=min(30.0, timeout))) as client:
@@ -370,6 +396,8 @@ class OpenAICompatAdapter:
             "content-type": "application/json",
             "accept": "text/event-stream",
         }
+        if cfg.get("headers"):
+            headers.update(cfg["headers"])
         async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=min(30.0, timeout))) as client:
             try:
                 async with client.stream("POST", cfg["endpoint"], headers=headers, json=payload) as resp:

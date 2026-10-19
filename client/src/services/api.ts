@@ -1089,6 +1089,18 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
+  /** 启用生成源（自定义源重新注册；内置源解除软停用） */
+  async enableProvider(providerId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/providers/${encodeURIComponent(providerId)}/enable`, { method: 'POST' });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  /** 停用生成源（自定义源注销注册；内置源软停用；定义保留，可随时再启用） */
+  async disableProvider(providerId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/providers/${encodeURIComponent(providerId)}/disable`, { method: 'POST' });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
   async testProvider(providerId: string, live = false): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/providers/${encodeURIComponent(providerId)}/test`, {
       method: 'POST',
@@ -1202,14 +1214,22 @@ export const apiService = {
     return await res.json();
   },
   // 模型广场
-  async getLlmPlaza(): Promise<{ suppliers: any[]; active: { supplier_id: string; model: string } }> {
+  async getLlmPlaza(): Promise<{ suppliers: any[]; default?: { supplier_id: string; model: string }; active: { supplier_id: string; model: string } }> {
     const res = await fetch(`${API_BASE_URL}/llm/plaza`);
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
-  async addLlmSupplier(body: { name: string; base_url: string; api_key?: string; protocol?: 'openai' | 'claude' }): Promise<any> {
+  async addLlmSupplier(body: { name: string; base_url: string; api_key?: string; protocol?: 'openai' | 'claude' | 'responses'; headers?: Record<string, string> }): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/llm/suppliers`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  /** 编辑供应商：只传要改的字段；api_key 留空 = 保留旧 Key；headers = {} 表示清空 */
+  async updateLlmSupplier(id: string, body: { name?: string; base_url?: string; api_key?: string; protocol?: 'openai' | 'claude' | 'responses'; headers?: Record<string, string> }): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/llm/suppliers/${encodeURIComponent(id)}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
@@ -1226,6 +1246,15 @@ export const apiService = {
   },
   async setLlmActive(supplierId: string, model: string): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/llm/active`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ supplier_id: supplierId, model }),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  /** 全局默认模型：拆剧本 / 润色 / 一键成片 / 对话都走它 */
+  async setLlmDefault(supplierId: string, model: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/llm/default`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ supplier_id: supplierId, model }),
     });

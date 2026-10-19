@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { X, Plus, Plug, Globe, Video, Mic, Cpu, Trash2, Edit3, Activity, Save, FileText, Zap } from 'lucide-react';
+import { X, Plus, Plug, Globe, Video, Mic, Cpu, Trash2, Edit3, Activity, Save, FileText, Zap, Power } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { CAPABILITIES_BY_KIND, getCapabilities } from './providerCapabilities';
 import { confirmAsync, toast } from '../../stores/useDialogStore';
@@ -24,6 +24,7 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
   const [editing, setEditing] = useState<any>(null);
   const [editApiKey, setEditApiKey] = useState('');
   const [editSrc, setEditSrc] = useState<any>(null);
+  const [busy, setBusy] = useState('');
 
   const fetchAll = async ()=>{
     try {
@@ -78,6 +79,33 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
       await fetchAll();
       window.dispatchEvent(new Event('provider-list-refresh'));
     } catch(e:any){ toast.error(e.message || '删除失败'); }
+  };
+  /** 启用/停用：自定义源走原生生命周期（注销/重注册）；内置源走软停用（守卫拦截，可随时恢复） */
+  const handleToggleEnabled = async (p:any)=>{
+    const next = p.enabled === false;
+    if (!next) {
+      const ok = await confirmAsync({
+        title: `停用「${p.display_name || p.name || p.id}」`,
+        message: p.builtin
+          ? '内置源将被软停用：下拉里不再可选、生成时会被守卫拦下；随时可再启用。'
+          : '停用后它不再出现在生成源下拉与执行链里（定义保留，随时可再启用）。',
+        confirmText: '确认停用',
+        cancelText: '取消',
+      });
+      if (!ok) return;
+    }
+    setBusy(`toggle:${p.id}`);
+    try {
+      if (next) await apiService.enableProvider(p.id);
+      else await apiService.disableProvider(p.id);
+      toast.success(next ? `已启用「${p.display_name || p.name || p.id}」` : `已停用「${p.display_name || p.name || p.id}」`);
+      await fetchAll();
+      window.dispatchEvent(new Event('provider-list-refresh'));
+    } catch(e:any){
+      toast.error(e?.message || '操作失败');
+    } finally {
+      setBusy('');
+    }
   };
   const handleTest = async (id:string, live = false)=>{
     if (live) {
@@ -202,7 +230,7 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
             <div className="p-2 rounded-xl bg-brand/20 border border-brand/30 text-brand"><Plug className="w-5 h-5" /></div>
             <div>
               <h2 className="text-sm font-bold text-white flex items-center gap-2">自定义生成源管理 <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">{customCount} 自定义</span> <span className="text-[10px] px-2 py-0.5 rounded-full bg-surface/80 border border-white/70 dark:border-white/12 text-gray-400">{providers.length} 总计</span></h2>
-              <p className="text-[11px] text-gray-400">增删改查 · 与设置/画布/分镜全域同源 · 导演通过 kind 自动分类</p>
+              <p className="text-[11px] text-gray-400">增删改查 · 启停 · 与设置/画布/分镜全域同源 · 导演通过 kind 自动分类</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -230,7 +258,7 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
             <option value="all">全部能力</option>
             {capOptions.map(o=> <option key={o.id} value={o.id}>{o.label}</option>)}
           </select>
-          <span className="ml-auto text-[11px] text-gray-500">内置不可删改 · 自定义可增删改查</span>
+           <span className="ml-auto text-[11px] text-gray-500">内置不可删改 · 都可停用/启用 · 自定义可增删改查</span>
         </div>
 
         {/* List */}
@@ -240,7 +268,7 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
               const Icon = kindIcon[p.kind] || Plug;
               const color = kindColor[p.kind] || 'text-brand';
               return (
-                <div key={p.id} className={`p-4 rounded-xl border flex flex-col gap-2 ${p.builtin?'bg-white/40 border-white/70 dark:border-white/12':'bg-surface/80 border-brand/20 shadow-sm'}`}>
+                <div key={p.id} className={`p-4 rounded-xl border flex flex-col gap-2 ${p.builtin?'bg-white/40 border-white/70 dark:border-white/12':'bg-surface/80 border-brand/20 shadow-sm'} ${p.enabled===false?'opacity-60':''}`}>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 min-w-0">
                       <div className={`w-8 h-8 rounded-lg flex items-center justify-center border bg-surface/80 ${p.builtin?'border-white/70 dark:border-white/12':'border-brand/20'}`}><Icon className={`w-4 h-4 ${color}`} /></div>
@@ -249,7 +277,12 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
                         <div className="text-[10px] font-mono text-gray-500 truncate">{p.id} · {p.kind} {p.provider_type?`·${p.provider_type}`:''}</div>
                       </div>
                     </div>
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full border ${p.builtin?'bg-surface/80 border-white/70 dark:border-white/12 text-gray-400':'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'}`}>{p.builtin?'内置':'自定义'}</span>
+                    <span className="flex items-center gap-1">
+                      {p.enabled === false && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full border bg-amber-500/15 border-amber-500/40 text-amber-300">已停用</span>
+                      )}
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full border ${p.builtin?'bg-surface/80 border-white/70 dark:border-white/12 text-gray-400':'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'}`}>{p.builtin?'内置':'自定义'}</span>
+                    </span>
                   </div>
                   {p.description && <div className="text-[11px] text-gray-400 line-clamp-2">{p.description}</div>}
                   <div className="flex flex-wrap items-center gap-1">
@@ -263,6 +296,21 @@ export const ProviderManagerModal: React.FC<Props> = ({ isOpen, onClose, editPro
                     <span className="ml-auto flex items-center gap-1">{p.health?.ok ? <span className="w-2 h-2 rounded-full bg-emerald-500"/> : p.health?.ok===false ? <span className="w-2 h-2 rounded-full bg-amber-500"/> : null}{p.builtin?'':<span className="px-1 py-0.5 rounded bg-surface/80">{p.params_schema ? Object.keys(p.params_schema.properties||{}).length+' 参数' : '无参'}</span>}</span>
                   </div>
                   <div className="flex items-center gap-1.5 pt-1">
+                    <button
+                      onClick={()=> handleToggleEnabled(p)}
+                      disabled={busy === `toggle:${p.id}`}
+                      title={p.enabled === false
+                        ? (p.builtin ? '启用这个内置源（解除软停用）' : '启用这个源（重新注册，进下拉与执行链）')
+                        : (p.builtin ? '停用这个内置源（软停用，守卫会拦下生成；可随时恢复）' : '停用这个源（注销注册，定义保留）')}
+                      className={`flex-1 py-1.5 rounded-lg text-xs flex items-center justify-center gap-1 border disabled:opacity-40 ${
+                        p.enabled === false
+                          ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300 hover:border-emerald-400'
+                          : 'bg-surface/80 border-white/70 dark:border-white/12 text-gray-300 hover:border-brand'
+                      }`}
+                    >
+                      {busy === `toggle:${p.id}` ? <Activity className="w-3 h-3 animate-pulse"/> : <Power className="w-3 h-3"/>}
+                      {p.enabled === false ? '启用' : '停用'}
+                    </button>
                     <button onClick={()=> handleTest(p.id)} title="体检/配置检查（不真调上游，不消耗额度）" className="flex-1 py-1.5 rounded-lg bg-surface/80 border border-white/70 dark:border-white/12 text-xs text-white hover:border-brand flex items-center justify-center gap-1"><Activity className="w-3 h-3"/> 测试</button>
                     <button onClick={()=> handleTest(p.id, true)} title="实测一次：真调上游最小请求，验证 Key / 余额 / 地址（可能消耗额度）" className="flex-1 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-emerald-300 text-xs flex items-center justify-center gap-1"><Zap className="w-3 h-3"/> 实测</button>
                     <button onClick={()=> openEdit(p)} className="flex-1 py-1.5 rounded-lg bg-brand/10 border border-brand/20 text-brand-light text-xs flex items-center justify-center gap-1"><Edit3 className="w-3 h-3"/> {p.builtin?'查看':'编辑'}</button>

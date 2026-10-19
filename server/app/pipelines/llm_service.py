@@ -293,6 +293,125 @@ class LLMService:
 
         return hdrs
 
+    def _plaza_default_override(self) -> Optional[Dict[str, Any]]:
+        """模型广场的全局默认模型（供应商 + 模型）；未配置或异常时返回 None。"""
+        try:
+            from app.llm import plaza
+            return plaza.resolve_default()
+        except Exception:
+            return None
+
+    async def _stream_plaza_override(
+        self,
+        override: Dict[str, Any],
+        messages: List[Dict[str, str]],
+        temperature: float,
+        max_tokens: int,
+        timeout: float,
+        extra_headers: Optional[Dict[str, str]] = None,
+    ) -> AsyncGenerator[str, None]:
+        headers: Dict[str, str] = dict(override.get("headers") or {})
+        if extra_headers:
+            headers.update(extra_headers)
+        proto = override.get("protocol") or "openai"
+        if proto == "claude":
+            async for chunk in self._stream_claude_messages(
+                endpoint=override["endpoint"],
+                api_key=override["api_key"],
+                model=override["model"],
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout=timeout,
+                extra_headers=headers,
+            ):
+                yield chunk
+            return
+        if proto == "responses":
+            async for chunk in self._stream_responses_api(
+                url=override["endpoint"],
+                api_key=override["api_key"],
+                model=override["model"],
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout=timeout,
+                extra_headers=headers,
+                skip_global_headers=True,
+                fallback_base=override.get("fallback_endpoint") or override["endpoint"],
+            ):
+                yield chunk
+            return
+        async for chunk in self._stream_openai_chat_completions(
+            base_url=override["endpoint"],
+            api_key=override["api_key"],
+            model=override["model"],
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout,
+            extra_headers=headers,
+            skip_global_headers=True,
+        ):
+            yield chunk
+
+    async def _stream_claude_messages(
+        self,
+        endpoint: str,
+        api_key: str,
+        model: str,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.3,
+        max_tokens: int = 4096,
+        timeout: float = 120.0,
+        extra_headers: Optional[Dict[str, str]] = None,
+    ) -> AsyncGenerator[str, None]:
+        """Anthropic Messages 流式（模型广场里协议选 Claude 的供应商）。"""
+        from app.llm.claude_wire import to_anthropic
+
+        system, anth_messages, _ = to_anthropic(messages, None)
+        if not anth_messages:
+            anth_messages = [{"role": "user", "content": [{"type": "text", "text": "继续。"}]}]
+        payload: Dict[str, Any] = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "messages": anth_messages,
+            "stream": True,
+        }
+        if system:
+            payload["system"] = system
+        if temperature is not None:
+            payload["temperature"] = temperature
+        headers = {
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+            "accept": "text/event-stream",
+        }
+        if extra_headers:
+            headers.update(extra_headers)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            async with client.stream("POST", endpoint, headers=headers, json=payload) as response:
+                if response.status_code != 200:
+                    body = (await response.aread()).decode(errors="ignore")[:300]
+                    raise LLMServiceError(f"Claude 接口 ({endpoint}) 报错 HTTP {response.status_code}: {body}")
+                async for line in response.aiter_lines():
+                    line = (line or "").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    raw = line[5:].strip()
+                    if not raw or raw == "[DONE]":
+                        continue
+                    try:
+                        data = json.loads(raw)
+                    except Exception:
+                        continue
+                    if data.get("type") == "content_block_delta":
+                        delta = data.get("delta") or {}
+                        text = delta.get("text") or ""
+                        if text:
+                            yield text
+
     async def chat_stream(
         self,
         messages: List[Dict[str, str]],
@@ -302,6 +421,15 @@ class LLMService:
         extra_headers: Optional[Dict[str, str]] = None,
     ) -> AsyncGenerator[str, None]:
         """全模型统一流式 Token 生成器 (SSE Async Generator)，支持自动降级容错"""
+        # 模型广场的全局默认模型优先；没设置时回退到系统设置里的直连通道
+        override = self._plaza_default_override()
+        if override:
+            async for chunk in self._stream_plaza_override(
+                override, messages, temperature, max_tokens, timeout, extra_headers,
+            ):
+                yield chunk
+            return
+
         provider = (settings.LLM_PROVIDER or "openai_compatible").lower()
         api_type = (settings.LLM_API_TYPE or "chat_completions").lower()
 
@@ -312,99 +440,19 @@ class LLMService:
             api_key = settings.RESPONSES_API_KEY or settings.OPENAI_API_KEY
             if not api_key:
                 raise LLMServiceError("Responses API 未配置密钥：请在系统配置中填入 API Key")
-            endpoint = self._normalize_responses_url(settings.RESPONSES_API_URL or settings.OPENAI_BASE_URL)
-            model = settings.RESPONSES_MODEL or settings.OPENAI_MODEL or "gpt-4o"
-
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "Accept": "text/event-stream",
-            }
-            headers.update(self._get_custom_headers())
-            if extra_headers:
-                headers.update(extra_headers)
-
-            input_items = []
-            instructions = ""
-            for m in messages:
-                role = m.get("role", "user")
-                content = m.get("content", "")
-                if role == "system":
-                    instructions = content
-                else:
-                    input_items.append({"role": role, "content": content})
-
-            payload: Dict[str, Any] = {
-                "model": model,
-                "input": input_items if input_items else messages,
-                "stream": True,
-            }
-            if instructions:
-                payload["instructions"] = instructions
-            if temperature is not None:
-                payload["temperature"] = temperature
-
-            responses_succeeded = False
-            try:
-                async with httpx.AsyncClient(timeout=timeout) as client:
-                    async with client.stream("POST", endpoint, headers=headers, json=payload) as response:
-                        if response.status_code == 200:
-                            responses_succeeded = True
-                            in_think_block = False
-                            async for line in response.aiter_lines():
-                                line = line.strip()
-                                if not line or line.startswith(":"):
-                                    continue
-                                if line.startswith("data: "):
-                                    data_str = line[6:].strip()
-                                    if data_str == "[DONE]":
-                                        break
-                                    try:
-                                        data = json.loads(data_str)
-                                        delta_text = ""
-                                        if "delta" in data and isinstance(data["delta"], str):
-                                            delta_text = data["delta"]
-                                        elif "output_text" in data and isinstance(data["output_text"], str):
-                                            delta_text = data["output_text"]
-                                        elif "choices" in data and data["choices"]:
-                                            delta_text = data["choices"][0].get("delta", {}).get("content", "")
-                                        elif "output" in data and isinstance(data["output"], list):
-                                            for item in data["output"]:
-                                                if isinstance(item, dict) and "content" in item:
-                                                    for c in item["content"]:
-                                                        if isinstance(c, dict) and "text" in c:
-                                                            delta_text += c["text"]
-
-                                        if delta_text:
-                                            if "<think>" in delta_text:
-                                                in_think_block = True
-                                            if "</think>" in delta_text:
-                                                in_think_block = False
-                                                delta_text = delta_text.split("</think>")[-1]
-                                            if not in_think_block and delta_text:
-                                                yield delta_text
-                                    except Exception:
-                                        pass
-                            return
-                        else:
-                            err_text = (await response.aread()).decode(errors="ignore")[:300]
-                            print(f"[LLM] Responses API 返回 HTTP {response.status_code}: {err_text}，尝试自动平滑降级为 OpenAI /chat/completions 接口...")
-            except Exception as e:
-                print(f"[LLM] Responses API 异常: {e}，尝试自动平滑降级为 OpenAI /chat/completions 接口...")
-
-            # 自动降级为 /chat/completions
-            fallback_base = settings.OPENAI_BASE_URL or settings.RESPONSES_API_URL or "https://api.openai.com/v1"
-            async for chunk in self._stream_openai_chat_completions(
-                base_url=fallback_base,
+            async for chunk in self._stream_responses_api(
+                url=settings.RESPONSES_API_URL or settings.OPENAI_BASE_URL,
                 api_key=api_key,
-                model=model,
+                model=settings.RESPONSES_MODEL or settings.OPENAI_MODEL or "gpt-4o",
                 messages=messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
                 timeout=timeout,
                 extra_headers=extra_headers,
+                fallback_base=settings.OPENAI_BASE_URL or settings.RESPONSES_API_URL or "https://api.openai.com/v1",
             ):
                 yield chunk
+            return
             return
 
         # ============================================================
@@ -460,6 +508,110 @@ class LLMService:
                 async for chunk in self._parse_openai_sse_stream(response):
                     yield chunk
 
+    async def _stream_responses_api(
+        self,
+        url: str,
+        api_key: str,
+        model: str,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.3,
+        max_tokens: int = 4096,
+        timeout: float = 120.0,
+        extra_headers: Optional[Dict[str, str]] = None,
+        skip_global_headers: bool = False,
+        fallback_base: Optional[str] = None,
+    ) -> AsyncGenerator[str, None]:
+        """OpenAI Responses API (/v1/responses) 流式；不可用时自动降级为同站点 /chat/completions。"""
+        endpoint = self._normalize_responses_url(url)
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+        }
+        if not skip_global_headers:
+            headers.update(self._get_custom_headers())
+        if extra_headers:
+            headers.update(extra_headers)
+
+        input_items = []
+        instructions = ""
+        for m in messages:
+            role = m.get("role", "user")
+            content = m.get("content", "")
+            if role == "system":
+                instructions = content
+            else:
+                input_items.append({"role": role, "content": content})
+
+        payload: Dict[str, Any] = {
+            "model": model,
+            "input": input_items if input_items else messages,
+            "stream": True,
+        }
+        if instructions:
+            payload["instructions"] = instructions
+        if temperature is not None:
+            payload["temperature"] = temperature
+
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                async with client.stream("POST", endpoint, headers=headers, json=payload) as response:
+                    if response.status_code == 200:
+                        in_think_block = False
+                        async for line in response.aiter_lines():
+                            line = line.strip()
+                            if not line or line.startswith(":"):
+                                continue
+                            if line.startswith("data: "):
+                                data_str = line[6:].strip()
+                                if data_str == "[DONE]":
+                                    break
+                                try:
+                                    data = json.loads(data_str)
+                                    delta_text = ""
+                                    if "delta" in data and isinstance(data["delta"], str):
+                                        delta_text = data["delta"]
+                                    elif "output_text" in data and isinstance(data["output_text"], str):
+                                        delta_text = data["output_text"]
+                                    elif "choices" in data and data["choices"]:
+                                        delta_text = data["choices"][0].get("delta", {}).get("content", "")
+                                    elif "output" in data and isinstance(data["output"], list):
+                                        for item in data["output"]:
+                                            if isinstance(item, dict) and "content" in item:
+                                                for c in item["content"]:
+                                                    if isinstance(c, dict) and "text" in c:
+                                                        delta_text += c["text"]
+
+                                    if delta_text:
+                                        if "<think>" in delta_text:
+                                            in_think_block = True
+                                        if "</think>" in delta_text:
+                                            in_think_block = False
+                                            delta_text = delta_text.split("</think>")[-1]
+                                        if not in_think_block and delta_text:
+                                            yield delta_text
+                                except Exception:
+                                    pass
+                        return
+                    err_text = (await response.aread()).decode(errors="ignore")[:300]
+                    print(f"[LLM] Responses API 返回 HTTP {response.status_code}: {err_text}，尝试自动平滑降级为 OpenAI /chat/completions 接口...")
+        except Exception as e:
+            print(f"[LLM] Responses API 异常: {e}，尝试自动平滑降级为 OpenAI /chat/completions 接口...")
+
+        # 自动降级为 /chat/completions
+        async for chunk in self._stream_openai_chat_completions(
+            base_url=fallback_base or url,
+            api_key=api_key,
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout,
+            extra_headers=extra_headers,
+            skip_global_headers=skip_global_headers,
+        ):
+            yield chunk
+
     async def _stream_openai_chat_completions(
         self,
         base_url: str,
@@ -470,6 +622,7 @@ class LLMService:
         max_tokens: int = 4096,
         timeout: float = 120.0,
         extra_headers: Optional[Dict[str, str]] = None,
+        skip_global_headers: bool = False,
     ) -> AsyncGenerator[str, None]:
         """执行标准 OpenAI /chat/completions SSE 传输"""
         endpoint = self._normalize_chat_completions_url(base_url)
@@ -478,7 +631,8 @@ class LLMService:
             "Content-Type": "application/json",
             "Accept": "text/event-stream",
         }
-        headers.update(self._get_custom_headers())
+        if not skip_global_headers:
+            headers.update(self._get_custom_headers())
         if extra_headers:
             headers.update(extra_headers)
         payload: Dict[str, Any] = {
@@ -616,6 +770,80 @@ class LLMService:
         stream_error: Optional[Exception] = None,
     ) -> str:
         """兜底非流式单次调用（Responses API → /chat/completions）；stream_error 为此前流式失败的原因（拼进报错）。"""
+        # 模型广场默认模型优先（与 chat_stream 同一口径）
+        override = self._plaza_default_override()
+        if override:
+            headers = {"Authorization": f"Bearer {override['api_key']}", "Content-Type": "application/json"}
+            headers.update(override.get("headers") or {})
+            if extra_headers:
+                headers.update(extra_headers)
+            proto = override.get("protocol") or "openai"
+            try:
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    if proto == "claude":
+                        from app.llm.claude_wire import to_anthropic
+                        system, anth_messages, _ = to_anthropic(messages, None)
+                        payload: Dict[str, Any] = {
+                            "model": override["model"],
+                            "max_tokens": max_tokens,
+                            "messages": anth_messages or [{"role": "user", "content": [{"type": "text", "text": "继续。"}]}],
+                        }
+                        if system:
+                            payload["system"] = system
+                        if temperature is not None:
+                            payload["temperature"] = temperature
+                        claude_headers = {"x-api-key": override["api_key"], "anthropic-version": "2023-06-01",
+                                          "content-type": "application/json"}
+                        claude_headers.update(override.get("headers") or {})
+                        if extra_headers:
+                            claude_headers.update(extra_headers)
+                        r = await client.post(override["endpoint"], headers=claude_headers, json=payload)
+                        r.raise_for_status()
+                        data = r.json()
+                        parts = [c.get("text", "") for c in (data.get("content") or []) if c.get("type") == "text"]
+                        return strip_think_tags("".join(parts))
+                    if proto == "responses":
+                        # 先试 /responses 单次调用，失败再降级同站点 /chat/completions
+                        input_items, instructions = [], ""
+                        for m in messages:
+                            if m.get("role") == "system":
+                                instructions = m.get("content", "")
+                            else:
+                                input_items.append({"role": m.get("role", "user"), "content": m.get("content", "")})
+                        rs_payload: Dict[str, Any] = {
+                            "model": override["model"],
+                            "input": input_items if input_items else messages,
+                            "temperature": temperature,
+                        }
+                        if instructions:
+                            rs_payload["instructions"] = instructions
+                        try:
+                            rs = await client.post(self._normalize_responses_url(override["endpoint"]),
+                                                   headers=headers, json=rs_payload)
+                            if rs.status_code == 200:
+                                data = rs.json()
+                                if isinstance(data.get("output_text"), str):
+                                    return strip_think_tags(data["output_text"])
+                                texts = []
+                                for item in data.get("output") or []:
+                                    for c in item.get("content") or []:
+                                        if isinstance(c, dict) and isinstance(c.get("text"), str):
+                                            texts.append(c["text"])
+                                if texts:
+                                    return strip_think_tags("".join(texts))
+                        except Exception:
+                            pass
+                    payload = {"model": override["model"], "messages": messages, "temperature": temperature}
+                    target = override.get("fallback_endpoint") or override["endpoint"] if proto == "responses" else override["endpoint"]
+                    r = await client.post(target, headers=headers, json=payload)
+                    r.raise_for_status()
+                    data = r.json()
+                    return strip_think_tags(data["choices"][0]["message"]["content"])
+            except Exception as e:
+                if stream_error:
+                    raise LLMServiceError(f"大模型调用失败: {_err_text(stream_error)} (重试错误: {_err_text(e)})")
+                raise LLMServiceError(f"大模型接口 ({override['endpoint']}) 异常: {_err_text(e)}")
+
         # 兜底非流式单次调用
         provider = (settings.LLM_PROVIDER or "openai_compatible").lower()
         api_type = (settings.LLM_API_TYPE or "chat_completions").lower()
