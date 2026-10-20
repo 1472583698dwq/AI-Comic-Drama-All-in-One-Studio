@@ -14,6 +14,7 @@ import { useProjectStore } from '../stores/useProjectStore';
 import { useProjectListStore, type ProjectMeta } from '../stores/useProjectListStore';
 import { useAgentStore } from '../components/agent/agentStore';
 import { AgentMessageList } from '../components/agent/AgentMessageList';
+import { ApprovalCard } from '../components/agent/AgentToolSteps';
 import { AgentComposer } from '../components/agent/AgentComposer';
 import { AgentSwarmPanel } from '../components/agent/AgentSwarmPanel';
 import { loadRoleMetas } from '../components/agent/swarmMeta';
@@ -255,7 +256,7 @@ export const AgentModeView: React.FC = () => {
               <button
                 onClick={scrollToBottom}
                 className="px-2.5 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-600 dark:text-amber-300 text-xs font-bold flex items-center gap-1 animate-pulse"
-                title="有工具待确认，点击定位到行内审批卡"
+                title="有工具待确认（审批卡在输入框上方）"
               >
                 <ShieldAlert className="w-3.5 h-3.5" />{pendingList.length} 待确认
               </button>
@@ -301,6 +302,21 @@ export const AgentModeView: React.FC = () => {
                 </button>
               )}
               <div className="pointer-events-auto">
+                {pendingList.length > 0 && (
+                  <div className="mb-1.5 space-y-1.5 max-h-[42vh] overflow-y-auto custom-scrollbar">
+                    {pendingList.map(([aid, v]) => (
+                      <ApprovalCard
+                        key={aid}
+                        aid={aid}
+                        tool={v.tool_name}
+                        args={v.args || {}}
+                        createdAt={v.createdAt}
+                        autoAllowed={!!autoAllowTools[v.tool_name]}
+                        onApprove={handleApprove}
+                      />
+                    ))}
+                  </div>
+                )}
                 {/* 对话工作目录（项目）选择，ZCode contextHeader 同位 */}
                 <div className="flex items-center mb-1.5">
                   <ProjectChip />

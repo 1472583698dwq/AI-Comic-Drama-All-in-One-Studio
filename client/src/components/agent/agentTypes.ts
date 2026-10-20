@@ -30,6 +30,15 @@ export function composeRunMode(b: BehaviorMode, e: ExecutionMode): RunMode {
   if (b === 'create') return e === 'auto' ? 'create_auto' : 'create';
   return e === 'auto' ? 'auto' : 'approve';
 }
+
+/** 权限三选一（UI 口径）：把任意 run_mode token 归一成「变更前确认/完全访问/造能力」。
+ *  create* → create；plan* → 按执行维度 approve/auto；其余 approve/auto 原样。 */
+export type PermissionMode = 'approve' | 'auto' | 'create';
+export function permissionOfRunMode(r?: RunMode | string): PermissionMode {
+  const b = behaviorOfRunMode(r);
+  if (b === 'create') return 'create';
+  return executionOfRunMode(r);
+}
 export type ToolStatus = 'executing' | 'completed' | 'error';
 export type SideEffect =
   | { type: 'provider_refresh' }
@@ -145,6 +154,8 @@ export interface AgentSession {
   messages: ChatMsg[];
   mode?: AgentMode;
   run_mode?: RunMode;
+  /** 计划会话单独记住用户选的权限（run_mode=plan 时权限信息不在 token 里） */
+  permission?: PermissionMode;
   /** 已归档：侧栏历史里折叠进归档视图，页内会话列表不显示（后端原样落盘） */
   archived?: boolean;
 }

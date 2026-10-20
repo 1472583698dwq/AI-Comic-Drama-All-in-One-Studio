@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { MarkdownText } from './MarkdownText';
 import { ArtifactCard, CapabilityProposalCard, ErrorCard, QuestionCard } from './AgentCards';
-import { AgentToolSteps, AgentTodoPanel } from './AgentToolSteps';
+import { AgentToolInline, AgentTodoPanel } from './AgentToolSteps';
 import { API_ORIGIN } from '../../utils/devOrigin';
 import type { AgentAttachment, ApprovalInfo, ChatMsg, QuestionInfo } from './agentTypes';
 
@@ -71,9 +71,6 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
   onProposalAction,
   proposalBusy,
   onApplyArtifact,
-  approvals,
-  autoAllowTools,
-  onApprove,
   questions,
   onAnswerQuestion,
 }) => {
@@ -107,9 +104,12 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
     <>
       {messages.map((m) => {
         const isAgent = m.sender === 'agent';
-        const hasThinking = isAgent && !!(m.thinking || m.isThinkingStreaming);
-        // IDE 式：思考过程默认折叠（流式进行中保持展开），不与正文混排
-        const thinkingOpen = expandedThinking[m.id] !== undefined ? expandedThinking[m.id] : !!m.isThinkingStreaming;
+        const steps = isAgent ? (m.steps || []) : [];
+        // 思维链 = 推理 + 工具调用时间线（dsh 交互：工具不再折叠在消息底部）
+        const hasChain = isAgent && (!!(m.thinking || m.isThinkingStreaming) || steps.length > 0);
+        const chainRunning = !!m.isThinkingStreaming || steps.some((s) => s.status === 'executing');
+        const chainOpen = expandedThinking[m.id] !== undefined ? expandedThinking[m.id] : chainRunning;
+        const stepFailed = steps.filter((s) => s.status === 'error').length;
         const isPlaceholder = isAgent && isRunning && !m.text && !m.thinking;
         const isEditing = editingId === m.id;
         // 长文本折叠：粘贴产生的长文（或超过 2000 字的用户消息）默认只显示摘要
@@ -159,26 +159,35 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
                 </button>
               )}
 
-              {hasThinking && (
+              {hasChain && (
                 <div className={`${compact ? 'mb-2.5' : 'mb-3'} rounded-xl border border-brand/30 bg-brand/5 overflow-hidden`}>
                   <button
                     type="button"
-                    onClick={() => setExpandedThinking((prev) => ({ ...prev, [m.id]: !thinkingOpen }))}
+                    onClick={() => setExpandedThinking((prev) => ({ ...prev, [m.id]: !chainOpen }))}
                     className="w-full px-3 py-1.5 flex items-center justify-between text-[11px] font-bold text-brand-light hover:bg-brand/10 transition-colors"
                   >
                     <span className="flex items-center gap-1.5">
                       <Sparkles className={`w-3.5 h-3.5 text-brand ${m.isThinkingStreaming ? 'animate-spin' : ''}`} />
-                      <span>{m.isThinkingStreaming ? '思考推演中…' : '思考过程'}</span>
+                      <span>
+                        {m.isThinkingStreaming
+                          ? '思维链进行中…'
+                          : `思维链${steps.length ? ` · ${steps.length} 次工具调用` : ''}${stepFailed ? ` · ${stepFailed} 失败` : ''}`}
+                      </span>
                     </span>
                     <span className="flex items-center gap-1 text-[10px] [color:var(--color-text-main)] font-normal">
-                      <span>{thinkingOpen ? '收起' : '展开'}</span>
-                      <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${thinkingOpen ? 'rotate-180' : ''}`} />
+                      <span>{chainOpen ? '收起' : '展开'}</span>
+                      <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${chainOpen ? 'rotate-180' : ''}`} />
                     </span>
                   </button>
-                  {thinkingOpen && (
-                    <div className="px-3 py-2 border-t border-brand/15 text-[11px] leading-relaxed [color:var(--color-text-main)] font-mono whitespace-pre-wrap max-h-60 overflow-y-auto custom-scrollbar select-text bg-surface/80">
-                      {m.thinking || (m.isThinkingStreaming ? '正在感知导演意图与分析分镜机位…' : '')}
-                      {m.isThinkingStreaming && <span className="inline-block w-1.5 h-3.5 bg-brand ml-1 animate-pulse align-middle" />}
+                  {chainOpen && (
+                    <div className="px-3 py-2 border-t border-brand/15 space-y-2">
+                      {(m.thinking || m.isThinkingStreaming) && (
+                        <div className="text-[11px] leading-relaxed [color:var(--color-text-main)] font-mono whitespace-pre-wrap max-h-60 overflow-y-auto custom-scrollbar select-text bg-surface/80 rounded-lg px-2 py-1.5">
+                          {m.thinking || (m.isThinkingStreaming ? '正在感知导演意图与分析分镜机位…' : '')}
+                          {m.isThinkingStreaming && <span className="inline-block w-1.5 h-3.5 bg-brand ml-1 animate-pulse align-middle" />}
+                        </div>
+                      )}
+                      {steps.length > 0 && <AgentToolInline steps={steps} />}
                     </div>
                   )}
                 </div>
@@ -295,15 +304,6 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
                     <ErrorCard key={`${m.id}-e${i}`} what={e.what} why={e.why} next={e.next} />
                   ))}
                 </div>
-              )}
-
-              {(m.steps?.length || 0) > 0 && (
-                <AgentToolSteps
-                  steps={m.steps!}
-                  approvals={approvals || {}}
-                  autoAllowTools={autoAllowTools || {}}
-                  onApprove={onApprove || (() => {})}
-                />
               )}
 
               {isAgent && m.todo && m.todo.length > 0 && <AgentTodoPanel todo={m.todo} />}

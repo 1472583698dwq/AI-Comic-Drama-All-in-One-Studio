@@ -48,8 +48,6 @@ PLAN_READONLY_TOOLS = frozenset({
     "subagent_list", "subagent_status",
     "onekey_summary",
     "onekey_review",
-    "onekey_style_lock",
-    "onekey_scene_image",
 })
 
 # 工具风险分级：low 查询/规划 / medium 单镜生成 / high 批量·覆盖·花钱 / catastrophic 删源·越界写·危险命令

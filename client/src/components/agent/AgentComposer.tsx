@@ -187,7 +187,7 @@ const ModeMenuPill: React.FC<{
                 icon={p.icon}
                 label={p.label}
                 hint={p.hint}
-                checked={!planOn && p.key === permission}
+                checked={p.key === permission}
                 onClick={() => pick(() => onSelectPermission(p.key))}
               />
             ))}

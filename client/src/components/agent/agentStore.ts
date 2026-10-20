@@ -16,10 +16,10 @@ import { agentSocket } from './agentSocket';
 import { clearAgentDraft, useAgentDraftStore } from './agentDraftStore';
 import { collectFromExecutedTools, dispatchSideEffects, reduceAgentEvent } from './agentEventReducer';
 import {
-  behaviorOfRunMode, composeRunMode, executionOfRunMode,
+  behaviorOfRunMode, composeRunMode, executionOfRunMode, permissionOfRunMode,
 } from './agentTypes';
 import type {
-  AgentAttachment, AgentEvent, AgentMode, AgentSession, ApprovalInfo, BehaviorMode, ChatMsg, ExecutionMode, QuestionInfo, RunMode, SubAgentInfo, WsStatus,
+  AgentAttachment, AgentEvent, AgentMode, AgentSession, ApprovalInfo, BehaviorMode, ChatMsg, ExecutionMode, PermissionMode, QuestionInfo, RunMode, SubAgentInfo, WsStatus,
 } from './agentTypes';
 
 export type AgentScope = 'page' | 'float';
@@ -47,10 +47,10 @@ function welcomeMsg(mode: AgentMode): ChatMsg {
     time: '就绪',
   };
 }
-function makeSession(scope: AgentScope, title: string, mode: AgentMode, runMode: RunMode): AgentSession {
-  const iso = new Date().toISOString();
-  return { id: uid(scope === 'float' ? 'fsess_' : 'sess_'), title, created_at: iso, updated_at: iso, messages: [welcomeMsg(mode)], mode, run_mode: runMode };
-}
+function makeSession(scope: AgentScope, title: string, mode: AgentMode, runMode: RunMode, permission?: PermissionMode): AgentSession {
+    const iso = new Date().toISOString();
+    return { id: uid(scope === 'float' ? 'fsess_' : 'sess_'), title, created_at: iso, updated_at: iso, messages: [welcomeMsg(mode)], mode, run_mode: runMode, permission: permission || permissionOfRunMode(runMode) };
+  }
 
 function autoTitle(sess: AgentSession, messages: ChatMsg[]): string {
   const cur = sess.title;
@@ -160,7 +160,7 @@ interface AgentStoreState {
   /** 组合 token（wire 口径）；UI 请用 behavior/execution 两个维度 */
   runMode: RunMode;
   /** 权限（三选一）：变更前确认 approve / 完全访问 auto / 造能力 create。计划进行中它表示"同意计划后按此执行" */
-  permission: RunMode;
+  permission: PermissionMode;
   /** 行为模式：能干什么（标准/创造/计划） */
   behavior: BehaviorMode;
   /** 执行方式：要不要逐项人审（审批/自动） */
@@ -217,10 +217,10 @@ export function createAgentStore(scope: AgentScope) {
   };
 
   return create<AgentStoreState>()((set, get) => {
-    const getPrefs = (): { mode: AgentMode; runMode: RunMode; permission: RunMode } => {
+    const getPrefs = (): { mode: AgentMode; runMode: RunMode; permission: PermissionMode } => {
       let mode: AgentMode = 'execute';
       let runMode: RunMode = 'approve';
-      let permission: RunMode = 'approve';
+      let permission: PermissionMode = 'approve';
       try {
         const m = localStorage.getItem(MODE_KEY);
         if (m === 'chat' || m === 'execute') mode = m;
@@ -230,7 +230,7 @@ export function createAgentStore(scope: AgentScope) {
         if (p === 'approve' || p === 'auto' || p === 'create') permission = p;
       } catch {}
       // 恢复到计划态时权限用本地记忆（计划 token 不携带权限信息）
-      if (behaviorOfRunMode(runMode) !== 'plan') permission = runMode;
+      if (behaviorOfRunMode(runMode) !== 'plan') permission = permissionOfRunMode(runMode);
       return { mode, runMode, permission };
     };
 
@@ -255,13 +255,29 @@ export function createAgentStore(scope: AgentScope) {
       commitMessages((prev) => prev.map((m) => (m.id === id ? fn(m) : m)));
     };
 
+    /** 会话落盘失败可见化（尤其项目已被删除的 404）：不再静默吞掉，按项目去重提示一次 */
+    const persistFailNotified = new Set<string>();
+    const notifyPersistError = (e: any) => {
+      const msg = String((e && e.message) || e || '');
+      const pid = get().projectId || '';
+      if (persistFailNotified.has(pid)) return;
+      persistFailNotified.add(pid);
+      if (/404|项目不存在/.test(msg)) {
+        toast.error('当前项目已被删除，会话无法保存。请刷新页面后重新创建/打开项目。');
+      } else {
+        toast.error(`会话保存失败：${msg.slice(0, 120)}`);
+      }
+    };
+
     const schedulePersist = () => {
       if (persistTimer) clearTimeout(persistTimer);
       persistTimer = setTimeout(() => {
         persistTimer = null;
         const { projectId, sessions } = get();
         if (projectId && sessions.length) {
-          apiService.saveProjectAgentSessions(projectId, sessions, scope).catch((e) => console.warn('[agentStore] persist failed', e));
+          apiService.saveProjectAgentSessions(projectId, sessions, scope)
+            .then(() => persistFailNotified.delete(projectId))
+            .catch(notifyPersistError);
         }
       }, 600);
     };
@@ -269,7 +285,9 @@ export function createAgentStore(scope: AgentScope) {
     const persistNow = () => {
       const { projectId, sessions } = get();
       if (projectId && sessions.length) {
-        apiService.saveProjectAgentSessions(projectId, sessions, scope).catch(() => {});
+        apiService.saveProjectAgentSessions(projectId, sessions, scope)
+          .then(() => persistFailNotified.delete(projectId))
+          .catch(notifyPersistError);
       }
     };
 
@@ -291,25 +309,28 @@ export function createAgentStore(scope: AgentScope) {
         runMode,
         behavior: behaviorOfRunMode(runMode),
         execution: planOn ? executionOfRunMode(get().permission) : executionOfRunMode(runMode),
-        ...(planOn ? {} : { permission: runMode }),
+        ...(planOn ? {} : { permission: permissionOfRunMode(runMode) }),
       });
       try { localStorage.setItem(RUNMODE_KEY, runMode); } catch {}
-      if (!planOn) { try { localStorage.setItem(PERMISSION_KEY, runMode); } catch {} }
+      if (!planOn) { try { localStorage.setItem(PERMISSION_KEY, permissionOfRunMode(runMode)); } catch {} }
       const { activeSessionId, sessions } = get();
-      set({ sessions: sessions.map((s) => (s.id === activeSessionId ? { ...s, run_mode: runMode, updated_at: new Date().toISOString() } : s)) });
+      const _perm = planOn ? get().permission : permissionOfRunMode(runMode);
+      set({ sessions: sessions.map((s) => (s.id === activeSessionId ? { ...s, run_mode: runMode, permission: _perm, updated_at: new Date().toISOString() } : s)) });
       // 立即持久化：避免防抖窗口内刷新导致服务端仍是旧模式（重开项目回退审批）
       persistNow();
       pushRunMode(runMode);
     };
 
-    /** 会话 token → 两维状态（加载/切换会话时用）；计划 token 不覆盖当前权限记忆 */
-    const dimsOf = (token: RunMode) => {
+    /** 会话 token → 两维状态（加载/切换会话时用）；计划 token 用会话自己的权限记忆 */
+    const dimsOf = (token: RunMode, sessionPermission?: PermissionMode) => {
       const planOn = behaviorOfRunMode(token) === 'plan';
+      const perm: PermissionMode = sessionPermission
+        || (planOn ? get().permission : permissionOfRunMode(token));
       return {
         runMode: token,
         behavior: behaviorOfRunMode(token),
-        execution: planOn ? executionOfRunMode(get().permission) : executionOfRunMode(token),
-        ...(planOn ? {} : { permission: token }),
+        execution: planOn ? executionOfRunMode(perm) : executionOfRunMode(token),
+        permission: perm,
       };
     };
 
@@ -465,11 +486,11 @@ export function createAgentStore(scope: AgentScope) {
                 activeSessionId: first.id,
                 messages: (first.messages || []).map((m) => ({ ...m, isThinkingStreaming: false, isStreaming: false })),
                 mode: first.mode || mode,
-                ...dimsOf(token),
+                ...dimsOf(token, first.permission),
                 loadingSessions: false,
               });
             } else {
-              const sess = makeSession(scope, '新会话', mode, runMode);
+              const sess = makeSession(scope, '新会话', mode, runMode, get().permission);
               set({ sessions: [sess], activeSessionId: sess.id, messages: sess.messages, loadingSessions: false });
               schedulePersist();
             }
@@ -477,7 +498,7 @@ export function createAgentStore(scope: AgentScope) {
           .catch((e) => {
             console.warn('[agentStore] load sessions failed', e);
             if (get().projectId !== projectId) return;
-            const sess = makeSession(scope, '新会话', mode, runMode);
+            const sess = makeSession(scope, '新会话', mode, runMode, get().permission);
             set({ sessions: [sess], activeSessionId: sess.id, messages: sess.messages, loadingSessions: false });
           });
       },
@@ -496,12 +517,17 @@ export function createAgentStore(scope: AgentScope) {
 
       setPermission(p) {
         // 三选一权限：计划进行中仅记录（同意计划后按它执行），不退出计划、不热推后端（run_mode 仍为 plan）
+        const perm = permissionOfRunMode(p);
         if (behaviorOfRunMode(get().runMode) === 'plan') {
-          set({ permission: p });
-          try { localStorage.setItem(PERMISSION_KEY, p); } catch {}
+          set({ permission: perm });
+          try { localStorage.setItem(PERMISSION_KEY, perm); } catch {}
+          // 计划会话的权限不在 token 里，单独记到会话，换会话/刷新不串
+          const { activeSessionId, sessions } = get();
+          set({ sessions: sessions.map((s) => (s.id === activeSessionId ? { ...s, permission: perm, updated_at: new Date().toISOString() } : s)) });
+          persistNow();
           return;
         }
-        applyRunMode(p);
+        applyRunMode(perm);
       },
 
       setBehavior(b) {
@@ -526,7 +552,7 @@ export function createAgentStore(scope: AgentScope) {
         const { projectId, sessions, mode, runMode } = get();
         if (!projectId) return;
         get().abort();
-        const sess = makeSession(scope, `会话 ${new Date().toLocaleDateString([], { month: '2-digit', day: '2-digit' })} ${nowTime()}`, mode, runMode);
+        const sess = makeSession(scope, `会话 ${new Date().toLocaleDateString([], { month: '2-digit', day: '2-digit' })} ${nowTime()}`, mode, runMode, get().permission);
         set({
           sessions: [sess, ...sessions],
           activeSessionId: sess.id,
@@ -553,7 +579,7 @@ export function createAgentStore(scope: AgentScope) {
           activeSessionId: id,
           messages: (target.messages || []).map((m) => ({ ...m, isThinkingStreaming: false, isStreaming: false })),
           mode: target.mode || get().mode,
-          ...dimsOf(token),
+          ...dimsOf(token, target.permission),
           approvals: {},
       questions: {},
           streamingMsgId: null,
@@ -577,7 +603,7 @@ export function createAgentStore(scope: AgentScope) {
         const remaining = sessions.filter((s) => s.id !== id);
         if (remaining.length === 0) {
           const { mode, runMode } = get();
-          const sess = makeSession(scope, '新会话', mode, runMode);
+          const sess = makeSession(scope, '新会话', mode, runMode, get().permission);
           set({ sessions: [sess], activeSessionId: sess.id, messages: sess.messages, approvals: {}, questions: {} });
         } else if (activeSessionId === id) {
           const first = [...remaining].sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')))[0];
@@ -590,7 +616,7 @@ export function createAgentStore(scope: AgentScope) {
             activeSessionId: first.id,
             messages: (first.messages || []).map((m) => ({ ...m, isThinkingStreaming: false, isStreaming: false })),
             mode: first.mode || get().mode,
-            ...dimsOf(token),
+            ...dimsOf(token, first.permission),
             approvals: {},
       questions: {},
             streamingMsgId: null,
@@ -673,7 +699,7 @@ export function createAgentStore(scope: AgentScope) {
         const planText = planMsg.text || '';
         if (!planText.trim()) return;
         // 批准计划：退出计划态，回到用户选定的权限执行（变更前确认=危险操作逐个问 / 完全访问=直接跑 / 造能力=可提案新能力）
-        const nextToken = get().permission;
+        const nextToken = permissionOfRunMode(get().permission);
         get().setRunMode(nextToken);
         const text = '按已批准的计划执行';
         const ctx: Record<string, any> = { ...buildContext(), run_mode: nextToken, approved_plan: planText };
