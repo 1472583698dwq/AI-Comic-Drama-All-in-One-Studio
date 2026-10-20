@@ -203,6 +203,8 @@ export interface Project {
   created_at: string;
   updated_at: string;
   engine?: string;
+  /** 内容版本（服务端乐观锁）：整份保存/字段级 patch 都带它，409 表示本地快照已过期 */
+  _rev?: number;
 }
 
 export interface MCPToolDefinition {

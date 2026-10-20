@@ -3225,7 +3225,9 @@ class MCPServerRegistry:
                     )
                 elif tool_name == "stage_control":
                     result = _stage_ops.apply_stage_control(_content_s, arguments)
-                    _pm_stage.save_content(_pid_s, _content_s)
+                    _saved_stage = _pm_stage.save_content(_pid_s, _content_s)
+                    # 前端据此对齐本地 _rev，后续整份保存不会把这次舞台写入当成旧快照覆盖
+                    result["content_rev"] = (_saved_stage or {}).get("_rev")
                 else:
                     _shot = _stage_ops.find_shot(
                         _content_s,

@@ -6,11 +6,11 @@ import io
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Body, HTTPException, UploadFile, File, Form, Query
+from fastapi import APIRouter, Body, HTTPException, UploadFile, File, Form, Query, Request
 from pydantic import BaseModel
 
 from app.models.project_meta import ProjectMetaCreate, ProjectMetaUpdate
-from app.providers.project.manager import project_manager
+from app.providers.project.manager import project_manager, ProjectRevConflict
 
 router = APIRouter()
 
@@ -212,12 +212,48 @@ async def get_project_content(project_id: str):
     return {"meta": meta, "content": content}
 
 
-@router.put("/projects/{project_id}/content")
-async def save_project_content(project_id: str, body: dict):
-    # body 为完整 ProjectContent
+def _expected_rev(request: Optional[Request], body: Dict[str, Any]) -> Optional[int]:
+    """从 If-Match 头或 body._rev 读取客户端持有的版本号（缺省 = 旧客户端，不做乐观锁）。"""
+    raw: Any = None
+    if request is not None:
+        raw = request.headers.get("if-match")
+    if raw is None and isinstance(body, dict):
+        raw = body.get("_rev")
+    if raw is None or raw == "":
+        return None
     try:
-        saved = project_manager.save_content(project_id, body)
-        return {"status": "saved", "content": saved}
+        return int(str(raw).strip().strip('"'))
+    except Exception:
+        return None
+
+
+@router.put("/projects/{project_id}/content")
+async def save_project_content(project_id: str, body: dict, request: Request):
+    # body 为完整 ProjectContent；带 _rev/If-Match 时做乐观锁，旧快照返回 409
+    try:
+        saved = project_manager.save_content(project_id, body, expected_rev=_expected_rev(request, body))
+        return {"status": "saved", "content": saved, "rev": saved.get("_rev")}
+    except ProjectRevConflict as e:
+        raise HTTPException(status_code=409, detail={"code": "rev_conflict", "current_rev": e.current_rev})
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"保存失败: {e}")
+
+
+@router.patch("/projects/{project_id}/shots/{shot_id}")
+async def patch_project_shot(project_id: str, shot_id: str, body: dict, request: Request):
+    """字段级合并单个分镜（只发差异字段），避免整份 PUT 把服务端舞台/新分镜覆盖回旧值。"""
+    try:
+        updates = dict(body or {})
+        saved = project_manager.patch_shot(
+            project_id, shot_id, updates, expected_rev=_expected_rev(request, updates),
+        )
+        return saved
+    except ProjectRevConflict as e:
+        raise HTTPException(status_code=409, detail={"code": "rev_conflict", "current_rev": e.current_rev})
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"分镜不存在: {shot_id}")
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:

@@ -264,6 +264,10 @@ export const Director3DStage: React.FC = () => {
   const [activeCamId, setActiveCamId] = useState<string | null>(null);
   const camOverrideRef = useRef<StageCamera | null>(null);
   const presetKeyRef = useRef('');
+  // 3D 场景重建完成标记（含 GLB 异步加载）：远控导出必须等它，不能靠固定 260ms
+  const stageSceneReadyRef = useRef(true);
+  // 远控导出的白模提示词由服务端 shot 构造，避免读组件里尚未同步的旧 state
+  const clayPromptOverrideRef = useRef<string | null>(null);
 
   // 同步 activeShot（仅跟随 activeShotId，避免任何 project 更新都重置未保存的手动调整）
   // stageSyncRev：手动触发的一次性重灌（如远控导出前刚把服务端最新状态拉回内存，同镜也要重灌）
@@ -273,15 +277,16 @@ export const Director3DStage: React.FC = () => {
     const shots = shotsInEpisode(st.project, st.activeEpisodeId);
     const shot = shots.find((sh) => sh.id === st.activeShotId) || shots[0];
     if (!shot) return;
-    if (shot.camera_framing) setFraming(shot.camera_framing);
-    if (shot.camera_motion) setMotion(shot.camera_motion);
-    if (shot.pose_preset) setPose(shot.pose_preset);
-    if (shot.focal_length_mm) setFocalLength(shot.focal_length_mm);
-    if (shot.camera_roll_deg !== undefined) setCameraRoll(shot.camera_roll_deg);
-    if (shot.cast_layout) setCastLayout(shot.cast_layout);
-    if (shot.props_config) setPropsConfig(shot.props_config);
-    if (shot.motion_speed) setMotionSpeed(shot.motion_speed);
-    if (shot.walk_path) setWaypointsBoth(shot.walk_path);
+    // 缺字段必须显式复位：否则切到「没有该字段」的新分镜时会残留上一镜 state，看起来永远回默认/旧值
+    setFraming(shot.camera_framing ?? 'medium');
+    setMotion(shot.camera_motion ?? 'push_in');
+    setPose(shot.pose_preset ?? 'stand');
+    setFocalLength(shot.focal_length_mm ?? 35);
+    setCameraRoll(shot.camera_roll_deg ?? 0);
+    setCastLayout(shot.cast_layout ?? 'solo');
+    setPropsConfig(Array.isArray(shot.props_config) ? shot.props_config : []);
+    setMotionSpeed((shot.motion_speed as any) || '1.0x');
+    setWaypointsBoth(Array.isArray(shot.walk_path) ? shot.walk_path : []);
     // 机位列表跟随分镜；切镜清空本镜截图队列与机位覆盖（避免串镜）
     setStageCameras(Array.isArray((shot as any).stage_cameras) ? (shot as any).stage_cameras : []);
     setShotQueue([]);
@@ -313,8 +318,8 @@ export const Director3DStage: React.FC = () => {
         });
       }
     }
-    if (shot.lighting_config) {
-      const lc = shot.lighting_config;
+    {
+      const lc = (shot.lighting_config || {}) as any;
       setKeyIntensity(lc.keyIntensity ?? 3.2);
       setKeyAzimuth(lc.keyAzimuth ?? 40);
       setKeyTemp(lc.keyTemp ?? 'neon');
@@ -991,6 +996,7 @@ export const Director3DStage: React.FC = () => {
   useEffect(() => {
     if (!sceneRef.current || !stageEntitiesGroupRef.current) return;
     let cancelled = false;
+    stageSceneReadyRef.current = false;
     const stage = stageEntitiesGroupRef.current;
     // 清理旧实体但保留环境 + 保留用户导入的custom模型（小云雀式：换姿势不丢自有资产）
     const keptCustom: THREE.Object3D[] = [];
@@ -1140,7 +1146,7 @@ export const Director3DStage: React.FC = () => {
           (transformControlsRef.current as any).attach(g2.getObjectByName(selName));
         }
       } catch {}
-    })();
+    })().finally(() => { if (!cancelled) stageSceneReadyRef.current = true; });
 
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2017,12 +2023,16 @@ export const Director3DStage: React.FC = () => {
   };
 
   const handleExportClay = async () => {
+    // 远控导出时由服务端 shot 预构造；无论这次是否真正开录都消费掉，避免污染下一次手动导出
+    const promptOverride = clayPromptOverrideRef.current;
+    clayPromptOverrideRef.current = null;
     if (!activeShot) { setClayMsg('请先选择分镜'); return; }
     if (clayExporting || isRecording) return;
     if (!pipRendererRef.current || !showPip) { setClayMsg('请先开启监视器（右上 Monitor）再导出白模'); return; }
     // 回执用的分镜身份在导出开始时锁定（录制期间切镜不应把结果记到别的分镜）
     const clayShotId = activeShot.id;
     const clayShotIndex = activeShot.shot_index;
+    const clayBase = { ...(activeShot as any) };
     // MediaRecorder + WebGL 在后台标签页会被浏览器节流/暂停：录不到画面（静止帧或空文件），
     // 白模参考视频的全部价值是按帧承载运镜，必须在窗口可见时录制（最小化/后台标签页会停摆）。
     if (typeof document !== 'undefined' && document.hidden) {
@@ -2079,15 +2089,16 @@ export const Director3DStage: React.FC = () => {
         return;
       }
       const secs = result.secs || recordSecsRefValue();
-      const prompt = buildClayPrompt(secs);
+      const prompt = promptOverride || buildClayPrompt(secs);
       const patch: Record<string, any> = {
         clay_prompt: prompt,
-        clay_video_url: result.url || (activeShot as any).clay_video_url || '',
-        previz_video_url: result.url || (activeShot as any).previz_video_url || '',
-        clay_first_frame_url: clayFirstFrameRef.current || (activeShot as any).clay_first_frame_url || '',
-        clay_last_frame_url: clayLastFrameRef.current || (activeShot as any).clay_last_frame_url || '',
+        clay_video_url: result.url || clayBase.clay_video_url || '',
+        previz_video_url: result.url || clayBase.previz_video_url || '',
+        clay_first_frame_url: clayFirstFrameRef.current || clayBase.clay_first_frame_url || '',
+        clay_last_frame_url: clayLastFrameRef.current || clayBase.clay_last_frame_url || '',
       };
-      try { updateShot(activeShot.id, patch as any); } catch {}
+      // 用导出开始锁定的 shot id（录制期间切镜不能把结果写到别的分镜）
+      try { updateShot(clayShotId, patch as any); } catch {}
       try { await navigator.clipboard.writeText(prompt); } catch {}
       setClayMsg(
         `白模导出完成：${secs.toFixed(1)}s 连续运镜视频 + 首/尾帧已落分镜（clay_video_url / clay_first_frame_url / clay_last_frame_url）；`
@@ -2122,13 +2133,13 @@ export const Director3DStage: React.FC = () => {
 
   // Agent 舞台控制实时应用：stage_control → tool_result → agent-stage-patch → 落盘 + 3D 即时更新
   useEffect(() => {
-    const onAgentPatch = (ev: any) => {
+    const onAgentPatch = async (ev: any) => {
       const detail = ev?.detail || {};
       const patch = detail.patch && typeof detail.patch === 'object' ? detail.patch : null;
       const store = useProjectStore.getState();
+      const activeId = store.activeProjectId || store.project?.id;
       // Agent 新建了分镜（0 镜项目解锁）：重新拉项目并自动切到该镜
       if (detail.created_shot) {
-        const activeId = store.activeProjectId || store.project?.id;
         if (!detail.project_id || !activeId || String(detail.project_id) === String(activeId)) {
           store.loadActiveProject().then(() => {
             const st2 = useProjectStore.getState();
@@ -2152,8 +2163,24 @@ export const Director3DStage: React.FC = () => {
       if (!shot && !detail.shot_id && !detail.shot_index) {
         shot = allShots.find((sh) => sh.id === store.activeShotId) || allShots[0];
       }
-      if (!shot) return;
-      try { store.updateShot(shot.id, patch); } catch {}
+      if (!shot && (detail.shot_id || detail.shot_index !== undefined)) {
+        // 服务端已新建/改过而本地还是旧快照：拉一次项目再定位，不要静默丢弃 patch
+        try { await store.reloadProjectContent(); } catch {
+          toast.error('Agent 已更新服务端舞台，但重新拉取项目失败，请手动刷新');
+          return;
+        }
+        const st2 = useProjectStore.getState();
+        const all2 = shotsInEpisode(st2.project, st2.activeEpisodeId);
+        shot = all2.find((sh) => detail.shot_id && sh.id === detail.shot_id)
+          || all2.find((sh) => detail.shot_index !== undefined && Number(sh.shot_index) === Number(detail.shot_index));
+      }
+      if (!shot) {
+        toast.error('Agent 已更新服务端舞台，但前端仍未找到该分镜（已重新拉取项目）');
+        return;
+      }
+      // 服务端已经是权威：只回显到内存，绝不整份 PUT 回写（旧快照会覆盖掉刚写入的舞台/新分镜）
+      try { store.updateShotLocal(shot.id, patch); } catch {}
+      if (detail.content_rev !== undefined) store.applyContentRev(activeId, detail.content_rev);
       const isActive = shot.id === (store.activeShotId || allShots[0]?.id);
       if (!isActive) return;
       const g = stageEntitiesGroupRef.current;
@@ -2178,18 +2205,18 @@ export const Director3DStage: React.FC = () => {
           }
         });
       }
-      if (patch.pose_preset) setPose(patch.pose_preset);
-      if (patch.camera_framing) setFraming(patch.camera_framing);
-      if (patch.camera_motion) setMotion(patch.camera_motion);
-      if (typeof patch.focal_length_mm === 'number') setFocalLength(patch.focal_length_mm);
-      if (typeof patch.camera_roll_deg === 'number') setCameraRoll(patch.camera_roll_deg);
-      if (patch.motion_speed) setMotionSpeed(patch.motion_speed);
-      if (patch.cast_layout) setCastLayout(patch.cast_layout);
-      if (Array.isArray(patch.props_config)) setPropsConfig(patch.props_config as any);
-      if (Array.isArray(patch.walk_path)) setWaypointsBoth(patch.walk_path);
-      if (Array.isArray(patch.stage_cameras)) setStageCameras(patch.stage_cameras as any);
-      if (patch.lighting_config) {
-        const lc = patch.lighting_config;
+      if (patch.pose_preset !== undefined) setPose(patch.pose_preset ?? 'stand');
+      if (patch.camera_framing !== undefined) setFraming(patch.camera_framing ?? 'medium');
+      if (patch.camera_motion !== undefined) setMotion(patch.camera_motion ?? 'push_in');
+      if (patch.focal_length_mm !== undefined) setFocalLength(Number(patch.focal_length_mm) || 35);
+      if (patch.camera_roll_deg !== undefined) setCameraRoll(Number(patch.camera_roll_deg) || 0);
+      if (patch.motion_speed !== undefined) setMotionSpeed(patch.motion_speed || '1.0x');
+      if (patch.cast_layout !== undefined) setCastLayout(patch.cast_layout ?? 'solo');
+      if (patch.props_config !== undefined) setPropsConfig(Array.isArray(patch.props_config) ? patch.props_config as any : []);
+      if (patch.walk_path !== undefined) setWaypointsBoth(Array.isArray(patch.walk_path) ? patch.walk_path : []);
+      if (patch.stage_cameras !== undefined) setStageCameras(Array.isArray(patch.stage_cameras) ? patch.stage_cameras as any : []);
+      if (patch.lighting_config !== undefined) {
+        const lc = patch.lighting_config || {};
         setKeyIntensity(lc.keyIntensity ?? 3.2);
         setKeyAzimuth(lc.keyAzimuth ?? 40);
         setKeyTemp(lc.keyTemp ?? 'neon');
@@ -2230,21 +2257,72 @@ export const Director3DStage: React.FC = () => {
       }
       // 关键一步：远控摆台（stage_control）只写服务端，浏览器内存可能整份是旧的。
       // 录制前先以服务端为准对齐内存，否则会录到旧舞台，并把旧状态回写覆盖服务端新状态。
-      await resyncStageFromServer();
+      const synced = await resyncStageFromServer();
+      if (!synced) toast.warning('拉取服务端舞台失败：将按当前内存状态导出，可能不是最新摆台');
       const shot = findClayTargetShot(detail);
       if (!shot) {
         toast.error('系统 Agent 请求导出白模，但当前项目没有分镜');
         return;
       }
       useProjectStore.getState().setActiveShotId(shot.id);
+      const s: any = shot;
+      // 组件 state 直接以服务端 shot 为准（同步 effect 只是下一拍再兜底一次）
+      const nextPose = s.pose_preset ?? 'stand';
+      const nextCast = s.cast_layout ?? 'solo';
+      const nextProps = Array.isArray(s.props_config) ? s.props_config : [];
+      const needsRebuild = String(pose) !== String(nextPose)
+        || String(castLayout) !== String(nextCast)
+        || JSON.stringify(propsConfig) !== JSON.stringify(nextProps);
+      if (needsRebuild) stageSceneReadyRef.current = false;
+      setFraming(s.camera_framing ?? 'medium');
+      setMotion(s.camera_motion ?? 'push_in');
+      setPose(nextPose);
+      setCastLayout(nextCast);
+      setPropsConfig(nextProps);
+      setFocalLength(s.focal_length_mm ?? 35);
+      setCameraRoll(s.camera_roll_deg ?? 0);
+      setMotionSpeed((s.motion_speed as any) || '1.0x');
+      setWaypointsBoth(Array.isArray(s.walk_path) ? s.walk_path : []);
+      {
+        const lc = (s.lighting_config || {}) as any;
+        setKeyIntensity(lc.keyIntensity ?? 3.2);
+        setKeyAzimuth(lc.keyAzimuth ?? 40);
+        setKeyTemp(lc.keyTemp ?? 'neon');
+        setRimIntensity(lc.rimIntensity ?? 3.5);
+        setAmbientIntensity(lc.ambientIntensity ?? 1.8);
+        setExposure(lc.exposure ?? 1.15);
+      }
       // 同镜也要重灌：把服务端刚拉回的状态重新应用到组件 state 与 3D 场景（布偶 / 走位 / 机位）
       setStageSyncRev((v) => v + 1);
       // stage_export_clay 的时长/帧率覆盖：只作用于紧随其后的这一次录制
       if (Number(detail?.duration) > 0) clayDurationOverrideRef.current = Math.min(60, Number(detail.duration));
       if (Number(detail?.fps) > 0) clayFpsOverrideRef.current = Math.max(10, Math.min(60, Math.round(Number(detail.fps))));
+      // clay_prompt 直接用服务端 shot 构造，不读组件闭包里的旧 framing/motion（260ms 等不到 React 提交与 GLB 重建）
+      const secs = Number(clayDurationOverrideRef.current) > 0
+        ? Number(clayDurationOverrideRef.current)
+        : (Number(s.duration) > 0 ? Number(s.duration) : 6);
+      clayPromptOverrideRef.current = buildClayPromptText({
+        framing: (s.camera_framing ?? 'medium') as any,
+        motion: (s.camera_motion ?? 'push_in') as any,
+        focalLength: Number(s.focal_length_mm ?? 35),
+        cameraRoll: Number(s.camera_roll_deg ?? 0),
+        motionSpeed: ((s.motion_speed as any) || '1.0x'),
+        aspect: projectAspect,
+        secs,
+        waypoints: Array.isArray(s.walk_path) ? s.walk_path : [],
+      });
       toast.info('系统 Agent 请求导出白模：正在切换灰模并录制连续运镜（请保持窗口可见）');
-      // 等切镜状态和 Three 场景完成同步后再调用导出，避免录到上一镜。
-      window.setTimeout(() => { void handleExportClayRef.current?.(); }, 260);
+      // 等 React 提交 + 3D 重建（含 GLB 异步加载）真正完成，而不是固定 260ms
+      await workerSleep(80);
+      {
+        const deadline = Date.now() + 6000;
+        while (!stageSceneReadyRef.current && Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 60));
+        }
+        if (!stageSceneReadyRef.current) toast.warning('3D 场景重建超时：仍按服务端参数导出，请检查成片运镜');
+      }
+      await new Promise<void>((r) => requestAnimationFrame(() => r()));
+      void handleExportClayRef.current?.();
     })();
   };
 

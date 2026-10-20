@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { Project, StoryboardShot, Character, AspectRatio, StylePreset, Episode, Scene } from '../types';
 import { apiService } from '../services/api';
+import { toast } from './useDialogStore';
 import { resolveTab } from './usePageStore';
 import { useProjectListStore } from './useProjectListStore';
 import { scenesInEpisode, ALL_EPISODES, UNASSIGNED_EPISODE } from '../utils/episodeScope';
@@ -88,7 +89,12 @@ interface ProjectState {
   // Script & Generation
   importNovelScript: (text: string, style?: StylePreset, ratio?: AspectRatio) => Promise<void>;
   generateShotVideo: (shotId: string, options?: { mode?: 'i2v' | 'r2v' | 't2v'; prompt?: string; duration?: number; provider?: string; workflow_id?: string; dynamic_inputs?: Record<string, any>; omit_first_frame?: boolean; reference_videos?: string[] }) => Promise<void>;
+  /** 字段级 PATCH（只发差异字段）：常规本地编辑/生成回写都走这里 */
   updateShot: (shotId: string, updates: Partial<StoryboardShot>) => void;
+  /** 只改内存不落盘：Agent 已完成服务端写入的回显，避免旧快照整份 PUT 反覆盖 */
+  updateShotLocal: (shotId: string, updates: Partial<StoryboardShot>) => void;
+  /** 保存/字段 patch 成功后对齐服务端 _rev（不再触发保存） */
+  applyContentRev: (projectId: string | null | undefined, rev: number | null | undefined) => void;
   updateCharacter: (charId: string, updates: Partial<Character>) => void;
   addCharacter: (character: Character) => void;
   deleteCharacter: (charId: string) => void;
@@ -119,17 +125,76 @@ interface ProjectState {
 }
 
 let saveTimer: any = null;
+/** 串行保存链：避免两次防抖保存同时飞出去，第二个带着旧 _rev 被 409 打回。 */
+let saveChain: Promise<void> = Promise.resolve();
+
+/**
+ * 整份保存（结构变更用：增删分镜/角色/场景等）。
+ * - 每次真正发送时取**当前** project（而不是排期时的旧快照）；
+ * - 带 _rev 做乐观锁；命中 409 说明服务端（Agent/导演台）已先行更新，重新拉取而不是覆盖。
+ */
 const persistProject = (proj: Project | null, activePid: string | null) => {
   if (!proj) return;
   const pid = proj.id || activePid;
   if (!pid) return;
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    apiService.saveProjectContent(pid, proj).catch((err) => {
-      console.warn('Auto-save project failed:', err);
-    });
+    saveTimer = null;
+    saveChain = saveChain.then(async () => {
+      const store = useProjectStore.getState();
+      const cur = store.project;
+      const curPid = cur?.id || store.activeProjectId;
+      if (!cur || !curPid || String(curPid) !== String(pid)) return;
+      try {
+        const res = await apiService.saveProjectContent(pid, cur);
+        store.applyContentRev(pid, res?.rev ?? res?.content?._rev);
+      } catch (e: any) {
+        if (e?.status === 409) {
+          await store.reloadProjectContent();
+          toast.warning('项目已在服务端更新（Agent/导演台），已加载最新内容');
+        } else {
+          console.warn('Auto-save project failed:', e);
+        }
+      }
+    }).catch(() => {});
   }, 250);
 };
+
+/** 合并分镜更新（含 image/video history 追加），返回新 project + 真正需要 PATCH 的差异。 */
+function mergeShotUpdate(proj: Project, shotId: string, updates: Partial<StoryboardShot>) {
+  let found = false;
+  const patch: Record<string, any> = { ...(updates as any) };
+  const newScenes = proj.scenes.map((sc) => ({
+    ...sc,
+    shots: sc.shots.map((sh) => {
+      if (sh.id !== shotId) return sh;
+      found = true;
+      const merged: any = { ...sh, ...updates };
+      // 历史 image_url/video_url 变更时追加
+      if ((updates as any).image_url && (updates as any).image_url !== sh.image_url) {
+        const hist = [...(sh.history || [])];
+        if (sh.image_url) hist.push({ image_url: sh.image_url, ts: new Date().toISOString(), provider: (sh as any).image_provider });
+        if (hist.length > 5) hist.shift();
+        merged.history = [...hist, { image_url: (updates as any).image_url, ts: new Date().toISOString(), provider: (updates as any).image_provider || (sh as any).image_provider }];
+        if (merged.history.length > 6) merged.history = merged.history.slice(-6);
+      }
+      if ((updates as any).video_url && (updates as any).video_url !== sh.video_url) {
+        const hist = [...(merged.history || sh.history || [])];
+        hist.push({ video_url: (updates as any).video_url, ts: new Date().toISOString(), provider: (updates as any).video_provider || (sh as any).video_provider });
+        if (hist.length > 6) hist.splice(0, hist.length - 6);
+        merged.history = hist;
+      }
+      if (merged.history !== sh.history) patch.history = merged.history;
+      return merged;
+    }),
+  }));
+  // PATCH 走 JSON：undefined 会被丢弃，显式转 null 才能清空服务端字段（如清除自定义关节姿态）
+  for (const k of Object.keys(patch)) {
+    if (patch[k] === undefined) patch[k] = null;
+  }
+  const total = newScenes.flatMap((s) => s.shots).reduce((sum, sh) => sum + sh.duration, 0);
+  return { nextProj: { ...proj, scenes: newScenes }, total, found, patch };
+}
 
 /**
  * 空白项目兜底：后端「新建空白项目」不落 content.json，`GET /projects/{id}` 返回的
@@ -397,36 +462,50 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   updateShot: (shotId, updates) => {
     const proj = get().project;
     if (!proj) return;
-
-    const newScenes = proj.scenes.map((sc) => ({
-      ...sc,
-      shots: sc.shots.map((sh) => {
-        if (sh.id !== shotId) return sh;
-        const merged: any = { ...sh, ...updates };
-        // 历史：image_url/video_url 变更时追加
-        if ((updates as any).image_url && (updates as any).image_url !== sh.image_url) {
-          const hist = [...(sh.history || [])];
-          if (sh.image_url) hist.push({ image_url: sh.image_url, ts: new Date().toISOString(), provider: (sh as any).image_provider });
-          if (hist.length > 5) hist.shift();
-          merged.history = [...hist, { image_url: (updates as any).image_url, ts: new Date().toISOString(), provider: (updates as any).image_provider || (sh as any).image_provider }];
-          if (merged.history.length > 6) merged.history = merged.history.slice(-6);
-        }
-        if ((updates as any).video_url && (updates as any).video_url !== sh.video_url) {
-          const hist = [...(merged.history || sh.history || [])];
-          hist.push({ video_url: (updates as any).video_url, ts: new Date().toISOString(), provider: (updates as any).video_provider || (sh as any).video_provider });
-          if (hist.length > 6) hist.splice(0, hist.length - 6);
-          merged.history = hist;
-        }
-        return merged;
-      }),
-    }));
-
-    const total = newScenes.flatMap((s) => s.shots).reduce((sum, sh) => sum + sh.duration, 0);
-    const nextProj = { ...proj, scenes: newScenes };
+    const { nextProj, total, found, patch } = mergeShotUpdate(proj, shotId, updates);
+    if (!found) return;
     set({ project: nextProj, totalDuration: total });
-    // 自动持久化
+    // 字段级 PATCH：不再把整份（可能过期的）项目 PUT 上去覆盖服务端舞台/新分镜
     const pid = nextProj.id || get().activeProjectId;
-    persistProject(nextProj, pid);
+    if (!pid) return;
+    apiService.patchProjectShot(pid, shotId, patch, nextProj._rev)
+      .then((res) => { get().applyContentRev(pid, res?.content_rev ?? res?.rev); })
+      .catch(async (e: any) => {
+        if (e?.status === 409) {
+          // 本地快照落后（Agent/导演台刚写过）：拉最新 rev 后重放本次字段 patch，避免丢用户这次修改
+          const fresh = await get().reloadProjectContent();
+          if (fresh) {
+            try {
+              const res = await apiService.patchProjectShot(pid, shotId, patch, fresh._rev);
+              get().applyContentRev(pid, res?.content_rev ?? res?.rev);
+              get().updateShotLocal(shotId, updates);
+              return;
+            } catch { /* 落到下面的提示 */ }
+          }
+          toast.warning('项目已在服务端更新（Agent/导演台），已加载最新内容');
+        } else {
+          toast.error(`保存分镜失败：${e?.message || e}`);
+        }
+      });
+  },
+
+  updateShotLocal: (shotId, updates) => {
+    const proj = get().project;
+    if (!proj) return;
+    const { nextProj, total, found } = mergeShotUpdate(proj, shotId, updates);
+    if (!found) return;
+    set({ project: nextProj, totalDuration: total });
+  },
+
+  applyContentRev: (projectId, rev) => {
+    const cur = get().project;
+    if (!cur) return;
+    const curPid = cur.id || get().activeProjectId;
+    if (projectId && curPid && String(projectId) !== String(curPid)) return;
+    const n = Number(rev);
+    if (!Number.isFinite(n) || n < 0) return;
+    if (Number(cur._rev ?? -1) === n) return;
+    set({ project: { ...cur, _rev: n } });
   },
 
   generateShotVideo: async (shotId: string, options) => {

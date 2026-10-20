@@ -39,6 +39,14 @@ def _save_index(items: List[Dict[str, Any]]):
         json.dump(items, f, ensure_ascii=False, indent=2)
 
 
+class ProjectRevConflict(Exception):
+    """内容版本冲突：客户端持有的 _rev 落后于服务端（乐观锁）。"""
+
+    def __init__(self, current_rev: int):
+        self.current_rev = int(current_rev or 0)
+        super().__init__(f"content rev conflict (current={self.current_rev})")
+
+
 def _content_path(project_id: str) -> str:
     return os.path.join(PROJECTS_ROOT, project_id, "content.json")
 
@@ -148,7 +156,11 @@ class ProjectManager:
             return None
         try:
             with open(p, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+            # 旧内容没有版本号：读时补 0（不落盘），下次保存自动升到 1
+            if isinstance(data, dict):
+                data.setdefault("_rev", 0)
+            return data
         except Exception:
             return None
 
@@ -281,20 +293,31 @@ class ProjectManager:
                 return meta.model_dump()
         return None
 
-    def save_content(self, project_id: str, content: Dict[str, Any]) -> Dict[str, Any]:
+    def save_content(
+        self,
+        project_id: str,
+        content: Dict[str, Any],
+        expected_rev: Optional[int] = None,
+    ) -> Dict[str, Any]:
         project_id = _resolve_id(project_id)
-        # 确保 meta 存在
+        # 确认 meta 存在
         meta_dict = self.get_meta(project_id)
         if not meta_dict:
             raise FileNotFoundError(f"项目不存在: {project_id}")
-        # 校验 content 可为 Project
+        # 乐观锁：旧客户端整份 PUT 不能覆盖服务端（Agent/导演台）刚写入的新状态
+        current = self.get_content(project_id) or {}
+        cur_rev = int(current.get("_rev") or 0)
+        if expected_rev is not None and int(expected_rev) != cur_rev:
+            raise ProjectRevConflict(cur_rev)
+        # 校验 content 为 Project
         try:
             from app.models.schemas import Project as ProjModel
             proj = ProjModel.model_validate(content)
             content = proj.model_dump()
         except Exception:
-            # 允许原始 dict 透传
-            pass
+            # 保留原始 dict 透传
+            content = dict(content or {})
+        content["_rev"] = cur_rev + 1
         os.makedirs(os.path.join(PROJECTS_ROOT, project_id), exist_ok=True)
         with open(_content_path(project_id), "w", encoding="utf-8") as f:
             json.dump(content, f, ensure_ascii=False, indent=2)
@@ -316,6 +339,39 @@ class ProjectManager:
         except Exception:
             pass
         return content
+
+    def patch_shot(
+        self,
+        project_id: str,
+        shot_id: str,
+        updates: Dict[str, Any],
+        expected_rev: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """字段级更新单个分镜：只合并传入字段，避免浏览器整份 PUT 覆盖服务端舞台状态。
+
+        与 PUT /content 共用 _rev 乐观锁；命中后 rev+1，并返回新 rev 供前端对齐。
+        """
+        project_id = _resolve_id(project_id)
+        content = self.get_content(project_id)
+        if not content:
+            raise FileNotFoundError(f"项目不存在或内容为空: {project_id}")
+        cur_rev = int(content.get("_rev") or 0)
+        if expected_rev is not None and int(expected_rev) != cur_rev:
+            raise ProjectRevConflict(cur_rev)
+        target = None
+        for scene in (content.get("scenes") or []):
+            for shot in (scene.get("shots") or []):
+                if str(shot.get("id") or "") == str(shot_id):
+                    target = shot
+                    break
+            if target is not None:
+                break
+        if target is None:
+            raise KeyError(shot_id)
+        clean = {k: v for k, v in (updates or {}).items() if k != "_rev"}
+        target.update(clean)
+        saved = self.save_content(project_id, content)
+        return {"status": "saved", "shot": target, "content_rev": saved.get("_rev", cur_rev + 1)}
 
     def save_canvas(self, project_id: str, snapshot: Dict[str, Any], canvas_id: Optional[str] = None, name: Optional[str] = None) -> Dict[str, Any]:
         project_id = _resolve_id(project_id)

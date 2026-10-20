@@ -835,8 +835,31 @@ export const apiService = {
     return await res.json();
   },
   async saveProjectContent(projectId: string, content: any): Promise<any> {
-    const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/content`, { method: 'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(content) });
-    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (content && content._rev !== undefined && content._rev !== null) headers['If-Match'] = String(content._rev);
+    const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/content`, { method: 'PUT', headers, body: JSON.stringify(content) });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      const err: any = new Error(extractErrorMessage(res, data));
+      err.status = res.status;
+      err.detail = data?.detail;
+      throw err;
+    }
+    return await res.json();
+  },
+  async patchProjectShot(projectId: string, shotId: string, updates: any, rev?: number): Promise<any> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (rev !== undefined && rev !== null) headers['If-Match'] = String(rev);
+    const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/shots/${encodeURIComponent(shotId)}`, {
+      method: 'PATCH', headers, body: JSON.stringify(updates || {}),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      const err: any = new Error(extractErrorMessage(res, data));
+      err.status = res.status;
+      err.detail = data?.detail;
+      throw err;
+    }
     return await res.json();
   },
   async getProjectCanvas(projectId: string, canvasId?: string): Promise<any> {

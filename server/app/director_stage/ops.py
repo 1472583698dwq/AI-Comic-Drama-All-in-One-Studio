@@ -199,6 +199,12 @@ def _new_shot(scene_index: int, shot_index: int, payload: Dict[str, Any]) -> Dic
         pose = "stand"
     action = str(payload.get("action_desc") or payload.get("title") or "新分镜")[:200]
     dialogue = str(payload.get("dialogue") or "")
+    props = payload.get("props_config") or []
+    walk_path = payload.get("walk_path") or []
+    lighting = payload.get("lighting_config") or {}
+    cameras = payload.get("stage_cameras") or []
+    layout = payload.get("stage_layout") or {}
+    pose_raw = payload.get("mannequin_pose") or {"v": 1, "entities": {}}
     return {
         "id": f"shot_{_uuid.uuid4().hex[:10]}",
         "scene_index": scene_index,
@@ -214,6 +220,16 @@ def _new_shot(scene_index: int, shot_index: int, payload: Dict[str, Any]) -> Dic
         "duration": _clamp(payload.get("duration", 3.5), 1.5, 10.0, 3.5),
         "subtitle_text": str(payload.get("subtitle_text") or dialogue or action)[:200],
         "status": "ready",
+        # 舞台字段必须随 create_shot 一起落盘：否则后续任何整份保存/远控导出都会按默认值回填
+        "focal_length_mm": float(payload.get("focal_length_mm") or 35.0),
+        "camera_roll_deg": float(payload.get("camera_roll_deg") or 0.0),
+        "cast_layout": str(payload.get("cast_layout") or "solo"),
+        "props_config": [str(x) for x in props if str(x).strip()] if isinstance(props, list) else [],
+        "walk_path": list(walk_path) if isinstance(walk_path, list) else [],
+        "lighting_config": dict(lighting) if isinstance(lighting, dict) else {},
+        "stage_cameras": list(cameras) if isinstance(cameras, list) else [],
+        "stage_layout": dict(layout) if isinstance(layout, dict) else {},
+        "mannequin_pose": dict(pose_raw) if isinstance(pose_raw, dict) else {"v": 1, "entities": {}},
     }
 
 

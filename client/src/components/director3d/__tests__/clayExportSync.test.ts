@@ -3,10 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const getProject = vi.fn();
 const saveProjectContent = vi.fn(async (..._a: any[]) => ({}));
+const patchProjectShot = vi.fn(async (..._a: any[]) => ({ content_rev: 2 }));
 vi.mock('../../../services/api', () => ({
   apiService: {
     getProject: (...a: any[]) => (getProject as any)(...a),
     saveProjectContent: (...a: any[]) => (saveProjectContent as any)(...a),
+    patchProjectShot: (...a: any[]) => (patchProjectShot as any)(...a),
   },
 }));
 
@@ -24,6 +26,7 @@ const projectWith = (shotOver: Record<string, any> = {}) => ({
 beforeEach(() => {
   getProject.mockReset();
   saveProjectContent.mockClear();
+  patchProjectShot.mockClear();
   useProjectStore.setState({
     project: null,
     activeProjectId: 'p1',
@@ -70,7 +73,7 @@ describe('白模导出前对齐服务端状态', () => {
     expect(findClayTargetShot({ shot_id: 'sh_1' })?.id).toBe('sh_1');
   });
 
-  it('录制结果回写落在服务端新状态之上：clay_* 与远控 patch 同时在，旧状态不再覆盖', async () => {
+  it('录制结果只 PATCH clay_* 字段：不携带旧舞台，不会覆盖服务端新状态', async () => {
     // 内存旧状态（单人/推镜）
     useProjectStore.setState({
       project: projectWith({ camera_motion: 'push_in', cast_layout: 'solo' }),
@@ -86,15 +89,23 @@ describe('白模导出前对齐服务端状态', () => {
       clay_video_url: '/storage/assets/ast_x/original.mp4',
       clay_prompt: '全景 (WS)，焦距 28mm；运镜：环绕 (Orbit)',
     } as any);
-    await new Promise((r) => setTimeout(r, 400));
-    expect(saveProjectContent).toHaveBeenCalledTimes(1);
-    const [, saved] = saveProjectContent.mock.calls[0];
-    const savedShot = (saved as any).scenes[0].shots[0];
-    // 回写的是「服务端新状态 + clay 结果」，不是内存里的旧舞台
+    await new Promise((r) => setTimeout(r, 50));
+    // 字段级 PATCH：只带 clay_*，绝不能把旧的 camera_motion/cast_layout 一起写回去
+    expect(patchProjectShot).toHaveBeenCalledTimes(1);
+    const [pid, shotId, patch] = patchProjectShot.mock.calls[0];
+    expect(pid).toBe('p1');
+    expect(shotId).toBe('sh_1');
+    expect(patch.clay_video_url).toBe('/storage/assets/ast_x/original.mp4');
+    expect(patch.clay_prompt).toContain('环绕');
+    expect(patch.camera_motion).toBeUndefined();
+    expect(patch.cast_layout).toBeUndefined();
+    // 内存里仍是服务端新舞台 + clay 结果
+    const savedShot = useProjectStore.getState().project!.scenes[0].shots[0] as any;
     expect(savedShot.camera_motion).toBe('orbit');
     expect(savedShot.cast_layout).toBe('duel');
     expect(savedShot.clay_video_url).toBe('/storage/assets/ast_x/original.mp4');
-    expect(savedShot.clay_prompt).toContain('环绕');
+    // 不再有整份 PUT
+    expect(saveProjectContent).not.toHaveBeenCalled();
   });
 
   it('setProject 默认仍会持久化；loadActiveProject 拉取路径不回写', async () => {
