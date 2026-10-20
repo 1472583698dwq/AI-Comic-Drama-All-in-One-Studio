@@ -135,6 +135,8 @@ class PipelineRunRequest(BaseModel):
     custom_instructions: Optional[str] = None
     max_images: int = 12
     image_provider: Optional[str] = None
+    # 图像编辑源（i2i，多图合成分镜）；空 = 与 image_provider 相同
+    image_edit_provider: Optional[str] = None
     image_workflow_id: Optional[str] = None
     audio_provider: Optional[str] = None
     # v2 一键成片

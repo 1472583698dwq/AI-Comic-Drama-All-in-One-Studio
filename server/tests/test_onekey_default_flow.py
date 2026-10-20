@@ -484,5 +484,117 @@ class TestSummaryStyle(unittest.TestCase):
         self.assertEqual(s["style"]["assets_reused"], ["林野"])
 
 
+class TestImageGenVsEditProviders(unittest.TestCase):
+    """图像生成（t2i：三视图/场景空镜）与图像编辑（i2i：多图合成分镜）分开配置。"""
+
+    def _fake_registry(self, captured):
+        class FakeRegistry:
+            async def generate(self, req, provider_id=None):
+                captured["provider_id"] = provider_id
+                captured["req"] = req
+                return SimpleNamespace(image_url="/storage/generated/img.png", provider=provider_id)
+
+        return FakeRegistry()
+
+    def test_edit_provider_defaults_to_generate_provider(self):
+        d = OK.OneKeyDraft(id="d_img", title="t", novel_text="x", image_provider="gen_x")
+        self.assertEqual(OK._img_edit_provider(d), "gen_x")
+        d.image_edit_provider = "edit_y"
+        self.assertEqual(OK._img_edit_provider(d), "edit_y")
+
+    def test_role_image_uses_generate_provider(self):
+        from app.pipelines import unified_orchestrator as UO
+        captured = {}
+        c = _char("c1", "林野")
+        d = OK.OneKeyDraft(id="d_img2", title="t", novel_text="x",
+                           image_provider="gen_x", image_edit_provider="edit_y",
+                           project=SimpleNamespace(characters=[c], scenes=[]))
+        d.style_spec = "cel shading"
+        orig = UO._get_image_registry
+        UO._get_image_registry = lambda: self._fake_registry(captured)
+        try:
+            out = run(OK._onekey_role_image(d, "林野"))
+        finally:
+            UO._get_image_registry = orig
+        self.assertEqual(out.get("status"), "done")
+        self.assertEqual(captured.get("provider_id"), "gen_x")   # 定妆走生成源
+
+    def test_shot_image_uses_edit_provider_with_refs(self):
+        from app.pipelines import unified_orchestrator as UO
+        captured = {}
+        c = _char("c1", "林野", views={"front": "/f.png", "side": "/s.png"})
+        sc = _scene(1, ref="/scene1.png")
+        shot = _shot(1, "林野推门而入", cids=["c1"])
+        sc.shots = [shot]
+        d = OK.OneKeyDraft(id="d_img3", title="t", novel_text="x",
+                           image_provider="gen_x", image_edit_provider="edit_y",
+                           project=SimpleNamespace(characters=[c], scenes=[sc]))
+        orig = UO._get_image_registry
+        UO._get_image_registry = lambda: self._fake_registry(captured)
+        try:
+            out = run(OK._onekey_shot_image(d, 1))
+        finally:
+            UO._get_image_registry = orig
+        self.assertEqual(out.get("engine_role"), "edit")
+        self.assertEqual(captured.get("provider_id"), "edit_y")  # 多图合成分镜走编辑源
+        self.assertTrue(captured["req"].reference_images)
+        self.assertEqual(shot.image_url, "/storage/generated/img.png")
+
+    def test_shot_image_warns_when_edit_source_lacks_i2i(self):
+        from app.pipelines import unified_orchestrator as UO
+        captured = {}
+        c = _char("c1", "林野", views={"front": "/f.png"})
+        sc = _scene(1)
+        shot = _shot(1, "林野推门而入", cids=["c1"])
+        sc.shots = [shot]
+        d = OK.OneKeyDraft(id="d_img4", title="t", novel_text="x",
+                           image_provider="t2i_x", image_edit_provider="t2i_x",
+                           project=SimpleNamespace(characters=[c], scenes=[sc]))
+        orig_registry = UO._get_image_registry
+        orig_caps = OK._image_capabilities
+        UO._get_image_registry = lambda: self._fake_registry(captured)
+        OK._image_capabilities = lambda pid: {"t2i"}
+        try:
+            out = run(OK._onekey_shot_image(d, 1))
+        finally:
+            UO._get_image_registry = orig_registry
+            OK._image_capabilities = orig_caps
+        self.assertIn("warning", out)
+        self.assertIn("i2i", out["warning"])
+
+    def test_summary_reports_image_sources(self):
+        d = OK.OneKeyDraft(id="d_img5", title="t", novel_text="x",
+                           image_provider="gen_x", image_edit_provider="edit_y",
+                           video_provider="vid_z", audio_provider="aud_w",
+                           project=SimpleNamespace(characters=[], scenes=[]))
+        s = OK._onekey_summary(d)
+        self.assertEqual(s["sources"]["image_generate"], "gen_x")
+        self.assertEqual(s["sources"]["image_edit"], "edit_y")
+        self.assertEqual(s["sources"]["video"], "vid_z")
+        self.assertEqual(s["sources"]["audio"], "aud_w")
+
+
+class TestDirectorPromptModes(unittest.TestCase):
+    """直出（跳过分镜合成）与关键帧两种模式都要在导演提示词里说清楚。"""
+
+    def _prompt(self, keyframe: bool) -> str:
+        from app.api import onekey_routes as R
+        d = OK.create_draft(f"ok_mode_{int(keyframe)}", "t", "x")
+        self.addCleanup(lambda: OK._DRAFTS.pop(d.id, None))
+        req = R.OneKeyRunRequest(text="x" * 30, keyframe_mode=keyframe)
+        return R._director_prompt(d.id, req, None)
+
+    def test_direct_mode_skips_storyboard(self):
+        p = self._prompt(False)
+        self.assertIn("跳过", p)
+        self.assertIn("r2v", p)
+        self.assertNotIn("先生成分镜关键帧（多图参考由图像编辑源合成）", p)
+
+    def test_keyframe_mode_mentions_compose_and_i2v(self):
+        p = self._prompt(True)
+        self.assertIn("关键帧", p)
+        self.assertIn("i2v", p)
+
+
 if __name__ == "__main__":
     unittest.main()

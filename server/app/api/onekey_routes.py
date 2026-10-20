@@ -82,19 +82,38 @@ def _director_prompt(draft_id: str, req: "OneKeyRunRequest", team=None) -> str:
     if not req.gen_roles:
         facts.append("用户关闭了定妆补齐（是否补资产由你判断）")
     if getattr(req, "keyframe_mode", False):
-        facts.append("用户允许使用分镜关键帧画面")
+        facts.append("用户选择：先生成分镜关键帧（多图参考由图像编辑源合成），再首帧 i2v 生成视频")
+    else:
+        facts.append("用户选择：**跳过分镜关键帧 / 图像编辑合成**，直接把角色多视图+场景参考喂给视频源"
+                     "（r2v 多参考直出）——不要逐镜先生成分镜画面；只有某镜既无资产参考、视频源也不支持参考时才补关键帧")
+    try:
+        from app.pipelines.onekey_agent import _img_edit_provider as _edit_pid
+        from app.pipelines import onekey_agent as _oka
+        _d = _oka.get_draft(draft_id)
+        if _d is not None and _edit_pid(_d) != _oka._img_provider(_d):
+            facts.append(
+                f"图像分工：定妆三视图/场景空镜＝生成模型（{_oka._img_provider(_d)}），"
+                f"多图合成分镜＝图像编辑模型（{_edit_pid(_d)}）"
+            )
+        elif _d is not None:
+            facts.append(
+                f"图像分工：未单独配置图像编辑源，多图合成分镜与定妆共用（{_oka._img_provider(_d)}）；"
+                f"若该源不支持图生图，分镜合成会退化为文生图"
+            )
+    except Exception:
+        pass
     facts_line = ("已知事实：" + "；".join(facts) + "。\n") if facts else ""
     skill = str(getattr(req, "prompt_skill", "") or "").strip()
     skill_line = ""
     if skill:
         skill_line = (
-            f"用户指定提示词技能：**{skill}**。写/改任何图片/视频提示词前必须先 read_skill(\"{skill}\") "
+            f"用户指定提示词技能：**{skill}**。写/改图片/视频提示词时建议先 read_skill(\"{skill}\") "
             f"并按其结构产出；视频成稿经 onekey_shot_video(prompt_override=...) 传入（工具默认兜底提示词只是基础版）。\n"
         )
     else:
         skill_line = (
-            "写/改任何图片/视频提示词前必须先 read_skill（视频优先 minimax-h3-prompt，通用兜底 prompt-basics）："
-            "执行口硬门控会直接拒绝未读技能的生成调用；"
+            "写/改图片/视频提示词时建议先 read_skill（视频优先 minimax-h3-prompt，通用兜底 prompt-basics）："
+            "技能阅读只是建议、不会拦截生成（读不到或没有合适技能时直接按经验写完整提示词即可）；"
             "成稿经 prompt_override 传入；不写则工具会用六要素兜底提示词。\n"
         )
     return (
@@ -184,6 +203,7 @@ async def _run_agent_task(task_id: str, req: "OneKeyRunRequest") -> None:
             style_preset=req.style_preset, aspect_ratio=req.aspect_ratio,
             custom_instructions=req.custom_instructions or "",
             image_provider=req.image_provider or "", video_provider=req.video_provider or "",
+            image_edit_provider=req.image_edit_provider or "",
             audio_provider=req.audio_provider or "",
             image_workflow_id=req.image_workflow_id or "", video_workflow_id=req.video_workflow_id or "",
             max_images=max_shots, max_videos=max(0, min(req.max_videos, HARD_CAP_SHOTS)),
@@ -287,15 +307,22 @@ async def _run_agent_task(task_id: str, req: "OneKeyRunRequest") -> None:
         _log("启动", f"总导演 Agent 已就绪（导演组：{team.name if team else '内置默认'}），由它自主制定计划并执行…", 5)
         # 预检：图片源允许文生图（资产生成/分镜）；**视频源**丢参考才是真实风险 → 分别告知
         try:
-            from app.pipelines.onekey_agent import _provider_image_slots
+            from app.pipelines.onekey_agent import _provider_image_slots, _img_edit_provider
             from app.core.config import settings as _settings
             _ipid = (req.image_provider or "").strip() or str(getattr(_settings, "IMAGE_PROVIDER", "") or "")
             _islots = _provider_image_slots(_ipid) if _ipid else None
             if _islots == 0:
-                _log("预检", f"生图源「{_ipid}」为文生图：资产与分镜按文本+风格生成（正常）；"
-                             f"成片一致性在视频步用参考图保证。")
+                _log("预检", f"生图源「{_ipid}」为文生图：定妆三视图/场景空镜按文本+风格生成（正常）。")
             elif _islots is not None and _islots > 0:
                 _log("预检", f"生图源「{_ipid}」支持参考图（{_islots} 槽）✓")
+            _epid = _img_edit_provider(draft) if draft is not None else ""
+            if _epid and _epid != _ipid:
+                _eslots = _provider_image_slots(_epid)
+                _log("预检", f"图像编辑源「{_epid}」：多图合成分镜走该源"
+                              + (f"（{_eslots} 槽）" if _eslots is not None else ""))
+            elif _epid:
+                _log("预检", f"未单独配置图像编辑源：多图合成分镜与生图共用「{_epid}」"
+                              f"（若该源不支持图生图，可能退化为文生图）")
             if req.enable_video:
                 _vpid = (req.video_provider or "").strip() or str(getattr(_settings, "VIDEO_PROVIDER", "") or "")
                 _vslots = _provider_image_slots(_vpid) if _vpid else None
@@ -306,6 +333,9 @@ async def _run_agent_task(task_id: str, req: "OneKeyRunRequest") -> None:
                     _log("预检", f"视频源「{_vpid}」为单图片槽（首帧专用）：参考图不传，一致性依赖首帧画面。")
                 elif _vslots is not None:
                     _log("预检", f"视频源「{_vpid}」支持参考图（{_vslots} 槽）：成片将用首帧+角色/场景多参考 ✓")
+                if not getattr(req, "keyframe_mode", False) and _vslots is not None and _vslots <= 1:
+                    _log("警告", f"当前是「直出」模式（跳过分镜画面），但视频源「{_vpid}」只有 {_vslots} 个图片槽，"
+                                 f"无法多图参考；建议开启「先生成分镜画面」（i2v），或换支持多参考的视频源。")
         except Exception:
             pass
         await agent_manager.prompt(

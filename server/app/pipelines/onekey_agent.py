@@ -34,6 +34,8 @@ class OneKeyDraft:
     aspect_ratio: str = "9:16"
     custom_instructions: str = ""
     image_provider: str = ""
+    # 图像编辑源（i2i）：多图合成分镜；空 = 沿用 image_provider
+    image_edit_provider: str = ""
     video_provider: str = ""
     audio_provider: str = ""
     image_workflow_id: str = ""
@@ -113,6 +115,13 @@ def _need_draft(args: Dict[str, Any]) -> "OneKeyDraft | Dict[str, Any]":
 
 def _img_provider(d: OneKeyDraft) -> str:
     return d.image_provider or getattr(settings, "IMAGE_PROVIDER", "") or "comfyui"
+
+
+def _img_edit_provider(d: OneKeyDraft) -> str:
+    """图像编辑源（i2i）：多图合成分镜走这里；未单独配置时沿用生图源。"""
+    return (d.image_edit_provider
+            or getattr(settings, "IMAGE_EDIT_PROVIDER", "")
+            or _img_provider(d))
 
 
 def _vid_provider(d: OneKeyDraft) -> str:
@@ -483,6 +492,23 @@ async def _onekey_scene_image(d: OneKeyDraft, scene_index: int, force: bool = Fa
             "style_locked": bool(d.style_spec)}
 
 
+def _image_capabilities(pid: str) -> Optional[set]:
+    """图像源的声明能力（t2i/i2i/reference）；查不到（内置源未声明）返回 None。
+
+    仅用于「多图合成分镜」时的能力提示：编辑源未声明 i2i/reference 时给出告警，
+    而不是静默按文生图处理。
+    """
+    try:
+        from app.providers.custom.manager import custom_provider_manager
+        d = custom_provider_manager.get_definition(pid)
+    except Exception:
+        return None
+    if d is None:
+        return None
+    caps = getattr(d, "capabilities", None) or []
+    return {str(c) for c in caps if str(c).strip()} or None
+
+
 def _effective_refs(pid: str, refs: List[str]) -> "tuple[List[str], Optional[int]]":
     """按 provider 的图片输入槽数量裁剪参考图，返回 (真正生效的列表, 槽位数)。
 
@@ -523,29 +549,39 @@ async def _onekey_shot_image(d: OneKeyDraft, shot_index: int, prompt_override: s
     if cam and "[运镜:" not in base_prompt and "[Camera:" not in base_prompt:
         base_prompt = f"{base_prompt}{cam}"
     base_prompt = f"{base_prompt}{_style_suffix(d)}"
-    # 多参考：角色资产优先 + 场景参考（图片源是文生图时按文本生成，不视为错误；
-    # 一致性主战场在视频步——见 _onekey_shot_video）
+    # 多参考：角色资产优先 + 场景参考。分镜合成属于「图像编辑」（i2i）——
+    # 用独立的编辑源（未配置时回落到生图源），三视图/场景空镜才用生成源（t2i）。
     refs = collect_shot_refs(shot, characters, scene=scene)
+    pid = _img_edit_provider(d)
     slots: Optional[int] = None
-    refs, slots = _effective_refs(_img_provider(d), refs)
-    img_note = _image_ref_note(_img_provider(d), slots)
+    refs, slots = _effective_refs(pid, refs)
+    img_note = _image_ref_note(pid, slots)
     req = ImageGenerateRequest(
         prompt=base_prompt, negative_prompt="", aspect_ratio=d.aspect_ratio,
         style_preset=d.style_preset, workflow_id=d.image_workflow_id or None,
         reference_images=refs or None,
         dynamic_inputs={"reference_images": refs} if refs else None,
     )
-    res = await _get_image_registry().generate(req, provider_id=_img_provider(d))
+    res = await _get_image_registry().generate(req, provider_id=pid)
     shot.image_url = res.image_url
     shot.status = "completed"
     out = {"draft_id": d.id, "shot_index": shot_index, "image_url": res.image_url,
            "provider": getattr(res, "provider", ""), "status": "done",
+           "engine_role": "edit" if pid != _img_provider(d) else "generate",
            "refs_used": len(refs), "refs_slots": slots, "style_locked": bool(d.style_spec),
            "refs_detail": {
                "scene": bool(scene is not None and str(getattr(scene, "ref_image_url", "") or "").strip()
                              and str(getattr(scene, "ref_image_url", "")) in refs),
                "characters": [getattr(r, "name", "") for r in roles],
            }}
+    if refs:
+        caps = _image_capabilities(pid)
+        if caps is not None and not ({"i2i", "reference"} & caps):
+            warn = (f"图像编辑源「{pid}」未声明 i2i/reference 能力：多图合成分镜可能退化为文生图。"
+                    f"请在「设置→生成源」把该源能力标为图生图/参考生图，或另配一个图像编辑源")
+            out["warning"] = warn
+            if warn not in d.ref_warnings:
+                d.ref_warnings.append(warn)
     if img_note:
         out["note"] = img_note
     return out
@@ -772,6 +808,12 @@ def _onekey_summary(d: OneKeyDraft) -> Dict[str, Any]:
     return {
         "draft_id": d.id, "status": "running",
         "style": {"locked": bool(d.style_spec), "style_spec": d.style_spec or "", "assets_reused": d.assets_reused},
+        "sources": {
+            "image_generate": _img_provider(d),   # 定妆三视图 / 场景空镜（t2i）
+            "image_edit": _img_edit_provider(d),  # 多图合成分镜（i2i）
+            "video": _vid_provider(d),
+            "audio": _aud_provider(d),
+        },
         "ref_warnings": d.ref_warnings[-3:],
         "characters": {"total": len(chars), "ready": len(char_ready), "pending": [getattr(c, "name", "") for c in chars if getattr(c, "name", "") not in char_ready]},
         "scenes": {"total": len(scenes), "ready": len(scene_ready),

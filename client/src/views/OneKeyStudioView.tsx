@@ -9,7 +9,9 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Zap, Loader2, CheckCircle2, AlertTriangle, Bot, Users, History,
   PlusCircle, Layers, Download, Palette, Image as ImageIcon, Music, Film,
-  Clapperboard, Sparkles, ScrollText, CircleDot, ChevronDown, LayoutGrid,
+  Clapperboard, Sparkles, ScrollText, CircleDot, ChevronDown,
+  Play, Camera, Aperture, SlidersHorizontal, Wand2, Timer,
+  X, CircleCheck, AudioLines, ListChecks,
 } from 'lucide-react';
 import { apiService } from '../services/api';
 import { resolveMediaUrl } from '../utils/devOrigin';
@@ -21,22 +23,32 @@ import { loadRoleMetas } from '../components/agent/swarmMeta';
 
 const TERMINAL = new Set(['success', 'partial', 'failed']);
 
+const PANEL = 'rounded-2xl border border-black/[.06] bg-white/60 backdrop-blur-xl dark:border-white/[.08] dark:bg-white/[.025]';
+const MUTED = '[color:var(--color-text-muted)]';
+const TEXT = '[color:var(--color-text-main)]';
+
 const stageTone = (stage: string) => {
   if (stage === '错误') return 'text-red-400';
-  if (stage === '超时') return 'text-amber-300';
-  if (stage === '警告') return 'text-amber-300';
-  if (stage === '子代理集群') return 'text-accent-purple';
-  if (stage === '导演计划' || stage === '启动') return 'text-emerald-300';
-  if (stage === '预检') return '[color:var(--color-text-muted)]';
-  return 'text-brand-light';
+  if (stage === '超时' || stage === '警告') return 'text-amber-400';
+  if (stage === '子代理集群') return 'text-violet-400';
+  if (stage === '导演计划' || stage === '启动') return 'text-emerald-400';
+  if (stage === '预检') return MUTED;
+  return 'text-amber-400';
 };
 
 const statusMeta = (status: string) => {
-  if (status === 'success') return { label: '制作完成', tone: 'text-emerald-400', dot: 'bg-emerald-400' };
-  if (status === 'partial') return { label: '部分完成', tone: 'text-amber-300', dot: 'bg-amber-400' };
-  if (status === 'failed') return { label: '制作失败', tone: 'text-red-400', dot: 'bg-red-400' };
-  if (status === 'queued' || status === 'running') return { label: 'Agent 制作中', tone: 'text-brand-light', dot: 'bg-brand animate-pulse' };
-  return { label: '待发起', tone: '[color:var(--color-text-muted)]', dot: 'bg-[color:var(--color-text-muted)]' };
+  if (status === 'success') return { label: '制作完成', tone: 'text-emerald-400', dot: 'bg-emerald-400', ring: 'emerald' as const };
+  if (status === 'partial') return { label: '部分完成', tone: 'text-amber-400', dot: 'bg-amber-400', ring: 'amber' as const };
+  if (status === 'failed') return { label: '制作失败', tone: 'text-red-400', dot: 'bg-red-400', ring: 'red' as const };
+  if (status === 'queued' || status === 'running') return { label: 'Agent 制作中', tone: 'text-amber-400', dot: 'bg-amber-400 animate-pulse', ring: 'amber' as const };
+  return { label: '待发起', tone: MUTED, dot: 'bg-[color:var(--color-text-muted)]', ring: 'amber' as const };
+};
+
+const fmtClock = (ms?: number): string => {
+  if (!ms) return '';
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 };
 
 /** 小型开关（深/浅色主题通用） */
@@ -46,74 +58,250 @@ const Switch: React.FC<{ checked: boolean; onChange: (v: boolean) => void; label
   <button
     type="button" title={title}
     onClick={() => onChange(!checked)}
-    className="w-full flex items-center justify-between gap-3 py-1 group text-left"
+    className="group flex w-full items-center justify-between gap-3 py-2 text-left"
   >
     <span className="min-w-0">
-      <span className="block text-[11.5px] [color:var(--color-text-main)] group-hover:text-brand-light transition-colors">{label}</span>
-      {hint && <span className="block text-[9.5px] [color:var(--color-text-muted)] truncate">{hint}</span>}
+      <span className={`block text-[12px] font-medium ${TEXT} transition-colors group-hover:text-amber-500 dark:group-hover:text-amber-300`}>{label}</span>
+      {hint && <span className={`mt-0.5 block truncate text-[10px] ${MUTED}`}>{hint}</span>}
     </span>
-    <span className={`w-8 h-[18px] rounded-full relative shrink-0 transition-colors ${checked ? 'bg-brand' : 'bg-surface-hover/80 border border-white/70 dark:border-white/12'}`}>
-      <span className={`absolute top-[2px] w-[13px] h-[13px] rounded-full bg-white shadow transition-all ${checked ? 'left-[16px]' : 'left-[2px]'}`} />
+    <span className={`relative h-[20px] w-[36px] shrink-0 rounded-full border transition-all ${
+      checked
+        ? 'border-amber-400/40 bg-amber-400/90 shadow-[0_0_14px_rgba(251,191,36,.35)]'
+        : 'border-black/10 bg-black/10 dark:border-white/10 dark:bg-white/10'
+    }`}>
+      <span className={`absolute top-[2px] h-[14px] w-[14px] rounded-full bg-white shadow-sm transition-all ${checked ? 'left-[19px]' : 'left-[2px]'}`} />
     </span>
   </button>
 );
 
-/** 分区卡片 */
-const Card: React.FC<{ title: string; icon?: React.ReactNode; right?: React.ReactNode; children: React.ReactNode }> = ({
-  title, icon, right, children,
-}) => (
-  <div className="rounded-2xl border border-white/70 dark:border-white/12 bg-surface-hover/80 dark:bg-black/40 p-3.5 space-y-2.5">
-    <div className="flex items-center gap-1.5">
-      {icon}
-      <span className="text-[11px] font-bold [color:var(--color-text-main)]">{title}</span>
+/** 分区面板 */
+const Panel: React.FC<{
+  title: string; icon?: React.ReactNode; hint?: string; right?: React.ReactNode;
+  children: React.ReactNode; className?: string;
+}> = ({ title, icon, hint, right, children, className = '' }) => (
+  <section className={`${PANEL} p-3.5 ${className}`}>
+    <div className="mb-3 flex items-center gap-2">
+      {icon && (
+        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border border-black/[.06] bg-black/[.03] dark:border-white/[.08] dark:bg-white/[.04]">
+          {icon}
+        </span>
+      )}
+      <div className="min-w-0">
+        <div className={`text-[12px] font-semibold leading-tight ${TEXT}`}>{title}</div>
+        {hint && <div className={`mt-0.5 truncate text-[10px] ${MUTED}`}>{hint}</div>}
+      </div>
       <span className="flex-1" />
       {right}
     </div>
-    {children}
+    <div className="space-y-3">{children}</div>
+  </section>
+);
+
+/** 分段标签 */
+const SegTabs: React.FC<{
+  value: string; onChange: (v: string) => void;
+  items: Array<{ id: string; label: string; icon?: React.ReactNode; count?: number }>;
+  size?: 'sm' | 'md';
+}> = ({ value, onChange, items, size = 'md' }) => (
+  <div className="inline-flex items-center gap-0.5 rounded-xl border border-black/[.06] bg-black/[.04] p-0.5 dark:border-white/[.08] dark:bg-black/30">
+    {items.map((it) => {
+      const active = value === it.id;
+      return (
+        <button
+          key={it.id} type="button" onClick={() => onChange(it.id)}
+          className={`inline-flex items-center gap-1.5 rounded-[10px] font-medium transition-all ${
+            size === 'sm' ? 'h-7 px-2.5 text-[10.5px]' : 'h-8 px-3 text-[11.5px]'
+          } ${
+            active
+              ? `${TEXT} bg-white shadow-sm dark:bg-white/[.10]`
+              : `${MUTED} hover:text-[color:var(--color-text-main)] hover:bg-white/50 dark:hover:bg-white/[.05]`
+          }`}
+        >
+          {it.icon}{it.label}
+          {typeof it.count === 'number' && it.count > 0 && (
+            <span className={`rounded-full px-1.5 py-0.5 font-mono text-[9px] ${active ? 'bg-amber-400/15 text-amber-600 dark:text-amber-300' : 'bg-black/[.05] dark:bg-white/[.06]'}`}>{it.count}</span>
+          )}
+        </button>
+      );
+    })}
   </div>
 );
 
-/** 标签按钮 */
-const TabBtn: React.FC<{ active: boolean; onClick: () => void; icon?: React.ReactNode; label: string; count?: number }> = ({
-  active, onClick, icon, label, count,
+/** 进度环 */
+const ProgressRing: React.FC<{ value: number; tone?: 'amber' | 'emerald' | 'red'; size?: number }> = ({ value, tone = 'amber', size = 66 }) => {
+  const r = (size - 8) / 2;
+  const c = 2 * Math.PI * r;
+  const pct = Math.max(0, Math.min(100, Math.round(value)));
+  const stroke = tone === 'emerald' ? '#34d399' : tone === 'red' ? '#f87171' : '#fbbf24';
+  return (
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg width={size} height={size} className="-rotate-90">
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth="5" stroke="currentColor" className="text-black/[.06] dark:text-white/[.08]" />
+        <circle
+          cx={size / 2} cy={size / 2} r={r} fill="none" stroke={stroke} strokeWidth="5"
+          strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c - (pct / 100) * c}
+          className="transition-all duration-700"
+        />
+      </svg>
+      <div className="absolute inset-0 flex items-center justify-center">
+        <span className={`font-mono text-[16px] font-bold leading-none ${TEXT}`}>
+          {pct}<span className="ml-0.5 text-[9px] opacity-40">%</span>
+        </span>
+      </div>
+    </div>
+  );
+};
+
+/** KPI 卡 */
+const Kpi: React.FC<{ icon: React.ReactNode; label: string; value: React.ReactNode; total?: React.ReactNode; accent: string }> = ({
+  icon, label, value, total, accent,
 }) => (
-  <button
-    type="button" onClick={onClick}
-    className={`px-3 h-8 rounded-lg text-[11.5px] font-medium inline-flex items-center gap-1.5 transition-colors ${
-      active
-        ? 'bg-surface/80 text-brand-light border border-brand/30 shadow-sm'
-        : 'border border-transparent [color:var(--color-text-muted)] hover:bg-surface/80'
-    }`}
-  >
-    {icon}{label}
-    {typeof count === 'number' && count > 0 && (
-      <span className={`text-[9.5px] px-1.5 rounded-full ${active ? 'bg-brand/15 text-brand-light' : 'bg-surface-hover/80'}`}>{count}</span>
-    )}
-  </button>
+  <div className="flex items-center gap-2.5 rounded-xl border border-black/[.05] bg-white/50 px-3 py-2 dark:border-white/[.06] dark:bg-white/[.03]">
+    <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${accent}`}>{icon}</span>
+    <div className="min-w-0">
+      <div className={`font-mono text-[13px] font-bold leading-none ${TEXT}`}>
+        {value}{total !== undefined && <span className="text-[10px] font-normal opacity-40">/{total}</span>}
+      </div>
+      <div className={`mt-1 text-[9.5px] ${MUTED}`}>{label}</div>
+    </div>
+  </div>
 );
 
-/** 缩略图格 */
-const Thumb: React.FC<{
-  url?: string; badge?: string; sub?: string; tone?: 'video' | 'image' | 'pending' | 'plain';
-  onClick?: () => void; title?: string;
-}> = ({ url, badge, sub, tone = 'plain', onClick, title }) => (
-  <button
-    type="button" title={title} onClick={onClick}
-    className={`relative aspect-square rounded-xl overflow-hidden border transition-all cursor-pointer group ${
-      tone === 'video' ? 'border-emerald-500/45 hover:border-emerald-400'
-        : tone === 'image' ? 'border-sky-500/35 hover:border-sky-400'
-          : 'border-white/70 dark:border-white/12 hover:border-brand/50'
-    } bg-surface/80 hover:ring-2 hover:ring-brand/25`}
-  >
-    {url
-      ? <img src={resolveMediaUrl(url)} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover group-hover:scale-[1.04] transition-transform duration-300" />
-      : <span className="absolute inset-0 flex items-center justify-center text-[9px] [color:var(--color-text-muted)]">{sub || '待生成'}</span>}
-    {badge && (
-      <span className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/75 to-transparent text-white text-[9px] px-1.5 pt-3 pb-0.5 truncate text-left">
-        {badge}
+/** 分镜缩略卡 */
+const ShotCard: React.FC<{ shot: any; onOpen: () => void }> = ({ shot, onOpen }) => {
+  const video = !!shot?.video_url;
+  const image = shot?.image_url || '';
+  const audio = !!shot?.audio_url;
+  const dur = Number(shot?.duration || 0);
+  return (
+    <button
+      type="button" onClick={onOpen}
+      className="group relative aspect-[3/4] overflow-hidden rounded-xl border border-black/[.07] bg-black/[.03] text-left transition-all hover:border-amber-400/50 hover:shadow-[0_12px_30px_-12px_rgba(251,191,36,.35)] dark:border-white/[.08] dark:bg-white/[.03]"
+    >
+      {video ? (
+        <video src={resolveMediaUrl(shot.video_url)} muted playsInline preload="metadata" className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.05]" />
+      ) : image ? (
+        <img src={resolveMediaUrl(image)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.05]" />
+      ) : (
+        <span className={`absolute inset-0 flex flex-col items-center justify-center gap-1.5 ${MUTED}`}>
+          <Film className="h-5 w-5 opacity-40" />
+          <span className="text-[9px]">待生成</span>
+        </span>
+      )}
+      <span className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent" />
+      <span className="absolute left-1.5 top-1.5 rounded-md bg-black/55 px-1.5 py-0.5 font-mono text-[9px] font-semibold text-white/90 backdrop-blur-sm">
+        #{shot?.shot_index ?? '—'}
       </span>
+      <span className={`absolute right-1.5 top-1.5 rounded-md px-1.5 py-0.5 text-[8.5px] font-semibold backdrop-blur-sm ${
+        video ? 'bg-emerald-500/85 text-white' : image ? 'bg-sky-500/85 text-white' : 'bg-black/45 text-white/60'
+      }`}>
+        {video ? '成片' : image ? '画面' : '待生成'}
+      </span>
+      {video && (
+        <span className="absolute inset-0 flex items-center justify-center">
+          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/20 text-white opacity-0 backdrop-blur-md transition-all duration-300 group-hover:opacity-100">
+            <Play className="ml-0.5 h-3.5 w-3.5 fill-current" />
+          </span>
+        </span>
+      )}
+      <span className="absolute inset-x-0 bottom-0 p-2">
+        <span className="line-clamp-2 text-[9.5px] leading-snug text-white/85">{shot?.action_desc || shot?.video_prompt || '待生成画面'}</span>
+        <span className="mt-1 flex flex-wrap items-center gap-1">
+          {dur > 0 && <span className="inline-flex items-center gap-0.5 rounded bg-white/10 px-1 py-0.5 text-[8px] text-white/75"><Timer className="h-2 w-2" />{dur}s</span>}
+          {audio && <span className="inline-flex items-center gap-0.5 rounded bg-pink-500/25 px-1 py-0.5 text-[8px] text-pink-100"><Music className="h-2 w-2" />配音</span>}
+        </span>
+      </span>
+    </button>
+  );
+};
+
+/** 角色卡 */
+const CharacterCard: React.FC<{ c: any; onOpen: () => void }> = ({ c, onOpen }) => {
+  const img = c?.three_views?.front || c?.three_views?.three_quarter || c?.three_views?.side || c?.avatar_url || '';
+  return (
+    <button
+      type="button" onClick={onOpen}
+      className="group relative aspect-[3/4] overflow-hidden rounded-xl border border-black/[.07] bg-black/[.03] text-left transition-all hover:border-amber-400/50 hover:shadow-[0_10px_28px_-12px_rgba(251,191,36,.4)] dark:border-white/[.08] dark:bg-white/[.03]"
+    >
+      {img ? (
+        <img src={resolveMediaUrl(img)} alt={c?.name || ''} loading="lazy" className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.05]" />
+      ) : (
+        <span className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-violet-500/10 to-amber-500/10">
+          <span className="text-lg font-bold text-white/25">{(c?.name || '?').slice(0, 1)}</span>
+        </span>
+      )}
+      <span className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/5 to-transparent" />
+      {img && <span className="absolute right-1.5 top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500/90 text-white"><CheckCircle2 className="h-2.5 w-2.5" /></span>}
+      <span className="absolute inset-x-0 bottom-0 p-2">
+        <span className="block truncate text-[10.5px] font-semibold text-white">{c?.name || '未命名'}</span>
+        <span className="block truncate text-[8.5px] text-white/55">{c?.role || '角色'}</span>
+      </span>
+    </button>
+  );
+};
+
+/** 场景卡 */
+const SceneCard: React.FC<{ s: any; onOpen: () => void }> = ({ s, onOpen }) => {
+  const img = s?.ref_image_url || '';
+  return (
+    <button
+      type="button" onClick={onOpen}
+      className="group relative aspect-[4/3] overflow-hidden rounded-xl border border-black/[.07] bg-black/[.03] text-left transition-all hover:border-sky-400/50 hover:shadow-[0_10px_28px_-12px_rgba(56,189,248,.35)] dark:border-white/[.08] dark:bg-white/[.03]"
+    >
+      {img ? (
+        <img src={resolveMediaUrl(img)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.05]" />
+      ) : (
+        <span className={`absolute inset-0 flex items-center justify-center ${MUTED}`}><Camera className="h-5 w-5 opacity-30" /></span>
+      )}
+      <span className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/5 to-transparent" />
+      <span className="absolute left-1.5 top-1.5 rounded-md bg-black/55 px-1.5 py-0.5 font-mono text-[8.5px] text-white/85">#{s?.scene_index ?? '—'}</span>
+      <span className="absolute inset-x-0 bottom-0 p-2">
+        <span className="block truncate text-[10px] font-semibold text-white">{s?.title || s?.location || '未命名场景'}</span>
+      </span>
+    </button>
+  );
+};
+
+/** 空状态（中部） */
+const EmptyStage: React.FC<{ running: boolean }> = ({ running }) => (
+  <div className="relative overflow-hidden rounded-2xl border border-black/[.06] bg-gradient-to-br from-amber-400/[.07] via-transparent to-violet-500/[.06] px-8 py-14 text-center dark:border-white/[.08]">
+    <div className="pointer-events-none absolute inset-x-0 top-0 h-5 bg-[repeating-linear-gradient(90deg,transparent_0_16px,rgba(0,0,0,.10)_16px_24px)] opacity-40 dark:bg-[repeating-linear-gradient(90deg,transparent_0_16px,rgba(255,255,255,.10)_16px_24px)]" />
+    <div className="pointer-events-none absolute inset-x-0 bottom-0 h-5 bg-[repeating-linear-gradient(90deg,transparent_0_16px,rgba(0,0,0,.10)_16px_24px)] opacity-40 dark:bg-[repeating-linear-gradient(90deg,transparent_0_16px,rgba(255,255,255,.10)_16px_24px)]" />
+    <div className="relative mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-amber-400/25 bg-gradient-to-br from-amber-300/20 to-orange-500/10">
+      {running ? <Loader2 className="h-6 w-6 animate-spin text-amber-400" /> : <Clapperboard className="h-6 w-6 text-amber-400" />}
+    </div>
+    <h3 className={`mt-4 text-[15px] font-bold ${TEXT}`}>{running ? '总导演正在拆解剧本' : '从一段文字，到一部成片'}</h3>
+    <p className={`mx-auto mt-1.5 max-w-[420px] text-[11px] leading-relaxed ${MUTED}`}>
+      {running ? '分镜与角色资产生成后会实时出现在这里' : '粘贴小说章节或故事梗概，总导演 Agent 会自主拆解、定妆、生片、配音并导出剪映草稿。'}
+    </p>
+    {!running && (
+      <div className="mx-auto mt-5 grid max-w-[520px] grid-cols-3 gap-2 text-left">
+        {[
+          ['01', '拆解', '剧本 → 角色 / 场景 / 分镜'],
+          ['02', '生成', '多参考直出 · 角色一致性'],
+          ['03', '成片', '自动验收 · 导出剪映'],
+        ].map(([n, t, d]) => (
+          <div key={n} className="rounded-xl border border-black/[.05] bg-white/40 px-2.5 py-2 dark:border-white/[.06] dark:bg-white/[.03]">
+            <div className="font-mono text-[9px] text-amber-500 dark:text-amber-300/80">{n}</div>
+            <div className={`mt-0.5 text-[10.5px] font-semibold ${TEXT}`}>{t}</div>
+            <div className={`mt-0.5 text-[9px] leading-snug ${MUTED}`}>{d}</div>
+          </div>
+        ))}
+      </div>
     )}
-  </button>
+  </div>
+);
+
+/** 空状态（右侧） */
+const EmptyPanel: React.FC<{ running: boolean; text: string }> = ({ running, text }) => (
+  <div className="flex min-h-[200px] items-center justify-center px-6">
+    <div className="text-center">
+      <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-2xl border border-black/[.06] bg-black/[.03] dark:border-white/[.08] dark:bg-white/[.03]">
+        {running ? <Loader2 className="h-5 w-5 animate-spin text-amber-400" /> : <ImageIcon className="h-5 w-5 opacity-40 [color:var(--color-text-muted)]" />}
+      </div>
+      <p className={`mt-3 max-w-[240px] text-[10.5px] leading-relaxed ${MUTED}`}>{text}</p>
+    </div>
+  </div>
 );
 
 export const OneKeyStudioView: React.FC = () => {
@@ -123,6 +311,7 @@ export const OneKeyStudioView: React.FC = () => {
   const [aspect, setAspect] = useState('9:16');
   const [maxShots, setMaxShots] = useState(12);
   const [imageProvider, setImageProvider] = useState('');
+  const [imageEditProvider, setImageEditProvider] = useState('');
   const [videoProvider, setVideoProvider] = useState('');
   const [audioProvider, setAudioProvider] = useState('');
   const [enableVideo, setEnableVideo] = useState(true);
@@ -234,6 +423,7 @@ export const OneKeyStudioView: React.FC = () => {
         aspect_ratio: aspect,
         max_images: maxShots,
         image_provider: imageProvider || undefined,
+        image_edit_provider: imageEditProvider || undefined,
         video_provider: videoProvider || undefined,
         audio_provider: audioProvider || undefined,
         enable_video: enableVideo,
@@ -306,44 +496,64 @@ export const OneKeyStudioView: React.FC = () => {
   const sceneReady = sceneList.filter((s: any) => s?.ref_image_url).length;
   const charReady = characters.filter((c: any) => c?.three_views?.front || c?.avatar_url).length;
 
-  return (
-    <div className="flex-1 flex flex-col overflow-hidden bg-background">
+return (
+    <div className="relative flex flex-1 flex-col overflow-hidden bg-background">
+      {/* 环境光 */}
+      <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute -left-40 -top-48 h-[520px] w-[520px] rounded-full bg-amber-400/[.07] blur-[130px]" />
+        <div className="absolute -right-32 top-1/3 h-[460px] w-[460px] rounded-full bg-violet-500/[.08] blur-[130px]" />
+        <div className="absolute bottom-0 left-1/3 h-[360px] w-[360px] rounded-full bg-brand/[.06] blur-[120px]" />
+        <div className="absolute inset-0 opacity-[.035] [background-image:radial-gradient(circle_at_1px_1px,currentColor_1px,transparent_0)] [background-size:26px_26px]" />
+      </div>
+
       {/* ══ 顶栏 ══ */}
-      <header className="h-14 px-4 border-b border-white/70 dark:border-white/12 bg-surface/80 dark:bg-black/45 backdrop-blur flex items-center gap-3 shrink-0">
-        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400 to-brand flex items-center justify-center shadow-lg shadow-amber-500/20 shrink-0">
-          <Clapperboard className="w-4.5 h-4.5 text-white" />
+      <header className="relative z-20 flex h-16 shrink-0 items-center gap-3 border-b border-black/[.06] bg-white/55 px-5 backdrop-blur-2xl dark:border-white/[.08] dark:bg-black/25">
+        <div className="relative shrink-0">
+          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-300 via-amber-400 to-orange-500 shadow-lg shadow-amber-500/25">
+            <Clapperboard className="h-5 w-5 text-black/80" />
+          </div>
+          <span className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-white dark:border-[#0b0b10] ${taskId ? sm.dot : 'bg-emerald-400'}`} />
         </div>
         <div className="min-w-0">
-          <div className="text-[13px] font-bold [color:var(--color-text-main)] flex items-center gap-2 leading-tight">
-            成片工作室
-            <span className="text-[9.5px] px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/25 font-medium">
-              Agent 集群
+          <div className="flex items-center gap-2">
+            <h1 className={`truncate text-[15px] font-bold tracking-tight ${TEXT}`}>成片工作室</h1>
+            <span className="hidden rounded-full border border-amber-400/25 bg-amber-400/10 px-2 py-0.5 text-[8.5px] font-semibold uppercase tracking-[.16em] text-amber-600 sm:inline dark:text-amber-300">
+              One-take Studio
             </span>
           </div>
-          <div className="text-[10px] [color:var(--color-text-muted)]">总导演自主编排 · todolist 实时计划 · 子代理集群 · 产物验收</div>
+          <p className={`truncate text-[10px] ${MUTED}`}>总导演 Agent 自主编排 · 子代理集群 · 产物验收</p>
         </div>
+
         <div className="flex-1" />
+
         {taskId && (
-          <span className={`text-[10.5px] px-2.5 py-1 rounded-full border border-white/70 dark:border-white/12 bg-surface/80 inline-flex items-center gap-1.5 ${sm.tone}`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${sm.dot}`} />{sm.label} · {progress}%
-          </span>
+          <div className={`hidden items-center gap-2 rounded-full border border-black/[.06] bg-white/60 px-3 py-1.5 md:flex dark:border-white/[.08] dark:bg-white/[.04]`}>
+            <span className={`h-1.5 w-1.5 rounded-full ${sm.dot}`} />
+            <span className={`text-[10.5px] font-medium ${TEXT}`}>{sm.label}</span>
+            <span className={`font-mono text-[10px] ${MUTED}`}>{progress}%</span>
+          </div>
         )}
+
         <div className="relative">
           <button
             onClick={() => { setShowHistory((v) => !v); refreshHistory(); }}
-            className="h-8 px-3 rounded-lg bg-surface/80 border border-white/70 dark:border-white/12 text-[11.5px] font-medium [color:var(--color-text-main)] hover:bg-surface-hover/80 inline-flex items-center gap-1.5"
+            className={`inline-flex h-9 items-center gap-1.5 rounded-xl border border-black/[.07] bg-white/60 px-3 text-[11.5px] font-medium ${TEXT} transition-colors hover:border-amber-400/40 hover:bg-white/80 dark:border-white/[.08] dark:bg-white/[.04] dark:hover:bg-white/[.07]`}
           >
-            <History className="w-3.5 h-3.5" />历史
-            <span className="text-[10px] [color:var(--color-text-muted)]">{history.length}</span>
-            <ChevronDown className={`w-3 h-3 transition-transform ${showHistory ? 'rotate-180' : ''}`} />
+            <History className="h-3.5 w-3.5" />历史
+            <span className={`rounded-full bg-black/[.05] px-1.5 py-0.5 font-mono text-[9px] ${MUTED} dark:bg-white/[.06]`}>{history.length}</span>
+            <ChevronDown className={`h-3 w-3 transition-transform ${showHistory ? 'rotate-180' : ''}`} />
           </button>
           {showHistory && (
             <>
               <div className="fixed inset-0 z-30" onClick={() => setShowHistory(false)} />
-              <div className="absolute right-0 top-[calc(100%+8px)] w-[340px] max-h-[380px] overflow-y-auto custom-scrollbar z-40 bg-surface/80 border border-white/70 dark:border-white/12 rounded-2xl shadow-2xl p-2">
-                {history.length === 0 && <div className="px-3 py-6 text-[11px] text-center [color:var(--color-text-muted)]">暂无历史任务</div>}
+              <div className={`absolute right-0 top-[calc(100%+8px)] z-40 max-h-[420px] w-[380px] overflow-y-auto rounded-2xl border border-black/[.06] bg-white/95 p-1.5 shadow-2xl backdrop-blur-2xl custom-scrollbar dark:border-white/[.08] dark:bg-[#121218]/95`}>
+                <div className={`flex items-center justify-between px-2.5 py-1.5 text-[9.5px] font-semibold uppercase tracking-wider ${MUTED}`}>
+                  <span>历史任务</span><span>{history.length}</span>
+                </div>
+                {history.length === 0 && <div className={`px-3 py-8 text-center text-[11px] ${MUTED}`}>暂无历史任务</div>}
                 {history.map((t) => {
                   const hm = statusMeta(t.status || '');
+                  const pct = Math.max(0, Math.min(100, Number(t.progress || 0)));
                   return (
                     <button
                       key={t.task_id}
@@ -353,15 +563,19 @@ export const OneKeyStudioView: React.FC = () => {
                         setStatus(t.status || 'running'); setProgress(t.progress || 0);
                         setTodos([]); setCenterTab('shots');
                       }}
-                      className={`w-full text-left px-2.5 py-2 rounded-xl hover:bg-surface/80 flex items-center gap-2.5 ${taskId === t.task_id ? 'bg-brand/10' : ''}`}
+                      className={`mb-0.5 w-full rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-black/[.04] dark:hover:bg-white/[.05] ${taskId === t.task_id ? 'bg-amber-400/10' : ''}`}
                     >
-                      <span className={`w-2 h-2 rounded-full shrink-0 ${hm.dot}`} />
-                      <span className="flex-1 min-w-0">
-                        <span className="block text-[11.5px] [color:var(--color-text-main)] truncate">{t.title || t.task_id}</span>
-                        <span className="block text-[10px] [color:var(--color-text-muted)] truncate">
-                          {t.team_name || '默认简化剧组'} · {t.progress || 0}% · {t.created_at || ''}
-                        </span>
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className={`h-1.5 w-1.5 rounded-full ${hm.dot}`} />
+                        <span className={`min-w-0 flex-1 truncate text-[11.5px] font-medium ${TEXT}`}>{t.title || t.task_id}</span>
+                        <span className={`font-mono text-[9.5px] ${MUTED}`}>{pct}%</span>
+                      </div>
+                      <div className="mt-1 flex items-center gap-2 pl-3.5">
+                        <span className={`truncate text-[9.5px] ${MUTED}`}>{t.team_name || '默认简化剧组'} · {t.created_at || ''}</span>
+                      </div>
+                      <div className="mt-1.5 ml-3.5 h-0.5 overflow-hidden rounded-full bg-black/[.06] dark:bg-white/[.07]">
+                        <div className={`h-full rounded-full ${hm.dot}`} style={{ width: `${pct}%` }} />
+                      </div>
                     </button>
                   );
                 })}
@@ -371,99 +585,63 @@ export const OneKeyStudioView: React.FC = () => {
         </div>
         <button
           onClick={() => { setTaskId(null); setResult(null); setError(null); setStatus('idle'); setLogs([]); setProgress(0); setSubagentMap({}); setTodos([]); refreshHistory(); }}
-          className="h-8 px-3 rounded-lg bg-brand text-white text-[11.5px] font-bold hover:bg-brand-light inline-flex items-center gap-1.5 shadow-lg shadow-brand/20"
+          className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-black/[.07] bg-white/60 px-3 text-[11.5px] font-medium transition-colors hover:border-amber-400/40 hover:bg-white/80 dark:border-white/[.08] dark:bg-white/[.04] dark:hover:bg-white/[.07]"
         >
-          <PlusCircle className="w-3.5 h-3.5" />新建任务
+          <PlusCircle className="h-3.5 w-3.5 text-amber-500 dark:text-amber-400" /><span className={TEXT}>新建任务</span>
         </button>
       </header>
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="relative z-10 flex min-h-0 flex-1 gap-3 p-3">
         {/* ══ 左：创作配置 ══ */}
-        <aside className="w-[300px] shrink-0 border-r border-white/70 dark:border-white/12 bg-surface/80 dark:bg-black/30 flex flex-col overflow-hidden">
-          <div className="flex-1 overflow-y-auto custom-scrollbar p-3.5 space-y-3">
-            <Card title="故事" icon={<Sparkles className="w-3.5 h-3.5 text-amber-400" />}>
+        <aside className={`flex w-[320px] shrink-0 flex-col overflow-hidden xl:w-[336px] ${PANEL}`}>
+          <div className="flex-1 space-y-3 overflow-y-auto p-3 custom-scrollbar">
+            <Panel title="剧本" icon={<ScrollText className="h-3.5 w-3.5 text-amber-400" />} hint="整章粘贴效果最好">
               <input
                 value={title} onChange={(e) => setTitle(e.target.value)} placeholder="成片标题（可选）"
-                className="w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl px-3 py-2 text-xs [color:var(--color-text-main)] placeholder-[color:var(--color-text-muted)] focus:outline-none focus:border-brand/60"
+                className={`h-9 w-full rounded-xl border border-black/[.07] bg-white/60 px-3 text-[12px] ${TEXT} placeholder-[color:var(--color-text-muted)] outline-none transition-colors focus:border-amber-400/60 focus:ring-2 focus:ring-amber-400/10 dark:border-white/[.08] dark:bg-black/20`}
               />
               <textarea
                 value={text} onChange={(e) => setText(e.target.value)} rows={9}
-                placeholder="粘贴小说章节 / 故事梗概（≥20字）。总导演 Agent 会先写下 todolist 计划，然后自主编排全流程（流程不写死，计划实时可见）。"
-                className="w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl p-3 text-xs leading-relaxed [color:var(--color-text-main)] placeholder-[color:var(--color-text-muted)] focus:outline-none focus:border-brand/60 resize-y custom-scrollbar"
+                placeholder="粘贴小说章节 / 故事梗概（≥20字）。总导演会先写下 todolist 计划，再自主编排全流程。"
+                className={`min-h-[190px] w-full resize-y rounded-xl border border-black/[.07] bg-white/60 p-3 text-[11.5px] leading-relaxed ${TEXT} placeholder-[color:var(--color-text-muted)] outline-none transition-colors focus:border-amber-400/60 focus:ring-2 focus:ring-amber-400/10 custom-scrollbar dark:border-white/[.08] dark:bg-black/20`}
               />
-              <div className="flex justify-between text-[9.5px] [color:var(--color-text-muted)]">
-                <span>整章粘贴效果最好</span>
-                <span className={text.length >= 20 ? 'text-emerald-400' : ''}>{text.length} 字</span>
+              <div className={`flex items-center justify-between text-[9.5px] ${MUTED}`}>
+                <span>支持整章小说 / 分集梗概</span>
+                <span className={text.length >= 20 ? 'text-emerald-500 dark:text-emerald-400' : ''}>{text.length} 字</span>
               </div>
-            </Card>
+            </Panel>
 
-            <Card title="生成源" icon={<Zap className="w-3.5 h-3.5 text-brand-light" />}>
-              <div>
-                <div className="text-[10.5px] [color:var(--color-text-muted)] mb-1">生图源<span className="ml-1 opacity-70">（角色表 / 场景空镜）</span></div>
-                <ProviderPicker kind="image" value={imageProvider} onChange={setImageProvider} compact placeholder="— 自动 —" />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <div className="text-[10.5px] [color:var(--color-text-muted)] mb-1">视频源</div>
-                  <ProviderPicker kind="video" value={videoProvider} onChange={setVideoProvider} compact placeholder="— 自动 —" capability="i2v" />
-                </div>
-                <div>
-                  <div className="text-[10.5px] [color:var(--color-text-muted)] mb-1">配音源</div>
-                  <ProviderPicker kind="audio" value={audioProvider} onChange={setAudioProvider} compact placeholder="— 自动 —" />
-                </div>
-              </div>
-              <div className="text-[9.5px] leading-relaxed text-amber-300/85 bg-amber-500/8 border border-amber-500/20 rounded-lg px-2 py-1.5">
-                视频源需支持参考图（角色多视图 + 场景参考）；生视频工具会自动抽帧，便于 Agent 自查成片。
-              </div>
-            </Card>
-
-            <Card title="导演组" icon={<Users className="w-3.5 h-3.5 text-accent-purple" />}>
-              <select
-                value={teamId} onChange={(e) => applyTeam(e.target.value)}
-                className="w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl px-2.5 py-2 text-xs [color:var(--color-text-main)] focus:outline-none focus:border-brand/60"
-              >
-                <option value="studio-default">默认简化剧组（资产复用 + 多参考 + 风格锁定 + 产物验收）</option>
-                {teams.filter((t) => t.id !== 'studio-default').map((t) => (
-                  <option key={t.id} value={t.id}>{t.name}{t.qa_gate ? ' · 质检门' : ''}</option>
-                ))}
-              </select>
-              <div className="text-[9.5px] leading-relaxed [color:var(--color-text-muted)] line-clamp-3">
-                {teams.find((t) => t?.id === teamId)?.description
-                  || '无固定流程：总导演 Agent 用 todolist 自主制定计划并执行（工具与成员均可自由调度）。'}
-              </div>
-            </Card>
-
-            <Card title="成片选项" icon={<LayoutGrid className="w-3.5 h-3.5 text-brand-light" />}>
+            <Panel title="制作规格" icon={<SlidersHorizontal className="h-3.5 w-3.5 text-sky-400" />}>
               <div className="flex items-center justify-between gap-2">
-                <span className="text-[10.5px] [color:var(--color-text-muted)]">画幅</span>
-                <div className="inline-flex rounded-lg bg-surface/80 border border-white/70 dark:border-white/12 p-0.5">
+                <span className={`text-[10.5px] ${MUTED}`}>画幅</span>
+                <div className="inline-flex rounded-lg border border-black/[.06] bg-black/[.04] p-0.5 dark:border-white/[.08] dark:bg-black/25">
                   {[['9:16', '竖屏'], ['16:9', '横屏'], ['1:1', '方形']].map(([v, label]) => (
                     <button
                       key={v} type="button" onClick={() => setAspect(v)}
-                      className={`px-2.5 py-1 rounded-md text-[10.5px] font-medium transition-colors ${
-                        aspect === v ? 'bg-surface/80 text-brand-light shadow-sm' : '[color:var(--color-text-muted)] hover:text-[color:var(--color-text-main)]'
+                      className={`rounded-md px-2.5 py-1 text-[10px] font-medium transition-all ${
+                        aspect === v ? 'bg-white text-amber-600 shadow-sm dark:bg-white/[.10] dark:text-amber-300' : `${MUTED} hover:text-[color:var(--color-text-main)]`
                       }`}
                     >{label}</button>
                   ))}
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                <span className="text-[10.5px] [color:var(--color-text-muted)] shrink-0">最多分镜</span>
+                <span className={`shrink-0 text-[10.5px] ${MUTED}`}>最多分镜</span>
                 <input
                   type="range" min={1} max={30} value={maxShots}
                   onChange={(e) => setMaxShots(Math.max(1, Math.min(30, parseInt(e.target.value) || 12)))}
-                  className="flex-1 accent-brand h-1"
+                  className="h-1 flex-1 accent-amber-400"
                 />
-                <span className="w-7 text-center text-[11px] font-mono text-brand-light">{maxShots}</span>
+                <span className="w-6 text-center font-mono text-[11px] font-semibold text-amber-500 dark:text-amber-300">{maxShots}</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-[10.5px] [color:var(--color-text-muted)] shrink-0">提示词技能</span>
+                <span className={`shrink-0 text-[10.5px] ${MUTED}`}>提示词技能</span>
                 <select
                   value={promptSkill} onChange={(e) => setPromptSkill(e.target.value)}
-                  title="指定模型写提示词时使用的技能：视频首选 minimax-h3-prompt（H3 三字段），通用兜底 prompt-basics（六要素）；不指定则由导演自选"
-                  className="flex-1 min-w-0 bg-surface/80 border border-white/70 dark:border-white/12 rounded-lg px-2 py-1 text-[10.5px] [color:var(--color-text-main)] focus:outline-none focus:border-brand/60"
+                  title="指定模型写提示词时使用的技能：视频首选 minimax-h3-prompt，通用兜底 prompt-basics"
+                  className={`h-8 min-w-0 flex-1 rounded-lg border border-black/[.07] bg-white/60 px-2 text-[10.5px] ${TEXT} outline-none focus:border-amber-400/60 dark:border-white/[.08] dark:bg-black/20`}
                 >
-                  <option value="">自动（导演自选，六要素兜底）</option>
+                  <option value="">自动（导演自选 · 六要素兜底）</option>
                   {[
                     ...skills.filter((s: any) => ['minimax-h3-prompt', 'prompt-basics'].includes(s?.name)),
                     ...skills.filter((s: any) => !['minimax-h3-prompt', 'prompt-basics'].includes(s?.name)),
@@ -474,63 +652,110 @@ export const OneKeyStudioView: React.FC = () => {
                   ))}
                 </select>
               </div>
-              <div className="text-[9px] leading-relaxed [color:var(--color-text-muted)]">
-                {promptSkill
-                  ? `已指定「${promptSkill}」：写/改提示词前 Agent 会先读取该技能并按结构产出`
-                  : '不指定技能时，工具会按「主体+动作+环境+光线+运镜+风格」六要素组装兜底提示词'}
+              <div className={`text-[9px] leading-relaxed ${MUTED}`}>
+                {promptSkill ? `已指定「${promptSkill}」：写/改提示词前会先读该技能` : '不指定时按「主体+动作+环境+光线+运镜+风格」组装兜底提示词'}
               </div>
-              <div className="border-t border-white/50 dark:border-white/10 pt-1.5 space-y-0.5">
-                <Switch checked={genRoles} onChange={setGenRoles} label="补齐角色资产" hint="已有三视图/形象自动复用" />
+            </Panel>
+
+            <Panel title="生成源" icon={<Zap className="h-3.5 w-3.5 text-amber-400" />} hint="生图 / 编辑 / 视频 / 配音">
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className={`flex w-[86px] shrink-0 items-center gap-1.5 text-[10px] ${MUTED}`}><Aperture className="h-3 w-3" />生图源</span>
+                  <div className="min-w-0 flex-1"><ProviderPicker kind="image" value={imageProvider} onChange={setImageProvider} compact placeholder="— 自动 —" /></div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`flex w-[86px] shrink-0 items-center gap-1.5 text-[10px] ${MUTED}`}><Sparkles className="h-3 w-3" />编辑源</span>
+                  <div className="min-w-0 flex-1"><ProviderPicker kind="image" value={imageEditProvider} onChange={setImageEditProvider} compact placeholder="— 同生图 —" capability="i2i" /></div>
+                </div>
+                <div className="grid grid-cols-[1fr_1fr] gap-2">
+                  <div className="min-w-0">
+                    <div className={`mb-1 flex items-center gap-1 text-[10px] ${MUTED}`}><Film className="h-3 w-3" />视频源</div>
+                    <ProviderPicker kind="video" value={videoProvider} onChange={setVideoProvider} compact placeholder="— 自动 —" capability="i2v" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className={`mb-1 flex items-center gap-1 text-[10px] ${MUTED}`}><AudioLines className="h-3 w-3" />配音源</div>
+                    <ProviderPicker kind="audio" value={audioProvider} onChange={setAudioProvider} compact placeholder="— 自动 —" />
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-start gap-1.5 rounded-lg border border-amber-400/20 bg-amber-400/[.07] px-2 py-1.5 text-[9px] leading-relaxed text-amber-700 dark:text-amber-200/90">
+                <Sparkles className="mt-[1px] h-2.5 w-2.5 shrink-0" />
+                <span>三视图 / 场景空镜走生图源；多图合成分镜走编辑源（不配则同生图源）。</span>
+              </div>
+            </Panel>
+
+            <Panel title="导演组" icon={<Users className="h-3.5 w-3.5 text-violet-400" />}>
+              <select
+                value={teamId} onChange={(e) => applyTeam(e.target.value)}
+                className={`h-9 w-full rounded-xl border border-black/[.07] bg-white/60 px-2.5 text-[11.5px] ${TEXT} outline-none focus:border-amber-400/60 dark:border-white/[.08] dark:bg-black/20`}
+              >
+                <option value="studio-default">默认简化剧组（资产复用 + 多参考 + 风格锁定 + 产物验收）</option>
+                {teams.filter((t) => t.id !== 'studio-default').map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}{t.qa_gate ? ' · 质检门' : ''}</option>
+                ))}
+              </select>
+              <div className={`line-clamp-3 text-[9.5px] leading-relaxed ${MUTED}`}>
+                {teams.find((t) => t?.id === teamId)?.description
+                  || '无固定流程：总导演 Agent 用 todolist 自主制定计划并执行。'}
+              </div>
+            </Panel>
+
+            <Panel title="高级选项" icon={<Wand2 className="h-3.5 w-3.5 text-emerald-400" />}>
+              <div className="divide-y divide-black/[.05] dark:divide-white/[.05]">
+                <Switch checked={genRoles} onChange={setGenRoles} label="补齐角色资产" hint="已有三视图 / 形象自动复用" />
                 <Switch checked={enableVideo} onChange={setEnableVideo} label="视频生成" hint="逐镜参考生视频（成片核心）" />
-                <Switch checked={keyframeMode} onChange={setKeyframeMode} label="先生成分镜画面" hint="默认关；开启后走首帧 i2v" title="默认关：直接用资产参考生视频（r2v）" />
+                <Switch checked={keyframeMode} onChange={setKeyframeMode} label="先生成分镜画面" hint="默认关：多参考 r2v 直出" title="默认关=跳过分镜合成，直接多参考生视频（r2v）；开启后先合成分镜画面再首帧 i2v" />
               </div>
-            </Card>
+            </Panel>
 
             {error && (
-              <div className="text-[10.5px] text-red-300 leading-relaxed bg-red-500/10 border border-red-500/30 rounded-xl px-3 py-2">
-                ⚠️ {error}
+              <div className="flex items-start gap-2 rounded-xl border border-red-500/25 bg-red-500/[.08] px-3 py-2 text-[10.5px] leading-relaxed text-red-600 dark:text-red-300">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />{error}
               </div>
             )}
           </div>
 
-          {/* 发起按钮（吸底） */}
-          <div className="p-3 border-t border-white/70 dark:border-white/12 bg-surface/80 dark:bg-black/45 shrink-0">
+          <div className="shrink-0 border-t border-black/[.06] bg-white/40 p-3 dark:border-white/[.08] dark:bg-black/20">
             <button
               onClick={() => void handleRun()}
               disabled={running}
-              className="w-full h-11 rounded-xl bg-gradient-to-r from-amber-500 to-brand text-white text-[13px] font-bold shadow-lg shadow-brand/25 inline-flex items-center justify-center gap-2 disabled:opacity-50 hover:brightness-110 transition-all"
+              className="group relative flex h-11 w-full items-center justify-center gap-2 overflow-hidden rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-orange-500 text-[12.5px] font-bold text-black shadow-lg shadow-amber-500/25 transition-all hover:brightness-105 disabled:opacity-50"
             >
-              {running ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+              <span className="absolute inset-0 bg-[linear-gradient(110deg,transparent,rgba(255,255,255,.35),transparent)] opacity-0 transition-opacity group-hover:opacity-100" />
+              {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
               {running ? 'Agent 制作中…' : done || status === 'failed' ? '再次发起成片' : '开始成片'}
             </button>
-            <div className="text-[9.5px] [color:var(--color-text-muted)] text-center mt-1.5">
-              计划与进度来自导演的 todolist · 流程不写死，由 Agent 自主决定
-            </div>
+            <div className={`mt-1.5 text-center text-[9px] ${MUTED}`}>计划与进度来自导演 todolist · 流程不写死</div>
           </div>
         </aside>
 
         {/* ══ 中：生产看板 ══ */}
-        <main className="flex-1 min-w-0 flex flex-col overflow-hidden">
-          {/* 状态卡 */}
-          <div className="px-4 pt-4 pb-3 shrink-0">
-            <div className="rounded-2xl border border-white/70 dark:border-white/12 bg-gradient-to-r from-brand/12 via-amber-500/6 to-transparent p-4">
-              <div className="flex items-center gap-3">
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${
-                  running ? 'bg-brand/15 border-brand/30' : done ? 'bg-emerald-500/15 border-emerald-500/30' : status === 'failed' ? 'bg-red-500/15 border-red-500/30' : 'bg-surface/80 border-white/70 dark:border-white/12'
+        <main className={`flex min-w-0 flex-1 flex-col overflow-hidden ${PANEL}`}>
+          <div className="shrink-0 space-y-2.5 p-3.5 pb-3">
+            <div className={`relative overflow-hidden rounded-2xl border border-black/[.05] bg-gradient-to-br p-4 dark:border-white/[.07] ${
+              running ? 'from-amber-400/[.12] via-amber-400/[.03] to-transparent'
+                : done ? 'from-emerald-400/[.10] via-emerald-400/[.02] to-transparent'
+                  : status === 'failed' ? 'from-red-500/[.10] via-red-500/[.02] to-transparent'
+                    : 'from-violet-500/[.07] via-transparent to-amber-400/[.05]'
+            }`}>
+              <div className="pointer-events-none absolute -right-10 -top-12 h-40 w-40 rounded-full bg-amber-400/[.08] blur-3xl" />
+              <div className="relative flex items-start gap-3.5">
+                <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border ${
+                  running ? 'border-amber-400/30 bg-amber-400/15' : done ? 'border-emerald-400/30 bg-emerald-400/15' : status === 'failed' ? 'border-red-400/30 bg-red-400/15' : 'border-black/[.06] bg-black/[.03] dark:border-white/[.08] dark:bg-white/[.04]'
                 }`}>
-                  {running && <Loader2 className="w-5 h-5 text-brand-light animate-spin" />}
-                  {done && <CheckCircle2 className="w-5 h-5 text-emerald-400" />}
-                  {status === 'failed' && <AlertTriangle className="w-5 h-5 text-red-400" />}
-                  {!running && !done && status !== 'failed' && <Clapperboard className="w-5 h-5 [color:var(--color-text-muted)]" />}
+                  {running && <Loader2 className="h-5 w-5 animate-spin text-amber-400" />}
+                  {done && <CheckCircle2 className="h-5 w-5 text-emerald-400" />}
+                  {status === 'failed' && <AlertTriangle className="h-5 w-5 text-red-400" />}
+                  {!running && !done && status !== 'failed' && <Clapperboard className="h-5 w-5 opacity-40 [color:var(--color-text-muted)]" />}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[13px] font-bold [color:var(--color-text-main)]">{sm.label}</span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full border font-medium flex items-center gap-1 bg-brand/10 text-brand-light border-brand/25">
-                      <Bot className="w-3 h-3" />{ranTeamName ? `导演组 · ${ranTeamName}` : '默认简化剧组'}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`text-[14px] font-bold ${TEXT}`}>{sm.label}</span>
+                    <span className="inline-flex items-center gap-1 rounded-full border border-violet-400/20 bg-violet-400/10 px-2 py-0.5 text-[9px] font-medium text-violet-600 dark:text-violet-300">
+                      <Bot className="h-2.5 w-2.5" />{ranTeamName ? `导演组 · ${ranTeamName}` : '默认简化剧组'}
                     </span>
                   </div>
-                  <div className="text-[10px] [color:var(--color-text-muted)] mt-0.5 truncate">
+                  <div className={`mt-1 truncate text-[10.5px] ${MUTED}`}>
                     {running
                       ? (todos.find((t) => t?.status === 'in_progress')?.content || 'Agent 正在自主编排…')
                       : done
@@ -538,97 +763,71 @@ export const OneKeyStudioView: React.FC = () => {
                         : '粘贴文本后点击「开始成片」，总导演 Agent 将自主编排全流程'}
                   </div>
                 </div>
-                <div className="text-right shrink-0">
-                  <div className={`text-xl font-bold font-mono ${running ? 'text-brand-light' : done ? 'text-emerald-400' : '[color:var(--color-text-main)]'}`}>{progress}<span className="text-[11px] opacity-60">%</span></div>
-                </div>
+                <ProgressRing value={progress} tone={sm.ring} />
               </div>
-              <div className="h-1.5 rounded-full bg-surface/80 overflow-hidden mt-3">
-                <div
-                  className={`h-full rounded-full transition-all duration-700 ${done ? 'bg-emerald-400' : 'bg-gradient-to-r from-brand to-amber-400'}`}
-                  style={{ width: `${progress}%` }}
-                />
+              <div className="relative mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <Kpi icon={<Users className="h-3.5 w-3.5 text-violet-400" />} label="角色资产" value={charReady} total={characters.length} accent="bg-violet-400/10" />
+                <Kpi icon={<Camera className="h-3.5 w-3.5 text-sky-400" />} label="场景空镜" value={sceneReady} total={sceneList.length} accent="bg-sky-400/10" />
+                <Kpi icon={<Film className="h-3.5 w-3.5 text-emerald-400" />} label="分镜成片" value={videoDone} total={shots.length} accent="bg-emerald-400/10" />
+                <Kpi icon={<AudioLines className="h-3.5 w-3.5 text-pink-400" />} label="配音" value={shots.filter((s: any) => s?.audio_url).length} total={summary.voice_needed ?? '—'} accent="bg-pink-400/10" />
               </div>
-              {(characters.length > 0 || shots.length > 0) && (
-                <div className="grid grid-cols-4 gap-2 mt-3">
-                  {[
-                    ['角色资产', charReady, characters.length],
-                    ['场景空镜', sceneReady, sceneList.length],
-                    ['分镜成片', videoDone, shots.length],
-                    ['配音', shots.filter((s: any) => s?.audio_url).length, summary.voice_needed ?? '—'],
-                  ].map(([label, a, b]) => (
-                    <div key={String(label)} className="rounded-xl bg-surface-hover/80 dark:bg-black/40 border border-white/50 dark:border-white/10 px-2.5 py-1.5">
-                      <div className="text-[12px] font-bold font-mono [color:var(--color-text-main)]">
-                        {a}<span className="text-[10px] opacity-50">/{b}</span>
-                      </div>
-                      <div className="text-[9px] [color:var(--color-text-muted)]">{label}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
 
-            {/* 导演计划 / 工具活动 */}
             {(todos.length > 0 || (stageList.length > 0 && running)) && (
-              <div className="mt-2.5 rounded-2xl border border-white/70 dark:border-white/12 bg-surface/80 dark:bg-black/35 px-3.5 py-2.5">
-                {todos.length > 0 ? (
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[10px] font-bold text-brand-light flex items-center gap-1 shrink-0">
-                      <Bot className="w-3 h-3" />导演计划 {todoCounts.done}/{todoCounts.total}
+              <div className={`flex items-start gap-2.5 rounded-2xl border border-black/[.05] bg-white/45 px-3.5 py-2.5 dark:border-white/[.06] dark:bg-white/[.02]`}>
+                <span className="mt-0.5 inline-flex shrink-0 items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-300">
+                  <ListChecks className="h-3 w-3" />导演计划
+                  {todos.length > 0 && <span className={`font-mono text-[9px] ${MUTED}`}>{todoCounts.done}/{todoCounts.total}</span>}
+                </span>
+                <div className="flex min-w-0 flex-1 flex-wrap gap-x-3 gap-y-1">
+                  {todos.length > 0 ? todos.map((t: any, i: number) => (
+                    <span key={i} className="inline-flex max-w-full items-center gap-1 text-[10px]">
+                      {t.status === 'completed'
+                        ? <CheckCircle2 className="h-3 w-3 shrink-0 text-emerald-400" />
+                        : t.status === 'in_progress'
+                          ? <Loader2 className="h-3 w-3 shrink-0 animate-spin text-amber-400" />
+                          : <CircleDot className={`h-3 w-3 shrink-0 ${MUTED}`} />}
+                      <span className={`truncate ${
+                        t.status === 'completed' ? `${MUTED} line-through` : t.status === 'in_progress' ? 'text-amber-600 dark:text-amber-300' : MUTED
+                      }`}>{t.content}</span>
                     </span>
-                    <div className="flex-1 flex flex-wrap gap-x-3 gap-y-1 min-w-0">
-                      {todos.map((t: any, i: number) => (
-                        <span key={i} className="text-[10px] inline-flex items-center gap-1 max-w-full">
-                          {t.status === 'completed'
-                            ? <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
-                            : t.status === 'in_progress'
-                              ? <Loader2 className="w-3 h-3 text-brand-light animate-spin shrink-0" />
-                              : <CircleDot className="w-3 h-3 [color:var(--color-text-muted)] shrink-0" />}
-                          <span className={`truncate ${t.status === 'completed' ? '[color:var(--color-text-muted)] line-through' : t.status === 'in_progress' ? 'text-brand-light' : '[color:var(--color-text-muted)]'}`}>
-                            {t.content}
-                          </span>
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[10px] font-bold text-brand-light flex items-center gap-1 shrink-0">
-                      <Loader2 className="w-3 h-3 animate-spin" />进行中
-                    </span>
-                    {stageList.slice(-8).map((s) => (
-                      <span key={s.stage} className="text-[10px] px-2 py-0.5 rounded-full bg-surface/80 border border-white/70 dark:border-white/12 [color:var(--color-text-muted)]">
-                        {s.stage}
-                      </span>
-                    ))}
-                  </div>
-                )}
+                  )) : stageList.slice(-10).map((s) => (
+                    <span key={s.stage} className={`rounded-full border border-black/[.05] bg-black/[.02] px-2 py-0.5 text-[9.5px] ${MUTED} dark:border-white/[.06] dark:bg-white/[.03]`}>{s.stage}</span>
+                  ))}
+                </div>
               </div>
             )}
           </div>
 
-          {/* 中部标签页 */}
-          <div className="px-4 flex items-center gap-1 border-b border-white/70 dark:border-white/12 shrink-0">
-            <TabBtn active={centerTab === 'shots'} onClick={() => setCenterTab('shots')} icon={<Film className="w-3.5 h-3.5" />} label="分镜" count={shots.length} />
-            <TabBtn active={centerTab === 'swarm'} onClick={() => setCenterTab('swarm')} icon={<Bot className="w-3.5 h-3.5" />} label="子代理集群" count={Object.keys(subagentMap).length} />
-            <TabBtn active={centerTab === 'logs'} onClick={() => setCenterTab('logs')} icon={<ScrollText className="w-3.5 h-3.5" />} label="实时日志" count={logs.length} />
+          <div className="flex shrink-0 items-center gap-2 border-b border-black/[.06] px-3.5 pb-2 dark:border-white/[.07]">
+            <SegTabs
+              value={centerTab} onChange={(v) => setCenterTab(v as any)}
+              items={[
+                { id: 'shots', label: '分镜', icon: <Film className="h-3.5 w-3.5" />, count: shots.length },
+                { id: 'swarm', label: '子代理集群', icon: <Bot className="h-3.5 w-3.5" />, count: Object.keys(subagentMap).length },
+                { id: 'logs', label: '实时日志', icon: <ScrollText className="h-3.5 w-3.5" />, count: logs.length },
+              ]}
+            />
+            <span className="flex-1" />
+            {centerTab === 'shots' && shots.length > 0 && (
+              <span className={`hidden items-center gap-2 text-[9px] lg:flex ${MUTED}`}>
+                <span className="inline-flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />成片</span>
+                <span className="inline-flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-sky-400" />画面</span>
+                <span className="inline-flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-white/25" />待生成</span>
+              </span>
+            )}
           </div>
 
-          <div className="flex-1 overflow-y-auto custom-scrollbar p-4">
+          <div className="min-h-0 flex-1 overflow-y-auto p-3.5 custom-scrollbar">
             {centerTab === 'shots' && (
               shots.length > 0 ? (
                 <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] [color:var(--color-text-muted)]">点击缩略图预览 · 绿=成片 · 蓝=成图 · 灰=待生成 · 粉标=有配音</span>
-                  </div>
-                  <div className="grid grid-cols-5 md:grid-cols-7 xl:grid-cols-9 gap-2">
+                  <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-5 2xl:grid-cols-7">
                     {shots.map((s: any) => (
-                      <Thumb
+                      <ShotCard
                         key={s.id || s.shot_index}
-                        url={s.image_url}
-                        tone={s.video_url ? 'video' : s.image_url ? 'image' : 'pending'}
-                        badge={`#${s.shot_index}`}
-                        title={`#${s.shot_index} ${s.action_desc || ''}`}
-                        onClick={() => {
+                        shot={s}
+                        onOpen={() => {
                           if (s.video_url) openPreview('video', s.video_url, `分镜 #${s.shot_index} 成片`);
                           else if (s.image_url) openPreview('image', s.image_url, `分镜 #${s.shot_index} 成图`);
                         }}
@@ -636,56 +835,76 @@ export const OneKeyStudioView: React.FC = () => {
                     ))}
                   </div>
                   {videoDone < shots.length && (
-                    <div className="flex items-center gap-1.5 text-[10px] [color:var(--color-text-muted)]">
-                      <Loader2 className="w-3 h-3 animate-spin text-brand-light" />
+                    <div className={`flex items-center gap-1.5 text-[10px] ${MUTED}`}>
+                      <Loader2 className="h-3 w-3 animate-spin text-amber-400" />
                       成片 {videoDone}/{shots.length} —— 异步视频生成中，完成后自动回写
+                    </div>
+                  )}
+                  {Array.isArray(result?.video_errors) && result.video_errors.length > 0 && (
+                    <div className="rounded-xl border border-red-500/20 bg-red-500/[.06] p-2.5 text-[10px] leading-relaxed text-red-600 dark:text-red-300">
+                      {result.video_errors.slice(0, 3).map((e: any, i: number) => (
+                        <div key={i}>✗ 分镜 #{e?.shot_index ?? '?'}：{String(e?.error || e?.message || '生成失败').slice(0, 160)}</div>
+                      ))}
                     </div>
                   )}
                 </div>
               ) : (
-                <EmptyState running={running} text={running ? 'Agent 正在拆解剧本，分镜生成后会出现在这里' : '发起任务后，这里会实时展示每一镜的成图/成片进度'} />
+                <EmptyStage running={running} />
               )
             )}
 
             {centerTab === 'swarm' && <OneKeySwarmBoard subagents={subagentMap} />}
 
             {centerTab === 'logs' && (
-              <div ref={logRef} className="h-full min-h-[300px] max-h-full overflow-y-auto rounded-2xl bg-surface/80 border border-white/70 dark:border-white/12 p-3.5 space-y-1 custom-scrollbar font-mono">
-                {logs.length === 0 && <div className="text-[11px] [color:var(--color-text-muted)] font-sans">等待 Agent 上报进度…</div>}
-                {logs.map((l: any, i: number) => (
-                  <div key={i} className="text-[10.5px] leading-relaxed flex gap-2">
-                    <span className={`font-bold shrink-0 ${stageTone(String(l.stage || ''))}`}>[{l.stage}]</span>
-                    <span className="[color:var(--color-text-main)] break-all">{l.message}</span>
-                  </div>
-                ))}
+              <div className="overflow-hidden rounded-2xl border border-black/[.06] bg-white/50 dark:border-white/[.08] dark:bg-black/30">
+                <div className="flex items-center gap-2 border-b border-black/[.05] px-3 py-2 dark:border-white/[.06]">
+                  <span className="h-2 w-2 rounded-full bg-red-400/80" />
+                  <span className="h-2 w-2 rounded-full bg-amber-400/80" />
+                  <span className="h-2 w-2 rounded-full bg-emerald-400/80" />
+                  <span className={`ml-2 font-mono text-[9.5px] ${MUTED}`}>director.log</span>
+                  <span className="flex-1" />
+                  <span className={`font-mono text-[9px] ${MUTED}`}>{logs.length} 行</span>
+                </div>
+                <div ref={logRef} className="max-h-[calc(100vh-360px)] min-h-[300px] space-y-0.5 overflow-y-auto p-3 font-mono custom-scrollbar">
+                  {logs.length === 0 && <div className={`py-6 text-center font-sans text-[11px] ${MUTED}`}>等待 Agent 上报进度…</div>}
+                  {logs.map((l: any, i: number) => (
+                    <div key={i} className="flex items-start gap-2 rounded px-1 py-0.5 text-[10.5px] leading-relaxed hover:bg-black/[.03] dark:hover:bg-white/[.03]">
+                      <span className={`shrink-0 font-mono text-[9px] tabular-nums ${MUTED}`}>{fmtClock(l.time_ms)}</span>
+                      <span className={`shrink-0 rounded px-1 py-0.5 text-[9px] font-semibold ${stageTone(String(l.stage || ''))}`}>{l.stage}</span>
+                      <span className={`min-w-0 break-all ${TEXT}`}>{l.message}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
         </main>
 
         {/* ══ 右：产物廊 ══ */}
-        <aside className="w-[340px] shrink-0 border-l border-white/70 dark:border-white/12 bg-surface/80 dark:bg-black/30 flex flex-col overflow-hidden">
-          <div className="p-3.5 pb-2 shrink-0">
+        <aside className={`flex w-[330px] shrink-0 flex-col overflow-hidden xl:w-[356px] ${PANEL}`}>
+          <div className="shrink-0 p-3.5 pb-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold [color:var(--color-text-main)] flex items-center gap-1.5">
-                <Palette className="w-3.5 h-3.5 text-brand" />产物廊
+              <span className={`inline-flex items-center gap-1.5 text-[12px] font-semibold ${TEXT}`}>
+                <span className="flex h-6 w-6 items-center justify-center rounded-lg border border-black/[.06] bg-black/[.03] dark:border-white/[.08] dark:bg-white/[.04]">
+                  <Palette className="h-3.5 w-3.5 text-amber-400" />
+                </span>
+                产物廊
               </span>
               {result?.jianyin_draft && Object.keys(result.jianyin_draft).length > 0 && (
-                <span className="text-[9.5px] px-2 py-0.5 rounded-full bg-emerald-500/12 border border-emerald-500/30 text-emerald-300">剪映已导出</span>
+                <span className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-0.5 text-[9px] font-medium text-emerald-600 dark:text-emerald-300">剪映已导出</span>
               )}
             </div>
-            {/* 统计条 */}
             {result && (
-              <div className="grid grid-cols-4 gap-1.5 mt-2.5">
+              <div className="mt-2.5 grid grid-cols-4 gap-1.5">
                 {[
-                  ['角色', `${charReady}`],
-                  ['场景', `${sceneReady}`],
-                  ['成片', `${videoDone}`],
-                  ['配音', `${shots.filter((s: any) => s?.audio_url).length}`],
-                ].map(([k, v]) => (
-                  <div key={k} className="rounded-xl bg-surface/80 border border-white/50 dark:border-white/10 py-1.5 text-center">
-                    <div className="text-[13px] font-bold font-mono [color:var(--color-text-main)]">{v}</div>
-                    <div className="text-[9px] [color:var(--color-text-muted)]">{k}</div>
+                  ['角色', `${charReady}`, 'text-violet-500 dark:text-violet-300'],
+                  ['场景', `${sceneReady}`, 'text-sky-500 dark:text-sky-300'],
+                  ['成片', `${videoDone}`, 'text-emerald-500 dark:text-emerald-300'],
+                  ['配音', `${shots.filter((s: any) => s?.audio_url).length}`, 'text-pink-500 dark:text-pink-300'],
+                ].map(([k, v, tone]) => (
+                  <div key={k} className="rounded-xl border border-black/[.05] bg-white/45 py-1.5 text-center dark:border-white/[.06] dark:bg-white/[.03]">
+                    <div className={`font-mono text-[13px] font-bold ${tone}`}>{v}</div>
+                    <div className={`text-[8.5px] ${MUTED}`}>{k}</div>
                   </div>
                 ))}
               </div>
@@ -693,71 +912,64 @@ export const OneKeyStudioView: React.FC = () => {
           </div>
 
           {!result ? (
-            <div className="flex-1 flex items-center justify-center px-8">
-              <div className="text-center space-y-3">
-                <div className="w-14 h-14 rounded-2xl bg-surface/80 border border-white/70 dark:border-white/12 flex items-center justify-center mx-auto">
-                  <ImageIcon className="w-6 h-6 [color:var(--color-text-muted)]" />
-                </div>
-                <div className="text-[11px] leading-relaxed [color:var(--color-text-muted)]">
-                  发起任务后，这里实时展示<br />角色资产 · 场景空镜 · 分镜成片
-                </div>
-              </div>
+            <div className="flex flex-1 items-center justify-center">
+              <EmptyPanel running={running} text={running ? '产物正在生成，角色 / 场景 / 成片会实时出现在这里' : '发起任务后，这里实时展示角色资产 · 场景空镜 · 分镜成片'} />
             </div>
           ) : (
             <>
-              {/* 产物分类标签 */}
-              <div className="px-3.5 flex items-center gap-1 border-b border-white/70 dark:border-white/12 shrink-0">
-                <TabBtn active={assetTab === 'characters'} onClick={() => setAssetTab('characters')} icon={<Users className="w-3.5 h-3.5" />} label="角色" count={characters.length} />
-                <TabBtn active={assetTab === 'scenes'} onClick={() => setAssetTab('scenes')} icon={<LayoutGrid className="w-3.5 h-3.5" />} label="场景" count={sceneList.length} />
-                <TabBtn active={assetTab === 'shots'} onClick={() => setAssetTab('shots')} icon={<Film className="w-3.5 h-3.5" />} label="成片" count={shots.length} />
+              <div className="flex shrink-0 items-center gap-1 border-b border-black/[.06] px-3.5 pb-2 dark:border-white/[.07]">
+                <SegTabs
+                  size="sm" value={assetTab} onChange={(v) => setAssetTab(v as any)}
+                  items={[
+                    { id: 'characters', label: '角色', count: characters.length },
+                    { id: 'scenes', label: '场景', count: sceneList.length },
+                    { id: 'shots', label: '成片', count: shots.length },
+                  ]}
+                />
+                <span className="flex-1" />
+                <span className={`text-[9px] ${MUTED}`}>点击预览</span>
               </div>
 
-              <div className="flex-1 overflow-y-auto custom-scrollbar p-3.5 space-y-3">
+              <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 custom-scrollbar">
                 {assetTab === 'characters' && (
                   characters.length > 0 ? (
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-2 gap-2">
                       {characters.map((c: any, i: number) => {
                         const img = c?.three_views?.front || c?.three_views?.three_quarter
                           || c?.three_views?.side || c?.avatar_url || '';
                         return (
-                          <Thumb
+                          <CharacterCard
                             key={c?.id || c?.name || i}
-                            url={img}
-                            badge={c?.name || ''}
-                            sub="待生成"
-                            title={`${c?.name || ''}${img ? '（点击预览）' : '（待生成）'}`}
-                            onClick={() => openPreview('image', img, `角色资产 · ${c?.name || ''}`)}
+                            c={c}
+                            onOpen={() => openPreview('image', img, `角色资产 · ${c?.name || ''}`)}
                           />
                         );
                       })}
                     </div>
-                  ) : <EmptyState running={running} text="还没有角色资产" />
+                  ) : <EmptyPanel running={running} text="还没有角色资产" />
                 )}
 
                 {assetTab === 'scenes' && (
                   sceneList.length > 0 ? (
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-2 gap-2">
                       {sceneList.map((s: any, i: number) => (
-                        <Thumb
+                        <SceneCard
                           key={s?.id || s?.scene_index || i}
-                          url={s?.ref_image_url}
-                          badge={`#${s?.scene_index ?? i + 1} ${s?.title || ''}`}
-                          sub="待生成"
-                          title={`场景 #${s?.scene_index ?? i + 1} ${s?.title || ''}`}
-                          onClick={() => openPreview('image', s?.ref_image_url, `场景 #${s?.scene_index ?? i + 1} · ${s?.title || ''}`)}
+                          s={s}
+                          onOpen={() => openPreview('image', s?.ref_image_url, `场景 #${s?.scene_index ?? i + 1} · ${s?.title || ''}`)}
                         />
                       ))}
                     </div>
-                  ) : <EmptyState running={running} text="还没有场景空镜" />
+                  ) : <EmptyPanel running={running} text="还没有场景空镜" />
                 )}
 
                 {assetTab === 'shots' && (
                   shots.length > 0 ? (
-                    <div className="space-y-2">
+                    <div className="space-y-1.5">
                       {shots.map((s: any, i: number) => {
                         const has = !!(s?.video_url || s?.image_url);
                         return (
-                          <div key={s?.id || s?.shot_index || i} className="flex items-center gap-2.5 rounded-xl border border-white/70 dark:border-white/12 bg-surface-hover/80 dark:bg-black/40 p-2">
+                          <div key={s?.id || s?.shot_index || i} className="flex items-center gap-2.5 rounded-xl border border-black/[.05] bg-white/45 p-2 transition-colors hover:border-amber-400/30 dark:border-white/[.06] dark:bg-white/[.03]">
                             <button
                               type="button"
                               title={s?.video_url ? '播放成片' : s?.image_url ? '预览成图' : '待生成'}
@@ -765,92 +977,96 @@ export const OneKeyStudioView: React.FC = () => {
                                 if (s?.video_url) openPreview('video', s.video_url, `分镜 #${s.shot_index} 成片`);
                                 else if (s?.image_url) openPreview('image', s.image_url, `分镜 #${s.shot_index} 成图`);
                               }}
-                              className={`relative w-16 h-10 rounded-lg overflow-hidden border shrink-0 cursor-pointer ${
-                                s?.video_url ? 'border-emerald-500/45' : has ? 'border-white/70 dark:border-white/12' : 'border-white/70 dark:border-white/12 bg-surface/80'
+                              className={`relative h-11 w-[62px] shrink-0 overflow-hidden rounded-lg border ${
+                                s?.video_url ? 'border-emerald-500/40' : has ? 'border-black/[.07] dark:border-white/[.08]' : 'border-dashed border-black/10 bg-black/[.03] dark:border-white/10 dark:bg-white/[.03]'
                               }`}
                             >
-                              {s?.image_url
-                                ? <img src={resolveMediaUrl(s.image_url)} alt="" loading="lazy" className="w-full h-full object-cover" />
-                                : <span className="absolute inset-0 flex items-center justify-center text-[8.5px] [color:var(--color-text-muted)]">{has ? '成片' : '待生成'}</span>}
+                              {s?.video_url ? (
+                                <video src={resolveMediaUrl(s.video_url)} muted playsInline preload="metadata" className="h-full w-full object-cover" />
+                              ) : s?.image_url ? (
+                                <img src={resolveMediaUrl(s.image_url)} alt="" loading="lazy" className="h-full w-full object-cover" />
+                              ) : (
+                                <span className={`absolute inset-0 flex items-center justify-center text-[8px] ${MUTED}`}>待生成</span>
+                              )}
                               {s?.video_url && (
-                                <span className="absolute inset-0 bg-black/25 flex items-center justify-center">
-                                  <Film className="w-3.5 h-3.5 text-white/90" />
+                                <span className="absolute inset-0 flex items-center justify-center bg-black/30">
+                                  <Play className="ml-0.5 h-3 w-3 fill-current text-white/90" />
                                 </span>
                               )}
                             </button>
                             <div className="min-w-0 flex-1">
-                              <div className="text-[10.5px] [color:var(--color-text-main)] truncate">
-                                <span className="font-mono text-brand-light mr-1.5">#{s?.shot_index}</span>
+                              <div className={`truncate text-[10.5px] ${TEXT}`}>
+                                <span className="mr-1.5 font-mono text-amber-500 dark:text-amber-300">#{s?.shot_index}</span>
                                 {s?.action_desc || s?.video_prompt || '—'}
                               </div>
-                              <div className="flex items-center gap-1.5 mt-0.5">
+                              <div className="mt-1 flex items-center gap-1.5">
                                 {s?.video_url
-                                  ? <span className="text-[9px] text-emerald-300">✓ 成片</span>
-                                  : <span className="text-[9px] [color:var(--color-text-muted)]">○ 待成片</span>}
-                                {s?.audio_url && <span className="text-[9px] text-pink-400 inline-flex items-center gap-0.5"><Music className="w-2.5 h-2.5" />配音</span>}
+                                  ? <span className="text-[9px] text-emerald-500 dark:text-emerald-300">✓ 成片</span>
+                                  : <span className={`text-[9px] ${MUTED}`}>○ 待成片</span>}
+                                {s?.audio_url && <span className="inline-flex items-center gap-0.5 text-[9px] text-pink-500 dark:text-pink-300"><Music className="h-2.5 w-2.5" />配音</span>}
                               </div>
                             </div>
                             {s?.audio_url && (
                               <button
                                 type="button" title="试听配音"
                                 onClick={() => openPreview('audio', s.audio_url, `分镜 #${s.shot_index} 配音`)}
-                                className="w-7 h-7 rounded-lg border border-white/70 dark:border-white/12 bg-surface/80 hover:border-pink-400/50 flex items-center justify-center shrink-0"
+                                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-black/[.06] bg-white/60 hover:border-pink-400/50 dark:border-white/[.08] dark:bg-white/[.04]"
                               >
-                                <Music className="w-3 h-3 text-pink-400" />
+                                <Music className="h-3 w-3 text-pink-500 dark:text-pink-300" />
                               </button>
                             )}
                           </div>
                         );
                       })}
                     </div>
-                  ) : <EmptyState running={running} text="还没有分镜产物" />
+                  ) : <EmptyPanel running={running} text="还没有分镜产物" />
                 )}
 
-                {/* 风格 / 复用 / 告警 */}
                 {summary.style_locked ? (
-                  <div className="text-[10px] text-emerald-300/90 flex items-center gap-1.5">
-                    <Sparkles className="w-3 h-3" />全片风格已由大模型锁定，自动附加到所有生成
+                  <div className="flex items-center gap-1.5 text-[10px] text-emerald-600 dark:text-emerald-300/90">
+                    <Wand2 className="h-3 w-3" />全片风格已由大模型锁定，自动附加到所有生成
                   </div>
                 ) : null}
                 {summary.assets_reused > 0 && (
-                  <div className="text-[10px] text-emerald-300/90">✓ 复用 {summary.assets_reused} 个已有角色资产（未重复定妆）</div>
+                  <div className="flex items-center gap-1.5 text-[10px] text-emerald-600 dark:text-emerald-300/90">
+                    <CircleCheck className="h-3 w-3" />复用 {summary.assets_reused} 个已有角色资产（未重复定妆）
+                  </div>
                 )}
                 {Array.isArray(result?.ref_warnings) && result.ref_warnings.length > 0 && (
-                  <div className="text-[10px] leading-relaxed text-red-300 bg-red-500/10 border border-red-500/30 rounded-xl p-2.5 space-y-1">
+                  <div className="space-y-1 rounded-xl border border-amber-500/25 bg-amber-500/[.07] p-2.5 text-[9.5px] leading-relaxed text-amber-700 dark:text-amber-200/90">
                     {result.ref_warnings.map((w: string, i: number) => <div key={i}>⚠️ {w}</div>)}
                   </div>
                 )}
                 {!!result?.jianyin_draft && Object.keys(result.jianyin_draft).length > 0 && (
-                  <div className="text-[10px] leading-relaxed text-emerald-300 break-all">
+                  <div className="break-all text-[9.5px] leading-relaxed text-emerald-600 dark:text-emerald-300">
                     ✓ 剪映草稿：{result.jianyin_draft.draft_path || result.jianyin_draft.path || '见导出目录'}
                   </div>
                 )}
               </div>
 
-              {/* 底部动作 */}
               {result?.project && (
-                <div className="p-3 border-t border-white/70 dark:border-white/12 bg-surface/80 dark:bg-black/45 shrink-0 space-y-1.5">
+                <div className="shrink-0 space-y-1.5 border-t border-black/[.06] bg-white/40 p-3 dark:border-white/[.08] dark:bg-black/20">
                   <div className="grid grid-cols-2 gap-1.5">
                     <button
                       onClick={() => void handleOpenProject('studio')}
                       disabled={saving}
-                      className="h-9 rounded-xl bg-brand text-white text-[11px] font-bold inline-flex items-center justify-center gap-1.5 hover:bg-brand-light disabled:opacity-50"
+                      className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-amber-400 to-orange-500 text-[11px] font-bold text-black shadow-md shadow-amber-500/20 transition-all hover:brightness-105 disabled:opacity-50"
                     >
-                      <Layers className="w-3.5 h-3.5" />分镜台精修
+                      <Layers className="h-3.5 w-3.5" />分镜台精修
                     </button>
                     <button
                       onClick={() => void handleOpenProject('canvas')}
                       disabled={saving}
-                      className="h-9 rounded-xl bg-surface/80 border border-white/70 dark:border-white/12 text-[11px] font-bold [color:var(--color-text-main)] inline-flex items-center justify-center gap-1.5 hover:bg-surface/80 disabled:opacity-50"
+                      className={`inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-black/[.07] bg-white/60 text-[11px] font-semibold ${TEXT} transition-colors hover:border-amber-400/40 dark:border-white/[.08] dark:bg-white/[.04] disabled:opacity-50`}
                     >
-                      <ImageIcon className="w-3.5 h-3.5" />画布编辑
+                      <ImageIcon className="h-3.5 w-3.5" />画布编辑
                     </button>
                   </div>
                   <button
                     onClick={() => window.dispatchEvent(new CustomEvent('open-export-modal'))}
-                    className="w-full h-9 rounded-xl bg-surface/80 border border-white/70 dark:border-white/12 text-[11px] font-bold [color:var(--color-text-main)] inline-flex items-center justify-center gap-1.5 hover:bg-surface/80"
+                    className={`inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-black/[.06] bg-white/40 text-[10.5px] font-medium ${MUTED} transition-colors hover:text-[color:var(--color-text-main)] dark:border-white/[.07] dark:bg-white/[.03]`}
                   >
-                    <Download className="w-3.5 h-3.5" />再导出剪映
+                    <Download className="h-3 w-3" />再导出剪映
                   </button>
                 </div>
               )}
@@ -862,44 +1078,31 @@ export const OneKeyStudioView: React.FC = () => {
       {/* ══ 媒体预览 ══ */}
       {preview && (
         <div
-          className="fixed inset-0 z-[120] bg-black/85 backdrop-blur-sm flex items-center justify-center p-8"
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-black/85 p-6 backdrop-blur-md"
           onClick={() => setPreview(null)}
         >
-          <div className="absolute top-4 right-5 flex items-center gap-3 text-white/80 text-xs" onClick={(e) => e.stopPropagation()}>
+          <div className="absolute left-1/2 top-4 flex -translate-x-1/2 items-center gap-3 rounded-full bg-white/10 px-4 py-1.5 text-[11px] text-white/80 backdrop-blur-xl" onClick={(e) => e.stopPropagation()}>
             <span className="max-w-[50vw] truncate">{preview.title}</span>
-            <button
-              className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20"
-              onClick={() => setPreview(null)}
-            >关闭 ✕</button>
+            <button className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] hover:bg-white/20" onClick={() => setPreview(null)}>
+              <X className="h-3 w-3" />
+            </button>
           </div>
-          <div className="max-w-[92vw] max-h-[88vh]" onClick={(e) => e.stopPropagation()}>
+          <div className="max-h-[88vh] max-w-[92vw]" onClick={(e) => e.stopPropagation()}>
             {preview.kind === 'video' && (
-              <video src={resolveMediaUrl(preview.url)} controls autoPlay className="max-w-[92vw] max-h-[88vh] rounded-xl" />
+              <video src={resolveMediaUrl(preview.url)} controls autoPlay className="max-h-[88vh] max-w-[92vw] rounded-2xl shadow-2xl" />
             )}
             {preview.kind === 'image' && (
-              <img src={resolveMediaUrl(preview.url)} alt={preview.title} className="max-w-[92vw] max-h-[88vh] object-contain rounded-xl" />
+              <img src={resolveMediaUrl(preview.url)} alt={preview.title} className="max-h-[88vh] max-w-[92vw] rounded-2xl object-contain shadow-2xl" />
             )}
             {preview.kind === 'audio' && (
-              <div className="bg-surface/80 rounded-xl p-4">
+              <div className="rounded-2xl bg-white/10 p-4 backdrop-blur-xl">
                 <audio src={resolveMediaUrl(preview.url)} controls autoPlay className="w-[420px] max-w-[80vw]" />
               </div>
             )}
           </div>
-          <div className="absolute bottom-4 text-[11px] text-white/50">点击空白处或按 Esc 关闭</div>
+          <div className="absolute bottom-4 text-[10px] text-white/40">点击空白处或按 Esc 关闭</div>
         </div>
       )}
     </div>
   );
 };
-
-/** 空状态 */
-const EmptyState: React.FC<{ running: boolean; text: string }> = ({ running, text }) => (
-  <div className="h-full min-h-[220px] flex items-center justify-center">
-    <div className="text-center space-y-3">
-      <div className="w-12 h-12 rounded-2xl bg-surface/80 border border-white/70 dark:border-white/12 flex items-center justify-center mx-auto">
-        {running ? <Loader2 className="w-5 h-5 text-brand-light animate-spin" /> : <Clapperboard className="w-5 h-5 [color:var(--color-text-muted)]" />}
-      </div>
-      <div className="text-[11px] [color:var(--color-text-muted)] max-w-[280px] leading-relaxed">{text}</div>
-    </div>
-  </div>
-);

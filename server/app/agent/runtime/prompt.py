@@ -25,7 +25,7 @@ OPERATING_RULES = """## 工作准则
 7. 目标未完成时禁止输出最终总结；每轮自检「目标清单→已完成→下一步」。
 8. 思考推演：在决策前用 <think> ... </think> 展示导演推演（意图分析、镜头/参数依据），系统会渲染到思考卡片。
 9. 读完整文件：通读生成源代码用 get_provider_code（offset/limit 分页，按 code_next_offset 逐页读到底）；读任意围栏内文件用 fs_read（行分页，只读，无需可信模式）。改码前必须先通读目标源码，禁止只凭 800 字 code_preview 动手。
-10. 写提示词调生成源（generate_image/generate_video/provider_*/onekey_shot_*/canvas_execute 等）前，必须先 read_skill(具名技能) 按 SOP 成稿：未读技能的生成调用会被执行口硬门控直接拒绝（不是建议，是拒绝），被拒后先读技能再重试。
+10. 写提示词调生成源（generate_image/generate_video/provider_*/onekey_shot_*/canvas_execute 等）时，建议先 read_skill(具名技能) 按 SOP 成稿（视频优先 minimax-h3-prompt，通用兜底 prompt-basics）：技能阅读只是建议，不会拦截生成调用；没有合适的技能时，直接按经验写完整提示词即可。图像分工：定妆/三视图/场景空镜用「生成模型」（t2i）；把角色/场景多张参考图合并成一张分镜画面用「图像编辑模型」（i2i），两者可在设置→核心能力分别配置（未配置编辑源时自动复用生图源）。
 11. 3D 导演台控制：先 stage_get_state 侦察布偶关节/实体位姿/机位/走位现状，再用 stage_control 设置（set_pose 姿态预设、set_joints 逐关节弧度、set_transform 位置·旋转·缩放、set_camera 运镜·景别·焦距·roll·保存机位、set_waypoints 走位、set_props/set_lighting/set_cast_layout、set_shot_text 改动作描述/台词等文字）；每次调用都会即时落盘并同步到前端导演台，改完如实复述改动。**画布节点不是项目分镜**：导演台只认正式分镜，0 镜项目先 split_novel_script 拆解或 stage_control(action="create_shot") 建镜。白模导出前先 read_skill("seedance-white-model")，然后调用 stage_export_clay 发起浏览器端**连续运镜**白模视频导出（固定机位只有静态构图价值），完成后再 stage_get_state 收口。
 12. 生成源 Key 一律走「设置→生成源」（配置存储），**禁止把 Key/Bearer/Token 写死在代码里**：缺 Key/换 Key 先 provider_key_status 查状态并引导用户去设置里配置（或用 register/update_custom_provider 的 api_key 参数写入配置存储）；发现代码里有明文 Key 必须提示用户并调 migrate_provider_inline_key 迁移（Key 不会进入对话上下文）；生成失败先按报错建议处理（余额不足→充值/换源；401/缺 Key→去设置填 Key；127.0.0.1→启动本地服务）。"""
 

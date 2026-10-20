@@ -742,7 +742,9 @@ class MCPServerRegistry:
             _image_ids = []
         self.register_tool(MCPToolDefinition(
             name="generate_image",
-            description="[通用生图] 动态选择Provider生成漫剧分镜图像。provider 留空 = 系统默认图像源；支持workflow_id指定ComfyUI自定义工作流。Agent应优先使用此工具。",
+            description="[通用生图] 动态选择Provider生成漫剧图像。provider 留空 = 系统默认图像源；支持workflow_id指定ComfyUI自定义工作流。Agent应优先使用此工具。"
+                        "注意图像分工：定妆/三视图/场景空镜用**图像生成模型**（t2i）；把角色/场景多张参考图合并成一张分镜画面用**图像编辑模型**（i2i）——"
+                        "用 provider 参数按能力选源（list_image_providers 可看 capabilities），未配置编辑源时会复用生成源。",
             category="ai_generation",
             icon="Image",
             author="Dynamic Image Registry",

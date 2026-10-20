@@ -740,7 +740,7 @@ export const apiService = {
   // 9.1 一键成片 Agent（异步任务 + 轮询；总导演 + 子代理集群，可传 team_id 选择导演组）
   async onekeyRun(params: {
     title?: string; text: string; style_preset?: string; aspect_ratio?: string; custom_instructions?: string;
-    max_images?: number; image_provider?: string; image_workflow_id?: string; audio_provider?: string;
+    max_images?: number; image_provider?: string; image_edit_provider?: string; image_workflow_id?: string; audio_provider?: string;
     video_provider?: string; video_workflow_id?: string; enable_video?: boolean; max_videos?: number;
     gen_roles?: boolean; max_roles?: number; team_id?: string; keyframe_mode?: boolean; prompt_skill?: string;
   }): Promise<{ task_id: string; status: string; team_id?: string; team_name?: string }> {
@@ -755,6 +755,7 @@ export const apiService = {
         custom_instructions: params.custom_instructions || '',
         max_images: params.max_images ?? 12,
         image_provider: params.image_provider,
+        image_edit_provider: params.image_edit_provider,
         image_workflow_id: params.image_workflow_id,
         audio_provider: params.audio_provider,
         video_provider: params.video_provider,

@@ -41,6 +41,7 @@ MANAGED_KEYS = [
     "RESPONSES_MODEL",
     # Image Generation
     "IMAGE_PROVIDER",
+    "IMAGE_EDIT_PROVIDER",
     "COMFYUI_SERVER_URL",
     "COMFYUI_CHECKPOINT",
     "COMFYUI_TIMEOUT_SECONDS",
@@ -211,6 +212,10 @@ class Settings(BaseModel):
     # Image Generation Providers
     # 默认走 OpenAI 兼容生图（gpt-image 系列）；未配置时注册表会自动回退到已配置的其它源（如 ComfyUI）
     IMAGE_PROVIDER: str = os.getenv("IMAGE_PROVIDER", "openai_compat")
+    # 图像编辑源（i2i：多张参考图合成分镜/改图），留空 = 沿用 IMAGE_PROVIDER。
+    # 生成与编辑是两类模型：定妆/三视图/场景空镜走 IMAGE_PROVIDER（生成）；
+    # 把角色/场景多图合并成一张分镜画面走 IMAGE_EDIT_PROVIDER（编辑）。
+    IMAGE_EDIT_PROVIDER: str = os.getenv("IMAGE_EDIT_PROVIDER", "")
     COMFYUI_SERVER_URL: str = os.getenv("COMFYUI_SERVER_URL", "http://127.0.0.1:8188")
     COMFYUI_CHECKPOINT: str = os.getenv("COMFYUI_CHECKPOINT", "")
     COMFYUI_TIMEOUT_SECONDS: int = int(os.getenv("COMFYUI_TIMEOUT_SECONDS", "1200"))
