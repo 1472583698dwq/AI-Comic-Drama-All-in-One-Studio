@@ -25,6 +25,16 @@ const CATEGORY_TABS: { key: AssetCategory | 'all'; label: string; icon: React.Re
 import { API_ORIGIN } from '../../utils/devOrigin';
 const resolveUrl = (u?: string) => u && u.startsWith('/') ? API_ORIGIN + u : u;
 
+/** 标签拆分：中英文逗号/顿号/分号/换行 均视为分隔符（历史脏数据按单标签存入） */
+const splitTagValue = (t: any): string[] => String(t ?? '').split(/[,，、;；\n\r]+/).map(s => s.trim()).filter(Boolean);
+/** 标签归一化：拆混排、去空白、去重（保序），用于展示与保存前的统一口径 */
+const normalizeTags = (list: any): string[] => {
+  const arr = Array.isArray(list) ? list : (list == null || list === '' ? [] : [list]);
+  const out: string[] = [];
+  for (const t of arr) for (const s of splitTagValue(t)) if (!out.includes(s)) out.push(s);
+  return out;
+};
+
 export const AssetLibrary: React.FC = () => {
   const { assets, total, category, q, isLoading, selectedId, fetchAssets, setCategory, setGroup, scope: scopeFilter, group: groupFilter, selectAsset, createAsset, updateAsset, batchImport, generateAsset, deleteAsset, duplicateAsset, publishAsset, unpublishAsset, shareAsset, copyAssetToProject } = useAssetStore() as any;
   const { project, updateShot } = useProjectStore();
@@ -43,6 +53,15 @@ export const AssetLibrary: React.FC = () => {
   const [shareTargets, setShareTargets] = useState<string[]>([]);
   const [shareBusy, setShareBusy] = useState(false);
   const projName = (pid?: string) => projects.find((p: any) => p.id === pid)?.title || pid || '';
+
+  // ── 详情面板标签：行内编辑 / 快速添加 ──
+  const [tagEdit, setTagEdit] = useState<{ index: number } | null>(null);
+  const [tagAddOpen, setTagAddOpen] = useState(false);
+  const [tagAddValue, setTagAddValue] = useState('');
+  const [tagSuggestions, setTagSuggestions] = useState<string[]>([]);
+  const [tagSugLoading, setTagSugLoading] = useState(false);
+  const [tagSugNote, setTagSugNote] = useState('');
+  const [savingTags, setSavingTags] = useState(false);
 
   const [showImport, setShowImport] = useState(false);
   const [showGenerate, setShowGenerate] = useState(false);
@@ -140,7 +159,19 @@ export const AssetLibrary: React.FC = () => {
 
   const refreshStats = () => apiService.getAssetStats(activePid || undefined).then(setStats).catch(()=>{});
 
-  const handleSearch = () => fetchAssets({ q: searchInput, page: 1 });
+  // 搜索防抖：停止输入 500ms 后自动检索；Enter /「搜索」按钮立即触发（并取消挂起的定时器）
+  const searchTimer = useRef<any>(null);
+  useEffect(() => {
+    if (searchInput === q) return; // 与当前生效关键词一致，无需重复请求
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => { searchTimer.current = null; fetchAssets({ q: searchInput, page: 1 }); }, 500);
+    return () => { if (searchTimer.current) { clearTimeout(searchTimer.current); searchTimer.current = null; } };
+  }, [searchInput]);
+
+  const handleSearch = () => {
+    if (searchTimer.current) { clearTimeout(searchTimer.current); searchTimer.current = null; }
+    fetchAssets({ q: searchInput, page: 1 });
+  };
 
   /** 新建文本/提示词素材：无文件，正文进 content，category=text */
   const handleCreateText = async () => {
@@ -546,6 +577,67 @@ export const AssetLibrary: React.FC = () => {
   const selOwnedByMe = !!selected && !!activePid && selected.project_id === activePid;
   const selSharedToMe = !!selected && !!activePid && !!selected.project_id && selected.project_id !== activePid && (selected.shared_to || []).includes(activePid);
 
+  // ── 标签（详情面板）：归一化展示 + 写权限判定 + 局部保存 ──
+  const selTags = normalizeTags(selected?.tags);
+  // 与后端 writable_by 同口径：全局素材仅出生项目可改；共享给我的只读
+  const selWritable = !!selected && (!activePid || (selected.scope === 'global'
+    ? (!selected.origin_project_id || selected.origin_project_id === activePid)
+    : selected.project_id === activePid));
+  /** 标签即时保存：仅提交 tags 局部字段（PUT 支持局部更新，不动其他字段） */
+  const saveTags = async (next: string[]) => {
+    if (!selected || savingTags) return;
+    setSavingTags(true);
+    try {
+      const fd = new FormData();
+      fd.append('tags', JSON.stringify(next));
+      if (activePid) fd.append('actor_project_id', activePid);
+      const updated: any = await (updateAsset as any)(selected.id, fd);
+      setDetailAsset((prev: any) => prev && prev.id === selected.id ? { ...prev, ...updated } : prev);
+    } catch (e: any) { toast.error(e?.message || '标签保存失败'); }
+    finally { setSavingTags(false); }
+  };
+  /** 行内编辑提交：混排输入自动拆分；清空 = 移除该标签 */
+  const commitTagEdit = (i: number, raw: string) => {
+    const parts = splitTagValue(raw);
+    const next = parts.length
+      ? [...selTags.slice(0, i), ...parts, ...selTags.slice(i + 1)]
+      : selTags.filter((_, j) => j !== i);
+    setTagEdit(null);
+    const norm = normalizeTags(next);
+    if (norm.join('\u0000') !== selTags.join('\u0000')) saveTags(norm);
+  };
+  /** 快速添加：输入新标签或点选已有标签；Enter 可连续添加 */
+  const commitTagAdd = (raw: string) => {
+    const parts = splitTagValue(raw);
+    if (!parts.length) return;
+    const norm = normalizeTags([...selTags, ...parts]);
+    setTagAddValue('');
+    if (norm.length === selTags.length) { toast.warning('标签已存在'); return; }
+    saveTags(norm);
+  };
+  // 已有标签建议：面板打开/输入时拉取（输入防抖 200ms）。
+  // 口径：① 归一化拆分历史混排脏数据（「测试，测试二，人人」被存成单标签的场景拆回独立项）；
+  //      ② 已持有的不过滤、只在行尾标注「已添加」——否则删掉一个标签后建议列表会直接空掉；
+  //      ③ 取全库词库（本地单机应用，标签建议是便捷入口，不做项目隔离）。
+  useEffect(() => {
+    if (!tagAddOpen) return;
+    let dead = false;
+    setTagSugLoading(true);
+    setTagSugNote('');
+    const t = setTimeout(() => {
+      apiService.getAssetTags(tagAddValue.trim() || undefined)
+        .then((r: any) => {
+          if (dead) return;
+          const pool = normalizeTags(r?.tags || []);
+          const held = new Set(selTags);
+          setTagSuggestions([...pool.filter(x => !held.has(x)), ...pool.filter(x => held.has(x))].slice(0, 12));
+        })
+        .catch(() => { if (!dead) { setTagSuggestions([]); setTagSugNote('标签加载失败，可直接输入后回车新建'); } })
+        .finally(() => { if (!dead) setTagSugLoading(false); });
+    }, tagAddValue.trim() ? 200 : 0);
+    return () => { dead = true; clearTimeout(t); };
+  }, [tagAddOpen, tagAddValue, selTags.join('\u0001')]);
+
   const handlePublish = async (a: any) => {
     const ok = await confirmAsync({ title: '共享到全局', message: `将「${a.name}」发布到全局素材库？\n发布后所有项目可见，文件与 URL 不变，已引用它的镜头不受影响。`, confirmText: '共享到全局', cancelText: '取消' });
     if (!ok) return;
@@ -705,7 +797,7 @@ export const AssetLibrary: React.FC = () => {
           </div>
           <div className="flex items-center gap-2 rounded-full bg-surface/80 border border-white/70 dark:border-white/12 px-3 py-1.5 focus-within:border-brand/40">
             <Search className="w-3.5 h-3.5 text-gray-500 shrink-0" />
-            <input value={searchInput} onChange={e=>setSearchInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleSearch()} placeholder="搜索名称/标签" className="flex-1 bg-transparent text-xs text-white placeholder-gray-500 focus:outline-none min-w-0" />
+            <input value={searchInput} onChange={e=>setSearchInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleSearch()} placeholder="搜索名称/标签（停输自动搜）" title="停止输入 0.5 秒后自动搜索" className="flex-1 bg-transparent text-xs text-white placeholder-gray-500 focus:outline-none min-w-0" />
             <button onClick={handleSearch} className="text-[11px] font-bold text-brand hover:text-brand-light">搜索</button>
           </div>
         </div>
@@ -820,6 +912,7 @@ export const AssetLibrary: React.FC = () => {
                 {assets.map((a: any) => {
                   const url = a.file_url || a.thumb_url;
                   const abs = url && url.startsWith('/') ? `http://127.0.0.1:8000${url}` : url;
+                  const cardTags = normalizeTags(a.tags);
                   return (
                   <div key={a.id} draggable onDragStart={e=>{ e.dataTransfer.setData('text/plain', abs||url||''); e.dataTransfer.setData('application/canvas-assetid', a.id); e.dataTransfer.setData('application/asset-category', a.category||''); if (a.category==='text') { e.dataTransfer.setData('application/canvas-assetkind','text'); e.dataTransfer.setData('application/canvas-text', a.content || a.visual_prompt || ''); } e.dataTransfer.effectAllowed='copy'; }} onClick={()=>{selectAsset(a.id); setDetailAsset(a);}} title={a.category==='text' ? '拖入画布：填充到命中的节点，或新建文本节点' : '拖拽到分镜垫图槽或画布'} className={`group bg-surface/80 border rounded-2xl overflow-hidden cursor-grab active:cursor-grabbing transition-all hover:shadow-lg ${selectedId===a.id ? 'border-brand ring-1 ring-brand/30' : 'border-white/70 dark:border-white/12 hover:border-white/80 dark:border-white/20'}`}>
                     {a.category === 'text' ? (
@@ -866,7 +959,7 @@ export const AssetLibrary: React.FC = () => {
                     <div className="p-2.5">
                       <div className="text-xs font-semibold text-white truncate">{a.name}</div>
                       <div className="text-[10px] text-gray-400 truncate mt-0.5">{a.description || a.visual_prompt?.slice(0,40) || '—'}</div>
-                      {a.tags?.length>0 && <div className="flex flex-wrap gap-1 mt-1.5">{a.tags.slice(0,3).map((t:string)=><span key={t} className="text-[9px] px-1 py-0.5 rounded bg-surface-hover/80 text-gray-400 flex items-center space-x-0.5"><Tag className="w-2.5 h-2.5" /><span>{t}</span></span>)}{a.tags.length>3 && <span className="text-[9px] text-gray-500">+{a.tags.length-3}</span>}</div>}
+                      {cardTags.length>0 && <div className="flex flex-wrap gap-1 mt-1.5">{cardTags.slice(0,3).map((t:string)=><span key={t} className="text-[9px] px-1 py-0.5 rounded bg-surface-hover/80 text-gray-400 flex items-center space-x-0.5"><Tag className="w-2.5 h-2.5" /><span>{t}</span></span>)}{cardTags.length>3 && <span className="text-[9px] text-gray-500">+{cardTags.length-3}</span>}</div>}
                     </div>
                   </div>
                   );
@@ -926,7 +1019,92 @@ export const AssetLibrary: React.FC = () => {
               </button>
               <div className="mt-1.5 text-[10px] text-gray-500 flex items-center gap-1"><span>💡 拖拽卡片到分镜垫图槽可直接作为参考图</span></div>
             </div>
-            {selected.tags?.length>0 && <div className="flex flex-wrap gap-1.5">{selected.tags.map((t:string)=><span key={t} className="text-xs px-2 py-1 rounded-full bg-brand/15 text-brand-light border border-brand/30">{t}</span>)}</div>}
+            {/* 标签：独立 chip 平铺（不堆叠）· 点击行内编辑 · 快速添加已有标签 */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-white flex items-center gap-1"><Tag className="w-3 h-3 text-gray-400" />标签</span>
+                {savingTags && <Loader2 className="w-3 h-3 animate-spin text-gray-500" />}
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {selTags.map((t: string, i: number) => tagEdit?.index === i ? (
+                  <input
+                    key={`tag-edit-${i}`}
+                    autoFocus
+                    data-no-polish
+                    defaultValue={t}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') commitTagEdit(i, (e.target as HTMLInputElement).value);
+                      else if (e.key === 'Escape') setTagEdit(null);
+                    }}
+                    onBlur={e => commitTagEdit(i, e.target.value)}
+                    className="w-28 bg-surface border border-brand rounded-full px-2.5 py-1 text-xs text-white focus:outline-none"
+                  />
+                ) : (
+                  <span
+                    key={`tag-${i}`}
+                    title={selWritable ? '点击编辑' : undefined}
+                    onClick={() => selWritable && setTagEdit({ index: i })}
+                    className={`group text-xs px-2 py-1 rounded-full bg-brand/15 text-brand-light border border-brand/30 flex items-center gap-1 ${selWritable ? 'cursor-pointer hover:bg-brand/25' : ''}`}
+                  >
+                    <Tag className="w-2.5 h-2.5 shrink-0" />
+                    <span className="truncate max-w-[180px] min-w-0">{t}</span>
+                    {selWritable && (
+                      <button onClick={e => { e.stopPropagation(); saveTags(selTags.filter((_, j: number) => j !== i)); }} className="shrink-0 opacity-0 group-hover:opacity-100 text-gray-400 hover:text-white" title="移除标签">
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    )}
+                  </span>
+                ))}
+                {selWritable && (tagAddOpen ? (
+                  <div className="relative">
+                    <input
+                      autoFocus
+                      data-no-polish
+                      value={tagAddValue}
+                      onChange={e => setTagAddValue(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') commitTagAdd(tagAddValue);
+                        else if (e.key === 'Escape') { setTagAddOpen(false); setTagAddValue(''); }
+                      }}
+                      onBlur={() => { setTagAddOpen(false); setTagAddValue(''); }}
+                      placeholder="输入新标签或点选已有"
+                      className="w-44 bg-surface border border-brand rounded-full px-2.5 py-1 text-xs text-white placeholder-gray-500 focus:outline-none"
+                    />
+                    {(tagSugLoading || tagSuggestions.length > 0 || tagSugNote) && (
+                      <div className="absolute z-10 top-full left-0 mt-1 w-48 max-h-44 overflow-y-auto bg-surface border border-white/70 dark:border-white/12 rounded-xl p-1 shadow-xl">
+                        {tagSugLoading && tagSuggestions.length === 0 && !tagSugNote && <div className="px-2 py-1.5 text-[10px] text-gray-500">加载中…</div>}
+                        {tagSuggestions.map(t => {
+                          const held = selTags.includes(t);
+                          return (
+                            <button
+                              key={t}
+                              onMouseDown={e => e.preventDefault()}
+                              onClick={() => commitTagAdd(t)}
+                              title={held ? '已添加' : undefined}
+                              className={`w-full text-left px-2 py-1 rounded-lg text-xs flex items-center gap-1 ${held ? 'text-gray-500' : 'text-gray-300 hover:bg-brand/15 hover:text-white'}`}
+                            >
+                              {held ? <Check className="w-3 h-3 shrink-0" /> : <Tag className="w-3 h-3 shrink-0 opacity-60" />}
+                              <span className="truncate">{t}</span>
+                              {held && <span className="ml-auto text-[10px] shrink-0">已添加</span>}
+                            </button>
+                          );
+                        })}
+                        {!tagSugLoading && tagSuggestions.length === 0 && tagSugNote && <div className="px-2 py-1.5 text-[10px] text-gray-500">{tagSugNote}</div>}
+                        {!tagSugLoading && tagSuggestions.length === 0 && !tagSugNote && <div className="px-2 py-1.5 text-[10px] text-gray-500">暂无已有标签，可直接输入后回车新建</div>}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setTagAddOpen(true)}
+                    className="text-xs px-2 py-1 rounded-full border border-dashed border-white/30 text-gray-400 hover:text-white hover:border-brand/50 flex items-center gap-1"
+                  >
+                    <Plus className="w-3 h-3" /><span>添加标签</span>
+                  </button>
+                ))}
+                {!selWritable && selTags.length === 0 && <span className="text-xs text-gray-500">暂无标签</span>}
+              </div>
+            </div>
             <div className="bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl p-3 space-y-2">
               <div className="text-xs font-semibold text-white flex items-center gap-1.5">
                 <span>归属与共享</span>

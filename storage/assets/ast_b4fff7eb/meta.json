@@ -3,14 +3,21 @@
   "project_id": null,
   "scope": "global",
   "shared_to": [],
+  "origin_project_id": null,
+  "group_path": null,
+  "published_at": null,
   "name": "1",
   "category": "character",
   "subcategory": null,
   "status": "approved",
   "description": "1",
-  "tags": [],
+  "tags": [
+    "测试",
+    "测试二"
+  ],
   "visual_prompt": "1",
   "negative_prompt": null,
+  "content": "",
   "style_preset": null,
   "file_url": "/storage/assets/ast_b4fff7eb/original.png",
   "thumb_url": "/storage/assets/ast_b4fff7eb/original.png",
@@ -36,5 +43,5 @@
     "generated_engine": "comfyui (custom-workflow)"
   },
   "created_at": "2026-08-26T17:26:56.418414",
-  "updated_at": "2026-08-31T09:58:40.632760"
+  "updated_at": "2026-10-20T13:08:12.722916"
 }

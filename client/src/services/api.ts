@@ -904,6 +904,14 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
+  async getAssetTags(q?: string, project_id?: string): Promise<{ tags: string[] }> {
+    const qs = new URLSearchParams();
+    if (q) qs.set('q', q);
+    if (project_id) qs.set('project_id', project_id);
+    const res = await fetch(`${API_BASE_URL}/assets/tags${qs.toString() ? `?${qs.toString()}` : ''}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
   async createAsset(form: FormData): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/assets`, { method: 'POST', body: form });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));

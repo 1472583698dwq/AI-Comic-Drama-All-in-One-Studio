@@ -80,6 +80,8 @@ export const GlobalAiPolish: React.FC<{ markProps?: Record<string, string> }> = 
     const handleFocusIn = (e: FocusEvent) => {
       const target = e.target as HTMLElement;
       if (!target) return;
+      // 显式退订：data-no-polish（与 SelectionPolish 的约定一致）——标签等短关键词输入框不需要润色
+      if (typeof target.closest === 'function' && target.closest('[data-no-polish]')) return;
       const isTextArea = target.tagName === 'TEXTAREA';
       const isInput = target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'text';
       if (!isTextArea && !isInput) {

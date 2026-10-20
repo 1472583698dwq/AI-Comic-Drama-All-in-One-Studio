@@ -26,7 +26,9 @@ def _parse_json_list(raw: Optional[str]) -> List[str]:
             return [str(x) for x in parsed]
         return [str(parsed)]
     except Exception:
-        return [t.strip() for t in raw.split(",") if t.strip()]
+        # 逗号分隔：兼容中文逗号/顿号/分号，避免「测试，试二，人人」被存成单个标签
+        normalized = raw.replace("，", ",").replace("、", ",").replace("；", ",").replace(";", ",")
+        return [t.strip() for t in normalized.split(",") if t.strip()]
 
 @router.get("/assets/stats")
 async def get_asset_stats(project_id: Optional[str] = Query(None, description="项目口径统计（默认全局）")):
