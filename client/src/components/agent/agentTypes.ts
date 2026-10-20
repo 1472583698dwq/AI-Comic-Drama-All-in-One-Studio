@@ -47,7 +47,7 @@ export type SideEffect =
   | { type: 'template_refresh' }
   | { type: 'canvas_tool'; tool: string; status: string; result?: any; error?: string }
   | { type: 'canvas_updated'; tool: string }
-  | { type: 'stage_patch'; tool: string; shot_id?: string; shot_index?: number; patch: any; created_shot?: any; project_id?: string }
+  | { type: 'stage_patch'; tool: string; shot_id?: string; shot_index?: number; patch: any; created_shot?: any; project_id?: string; content_rev?: number }
   | { type: 'stage_export_clay'; tool: string; shot_id?: string; shot_index?: number; project_id?: string; duration?: number; fps?: number }
   | { type: 'project_refresh'; tool: string };
 
@@ -119,6 +119,24 @@ export interface AgentAttachment {
   meta?: Record<string, string>;
 }
 
+/** 运行轨迹：思考段与工具调用按发生顺序交错，Codex 式时间线（旧消息无此字段时按 thinking→steps 回退）。 */
+export type AgentTimelineItem =
+  | { kind: 'thinking'; id: string; text: string; done?: boolean }
+  | { kind: 'tool'; stepId: string };
+
+/** 拆出模型文本里的 <think> 块：正文去掉标签，思考内容单独返回（支持未闭合，流式中途也不露标签）。 */
+export function splitThinkTags(text: string): { clean: string; thoughts: string[] } {
+  const thoughts: string[] = [];
+  let clean = String(text || '');
+  clean = clean.replace(/<think[^>]*>([\s\S]*?)(?:<\/think>|$)/gi, (_m, inner: string) => {
+    const t = String(inner || '').trim();
+    if (t) thoughts.push(t);
+    return '';
+  });
+  clean = clean.replace(/<\/?think[^>]*>/gi, '').trim();
+  return { clean, thoughts };
+}
+
 export interface ChatMsg {
   id: string;
   sender: 'user' | 'agent';
@@ -127,6 +145,8 @@ export interface ChatMsg {
   isThinkingStreaming?: boolean;
   isStreaming?: boolean;
   steps?: ToolStep[];
+  /** 运行中事件顺序（思考段 ↔ 工具调用），由事件归约器追加；优先于 thinking/steps 分组展示 */
+  timeline?: AgentTimelineItem[];
   suggested?: string[];
   mode?: AgentMode;
   time: string;

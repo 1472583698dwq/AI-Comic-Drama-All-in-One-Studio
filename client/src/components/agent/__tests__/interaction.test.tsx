@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { AgentMessageList } from '../AgentMessageList';
 import { ApprovalCard } from '../AgentToolSteps';
-import { permissionOfRunMode } from '../agentTypes';
+import { permissionOfRunMode, splitThinkTags } from '../agentTypes';
 import type { ChatMsg } from '../agentTypes';
 
 function agentMsg(over: Partial<ChatMsg> = {}): ChatMsg {
@@ -27,15 +27,35 @@ const listProps = {
   onApplyArtifact: () => {},
 };
 
-describe('agent 交互：思维链内工具 + 前台审批卡', () => {
-  it('工具调用收进思维链，不再单独挂在消息底部', () => {
+describe('agent 交互：Codex 式思考/工具时间线 + 前台审批卡', () => {
+  it('思考段独立折叠，工具调用按行内联（不再整组塞进「工具步骤」）', () => {
     render(<AgentMessageList messages={[agentMsg()]} {...listProps} />);
-    const header = screen.getByText(/思维链/);
-    expect(header.textContent).toContain('1 次工具调用');
-    // 完成态默认折叠：工具行不可见，展开后出现在思维链里
-    expect(screen.queryByText('generate_video')).toBeNull();
-    fireEvent.click(header);
+    // 工具行始终在时间线上，不依赖展开某个大折叠块
     expect(screen.getByText('generate_video')).toBeTruthy();
+    // 完成态思考默认收起，点开后可回看
+    expect(screen.queryByText('先看分镜再决定运镜。')).toBeNull();
+    fireEvent.click(screen.getByText('思考'));
+    expect(screen.getByText('先看分镜再决定运镜。')).toBeTruthy();
+  });
+
+  it('模型正文里的 <think> 标签不外露，思考内容进入思考段', () => {
+    render(
+      <AgentMessageList
+        messages={[agentMsg({ thinking: '', text: '<think>内心推演</think>最终答案' })]}
+        {...listProps}
+      />,
+    );
+    expect(screen.queryByText(/<think>/)).toBeNull();
+    expect(screen.getByText('最终答案')).toBeTruthy();
+    fireEvent.click(screen.getByText('思考'));
+    expect(screen.getByText('内心推演')).toBeTruthy();
+  });
+
+  it('splitThinkTags：闭合/未闭合都拆干净', () => {
+    expect(splitThinkTags('前<think>推演A</think>后<think>推演B')).toEqual({
+      clean: '前后',
+      thoughts: ['推演A', '推演B'],
+    });
   });
 
   it('审批卡不在消息列表里（由输入框上方前台渲染）', () => {

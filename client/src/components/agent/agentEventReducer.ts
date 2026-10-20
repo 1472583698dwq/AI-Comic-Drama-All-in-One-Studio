@@ -2,7 +2,8 @@
  * Agent 事件归约器 — WS 与 SSE 共用同一份逻辑（旧实现两处各写一遍导致功能漂移）
  * 纯函数：输入消息 + 事件 → 输出新消息 + 副作用清单（画布/生成源/技能刷新等）
  */
-import type { AgentEvent, ChatMsg, SideEffect, ToolStep } from './agentTypes';
+import type { AgentEvent, AgentTimelineItem, ChatMsg, SideEffect, ToolStep } from './agentTypes';
+import { splitThinkTags } from './agentTypes';
 import { extractArtifact, toStructuredError } from './businessIntents';
 
 let seq = 0;
@@ -14,6 +15,37 @@ function stepId() {
 function appendText(text: string, extra: string): string {
   return text ? `${text}\n\n${extra}` : extra;
 }
+
+/** 当前打开（未完成）的思考段；fresh=true 强制开新段（每次 reasoning pass 一个块）。 */
+function ensureThinking(items: AgentTimelineItem[], fresh = false): AgentTimelineItem[] {
+  const list = [...items];
+  const last = list[list.length - 1];
+  if (!fresh && last?.kind === 'thinking' && !last.done) return list;
+  list.push({ kind: 'thinking', id: stepId(), text: '', done: false });
+  return list;
+}
+
+function appendThinkingText(items: AgentTimelineItem[], delta: string): AgentTimelineItem[] {
+  if (!delta) return items;
+  const list = ensureThinking(items);
+  const i = list.length - 1;
+  const cur = list[i] as Extract<AgentTimelineItem, { kind: 'thinking' }>;
+  list[i] = { ...cur, text: cur.text + delta };
+  return list;
+}
+
+function closeThinking(items: AgentTimelineItem[]): AgentTimelineItem[] {
+  const list = [...items];
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const it = list[i];
+    if (it.kind === 'thinking' && !it.done) {
+      list[i] = { ...it, done: true };
+      break;
+    }
+  }
+  return list;
+}
+
 
 export interface ReduceResult {
   msg: ChatMsg;
@@ -33,20 +65,34 @@ export function reduceAgentEvent(msg: ChatMsg, ev: AgentEvent): ReduceResult {
           ...msg,
           isThinkingStreaming: true,
           thinking: (msg.thinking ? `${msg.thinking}\n` : '') + (ev.message || ''),
+          timeline: appendThinkingText(msg.timeline || [], ev.message || ''),
         },
         sideEffects,
       };
     case 'agent_thinking_start':
-      return { msg: { ...msg, isThinkingStreaming: true, thinking: msg.thinking || '' }, sideEffects };
+      return {
+        msg: {
+          ...msg,
+          isThinkingStreaming: true,
+          thinking: msg.thinking || '',
+          timeline: ensureThinking(closeThinking(msg.timeline || []), true),
+        },
+        sideEffects,
+      };
     case 'agent_thinking_chunk':
       return {
-        msg: { ...msg, isThinkingStreaming: true, thinking: (msg.thinking || '') + (ev.delta || '') },
+        msg: {
+          ...msg,
+          isThinkingStreaming: true,
+          thinking: (msg.thinking || '') + (ev.delta || ''),
+          timeline: appendThinkingText(msg.timeline || [], ev.delta || ''),
+        },
         sideEffects,
       };
     case 'agent_thinking_end':
-      return { msg: { ...msg, isThinkingStreaming: false }, sideEffects };
+      return { msg: { ...msg, isThinkingStreaming: false, timeline: closeThinking(msg.timeline || []) }, sideEffects };
     case 'agent_stream_start':
-      return { msg: { ...msg, isThinkingStreaming: false, isStreaming: true }, sideEffects };
+      return { msg: { ...msg, isThinkingStreaming: false, isStreaming: true, timeline: closeThinking(msg.timeline || []) }, sideEffects };
     case 'agent_stream_chunk':
       return {
         msg: { ...msg, isThinkingStreaming: false, isStreaming: true, text: msg.text + (ev.delta || '') },
@@ -70,7 +116,8 @@ export function reduceAgentEvent(msg: ChatMsg, ev: AgentEvent): ReduceResult {
         args: (ev.arguments || ev.args) && typeof (ev.arguments || ev.args) === 'object' ? (ev.arguments || ev.args) : undefined,
         startedAt: Date.now(),
       };
-      return { msg: { ...msg, steps: [...(msg.steps || []), step] }, sideEffects };
+      const timeline: AgentTimelineItem[] = [...closeThinking(msg.timeline || []), { kind: 'tool', stepId: step.id }];
+      return { msg: { ...msg, steps: [...(msg.steps || []), step], timeline }, sideEffects };
     }
     case 'tool_result': {
       const steps: ToolStep[] = (msg.steps || []).map((s) =>
@@ -113,10 +160,10 @@ export function reduceAgentEvent(msg: ChatMsg, ev: AgentEvent): ReduceResult {
       if (name.startsWith('stage_') && ev.status === 'success' && ((ev.result as any)?.stage_patch || (ev.result as any)?.created_shot)) {
         const r = ev.result as any;
         if (r.stage_patch && Object.keys(r.stage_patch).length > 0) {
-          sideEffects.push({ type: 'stage_patch', tool: name, shot_id: r.shot_id, shot_index: r.shot_index, patch: r.stage_patch, project_id: r.project_id });
+          sideEffects.push({ type: 'stage_patch', tool: name, shot_id: r.shot_id, shot_index: r.shot_index, patch: r.stage_patch, project_id: r.project_id, content_rev: r.content_rev });
         }
         if (r.created_shot) {
-          sideEffects.push({ type: 'stage_patch', tool: name, shot_id: r.shot_id, shot_index: r.shot_index, patch: {}, created_shot: r.created_shot, project_id: r.project_id });
+          sideEffects.push({ type: 'stage_patch', tool: name, shot_id: r.shot_id, shot_index: r.shot_index, patch: {}, created_shot: r.created_shot, project_id: r.project_id, content_rev: r.content_rev });
         }
       }
       if (name === 'stage_export_clay' && ev.status === 'success' && (ev.result as any)?.stage_action === 'export_clay') {
@@ -140,11 +187,23 @@ export function reduceAgentEvent(msg: ChatMsg, ev: AgentEvent): ReduceResult {
       const items = Array.isArray(ev.items) ? ev.items.filter((t: any) => t && typeof t.content === 'string') : [];
       return { msg: { ...msg, todo: items }, sideEffects };
     }
-    case 'agent_response':
+    case 'agent_response': {
+      // 模型有时把 <think> 直接写进正文：拆出来进思考段，正文只留干净文本
+      const rawText = typeof ev.message === 'string' ? ev.message : msg.text;
+      const { clean, thoughts } = splitThinkTags(rawText);
+      let timeline = closeThinking(msg.timeline || []);
+      for (const t of thoughts) {
+        const dup = timeline.some((it) => it.kind === 'thinking' && it.text.trim() === t);
+        if (!dup) timeline = [...timeline, { kind: 'thinking', id: stepId(), text: t, done: true }];
+      }
+      if (ev.thinking && !timeline.some((it) => it.kind === 'thinking')) {
+        timeline = [{ kind: 'thinking', id: stepId(), text: String(ev.thinking), done: true }, ...timeline];
+      }
       return {
         msg: {
           ...msg,
-          text: ev.message || msg.text,
+          text: clean,
+          timeline,
           thinking: ev.thinking !== undefined ? (ev.thinking || msg.thinking) : msg.thinking,
           suggested: ev.suggested_actions,
           isThinkingStreaming: false,
@@ -152,9 +211,16 @@ export function reduceAgentEvent(msg: ChatMsg, ev: AgentEvent): ReduceResult {
         },
         sideEffects,
       };
+    }
     case 'error':
       return {
-        msg: { ...msg, isThinkingStreaming: false, isStreaming: false, text: appendText(msg.text, `⚠️ ${ev.message}`) },
+        msg: {
+          ...msg,
+          isThinkingStreaming: false,
+          isStreaming: false,
+          timeline: closeThinking(msg.timeline || []),
+          text: appendText(msg.text, `⚠️ ${ev.message}`),
+        },
         sideEffects,
       };
     default:
@@ -217,7 +283,7 @@ export function dispatchSideEffects(sideEffects: SideEffect[]) {
           break;
         case 'stage_patch':
           window.dispatchEvent(new CustomEvent('agent-stage-patch', {
-            detail: { tool: se.tool, shot_id: se.shot_id, shot_index: se.shot_index, patch: se.patch, created_shot: se.created_shot, project_id: se.project_id },
+            detail: { tool: se.tool, shot_id: se.shot_id, shot_index: se.shot_index, patch: se.patch, created_shot: se.created_shot, project_id: se.project_id, content_rev: se.content_rev },
           }));
           break;
         case 'stage_export_clay':

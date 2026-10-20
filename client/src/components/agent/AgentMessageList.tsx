@@ -8,9 +8,10 @@ import {
 } from 'lucide-react';
 import { MarkdownText } from './MarkdownText';
 import { ArtifactCard, CapabilityProposalCard, ErrorCard, QuestionCard } from './AgentCards';
-import { AgentToolInline, AgentTodoPanel } from './AgentToolSteps';
+import { AgentTodoPanel, ToolStepRow } from './AgentToolSteps';
 import { API_ORIGIN } from '../../utils/devOrigin';
-import type { AgentAttachment, ApprovalInfo, ChatMsg, QuestionInfo } from './agentTypes';
+import { splitThinkTags } from './agentTypes';
+import type { AgentAttachment, AgentTimelineItem, ApprovalInfo, ChatMsg, QuestionInfo, ToolStep } from './agentTypes';
 
 const resolveMediaUrl = (u?: string) => (!u ? '' : (u.startsWith('/') ? API_ORIGIN + u : u));
 
@@ -41,6 +42,44 @@ const UserAttachment: React.FC<{ att: AgentAttachment }> = ({ att }) => {
 };
 
 export { UserAttachment };
+
+/**
+ * 思考段（Codex 式）：运行中实时展开，完成后收成一行，可点开回看。
+ * 由事件时间线逐段渲染，而不是把整轮思考塞进一个大折叠框。
+ */
+const ReasoningBlock: React.FC<{ text: string; done: boolean; streaming: boolean; compact?: boolean }> = ({
+  text, done, streaming, compact,
+}) => {
+  const [open, setOpen] = useState(!done || streaming);
+  React.useEffect(() => {
+    if (streaming) setOpen(true);
+  }, [streaming]);
+  return (
+    <div className="overflow-hidden rounded-xl border border-black/[.05] bg-black/[.015] dark:border-white/[.07] dark:bg-white/[.02]">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-black/[.025] dark:hover:bg-white/[.03]"
+      >
+        <Sparkles className={`h-3 w-3 shrink-0 ${streaming ? 'animate-pulse text-brand' : 'text-violet-400/75'}`} />
+        <span className="text-[10.5px] font-medium [color:var(--color-text-main)]">
+          {streaming ? '思考中…' : done ? '思考' : '思考'}
+        </span>
+        {!streaming && text && (
+          <span className="font-mono text-[9px] [color:var(--color-text-muted)]">{text.length} 字</span>
+        )}
+        <span className="flex-1" />
+        <ChevronDown className={`h-3 w-3 [color:var(--color-text-muted)] transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className={`border-t border-black/[.04] px-2.5 py-2 text-[11px] leading-relaxed [color:var(--color-text-main)] whitespace-pre-wrap break-words dark:border-white/[.05] ${compact ? 'max-h-44' : 'max-h-64'} overflow-y-auto custom-scrollbar`}>
+          {text || '正在理解意图、检查上下文与可用工具…'}
+          {streaming && <span className="ml-1 inline-block h-3 w-1.5 animate-pulse bg-brand align-middle" />}
+        </div>
+      )}
+    </div>
+  );
+};
 
 export interface AgentMessageListProps {
   messages: ChatMsg[];
@@ -74,7 +113,6 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
   questions,
   onAnswerQuestion,
 }) => {
-  const [expandedThinking, setExpandedThinking] = useState<Record<string, boolean>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
@@ -105,12 +143,33 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
       {messages.map((m) => {
         const isAgent = m.sender === 'agent';
         const steps = isAgent ? (m.steps || []) : [];
-        // 思维链 = 推理 + 工具调用时间线（dsh 交互：工具不再折叠在消息底部）
-        const hasChain = isAgent && (!!(m.thinking || m.isThinkingStreaming) || steps.length > 0);
-        const chainRunning = !!m.isThinkingStreaming || steps.some((s) => s.status === 'executing');
-        const chainOpen = expandedThinking[m.id] !== undefined ? expandedThinking[m.id] : chainRunning;
-        const stepFailed = steps.filter((s) => s.status === 'error').length;
-        const isPlaceholder = isAgent && isRunning && !m.text && !m.thinking;
+        const stepById = new Map<string, ToolStep>(steps.map((s) => [s.id, s]));
+        // 模型正文偶尔自带 <think>…</think>：拆出来进思考段，正文只渲染干净文本
+        const { clean: cleanText, thoughts: textThoughts } = isAgent
+          ? splitThinkTags(m.text || '')
+          : { clean: m.text || '', thoughts: [] as string[] };
+        // Codex 式事件时间线：思考段与工具调用按发生顺序交错；旧消息无 timeline 时按 thinking→steps 回退
+        const timeline: AgentTimelineItem[] = [];
+        if (isAgent) {
+          const seenThinking = new Set<string>();
+          for (const it of m.timeline || []) {
+            timeline.push(it);
+            if (it.kind === 'thinking') seenThinking.add(it.text.trim());
+          }
+          for (const t of textThoughts) {
+            if (!seenThinking.has(t)) {
+              timeline.push({ kind: 'thinking', id: `tt_${m.id}_${timeline.length}`, text: t, done: true });
+              seenThinking.add(t);
+            }
+          }
+          if (!m.timeline || m.timeline.length === 0) {
+            const fallback = (m.thinking || '').trim();
+            if (fallback) timeline.unshift({ kind: 'thinking', id: `tb_${m.id}`, text: fallback, done: !m.isThinkingStreaming });
+            for (const s of steps) timeline.push({ kind: 'tool', stepId: s.id });
+          }
+        }
+        const hasChain = timeline.length > 0;
+        const isPlaceholder = isAgent && isRunning && !cleanText && timeline.length === 0;
         const isEditing = editingId === m.id;
         // 长文本折叠：粘贴产生的长文（或超过 2000 字的用户消息）默认只显示摘要
         const isLongUser = !isAgent && !!m.text && (m.pastedBulk || m.text.length > 2000);
@@ -142,7 +201,7 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
 
               {compact && m.text && (
                 <button
-                  onClick={(e) => copyMsg(e, m.id, m.text)}
+                  onClick={(e) => copyMsg(e, m.id, cleanText || m.text)}
                   className="absolute top-1.5 right-1.5 p-1 rounded-md opacity-0 group-hover/msg:opacity-100 transition-opacity bg-surface border border-border [color:var(--color-text-muted)] hover:[color:var(--color-text-main)]"
                   title="复制本条消息"
                 >
@@ -160,36 +219,30 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
               )}
 
               {hasChain && (
-                <div className={`${compact ? 'mb-2.5' : 'mb-3'} rounded-xl border border-brand/30 bg-brand/5 overflow-hidden`}>
-                  <button
-                    type="button"
-                    onClick={() => setExpandedThinking((prev) => ({ ...prev, [m.id]: !chainOpen }))}
-                    className="w-full px-3 py-1.5 flex items-center justify-between text-[11px] font-bold text-brand-light hover:bg-brand/10 transition-colors"
-                  >
-                    <span className="flex items-center gap-1.5">
-                      <Sparkles className={`w-3.5 h-3.5 text-brand ${m.isThinkingStreaming ? 'animate-spin' : ''}`} />
-                      <span>
-                        {m.isThinkingStreaming
-                          ? '思维链进行中…'
-                          : `思维链${steps.length ? ` · ${steps.length} 次工具调用` : ''}${stepFailed ? ` · ${stepFailed} 失败` : ''}`}
-                      </span>
-                    </span>
-                    <span className="flex items-center gap-1 text-[10px] [color:var(--color-text-main)] font-normal">
-                      <span>{chainOpen ? '收起' : '展开'}</span>
-                      <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${chainOpen ? 'rotate-180' : ''}`} />
-                    </span>
-                  </button>
-                  {chainOpen && (
-                    <div className="px-3 py-2 border-t border-brand/15 space-y-2">
-                      {(m.thinking || m.isThinkingStreaming) && (
-                        <div className="text-[11px] leading-relaxed [color:var(--color-text-main)] font-mono whitespace-pre-wrap max-h-60 overflow-y-auto custom-scrollbar select-text bg-surface/80 rounded-lg px-2 py-1.5">
-                          {m.thinking || (m.isThinkingStreaming ? '正在感知导演意图与分析分镜机位…' : '')}
-                          {m.isThinkingStreaming && <span className="inline-block w-1.5 h-3.5 bg-brand ml-1 animate-pulse align-middle" />}
-                        </div>
-                      )}
-                      {steps.length > 0 && <AgentToolInline steps={steps} />}
-                    </div>
-                  )}
+                <div className={`${compact ? 'mb-2.5' : 'mb-3'} space-y-1.5`}>
+                  {timeline.map((item) => {
+                    if (item.kind === 'thinking') {
+                      return (
+                        <ReasoningBlock
+                          key={item.id}
+                          text={item.text}
+                          done={item.done !== false}
+                          streaming={item.done === false && !!m.isThinkingStreaming}
+                          compact={compact}
+                        />
+                      );
+                    }
+                    const step = stepById.get(item.stepId);
+                    if (!step) return null;
+                    return (
+                      <div
+                        key={item.stepId}
+                        className="overflow-hidden rounded-xl border border-black/[.05] bg-black/[.015] dark:border-white/[.07] dark:bg-white/[.02]"
+                      >
+                        <ToolStepRow step={step} />
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 
@@ -204,7 +257,7 @@ export const AgentMessageList: React.FC<AgentMessageListProps> = ({
 
               {isAgent ? (
                 // 阅读行宽收在 ~68ch（与容器宽度解耦）：长回复不会一行拉到屏幕边缘
-                <MarkdownText text={m.text || (isPlaceholder ? '思考中…' : '')} className={compact ? undefined : 'max-w-[68ch]'} />
+                <MarkdownText text={cleanText || (isPlaceholder ? '思考中…' : '')} className={compact ? undefined : 'max-w-[68ch]'} />
               ) : isEditing ? (
                 <div className="space-y-1.5 min-w-[200px]" onClick={(e) => e.stopPropagation()}>
                   <textarea
