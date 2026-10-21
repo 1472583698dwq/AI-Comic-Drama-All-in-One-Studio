@@ -1393,6 +1393,15 @@ class MCPServerRegistry:
             is_enabled=True,
             input_schema={"type":"object","properties":{"query":{"type":"string","description":"检索关键词，如 生图 配音 画布 剪映"},"limit":{"type":"integer","default":12,"description":"返回条数 4-20"}},"required":[]}
         ))
+        self.register_tool(MCPToolDefinition(
+            name="list_custom_nodes",
+            description="[画布/自定义节点] 列出已安装的自定义代码节点（id/名称/kind/描述/参数键/MCP 工具名），编排前确认有哪些自定义能力可用，再用 customnode_<id> 调用。只回元信息不回代码正文（读码用 fs_read）。被 设置 → 功能开关 关闭时回空清单并说明。",
+            category="workflow",
+            icon="Boxes",
+            author="Custom Nodes",
+            is_enabled=True,
+            input_schema={"type":"object","properties":{"kind":{"type":"string","enum":["image","video","audio","utility"],"description":"按类型过滤（缺省=全部）"}},"required":[]}
+        ))
 
         # --- A档可信模式双工具：文件编辑 + 命令执行（总闸 STUDIO_TRUSTED_MODE=1，未开则明错） ---
         self.register_tool(MCPToolDefinition(
@@ -1736,6 +1745,38 @@ class MCPServerRegistry:
                     result = {"tools": _search(q, max(4, min(lim, 20)))}
                 except Exception as e:
                     return MCPToolCallResponse(tool_name=tool_name, status="error", result=None, error=f"search_tools失败: {e}", execution_time_ms=int((time.time()-start_time)*1000))
+                return MCPToolCallResponse(tool_name=tool_name, status="success", result=result, error=None, execution_time_ms=int((time.time()-start_time)*1000))
+            # 自定义代码节点清单：只回元信息（id/kind/参数键/mcp_tool），读码仍走 fs_read。
+            # 关闸时回空清单 + 说明，而不是报错——编排者据此跳过自定义分支即可。
+            if tool_name == "list_custom_nodes":
+                try:
+                    from app.core import features as _cn_features
+                    if not _cn_features.is_enabled("canvas_custom_nodes"):
+                        return MCPToolCallResponse(
+                            tool_name=tool_name, status="success",
+                            result={"nodes": [], "total": 0,
+                                    "note": "自定义代码节点已在 设置 → 功能开关 里关闭"},
+                            error=None, execution_time_ms=int((time.time()-start_time)*1000))
+                    from app.custom_nodes.manager import custom_node_manager
+                    _kind = str((arguments or {}).get("kind") or "").strip().lower() or None
+                    _nodes = []
+                    for _n in custom_node_manager.list_nodes(kind=_kind):
+                        _schema = _n.input_schema or {}
+                        _props = _schema.get("properties") or {}
+                        _nodes.append({
+                            "id": _n.id, "name": _n.name, "kind": _n.kind,
+                            "description": (_n.description or "")[:200],
+                            "enabled": bool(_n.enabled),
+                            "mcp_tool": f"customnode_{_n.id}",
+                            "inputs": list(_props.keys()),
+                            "required": list(_schema.get("required") or []),
+                            "params": sorted((_n.params_schema or {}).get("properties", {}).keys()),
+                        })
+                    result = {"nodes": _nodes, "total": len(_nodes)}
+                except Exception as e:
+                    return MCPToolCallResponse(tool_name=tool_name, status="error", result=None,
+                                               error=f"list_custom_nodes失败: {e}",
+                                               execution_time_ms=int((time.time()-start_time)*1000))
                 return MCPToolCallResponse(tool_name=tool_name, status="success", result=result, error=None, execution_time_ms=int((time.time()-start_time)*1000))
             # 插件查壳工具：plugin_<id>_<name>，强制trusted总闸 + 20分钟超时（与fs_file/shell_exec同闸）
             if tool_name.startswith("plugin_"):

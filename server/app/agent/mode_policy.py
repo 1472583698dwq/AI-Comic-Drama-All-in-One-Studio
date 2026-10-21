@@ -59,6 +59,7 @@ TOOL_RISK: Dict[str, str] = {
     "get_provider_code": "low", "canvas_query": "low", "canvas_query_assets": "low",
     "fs_read": "low", "read_skill": "low", "view_media": "low",
     "ask_user_question": "low",
+    "list_custom_nodes": "low",
     "director_3d_stage_plan": "low", "stage_get_state": "low",
     "split_novel_script": "medium",
     # 素材库：创建/发布是单条资产变更（发布=全局可见，可收回）→ medium，人审由执行维决定
@@ -162,6 +163,38 @@ def compose_run_mode(behavior: Optional[str], execution: Optional[str]) -> str:
     return "auto" if e == "auto" else "approve"
 
 
+def _provider_kind(tool_name: str) -> str:
+    """``provider_<id>`` → image / video / audio；解析不出来返回空串。
+
+    两条取值路径，都失败就返回空串（调用方回落到 medium，宁可保守分级也不误升）：
+    1. 注册时写进 description 的 ``[Provider:video]`` 前缀 —— 最便宜，不依赖注册表初始化；
+    2. 回落逐个注册表 ``list_ids()`` 反查 —— 覆盖 description 未带前缀的兜底定义。
+    """
+    pid = tool_name[len("provider_"):] if tool_name.startswith("provider_") else ""
+    if not pid:
+        return ""
+    try:
+        from app.agent.tools.registry import tool_view
+        t = tool_view.get(tool_name)
+        desc = str(getattr(t, "description", "") or "")
+        if desc.startswith("[Provider:"):
+            kind = desc[len("[Provider:"):].split("]", 1)[0].strip().lower()
+            if kind in ("image", "video", "audio"):
+                return kind
+    except Exception:
+        pass
+    try:
+        from app.providers.image.registry import image_registry
+        from app.providers.video.registry import video_registry
+        from app.providers.audio.registry import audio_registry
+        for kind, reg in (("image", image_registry), ("video", video_registry), ("audio", audio_registry)):
+            if pid in (reg.list_ids() or []):
+                return kind
+    except Exception:
+        pass
+    return ""
+
+
 def tool_risk(tool_name: str) -> str:
     if not tool_name:
         return "low"
@@ -169,8 +202,9 @@ def tool_risk(tool_name: str) -> str:
     if tool_name in TOOL_RISK:
         return TOOL_RISK[tool_name]
     if tool_name.startswith("provider_"):
-        # provider_* 动态源按 kind 粗分：含 video 视为 high，其余 medium
-        return "medium"
+        # provider_* 动态源按 kind 分流：视频源单次耗时可达 20 分钟且按次/秒计费 → high；
+        # 图片/音频单条生成 → medium。kind 解析不出来时保守留 medium。
+        return "high" if _provider_kind(tool_name) == "video" else "medium"
     if tool_name.startswith("customnode_"):
         return "medium"
     if tool_name.startswith("plugin_"):

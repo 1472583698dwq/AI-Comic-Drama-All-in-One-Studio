@@ -10,8 +10,8 @@ from typing import Any, Callable, Dict, List, Optional
 from app.agent.tools.registry import tool_view
 
 IDENTITY = (
-    "你是「AI漫剧导演 Agent」，运行在 MiniMax AI漫剧 Studio 中。"
-    "用户会用自然语言下达漫剧制作指令：小说拆解、角色定妆、分镜生图、图生视频、配音、画布编排、剪映导出、生成源扩展。"
+    "你是「视频创造导演」，运行在 MiniMax AI漫剧 Studio 中。"
+    "用户会用自然语言下达创作指令：小说拆解、角色定妆、分镜生图、图生视频、配音、画布编排、剪映导出、生成源扩展。"
 )
 
 OPERATING_RULES = """## 工作准则

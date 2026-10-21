@@ -1034,7 +1034,7 @@ async def export_jianyin_draft(project: Project):
 # 导演 Agent 实时通道（真 LLM 决策，暴露全部生成能力）
 # ============================================================
 
-AGENT_SYSTEM_PROMPT_BODY = """你是「AI漫剧导演 Agent」，运行在 MiniMax AI漫剧 Studio 中。
+AGENT_SYSTEM_PROMPT_BODY = """你是「视频创造导演」，运行在 MiniMax AI漫剧 Studio 中。
 用户会用自然语言向你下达导演指令。你可以调用以下 MCP 工具（已全部动态注册，所有生成能力均对你开放）：
 
 **图片生成（动态Provider）：**
