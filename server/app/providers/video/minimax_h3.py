@@ -37,8 +37,15 @@ def _abs_url(url: str) -> str:
     return url
 
 
-def _map_resolution(res: Optional[str]) -> str:
+def _is_max_model(model: str) -> bool:
+    m = (model or "").strip().lower()
+    return m.endswith("-max") or "h3-max" in m
+
+
+def _map_resolution(res: Optional[str], is_max: bool = False) -> str:
     r = (res or "").strip().upper()
+    if is_max:
+        return "480P" if r == "480P" else "768P"
     if r in ("768P", "2K"):
         return r
     if r in ("1080P", "2K "):
@@ -70,40 +77,43 @@ class MiniMaxH3VideoProvider(VideoProvider):
 
     def get_capabilities(self) -> Dict[str, Any]:
         cap = super().get_capabilities()
+        model = (getattr(settings, "MINIMAX_H3_MODEL", "") or "MiniMax-H3").strip() or "MiniMax-H3"
+        is_max = _is_max_model(model)
         cap.update({
             "display_name": self.display_name,
             "description": self.description,
-            "modes": ["t2v", "i2v", "r2v"],
+            "modes": ["t2v", "i2v"] if is_max else ["t2v", "i2v", "r2v"],
             "supports_first_frame": True,
             "supports_last_frame": True,
-            "supports_reference": True,
-            "supports_reference_video": True,
-            "supports_reference_audio": True,
+            "supports_reference": not is_max,
+            "supports_reference_video": not is_max,
+            "supports_reference_audio": not is_max,
+            "reference_with_frame_exclusive": True,
             "max_duration": 15,
-            "min_duration": 4,
-            "resolutions": ["768P", "2K"],
+            "min_duration": 5 if is_max else 4,
+            "resolutions": ["480P", "768P"] if is_max else ["768P", "2K"],
             "doc_url": H3_DOC_URL,
             "is_configured": self.is_configured(),
-            "models": ["MiniMax-H3"],
-            "default_model": getattr(settings, "MINIMAX_H3_MODEL", "MiniMax-H3") or "MiniMax-H3",
+            "models": ["MiniMax-H3", "MiniMax-H3-Max"],
+            "default_model": model,
             "input_schema": {
                 "type": "object",
                 "properties": {
                     "prompt": {"type": "string", "description": "运动/运镜描述(必填, ≤7000字符)", "x-handle": "text", "x-role": "prompt"},
-                    "first_frame": {"type": "string", "format": "uri", "description": "首帧图(i2v)", "x-handle": "image", "x-slot": "first_frame"},
-                    "last_frame": {"type": "string", "format": "uri", "description": "尾帧图(需配首帧)", "x-handle": "image", "x-slot": "last_frame"},
-                    "reference_images": {"type": "array", "items": {"type": "string", "format": "uri"}, "description": "参考图≤9 (r2v)", "x-handle": "image", "x-slot": "reference_images", "maxItems": 9, "minItems": 0},
-                    "reference_videos": {"type": "array", "items": {"type": "string", "format": "uri"}, "description": "参考视频≤3, 单段2-15s (r2v)", "x-handle": "video", "x-slot": "reference_videos", "maxItems": 3, "minItems": 0},
-                    "reference_audios": {"type": "array", "items": {"type": "string", "format": "uri"}, "description": "参考音频≤3, 需配图文 (r2v)", "x-handle": "audio", "x-slot": "ref_audio", "maxItems": 3, "minItems": 0},
+                    "first_frame": {"type": "string", "format": "uri", "description": "首帧图(i2v)；与 reference_* 互斥", "x-handle": "image", "x-slot": "first_frame"},
+                    "last_frame": {"type": "string", "format": "uri", "description": "尾帧图(需配首帧；与 reference_* 互斥)", "x-handle": "image", "x-slot": "last_frame"},
+                    "reference_images": {"type": "array", "items": {"type": "string", "format": "uri"}, "description": "参考图≤9 (r2v；与首/尾帧互斥)", "x-handle": "image", "x-slot": "reference_images", "maxItems": 9, "minItems": 0},
+                    "reference_videos": {"type": "array", "items": {"type": "string", "format": "uri"}, "description": "参考视频≤3, 单段2-15s (r2v；与首/尾帧互斥)", "x-handle": "video", "x-slot": "reference_videos", "maxItems": 3, "minItems": 0},
+                    "reference_audios": {"type": "array", "items": {"type": "string", "format": "uri"}, "description": "参考音频≤3, 需配图文 (r2v；与首/尾帧互斥)", "x-handle": "audio", "x-slot": "ref_audio", "maxItems": 3, "minItems": 0},
                 },
                 "required": ["prompt"],
             },
             "params_schema": {
                 "type": "object",
                 "properties": {
-                    "resolution": {"type": "string", "title": "分辨率", "enum": ["768P", "2K"], "default": "768P", "description": "768P省钱/2K高清", "x-category": "layout", "x-visibility": "basic", "x-agent": "auto", "x-priority": 20},
+                    "resolution": {"type": "string", "title": "分辨率", "enum": ["480P", "768P"] if is_max else ["768P", "2K"], "default": "768P", "description": "H3-Max 仅 480P/768P" if is_max else "768P省钱/2K高清", "x-category": "layout", "x-visibility": "basic", "x-agent": "auto", "x-priority": 20},
                     "ratio": {"type": "string", "title": "宽高比", "enum": ["adaptive", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"], "default": "adaptive", "description": "文生需指定具体比例, 图生固定adaptive", "x-category": "layout", "x-visibility": "basic", "x-agent": "auto", "x-priority": 10},
-                    "duration": {"type": "integer", "title": "时长(秒)", "default": 5, "minimum": 4, "maximum": 15, "description": "4-15整数秒", "x-category": "motion", "x-visibility": "basic", "x-agent": "auto", "x-priority": 30},
+                    "duration": {"type": "integer", "title": "时长(秒)", "default": 5, "minimum": 5 if is_max else 4, "maximum": 15, "description": "5-15整数秒" if is_max else "4-15整数秒", "x-category": "motion", "x-visibility": "basic", "x-agent": "auto", "x-priority": 30},
                 },
             },
         })
@@ -118,6 +128,7 @@ class MiniMaxH3VideoProvider(VideoProvider):
         started = time.time()
         base = (getattr(settings, "MINIMAX_H3_BASE_URL", "") or "https://api.minimaxi.com").rstrip("/")
         model = (getattr(settings, "MINIMAX_H3_MODEL", "") or "MiniMax-H3").strip() or "MiniMax-H3"
+        is_max = _is_max_model(model)
         dyn = req.dynamic_inputs if isinstance(req.dynamic_inputs, dict) else {}
         extra = req.extra if isinstance(req.extra, dict) else {}
 
@@ -143,6 +154,11 @@ class MiniMaxH3VideoProvider(VideoProvider):
                 raise ValueError("H3 尾帧必须与首帧配对使用")
             content.append({"type": "image_url", "image_url": {"url": _abs_url(last)}, "role": "last_frame"})
             has_image_input = True
+        if is_max and (ref_imgs or ref_vids or ref_auds):
+            raise ValueError("MiniMax-H3-Max 不支持参考图/视频/音频；请改用 MiniMax-H3 或移除参考素材")
+        if (first or last) and (ref_imgs or ref_vids or ref_auds):
+            print("[MiniMaxH3] H3 的 i2v 与 r2v 互斥，已忽略随首/尾帧传入的参考素材")
+            ref_imgs, ref_vids, ref_auds = [], [], []
         for u in (ref_imgs or [])[:9]:
             if u:
                 content.append({"type": "image_url", "image_url": {"url": _abs_url(u)}, "role": "reference_image"})
@@ -158,14 +174,14 @@ class MiniMaxH3VideoProvider(VideoProvider):
         if ref_auds and not has_image_input:
             raise ValueError("H3 参考音频不可单独使用, 需至少配一张图或一段视频")
 
-        resolution = _map_resolution(req.resolution or dyn.get("resolution") or extra.get("resolution"))
+        resolution = _map_resolution(req.resolution or dyn.get("resolution") or extra.get("resolution"), is_max)
         ratio = dyn.get("ratio") or extra.get("ratio") or req.aspect_ratio
         ratio = _map_ratio(ratio, has_image_input)
         try:
             duration = int(req.duration or dyn.get("duration") or 5)
         except Exception:
             duration = 5
-        duration = max(4, min(15, duration))
+        duration = max(5 if is_max else 4, min(15, duration))
 
         payload = {"model": model, "content": content, "resolution": resolution, "duration": duration, "ratio": ratio}
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}

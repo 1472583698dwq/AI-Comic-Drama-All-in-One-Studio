@@ -98,6 +98,9 @@ export interface AgentArtifact {
   applied?: boolean;
   /** 一键应用的目标覆盖：previz_video = 写回本镜参考视频（白模/预演），其余按 kind 默认字段 */
   applyAs?: 'previz_video';
+  /** 工具显式指定的目标分镜；缺省时才回退到当前激活镜 */
+  shotId?: string;
+  shotIndex?: number;
 }
 
 export interface AgentErrorCard {
@@ -147,6 +150,8 @@ export interface ChatMsg {
   steps?: ToolStep[];
   /** 运行中事件顺序（思考段 ↔ 工具调用），由事件归约器追加；优先于 thinking/steps 分组展示 */
   timeline?: AgentTimelineItem[];
+  /** 服务端 turn 的 run_id：锁定本条消息所属回合，防止上一轮/后台通知的迟到事件覆盖当前流 */
+  runId?: string;
   suggested?: string[];
   mode?: AgentMode;
   time: string;

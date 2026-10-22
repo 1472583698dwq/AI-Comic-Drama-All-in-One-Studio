@@ -8,11 +8,13 @@
 - usage_totals()：token 计量投影（P3）。
 """
 import json
+import os
 import time
 from typing import Any, Dict, List, Optional
 
 from app.agent.runtime import events as E
 from app.agent.runtime.store import store as default_store, SessionStore
+from app.agent.runtime.token_meter import estimate_messages
 
 # 配对修复用合成结果：缺失的 tool 响应（中断/剪裁）以错误态占位，禁止模型臆测结果
 _ORPHAN_FILL = json.dumps(
@@ -73,6 +75,52 @@ def _safe_tool_arguments(args: Any) -> str:
         return s
     except Exception:
         return "{}"
+
+
+def _trim_to_budget(msgs: List[Dict[str, Any]], max_tokens: int) -> List[Dict[str, Any]]:
+    """硬预算兜底：压缩器失效/摘要失败时，也不能把 1M+ prompt 直接发给模型。
+
+    优先按完整用户回合裁剪最旧历史，保留 system、历史摘要和最后一轮；
+    仍然超限时去掉历史图片 part，最后才截断超长字符串。
+    """
+    out = [dict(m) for m in msgs]
+    if max_tokens <= 0 or estimate_messages(out) <= max_tokens:
+        return out
+    guard = 0
+    while estimate_messages(out) > max_tokens and guard < 200:
+        guard += 1
+        users = [i for i, m in enumerate(out) if m.get("role") == "user"]
+        if len(users) <= 1:
+            break
+        start = users[0]
+        # 首条若是历史摘要，继续保留；从真正的第一个旧回合开始删
+        if str(out[start].get("content") or "").startswith("[历史摘要]"):
+            if len(users) <= 2:
+                break
+            start = users[1]
+        end = users[1] if start == users[0] else users[2]
+        del out[start:end]
+        out = _sanitize_tool_pairing(out)
+    if estimate_messages(out) > max_tokens:
+        for m in out:
+            c = m.get("content")
+            if not isinstance(c, list):
+                continue
+            kept: List[Any] = []
+            for p in c:
+                if not isinstance(p, dict):
+                    kept.append(p)
+                    continue
+                if p.get("type") in ("image_url", "video_url", "audio_url") or p.get("image_url") or p.get("video_url") or p.get("audio_url"):
+                    continue
+                kept.append(p)
+            m["content"] = kept or [{"type": "text", "text": "[历史媒体已省略]"}]
+    if estimate_messages(out) > max_tokens:
+        for m in out:
+            c = m.get("content")
+            if isinstance(c, str) and len(c) > 24000:
+                m["content"] = c[:16000] + "\n\n...[上下文过长，已截断中间部分]...\n\n" + c[-4000:]
+    return out
 
 
 class Session:
@@ -290,7 +338,8 @@ class Session:
         return str((ev or {}).get("data", {}).get("text") or "")
 
     # ── 模型历史投影 ─────────────────────────────────────
-    def derive_messages(self, system_text: Optional[str] = None) -> List[Dict[str, Any]]:
+    def derive_messages(self, system_text: Optional[str] = None,
+                        max_tokens: Optional[int] = None) -> List[Dict[str, Any]]:
         """从日志投影模型消息；纯函数，结果缓存到下次 append。
 
         规则：
@@ -298,7 +347,7 @@ class Session:
         - assistant/attempt、边界事件、审批事件等非 surface 事件不进入历史。
         - system_text 显式传入时优先（来自请求装配），否则用日志中最后一条 system/message。
         """
-        cache_key = (self._next_seq, system_text)
+        cache_key = (self._next_seq, system_text, max_tokens)
         if self._messages_cache is not None and self._messages_cache_key == cache_key:
             return [dict(m) for m in self._messages_cache]
 
@@ -314,6 +363,25 @@ class Session:
                 for k, v in (d.get("replacements") or {}).items():
                     if str(k).isdigit():
                         replacements[int(k)] = str(v)
+
+        # 只给最近 N 条带附件的消息保留视觉上下文（每条最多 1 张图）；更早的截图/抽帧不再发送。
+        # 图片走 image_url 时按视觉 token 计（单图约 1k），不再把 base64 当文本。
+        try:
+            _keep_media = max(1, int(os.environ.get("AGENT_MM_KEEP_IMAGE_TURNS") or 2))
+        except Exception:
+            _keep_media = 2
+        media_seqs: List[int] = []
+        for ev in self._events:
+            if ev.get("type") != E.USER_MESSAGE:
+                continue
+            seq = int(ev.get("seq") or 0)
+            if seq in shadowed:
+                continue
+            d = ev.get("data") or {}
+            meta = d.get("meta") if isinstance(d.get("meta"), dict) else {}
+            if meta.get("attachments"):
+                media_seqs.append(seq)
+        recent_media_seqs = set(media_seqs[-_keep_media:])
 
         logged_system = ""
         msgs: List[Dict[str, Any]] = []
@@ -335,20 +403,42 @@ class Session:
                 logged_system = str(d.get("text") or "")
             elif t == E.USER_MESSAGE:
                 text = str(d.get("text") or "")
-                atts = ((d.get("meta") or {}).get("attachments") or []) if isinstance(d.get("meta"), dict) else []
+                raw_atts = ((d.get("meta") or {}).get("attachments") or []) if isinstance(d.get("meta"), dict) else []
+                atts: List[Dict[str, Any]] = []
+                dropped = 0
+                if raw_atts:
+                    if seq in recent_media_seqs:
+                        # 最近 N 条带附件的消息各保留 1 张图，避免一次带 3 帧/多张截图把 prompt 撑爆
+                        for a in raw_atts:
+                            if not isinstance(a, dict) or str(a.get("kind") or "") != "image":
+                                dropped += 1
+                                continue
+                            ref = str(a.get("ref") or "")
+                            if ref.startswith("data:") and len(ref) > 400000:
+                                dropped += 1
+                                continue
+                            if not atts:
+                                atts.append(a)
+                            else:
+                                dropped += 1
+                    else:
+                        # 历史截图/抽帧不重复发送；只保留文字与工具结果摘要
+                        dropped = len(raw_atts)
+                if dropped:
+                    text = (text + f"\n\n（历史媒体附件 {dropped} 个已省略，避免上下文膨胀；需要时重新查看对应镜头/资产）").strip()
+                if len(text) > 6000 and str(d.get("form") or "") != "context":
+                    # 长文/后台通知统一折成 头+尾+locator；全文落盘，fs_read 可取
+                    try:
+                        from app.agent.runtime.compaction import maybe_fold_user_text
+                        text = maybe_fold_user_text(self.id, seq, text)
+                    except Exception:
+                        pass
                 content: Any = text
                 if atts:
                     # 多模态附件：图片（视觉可用时）转 content parts；其余降级为文本行
                     try:
                         from app.agent.runtime.attachments import build_user_content
                         content = build_user_content(text, atts)
-                    except Exception:
-                        content = text
-                elif d.get("source") == "user" and len(text) > 2000:
-                    # 复制粘贴的长文：模型历史折成 头+尾+locator（全文落盘，fs_read 可取）
-                    try:
-                        from app.agent.runtime.compaction import maybe_fold_user_text
-                        content = maybe_fold_user_text(self.id, seq, text)
                     except Exception:
                         content = text
                 if content:
@@ -375,12 +465,14 @@ class Session:
             elif t == E.COMPACTION_SUMMARY and seq not in shadowed:
                 text = str(d.get("text") or "")
                 if text:
-                    msgs.append({"role": "user", "content": text})
+                    msgs.append({"role": "user", "content": f"[历史摘要]\n{text}"})
 
         system = system_text if system_text is not None else logged_system
         if system:
             msgs.insert(0, {"role": "system", "content": system})
         msgs = _sanitize_tool_pairing(msgs)
+        if max_tokens:
+            msgs = _trim_to_budget(msgs, int(max_tokens))
         self._messages_cache = msgs
         self._messages_cache_key = cache_key
         return [dict(m) for m in msgs]

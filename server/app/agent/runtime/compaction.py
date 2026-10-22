@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Set
 
 from app.agent.runtime import events as E
 from app.agent.runtime.token_meter import (
-    context_window, estimate_messages, estimate_text, should_compact,
+    context_window, estimate_attachments, estimate_messages, estimate_text, should_compact,
 )
 
 _SUMMARY_SYSTEM = (
@@ -141,7 +141,10 @@ def maybe_prune_tool_results(session, max_chars: Optional[int] = None) -> int:
 
 
 def _surface_sequence(session) -> List[Dict[str, Any]]:
-    """按事件顺序列出 surface 项：{seq, role, tokens, ev}（已遮蔽的不计入）。"""
+    """按事件顺序列出 surface：{seq, role, tokens, source, form}（被遮蔽的不入列）。
+
+    user 消息必须把附件也计入，否则 base64 截图会让压缩器误判「历史很小」。
+    """
     shadowed, _ = _shadow_info(session)
     out: List[Dict[str, Any]] = []
     for ev in session.events:
@@ -151,7 +154,13 @@ def _surface_sequence(session) -> List[Dict[str, Any]]:
         t = ev.get("type")
         d = ev.get("data") or {}
         if t == E.USER_MESSAGE:
-            out.append({"seq": seq, "role": "user", "tokens": estimate_text(str(d.get("text") or "")), "type": t})
+            meta = d.get("meta") if isinstance(d.get("meta"), dict) else {}
+            atts = meta.get("attachments") or []
+            tok = estimate_text(str(d.get("text") or "")) + estimate_attachments(atts)
+            out.append({
+                "seq": seq, "role": "user", "tokens": tok, "type": t,
+                "source": str(d.get("source") or ""), "form": str(d.get("form") or ""),
+            })
         elif t == E.ASSISTANT_MESSAGE:
             tok = estimate_text(str(d.get("text") or "")) + estimate_text(str(d.get("tool_calls") or ""))
             out.append({"seq": seq, "role": "assistant", "tokens": tok, "type": t})
@@ -163,23 +172,58 @@ def _surface_sequence(session) -> List[Dict[str, Any]]:
     return out
 
 
-def select_shadow_range(surface: List[Dict[str, Any]], keep_tokens: int) -> Optional[int]:
-    """返回 cut 下标：surface[:cut] 被遮蔽，surface[cut:] 保留。无法安全压缩返回 None。"""
+def _keep_turns() -> int:
+    try:
+        return max(1, int(os.environ.get("AGENT_COMPACT_KEEP_TURNS") or 4))
+    except Exception:
+        return 4
+
+
+def select_shadow_range(surface: List[Dict[str, Any]], keep_tokens: int,
+                        keep_turns: Optional[int] = None) -> Optional[int]:
+    """返回 cut 下标：surface[:cut] 被遮蔽，surface[cut:] 保留；无法安全压缩返回 None。
+
+    通用压缩策略：
+    - 最近 N 个用户回合（默认 4）保持原文，不进入摘要；
+    - 更早的内容按 token 预算再裁一层，避免单回合过大时仍然超限；
+    - 只从完整回合/非 tool 位置切，避免拆散 assistant.tool_calls → tool 配对。
+    """
     if len(surface) <= 4:
         return None
+    n_keep = _keep_turns() if keep_turns is None else max(1, int(keep_turns))
+
+    # 1) token 预算切点：从尾部往前累计，保留至少 keep_tokens
+    token_cut: Optional[int] = None
     total = 0
-    cut = len(surface)
     for i in range(len(surface) - 1, -1, -1):
-        total += surface[i]["tokens"]
-        cut = i
+        total += int(surface[i].get("tokens") or 0)
         if total >= keep_tokens:
+            token_cut = i
             break
-    # 绝不能从 tool 结果中间开始保留（其 assistant tool_calls 已被遮蔽会配对断裂）
-    while cut < len(surface) and surface[cut]["role"] == "tool":
+
+    # 2) 最近 N 个「真实用户回合」切点（stage/system 通知不算用户回合）
+    user_idx = [
+        i for i, x in enumerate(surface)
+        if x.get("role") == "user"
+        and str(x.get("source") or "") in ("", "user")
+        and str(x.get("form") or "") != "context"
+    ]
+    turn_cut: Optional[int] = user_idx[-n_keep] if len(user_idx) > n_keep else None
+
+    candidates = [c for c in (token_cut, turn_cut) if c is not None and 0 < c < len(surface)]
+    if not candidates:
+        return None
+    cut = min(candidates)  # 两个约束都满足：至少早于最近 N 轮，且不超过 token 预算
+
+    # 只从「用户回合起点」切，避免把 assistant.tool_calls 和它的 tool 结果拆开。
+    if surface[cut].get("role") != "user":
+        nxt = next((i for i in range(cut + 1, len(surface)) if surface[i].get("role") == "user"), None)
+        cut = nxt if nxt is not None else len(surface)
+    while cut < len(surface) and surface[cut].get("role") == "tool":
         cut += 1
     if cut <= 1 or cut >= len(surface):
         return None
-    shadowed_tokens = sum(x["tokens"] for x in surface[:cut])
+    shadowed_tokens = sum(int(x.get("tokens") or 0) for x in surface[:cut])
     if shadowed_tokens < 1500:
         return None
     return cut

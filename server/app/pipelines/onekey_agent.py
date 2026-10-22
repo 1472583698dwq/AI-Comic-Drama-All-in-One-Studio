@@ -590,7 +590,7 @@ async def _onekey_shot_image(d: OneKeyDraft, shot_index: int, prompt_override: s
 async def _onekey_shot_video(d: OneKeyDraft, shot_index: int, prompt_override: str = "") -> Dict[str, Any]:
     """逐镜生成视频。
 
-    - 该镜已有画面（关键帧模式）→ i2v：首帧 + 角色/场景多参考；
+    - 该镜已有画面（关键帧模式）→ i2v：首帧；H3 不允许首尾帧与参考素材混用；
     - 无画面（默认）→ **r2v 参考生视频**：直接用角色多视图 + 场景参考；
     - prompt_override：Agent 自写/改写后的视频提示词（如按 minimax-h3-prompt 技能的三字段结构），
       原样作为基础提示词；已含运镜/风格/H3 字段时不再自动追加后缀。

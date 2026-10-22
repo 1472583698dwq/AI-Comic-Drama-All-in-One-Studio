@@ -45,9 +45,9 @@ INTENTS: Dict[str, Dict[str, Any]] = {
     "export": {
         "label": "导出交付",
         "keywords": ["导出", "剪映", "capcut", "草稿", "时间线", "成片导出", "jianyin"],
-        "tools": ["export_jianyin_draft"],
+        "tools": ["export_jianyin_draft", "export_timeline_mp4"],
         "risk": "medium",
-        "desc": "时间线聚合 -> 剪映草稿工程",
+        "desc": "时间线聚合 -> 剪映草稿 / MP4 成片",
     },
     "asset": {
         "label": "素材复用",

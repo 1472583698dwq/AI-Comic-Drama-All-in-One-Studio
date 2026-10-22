@@ -101,6 +101,6 @@ Low-angle tracking shot at fast speed, a swordsman in tattered white robes dashe
 
 ## 10. 与专用技能的关系
 
-- **MiniMax H3**（AutoDL H3 / MiniMax H3 源）：请用 `minimax-h3-prompt` 技能的三字段结构（本技能的六要素填进 `integrated_multimodal_description` / `overall_soundscape` / `non_diegetic_music`）。
+- **MiniMax H3**（AutoDL H3 / MiniMax H3 源）：请用 `minimax-h3-prompt` 技能的三字段结构（本技能的六要素填进 `integrated_multimodal_description` / `overall_soundscape` / `non_diegetic_music`）。H3 首/尾帧与参考素材互斥，i2v 时不要再传参考；H3-Max 不支持参考素材和 2K，时长 5–15 秒。
 - 其他模型（ComfyUI 工作流、Kling、Seedance、Wan、MiniMax v1 等）：本技能即最终格式。
 - 一键成片兜底：`onekey_shot_video` 在 Agent 未提供 `prompt_override` 时会自动按本技能六要素组装基础提示词（主体+动作+环境+光线+运镜+风格）；**想更好就让 Agent 先 read_skill 再写 override**。

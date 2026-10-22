@@ -79,6 +79,7 @@ TOOL_RISK: Dict[str, str] = {
     # 是否人审由执行维决定（审批=确认，自动=直跑），plan 模式无此工具（只读白名单外）。
     "canvas_delete_node": "high",
     "export_jianyin_draft": "medium",
+    "export_timeline_mp4": "medium",
     # 能力变更（Creator 提案链，默认走人审）
     "register_custom_provider": "high", "update_custom_provider": "high",
     "delete_custom_provider": "catastrophic", "test_custom_provider": "low",

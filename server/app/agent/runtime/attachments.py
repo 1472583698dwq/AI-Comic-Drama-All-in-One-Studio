@@ -40,14 +40,6 @@ MAX_LOCAL_BYTES = int(os.environ.get("AGENT_MM_MAX_BYTES") or 8 * 1024 * 1024)
 UPLOAD_ROOT = "agent_uploads"
 
 # ── 视觉能力判定 ────────────────────────────────────────────
-_VISION_HINTS = (
-    "gpt-4o", "gpt-4.1", "gpt-4-turbo", "gpt-5", "o1", "o3", "o4",
-    "gemini", "claude", "vl", "vision", "omni", "glm-4v", "qvq",
-    "internvl", "minicpm-v", "step-1v", "yi-vision", "qwen-vl", "qwen2.5-vl",
-    "qwen3-vl", "minimax-vl", "abab-vl",
-)
-
-
 def _flag(name: str, default: str = "auto") -> str:
     v = (os.environ.get(name) or default).strip().lower()
     return v or default
@@ -61,26 +53,17 @@ def _truthy_flag(v: str) -> Optional[bool]:
     return None
 
 
-def _current_model() -> str:
-    try:
-        from app.agent.llm.adapter import adapter
-        return str((adapter.resolve() or {}).get("model") or "")
-    except Exception:
-        return ""
-
-
 def vision_enabled(model: Optional[str] = None) -> bool:
     """图片是否可作为 image_url content part 发给主模型。
 
-    AGENT_MM_IMAGE=1 强制开 / 0 强制关 / auto（默认）按模型名试探。
+    默认信任所有模型都能读图：只在显式 AGENT_MM_IMAGE=0 时降级为文本。
+    真不支持视觉的模型会让 provider 返回 400，adapter 会转成明确的
+    VISION_UNSUPPORTED 错误返回前端，提示切换支持图片的模型。
     """
     forced = _truthy_flag(_flag("AGENT_MM_IMAGE"))
     if forced is not None:
         return forced
-    m = (model if model is not None else _current_model()).lower()
-    if not m:
-        return False
-    return any(h in m for h in _VISION_HINTS)
+    return True
 
 
 def kind_enabled(kind: str) -> bool:
@@ -190,9 +173,16 @@ def _to_sendable(ref: str, kind: str) -> Tuple[Optional[str], Optional[str]]:
 
 
 def attachment_brief(a: Dict[str, Any]) -> str:
-    """无视觉/非图片类附件给模型的文本行（保留 URL，模型可交给生成链复用）。"""
+    """无视觉/非图片类附件给模型的文本行（保留 URL，模型可交给生成链复用）。
+
+    绝不能把 data: URI 整段塞进文本：base64 会按普通文本 token 计费，
+    单张截图就能把 1M 上下文撑爆。内联数据在这里只留短标记。
+    """
     kind_label = {"image": "图片", "video": "视频", "audio": "音频"}.get(a.get("kind"), "附件")
-    return f"[{kind_label}附件] {a.get('name') or ''} → {a.get('ref') or ''}".strip()
+    ref = str(a.get("ref") or "")
+    if ref.startswith("data:"):
+        ref = "（内联数据已省略）"
+    return f"[{kind_label}附件] {a.get('name') or ''} → {ref}".strip()
 
 
 def build_user_content(text: str, attachments: Optional[List[Dict[str, Any]]]) -> Any:

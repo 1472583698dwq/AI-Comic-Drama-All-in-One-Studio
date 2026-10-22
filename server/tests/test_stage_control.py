@@ -86,6 +86,13 @@ class TestStageState(unittest.TestCase):
         self.assertEqual(empty["scenes"][0]["shots"][0]["shot_index"], 1)
         self.assertEqual(out["shot_index"], 1)
 
+    def test_create_shot_duration_clamped_to_1_5_15(self):
+        empty = {"id": "p", "title": "空项目", "scenes": []}
+        out = ops.apply_stage_control(empty, {"action": "create_shot", "payload": {"duration": 12}})
+        self.assertEqual(out["created_shot"]["duration"], 12.0)
+        out2 = ops.apply_stage_control(empty, {"action": "create_shot", "payload": {"duration": 99}})
+        self.assertEqual(out2["created_shot"]["duration"], 15.0)
+
 
 class TestStageControl(unittest.TestCase):
     def test_set_pose_and_clear_joints(self):
@@ -169,9 +176,39 @@ class TestStageControl(unittest.TestCase):
         self.assertEqual(shot["action_desc"], "双忍雨夜对峙")
         self.assertEqual(shot["dialogue"], "你终于来了。")
         self.assertEqual(out["stage_patch"]["action_desc"], "双忍雨夜对峙")
-        # 不给任何文字字段 → 明错（不静默）
+        # 不给任何可写字段 → 明错（不静默）
         with self.assertRaises(ops.StageControlError):
             ops.apply_stage_control(c, {"action": "set_shot_text", "shot_index": 1, "payload": {}})
+
+    def test_set_shot_text_can_update_duration(self):
+        c = _content()
+        out = ops.apply_stage_control(c, {"action": "set_shot_text", "shot_index": 1,
+                                          "payload": {"duration": 10}})
+        shot = c["scenes"][0]["shots"][0]
+        self.assertEqual(shot["duration"], 10.0)
+        self.assertEqual(out["stage_patch"]["duration"], 10.0)
+        self.assertIn("duration", out["note"])
+
+        # 与文字字段同一次调用生效
+        out2 = ops.apply_stage_control(c, {"action": "set_shot_text", "shot_index": 1,
+                                           "payload": {"duration": 6.5, "dialogue": "新台词"}})
+        self.assertEqual(shot["duration"], 6.5)
+        self.assertEqual(shot["dialogue"], "新台词")
+        self.assertEqual(out2["stage_patch"]["duration"], 6.5)
+
+        # 越界按 1.5–15 钳制，不静默写非法值
+        out3 = ops.apply_stage_control(c, {"action": "set_shot_text", "shot_index": 1,
+                                           "payload": {"duration": 99}})
+        self.assertEqual(shot["duration"], 15.0)
+        self.assertEqual(out3["stage_patch"]["duration"], 15.0)
+        ops.apply_stage_control(c, {"action": "set_shot_text", "shot_index": 1,
+                                    "payload": {"duration": 0.1}})
+        self.assertEqual(shot["duration"], 1.5)
+
+        # 非数值明确报错，不静默写成默认值
+        with self.assertRaises(ops.StageControlError):
+            ops.apply_stage_control(c, {"action": "set_shot_text", "shot_index": 1,
+                                        "payload": {"duration": "十秒"}})
 
     def test_entity_whitelist_rejects_junk(self):
         c = _content()
@@ -320,19 +357,78 @@ class TestMcpSurface(unittest.TestCase):
         self.assertIn("stage_get_state", names)
         self.assertIn("stage_control", names)
         self.assertIn("stage_export_clay", names)
+        self.assertIn("export_timeline_mp4", names)
 
     def test_mode_policy_entries(self):
         from app.agent import mode_policy
         self.assertIn("stage_get_state", mode_policy.PLAN_READONLY_TOOLS)
         self.assertNotIn("stage_control", mode_policy.PLAN_READONLY_TOOLS)
+        self.assertNotIn("export_timeline_mp4", mode_policy.PLAN_READONLY_TOOLS)
         self.assertEqual(mode_policy.tool_risk("stage_get_state"), "low")
         self.assertEqual(mode_policy.tool_risk("stage_control"), "medium")
+        self.assertEqual(mode_policy.tool_risk("export_timeline_mp4"), "medium")
 
     def test_white_model_skill_loads(self):
         from app.skills.engine import skill_engine
         sk = skill_engine.get_skill("seedance-white-model")
         self.assertIsNotNone(sk, "白模工作流技能应随项目内置加载")
         self.assertIn("@video1", sk.instructions or "")
+
+
+class TestTimelineExportTool(unittest.TestCase):
+    """export_timeline_mp4：用当前项目内容导出，不依赖真实 ffmpeg（合片内核 mock）。"""
+
+    def test_export_tool_uses_project_context_and_current_duration(self):
+        import asyncio
+        import shutil
+        import tempfile
+        import unittest.mock as mock
+        from app.core.config import settings
+        from app.mcp.server import mcp_registry
+        from app.media import project_merge
+
+        root = tempfile.mkdtemp(prefix="mp4_tool_test_")
+        saved = settings.EXPORTS_DIR
+        settings.EXPORTS_DIR = root
+        content = {
+            "id": "proj_mp4",
+            "title": "六镜测试",
+            "aspect_ratio": "9:16",
+            "scenes": [{"shots": [{
+                "id": "sh1", "shot_index": 1, "duration": 10,
+                "image_url": "/storage/images/a.png", "subtitle_text": "新台词",
+            }]}],
+        }
+        seen = {}
+
+        async def fake_merge(normalized, output_path, **kwargs):
+            seen.update(normalized=normalized, output_path=output_path, **kwargs)
+            with open(output_path, "wb") as fh:
+                fh.write(b"x" * 1024)
+            return {
+                "status": "success", "output_path": output_path,
+                "output_url": "/exports/timeline/fake.mp4",
+                "duration": sum(s["duration"] for s in normalized),
+                "size_bytes": 1024, "subtitles": False, "audio_tracks": 0, "warnings": [],
+            }
+
+        try:
+            with mock.patch.object(project_merge, "merge_project_shots", fake_merge):
+                res = asyncio.run(mcp_registry.execute_tool(
+                    "export_timeline_mp4",
+                    {"subtitles": False, "generate_missing_voice": False},
+                    project_context=content,
+                ))
+        finally:
+            settings.EXPORTS_DIR = saved
+            shutil.rmtree(root, ignore_errors=True)
+
+        self.assertEqual(res.status, "success", res.error)
+        self.assertEqual(seen["normalized"][0]["duration"], 10.0)
+        self.assertFalse(seen["subtitles"])
+        self.assertEqual(res.result["project_id"], "proj_mp4")
+        self.assertEqual(res.result["shot_indexes"], [1])
+        self.assertTrue(res.result["output_url"].startswith("/exports/timeline/"))
 
 
 if __name__ == "__main__":

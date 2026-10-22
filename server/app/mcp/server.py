@@ -7,6 +7,7 @@ MCP 统一工具中枢 - 动态可扩展版
 """
 import asyncio
 import time
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Callable
 
 from app.core.logging_config import get_logger
@@ -26,6 +27,94 @@ except ImportError:
     mcp_app = None
 
 
+def _video_target(project_context: Any, shot_id: Any = "", shot_index: Any = None) -> Optional[Dict[str, Any]]:
+    if not isinstance(project_context, dict):
+        return None
+    pid = str(project_context.get("id") or project_context.get("project_id") or "").strip()
+    content = project_context.get("project")
+    if not isinstance(content, dict) and pid:
+        try:
+            from app.providers.project.manager import project_manager
+            content = project_manager.get_content(pid)
+        except Exception:
+            content = None
+    if not isinstance(content, dict):
+        return None
+    if not pid:
+        pid = str(content.get("id") or "").strip()
+    if not pid:
+        return None
+    from app.director_stage.ops import find_shot
+    sid = str(shot_id or "").strip()
+    explicit = bool(sid) or shot_index is not None
+    if not explicit:
+        active = project_context.get("active_shot")
+        sid = str((active or {}).get("id") or "") if isinstance(active, dict) else ""
+    shot = find_shot(content, sid, shot_index) if explicit else find_shot(content, sid, None)
+    if shot is None and not explicit:
+        shot = find_shot(content, "", None)
+    if shot is None:
+        raise ValueError(f"未找到指定分镜：shot_id={sid or '-'} shot_index={shot_index if shot_index is not None else '-'}")
+    return {"project_id": pid, "shot_id": str(shot.get("id") or ""), "shot_index": shot.get("shot_index")}
+
+
+def _apply_video_to_shot(project_context: Any, video_url: str, provider: str,
+                         shot_id: Any = "", shot_index: Any = None) -> Dict[str, Any]:
+    if not video_url:
+        return {}
+    target = _video_target(project_context, shot_id, shot_index)
+    if not target:
+        return {}
+    pid = target["project_id"]
+    try:
+        from app.providers.project.manager import project_manager
+        from app.director_stage.ops import find_shot
+        content = project_manager.get_content(pid) or {}
+        shot = find_shot(content, target["shot_id"], None)
+        if shot is None:
+            return {}
+        old = str(shot.get("video_url") or "")
+        hist = [h for h in (shot.get("history") or []) if isinstance(h, dict)]
+        if old and old != video_url and (not hist or str(hist[-1].get("video_url") or "") != old):
+            hist.append({
+                "video_url": old,
+                "ts": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "provider": str(shot.get("video_provider") or ""),
+            })
+        patch: Dict[str, Any] = {
+            "video_url": video_url,
+            "video_provider": str(provider or shot.get("video_provider") or ""),
+            "status": "completed",
+        }
+        if hist:
+            patch["history"] = hist[-6:]
+        saved = project_manager.patch_shot(pid, target["shot_id"], patch)
+        target["content_rev"] = saved.get("content_rev")
+    except Exception as e:
+        logger.warning("generate_video 回写分镜失败: %s", e)
+        return {}
+    return target
+
+
+_VIDEO_APPLY_TASKS: set = set()
+
+
+def _schedule_video_apply(task_id: str, project_context: Any, provider: str,
+                         shot_id: Any = "", shot_index: Any = None) -> None:
+    async def _runner() -> None:
+        try:
+            from app.providers.tasks import task_center
+            rec = await task_center.wait(str(task_id), timeout_s=1800)
+            if rec.status == "SUCCESS" and rec.video_url:
+                _apply_video_to_shot(project_context, rec.video_url, provider, shot_id, shot_index)
+        except Exception:
+            pass
+
+    task = asyncio.create_task(_runner())
+    _VIDEO_APPLY_TASKS.add(task)
+    task.add_done_callback(_VIDEO_APPLY_TASKS.discard)
+
+
 async def finalize_video_async_result(res: Any, provider_id: str, project_context: Any,
                                       arguments: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
     """统一异步任务抽象（TaskCenter）：提交即返 task_id 的视频源，登记进任务中心再返回。
@@ -36,24 +125,51 @@ async def finalize_video_async_result(res: Any, provider_id: str, project_contex
     - wait=False：登记后立即返回 SUBMITTED，让调用方用 task_wait / task_status 续查。
     register 幂等（同 task_id 只记一次），canvas/onekey 等已自行登记的路径不受影响。
     """
-    if getattr(res, "video_url", "") or not getattr(res, "task_id", ""):
+    target = _video_target(project_context, arguments.get("shot_id", ""), arguments.get("shot_index"))
+    if target:
+        result["shot_id"] = target["shot_id"]
+        result["shot_index"] = target["shot_index"]
+    if getattr(res, "video_url", ""):
+        if target:
+            result.update(_apply_video_to_shot(
+                project_context, str(res.video_url), str(provider_id or getattr(res, "provider", "") or ""),
+                target["shot_id"], None,
+            ))
+        return result
+    if not getattr(res, "task_id", ""):
         return result
     from app.providers.tasks import task_center
     _pid_ctx = str((project_context or {}).get("id") or "") if isinstance(project_context, dict) else ""
     task_center.register(
         str(res.task_id), str(provider_id or getattr(res, "provider", "") or ""), "video",
-        request={"mode": str(arguments.get("mode") or "")},
+        request={
+            "mode": str(arguments.get("mode") or ""),
+            "shot_id": target.get("shot_id") if target else "",
+            "shot_index": target.get("shot_index") if target else None,
+        },
         project_id=_pid_ctx,
     )
     if arguments.get("wait") is False:
         result["status"] = "SUBMITTED"
         result["note"] = "任务已提交，可用 task_wait / task_status 查询进度"
+        if target:
+            _schedule_video_apply(
+                str(res.task_id), project_context,
+                str(provider_id or getattr(res, "provider", "") or ""),
+                target["shot_id"], None,
+            )
     else:
         rec = await task_center.wait(str(res.task_id))
         result["status"] = rec.status
         if rec.status == "SUCCESS" and rec.video_url:
             result["video_url"] = rec.video_url
             result["local_path"] = rec.local_path or result.get("local_path")
+            if target:
+                result.update(_apply_video_to_shot(
+                    project_context, rec.video_url,
+                    str(provider_id or getattr(res, "provider", "") or ""),
+                    target["shot_id"], None,
+                ))
         elif rec.status == "FAILED":
             raise RuntimeError(rec.error or "视频任务失败")
         else:
@@ -535,14 +651,14 @@ class MCPServerRegistry:
             return {"providers": reg.list_providers()}
 
         @mcp_app.tool
-        async def generate_video(prompt: str, mode: str = "i2v", first_frame_url: str = "", reference_images: list = None, reference_videos: list = None, duration: int = 5, provider: str = "", wait: bool = True) -> dict:
+        async def generate_video(prompt: str, mode: str = "i2v", first_frame_url: str = "", reference_images: list = None, reference_videos: list = None, duration: int = 5, provider: str = "", wait: bool = True, shot_id: str = "", shot_index: Optional[int] = None) -> dict:
             """通用视频生成（图生视频/参考生视频/文生视频）"""
             from app.providers.video.base import VideoGenerateRequest
             reg = _lazy_video_registry()
             req = VideoGenerateRequest(prompt=prompt, mode=mode, first_frame_url=first_frame_url or None, reference_images=reference_images, reference_videos=reference_videos, duration=duration, provider=provider or None)
             res = await reg.generate(req, provider_id=provider or None)
             result = {"video_url": res.video_url, "duration": res.duration, "provider": res.provider, "engine": res.engine, "task_id": res.task_id}
-            return await finalize_video_async_result(res, provider or res.provider or "", None, {"mode": mode, "wait": wait}, result)
+            return await finalize_video_async_result(res, provider or res.provider or "", None, {"mode": mode, "wait": wait, "shot_id": shot_id, "shot_index": shot_index}, result)
 
         @mcp_app.tool
         async def list_video_providers() -> dict:
@@ -883,7 +999,9 @@ class MCPServerRegistry:
                     "reference_videos": {"type": "array", "items": {"type": "string"}, "description": "参考视频 URL 列表（白模预演/运动参考；不填则自动使用当前镜头的 previz_video_url）"},
                     "duration": {"type": "integer", "default": 5, "description": "视频时长秒数"},
                     "provider": {"type": "string", "enum": _video_ids, "description": "指定视频源，不填则使用系统默认 VIDEO_PROVIDER"},
-                    "wait": {"type": "boolean", "default": True, "description": "异步源是否阻塞等到成片（默认 true）；false=提交即返回 task_id，用 task_wait/task_status 续查"}
+                    "wait": {"type": "boolean", "default": True, "description": "异步源是否阻塞等到成片（默认 true）；false=提交即返回 task_id，用 task_wait/task_status 续查"},
+                    "shot_id": {"type": "string", "description": "成片要写回的分镜 id；不填=当前激活镜，绝不再默认写第一镜"},
+                    "shot_index": {"type": "integer", "description": "成片要写回的分镜号（与 shot_id 二选一；不填=当前激活镜）"}
                 },
                 "required": ["prompt"]
             }
@@ -1029,6 +1147,34 @@ class MCPServerRegistry:
             }
         ))
 
+        self.register_tool(MCPToolDefinition(
+            name="export_timeline_mp4",
+            description="[ffmpeg] 把当前项目按多轨时间线导出为 MP4：主画面（成片视频/分镜静帧/黑场）+ 视频自带原声/配音 + 烧录字幕 + BGM。默认导出全部镜头；可用 shot_indexes/shot_ids 只导指定镜头。**导出前先确认各镜 duration 与成片视频真实长度一致**（stage_control set_shot_text 可改 duration，1.5–15 秒），否则会按旧 duration 裁剪。这是长任务：优先用 job_start(tool='export_timeline_mp4', arguments={...}) 后台提交，完成后会自动通知，不会阻塞当前回合；直接调用会一直等待到成片完成。返回 output_path/output_url/duration/warnings。",
+            category="export",
+            icon="Download",
+            author="ffmpeg",
+            is_enabled=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "project_id": {"type": "string", "description": "项目 id（缺省=当前会话项目）"},
+                    "project": {"type": "object", "description": "可选：完整 Project JSON（无项目上下文时用）"},
+                    "shot_indexes": {"type": "array", "items": {"type": "integer"}, "description": "可选：只导出这些分镜号（缺省=全部）"},
+                    "shot_ids": {"type": "array", "items": {"type": "string"}, "description": "可选：只导出这些分镜 id（缺省=全部）"},
+                    "aspect_ratio": {"type": "string", "enum": ["9:16", "16:9", "1:1"], "description": "画幅（缺省=项目设置）"},
+                    "subtitles": {"type": "boolean", "description": "是否烧录字幕（默认 true）"},
+                    "generate_missing_voice": {"type": "boolean", "description": "视频无音轨且有台词/旁白时自动 TTS 补配音并写回项目（默认 false；视频自带原声会直接混入）"},
+                    "audio_provider": {"type": "string", "description": "可选：指定 TTS 源 id；缺省自动选择可用源"},
+                    "allow_silent": {"type": "boolean", "description": "没有任何配音/BGM 时是否仍导出静音 MP4（默认 false，直接报错提示先配音）"},
+                    "bgm_url": {"type": "string", "description": "可选：覆盖项目 BGM 地址；传空字符串表示不带 BGM"},
+                    "bgm_volume": {"type": "number", "description": "BGM 音量 0–1（缺省=项目设置）"},
+                    "output_name": {"type": "string", "description": "可选：输出文件名（不含扩展名）"},
+                    "title": {"type": "string", "description": "可选：输出文件名前缀（缺省=项目标题）"}
+                },
+                "required": []
+            }
+        ))
+
         # 11. 3D导演台
         self.register_tool(MCPToolDefinition(
             name="director_3d_stage_plan",
@@ -1073,7 +1219,7 @@ class MCPServerRegistry:
         ))
         self.register_tool(MCPToolDefinition(
             name="stage_control",
-            description="[3D导演台] 控制分镜舞台并即时落盘+前端实时应用：create_shot(新建分镜,0镜项目先走这步)/set_pose(姿态预设)/set_joints(逐关节[弧度])/clear_joints/set_transform(实体位置·旋转·缩放)/set_camera(景别·运镜·焦距·roll·站位·保存机位)/set_waypoints(主角走位≤6点)/set_props(道具)/set_lighting(三点光)/set_cast_layout(站位阵型)/set_shot_text(改动作描述/台词/旁白/提示词等文字字段)。双人打斗类镜头：set_cast_layout=duel + set_pose(fight) + set_camera(orbit/shake)。",
+            description="[3D导演台] 控制分镜舞台并即时落盘+前端实时应用：create_shot(新建分镜,0镜项目先走这步)/set_pose(姿态预设)/set_joints(逐关节[弧度])/clear_joints/set_transform(实体位置·旋转·缩放)/set_camera(景别·运镜·焦距·roll·站位·保存机位)/set_waypoints(主角走位≤6点)/set_props(道具)/set_lighting(三点光)/set_cast_layout(站位阵型)/set_shot_text(改动作描述/台词/旁白/提示词等文字字段、duration 时长（1.5–15 秒），或 image_url/video_url/audio_url/status 结果字段；history 由服务端维护)。双人打斗类镜头：set_cast_layout=duel + set_pose(fight) + set_camera(orbit/shake)。",
             category="workflow",
             icon="Sliders",
             author="Director Stage",
@@ -1086,7 +1232,7 @@ class MCPServerRegistry:
                     "shot_id": {"type": "string", "description": "分镜 id（缺省=当前激活/第一镜）"},
                     "shot_index": {"type": "integer", "description": "分镜号（与 shot_id 二选一）"},
                     "scene_index": {"type": "integer", "description": "create_shot 时指定场景号（缺省=第一个场景，无场景则自动建场景 1）"},
-                    "payload": {"type": "object", "description": "动作参数：entity=实体名；joints={关节:[x,y,z]弧度}；p/r/s；camera_framing/camera_motion/focal_length_mm/camera_roll_deg/motion_speed/cast_layout；camera={pos,quat,fov,name}；points=[{x,z}]；props=[...]；灯光字段；create_shot 可用 action_desc/duration/pose_preset 等；set_shot_text 用 action_desc/dialogue/voiceover/speaker_name/image_prompt/video_prompt/subtitle_text"},
+                    "payload": {"type": "object", "description": "动作参数：entity=实体名；joints={关节:[x,y,z]弧度}；p/r/s；camera_framing/camera_motion/focal_length_mm/camera_roll_deg/motion_speed/cast_layout；camera={pos,quat,fov,name}；points=[{x,z}]；props=[...]；灯光字段；create_shot 可用 action_desc/duration(1.5–15)/pose_preset 等；set_shot_text 用文字字段 action_desc/dialogue/voiceover/speaker_name/image_prompt/video_prompt/subtitle_text、duration（数值 1.5–15 秒），或结果字段 image_url/video_url/audio_url/status/image_provider/video_provider/audio_provider（history 由服务端维护）"},
                 },
                 "required": ["action"]
             }
@@ -2120,6 +2266,8 @@ class MCPServerRegistry:
                 )
                 if not req.prompt or not req.prompt.strip():
                     raise ValueError("视频运动提示词 prompt 不能为空")
+                if arguments.get("shot_id") or arguments.get("shot_index") is not None:
+                    _video_target(project_context, arguments.get("shot_id"), arguments.get("shot_index"))
                 vid_res = await reg.generate(req, provider_id=provider)
                 result = {
                     "video_url": vid_res.video_url,
@@ -2254,6 +2402,124 @@ class MCPServerRegistry:
                     return MCPToolCallResponse(tool_name=tool_name, status="error", result=None, error="export_jianyin_draft 需要完整Project JSON", execution_time_ms=int((time.time()-start_time)*1000))
                 project = Project.model_validate(project_payload)
                 result = await jianyin_exporter.export_project_to_jianyin_draft_async(project)
+
+            elif tool_name == "export_timeline_mp4":
+                from app.api.timeline_routes import _reserve_output_path
+                from app.media.project_merge import merge_project_shots, normalize_project_shots
+                from app.providers.project.manager import project_manager
+
+                content = None
+                ctx_pid = ""
+                if isinstance(project_context, dict):
+                    ctx_pid = str(project_context.get("id") or project_context.get("project_id") or "").strip()
+                pid_arg = str(arguments.get("project_id") or "").strip()
+                pid = pid_arg or ctx_pid
+                # 以服务端最新内容为准：stage_control 改完 duration 后，会话上下文可能还是旧快照
+                if pid:
+                    try:
+                        content = project_manager.get_content(pid)
+                    except Exception:
+                        content = None
+                if content is None and isinstance(project_context, dict) and project_context.get("scenes"):
+                    content = dict(project_context)
+                if content is None:
+                    project_arg = arguments.get("project")
+                    if hasattr(project_arg, "model_dump"):
+                        project_arg = project_arg.model_dump()
+                    if isinstance(project_arg, dict):
+                        content = project_arg
+                if not isinstance(content, dict):
+                    raise ValueError("export_timeline_mp4 需要项目上下文、project_id 或完整 project JSON")
+                pid = pid_arg or str(content.get("id") or "").strip()
+
+                shots: List[Dict[str, Any]] = []
+                for scene in (content.get("scenes") or []):
+                    if isinstance(scene, dict):
+                        shots.extend([s for s in (scene.get("shots") or []) if isinstance(s, dict)])
+                filter_ids = {str(x).strip() for x in (arguments.get("shot_ids") or []) if str(x).strip()}
+                filter_indexes = set()
+                for value in (arguments.get("shot_indexes") or []):
+                    try:
+                        filter_indexes.add(int(value))
+                    except (TypeError, ValueError):
+                        continue
+                if filter_ids or filter_indexes:
+                    picked = []
+                    for shot in shots:
+                        try:
+                            shot_index = int(shot.get("shot_index"))
+                        except (TypeError, ValueError):
+                            shot_index = -1
+                        if str(shot.get("id") or "") in filter_ids or shot_index in filter_indexes:
+                            picked.append(shot)
+                    shots = picked
+                if not shots:
+                    raise ValueError("没有可导出的分镜：请先确认项目有镜头，或检查 shot_indexes/shot_ids")
+
+                if on_progress:
+                    try:
+                        on_progress(f"正在准备 {len(shots)} 个镜头的多轨素材…")
+                    except Exception:
+                        pass
+                normalized, normalize_warnings = normalize_project_shots(shots)
+                if arguments.get("generate_missing_voice", False):
+                    from app.media.voice_fill import fill_missing_voice, persist_generated_voice
+                    try:
+                        before_ids = [
+                            str(s.get("id") or "") for s in normalized
+                            if not s.get("audio_url") and (s.get("dialogue") or s.get("voiceover"))
+                        ]
+                        generated, voice_warnings = await fill_missing_voice(
+                            normalized,
+                            project_content=content,
+                            characters=content.get("characters"),
+                            provider=str(arguments.get("audio_provider") or "").strip() or None,
+                            project_id=pid,
+                            on_progress=on_progress,
+                        )
+                        normalize_warnings.extend(voice_warnings)
+                        if generated:
+                            normalize_warnings.extend(persist_generated_voice(normalized, pid, before_ids))
+                    except Exception as exc:
+                        normalize_warnings.append(f"自动配音未执行：{type(exc).__name__}: {exc}")
+                output_path = _reserve_output_path(
+                    arguments.get("output_name"),
+                    arguments.get("title") or content.get("title") or "多轨成片",
+                )
+                bgm_url = arguments.get("bgm_url") if "bgm_url" in arguments else content.get("bgm_url")
+                bgm_volume = arguments.get("bgm_volume", content.get("bgm_volume", 0.5))
+                subtitles = arguments.get("subtitles", True)
+                if isinstance(subtitles, str):
+                    subtitles = subtitles.strip().lower() not in ("0", "false", "no", "off")
+                if on_progress:
+                    try:
+                        total = round(sum(float(s["duration"]) for s in normalized), 3)
+                        on_progress(f"正在合成 {total:g}s 成片（画面/配音/字幕/BGM）…")
+                    except Exception:
+                        pass
+                try:
+                    result = await merge_project_shots(
+                        normalized,
+                        output_path,
+                        aspect_ratio=arguments.get("aspect_ratio") or content.get("aspect_ratio"),
+                        bgm_url=bgm_url,
+                        bgm_volume=bgm_volume,
+                        subtitles=bool(subtitles),
+                        allow_silent=bool(arguments.get("allow_silent", False)),
+                    )
+                except Exception as exc:
+                    if normalize_warnings:
+                        raise ValueError(f"{exc}；自动配音提示：{'；'.join(normalize_warnings[-4:])[:500]}")
+                    raise
+                result["warnings"] = (normalize_warnings + list(result.get("warnings") or []))[:200]
+                result["project_id"] = pid
+                result["project_title"] = content.get("title")
+                result["shot_indexes"] = [s["shot_index"] for s in normalized]
+                if on_progress:
+                    try:
+                        on_progress("MP4 合成完成")
+                    except Exception:
+                        pass
 
             elif tool_name == "register_custom_provider":
                 from app.providers.custom.manager import custom_provider_manager

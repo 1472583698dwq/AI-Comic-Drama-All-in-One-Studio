@@ -180,7 +180,9 @@ function mergeShotUpdate(proj: Project, shotId: string, updates: Partial<Storybo
       }
       if ((updates as any).video_url && (updates as any).video_url !== sh.video_url) {
         const hist = [...(merged.history || sh.history || [])];
-        hist.push({ video_url: (updates as any).video_url, ts: new Date().toISOString(), provider: (updates as any).video_provider || (sh as any).video_provider });
+        if (sh.video_url && (hist.length === 0 || hist[hist.length - 1]?.video_url !== sh.video_url)) {
+          hist.push({ video_url: sh.video_url, ts: new Date().toISOString(), provider: (sh as any).video_provider });
+        }
         if (hist.length > 6) hist.splice(0, hist.length - 6);
         merged.history = hist;
       }

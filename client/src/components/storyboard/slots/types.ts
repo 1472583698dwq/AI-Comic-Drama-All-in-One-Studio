@@ -158,8 +158,8 @@ export interface ShotSlotContext {
   setShowHotkeysHint: (v: boolean) => void;
   inspectingWorkflowId: string;
   setInspectingWorkflowId: (id: string) => void;
-  slotPicker: { slot: any; writeKeys: string[]; multi: boolean } | null;
-  setSlotPicker: (v: { slot: any; writeKeys: string[]; multi: boolean } | null) => void;
+  slotPicker: { slot: any; writeKeys: string[]; multi: boolean; replaceIndex?: number } | null;
+  setSlotPicker: (v: { slot: any; writeKeys: string[]; multi: boolean; replaceIndex?: number } | null) => void;
   assetPickerConfig: AssetPickerConfig;
   setAssetPickerConfig: React.Dispatch<React.SetStateAction<AssetPickerConfig>>;
   ctxMenu: { x: number; y: number; shotId: string } | null;
@@ -188,9 +188,9 @@ export interface ShotSlotContext {
   sendShotToCanvas: (shot: any, opts: { mode: 'new' | 'existing'; canvas_id?: string }) => void;
   openShotCtxMenu: (e: React.MouseEvent, shot: any) => void;
   setSlotValue: (writeKeys: string[], value: any) => void;
-  handleSlotUploadFile: (writeKeys: string[], file: File, multi: boolean) => void;
+  handleSlotUploadFile: (writeKeys: string[], file: File | File[], multi: boolean, maxCount?: number) => void;
   injectCharacterToSlot: (writeKeys: string[], multi: boolean) => void;
-  pickAssetForSlot: (slot: any, writeKeys: string[], multi: boolean) => void;
+  pickAssetForSlot: (slot: any, writeKeys: string[], multi: boolean, replaceIndex?: number) => void;
   handleSlotPicked: (urlOrUrls: string | string[], meta?: any) => void;
   resolveRenderSlots: (def: any, kind: 'image' | 'video' | 'audio') => any[];
   keepDeclaredOnly: (def: any, values: Record<string, any>) => Record<string, any>;

@@ -292,6 +292,123 @@ class TestDraftRoute(_IsolatedTimelineTest):
         self.assertIn("剪映", res.json()["detail"])
 
 
+class TestProjectExportRoute(_IsolatedTimelineTest):
+    """多轨剪辑导出 MP4：提交口校验 + 后台合片任务走通。"""
+
+    def test_empty_shots_rejected_with_400(self):
+        res = self.client.post(f"{API}/timeline/export-project", json={"shots": []})
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("分镜", res.json()["detail"])
+
+    def test_without_ffmpeg_returns_503_with_install_hint(self):
+        from app.media import timeline_merge
+        url = self._fake_clip("project_nomedia.mp4")
+        with mock.patch.object(timeline_merge, "has_binary", return_value=False):
+            res = self.client.post(f"{API}/timeline/export-project", json={
+                "shots": [{"shot_index": 1, "duration": 2.0, "video_url": url}],
+            })
+        self.assertEqual(res.status_code, 503)
+        self.assertIn("ffmpeg", res.json()["detail"])
+
+    def test_missing_voice_is_generated_before_merge(self):
+        from app.api import timeline_routes as routes
+        url = self._fake_clip("project_voice.mp4")
+        seen = {}
+
+        async def _fake_fill(shots, **kwargs):
+            for shot in shots:
+                shot["audio_url"] = "/storage/audio/generated.mp3"
+                shot["audio_duration"] = 2.0
+            return 1, []
+
+        async def _fake_merge(shots, out_path, **kwargs):
+            seen["audio_url"] = shots[0].get("audio_url")
+            with open(out_path, "wb") as fh:
+                fh.write(b"x" * 1024)
+            return {
+                "status": "success", "output_path": out_path,
+                "output_url": "/exports/timeline/voice.mp4",
+                "duration": 2.0, "size_bytes": 1024, "subtitles": False,
+                "audio_tracks": 1, "warnings": [],
+            }
+
+        with mock.patch.object(routes, "fill_missing_voice", _fake_fill), \
+             mock.patch.object(routes, "merge_project_shots", _fake_merge), \
+             _client() as client:
+            res = client.post(f"{API}/timeline/export-project", json={
+                "shots": [{"shot_index": 1, "duration": 2.0, "video_url": url,
+                           "voiceover": "旁白"}],
+                "generate_missing_voice": True,
+            })
+            self.assertEqual(res.status_code, 200, res.text)
+            task_id = res.json()["task_id"]
+            body = {}
+            for _ in range(80):
+                body = client.get(f"{API}/timeline/tasks/{task_id}").json()
+                if body.get("status") in ("success", "error"):
+                    break
+                time.sleep(0.05)
+
+        self.assertEqual(body.get("status"), "success", body.get("error"))
+        self.assertEqual(seen["audio_url"], "/storage/audio/generated.mp3")
+
+    def test_task_completes_and_receives_all_tracks(self):
+        from app.api import timeline_routes as routes
+        url = self._fake_clip("project_a.mp4")
+        seen = {}
+
+        async def _fake_merge(shots, out_path, **kwargs):
+            seen.update(shots=shots, out_path=out_path, **kwargs)
+            with open(out_path, "wb") as fh:
+                fh.write(b"x" * 2048)
+            return {
+                "status": "success",
+                "output_path": out_path,
+                "output_url": "/exports/timeline/fake.mp4",
+                "duration": sum(s["duration"] for s in shots),
+                "size_bytes": 2048,
+                "subtitles": True,
+                "audio_tracks": 1,
+                "warnings": [],
+                "engine": "ffmpeg",
+            }
+
+        with mock.patch.object(routes, "merge_project_shots", _fake_merge), _client() as client:
+            res = client.post(f"{API}/timeline/export-project", json={
+                "shots": [
+                    {"shot_index": 1, "duration": 2.0, "video_url": url,
+                     "audio_url": url, "subtitle_text": "字幕一"},
+                    {"shot_index": 2, "duration": 1.0, "video_url": "",
+                     "image_url": "", "subtitle_text": "字幕二"},
+                ],
+                "title": "多轨冒烟",
+                "aspect_ratio": "9:16",
+                "bgm_url": url,
+                "bgm_volume": 0.3,
+                "subtitles": True,
+                "generate_missing_voice": False,
+                "project_id": "proj_test",
+            })
+            self.assertEqual(res.status_code, 200, res.text)
+            task_id = res.json()["task_id"]
+
+            body = {}
+            for _ in range(80):
+                body = client.get(f"{API}/timeline/tasks/{task_id}").json()
+                if body.get("status") in ("success", "error"):
+                    break
+                time.sleep(0.05)
+
+        self.assertEqual(body.get("status"), "success", body.get("error"))
+        self.assertTrue(body["output_path"].endswith(".mp4"))
+        self.assertEqual(seen["bgm_url"], url)
+        self.assertEqual(seen["bgm_volume"], 0.3)
+        self.assertTrue(seen["subtitles"])
+        self.assertEqual(len(seen["shots"]), 2)
+        self.assertEqual(seen["shots"][0]["subtitle"], "字幕一")
+        self.assertEqual(seen["shots"][1]["subtitle"], "字幕二")
+
+
 class TestMergeConcurrencyGate(_IsolatedTimelineTest):
     """提交闸门：在途额度（2 个合成 + 8 个排队）用满后必须 429，而不是无界拉起 ffmpeg。"""
 

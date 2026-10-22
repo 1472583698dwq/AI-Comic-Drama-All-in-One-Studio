@@ -1,4 +1,4 @@
-import { Project, StoryboardShot, MCPToolDefinition } from '../types';
+import { Project, MCPToolDefinition } from '../types';
 import { API_BASE_URL } from '../utils/devOrigin';
 import type { TimelineClip } from '../types/timeline';
 // 类型专用导入（不产生运行期依赖）：/config/test 的目标名单以设置面板的 TestTarget 为唯一口径
@@ -492,6 +492,28 @@ export const apiService = {
   },
   async getTimelineTask(taskId: string): Promise<TimelineTask> {
     const res = await fetch(`${API_BASE_URL}/timeline/tasks/${encodeURIComponent(taskId)}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  // 多轨剪辑：画面 + 配音 + 字幕 + BGM 合成 MP4（长任务，轮询复用 getTimelineTask）
+  async exportProjectTimeline(payload: {
+    shots: Array<Record<string, any>>;
+    project_id?: string;
+    title?: string;
+    output_name?: string;
+    aspect_ratio?: string;
+    bgm_url?: string | null;
+    bgm_volume?: number;
+    subtitles?: boolean;
+    generate_missing_voice?: boolean;
+    audio_provider?: string | null;
+    allow_silent?: boolean;
+  }): Promise<{ status: string; task_id: string; shots: number; duration: number; stage: string; warnings?: string[] }> {
+    const res = await fetch(`${API_BASE_URL}/timeline/export-project`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },

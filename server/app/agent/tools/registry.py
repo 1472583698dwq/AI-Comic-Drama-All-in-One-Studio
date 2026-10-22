@@ -16,6 +16,7 @@ _VIDEO_TIMEOUT_S = 1800
 _TOOL_TIMEOUTS: Dict[str, int] = {
     "generate_video": _VIDEO_TIMEOUT_S,
     "export_jianyin_draft": 600,
+    "export_timeline_mp4": 1800,
     "shell_exec": 1200,
     # 拆解=大 JSON LLM 生成（角色+场景+逐镜），慢在模型侧；300s 会把长文本拆解中途掐死
     "split_novel_script": 900,
@@ -202,7 +203,7 @@ _ONEKEY_SHOT_IMAGE_SCHEMA = _internal_schema(
     ["draft_id", "shot_index"])
 _ONEKEY_SHOT_VIDEO_SCHEMA = _internal_schema(
     "onekey_shot_video",
-    "[一键成片] 为分镜生成视频：该镜有画面→首帧 i2v + 参考；无画面→直接用角色多视图 + 场景参考生成（r2v，默认流程）。"
+    "[一键成片] 为分镜生成视频：该镜有画面→首帧 i2v（H3 首尾帧与参考素材互斥，不要再传参考）；无画面→直接用角色多视图 + 场景参考生成（r2v，默认流程）。"
     "写/改视频提示词前先 read_skill('minimax-h3-prompt')（H3 三字段结构/对齐行/运镜规则），成稿用 prompt_override 传入。"
     "返回 video_url 或异步 task_id。",
     {"draft_id": {"type": "string"}, "shot_index": {"type": "integer"},

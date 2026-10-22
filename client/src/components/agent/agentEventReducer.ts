@@ -248,7 +248,7 @@ export function collectFromExecutedTools(executed: any[]): {
     });
     try {
       if (t.status === 'success' && t.result) {
-        const a = extractArtifact(t.tool_name, t.result);
+        const a = extractArtifact(t.tool_name, t.result, t.arguments);
         if (a) artifacts.push({ ...a });
       } else if (t.status !== 'success') {
         const se = toStructuredError(t.tool_name, t.error || '执行失败');

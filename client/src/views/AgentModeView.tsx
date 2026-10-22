@@ -8,7 +8,7 @@
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ShieldAlert, Trash2, ArrowDown, Folder, ChevronDown, Check,
+  ShieldAlert, Trash2, ArrowDown, Folder, ChevronDown, Check, MessageCirclePlus,
 } from 'lucide-react';
 import { useProjectStore } from '../stores/useProjectStore';
 import { useProjectListStore, type ProjectMeta } from '../stores/useProjectListStore';
@@ -245,6 +245,15 @@ export const AgentModeView: React.FC = () => {
             </div>
           </div>
           <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={() => createSession()}
+              title="新建会话（不继承当前对话上下文）"
+              aria-label="新建会话"
+              className="flex items-center gap-1.5 rounded-lg border border-brand/35 bg-brand/10 px-2.5 py-2 text-[11px] font-semibold text-brand transition-all hover:border-brand/60 hover:bg-brand/15 active:scale-95 shrink-0"
+            >
+              <MessageCirclePlus className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">新建会话</span>
+            </button>
             <button
               onClick={() => void clearAll()}
               title="清空本会话的全部消息记忆（不影响项目文件）"

@@ -10,6 +10,7 @@
 关节与前端 `Director3DStage.createPoseMannequin` 的 rig 同名同限位（单一口径）：
 had 对应 group 的局部欧拉角 XYZ（弧度），肘/膝为铰链限位。
 """
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 JOINTS = (
@@ -89,6 +90,23 @@ def find_shot(content: Any, shot_id: str = "", shot_index: Any = None) -> Option
                     continue
             return None
     return shots[0]
+
+
+def _push_result_history(shot: Dict[str, Any], key: str) -> bool:
+    old = str(shot.get(key) or "")
+    if not old:
+        return False
+    hist = [h for h in (shot.get("history") or []) if isinstance(h, dict)]
+    if hist and str(hist[-1].get(key) or "") == old:
+        return False
+    provider_key = key.replace("_url", "_provider")
+    hist.append({
+        key: old,
+        "ts": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "provider": str(shot.get(provider_key) or ""),
+    })
+    shot["history"] = hist[-6:]
+    return True
 
 
 def _clamp(v: Any, lo: float, hi: float, default: float = 0.0) -> float:
@@ -217,7 +235,7 @@ def _new_shot(scene_index: int, shot_index: int, payload: Dict[str, Any]) -> Dic
         "voiceover": str(payload.get("voiceover") or ""),
         "emotion": "neutral",
         "image_prompt": str(payload.get("image_prompt") or "cinematic anime shot, high quality lighting, masterpiece"),
-        "duration": _clamp(payload.get("duration", 3.5), 1.5, 10.0, 3.5),
+        "duration": _clamp(payload.get("duration", 3.5), 1.5, 15.0, 3.5),
         "subtitle_text": str(payload.get("subtitle_text") or dialogue or action)[:200],
         "status": "ready",
         # 舞台字段必须随 create_shot 一起落盘：否则后续任何整份保存/远控导出都会按默认值回填
@@ -456,17 +474,42 @@ def apply_stage_control(content: Any, arguments: Dict[str, Any]) -> Dict[str, An
         note = f"已设置站位阵型「{val}」（Antagonist/Supporting 布偶会自动就位）"
 
     elif action == "set_shot_text":
-        # 文字字段（分镜台手工编辑的同一组）：Agent 能改动作描述/台词/提示词，不再只能改舞台参数
+        # 文字/时长字段（分镜台手工编辑的同一组）：Agent 能改动作描述/台词/提示词/时长
         text_fields = ("action_desc", "dialogue", "voiceover", "speaker_name", "image_prompt", "video_prompt", "subtitle_text")
-        for key in text_fields:
+        result_fields = ("image_url", "video_url", "audio_url", "status",
+                         "image_provider", "video_provider", "audio_provider")
+        numeric_fields = ("duration",)
+        history_changed = False
+        for key in text_fields + result_fields:
             if key not in payload:
                 continue
-            limit = 500 if key in ("image_prompt", "video_prompt") else 200
-            shot[key] = str(payload.get(key) or "")[:limit]
-            patch[key] = shot[key]
+            if key in result_fields:
+                limit = 2048 if key.endswith("_url") else 120
+                value = str(payload.get(key) or "")[:limit]
+                if key.endswith("_url") and value != str(shot.get(key) or ""):
+                    history_changed = _push_result_history(shot, key) or history_changed
+                shot[key] = value
+                patch[key] = value
+            else:
+                limit = 500 if key in ("image_prompt", "video_prompt") else 200
+                shot[key] = str(payload.get(key) or "")[:limit]
+                patch[key] = shot[key]
+        if "duration" in payload:
+            try:
+                raw_duration = float(payload.get("duration"))
+            except (TypeError, ValueError):
+                raise StageControlError("duration 需要数值（1.5–15 秒）")
+            duration = round(max(1.5, min(15.0, raw_duration)), 3)
+            shot["duration"] = duration
+            patch["duration"] = duration
+        if history_changed:
+            patch["history"] = shot.get("history") or []
         if not patch:
-            raise StageControlError("set_shot_text 需要至少一个文字字段：" + "/".join(text_fields))
-        note = "已更新分镜文字: " + ",".join(patch.keys())
+            raise StageControlError(
+                "set_shot_text 需要至少一个可写字段："
+                + "/".join(text_fields + result_fields + numeric_fields)
+            )
+        note = "已更新分镜字段: " + ",".join(patch.keys())
 
     else:
         raise StageControlError(f"未知 action: {action}")

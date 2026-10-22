@@ -769,6 +769,21 @@ export function createAgentStore(scope: AgentScope) {
 
       applyAgentEvent(ev) {
         const st = get();
+        // 后台回合（stage/system/job 通知）也会复用同一个 WS/session；它们的事件不能落到
+        // 用户当前消息上，否则 stage 通知的 agent_response 会提前清空 streamingMsgId，
+        // 导致用户回合后续的 stream_chunk 全被丢弃（表现为“没有流式输出”）。
+        const turnSource = String((ev as any).turn_source || '');
+        if (turnSource && turnSource !== 'user') return;
+        if (ev.event === 'error' && String((ev as any).code || '') === 'VISION_UNSUPPORTED') {
+          toast.warning('当前模型不支持视觉输入（图片），请切换到支持图片的模型，或关闭图片附件后重试。');
+        }
+        // 同一 session 里上一轮 user 回合的迟到事件也不能串到新消息。
+        const runId = String((ev as any).run_id || '');
+        if (runId) {
+          const curId = st.streamingMsgId;
+          const cur = curId ? st.messages.find((m) => m.id === curId) : undefined;
+          if (cur?.runId && cur.runId !== runId) return;
+        }
         if (ev.event === 'subagent_started' || ev.event === 'subagent_progress' || ev.event === 'subagent_settled') {
           const sid = String((ev as any).subagent_id || '');
           if (!sid) return;
@@ -866,9 +881,10 @@ export function createAgentStore(scope: AgentScope) {
           const idx = st.messages.findIndex((m) => m.id === id);
           if (idx >= 0) {
             const { msg, sideEffects } = reduceAgentEvent(st.messages[idx], ev);
-            if (msg !== st.messages[idx]) {
+            const next = runId && !msg.runId ? { ...msg, runId } : msg;
+            if (next !== st.messages[idx]) {
               const messages = [...st.messages];
-              messages[idx] = msg;
+              messages[idx] = next;
               commitMessages(() => messages);
             }
             dispatchSideEffects(sideEffects);
@@ -924,10 +940,16 @@ export function createAgentStore(scope: AgentScope) {
 
       applyArtifact(msgId, index) {
         const ps = useProjectStore.getState();
-        const shotId = ps.activeShotId;
         const msg = get().messages.find((m) => m.id === msgId);
         const artifact = msg?.artifacts?.[index];
-        if (!shotId || !artifact) return;
+        if (!artifact) return;
+        const shots = ps.project?.scenes.flatMap((s) => s.shots) || [];
+        const byId = artifact.shotId ? shots.find((s) => s.id === artifact.shotId) : undefined;
+        const byIndex = artifact.shotIndex !== undefined
+          ? shots.find((s) => Number(s.shot_index) === Number(artifact.shotIndex))
+          : undefined;
+        const shotId = byId?.id || byIndex?.id || ps.activeShotId;
+        if (!shotId) return;
         const patch: any = { status: 'completed' };
         if (artifact.kind === 'image') { patch.image_url = artifact.url; patch.image_provider = artifact.tool; }
         if (artifact.kind === 'video') {

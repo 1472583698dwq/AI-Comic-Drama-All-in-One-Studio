@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""媒体处理包：目前只有画布时间线节点的合片内核（ffmpeg 可选依赖，探测式使用）。"""
+"""媒体处理包：时间线片段合片 / 项目多轨导出 / 剪映草稿桥接（ffmpeg 可选依赖）。"""
 from app.media.timeline_draft import clips_to_project, export_clips_to_draft  # noqa: F401
 from app.media.timeline_merge import (  # noqa: F401
     TimelineMergeError,

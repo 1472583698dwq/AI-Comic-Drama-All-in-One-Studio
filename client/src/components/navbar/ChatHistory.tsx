@@ -232,6 +232,17 @@ export const ChatHistory: React.FC<{
               </button>
             );
           })()}
+          {view === 'sessions' && !showArchived && (
+            <button
+              type="button"
+              title="新建会话"
+              aria-label="新建会话"
+              onClick={handleStartTask}
+              className="p-1.5 rounded-lg text-brand hover:bg-brand/10 transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+            </button>
+          )}
           <div ref={filterRef} className="relative">
             <button
               type="button"
@@ -306,6 +317,19 @@ export const ChatHistory: React.FC<{
             )}
             {archivedEntries.map((e) => renderRow(e, { archived: true }))}
           </>
+        )}
+
+        {!showArchived && view === 'sessions' && activeEntries.length > 0 && (
+          <button
+            type="button"
+            onClick={handleStartTask}
+            title="新建独立会话，不影响当前会话"
+            className="mb-1 flex h-8 w-full items-center gap-2 rounded-lg border border-dashed border-brand/30 px-2.5 text-[11px] font-semibold text-brand transition-colors hover:border-brand/60 hover:bg-brand/10"
+          >
+            <MessageCirclePlus className="h-3.5 w-3.5 shrink-0" />
+            <span>新建会话</span>
+            <Plus className="ml-auto h-3 w-3 opacity-60" />
+          </button>
         )}
 
         {!showArchived && view === 'sessions' && activeEntries.map((e) => renderRow(e, { showProject: true }))}

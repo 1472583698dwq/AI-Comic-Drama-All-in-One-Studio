@@ -22,7 +22,7 @@
 | 安全 | `POST /api/v1/mcp/call`、`POST /api/v1/extensions/execute` 有 **Origin 白名单**（非本机 Origin → 403） |
 | 页面/功能门控 | 部分模块带 `Depends(pages.require(...))` / `Depends(features.require(...))`；对应页/功能关闭时**该族端点整体返回 404**（下表表头已标注） |
 
-**端点总数**：`app/api/` 合计 **205** + `main.py` App 级 **4** = **209**。
+**端点总数**：`app/api/` 合计 **206** + `main.py` App 级 **4** = **210**。
 
 ---
 
@@ -305,12 +305,13 @@
 
 ---
 
-## 11. `timeline_routes.py` — 时间线合片（4）｜门控 pages.require_any(["canvas","timeline"])
+## 11. `timeline_routes.py` — 时间线合片（5）｜门控 pages.require_any(["canvas","timeline"])
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | GET | `/api/v1/timeline/engine` | 引擎自检（ffmpeg 合片 + 剪映降级出口） |
 | POST | `/api/v1/timeline/merge` | 提交合片任务（同步校验后返回 task_id） |
+| POST | `/api/v1/timeline/export-project` | 多轨剪辑导出 MP4（主画面 + 视频原声/配音 + 字幕 + BGM） |
 | GET | `/api/v1/timeline/tasks/{task_id}` | 查询合片任务 |
 | POST | `/api/v1/timeline/draft` | 降级出口：导出剪映/CapCut 草稿 |
 

@@ -25,6 +25,15 @@ describe('agent/businessIntents · extractArtifact', () => {
     expect(a?.url).toBe('/storage/generated/f1.jpg');
   });
 
+  it('generate_video 返回显式分镜目标 → 产物携带 shot_id/shot_index', () => {
+    const a = extractArtifact(
+      'generate_video',
+      { video_url: '/storage/videos/a.mp4', shot_id: 'shot-b', shot_index: 2 },
+      { shot_id: 'shot-b', shot_index: 2 },
+    );
+    expect(a).toMatchObject({ shotId: 'shot-b', shotIndex: 2 });
+  });
+
   it('无媒体 / 非对象 → null', () => {
     expect(extractArtifact('stage_get_state', { shots_total: 1 })).toBeNull();
     expect(extractArtifact('stage_get_state', 'not-a-dict')).toBeNull();

@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useMemo, useState } from 'react';
 import { 
   Play, 
   Pause, 
@@ -12,12 +12,18 @@ import {
   MessageSquare,
   Sparkles,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Download,
+  Loader2,
+  CheckCircle2,
+  AlertTriangle,
+  FolderOpen,
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { StoryboardShot } from '../../types';
 import { API_ORIGIN } from '../../utils/devOrigin';
 import { shotsInEpisode } from '../../utils/episodeScope';
+import { useProjectExport } from './useProjectExport';
 
 export const MultiTrackTimeline: React.FC = () => {
   const { 
@@ -30,7 +36,6 @@ export const MultiTrackTimeline: React.FC = () => {
     currentTime, 
     setCurrentTime, 
     activeEpisodeId,
-    updateShot
   } = useProjectStore();
 
   const [isCollapsed, setIsCollapsed] = useState<boolean>(activeTab !== 'timeline');
@@ -43,37 +48,58 @@ export const MultiTrackTimeline: React.FC = () => {
     setIsCollapsed(activeTab !== 'timeline');
   }, [activeTab]);
 
-  const shots: StoryboardShot[] = shotsInEpisode(project, activeEpisodeId);
-  const totalDuration = shots.reduce((sum, sh) => sum + (Number(sh.duration) || 0), 0);
+  const shots: StoryboardShot[] = useMemo(
+    () => shotsInEpisode(project, activeEpisodeId),
+    [project, activeEpisodeId],
+  );
+  const totalDuration = useMemo(
+    () => shots.reduce((sum, sh) => sum + (Number(sh.duration) || 0), 0),
+    [shots],
+  );
+  const episodeTitle = useMemo(() => {
+    if (!project || !activeEpisodeId || activeEpisodeId === 'all' || activeEpisodeId === 'none') return '';
+    return project.episodes?.find((episode) => episode.id === activeEpisodeId)?.title || '';
+  }, [project, activeEpisodeId]);
+  const exportTitle = useMemo(
+    () => `${project?.title || '时间线'}${episodeTitle ? ` · ${episodeTitle}` : ''}`,
+    [project?.title, episodeTitle],
+  );
+  const exporter = useProjectExport({ project, shots, title: exportTitle });
+  const ffmpegReady = exporter.engine === null || exporter.engine.available;
+  // 走带 interval 只随 isPlaying 创建一次；每帧读取 store/latest refs。
+  // 旧实现把 currentTime/shots/activeShotId 放进依赖，50ms 就被清掉重建，
+  // 会造成走带抖动、播放头卡顿，且每次 render 都生成新 shots 数组。
+  const shotsRef = useRef(shots);
+  shotsRef.current = shots;
+  const totalRef = useRef(totalDuration);
+  totalRef.current = totalDuration;
 
-  // Playback timer ticker
   useEffect(() => {
-    let interval: any;
-    if (isPlaying) {
-      interval = setInterval(() => {
-        const nextTime = currentTime + 0.05;
-        if (nextTime >= totalDuration) {
-          setCurrentTime(0);
-          setIsPlaying(false);
-        } else {
-          setCurrentTime(nextTime);
-          
-          // Auto sync active shot
-          let accumulated = 0;
-          for (const shot of shots) {
-            if (nextTime >= accumulated && nextTime < accumulated + shot.duration) {
-              if (shot.id !== activeShotId) {
-                setActiveShotId(shot.id);
-              }
-              break;
-            }
-            accumulated += shot.duration;
-          }
+    if (!isPlaying) return undefined;
+    const interval = window.setInterval(() => {
+      const st = useProjectStore.getState();
+      const nextTime = st.currentTime + 0.05;
+      const total = totalRef.current;
+      if (nextTime >= total) {
+        st.setCurrentTime(0);
+        st.setIsPlaying(false);
+        return;
+      }
+      st.setCurrentTime(nextTime);
+
+      // 只在跨镜时更新 activeShotId，避免每帧写 store 触发额外渲染
+      let accumulated = 0;
+      for (const shot of shotsRef.current) {
+        const dur = Math.max(0, Number(shot.duration) || 0);
+        if (nextTime >= accumulated && nextTime < accumulated + dur) {
+          if (shot.id !== st.activeShotId) st.setActiveShotId(shot.id);
+          break;
         }
-      }, 50);
-    }
-    return () => clearInterval(interval);
-  }, [isPlaying, currentTime, totalDuration, shots, activeShotId]);
+        accumulated += dur;
+      }
+    }, 50);
+    return () => window.clearInterval(interval);
+  }, [isPlaying]);
 
   // Handle clicking time ruler or track
   const handleTimelineClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -150,8 +176,29 @@ export const MultiTrackTimeline: React.FC = () => {
           </div>
         )}
 
-        {/* Zoom Slider & Collapse Toggle */}
+        {/* Zoom Slider, Export & Collapse Toggle */}
         <div className="flex items-center space-x-2">
+          <button
+            onClick={exporter.exportMp4}
+            disabled={exporter.busy || !ffmpegReady}
+            aria-label="导出 MP4"
+            title={
+              ffmpegReady
+                ? '把主画面 / 视频原声 / 配音 / 字幕 / BGM 合成为一条 MP4（保存到 exports/timeline）'
+                : (exporter.engine?.ffmpeg_hint || 'ffmpeg 未就绪，无法导出 MP4')
+            }
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold border border-brand/40 bg-brand/15 text-brand hover:bg-brand/25 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {exporter.busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+            <span className="hidden sm:inline whitespace-nowrap">
+              {exporter.busy
+                ? `${exporter.mp4.stage || '合成'} ${Math.max(0, Math.round(exporter.mp4.progress))}%`
+                : exporter.mp4.status === 'success'
+                  ? '再次导出 MP4'
+                  : '导出 MP4'}
+            </span>
+          </button>
+
           {!isCollapsed && (
             <div className="flex items-center space-x-2 mr-2">
               <button
@@ -193,6 +240,78 @@ export const MultiTrackTimeline: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {!isCollapsed && (exporter.busy || exporter.mp4.status === 'success' || exporter.mp4.status === 'error') && (
+        <div className="px-3 sm:px-4 py-1.5 border-b border-border flex items-center gap-2 text-[11px] bg-surface-secondary/60 shrink-0">
+          {exporter.busy && (
+            <>
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-brand shrink-0" />
+              <span className="[color:var(--color-text-secondary)] shrink-0">
+                {exporter.mp4.stage || '合成'}中…
+              </span>
+              <span className="flex-1 max-w-[220px] h-1 rounded-full overflow-hidden bg-surface-tertiary">
+                <span
+                  className="block h-full bg-brand transition-[width] duration-300"
+                  style={{ width: `${Math.max(5, Math.min(100, exporter.mp4.progress))}%` }}
+                />
+              </span>
+              <span className="font-mono text-[10px] [color:var(--color-text-muted)] shrink-0">
+                {Math.max(0, Math.round(exporter.mp4.progress))}%
+              </span>
+            </>
+          )}
+          {!exporter.busy && exporter.mp4.status === 'success' && (
+            <>
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+              <span className="min-w-0 flex-1 truncate text-emerald-600 dark:text-emerald-300" title={exporter.mp4.task?.output_path}>
+                成片已导出
+                {exporter.mp4.task?.duration ? ` · ${Number(exporter.mp4.task.duration).toFixed(1)}s` : ''}
+                {exporter.mp4.task?.output_url ? ` · ${exporter.mp4.task.output_url.split('/').pop()}` : ''}
+              </span>
+              {!!exporter.mp4.task?.warnings?.length && (
+                <span
+                  className="text-amber-500 shrink-0"
+                  title={exporter.mp4.task.warnings.join('\n')}
+                >
+                  {exporter.mp4.task.warnings.length} 条提示
+                </span>
+              )}
+              <button
+                onClick={exporter.downloadResult}
+                className="ml-auto shrink-0 h-6 px-2 rounded border border-emerald-500/40 text-emerald-600 dark:text-emerald-300 hover:bg-emerald-500/10"
+              >
+                下载成片
+              </button>
+              <button
+                onClick={exporter.openResultFolder}
+                className="shrink-0 h-6 px-2 rounded border border-border [color:var(--color-text-secondary)] hover:text-brand hover:border-brand/50 flex items-center gap-1"
+              >
+                <FolderOpen className="w-3 h-3" /> 打开目录
+              </button>
+            </>
+          )}
+          {!exporter.busy && exporter.mp4.status === 'error' && (
+            <>
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+              <span className="min-w-0 flex-1 truncate text-amber-600 dark:text-amber-300" title={exporter.mp4.error || ''}>
+                {exporter.mp4.error}
+              </span>
+              {!ffmpegReady && (
+                <span className="shrink-0 text-[10px] [color:var(--color-text-muted)]" title={exporter.engine?.ffmpeg_hint}>
+                  可改用「导出剪映草稿」
+                </span>
+              )}
+              <button
+                onClick={exporter.exportMp4}
+                disabled={!ffmpegReady}
+                className="ml-auto shrink-0 h-6 px-2 rounded border border-border [color:var(--color-text-secondary)] hover:text-brand hover:border-brand/50 disabled:opacity-40"
+              >
+                重试
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       {/* 2. Multi-track Canvas Container */}
       {!isCollapsed && (
@@ -307,11 +426,15 @@ function renderShotTrack(
 ) {
   let accumulated = 0;
   return shots.map((shot) => {
+    const start = accumulated;
     const left = accumulated * zoom;
     const width = shot.duration * zoom;
     accumulated += shot.duration;
     const isActive = shot.id === activeShotId;
-    const frame = shot.video_url || shot.image_url || (shot as any).previz_video_url || (shot as any).previz_url;
+    // 剪辑只认最终成片和分镜图；白模/预演视频是生成参考，不进入剪辑与导出。
+    const frame = shot.video_url || shot.image_url;
+    const thumb = shot.image_url;
+    const mediaLabel = shot.video_url ? '成片' : shot.image_url ? '静帧' : '无画面';
 
     return (
       <div
@@ -319,6 +442,8 @@ function renderShotTrack(
         onClick={(e) => {
           e.stopPropagation();
           setActiveShotId(shot.id);
+          // 点片段即把预览/播放头定位到该镜起点，右侧才能单独编辑这一镜。
+          useProjectStore.getState().setCurrentTime(start);
         }}
         className={`absolute h-12 rounded-lg overflow-hidden border cursor-pointer transition-all flex items-center shadow-sm ${
           isActive
@@ -328,11 +453,11 @@ function renderShotTrack(
               : 'border-dashed border-red-500/50 bg-red-500/5'
         }`}
         style={{ left: `${left}px`, width: `${width - 4}px` }}
-        title={frame ? undefined : '该镜没有任何画面素材（视频/图片/预演截图），导出剪映草稿时会被跳过'}
+        title={frame ? undefined : '该镜还没有成片视频或分镜图，导出剪映草稿时会被跳过'}
       >
-        {shot.image_url && (
+        {thumb && (
           <img 
-            src={shot.image_url.startsWith('/') ? API_ORIGIN + shot.image_url : shot.image_url} 
+            src={thumb.startsWith('/') ? API_ORIGIN + thumb : thumb} 
             alt={`Shot ${shot.shot_index}`} 
             className="w-12 h-full object-cover rounded-l opacity-90" 
           />
@@ -343,11 +468,9 @@ function renderShotTrack(
             <span className="text-[9px] px-1 rounded bg-surface-secondary border border-border text-brand font-mono">
               {shot.duration}s
             </span>
-            {shot.video_url
-              ? <span className="text-[9px] text-brand-blue/80">视频</span>
-              : shot.image_url
-                ? <span className="text-[9px] text-gray-500">静帧</span>
-                : <span className="text-[9px] text-red-300">无画面</span>}
+            {frame
+              ? <span className={`text-[9px] ${shot.video_url ? 'text-brand-blue/80' : 'text-gray-500'}`}>{mediaLabel}</span>
+              : <span className="text-[9px] text-red-300">无画面</span>}
           </div>
           <p className="text-[9px] [color:var(--color-text-muted)] truncate">{shot.action_desc || shot.image_prompt}</p>
         </div>

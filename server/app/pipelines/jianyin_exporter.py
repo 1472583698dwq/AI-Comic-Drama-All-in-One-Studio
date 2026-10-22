@@ -151,9 +151,12 @@ def plan_slot(design_us: int, pic_us: Optional[int], pic_is_still: bool, audio_u
 
 
 def picture_url_chain(shot: Any) -> List[str]:
-    """画面素材回退顺序：成片 → 分镜图 → 导演台预演视频 → 预演截图"""
+    """画面素材回退顺序：成片 → 分镜图。
+
+    白模/预演视频只服务生成参考，不进入剪辑与剪映导出。
+    """
     out = []
-    for key in ("video_url", "image_url", "previz_video_url", "previz_url"):
+    for key in ("video_url", "image_url"):
         val = getattr(shot, key, None)
         if isinstance(val, str) and val.strip():
             out.append(val.strip())
@@ -335,7 +338,7 @@ class JianYingDraftExporter:
             """按回退顺序拿到第一份能加载的画面素材"""
             chain = picture_url_chain(shot)
             if not chain:
-                return None, None, "镜头没有任何画面素材（视频/图片/预演截图都为空）"
+                return None, None, "镜头没有任何画面素材（成片视频/分镜图都为空）"
             last_err = "画面素材不可用"
             for url in chain:
                 try:

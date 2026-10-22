@@ -139,6 +139,18 @@ export const ShotInspector: React.FC = () => {
   // 默认先看完整镜头板；高级镜头编辑按需打开抽屉，避免首次进入就被参数面板占满。
   const [detailOpen, setDetailOpen] = useState(false);
 
+  // 多轨剪辑页点「编辑此镜」后，切到分镜台并直接展开该镜的参数/绑定抽屉。
+  useEffect(() => {
+    const openShot = (e: Event) => {
+      const id = String((e as CustomEvent)?.detail?.shotId || '').trim();
+      if (!id) return;
+      setActiveShotId(id);
+      setDetailOpen(true);
+    };
+    window.addEventListener('storyboard-open-shot', openShot);
+    return () => window.removeEventListener('storyboard-open-shot', openShot);
+  }, [setActiveShotId]);
+
 
   // 旧分镜可能只存了 workflow_id 而没选源，仅作为未选源时的兜底
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>(
@@ -149,7 +161,7 @@ export const ShotInspector: React.FC = () => {
   const [_projectAssets, setProjectAssets] = useState<any[]>([]);
   const [uploadingInputKey, setUploadingInputKey] = useState<string | null>(null);
   // 生成源插槽的素材选择（复用画布的四源选择器，支持多选累积）
-  const [slotPicker, setSlotPicker] = useState<{ slot: any; writeKeys: string[]; multi: boolean } | null>(null);
+  const [slotPicker, setSlotPicker] = useState<{ slot: any; writeKeys: string[]; multi: boolean; replaceIndex?: number } | null>(null);
   // 一键绑定：预览状态 + 撤销栈（资源×源插槽声明，见 referenceBinder.ts）
   const [bindPreview, setBindPreview] = useState<{ kind: 'image' | 'video'; shotId: string; def: any; overwrite: boolean } | null>(null);
   const [bindUndo, setBindUndo] = useState<Array<{ shotId: string; prev: Record<string, any> }> | null>(null);
@@ -478,25 +490,39 @@ export const ShotInspector: React.FC = () => {
     if (activeShot) updateShot(activeShot.id, { dynamic_inputs: next } as any);
   };
 
-  const handleSlotUploadFile = async (writeKeys: string[], file: File, multi: boolean) => {
+  const handleSlotUploadFile = async (writeKeys: string[], fileOrFiles: File | File[], multi: boolean, maxCount?: number) => {
     const key = writeKeys[0];
+    const files = Array.isArray(fileOrFiles) ? fileOrFiles : [fileOrFiles];
+    if (!files.length) return;
     try {
       setUploadingInputKey(key);
-      const isImage = file.type.startsWith('image/') || /\.(png|jpe?g|webp|bmp|gif)$/i.test(file.name);
-      let value = '';
-      if (isImage) {
-        const res = await apiService.uploadImageToComfyUI(file);
-        value = res?.name || '';
-      } else {
-        value = await new Promise<string>((resolve, reject) => {
-          const r = new FileReader();
-          r.onload = () => resolve(r.result as string);
-          r.onerror = () => reject(new Error('读取文件失败'));
-          r.readAsDataURL(file);
-        });
+      const uploaded: string[] = [];
+      for (const file of files) {
+        const isImage = file.type.startsWith('image/') || /\.(png|jpe?g|webp|bmp|gif)$/i.test(file.name);
+        let value = '';
+        if (isImage) {
+          const res = await apiService.uploadImageToComfyUI(file);
+          value = res?.name || '';
+        } else {
+          value = await new Promise<string>((resolve, reject) => {
+            const r = new FileReader();
+            r.onload = () => resolve(r.result as string);
+            r.onerror = () => reject(new Error('读取文件失败'));
+            r.readAsDataURL(file);
+          });
+        }
+        if (!value) throw new Error('上传未返回文件名');
+        uploaded.push(value);
       }
-      if (!value) throw new Error('上传未返回文件名');
-      setSlotValue(writeKeys, multi ? [value] : value);
+      if (multi) {
+        const cur = shotDynamicInputs[writeKeys[0]] ?? (writeKeys[1] ? shotDynamicInputs[writeKeys[1]] : undefined);
+        const existing: string[] = Array.isArray(cur) ? cur.map(String) : (cur ? [String(cur)] : []);
+        const merged = [...existing, ...uploaded];
+        const max = typeof maxCount === 'number' && maxCount > 0 ? maxCount : 12;
+        setSlotValue(writeKeys, merged.slice(-max));
+      } else {
+        setSlotValue(writeKeys, uploaded[uploaded.length - 1]);
+      }
     } catch (e: any) {
       alert(`上传素材失败: ${e?.message || e}`);
     } finally {
@@ -515,24 +541,30 @@ export const ShotInspector: React.FC = () => {
     setSlotValue(writeKeys, multi ? [charImg] : charImg);
   };
 
-  const pickAssetForSlot = (slot: any, writeKeys: string[], multi: boolean) => {
-    setSlotPicker({ slot, writeKeys, multi });
+  const pickAssetForSlot = (slot: any, writeKeys: string[], multi: boolean, replaceIndex?: number) => {
+    setSlotPicker({ slot, writeKeys, multi, replaceIndex });
   };
 
   // 画布产出 / 角色库 / 素材库 / 本地上传 四源统一选择，多选时累积而非覆盖
   const handleSlotPicked = (urlOrUrls: string | string[], meta?: any) => {
     if (!slotPicker) return;
-    const { writeKeys, multi } = slotPicker;
+    const { writeKeys, multi, replaceIndex } = slotPicker;
     const incoming = Array.isArray(urlOrUrls) ? urlOrUrls.filter(Boolean) : (urlOrUrls ? [urlOrUrls] : []);
     if (!incoming.length) return;
     let value: any;
     if (multi) {
-      const cur = shotDynamicInputs[writeKeys[0]];
+      const cur = shotDynamicInputs[writeKeys[0]] ?? (writeKeys[1] ? shotDynamicInputs[writeKeys[1]] : undefined);
       const existing: string[] = Array.isArray(cur) ? cur : (cur ? [String(cur)] : []);
-      const merged = [...existing];
-      incoming.forEach((u) => { if (!merged.includes(u)) merged.push(u); });
-      const max = slotPicker.slot?.maxCount;
-      value = typeof max === 'number' && max > 0 ? merged.slice(-max) : merged;
+      if (typeof replaceIndex === 'number' && replaceIndex >= 0 && replaceIndex < existing.length) {
+        const next = [...existing];
+        next[replaceIndex] = String(incoming[0]);
+        value = next;
+      } else {
+        const merged = [...existing];
+        incoming.forEach((u) => { if (!merged.includes(u)) merged.push(u); });
+        const max = slotPicker.slot?.maxCount;
+        value = typeof max === 'number' && max > 0 ? merged.slice(-max) : merged;
+      }
     } else {
       value = incoming[incoming.length - 1];
     }

@@ -59,6 +59,7 @@ ERROR_TIMEOUT = "TIMEOUT"                            # 超时：重试
 ERROR_TRANSPORT = "TRANSPORT"                        # 网络传输失败：重试
 ERROR_CONFIG = "CONFIG"                              # 其他配置错误：不重试
 ERROR_EMPTY_RESPONSE = "EMPTY_RESPONSE"              # 空响应：重试
+ERROR_VISION_UNSUPPORTED = "VISION_UNSUPPORTED"      # 当前模型不接受图片：直接提示前端切换模型
 
 _RETRYABLE_CODES = frozenset({ERROR_RATE_LIMIT, ERROR_SERVER, ERROR_TIMEOUT, ERROR_TRANSPORT, ERROR_EMPTY_RESPONSE})
 
@@ -68,6 +69,28 @@ _AUTH_PHRASES = ("invalid api key", "incorrect api key", "unauthorized", "authen
                  "密钥", "鉴权", "认证失败")
 _CONTEXT_PHRASES = ("context length", "context_length", "maximum context", "context limit", "too many tokens",
                     "input is too long", "reduce the length", "上下文长度", "上下文超限", "输入过长")
+_VISION_PHRASES = (
+    "image input", "image_url", "image content", "image is not supported",
+    "does not support image", "doesn't support image", "not support image",
+    "unsupported image", "invalid image", "vision is not supported",
+    "does not support vision", "no vision", "text-only", "text only model",
+    "multimodal is not supported", "不支持图片", "不支持视觉", "图片输入", "多模态", "纯文本模型",
+)
+
+
+def is_vision_unsupported(status: int, body: str) -> bool:
+    """判断 4xx 是否是因为当前模型不接受 image_url 图片输入。"""
+    if status not in (400, 404, 415, 422):
+        return False
+    b = (body or "").lower()
+    return any(p in b for p in _VISION_PHRASES)
+
+
+def vision_unsupported_message(body: str) -> str:
+    detail = (body or "").strip().replace("\n", " ")[:300]
+    return ("当前模型不支持视觉输入（图片）。请切换到支持图片的模型后重试，"
+            "或关闭图片附件（AGENT_MM_IMAGE=0）。"
+            + (f" 上游返回：{detail}" if detail else ""))
 
 
 def classify_http_error(status: int, body: str) -> str:
@@ -83,12 +106,14 @@ def classify_http_error(status: int, body: str) -> str:
         return ERROR_INVALID_REQUEST
     if status >= 500:
         return ERROR_SERVER
-    if status == 400:
+    if status in (400, 404, 415, 422):
         if any(p in b for p in _CONTEXT_PHRASES):
             return ERROR_CONTEXT_OVERFLOW
-        if any(p in b for p in _QUOTA_PHRASES):
+        if is_vision_unsupported(status, body):
+            return ERROR_VISION_UNSUPPORTED
+        if status == 400 and any(p in b for p in _QUOTA_PHRASES):
             return ERROR_QUOTA
-        if any(p in b for p in _AUTH_PHRASES):
+        if status in (400, 404) and any(p in b for p in _AUTH_PHRASES):
             return ERROR_AUTH
         return ERROR_INVALID_REQUEST
     return ERROR_INVALID_REQUEST if 400 <= status < 500 else ERROR_SERVER
@@ -345,6 +370,8 @@ class OpenAICompatAdapter:
                         if resp.status_code != 200:
                             body = (await resp.aread()).decode(errors="ignore")[:400]
                             code = classify_http_error(resp.status_code, body)
+                            if code == ERROR_VISION_UNSUPPORTED:
+                                raise LLMConfigError(vision_unsupported_message(body), code=code)
                             # 网关转发的上游瞬时故障（400 形态）交给外层退避重试，别按请求错误打死整轮
                             if _is_upstream_blame(body):
                                 raise LLMTransportError(f"LLM HTTP {resp.status_code}: {body}",
@@ -404,6 +431,8 @@ class OpenAICompatAdapter:
                     if resp.status_code != 200:
                         body = (await resp.aread()).decode(errors="ignore")[:400]
                         code = classify_http_error(resp.status_code, body)
+                        if code == ERROR_VISION_UNSUPPORTED:
+                            raise LLMConfigError(vision_unsupported_message(body), code=code)
                         if is_retryable_code(code) or _is_upstream_blame(body):
                             raise LLMTransportError(f"Claude HTTP {resp.status_code}: {body}",
                                                     status=resp.status_code, code=code)

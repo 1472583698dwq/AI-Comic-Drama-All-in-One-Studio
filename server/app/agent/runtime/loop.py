@@ -22,6 +22,7 @@ from app.agent.runtime.inbox import Inbox
 from app.agent.runtime.prompt import build_context_block, build_system_prompt
 from app.agent.runtime.session import Session
 from app.agent.runtime.store import SessionStore
+from app.agent.runtime.token_meter import context_window
 from app.agent.tools.pipeline import ToolPipeline
 from app.agent.tools.registry import tool_view
 
@@ -82,6 +83,9 @@ class AgentLoop:
         self._open_step = False
         self._turn_seq = 0
         self._run_id = ""
+        # 当前 turn 的触发来源（user / stage / system / job）。前端据此只接收用户回合的流，
+        # 避免后台通知回合与用户消息共用 streamingMsgId，互相覆盖/提前结束。
+        self._turn_source = ""
         self._turn_started_at = 0.0
         self._lock = asyncio.Lock()
         self.pipeline = ToolPipeline(
@@ -127,10 +131,19 @@ class AgentLoop:
             pass
 
     async def _emit(self, ev: Dict[str, Any]) -> None:
-        # 客户端按 session_id 分流（页面版与悬浮窗版独立会话共用一条 WS）。
+        # 给客户端按 session_id 过滤，同时带上 turn 归属：run_id 用于抵御上一轮迟到事件，
+        # turn_source 让前端忽略 stage/system 后台回合的流式事件（否则会串到用户消息里）。
         try:
-            if isinstance(ev, dict) and "session_id" not in ev:
-                ev = {**ev, "session_id": self.session_id}
+            if isinstance(ev, dict):
+                extra: Dict[str, Any] = {}
+                if "session_id" not in ev:
+                    extra["session_id"] = self.session_id
+                if self._run_id and "run_id" not in ev:
+                    extra["run_id"] = self._run_id
+                if self._turn_source and "turn_source" not in ev:
+                    extra["turn_source"] = self._turn_source
+                if extra:
+                    ev = {**ev, **extra}
         except Exception:
             pass
         for sink in list(self._sinks):
@@ -152,6 +165,8 @@ class AgentLoop:
         except Exception as e:
             cmd_reply = f"命令执行失败: {e}"
         if cmd_reply is not None:
+            self._run_id = f"{self.session.id}_{int(time.time())}_cmd_{uuid.uuid4().hex[:6]}"
+            self._turn_source = "user"
             await self._emit({"event": "agent_response", "message": cmd_reply,
                               "suggested_actions": [], "executed_tools": [], "mode": self.mode})
             return
@@ -376,6 +391,10 @@ class AgentLoop:
         self._header_logged_this_turn = 0
         self._turn_seq += 1
         self._run_id = f"{self.session.id}_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+        try:
+            self._turn_source = str(getattr(claimed[0], "source", "") or "user")
+        except Exception:
+            self._turn_source = "user"
         self._turn_started_at = time.time()
         self.session.append(E.TURN_START, {"mode": self.mode, "run_mode": self.run_mode, "run_id": self._run_id})
         self._trace("turn_start", {
@@ -457,7 +476,14 @@ class AgentLoop:
                                                system_text=self._turn_system_text or None)
                     except Exception:
                         pass
-                    messages = self.session.derive_messages(system_text=system_text)
+                    try:
+                        _prompt_ratio = float(os.environ.get("AGENT_PROMPT_MAX_RATIO") or 0.85)
+                    except Exception:
+                        _prompt_ratio = 0.85
+                    messages = self.session.derive_messages(
+                        system_text=system_text,
+                        max_tokens=int(context_window() * max(0.5, min(_prompt_ratio, 0.95))),
+                    )
                     cfg = adapter.resolve()
                     self._log_request_header(cfg, tools)
                     reply = await self._call_model(messages, tools)
@@ -553,7 +579,8 @@ class AgentLoop:
                         continue
                     reason = "error"
                     self.session.append(E.ASSISTANT_ATTEMPT, {"error": str(e)[:500], "terminal": True})
-                    await self._emit({"event": "error", "message": str(e)})
+                    await self._emit({"event": "error", "message": str(e),
+                                      "code": getattr(e, "code", "") or ""})
                     break
                 except Exception as e:
                     if await self._recover_context_overflow(e, overflow_compacts):
@@ -843,10 +870,22 @@ class AgentLoop:
             from app.agent.runtime.compaction import is_context_overflow_error, maybe_compact
             if used >= 2 or not is_context_overflow_error(err):
                 return False
-            await maybe_compact(self.session, emit=self._emit, force=True,
-                                system_text=(self._turn_system_text or None),
-                                trigger="context-overflow")
-            await self._emit({"event": "agent_thinking", "message": "模型上下文超限，已压缩历史后重试本步…"})
+            compacted = await maybe_compact(self.session, emit=self._emit, force=True,
+                                            system_text=(self._turn_system_text or None),
+                                            trigger="context-overflow")
+            if not compacted:
+                # 摘要失败/只保留最近轮次无法再摘要时，至少把旧 tool 结果强裁剪；
+                # 真正的请求级兜底在 Session.derive_messages(max_tokens=...) 里完成。
+                try:
+                    from app.agent.runtime.compaction import maybe_prune_tool_results
+                    maybe_prune_tool_results(self.session, max_chars=2000)
+                except Exception:
+                    pass
+            await self._emit({
+                "event": "agent_thinking",
+                "message": "模型上下文超限，已压缩历史后重试本步。" if compacted
+                else "模型上下文超限，摘要未产出，已强制裁剪旧历史/媒体后重试本步。",
+            })
             return True
         except Exception:
             return False

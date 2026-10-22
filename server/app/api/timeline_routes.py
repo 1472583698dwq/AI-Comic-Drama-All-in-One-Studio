@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
-"""画布时间线节点 API：引擎自检 / 合片 MP4（长任务）/ 降级剪映草稿。
+"""时间线 API：引擎自检 / 片段合片 / 多轨剪辑导出 / 降级剪映草稿。
 
 契约要点：
-- 提交口**先校验后排队**：片段非法当场 400（含可读原因），不把校验错误塞进异步任务；
+- 提交口**先校验后排队**：片段/镜头非法当场 400（含可读原因），不把校验错误塞进异步任务；
 - ffmpeg 未就绪 → 503 + 安装指引（前端据此把导出项降级为「剪映草稿」）；
-- 合成是长任务：`POST /timeline/merge` 立即返回 task_id，前端轮询 `/timeline/tasks/{id}`，
-  HTTP 全程不阻塞（与一键成片/视频任务同一套「提交-轮询」模式）。
+- 合成是长任务：`POST /timeline/merge` 或 `POST /timeline/export-project` 立即返回 task_id，
+  前端轮询 `/timeline/tasks/{id}`，HTTP 全程不阻塞（与一键成片/视频任务同一套「提交-轮询」模式）。
+- `export-project` 面向多轨剪辑页：主画面 + 配音 + 字幕 + BGM 一次合成，而不是画布节点的片段串接。
 """
 from __future__ import annotations
 
@@ -21,6 +22,8 @@ from pydantic import BaseModel
 
 from app.core import pages
 from app.core.config import settings
+from app.media.project_merge import merge_project_shots, normalize_project_shots
+from app.media.voice_fill import fill_missing_voice, persist_generated_voice
 from app.media.timeline_draft import export_clips_to_draft
 from app.media.timeline_merge import (
     TimelineMergeError,
@@ -69,6 +72,21 @@ class TimelineDraftRequest(BaseModel):
     clips: List[Dict[str, Any]]
     title: Optional[str] = None
     aspect_ratio: Optional[str] = None
+
+
+class TimelineProjectMergeRequest(BaseModel):
+    model_config = {"extra": "allow"}
+    project_id: Optional[str] = None
+    shots: List[Dict[str, Any]]
+    title: Optional[str] = None
+    output_name: Optional[str] = None
+    aspect_ratio: Optional[str] = None
+    bgm_url: Optional[str] = None
+    bgm_volume: float = 0.5
+    subtitles: bool = True
+    generate_missing_voice: bool = False
+    audio_provider: Optional[str] = None
+    allow_silent: bool = False
 
 
 def _safe_name(name: Optional[str], title: Optional[str]) -> str:
@@ -121,7 +139,7 @@ def _patch(task_id: str, **fields: Any) -> None:
         task["updated_at"] = time.time()
 
 
-async def _run_merge(task_id: str, clips: List[Dict[str, Any]], out_path: str, aspect_ratio: Optional[str]) -> None:
+async def _run_gated(task_id: str, worker, *, stage: str = "合成", progress: float = 30) -> None:
     global _merge_running, _merge_inflight
     acquired = False
     try:
@@ -131,20 +149,12 @@ async def _run_merge(task_id: str, clips: List[Dict[str, Any]], out_path: str, a
             await asyncio.sleep(_QUEUE_POLL_SECONDS)
         _merge_running += 1
         acquired = True
-        _patch(task_id, stage="合成", progress=30)
+        _patch(task_id, stage=stage, progress=progress)
         try:
-            result = await merge_clips(clips, out_path, aspect_ratio=aspect_ratio)
-            _patch(
-                task_id,
-                status="success",
-                stage="完成",
-                progress=100,
-                output_url=result["output_url"],
-                output_path=result["output_path"],
-                duration=result["duration"],
-                size_bytes=result["size_bytes"],
-                warnings=result["warnings"],
-            )
+            result = await worker()
+            if isinstance(result, dict):
+                _patch(task_id, **result)
+            _patch(task_id, status="success", stage="完成", progress=100)
         except TimelineMergeError as e:
             _patch(task_id, status="error", stage="失败", progress=100, error=str(e))
         except asyncio.CancelledError:
@@ -156,6 +166,72 @@ async def _run_merge(task_id: str, clips: List[Dict[str, Any]], out_path: str, a
         if acquired:
             _merge_running -= 1
         _merge_inflight -= 1
+
+
+async def _run_merge(task_id: str, clips: List[Dict[str, Any]], out_path: str, aspect_ratio: Optional[str]) -> None:
+    async def worker():
+        return await merge_clips(clips, out_path, aspect_ratio=aspect_ratio)
+
+    await _run_gated(task_id, worker, stage="合成", progress=30)
+
+
+async def _run_project_merge(
+    task_id: str,
+    shots: List[Dict[str, Any]],
+    out_path: str,
+    *,
+    aspect_ratio: Optional[str],
+    bgm_url: Optional[str],
+    bgm_volume: float,
+    subtitles: bool,
+    generate_missing_voice: bool,
+    audio_provider: Optional[str],
+    allow_silent: bool,
+    project_id: Optional[str],
+    initial_warnings: List[str],
+) -> None:
+    async def worker():
+        warnings = list(initial_warnings)
+        if generate_missing_voice:
+            try:
+                from app.providers.project.manager import project_manager
+                content = project_manager.get_content(project_id) if project_id else None
+                before_ids = [
+                    str(s.get("id") or "") for s in shots
+                    if not s.get("audio_url") and (s.get("dialogue") or s.get("voiceover"))
+                ]
+                generated, voice_warnings = await fill_missing_voice(
+                    shots,
+                    project_content=content,
+                    characters=(content or {}).get("characters"),
+                    provider=audio_provider,
+                    project_id=project_id,
+                    on_progress=lambda msg: _patch(task_id, stage=msg, progress=25),
+                )
+                warnings.extend(voice_warnings)
+                if generated:
+                    warnings.extend(persist_generated_voice(shots, project_id, before_ids))
+            except Exception as e:
+                warnings.append(f"自动配音未执行：{type(e).__name__}: {e}")
+        _patch(task_id, stage="合成", progress=30)
+        try:
+            result = await merge_project_shots(
+                shots,
+                out_path,
+                aspect_ratio=aspect_ratio,
+                bgm_url=bgm_url,
+                bgm_volume=bgm_volume,
+                subtitles=subtitles,
+                allow_silent=allow_silent,
+            )
+        except TimelineMergeError as e:
+            if warnings:
+                raise TimelineMergeError(f"{e}；自动配音提示：{'；'.join(warnings[-4:])[:500]}")
+            raise
+        result["warnings"] = (warnings + list(result.get("warnings") or []))[:200]
+        return result
+
+    await _run_gated(task_id, worker, stage="合成", progress=20)
 
 
 @router.get("/timeline/engine")
@@ -214,6 +290,77 @@ async def submit_timeline_merge(req: TimelineMergeRequest):
     asyncio.create_task(_run_merge(task_id, clips, out_path, req.aspect_ratio))
     return {"status": "success", "task_id": task_id, "clips": len(clips),
             "duration": _TASKS[task_id]["duration"], "stage": "排队"}
+
+
+@router.post("/timeline/export-project")
+async def submit_project_merge(req: TimelineProjectMergeRequest):
+    """多轨剪辑导出 MP4：画面 + 配音 + 字幕 + BGM 一次性合成。"""
+    global _merge_inflight
+    status = engine_status()
+    if not status.get("available"):
+        raise HTTPException(
+            status_code=503,
+            detail=f"{status.get('ffmpeg_hint', '')} {status.get('draft_hint', '')}".strip(),
+        )
+    try:
+        shots, warnings = normalize_project_shots(req.shots)
+    except TimelineMergeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if _merge_inflight >= _MERGE_CONCURRENCY + _MERGE_QUEUE_LIMIT:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"合片任务已排满（同时 {_MERGE_CONCURRENCY} 个合成 + {_MERGE_QUEUE_LIMIT} 个排队），"
+                f"请等前面的任务完成后再试"
+            ),
+        )
+
+    try:
+        out_path = _reserve_output_path(req.output_name, req.title)
+    except TimelineMergeError as e:
+        raise HTTPException(status_code=429, detail=str(e))
+
+    duration = round(sum(float(shot["duration"]) for shot in shots), 3)
+    task_id = f"tl_{uuid.uuid4().hex[:12]}"
+    _TASKS[task_id] = {
+        "task_id": task_id,
+        "status": "running",
+        "stage": "排队",
+        "progress": 5,
+        "created_at": time.time(),
+        "updated_at": time.time(),
+        "project_id": req.project_id,
+        "shots": len(shots),
+        "duration": duration,
+        "output_name": os.path.basename(out_path),
+        "engine": "ffmpeg",
+        "warnings": warnings,
+    }
+    _prune_tasks()
+    _merge_inflight += 1
+    asyncio.create_task(_run_project_merge(
+        task_id,
+        shots,
+        out_path,
+        aspect_ratio=req.aspect_ratio,
+        bgm_url=req.bgm_url,
+        bgm_volume=req.bgm_volume,
+        subtitles=req.subtitles,
+        generate_missing_voice=req.generate_missing_voice,
+        audio_provider=req.audio_provider,
+        allow_silent=req.allow_silent,
+        project_id=req.project_id,
+        initial_warnings=warnings,
+    ))
+    return {
+        "status": "success",
+        "task_id": task_id,
+        "shots": len(shots),
+        "duration": duration,
+        "stage": "排队",
+        "warnings": warnings,
+    }
 
 
 @router.get("/timeline/tasks/{task_id}")

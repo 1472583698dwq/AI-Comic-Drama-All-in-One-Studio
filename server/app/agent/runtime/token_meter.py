@@ -21,6 +21,44 @@ def estimate_text(text: str) -> int:
     return int(cjk * 0.7 + other / 4.0) + 1
 
 
+def estimate_data_ref(ref: str, kind: str = "image") -> int:
+    """估算媒体引用的 token。
+
+    图片走 image_url content part 时，provider 按视觉 token 计（DeepSeek Flash 单图
+    最多 1024，OpenAI patch 模型约 1536）。只有文本降级路径才可能把 base64 当文本，
+    而那条路径已改成省略 data URI，所以这里不再按字符数放大图片。
+    """
+    s = str(ref or "")
+    if not s:
+        return 0
+    if s.startswith("data:"):
+        if kind == "image":
+            return 1536
+        return min(20000, max(800, len(s) // 8))
+    return estimate_text(s)
+
+
+def estimate_attachments(atts: Any) -> int:
+    total = 0
+    for a in (atts or []):
+        if isinstance(a, dict):
+            total += estimate_data_ref(str(a.get("ref") or ""), str(a.get("kind") or "image"))
+    return total
+
+
+def _part_media(part: Dict[str, Any]) -> tuple:
+    for key, kind in (("image_url", "image"), ("video_url", "video"), ("audio_url", "audio")):
+        v = part.get(key)
+        if isinstance(v, dict):
+            u = v.get("url")
+        else:
+            u = v
+        if isinstance(u, str) and u:
+            return u, kind
+    u = part.get("url")
+    return (u, "image") if isinstance(u, str) else ("", "image")
+
+
 def estimate_message(msg: Dict[str, Any]) -> int:
     n = 4
     content = msg.get("content")
@@ -30,6 +68,8 @@ def estimate_message(msg: Dict[str, Any]) -> int:
         for part in content:
             if isinstance(part, dict):
                 n += estimate_text(str(part.get("text") or ""))
+                url, kind = _part_media(part)
+                n += estimate_data_ref(url, kind)
     for tc in (msg.get("tool_calls") or []):
         fn = (tc or {}).get("function") or {}
         n += estimate_text(str(fn.get("name") or "")) + estimate_text(str(fn.get("arguments") or ""))

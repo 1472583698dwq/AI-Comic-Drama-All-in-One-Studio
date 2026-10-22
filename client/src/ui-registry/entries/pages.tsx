@@ -6,6 +6,7 @@ import { AssetsHub } from '../../components/asset/AssetsHub';
 import { ShotInspector } from '../../components/storyboard/ShotInspector';
 import { Director3DStage } from '../../components/director3d/Director3DStage';
 import { MultiTrackTimeline } from '../../components/timeline/MultiTrackTimeline';
+import { ProjectTimelinePreview } from '../../components/timeline/ProjectTimelinePreview';
 import { MobileCardFlow } from '../../components/mobile/MobileCardFlow';
 import { AgentModeView } from '../../views/AgentModeView';
 import { SetupView } from '../../views/setup/SetupView';
@@ -97,6 +98,11 @@ export const AgentPage: React.FC = () => (
   <ErrorBoundary name="Agent模式页"><AgentModeView /></ErrorBoundary>
 );
 
+/** 多轨剪辑页：上方真实播放器 + 下方多轨时间线（StageLayout 提供），不再复用分镜台。 */
+export const TimelinePage: React.FC = () => (
+  <ErrorBoundary name="多轨剪辑页"><ProjectTimelinePreview /></ErrorBoundary>
+);
+
 export const ConfigPage: React.FC = () => (
   <ErrorBoundary name="设置中心"><SetupView /></ErrorBoundary>
 );
@@ -165,7 +171,7 @@ const PAGE_IMPLS: PageImpl[] = [
   { id: 'studio', order: 50, view: ShotInspector, layout: StageLayout },
   { id: 'onekey', order: 55, view: OneKeyPage },
   { id: 'director3d', order: 60, view: Director3DStage, layout: StageLayout },
-  { id: 'timeline', order: 70, view: ShotInspector, layout: StageLayout },
+  { id: 'timeline', order: 70, view: TimelinePage, layout: StageLayout },
   { id: 'agent', order: 80, view: AgentPage },
   { id: 'canvas', order: 90, view: CanvasPage },
   { id: 'config', order: 100, view: ConfigPage },
