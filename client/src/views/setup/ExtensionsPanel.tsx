@@ -2,13 +2,14 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Package, Power, RefreshCw, Trash2, Search, Upload, Loader2,
   Plug, Workflow, Puzzle, Boxes, Sparkles, Cpu, Palette, Eye, EyeOff,
-  Edit3, Plug2, FileCode2, Copy, Check, FileSearch,
+  Edit3, Plug2, FileCode2, Copy, Check, FileSearch, PackagePlus, Users,
 } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { toast, confirmAsync } from '../../stores/useDialogStore';
 import { useThemeStore } from '../../stores/useThemeStore';
 import { WorkflowInspectorModal } from '../../components/workflow/WorkflowInspectorModal';
 import { ExtensionDetailDrawer } from './ExtensionDetailDrawer';
+import { PluginScaffoldModal } from './PluginScaffoldModal';
 
 /** 13 类扩展的中文名与一句话解释（与后端 ExtensionKind 对齐） */
 const KIND_META: Record<string, { label: string; desc: string }> = {
@@ -25,6 +26,20 @@ const KIND_META: Record<string, { label: string; desc: string }> = {
   agent_profile:   { label: '导演组成员', desc: '自定义专家子代理角色：系统提示 + 工具白名单，可被总导演委派' },
   agent_team:      { label: '导演组',    desc: '一键成片的成员名单 + 总导演编排脚本（playbook）与质检门' },
   plugin:          { label: '插件包',    desc: '容器：一个 zip 一次带进上面 12 类' },
+};
+
+const DOMAIN_ORDER = ['capability', 'canvas', 'workspace', 'agent'] as const;
+const DOMAIN_META: Record<string, { label: string; desc: string; icon: any; cls: string }> = {
+  capability: { label: '能力', desc: '生成源 / 工作流 / MCP 工具', icon: Sparkles, cls: 'text-brand-light' },
+  canvas: { label: '画布', desc: '声明式节点 / 代码节点', icon: Boxes, cls: 'text-teal-400' },
+  workspace: { label: '工作台', desc: '分镜槽 / 主题 / 导出器 / 导演包', icon: Workflow, cls: 'text-violet-400' },
+  agent: { label: '智能体', desc: '技能 / 角色 / 导演组', icon: Users, cls: 'text-amber-400' },
+};
+const KIND_DOMAIN: Record<string, string> = {
+  provider: 'capability', workflow: 'capability', mcp_tool: 'capability',
+  custom_node: 'canvas', canvas_node: 'canvas',
+  storyboard_slot: 'workspace', theme: 'workspace', exporter: 'workspace', director_pack: 'workspace',
+  skill: 'agent', agent_profile: 'agent', agent_team: 'agent',
 };
 
 const SOURCE_META: Record<string, { label: string; cls: string }> = {
@@ -51,8 +66,10 @@ export const ExtensionsPanel: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [kind, setKind] = useState('');
+  const [domain, setDomain] = useState('');
   const [q, setQ] = useState('');
   const [showBuiltin, setShowBuiltin] = useState(false);
+  const [showScaffold, setShowScaffold] = useState(false);
   const [tests, setTests] = useState<Record<string, { running?: boolean; ok?: boolean; detail?: string }>>({});
   const [inspectWfId, setInspectWfId] = useState('');
   const [detailExt, setDetailExt] = useState<any>(null);
@@ -97,16 +114,35 @@ export const ExtensionsPanel: React.FC = () => {
   }, [exts, q, showBuiltin]);
 
   const shown = useMemo(
-    () => (kind ? base.filter((e) => e.kind === kind) : base),
-    [base, kind],
+    () => base.filter((e) => (!domain || KIND_DOMAIN[e.kind] === domain) && (!kind || e.kind === kind)),
+    [base, domain, kind],
   );
+
+  const allDomainCounts = useMemo(() => {
+    const m: Record<string, number> = {};
+    exts.forEach((e) => {
+      const d = KIND_DOMAIN[e.kind];
+      if (d) m[d] = (m[d] || 0) + 1;
+    });
+    return m;
+  }, [exts]);
+
+  const domainCounts = useMemo(() => {
+    const m: Record<string, number> = {};
+    base.forEach((e) => {
+      const d = KIND_DOMAIN[e.kind];
+      if (d) m[d] = (m[d] || 0) + 1;
+    });
+    return m;
+  }, [base]);
 
   /** 筛选条上的数字 = 点进去真能看到几条，和「全部 N」同一口径 */
   const viewCounts = useMemo(() => {
     const m: Record<string, number> = {};
-    base.forEach((e) => { m[e.kind] = (m[e.kind] || 0) + 1; });
+    base.filter((e) => !domain || KIND_DOMAIN[e.kind] === domain)
+      .forEach((e) => { m[e.kind] = (m[e.kind] || 0) + 1; });
     return m;
-  }, [base]);
+  }, [base, domain]);
 
   const hiddenBuiltin = useMemo(
     () => (showBuiltin ? 0 : exts.filter((e) => e.source === 'builtin' || e.status === 'builtin').length),
@@ -115,8 +151,8 @@ export const ExtensionsPanel: React.FC = () => {
 
   const kindsPresent = useMemo(() => {
     const set = new Set(exts.map((e) => e.kind));
-    return Object.keys(KIND_META).filter((k) => set.has(k));
-  }, [exts]);
+    return Object.keys(KIND_META).filter((k) => set.has(k) && (!domain || KIND_DOMAIN[k] === domain));
+  }, [exts, domain]);
 
   // ── 插件 ──
   const installPlugin = async (f: File) => {
@@ -214,13 +250,14 @@ export const ExtensionsPanel: React.FC = () => {
   return (
     <div className="space-y-5">
       <div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-surface/80 rounded-2xl overflow-hidden border border-white/70 dark:border-white/12">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-px bg-surface/80 rounded-2xl overflow-hidden border border-white/70 dark:border-white/12">
           <Stat label="扩展总数" value={counts.total ?? exts.length} />
-          <Stat label="生成源" value={counts.provider ?? 0} />
-          <Stat label="MCP 工具" value={counts.mcp_tool ?? 0} />
-          <Stat label="技能" value={counts.skill ?? 0} />
+          {DOMAIN_ORDER.map((d) => (
+            <Stat key={d} label={DOMAIN_META[d].label} value={allDomainCounts[d] ?? 0}
+              active={domain === d} onClick={() => { setDomain(domain === d ? '' : d); setKind(''); }} />
+          ))}
         </div>
-        <div className="mt-1.5 text-[10.5px] text-gray-500">系统全量（含内置）；下面列表按筛选条件展示</div>
+        <div className="mt-1.5 text-[10.5px] text-gray-500">系统全量（含内置）；点四域卡片筛选，下面列表按筛选条件展示</div>
       </div>
 
       {/* ── 插件包 ── */}
@@ -228,14 +265,22 @@ export const ExtensionsPanel: React.FC = () => {
         <div className="px-5 pt-4 pb-3 border-b border-white/60 dark:border-white/12 flex items-center gap-2">
           <Package className="w-4 h-4 text-violet-400" />
           <h3 className="text-sm font-bold text-[color:var(--color-text-main)]">插件包</h3>
-          <button
-            onClick={() => fileRef.current?.click()}
-            disabled={busy === 'install'}
-            className="ml-auto px-3 py-1.5 rounded-xl bg-brand text-white text-[11.5px] font-bold hover:bg-brand-light disabled:opacity-40 flex items-center gap-1.5"
-          >
+          <div className="ml-auto flex items-center gap-1.5">
+            <button
+              onClick={() => setShowScaffold(true)}
+              className="px-3 py-1.5 rounded-xl bg-surface/80 border border-white/70 dark:border-white/12 text-[11.5px] text-gray-200 hover:border-brand/60 flex items-center gap-1.5"
+            >
+              <PackagePlus className="w-3.5 h-3.5" />新建插件
+            </button>
+            <button
+              onClick={() => fileRef.current?.click()}
+              disabled={busy === 'install'}
+              className="px-3 py-1.5 rounded-xl bg-brand text-white text-[11.5px] font-bold hover:bg-brand-light disabled:opacity-40 flex items-center gap-1.5"
+            >
             {busy === 'install' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-            安装 zip 包
-          </button>
+              安装 zip 包
+            </button>
+          </div>
           <input
             ref={fileRef} type="file" accept=".zip" className="hidden"
             onChange={(e) => { const f = e.target.files?.[0]; if (f) installPlugin(f); }}
@@ -256,6 +301,11 @@ export const ExtensionsPanel: React.FC = () => {
                     <div className="flex items-center gap-2">
                       <span className="text-[12.5px] font-bold text-[color:var(--color-text-main)] truncate">{p.name}</span>
                       <span className="text-[10px] font-mono text-gray-500">v{p.version}</span>
+                      {(p.domains || []).map((d: string) => (
+                        <span key={d} className="text-[9.5px] px-1.5 py-0.5 rounded border border-brand/40 bg-brand/10 text-brand-light">
+                          {DOMAIN_META[d]?.label || d}
+                        </span>
+                      ))}
                       {p.enabled
                         ? <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/40 text-emerald-300">已启用</span>
                         : <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-surface-hover/80 border border-white/70 dark:border-white/12 text-gray-400">已停用</span>}
@@ -283,6 +333,9 @@ export const ExtensionsPanel: React.FC = () => {
           <CodeTemplateButton />
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+          <EntryCard icon={PackagePlus} iconCls="text-violet-400" title="新建插件脚手架"
+            desc="按四域生成 plugin.json + README + 示例，补完贡献文件后直接启用"
+            onClick={() => setShowScaffold(true)} />
           <EntryCard icon={Plug} iconCls="text-brand-light" title="新建自定义生成源"
             desc="贴 API 文档自动写代码接入，或手写 Python / JavaScript 协程、导入 ComfyUI 工作流"
             onClick={() => window.dispatchEvent(new CustomEvent('open-provider-create', { detail: { tab: 'doc' } }))} />
@@ -317,6 +370,15 @@ export const ExtensionsPanel: React.FC = () => {
                 className="w-full bg-surface/80 border border-white/70 dark:border-white/12 rounded-xl pl-8 pr-3 py-1.5 text-[11.5px] text-[color:var(--color-text-main)] placeholder-gray-600 focus:outline-none focus:border-brand/60"
               />
             </div>
+          </div>
+
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <Chip active={!domain} onClick={() => { setDomain(''); setKind(''); }} label={`全部域 ${base.length}`} />
+            {DOMAIN_ORDER.map((d) => (
+              <Chip key={d} active={domain === d}
+                onClick={() => { setDomain(domain === d ? '' : d); setKind(''); }}
+                label={`${DOMAIN_META[d].label} ${domainCounts[d] ?? 0}`} title={DOMAIN_META[d].desc} />
+            ))}
           </div>
 
           <div className="mt-2 flex flex-wrap gap-1.5">
@@ -424,6 +486,13 @@ export const ExtensionsPanel: React.FC = () => {
         </div>
       </section>
 
+      {showScaffold && (
+        <PluginScaffoldModal
+          onClose={() => setShowScaffold(false)}
+          onCreated={() => { load(); window.dispatchEvent(new Event('plugin-list-refresh')); }}
+        />
+      )}
+
       {detailExt && (
         <ExtensionDetailDrawer
           ext={detailExt}
@@ -526,11 +595,13 @@ const Act: React.FC<{
   );
 };
 
-const Stat: React.FC<{ label: string; value: number }> = ({ label, value }) => (
-  <div className="bg-surface/80 px-4 py-3">
-    <div className="text-xl font-bold font-mono text-brand-light leading-tight">{value}</div>
+const Stat: React.FC<{ label: string; value: number; active?: boolean; onClick?: () => void }> =
+({ label, value, active, onClick }) => (
+  <button type="button" onClick={onClick}
+    className={`text-left bg-surface/80 px-4 py-3 transition-colors ${onClick ? 'hover:bg-surface-hover/80' : ''} ${active ? 'bg-brand/10' : ''}`}>
+    <div className={`text-xl font-bold font-mono leading-tight ${active ? 'text-white' : 'text-brand-light'}`}>{value}</div>
     <div className="text-[10.5px] text-gray-500">{label}</div>
-  </div>
+  </button>
 );
 
 const Chip: React.FC<{ active: boolean; onClick: () => void; label: string; title?: string }> = ({ active, onClick, label, title }) => (

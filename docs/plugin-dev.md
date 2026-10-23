@@ -1,5 +1,7 @@
 # 插件开发指南（Plugin / Extension Dev Guide）
 
+> 最快路径：插件中心 →「新建插件」，按能力 / 画布 / 工作台 / 智能体四域生成骨架；手写流程仍适用。
+
 > **适用版本**：Studio 2.x（2026-09）
 > **读者**：想为工作台增加生成源 / 技能 / 节点 / 主题 / 导出器 / 扩展 MCP 工具的开发者
 > **一句话**：写一个 `plugin.json` + 几个 JSON/Python 文件，打成 zip 安装启用，就能在画布、分镜、导演台、导出中心出现你的能力。
@@ -95,7 +97,54 @@ Compress-Archive -Path hello-pack\* -DestinationPath hello-pack.zip
    分镜槽 / 画布节点 / 主题 / 导出器 / 导演台 / 生成源 / 技能 / 工作流 / 代码节点 / MCP 工具
 ```
 
-### 1.1 扩展点全景
+### 1.1 推荐入口：v2 四域（内部仍兼容 12 类）
+
+新插件建议只记 4 个域；旧 `extensionPoints` 仍可用，安装时会自动归一。
+
+| 域 | 包含旧扩展点 | 用途 |
+|---|---|---|
+| `capability` | `providers` / `workflows` / `mcp_tools` | 接入生成源、ComfyUI 工作流、外部工具 |
+| `canvas` | `custom_nodes` / `canvas_nodes` | 画布代码节点与声明式节点 |
+| `workspace` | `storyboard_slots` / `themes` / `exporters` / `director_packs` | 分镜槽、主题、导出器、3D 导演包 |
+| `agent` | `skills` / `agent_profiles` / `agent_teams` | 技能、专家角色、导演组 |
+
+```json
+{
+  "schema": 2,
+  "id": "acme-pack",
+  "name": "Acme 漫剧包",
+  "version": "2.0.0",
+  "contributes": {
+    "capability": { "providers": ["providers/*.json"], "tools": ["tools/*.py"] },
+    "canvas": { "nodes": ["canvas/*.json"], "codeNodes": ["code/*.py"] },
+    "workspace": { "slots": ["slots/*.json"], "themes": ["themes/*.json"] },
+    "agent": { "skills": ["skills/*/SKILL.md"], "teams": ["agent_teams/*.json"] }
+  }
+}
+```
+
+> v2 只是 manifest 归一，底层执行器/回滚/命名空间不变；v1 包可继续安装。
+
+### 1.2 生成脚手架（推荐）
+
+插件中心点「新建插件」，选择能力 / 画布 / 工作台 / 智能体四域之一，会生成：
+
+- `plugin.json`：v2 manifest，带 `domains` 与 `contributes.<domain>`
+- `README.md`：下一步说明
+- `examples/<domain>.md`：该域的契约与可复制示例
+
+脚手架只写 `storage/plugins/<id>/`，不启用、不执行代码。也可以直接调：
+
+```http
+POST /api/v1/plugins/scaffold
+Content-Type: application/json
+
+{"id":"my-pack","name":"我的扩展包","domain":"workspace","description":"可选","author":"you"}
+```
+
+补完真实贡献文件与 glob 后，再回插件中心「启用」。
+
+### 1.3 扩展点全表
 
 | 扩展点 | 包内文件 | 携带代码 | 宿主/UI 落点 | 执行方式 |
 |---|---|---|---|---|
@@ -113,7 +162,7 @@ Compress-Archive -Path hello-pack\* -DestinationPath hello-pack.zip
 | `mcp_tools` | `tools/*.py` | ✅ Python | Agent / MCP 工具面板 | **进程内直执行**（trusted 闸） |
 | （plugin 本身） | `plugin.json` | — | 插件中心 | 包生命周期 |
 
-### 1.2 "可执行扩展"与引用规则
+### 1.4 "可执行扩展"与引用规则
 
 `canvas_nodes` / `exporters` / `storyboard_slots` 的 `run.extension` 只能指向**可执行 kind**：
 

@@ -1,0 +1,151 @@
+{
+  "version": 2,
+  "active_canvas_id": "cv_mvgc7uea",
+  "canvases": {
+    "default": {
+      "viewport": {
+        "x": 0,
+        "y": 0,
+        "zoom": 1
+      },
+      "schema_version": 2,
+      "name": "默认画布",
+      "nodes": [],
+      "edges": [],
+      "updated_at": "2026-10-21 09:17:49"
+    },
+    "cv_mvgc7uea": {
+      "schema_version": 2,
+      "viewport": {
+        "x": -539.3918918918919,
+        "y": -124.7837837837838,
+        "zoom": 1.1739864864864864
+      },
+      "name": "画布1",
+      "nodes": [
+        {
+          "id": "video_1792479846498_6",
+          "type": "video",
+          "position": {
+            "x": 800,
+            "y": 80
+          },
+          "data": {
+            "label": "视频生成",
+            "prompt": "女生朝着镜头打招呼\n",
+            "mode": "startEnd",
+            "refOrder": [
+              "image_1792479846498_4|image",
+              "image_1792479846498_5|image"
+            ],
+            "refRoles": {
+              "image_1792479846498_4|image": "first_frame",
+              "image_1792479846498_5|image": "last_frame"
+            },
+            "history": [
+              {
+                "url": "/storage/videos/vid_1792480364_63f85888.mp4",
+                "created_at": "2026-10-20T07:12:49.693Z",
+                "provider_id": "prov_92d77c6e",
+                "prompt": "女生朝着镜头打招呼",
+                "params": {
+                  "aspect_ratio": "9:16 (Portrait Widescreen)",
+                  "duration": 5,
+                  "megapixels": 1,
+                  "instance_type": "default"
+                }
+              }
+            ],
+            "smart_plan": false,
+            "provider_id": "prov_92d77c6e",
+            "provider": "prov_92d77c6e",
+            "_polling": false,
+            "params": {
+              "aspect_ratio": "9:16 (Portrait Widescreen)",
+              "duration": 5,
+              "megapixels": 1,
+              "instance_type": "default"
+            },
+            "provider_params": {
+              "aspect_ratio": "9:16 (Portrait Widescreen)",
+              "duration": 5,
+              "megapixels": 1,
+              "instance_type": "default"
+            },
+            "duration": 5,
+            "aspect_ratio": "9:16 (Portrait Widescreen)",
+            "text": "女生朝着镜头打招呼\n",
+            "agent_state": {
+              "status": "completed",
+              "tool": "provider_prov_92d77c6e",
+              "provider_id": "prov_92d77c6e",
+              "elapsed_ms": 208285,
+              "updated_at": "2026-10-20T07:12:49.693Z"
+            },
+            "video_url": "/storage/videos/vid_1792480364_63f85888.mp4"
+          },
+          "selected": false,
+          "measured": {
+            "width": 198,
+            "height": 289
+          }
+        },
+        {
+          "id": "asset-source_1792479854292_7",
+          "type": "asset-source",
+          "position": {
+            "x": 432,
+            "y": 432
+          },
+          "data": {
+            "label": "镜头1尾帧",
+            "asset_kind": "image",
+            "asset_id": "ast_0e067b9f",
+            "asset_name": "镜头1尾帧",
+            "image_url": "/storage/assets/ast_0e067b9f/original.jpg",
+            "image": "/storage/assets/ast_0e067b9f/original.jpg",
+            "url": "/storage/assets/ast_0e067b9f/original.jpg"
+          },
+          "selected": false,
+          "measured": {
+            "width": 240,
+            "height": 289
+          }
+        },
+        {
+          "id": "video_1792545479935_1",
+          "type": "video",
+          "position": {
+            "x": 1168,
+            "y": 176
+          },
+          "data": {
+            "label": "视频生成",
+            "prompt": "",
+            "mode": "",
+            "refOrder": [],
+            "refRoles": {},
+            "history": [],
+            "smart_plan": false
+          },
+          "selected": false,
+          "measured": {
+            "width": 220,
+            "height": 193
+          }
+        }
+      ],
+      "edges": [
+        {
+          "type": "simplebezier",
+          "source": "asset-source_1792479854292_7",
+          "sourceHandle": "out",
+          "target": "video_1792479846498_6",
+          "targetHandle": "in",
+          "id": "e_asset-source_1792479854292_7_out_video_1792479846498_6_in_mvgc8jr1"
+        }
+      ],
+      "updated_at": "2026-10-21 09:20:52"
+    }
+  }
+}

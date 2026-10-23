@@ -9,7 +9,7 @@ P0支持的 extensionPoints：
 
 P1预留（声明即校验，执行延后）：mcp_tools / canvas_nodes / director_packs / exporters / themes
 """
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -30,6 +30,127 @@ class PluginExtensionPoints(BaseModel):
     agent_teams: List[str] = Field(default_factory=list)
 
 
+V2_GROUPS = {
+    "capability": {
+        "providers": "providers",
+        "workflows": "workflows",
+        "tools": "mcp_tools",
+    },
+    "canvas": {
+        "nodes": "canvas_nodes",
+        "codeNodes": "custom_nodes",
+    },
+    "workspace": {
+        "slots": "storyboard_slots",
+        "themes": "themes",
+        "exporters": "exporters",
+        "directorPacks": "director_packs",
+    },
+    "agent": {
+        "skills": "skills",
+        "profiles": "agent_profiles",
+        "teams": "agent_teams",
+    },
+}
+
+
+V2_DOMAINS = {
+    "capability": {
+        "label": "能力",
+        "description": "生成源、ComfyUI 工作流、MCP 工具：扩展系统能做什么。",
+        "fields": {
+            "providers": "生成源",
+            "workflows": "工作流",
+            "tools": "MCP 工具",
+        },
+    },
+    "canvas": {
+        "label": "画布",
+        "description": "声明式节点与代码节点：扩展画布上能拖什么、连什么。",
+        "fields": {
+            "nodes": "画布节点",
+            "codeNodes": "代码节点",
+        },
+    },
+    "workspace": {
+        "label": "工作台",
+        "description": "分镜槽、主题、导出器、导演包：扩展创作工作台。",
+        "fields": {
+            "slots": "分镜槽",
+            "themes": "主题",
+            "exporters": "导出器",
+            "directorPacks": "导演包",
+        },
+    },
+    "agent": {
+        "label": "智能体",
+        "description": "技能、角色画像、导演组：扩展 AI 导演团队。",
+        "fields": {
+            "skills": "技能",
+            "profiles": "角色",
+            "teams": "导演组",
+        },
+    },
+}
+
+DOMAIN_ORDER = ("capability", "canvas", "workspace", "agent")
+
+# 内部 extensionPoints 字段 -> v2 四域
+FIELD_DOMAIN = {
+    "providers": "capability", "workflows": "capability", "mcp_tools": "capability",
+    "custom_nodes": "canvas", "canvas_nodes": "canvas",
+    "storyboard_slots": "workspace", "themes": "workspace",
+    "exporters": "workspace", "director_packs": "workspace",
+    "skills": "agent", "agent_profiles": "agent", "agent_teams": "agent",
+}
+
+# 统一扩展 kind -> v2 四域（UI 筛选与计数用）
+KIND_DOMAIN = {
+    "provider": "capability", "workflow": "capability", "mcp_tool": "capability",
+    "custom_node": "canvas", "canvas_node": "canvas",
+    "storyboard_slot": "workspace", "theme": "workspace",
+    "exporter": "workspace", "director_pack": "workspace",
+    "skill": "agent", "agent_profile": "agent", "agent_team": "agent",
+}
+
+
+def domains_of(eps: Any, declared: Optional[List[str]] = None) -> List[str]:
+    """从 extensionPoints 与显式 domains 推导四域，按固定顺序返回。"""
+    found = {str(d) for d in (declared or []) if str(d) in V2_DOMAINS}
+    for field, domain in FIELD_DOMAIN.items():
+        if getattr(eps, field, None):
+            found.add(domain)
+    return [d for d in DOMAIN_ORDER if d in found]
+
+
+def domain_counts(eps: Any) -> Dict[str, int]:
+    counts = {d: 0 for d in DOMAIN_ORDER}
+    for field, domain in FIELD_DOMAIN.items():
+        counts[domain] += len(getattr(eps, field, None) or [])
+    return {k: v for k, v in counts.items() if v}
+
+
+def normalize_manifest_v2(data: Dict) -> Dict:
+    """把 v2 的四域 contributes 归一成内部 v1 extensionPoints，保持旧执行器不变。"""
+    if not isinstance(data, dict):
+        return data
+    contributes = data.get("contributes")
+    if not isinstance(contributes, dict):
+        return data
+    eps = dict(data.get("extensionPoints") or {})
+    for group, fields in V2_GROUPS.items():
+        items = contributes.get(group)
+        if not isinstance(items, dict):
+            continue
+        for key, target in fields.items():
+            values = items.get(key)
+            if isinstance(values, list):
+                eps[target] = [str(v) for v in values if str(v).strip()]
+    out = {k: v for k, v in data.items() if k not in ("schema", "contributes")}
+    out["extensionPoints"] = eps
+    return out
+
+
 class PluginManifest(BaseModel):
     model_config = {"extra": "forbid"}
 
@@ -44,6 +165,7 @@ class PluginManifest(BaseModel):
     dependsOn: Dict[str, str] = Field(
         default_factory=dict,
         description="依赖的插件 → 版本约束，如 {\"base-pack\": \">=1.0.0\"}；支持 *, =, >, >=, <, <=, ^, ~")
+    domains: List[str] = Field(default_factory=list, description="v2 四域声明：capability/canvas/workspace/agent")
     extensionPoints: PluginExtensionPoints = Field(default_factory=PluginExtensionPoints)
 
 
@@ -77,6 +199,7 @@ MCP_TOOL_NAME_RE = r"^[a-z0-9_]{2,48}$"
 
 
 MANIFEST_TEMPLATE: Dict = {
+    "schema": 2,
     "id": "my-drama-pack",
     "name": "我的漫剧包",
     "version": "1.0.0",
@@ -85,12 +208,12 @@ MANIFEST_TEMPLATE: Dict = {
     "publisher": "you",
     "license": "MIT",
     "dependsOn": {},
-    "extensionPoints": {
-        "providers": ["providers/*.json"],
-        "skills": ["skills/*/SKILL.md"],
-        "workflows": ["workflows/*.json"],
-        "custom_nodes": ["custom_nodes/*.json"],
-        "storyboard_slots": ["slots/*.json"],
+    "domains": ["workspace"],
+    "contributes": {
+        "workspace": {
+            "themes": ["themes/*.json"],
+            "slots": ["slots/*.json"],
+        },
     },
 }
 

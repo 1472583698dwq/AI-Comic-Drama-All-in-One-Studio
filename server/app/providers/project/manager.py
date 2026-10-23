@@ -8,6 +8,7 @@
 """
 import os
 import json
+import threading
 import time
 import uuid
 from typing import List, Optional, Dict, Any
@@ -57,6 +58,20 @@ def _canvas_path(project_id: str) -> str:
 
 def _agent_sessions_path(project_id: str) -> str:
     return os.path.join(PROJECTS_ROOT, project_id, "agent_sessions.json")
+
+# Agent 会话是「整文件覆盖写」：流式输出时前端会高频保存，必须按项目串行化，
+# 否则同一 .tmp 文件会被并发写坏，Windows 上 os.replace 还会因占用直接失败。
+_SESSION_LOCKS: Dict[str, threading.RLock] = {}
+_SESSION_LOCKS_GUARD = threading.Lock()
+
+
+def _session_lock(project_id: str) -> threading.RLock:
+    with _SESSION_LOCKS_GUARD:
+        lock = _SESSION_LOCKS.get(project_id)
+        if lock is None:
+            lock = threading.RLock()
+            _SESSION_LOCKS[project_id] = lock
+        return lock
 
 
 # ===== 双 ID 兼容层 =====
@@ -225,6 +240,9 @@ class ProjectManager:
                 for k in ["title","style_preset","aspect_ratio","status","cover_url","description"]:
                     if k in updates and updates[k] is not None:
                         setattr(meta, k, updates[k])
+                if "agent_policy" in updates and updates["agent_policy"] is not None:
+                    from app.models.agent_policy import normalize_policy
+                    meta.agent_policy = normalize_policy(updates["agent_policy"])
                 # 校验 status
                 if meta.status not in ("draft","producing","done","archived"):
                     meta.status = "draft"
@@ -549,36 +567,49 @@ class ProjectManager:
         proj_dir = os.path.join(PROJECTS_ROOT, project_id)
         if not os.path.exists(proj_dir):
             raise FileNotFoundError(f"项目不存在: {project_id}")
-        # scope 隔离写：只替换该 scope 的会话，保留另一端的会话不被覆盖
-        scope = (scope or "").strip() or None
-        if scope:
-            try:
-                existing = self.get_agent_sessions(project_id, scope="all")
-            except Exception:
-                existing = []
-            keep = [s for s in existing if isinstance(s, dict) and (s.get("scope") or "page") != scope]
-            stamped = []
-            for s in (sessions or []):
-                if isinstance(s, dict):
-                    s = {**s, "scope": scope}
-                stamped.append(s)
-            sessions = keep + stamped
-        p = _agent_sessions_path(project_id)
-        temp_p = p + f".tmp.{os.getpid()}"
-        with open(temp_p, "w", encoding="utf-8") as f:
-            json.dump(sessions, f, ensure_ascii=False, indent=2)
-        if os.path.exists(p):
-            try:
-                os.replace(temp_p, p)
-            except Exception:
+        # scope 合并 + 整文件写入必须在同一把项目锁内完成；否则两个请求会互相覆盖。
+        from app.storage_sync.file_locks import lock_for
+        rel = f"projects/{project_id}/agent_sessions.json"
+        with _session_lock(project_id):
+            with lock_for(rel):
+                scope = (scope or "").strip() or None
+                if scope:
+                    try:
+                        existing = self.get_agent_sessions(project_id, scope="all")
+                    except Exception:
+                        existing = []
+                    keep = [s for s in existing if isinstance(s, dict) and (s.get("scope") or "page") != scope]
+                    stamped = []
+                    for s in (sessions or []):
+                        if isinstance(s, dict):
+                            s = {**s, "scope": scope}
+                        stamped.append(s)
+                    sessions = keep + stamped
+                p = _agent_sessions_path(project_id)
+                temp_p = f"{p}.tmp.{os.getpid()}.{threading.get_ident()}.{time.time_ns()}"
                 try:
-                    os.remove(p)
-                except Exception:
-                    pass
-                os.rename(temp_p, p)
-        else:
-            os.rename(temp_p, p)
-        return sessions
+                    with open(temp_p, "w", encoding="utf-8") as f:
+                        json.dump(sessions, f, ensure_ascii=False, indent=2)
+                        f.flush()
+                        os.fsync(f.fileno())
+                    last_err: Optional[Exception] = None
+                    for attempt in range(6):
+                        try:
+                            os.replace(temp_p, p)
+                            last_err = None
+                            break
+                        except OSError as e:
+                            last_err = e
+                            time.sleep(0.05 * (attempt + 1))
+                    if last_err is not None:
+                        raise last_err
+                finally:
+                    try:
+                        if os.path.exists(temp_p):
+                            os.remove(temp_p)
+                    except OSError:
+                        pass
+                return sessions
 
     def delete_agent_session(self, project_id: str, session_id: str) -> Dict[str, Any]:
         sessions = self.get_agent_sessions(project_id)

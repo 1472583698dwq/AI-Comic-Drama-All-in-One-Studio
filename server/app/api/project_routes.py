@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Body, HTTPException, UploadFile, File, Form, Query, Request
 from pydantic import BaseModel
 
+from app.models.agent_policy import AgentPolicy, normalize_policy
 from app.models.project_meta import ProjectMetaCreate, ProjectMetaUpdate
 from app.providers.project.manager import project_manager, ProjectRevConflict
 
@@ -137,6 +138,26 @@ async def get_project(project_id: str):
     if not combined:
         raise HTTPException(status_code=404, detail=f"项目不存在: {project_id}")
     return combined
+
+
+@router.get("/projects/{project_id}/agent-policy")
+async def get_project_agent_policy(project_id: str):
+    meta = project_manager.get_meta(project_id)
+    if not meta:
+        raise HTTPException(status_code=404, detail=f"项目不存在: {project_id}")
+    return normalize_policy(meta.get("agent_policy"))
+
+
+@router.put("/projects/{project_id}/agent-policy")
+async def update_project_agent_policy(project_id: str, policy: AgentPolicy):
+    meta = project_manager.get_meta(project_id)
+    if not meta:
+        raise HTTPException(status_code=404, detail=f"项目不存在: {project_id}")
+    normalized = normalize_policy(policy.model_dump())
+    updated = project_manager.update_meta(project_id, {"agent_policy": normalized})
+    if not updated:
+        raise HTTPException(status_code=404, detail=f"项目不存在: {project_id}")
+    return normalize_policy(updated.get("agent_policy"))
 
 
 @router.put("/projects/{project_id}")

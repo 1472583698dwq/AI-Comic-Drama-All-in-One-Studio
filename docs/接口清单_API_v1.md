@@ -22,7 +22,7 @@
 | 安全 | `POST /api/v1/mcp/call`、`POST /api/v1/extensions/execute` 有 **Origin 白名单**（非本机 Origin → 403） |
 | 页面/功能门控 | 部分模块带 `Depends(pages.require(...))` / `Depends(features.require(...))`；对应页/功能关闭时**该族端点整体返回 404**（下表表头已标注） |
 
-**端点总数**：`app/api/` 合计 **206** + `main.py` App 级 **4** = **210**。
+**端点总数**：`app/api/` 合计 **216**（含项目权限 2 个、变更集 7 个、插件脚手架 1 个）+ `main.py` App 级 **4** = **220**。
 
 ---
 
@@ -170,7 +170,7 @@
 
 ---
 
-## 3. `project_routes.py` — 项目（19）
+## 3. `project_routes.py` — 项目（21）
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
@@ -193,6 +193,24 @@
 | GET | `/api/v1/projects/{project_id}/agent-sessions` | 项目 Agent 会话 |
 | PUT | `/api/v1/projects/{project_id}/agent-sessions` | 保存 Agent 会话 |
 | DELETE | `/api/v1/projects/{project_id}/agent-sessions/{session_id}` | 删除 Agent 会话 |
+| GET | `/api/v1/projects/{project_id}/agent-policy` | 项目模型与工具权限（allow/ask/deny） |
+| PUT | `/api/v1/projects/{project_id}/agent-policy` | 保存项目模型与工具权限 |
+
+---
+
+### 3.1 `change_set_routes.py` — Creator 变更集（7）
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| GET | `/api/v1/change-sets` | 变更集列表 |
+| POST | `/api/v1/change-sets/propose` | 生成变更集（不写生产） |
+| GET | `/api/v1/change-sets/{id}` | 变更集详情 |
+| POST | `/api/v1/change-sets/{id}/test` | 试跑 |
+| POST | `/api/v1/change-sets/{id}/apply` | 用户批准后应用 |
+| POST | `/api/v1/change-sets/{id}/discard` | 丢弃 |
+| POST | `/api/v1/change-sets/{id}/rollback` | 回滚 |
+
+> 变更集写口与工具执行口同源：非本机 Origin → 403。
 
 ---
 
@@ -252,12 +270,13 @@
 
 ---
 
-## 7. `plugin_routes.py` — 插件（9）
+## 7. `plugin_routes.py` — 插件（10）
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | GET | `/api/v1/plugins` | 插件列表 |
 | GET | `/api/v1/plugins/spec` | 插件清单模板 + 扩展点文档 |
+| POST | `/api/v1/plugins/scaffold` | 生成 v2 四域插件骨架 |
 | POST | `/api/v1/plugins/install` | 安装插件（上传包） |
 | POST | `/api/v1/plugins/reload` | 重载全部插件 |
 | GET | `/api/v1/plugins/health` | 插件可观测（执行/错误/超时） |
@@ -430,21 +449,21 @@
 | 模块 | 数量 |
 |---|---|
 | `routes.py` | 74（含 1 WS） |
-| `project_routes.py` | 19 |
+| `project_routes.py` | 21 |
 | `provider_routes.py` | 14 |
 | `asset_routes.py` | 14 |
 | `extension_routes.py` | 11 |
 | `agent_team_routes.py` | 10 |
-| `plugin_routes.py` | 9 |
+| `plugin_routes.py` | 10 |
 | `canvas_routes.py` / `canvas_node_routes.py` / `exporter_routes.py` | 各 6 |
 | `storyboard_slot_routes.py` / `theme_routes.py` / `director_pack_routes.py` / `log_routes.py` | 各 5 |
 | `timeline_routes.py` / `custom_node_routes.py` | 各 4 |
 | `onekey_routes.py` | 3 |
 | `setup_routes.py` / `feature_routes.py` | 各 2 |
 | `page_routes.py` | 1 |
-| **`app/api/` 合计** | **205** |
+| **`app/api/` 合计** | **216** |
 | `main.py` App 级 | 4 |
-| **总计** | **209** |
+| **总计** | **220** |
 
 ---
 

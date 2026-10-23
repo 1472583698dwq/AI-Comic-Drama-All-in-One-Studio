@@ -16,7 +16,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Send, Square, MessageSquarePlus, ChevronUp, Check, Paperclip, X, Loader2,
-  Image as ImageIcon, Film, Music, Hand, ShieldAlert, Lightbulb, FlaskConical,
+  Image as ImageIcon, Film, Music, ShieldAlert, Lightbulb, FlaskConical,
   type LucideIcon,
 } from 'lucide-react';
 import { useAgentDraftStore, MAX_ATTACHMENTS } from './agentDraftStore';
@@ -67,9 +67,8 @@ const AGENT_PLAN_PRESET = {
 /** 权限三选一（与计划不冲突）：映射到现有 run_mode token，后端零改动。
  *  图标口径对齐 ZCode：确认=手形、自动=盾牌勾、高权限=盾牌警示。 */
 const AGENT_PERMISSION_PRESETS: Array<{ key: RunMode; label: string; hint: string; icon: LucideIcon }> = [
-  { key: 'approve', label: '变更前确认', icon: Hand, hint: '正常干活；删源/写文件/跑命令等危险操作逐个问你' },
-  { key: 'auto', label: '完全访问', icon: ShieldAlert, hint: '全部工具自动执行、不再逐项确认（含删源/写文件/跑命令），可随时暂停' },
-  { key: 'create', label: '造能力', icon: FlaskConical, hint: '缺能力先提案：试跑验证后由你决定转正/丢弃，默认不写生产' },
+  { key: 'auto', label: '自动', icon: ShieldAlert, hint: '按项目权限自动执行；确认项仍会问你，禁止项直接拒绝' },
+  { key: 'create', label: '创造', icon: FlaskConical, hint: '缺能力先提案；系统变更需你批准，默认不写生产' },
 ];
 
 /** 菜单条目：图标 + 标签 + 一句描述，选中打勾（行高与 ZCode 一致，两行文案不挤） */
@@ -338,17 +337,17 @@ export const AgentComposer: React.FC<AgentComposerProps> = ({
 
   // 计划与权限解耦：planOn 只看 run_mode token；权限优先取调用方回传，缺省从 token 派生
   const planOn = runMode === 'plan' || runMode === 'plan_auto';
-  const perm: RunMode = permissionProp || (planOn ? 'approve' : runMode === 'create_auto' ? 'create' : (runMode || 'approve'));
+  const perm: RunMode = planOn
+    ? (permissionProp === 'create' ? 'create' : 'auto')
+    : (runMode === 'create' || runMode === 'create_auto' ? 'create' : 'auto');
 
   const placeholder = isRunning && onSteer
     ? '运行中：输入补充指令后回车插话（进入下一轮，不打断已产出）'
     : planOn
-      ? (compact ? '计划模式 · 只读侦察出计划' : '计划模式：只读侦察并产出完整计划，同意后按所选权限执行')
+      ? (compact ? '计划模式 · 只读侦察出计划' : '计划模式：只读侦察并产出完整计划，同意后按项目权限执行')
       : perm === 'auto'
-        ? (compact ? '吩咐 AI 导演做点什么…（完全访问）' : '完全访问：全部工具自动执行不弹确认，如“把画布现有节点全量执行一遍”')
-        : perm === 'create'
-          ? (compact ? '吩咐 AI 导演做点什么…（造能力）' : '造能力：缺什么能力直接说，如“做一个竖屏封面生成节点”')
-          : (compact ? '吩咐 AI 导演做点什么…' : '变更前确认：危险操作会先问你，如“为当前镜头规划特写推镜并配音”');
+        ? (compact ? '吩咐 AI 导演做点什么…（自动）' : '自动：按项目权限执行；确认项会问你，禁止项直接拒绝')
+        : (compact ? '吩咐 AI 导演做点什么…（创造）' : '创造：缺什么能力直接说；系统变更会先提案，需你批准');
 
   const hasMenu = !!(onRunModeChange && runMode != null);
 
@@ -469,7 +468,7 @@ export const AgentComposer: React.FC<AgentComposerProps> = ({
               iconOnly={pillIconOnly}
               disabled={isRunning}
               onSelectPlan={() => onRunModeChange?.(planOn ? perm : 'plan')}
-              onSelectPermission={(p) => (planOn ? onPermissionChange?.(p) : onRunModeChange?.(p))}
+              onSelectPermission={(p) => onRunModeChange?.(p)}
               onClosed={focusInput}
             />
           )}

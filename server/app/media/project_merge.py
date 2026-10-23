@@ -476,7 +476,7 @@ def build_project_command(
         audio_out = "aout"
 
     if subtitle_file:
-        graph.append(f"[vo]subtitles=filename={subtitle_file}[vout]")
+        graph.append(f"[vo]subtitles=filename={subtitle_file}:wrap_unicode=1[vout]")
         video_out = "vout"
     else:
         video_out = "vo"
@@ -529,15 +529,84 @@ def _ass_time(seconds: float) -> str:
     return f"{h}:{m:02d}:{s:02d}.{cs % 100:02d}"
 
 
-def _ass_text(text: str) -> str:
-    escaped = text.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
-    return escaped.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\\N")
+def _ass_escape(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
+
+
+def _char_units(ch: str) -> float:
+    """字幕排版宽度估算：中文/全角按 1em，ASCII 按约 0.55em。"""
+    if not ch:
+        return 0.0
+    code = ord(ch)
+    if code < 0x80:
+        if ch in " \t":
+            return 0.35
+        return 0.55
+    return 1.0
+
+
+def _wrap_subtitle(text: str, max_units: float) -> List[str]:
+    """按画面可用宽度手动断行，避免 libass 对中文不换行导致左右裁切。"""
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines: List[str] = []
+    for para in normalized.split("\n"):
+        rest = para.strip() if para.strip() else ""
+        if not rest:
+            lines.append("")
+            continue
+        while sum(_char_units(c) for c in rest) > max_units:
+            units = 0.0
+            cut = 0
+            for i, ch in enumerate(rest):
+                u = _char_units(ch)
+                if cut and units + u > max_units:
+                    break
+                units += u
+                cut = i + 1
+            # 优先在标点/空格后断行，避免把句读甩到下一行开头
+            window = rest[:max(1, cut)]
+            for j in range(len(window) - 1, max(-1, len(window) - 10), -1):
+                if window[j] in "，。！？；：、,.!?;: ":
+                    cut = j + 1
+                    break
+            cut = max(1, min(cut, len(rest)))
+            lines.append(rest[:cut].rstrip())
+            rest = rest[cut:].lstrip()
+        lines.append(rest)
+    return lines or [""]
+
+
+def subtitle_layout(width: int, height: int) -> Dict[str, float]:
+    """按成片画幅统一字幕字号、安全边距与单行最大宽度（单位 em）。"""
+    w = max(1, int(width))
+    h = max(1, int(height))
+    font_size = max(30, int(round(min(w, h) * 0.06)))
+    margin_lr = max(24, int(round(w * 0.06)))
+    margin_v = max(24, int(round(h * 0.06)))
+    max_units = max(4.0, (w - margin_lr * 2) / font_size)
+    return {
+        "font_size": font_size,
+        "margin_lr": margin_lr,
+        "margin_v": margin_v,
+        "max_units": max_units,
+    }
+
+
+def _ass_text(text: str, max_units: Optional[float] = None) -> str:
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    if max_units and max_units > 0:
+        wrapped = _wrap_subtitle(normalized, max_units)
+    else:
+        wrapped = normalized.split("\n")
+    return "\\N".join(_ass_escape(line) for line in wrapped)
 
 
 def build_ass(shots: List[Dict[str, Any]], width: int, height: int) -> str:
-    font_size = max(28, int(round(height * 0.046)))
-    margin_v = max(24, int(round(height * 0.06)))
-    margin_lr = max(20, int(round(width * 0.04)))
+    layout = subtitle_layout(width, height)
+    font_size = layout["font_size"]
+    margin_v = layout["margin_v"]
+    margin_lr = layout["margin_lr"]
+    max_units = layout["max_units"]
     lines = [
         "[Script Info]",
         "ScriptType: v4.00+",
@@ -562,7 +631,7 @@ def build_ass(shots: List[Dict[str, Any]], width: int, height: int) -> str:
         text = _text(shot.get("subtitle"))
         if text:
             lines.append(
-                f"Dialogue: 0,{_ass_time(cursor)},{_ass_time(cursor + slot)},Default,,0,0,0,,{_ass_text(text)}"
+                f"Dialogue: 0,{_ass_time(cursor)},{_ass_time(cursor + slot)},Default,,0,0,0,,{_ass_text(text, max_units)}"
             )
         cursor = round(cursor + slot, 3)
     return "\n".join(lines) + "\n"

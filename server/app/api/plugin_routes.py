@@ -2,10 +2,12 @@
 """插件系统 HTTP API — 列表/安装(zip)/启用/禁用/卸载/重扫/spec"""
 from typing import Any, Dict
 
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, Body, HTTPException, UploadFile, File
 
 from app.extensions import events
-from app.plugins.models import MANIFEST_TEMPLATE, EXTENSION_POINTS_DOC
+from app.plugins.models import (
+    MANIFEST_TEMPLATE, EXTENSION_POINTS_DOC, V2_DOMAINS, DOMAIN_ORDER,
+)
 from app.plugins import manager as pm
 
 router = APIRouter()
@@ -14,14 +16,31 @@ router = APIRouter()
 @router.get("/plugins")
 async def list_plugins():
     try:
-        return {"plugins": pm.discover(), "total": len(pm.discover())}
+        plugins = pm.discover()
+        return {"plugins": plugins, "total": len(plugins)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"插件列表失败: {e}")
 
 
 @router.get("/plugins/spec")
 async def plugin_spec():
-    return {"template": MANIFEST_TEMPLATE, "extensionPoints": EXTENSION_POINTS_DOC}
+    domains = [{"key": key, **V2_DOMAINS[key]} for key in DOMAIN_ORDER]
+    return {"template": MANIFEST_TEMPLATE, "extensionPoints": EXTENSION_POINTS_DOC,
+            "domains": domains, "schema": 2}
+
+
+@router.post("/plugins/scaffold")
+async def scaffold_plugin(body: Dict[str, Any] = Body(...)):
+    try:
+        return pm.scaffold_plugin(
+            pid=str(body.get("id") or ""),
+            name=str(body.get("name") or ""),
+            domain=str(body.get("domain") or "capability"),
+            description=str(body.get("description") or ""),
+            author=str(body.get("author") or ""),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"生成插件骨架失败: {e}")
 
 
 @router.post("/plugins/install")

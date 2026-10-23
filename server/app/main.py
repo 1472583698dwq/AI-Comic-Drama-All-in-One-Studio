@@ -123,13 +123,35 @@ EXECUTION_PATHS = {
 
 @app.middleware("http")
 async def _origin_guard(request, call_next):
-    if request.url.path in EXECUTION_PATHS and request.method.upper() != "OPTIONS":
+    _is_change_set = request.url.path.startswith(f"{settings.API_V1_STR}/change-sets")
+    if (request.url.path in EXECUTION_PATHS or _is_change_set) and request.method.upper() != "OPTIONS":
         origin = request.headers.get("origin") or ""
         if not is_local_or_allowed_origin(origin):
             return JSONResponse(
                 status_code=403,
                 content={"detail": f"已拒绝跨源调用（Origin={origin}）：本机工具执行口不对外站开放"},
             )
+    return await call_next(request)
+
+
+# MCP 标准协议端点（/mcp-server）可被外部客户端直连；默认只监听回环，
+# 但一旦通过反向代理/隧道暴露出去，必须带 Bearer Token，否则生成/删源/文件类工具会被任意调用。
+# 设置 STUDIO_MCP_AUTH_TOKEN 后生效；不设置则保持原来的本机无鉴权行为。
+@app.middleware("http")
+async def _mcp_auth_guard(request, call_next):
+    path = request.url.path
+    if (path == "/mcp-server" or path.startswith("/mcp-server/")) and request.method.upper() != "OPTIONS":
+        token = os.getenv("STUDIO_MCP_AUTH_TOKEN", "").strip()
+        if token:
+            import hmac
+            auth = request.headers.get("authorization", "")
+            expected = f"Bearer {token}"
+            if not hmac.compare_digest(auth.encode("utf-8"), expected.encode("utf-8")):
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "MCP 鉴权失败：请在 Authorization 头携带 Bearer Token"},
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
     return await call_next(request)
 
 
@@ -234,6 +256,13 @@ try:
     print("[Main] Plugin routes mounted at /api/v1/plugins")
 except Exception as e:
     print(f"[Main] Plugin routes mount failed: {e}")
+# Creator ChangeSet 路由（提案/试跑/应用/丢弃/回滚）
+try:
+    from app.api.change_set_routes import router as change_set_router
+    app.include_router(change_set_router, prefix=settings.API_V1_STR)
+    print("[Main] ChangeSet routes mounted at /api/v1/change-sets")
+except Exception as e:
+    print(f"[Main] ChangeSet routes mount failed: {e}")
 # 自定义代码节点路由（CRUD/体检/试运行/单次执行）
 try:
     from app.api.custom_node_routes import router as custom_node_router

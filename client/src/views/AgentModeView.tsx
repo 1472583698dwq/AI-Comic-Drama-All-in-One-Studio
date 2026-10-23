@@ -8,7 +8,7 @@
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ShieldAlert, Trash2, ArrowDown, Folder, ChevronDown, Check, MessageCirclePlus,
+  ShieldAlert, ShieldCheck, Trash2, ArrowDown, Folder, ChevronDown, Check, MessageCirclePlus,
 } from 'lucide-react';
 import { useProjectStore } from '../stores/useProjectStore';
 import { useProjectListStore, type ProjectMeta } from '../stores/useProjectListStore';
@@ -17,6 +17,7 @@ import { AgentMessageList } from '../components/agent/AgentMessageList';
 import { ApprovalCard } from '../components/agent/AgentToolSteps';
 import { AgentComposer } from '../components/agent/AgentComposer';
 import { AgentSwarmPanel } from '../components/agent/AgentSwarmPanel';
+import { ProjectPolicyModal } from '../components/agent/ProjectPolicyModal';
 import { loadRoleMetas } from '../components/agent/swarmMeta';
 import { apiService } from '../services/api';
 import { toast } from '../stores/useDialogStore';
@@ -142,6 +143,7 @@ const ProjectChip: React.FC = () => {
 export const AgentModeView: React.FC = () => {
   const { project, activeShotId } = useProjectStore();
   const [proposalBusy, setProposalBusy] = useState<Record<string, string>>({});
+  const [policyOpen, setPolicyOpen] = useState(false);
   // 消息流容器：输入框改为悬浮层后不再占据独立区域，贴底/回到底部都由它自己算
   const scrollRef = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
@@ -159,6 +161,20 @@ export const AgentModeView: React.FC = () => {
   useEffect(() => {
     bindProject(project?.id || null);
   }, [project?.id, bindProject]);
+
+  // 项目级执行模式：切换项目时以项目设置为默认，之后仍可在输入框左下角临时切换
+  useEffect(() => {
+    if (!project?.id) return;
+    let alive = true;
+    apiService.getProjectAgentPolicy(project.id)
+      .then((p) => {
+        if (alive && (p?.execution_mode === 'plan' || p?.execution_mode === 'auto' || p?.execution_mode === 'create')) {
+          setRunMode(p.execution_mode);
+        }
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [project?.id, setRunMode]);
 
   // 拉取导演组扩展角色（自定义 icon/color）供集群面板使用
   useEffect(() => {
@@ -245,6 +261,15 @@ export const AgentModeView: React.FC = () => {
             </div>
           </div>
           <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={() => setPolicyOpen(true)}
+              title="项目模型与权限（工具 allow / ask / deny）"
+              aria-label="项目模型与权限"
+              className="flex items-center gap-1.5 rounded-lg border border-white/70 dark:border-white/12 bg-surface/80 px-2.5 py-2 text-[11px] font-semibold [color:var(--color-text-main)] transition-all hover:border-brand/50 active:scale-95 shrink-0"
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">权限</span>
+            </button>
             <button
               onClick={() => createSession()}
               title="新建会话（不继承当前对话上下文）"
@@ -348,6 +373,12 @@ export const AgentModeView: React.FC = () => {
         </div>
       </div>
 
+      <ProjectPolicyModal
+        open={policyOpen}
+        projectId={project?.id}
+        onClose={() => setPolicyOpen(false)}
+        onSaved={(p) => setRunMode(p.execution_mode)}
+      />
     </div>
   );
 };

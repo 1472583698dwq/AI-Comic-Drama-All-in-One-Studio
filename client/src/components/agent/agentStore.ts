@@ -42,7 +42,7 @@ function welcomeMsg(mode: AgentMode): ChatMsg {
     mode,
     text: mode === 'chat'
       ? '这里是 **纯问答**。我只做讲解不动手，不调用任何工具、零副作用。'
-      : '这里是 **变更前确认** 模式。我会按 ReAct 循环直接调生图/配音/视频/画布/剪映等工具，危险操作（删源/写文件/跑命令）会先问你；需要的话可在输入框左下角切到 **计划**（先出方案）/ **完全访问**（全自动）/ **造能力**（缺能力先提案）。',
+      : '这里是 **自动** 模式。我会按项目权限执行：允许的工具直接做，需要确认的会问你，禁止的会直接拒绝；可在输入框左下角切到 **计划**（只读出方案）/ **创造**（缺什么能力先提案）。',
     suggested: mode === 'chat' ? QUICK_ASK : QUICK_DO,
     time: '就绪',
   };
@@ -205,6 +205,10 @@ export function createAgentStore(scope: AgentScope) {
   const ALLOW_KEY = scope === 'float' ? 'agent_float_auto_allow' : 'agent_auto_allow';
 
   let persistTimer: ReturnType<typeof setTimeout> | null = null;
+  let persistInFlight: Promise<void> | null = null;
+  let persistQueued = false;
+  let persistRetry = 0;
+  let persistRetryTimer: ReturnType<typeof setTimeout> | null = null;
   let sseController: AbortController | null = null;
   let prevWsStatus: WsStatus = 'closed';
 
@@ -219,18 +223,20 @@ export function createAgentStore(scope: AgentScope) {
   return create<AgentStoreState>()((set, get) => {
     const getPrefs = (): { mode: AgentMode; runMode: RunMode; permission: PermissionMode } => {
       let mode: AgentMode = 'execute';
-      let runMode: RunMode = 'approve';
-      let permission: PermissionMode = 'approve';
+      let runMode: RunMode = 'auto';
+      let permission: PermissionMode = 'auto';
       try {
         const m = localStorage.getItem(MODE_KEY);
         if (m === 'chat' || m === 'execute') mode = m;
         const r = localStorage.getItem(RUNMODE_KEY);
         if (r) runMode = composeRunMode(behaviorOfRunMode(r), executionOfRunMode(r));
         const p = localStorage.getItem(PERMISSION_KEY);
-        if (p === 'approve' || p === 'auto' || p === 'create') permission = p;
+        if (p === 'auto' || p === 'create') permission = p;
       } catch {}
       // 恢复到计划态时权限用本地记忆（计划 token 不携带权限信息）
-      if (behaviorOfRunMode(runMode) !== 'plan') permission = permissionOfRunMode(runMode);
+      if (behaviorOfRunMode(runMode) !== 'plan') {
+        permission = permissionOfRunMode(runMode) === 'create' ? 'create' : 'auto';
+      }
       return { mode, runMode, permission };
     };
 
@@ -269,26 +275,62 @@ export function createAgentStore(scope: AgentScope) {
       }
     };
 
+    /** 同一时刻只允许一个保存请求在途；流式输出期间的新变更合并到下一轮。 */
+    const saveLatestSessions = (): Promise<void> => {
+      if (persistInFlight) {
+        persistQueued = true;
+        return persistInFlight;
+      }
+      const { projectId, sessions } = get();
+      if (!projectId || !sessions.length) return Promise.resolve();
+      persistInFlight = apiService.saveProjectAgentSessions(projectId, sessions, scope)
+        .then(() => {
+          persistRetry = 0;
+          if (persistRetryTimer) {
+            clearTimeout(persistRetryTimer);
+            persistRetryTimer = null;
+          }
+          persistFailNotified.delete(projectId);
+        })
+        .catch((e) => {
+          const status = Number((e as any)?.status || 0);
+          const retryable = !status || status === 400 || status >= 500;
+          if (retryable && persistRetry < 2) {
+            persistRetry += 1;
+            if (persistRetryTimer) clearTimeout(persistRetryTimer);
+            persistRetryTimer = setTimeout(() => {
+              persistRetryTimer = null;
+              void saveLatestSessions();
+            }, 1200);
+            return;
+          }
+          persistRetry = 0;
+          notifyPersistError(e);
+        })
+        .finally(() => {
+          persistInFlight = null;
+          if (persistQueued) {
+            persistQueued = false;
+            schedulePersist();
+          }
+        });
+      return persistInFlight;
+    };
+
     const schedulePersist = () => {
       if (persistTimer) clearTimeout(persistTimer);
       persistTimer = setTimeout(() => {
         persistTimer = null;
-        const { projectId, sessions } = get();
-        if (projectId && sessions.length) {
-          apiService.saveProjectAgentSessions(projectId, sessions, scope)
-            .then(() => persistFailNotified.delete(projectId))
-            .catch(notifyPersistError);
-        }
-      }, 600);
+        void saveLatestSessions();
+      }, 1200);
     };
 
     const persistNow = () => {
-      const { projectId, sessions } = get();
-      if (projectId && sessions.length) {
-        apiService.saveProjectAgentSessions(projectId, sessions, scope)
-          .then(() => persistFailNotified.delete(projectId))
-          .catch(notifyPersistError);
+      if (persistTimer) {
+        clearTimeout(persistTimer);
+        persistTimer = null;
       }
+      void saveLatestSessions();
     };
 
     /** 运行模式热推后端：切「审批/自动」立即对当前运行轮生效（WS 优先，HTTP 兜底） */
@@ -774,6 +816,10 @@ export function createAgentStore(scope: AgentScope) {
         // 导致用户回合后续的 stream_chunk 全被丢弃（表现为“没有流式输出”）。
         const turnSource = String((ev as any).turn_source || '');
         if (turnSource && turnSource !== 'user') return;
+        if (ev.event === 'run_mode_set' && (ev as any).run_mode) {
+          get().setRunMode(String((ev as any).run_mode) as RunMode);
+          return;
+        }
         if (ev.event === 'error' && String((ev as any).code || '') === 'VISION_UNSUPPORTED') {
           toast.warning('当前模型不支持视觉输入（图片），请切换到支持图片的模型，或关闭图片附件后重试。');
         }
@@ -861,12 +907,6 @@ export function createAgentStore(scope: AgentScope) {
             set((s) => ({ approvals: { ...s.approvals, [aid]: { tool_name: tool, args: ev.arguments || {}, createdAt: Date.now() } } }));
             // 本会话"始终允许"：自动放行（IDE 式免打扰）
             if (tool && get().autoAllowTools[tool]) {
-              set((s) => (s.approvals[aid] ? { approvals: { ...s.approvals, [aid]: { ...s.approvals[aid], decided: true } } } : {}));
-              get().approve(aid, true);
-              return;
-            }
-            // 全局「自动执行」兜底：模式热同步存在竞态（事件早于 set_run_mode 到达）时自动放行
-            if (get().execution === 'auto') {
               set((s) => (s.approvals[aid] ? { approvals: { ...s.approvals, [aid]: { ...s.approvals[aid], decided: true } } } : {}));
               get().approve(aid, true);
               return;

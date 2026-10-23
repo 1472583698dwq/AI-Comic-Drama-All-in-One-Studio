@@ -1,0 +1,312 @@
+{
+  "id": "proj_695dc368",
+  "title": "完整流程测试",
+  "original_novel": "",
+  "style_preset": "donghua_xianxia",
+  "aspect_ratio": "9:16",
+  "characters": [],
+  "scenes": [
+    {
+      "id": "scene-1",
+      "scene_index": 1,
+      "title": "场景 1",
+      "location": "",
+      "time_of_day": "day",
+      "atmosphere": "epic",
+      "image_prompt": "",
+      "props": [],
+      "ref_image_url": null,
+      "episode_id": null,
+      "shots": []
+    },
+    {
+      "id": "scene-2-jmokhk",
+      "scene_index": 2,
+      "title": "场景 2",
+      "location": "",
+      "time_of_day": "day",
+      "atmosphere": "epic",
+      "image_prompt": "",
+      "props": [],
+      "ref_image_url": null,
+      "episode_id": "ep_2q2swby4",
+      "shots": [
+        {
+          "id": "shot-1792564113416",
+          "shot_index": 1,
+          "scene_index": 2,
+          "camera_framing": "medium",
+          "camera_motion": "push_in",
+          "action_desc": "夜市炒饭摊，老陈双手握锅猛翻，米粒与油花飞起。案板上手机屏幕骤亮，弹出红条通知「您的外卖店铺因差评过多，已被下线」。他翻锅的手停在半空半秒，眼神沉了一下，随即一把拧开气阀把火开到最大，火焰轰然窜高。",
+          "speaker_id": null,
+          "speaker_name": "老陈",
+          "dialogue": "",
+          "voiceover": "被裁第47天，我摆了这个摊。隔壁王哥卖9块9，我用的是超市冷柜里的鲜肉。他说我傻。",
+          "emotion": "neutral",
+          "image_prompt": "Photorealistic cinematic film still, vertical 9:16. Night market fried-rice stall at night. Lao Chen, a 40-year-old lean Chinese man with short black hair faintly grey at the temples, hard tired eyes, wearing a worn charcoal-grey crew-neck T-shirt with sleeves rolled to the elbows and a navy-blue apron stained with oil, an off-white towel at his waist, stands behind a stainless steel cart and flips a huge blackened carbon-steel wok with both hands, white rice and oil splashing. A warm bare hangi",
+          "video_prompt": "I2VA 首帧 - 见 H3 三字段结构，由导演在生成时注入",
+          "image_url": null,
+          "video_url": "/storage/videos/vid_1792637629_06588ca7.mp4",
+          "audio_url": null,
+          "duration": 10.0,
+          "subtitle_text": "被裁第47天，我摆了这个摊。",
+          "pose_preset": null,
+          "focal_length_mm": 35.0,
+          "camera_roll_deg": 0.0,
+          "cast_layout": "solo",
+          "props_config": [],
+          "status": "completed",
+          "motion_speed": "1.0x",
+          "video_provider": "generate_video",
+          "history": [
+            {
+              "video_url": "/storage/videos/vid_1792567574_c96a9d3d.mp4",
+              "ts": "2026-10-22T02:56:07.499Z",
+              "provider": "generate_video"
+            }
+          ]
+        },
+        {
+          "id": "shot_cd6ea41c44",
+          "shot_index": 2,
+          "scene_index": 2,
+          "camera_framing": "close_up",
+          "camera_motion": "truck_right",
+          "action_desc": "两个摊位的价牌并排特写。左：王哥的红底黄白大字「9.9元 管饱」，脱漆翘边、脏胶带、被冷白灯管照得发青。右：老陈的白板黑字「18元 鲜肉现炒」配红下划线，边角磨损、油指印，暖黄灯从上打下来。中间一道湿亮的路面反光。镜头横向缓移，从廉价红牌扫到干净白牌。",
+          "speaker_id": null,
+          "speaker_name": null,
+          "dialogue": "",
+          "voiceover": "隔壁王哥卖9块9，我用的是超市冷柜里的鲜肉。他说我傻。",
+          "emotion": "neutral",
+          "image_prompt": "Photorealistic cinematic close-up, vertical 9:16. Two CNY price boards side by side in a night market, shot at counter height. On the left: a garish red plastic board with huge bold yellow-white Chinese characters 9.9元 管饱, warped and greasy, held by dirty masking tape, lit by harsh cold fluorescent light. On the right: a small white corrugated board with bold black Chinese characters 18元 鲜肉现炒 and a thin red underline, worn edges and oily fingerprints, lit by a warm bare bulb from above. Between and below them, wet asphalt reflects both light sources. Dark blurred night-market background with warm neon bokeh.",
+          "video_prompt": "",
+          "image_url": "/storage/assets/ast_b296a796/original.jpg",
+          "video_url": "/storage/videos/vid_1792568064_bbec50a9.mp4",
+          "audio_url": null,
+          "duration": 5.2,
+          "subtitle_text": "18元 vs 9.9元",
+          "pose_preset": "stand",
+          "focal_length_mm": 50.0,
+          "camera_roll_deg": 0.0,
+          "cast_layout": "solo",
+          "props_config": [],
+          "status": "completed",
+          "walk_path": [],
+          "lighting_config": {},
+          "stage_cameras": [],
+          "stage_layout": {},
+          "mannequin_pose": {
+            "v": 1,
+            "entities": {}
+          },
+          "video_provider": "generate_video",
+          "history": [
+            {
+              "image_url": "/storage/assets/ast_b296a796/original.jpg",
+              "ts": "2026-10-21T08:42:18.790Z"
+            }
+          ],
+          "video_input": "frame"
+        },
+        {
+          "id": "shot_0582db039d",
+          "shot_index": 3,
+          "scene_index": 2,
+          "camera_framing": "medium",
+          "camera_motion": "pan_right",
+          "action_desc": "一个中年男顾客站在老陈摊前低头看了看锅里，又扭头看隔壁，犹豫着没下单。隔壁王哥探过身，扯着嗓子招呼：「这边便宜五块还送肠！」顾客一愣，转身就往隔壁走过去。老陈眼皮没抬，手里锅铲继续翻，只是翻的力气重了一点。",
+          "speaker_id": null,
+          "speaker_name": null,
+          "dialogue": "",
+          "voiceover": "他说我傻。",
+          "emotion": "neutral",
+          "image_prompt": "Photorealistic cinematic film still, vertical 9:16. Night market at night, between two fried-rice stalls. A middle-aged male customer in a wrinkled polo shirt stands undecided in the narrow wet gap between the stalls, glancing from the warm tidy stall on the right toward the garish cheap stall on the left. At the left stall a heavyset vendor in a stained white tank top leans out, mouth open mid-shout, red ladle raised. At the right stall Lao Chen stands behind his blackened wok, eyes down, refusing to look up, spatula in hand. Warm amber bulb light on the right, harsh cold fluorescent on the left, wet asphalt reflecting both, blurred neon crowd behind.",
+          "video_prompt": "",
+          "image_url": "/storage/assets/ast_b296a796/original.jpg",
+          "video_url": "/storage/videos/vid_1792639721_a7ae25f3.mp4",
+          "audio_url": null,
+          "duration": 7.0,
+          "subtitle_text": "这边便宜五块还送肠",
+          "pose_preset": "stand",
+          "focal_length_mm": 35.0,
+          "camera_roll_deg": 0.0,
+          "cast_layout": "solo",
+          "props_config": [],
+          "status": "completed",
+          "walk_path": [],
+          "lighting_config": {},
+          "stage_cameras": [],
+          "stage_layout": {},
+          "mannequin_pose": {
+            "v": 1,
+            "entities": {}
+          },
+          "video_provider": "prov_03ac0639",
+          "video_input": "frame",
+          "history": [
+            {
+              "image_url": "/storage/assets/ast_b296a796/original.jpg",
+              "ts": "2026-10-21T08:47:06.780Z"
+            },
+            {
+              "video_url": "/storage/videos/vid_1792572227_71e8da0f.mp4",
+              "ts": "2026-10-22T03:28:41.788223Z",
+              "provider": "prov_92d77c6e"
+            }
+          ]
+        },
+        {
+          "id": "shot_b801e2ef1e",
+          "shot_index": 4,
+          "scene_index": 2,
+          "camera_framing": "over_shoulder",
+          "camera_motion": "push_in",
+          "action_desc": "小周（衬衫+蓝色挂绳工牌）停在老陈摊前，看了看价牌，又转头看隔壁。老陈一抬头看见是他，手里的锅铲顿了一下，喉咙动了动，左手不自觉地摸到腰后去抓围裙带子——想把它解下来。手停在那儿，没解。小周笑了笑。",
+          "speaker_id": null,
+          "speaker_name": null,
+          "dialogue": "陈哥，你这价比公司食堂还贵啊。",
+          "voiceover": "",
+          "emotion": "neutral",
+          "image_prompt": "Photorealistic cinematic film still, vertical 9:16. Night market fried-rice stall at night, over-the-shoulder shot from behind a young office worker in a crisp light-blue dress shirt with a blue lanyard ID badge, standing at the stall counter. Facing him behind the cart is Lao Chen, a 40-year-old lean man in a charcoal-grey T-shirt and oil-stained navy apron, caught mid-motion, eyes wide with startled recognition, his left hand reaching back to the apron strings at his hip as if about to untie it. Warm bare bulb overhead, steam rising from the wok, dark blurred night-market bokeh behind.",
+          "video_prompt": "",
+          "image_url": "/storage/assets/ast_0be40f3a/original.jpg",
+          "video_url": "/storage/videos/vid_1792573445_ba65f1e3.mp4",
+          "audio_url": null,
+          "duration": 7.3,
+          "subtitle_text": "陈哥，你这价比公司食堂还贵啊。",
+          "pose_preset": "stand",
+          "focal_length_mm": 50.0,
+          "camera_roll_deg": 0.0,
+          "cast_layout": "solo",
+          "props_config": [],
+          "status": "completed",
+          "walk_path": [],
+          "lighting_config": {},
+          "stage_cameras": [],
+          "stage_layout": {},
+          "mannequin_pose": {
+            "v": 1,
+            "entities": {}
+          },
+          "video_provider": "prov_92d77c6e",
+          "video_input": "frame",
+          "history": [
+            {
+              "image_url": "/storage/assets/ast_0be40f3a/original.jpg",
+              "ts": "2026-10-21T09:19:12.675Z"
+            }
+          ]
+        },
+        {
+          "id": "shot_63c0ceead2",
+          "shot_index": 5,
+          "scene_index": 2,
+          "camera_framing": "over_shoulder",
+          "camera_motion": "push_in",
+          "action_desc": "小周没回答，双手把手机横过来，镜头对着老陈的摊位开拍。老陈一下子慌了，往前迈半步，手往锅沿一按：「你拍这干啥？」小周没停，对着镜头平静地说一句，然后把手机屏幕转过来给老陈看——刚发出去，评论区已经在刷「在哪？今晚就去」。老陈盯着屏幕，铁锅还紧紧攥在手里。背景里隔壁的 9.9 元喇叭还在响，但已经没人往那边走了。",
+          "speaker_id": null,
+          "speaker_name": null,
+          "dialogue": "前大厂P7，被裁后在夜市用鲜肉炒饭。贵五块，但吃完——不烧心。",
+          "voiceover": "",
+          "emotion": "neutral",
+          "image_prompt": "Photorealistic cinematic film still, vertical 9:16. Night market fried-rice stall at night. A young office worker in a crisp light-blue shirt holds a smartphone horizontally with both hands, filming toward the stall, the screen glowing and visible. Opposite him Lao Chen, a 40-year-old lean man in a charcoal T-shirt and oil-stained navy apron, has half-stepped forward with one hand pressed on the wok rim, alarmed. Warm bare bulb above, steam rising, dark neon night market blurred behind.",
+          "video_prompt": "",
+          "image_url": "/storage/assets/ast_0be40f3a/original.jpg",
+          "video_url": "/storage/videos/vid_1792646422_f0e57b64.mp4",
+          "audio_url": null,
+          "duration": 8.0,
+          "subtitle_text": "前大厂P7，被裁后在夜市用鲜肉炒饭。贵五块，但吃完——不烧心。",
+          "pose_preset": "stand",
+          "focal_length_mm": 50.0,
+          "camera_roll_deg": 0.0,
+          "cast_layout": "solo",
+          "props_config": [],
+          "status": "completed",
+          "walk_path": [],
+          "lighting_config": {},
+          "stage_cameras": [],
+          "stage_layout": {},
+          "mannequin_pose": {
+            "v": 1,
+            "entities": {}
+          },
+          "video_provider": "prov_03ac0639",
+          "history": [
+            {
+              "image_url": "/storage/assets/ast_0be40f3a/original.jpg",
+              "ts": "2026-10-21T09:39:01.840Z"
+            },
+            {
+              "video_url": "/storage/videos/vid_1792575211_3c886ae4.mp4",
+              "ts": "2026-10-22T04:55:24.198491Z",
+              "provider": "prov_92d77c6e"
+            },
+            {
+              "video_url": "/storage/videos/vid_1792644920_8ce08b5a.mp4",
+              "ts": "2026-10-22T05:20:25.724072Z",
+              "provider": "prov_03ac0639"
+            }
+          ],
+          "video_input": "frame"
+        },
+        {
+          "id": "shot_b279c6be2e",
+          "shot_index": 6,
+          "scene_index": 2,
+          "camera_framing": "extreme_close_up",
+          "camera_motion": "static",
+          "action_desc": "黑底白字，居中竖排。老陈的旁白在画外响起，问出最后一句。文字随旁白节拍逐行浮现，停留，然后缓缓淡出。",
+          "speaker_id": null,
+          "speaker_name": null,
+          "dialogue": "",
+          "voiceover": "你说，是贵五块的那碗饭不烧心，还是便宜五块的那碗，更烧心？",
+          "emotion": "neutral",
+          "image_prompt": "Pure black background, vertical 9:16. Centered white Chinese text on two lines in a clean sans-serif typeface: first line 是贵五块的那碗饭不烧心， second line smaller 还是便宜五块的那碗，更烧心？ No other elements. Slight film grain, subtle vignette, text softly lit as if backlit. Minimalist end card.",
+          "video_prompt": "",
+          "image_url": "/storage/assets/ast_0be40f3a/original.jpg",
+          "video_url": "/storage/videos/vid_1792575803_9dbaa8be.mp4",
+          "audio_url": null,
+          "duration": 5.2,
+          "subtitle_text": "你说，是贵五块的那碗饭不烧心，还是便宜五块的那碗，更烧心？",
+          "pose_preset": "stand",
+          "focal_length_mm": 50.0,
+          "camera_roll_deg": 0.0,
+          "cast_layout": "solo",
+          "props_config": [],
+          "status": "completed",
+          "walk_path": [],
+          "lighting_config": {},
+          "stage_cameras": [],
+          "stage_layout": {},
+          "mannequin_pose": {
+            "v": 1,
+            "entities": {}
+          },
+          "video_input": "frame",
+          "history": [
+            {
+              "image_url": "/storage/assets/ast_0be40f3a/original.jpg",
+              "ts": "2026-10-21T09:39:03.237Z"
+            }
+          ],
+          "video_provider": "prov_92d77c6e"
+        }
+      ]
+    }
+  ],
+  "episodes": [
+    {
+      "id": "ep_2q2swby4",
+      "episode_index": 1,
+      "title": "第1集",
+      "summary": ""
+    }
+  ],
+  "bgm_name": "Epic_Battle_Orchestra.mp3",
+  "bgm_url": null,
+  "bgm_volume": 0.5,
+  "created_at": "2026-10-21T06:28:23.384Z",
+  "updated_at": "2026-10-21T06:28:23.384Z",
+  "engine": null,
+  "_rev": 43
+}

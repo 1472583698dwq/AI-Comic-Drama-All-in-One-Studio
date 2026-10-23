@@ -59,7 +59,7 @@ class AgentLoop:
         self.agent_profile = agent_profile
         self.plan_mode = behavior_of(self.run_mode) == "plan"
         # /plan off 回到进入计划前的行为（如 创造+自动），避免把行为维度一并重置
-        self._pre_plan_run_mode = "approve"
+        self._pre_plan_run_mode = "auto"
         self.context: Dict[str, Any] = dict(context or {})
         # durable inbox：重启恢复未消费输入（排除 goal 提醒——由目标驱动重新生成，防重复计轮）
         _restore: List[Dict[str, Any]] = []
@@ -97,6 +97,10 @@ class AgentLoop:
             session=self.session,
             agent_profile=agent_profile,
         )
+        try:
+            self.pipeline.mode_switch_callback = self.set_run_mode
+        except Exception:
+            pass
         try:
             from app.agent.runtime.goal import load_goal
             self.goal = load_goal(self.session)
@@ -223,25 +227,10 @@ class AgentLoop:
     async def apply_run_mode(self, run_mode: str) -> str:
         """热切换运行模式（对当前轮后续工具立即生效）。
 
-        切到「自动」时同步放行全部挂起审批并补发 approval_ack，
-        否则用户切了自动，之前弹出的审批卡仍会阻塞工具直到超时。
+        模式切换不替用户批准已挂起的 ask：auto 只自动执行项目策略为 allow 的工具，
+        已弹给用户的审批仍必须由用户点确认。
         """
         self.set_run_mode(run_mode)
-        try:
-            from app.agent.mode_policy import execution_of
-            to_auto = execution_of(self.run_mode) == "auto"
-        except Exception:
-            to_auto = str(self.run_mode).endswith("auto")
-        if to_auto:
-            approvals = getattr(getattr(self, "pipeline", None), "approvals", None)
-            resolver = getattr(approvals, "resolve_all", None)
-            if callable(resolver):
-                for aid in resolver(True):
-                    try:
-                        await self._emit({"event": "approval_ack", "approval_id": aid,
-                                          "approved": True, "resolved": True})
-                    except Exception:
-                        pass
         return self.run_mode
 
     def set_goal(self, objective: str, max_rounds: Optional[int] = None):

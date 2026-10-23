@@ -1747,7 +1747,7 @@ class AgentChatRequest(BaseModel):
     session_id: Optional[str] = Field(default=None, description="会话ID，用于多轮记忆隔离")
     stream: bool = Field(default=False, description="是否流式返回")
     mode: str = Field(default="execute", description="Agent模式：chat问答（不调工具）| execute执行（ReAct调工具生成）")
-    run_mode: str = Field(default="approve", description="运行模式：approve审批 / auto自动 / create创造")
+    run_mode: str = Field(default="auto", description="运行模式：plan计划 / auto自动 / create创造")
     attachments: List[Dict[str, Any]] = Field(default_factory=list, description="多模态附件引用（图/视频/音频），ref 指向 /storage 或 http(s)")
 
 def _is_masked_placeholder(v: str) -> bool:
@@ -2621,17 +2621,17 @@ async def agent_stage_clay_result(req: StageClayResultRequest):
 
 
 class AgentRunModeRequest(BaseModel):
-    run_mode: str = Field(default="approve", description="组合运行模式 token（approve/auto/create/create_auto/plan/plan_auto）")
+    run_mode: str = Field(default="auto", description="运行模式：plan / auto / create")
 
 
 @router.post("/agent/session/{session_id}/run_mode")
 async def agent_session_set_run_mode(session_id: str, req: AgentRunModeRequest):
-    """运行模式热切换 HTTP 兜底（WS 不可用时）：切「自动」立即对当前轮生效并放行挂起审批。"""
+    """运行模式热切换 HTTP 兜底（WS 不可用时）：plan / auto / create 立即对当前轮生效。"""
     try:
         from app.agent.mode_policy import normalize_run_mode as _nrm_rm
         rm = _nrm_rm(req.run_mode)
     except Exception:
-        rm = "approve"
+        rm = "auto"
     if not AGENT_V2:
         # v1 内核按消息透传 run_mode，无会话级状态可切换
         return {"run_mode": rm, "applied": False, "note": "v1 内核按每条消息透传 run_mode"}

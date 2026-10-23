@@ -25,7 +25,10 @@ import time
 import zipfile
 from typing import Any, Dict, List, Optional, Tuple
 
-from app.plugins.models import PluginManifest, PluginRecord, MCP_TOOL_NAME_RE
+from app.plugins.models import (
+    PluginManifest, PluginRecord, MCP_TOOL_NAME_RE, normalize_manifest_v2,
+    V2_DOMAINS, domains_of, domain_counts,
+)
 
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9\-]{1,63}$")
 _VER_RE = re.compile(r"^\d+\.\d+\.\d+([\-+][0-9A-Za-z.\-]+)?$")
@@ -328,7 +331,7 @@ def _resolve_code_ref(pdir: str, rel: str, obj: Any,
 
 
 def validate_manifest_dict(data: Dict[str, Any]) -> PluginManifest:
-    m = PluginManifest.model_validate(data)
+    m = PluginManifest.model_validate(normalize_manifest_v2(data))
     if not _ID_RE.match(m.id):
         raise ValueError("插件id非法：小写字母数字中划线，2~64字符")
     if not _VER_RE.match(m.version):
@@ -387,6 +390,8 @@ def discover() -> List[Dict[str, Any]]:
             "dependsOn": dict(m.dependsOn or {}),
             "enabled": bool(rec.get("enabled", False)),
             "installed_at": rec.get("installed_at", ""),
+            "domains": domains_of(eps, m.domains),
+            "domain_counts": domain_counts(eps),
             "contributions": {
                 "providers": _glob_kind(pdir, eps.providers),
                 "skills": _glob_kind(pdir, eps.skills),
@@ -394,11 +399,12 @@ def discover() -> List[Dict[str, Any]]:
                 "mcp_tools": _glob_kind(pdir, eps.mcp_tools),
                 "custom_nodes": _glob_kind(pdir, eps.custom_nodes),
                 "storyboard_slots": _glob_kind(pdir, eps.storyboard_slots),
-            },
-            "deferred": {
-                k: getattr(eps, k) for k in ("canvas_nodes", "director_packs", "exporters", "themes",
-                                             "agent_profiles", "agent_teams")
-                if getattr(eps, k)
+                "canvas_nodes": _glob_kind(pdir, eps.canvas_nodes),
+                "themes": _glob_kind(pdir, eps.themes),
+                "exporters": _glob_kind(pdir, eps.exporters),
+                "director_packs": _glob_kind(pdir, eps.director_packs),
+                "agent_profiles": _glob_kind(pdir, eps.agent_profiles),
+                "agent_teams": _glob_kind(pdir, eps.agent_teams),
             },
         })
     return out
@@ -445,6 +451,169 @@ def install_from_dir(src_dir: str) -> PluginManifest:
         }
         _save_index(idx)
     return m
+
+
+_SCAFFOLD_EXAMPLES = {
+    "capability": r"""# 能力域示例
+
+## 生成源（provider）
+`capability/providers/hello.json`
+
+```json
+{
+  "id": "hello_provider",
+  "name": "Hello 生成源",
+  "kind": "image",
+  "provider_type": "code",
+  "language": "python",
+  "code": "async def generate(ctx, api):\n    return {'image_url': 'https://example.com/hello.png'}\n"
+}
+```
+
+## 工作流
+把 ComfyUI 导出的工作流 JSON 放到 `capability/workflows/`，并在 `plugin.json` 的
+`contributes.capability.workflows` 中声明 `workflows/*.json`。
+
+## MCP 工具
+把 `PLUGIN_TOOLS` 查壳文件放到 `capability/tools/`，在 `contributes.capability.tools`
+中声明 `tools/*.py`。工具执行需要 `STUDIO_TRUSTED_MODE=1`。
+""",
+    "canvas": """# 画布域示例
+
+## 声明式节点
+`canvas/nodes/hello.json`
+
+```json
+{
+  "id": "hello_node",
+  "name": "Hello 节点",
+  "kind": "utility",
+  "inputs": [{"id": "text", "label": "文本", "type": "text"}],
+  "outputs": [{"id": "text", "label": "文本", "type": "text", "from": "text"}],
+  "run": {"extension": "custom_node:hello_code", "map": {"text": "$in.text"}}
+}
+```
+
+## 代码节点
+`canvas/code/hello_code.json`，在 `contributes.canvas.codeNodes` 中声明
+`canvas/code/*.json`。代码节点需要 `input_schema`、`params_schema` 与 `run.code`。
+""",
+    "workspace": """# 工作台域示例
+
+## 主题
+`workspace/themes/hello-theme.json`
+
+```json
+{
+  "id": "hello-theme",
+  "name": "Hello 主题",
+  "mode": "all",
+  "vars": {"--color-brand": "#7c3aed", "--color-bg": "#0b0b0f"}
+}
+```
+
+## 分镜槽
+`workspace/slots/hello-tab.json`
+
+```json
+{
+  "slot": "shot.tabs",
+  "id": "hello-tab",
+  "label": "Hello",
+  "order": 50,
+  "blocks": [{"kind": "info", "text": "来自 Hello 插件"}]
+}
+```
+
+导出器与导演包分别放在 `workspace/exporters/`、`workspace/director_packs/`。
+""",
+    "agent": """# 智能体域示例
+
+## 技能
+`agent/skills/hello/SKILL.md`
+
+```markdown
+---
+name: hello
+description: 一个最小技能示例
+---
+
+收到用户请求后，先复述目标，再给出三条可执行建议。
+```
+
+## 角色与导演组
+角色画像放 `agent/profiles/*.json`，导演组放 `agent/teams/*.json`；
+在 `plugin.json` 的 `contributes.agent` 中分别声明 `profiles` 与 `teams`。
+""",
+}
+
+
+def scaffold_plugin(pid: str, name: str, domain: str = "capability",
+                    description: str = "", author: str = "") -> Dict[str, Any]:
+    """生成一个 v2 四域插件骨架（只写 storage/plugins，不启用、不执行代码）。"""
+    pid = str(pid or "").strip()
+    if not _ID_RE.match(pid):
+        raise ValueError("插件id非法：小写字母数字中划线，2~64字符")
+    domain = str(domain or "capability").strip()
+    if domain not in V2_DOMAINS:
+        raise ValueError(f"domain 非法: {domain}，支持 {list(V2_DOMAINS)}")
+    name = str(name or "").strip() or pid
+    dest = os.path.join(_plugins_root(), pid)
+    manifest = {
+        "schema": 2,
+        "id": pid,
+        "name": name,
+        "version": "1.0.0",
+        "description": str(description or "").strip(),
+        "author": str(author or "").strip(),
+        "publisher": str(author or "").strip() or pid,
+        "license": "MIT",
+        "domains": [domain],
+        "contributes": {domain: {}},
+    }
+    validate_manifest_dict(manifest)
+    readme = (
+        f"# {name}\n\n"
+        f"{manifest['description'] or '一个最小可用的 v2 插件骨架。'}\n\n"
+        f"域：`{domain}`（{V2_DOMAINS[domain]['label']}）\n\n"
+        "## 目录\n"
+        f"- `plugin.json`：插件清单，`contributes.{domain}` 下声明扩展点。\n"
+        f"- `examples/{domain}.md`：该域的示例与契约。\n\n"
+        "## 下一步\n"
+        f"1. 按 `examples/{domain}.md` 把真实贡献文件放进插件目录。\n"
+        f"2. 在 `plugin.json` 的 `contributes.{domain}` 中补上 glob（如 `themes/*.json`）。\n"
+        "3. 回到插件中心点「启用」。\n"
+    )
+    with _LOCK:
+        if os.path.exists(dest):
+            raise ValueError(f"插件目录已存在: {pid}")
+        os.makedirs(dest, exist_ok=False)
+        files: List[str] = []
+        try:
+            with open(os.path.join(dest, "plugin.json"), "w", encoding="utf-8") as f:
+                json.dump(manifest, f, ensure_ascii=False, indent=2)
+            files.append("plugin.json")
+            with open(os.path.join(dest, "README.md"), "w", encoding="utf-8") as f:
+                f.write(readme)
+            files.append("README.md")
+            ex_dir = os.path.join(dest, "examples")
+            os.makedirs(ex_dir, exist_ok=True)
+            with open(os.path.join(ex_dir, f"{domain}.md"), "w", encoding="utf-8") as f:
+                f.write(_SCAFFOLD_EXAMPLES[domain])
+            files.append(f"examples/{domain}.md")
+        except Exception:
+            shutil.rmtree(dest, ignore_errors=True)
+            raise
+    return {
+        "status": "scaffolded",
+        "id": pid,
+        "name": name,
+        "domain": domain,
+        "path": dest,
+        "files": files,
+        "manifest": manifest,
+        "next": f"编辑 {pid}/plugin.json 后 POST /plugins/{pid}/enable",
+    }
 
 
 def install_from_zip(data: bytes) -> PluginManifest:

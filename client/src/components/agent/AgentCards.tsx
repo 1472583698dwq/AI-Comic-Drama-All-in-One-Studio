@@ -140,7 +140,8 @@ export const ErrorCard: React.FC<{ what: string; why: string; next: string; onRe
 /** Creator 能力提案状态中文口径（卡头展示） */
 const PROPOSAL_STATUS_LABEL: Record<string, string> = {
   proposed: '待试跑', testing: '试跑中…', tested: '试跑通过', test_failed: '试跑未通过',
-  persisted: '已持久化', discarded: '已丢弃', rolled_back: '已回滚', needs_manual: '需人工接入',
+  failed: '试跑未通过', persisted: '已持久化', applied: '已应用',
+  discarded: '已丢弃', rolled_back: '已回滚', needs_manual: '需人工接入',
 };
 
 /** Creator 能力提案卡：临时提案，需人 Start 试跑，试跑后 persist 真写生产（备份+回滚）/discard/rollback */
@@ -151,7 +152,7 @@ export const CapabilityProposalCard: React.FC<{
   onFinalize: (action: 'persist' | 'discard' | 'rollback') => void;
 }> = ({ proposal, busy, onStart, onFinalize }) => {
   const status = proposal.status || 'proposed';
-  const isPersisted = status === 'persisted';
+  const isPersisted = status === 'persisted' || status === 'applied';
   const canStart = !busy && !isPersisted && status !== 'discarded';
   const canPersist = !busy && status === 'tested';
   return (

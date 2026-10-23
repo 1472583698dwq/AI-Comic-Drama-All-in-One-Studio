@@ -633,6 +633,20 @@ class ToolPipeline:
             msg = f"计划模式只允许只读工具，已拦截 {name}（本轮不执行任何变更）"
             return ToolOutcome(call_id, name, "denied", error=msg, model_content=json.dumps({"error": msg}, ensure_ascii=False))
 
+        # ①.2 项目级权限：模式只决定自动程度，具体 allow/ask/deny 由 ProjectPolicy 决定
+        try:
+            from app.agent.policy import permission_decision, policy_from_context
+            _policy = policy_from_context(project_context)
+            _decision = permission_decision(name, args, run_mode, _policy)
+        except Exception:
+            _policy = {}
+            _decision = "ask" if _risk(name) in ("medium", "high", "catastrophic") else "allow"
+        if _decision == "deny":
+            msg = f"项目权限禁止工具 {name}（项目设置 → 模型与权限）"
+            return ToolOutcome(call_id, name, "denied", error=msg,
+                               meta={"permission": "deny", "group": "policy"},
+                               model_content=json.dumps({"error": msg}, ensure_ascii=False))
+
         # ①.5 子代理角色裁剪：执行口二次拒绝越权工具（角色约束靠代码，不靠提示词）
         _profile = getattr(self, "agent_profile", None)
         if _profile is not None and not _profile.allows(name):
@@ -893,7 +907,7 @@ class ToolPipeline:
             if not tool or not isinstance(items, list) or not items:
                 msg = "batch_run 需要 tool 与非空 items"
                 return ToolOutcome(call_id, name, "error", error=msg, model_content=json.dumps({"error": msg}, ensure_ascii=False))
-            if len(items) > 3 and _execution != "auto" and not auto_approved:
+            if len(items) > 3 and not auto_approved:
                 verdict = await self.approvals.request("batch_run", {"tool": tool, "count": len(items)},
                                                        reason=f"批量执行 {len(items)} 项 {tool}")
                 if verdict != "approved":
@@ -903,7 +917,7 @@ class ToolPipeline:
             from app.agent.runtime.batch import run_batch
 
             async def _one(cid, t, a, ctx, rm):
-                return await self.execute(cid, t, a, ctx, rm, auto_approved=True)
+                return await self.execute(cid, t, a, ctx, rm, auto_approved=False)
 
             result = await run_batch(_one, tool, items, int(args.get("concurrency") or 3))
             if result.get("status") == "error":
@@ -952,20 +966,61 @@ class ToolPipeline:
             return ToolOutcome(call_id, name, "denied", error=msg,
                                model_content=json.dumps({"error": msg}, ensure_ascii=False))
 
-        # ④ 人审：破坏性调用 / 模式策略要求的高风险调用
-        need_confirm = is_destructive(name, args)
-        if not need_confirm:
-            try:
-                from app.agent.mode_policy import requires_confirm as _rc
-                need_confirm = _rc(name, run_mode, True)
-            except Exception:
-                need_confirm = _risk(name) in ("high", "catastrophic")
-        # plan 只读 / auto 自动执行：不弹确认（两维各自硬门控；风险由前端危险态明示 + 随时暂停兜底）
-        if need_confirm and _behavior != "plan" and _execution != "auto" and not auto_approved:
-            verdict = await self.approvals.request(name, args, reason=f"risk={_risk(name)} mode={run_mode}")
+        # ④ 人审：破坏性调用 / 项目策略要求确认的调用；auto 不再无条件放行
+        need_confirm = is_destructive(name, args) or _decision == "ask"
+        if need_confirm and not auto_approved:
+            verdict = await self.approvals.request(
+                name, args, reason=f"permission={_decision} risk={_risk(name)} mode={run_mode}")
             if verdict != "approved":
                 msg = f"已跳过需确认的工具 {name}（{APPROVAL_VERDICT_TEXT.get(verdict, verdict)}）"
                 return ToolOutcome(call_id, name, "denied", error=msg, meta={"approval": verdict},
+                                   model_content=json.dumps({"error": msg}, ensure_ascii=False))
+
+        # 模式切换：create 已在上面走用户审批；plan/auto 属于降级/安全切换
+        if name == "request_mode_switch":
+            from app.agent.mode_policy import normalize_run_mode
+            target = normalize_run_mode(str(args.get("target") or "auto"))
+            callback = getattr(self, "mode_switch_callback", None)
+            if callback is None:
+                msg = "当前会话不支持模式切换"
+                return ToolOutcome(call_id, name, "error", error=msg,
+                                   model_content=json.dumps({"error": msg}, ensure_ascii=False))
+            try:
+                callback(target)
+            except Exception as e:
+                msg = f"模式切换失败: {e}"
+                return ToolOutcome(call_id, name, "error", error=msg,
+                                   model_content=json.dumps({"error": msg}, ensure_ascii=False))
+            payload = {"status": "success", "run_mode": target,
+                       "note": "已切换执行模式" if target != "create" else "用户已批准进入创造模式"}
+            try:
+                r = self.emit({"event": "run_mode_set", "run_mode": target, "source": "agent"})
+                if asyncio.iscoroutine(r):
+                    await r
+            except Exception:
+                pass
+            return ToolOutcome(call_id, name, "success", result=payload,
+                               model_content=json.dumps(payload, ensure_ascii=False))
+
+        if name in ("creator_propose_change_set", "creator_test_change_set",
+                    "creator_apply_change_set", "creator_rollback_change_set"):
+            from app.agent import change_sets
+            pid = str((project_context or {}).get("project_id") or "") if isinstance(project_context, dict) else ""
+            ctx = {"project_id": pid} if pid else {}
+            try:
+                if name == "creator_propose_change_set":
+                    result = change_sets.propose_change_set(str(args.get("goal") or ""), ctx)
+                elif name == "creator_test_change_set":
+                    result = await change_sets.test_change_set(str(args.get("change_set_id") or ""), ctx)
+                elif name == "creator_apply_change_set":
+                    result = await change_sets.apply_change_set(str(args.get("change_set_id") or ""), ctx)
+                else:
+                    result = await change_sets.rollback_change_set(str(args.get("change_set_id") or ""), ctx)
+                return ToolOutcome(call_id, name, "success", result=result,
+                                   model_content=json.dumps(result, ensure_ascii=False, default=str)[:8000])
+            except Exception as e:
+                msg = f"ChangeSet 操作失败: {e}"
+                return ToolOutcome(call_id, name, "error", error=msg,
                                    model_content=json.dumps({"error": msg}, ensure_ascii=False))
 
         # ⑤ 执行（带 per-tool 超时）

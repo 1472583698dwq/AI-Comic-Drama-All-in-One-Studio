@@ -22,6 +22,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
+import tempfile
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -171,33 +173,58 @@ class StorageMirror:
         local = os.path.join(settings.STORAGE_DIR, rel)
         if not os.path.isfile(local):
             return
-        st = os.stat(local)
         assert self.client
-        if is_mutable(rel):
-            # 版本化快照：文件名就是版本号，天然避开「远端不能覆盖」
-            state_dir = self.state_dir(rel)
-            remote = f"{state_dir}/{_now_ms()}.json"
-            await self.client.put(remote, local)
-            self.journal.mark(rel, size=st.st_size, mtime=st.st_mtime,
-                              pushed_at=_now_ms(), remote=remote)
-            try:
-                await self._prune_snapshots(state_dir)
-            except Exception:
-                pass
-        else:
-            remote = self.media_path(rel)
-            # 素材是一次写定的：远端已有同名就认为已同步（该驱动也覆盖不了）
-            if not self.journal.get(rel).get("pushed_at"):
-                if await self.client.stat(remote):
-                    self.journal.mark(rel, size=st.st_size, mtime=st.st_mtime,
-                                      pushed_at=_now_ms(), remote=remote, note="远端已存在")
-                    self.stats["skipped"] += 1
-                    return
-            await self.client.put(remote, local)
-            self.journal.mark(rel, size=st.st_size, mtime=st.st_mtime,
-                              pushed_at=_now_ms(), remote=remote,
-                              error="", fail_count=0)
-        self.stats["uploaded"] += 1
+        # 可变状态文件（会话/工程/索引）先在同一把锁下复制快照再上传。
+        # 否则 Windows 上传线程持有旧文件句柄时，save_agent_sessions 的 os.replace
+        # 会因目标被占用反复失败，前端就会看到“会话保存失败”。
+        upload_path = local
+        snap_path: Optional[str] = None
+        try:
+            if is_mutable(rel):
+                from .file_locks import lock_for
+                fd, snap_path = tempfile.mkstemp(
+                    prefix=".sync-", suffix=os.path.splitext(local)[1] or ".json",
+                    dir=os.path.dirname(local),
+                )
+                os.close(fd)
+                with lock_for(rel):
+                    shutil.copyfile(local, snap_path)
+                    # 快照 mtime 是复制时间；journal 必须记录源文件 mtime，
+                    # 否则下一轮扫描会误判为“又改了”，每 20s 无限重传。
+                    st = os.stat(local)
+                upload_path = snap_path
+            else:
+                st = os.stat(upload_path)
+            if is_mutable(rel):
+                state_dir = self.state_dir(rel)
+                remote = f"{state_dir}/{_now_ms()}.json"
+                await self.client.put(remote, upload_path)
+                self.journal.mark(rel, size=st.st_size, mtime=st.st_mtime,
+                                  pushed_at=_now_ms(), remote=remote)
+                try:
+                    await self._prune_snapshots(state_dir)
+                except Exception:
+                    pass
+            else:
+                remote = self.media_path(rel)
+                if not self.journal.get(rel).get("pushed_at"):
+                    if await self.client.stat(remote):
+                        self.journal.mark(rel, size=st.st_size, mtime=st.st_mtime,
+                                          pushed_at=_now_ms(), remote=remote, note="远端已存在")
+                        self.stats["skipped"] += 1
+                        return
+                await self.client.put(remote, upload_path)
+                self.journal.mark(rel, size=st.st_size, mtime=st.st_mtime,
+                                  pushed_at=_now_ms(), remote=remote,
+                                  error="", fail_count=0)
+            self.stats["uploaded"] += 1
+        finally:
+            if snap_path:
+                try:
+                    os.remove(snap_path)
+                except OSError:
+                    pass
+
 
     async def _worker(self) -> None:
         while True:

@@ -48,73 +48,58 @@ class TempStore(unittest.TestCase):
 
 
 class TestCompose(unittest.TestCase):
-    def test_run_modes_are_six_tokens(self):
-        self.assertEqual(
-            list(RUN_MODES),
-            ["approve", "auto", "create", "create_auto", "plan", "plan_auto"],
-        )
+    def test_run_modes_are_three_tokens(self):
+        self.assertEqual(list(RUN_MODES), ["plan", "auto", "create"])
 
-    def test_aliases_normalize_to_composed_token(self):
+    def test_aliases_normalize_to_new_tokens(self):
         cases = {
-            "supervisor": "approve", "standard": "approve", "ask": "approve", "default": "approve",
-            "automation": "auto", "never": "auto", "yolo": "auto",
+            "approve": "auto", "supervisor": "auto", "standard": "auto",
+            "ask": "auto", "default": "auto", "automation": "auto",
+            "never": "auto", "yolo": "auto",
             "creator": "create", "creative": "create",
+            "create_auto": "create", "create-auto": "create", "auto_create": "create",
             "planning": "plan", "readonly": "plan",
-            "create-auto": "create_auto", "create+auto": "create_auto", "auto_create": "create_auto",
-            "plan-auto": "plan_auto", "auto_plan": "plan_auto",
-            "": "approve", None: "approve", "不认识的": "approve",
+            "plan_auto": "plan", "plan-auto": "plan", "auto_plan": "plan",
+            "": "auto", None: "auto", "不认识的": "auto",
         }
         for raw, want in cases.items():
             self.assertEqual(normalize_run_mode(raw), want, raw)
 
     def test_dimension_derivation(self):
-        self.assertEqual(behavior_of("approve"), "standard")
-        self.assertEqual(behavior_of("auto"), "standard")
+        self.assertEqual(behavior_of("auto"), "auto")
         self.assertEqual(behavior_of("create"), "create")
-        self.assertEqual(behavior_of("create_auto"), "create")
         self.assertEqual(behavior_of("plan"), "plan")
-        self.assertEqual(behavior_of("plan_auto"), "plan")
-        self.assertEqual(execution_of("approve"), "approve")
+        self.assertEqual(behavior_of("approve"), "auto")
         self.assertEqual(execution_of("auto"), "auto")
-        self.assertEqual(execution_of("create"), "approve")
-        self.assertEqual(execution_of("create_auto"), "auto")
-        self.assertEqual(execution_of("plan_auto"), "auto")
+        self.assertEqual(execution_of("create"), "auto")
+        self.assertEqual(execution_of("plan"), "approve")
 
     def test_compose_roundtrip(self):
-        for b in ("standard", "create", "plan"):
-            for e in ("approve", "auto"):
-                token = compose_run_mode(b, e)
-                self.assertEqual(behavior_of(token), b)
-                self.assertEqual(execution_of(token), e, f"{b}+{e}={token}")
-        self.assertEqual(compose_run_mode("乱填", "乱填"), "approve")
+        self.assertEqual(compose_run_mode("plan", "auto"), "plan")
+        self.assertEqual(compose_run_mode("create", "approve"), "create")
+        self.assertEqual(compose_run_mode("standard", "approve"), "auto")
+        self.assertEqual(compose_run_mode("乱填", "乱填"), "auto")
 
 
 class TestRequiresConfirm(unittest.TestCase):
-    def test_approve_asks_for_medium_and_above(self):
-        self.assertTrue(requires_confirm("generate_image", "approve"))
-        self.assertTrue(requires_confirm("generate_video", "approve"))
-        self.assertFalse(requires_confirm("list_assets", "approve"))
-
-    def test_auto_never_asks_even_catastrophic(self):
-        # 「自动执行」= 全自动：连删源/可信写/命令都不再逐项确认（风险由前端危险态 + 随时暂停兜底）
-        for mode in ("auto", "create_auto", "plan_auto"):
-            for tool in ("delete_custom_provider", "shell_exec", "fs_file", "canvas_delete_node"):
-                self.assertFalse(requires_confirm(tool, mode), f"{tool}@{mode}")
+    def test_auto_allows_read_and_generate_but_asks_for_writes(self):
+        self.assertFalse(requires_confirm("list_assets", "auto"))
+        self.assertFalse(requires_confirm("generate_image", "auto"))
+        self.assertFalse(requires_confirm("canvas_create_node", "auto"))
+        self.assertTrue(requires_confirm("register_custom_provider", "auto"))
+        self.assertTrue(requires_confirm("delete_custom_provider", "auto"))
+        self.assertTrue(requires_confirm("shell_exec", "auto"))
 
     def test_plan_never_asks(self):
         self.assertFalse(requires_confirm("generate_video", "plan"))
+        self.assertFalse(requires_confirm("canvas_delete_node", "plan"))
         self.assertFalse(requires_confirm("canvas_delete_node", "plan_auto"))
 
-    def test_create_review_tools_gated_only_in_approve_execution(self):
+    def test_create_review_tools_are_gated(self):
         for tool in ("creator_start_test", "creator_finalize",
                      "register_custom_provider", "update_custom_provider"):
             self.assertTrue(requires_confirm(tool, "create"), tool)
-        # 创造+自动：提案链不再等人点，随自动执行推进
-        self.assertFalse(requires_confirm("creator_finalize", "create_auto"))
-        # 标准行为下同类工具属 medium → 审批模式仍拦
-        self.assertTrue(requires_confirm("creator_start_test", "approve"))
-        # 提案本身不生效（仅写临时文件），任何模式都不拦
-        self.assertFalse(requires_confirm("creator_propose_capability", "approve"))
+        self.assertFalse(requires_confirm("creator_propose_capability", "create"))
 
 
 class TestPipelineBehaviorGate(TempStore):
@@ -143,10 +128,9 @@ class TestPipelineBehaviorGate(TempStore):
         self.assertNotEqual(out.status, "denied")
         self.assertFalse([e for e in events if e.get("event") == "approval_required"])
 
-    def test_approve_execution_still_asks(self):
+    def test_auto_mode_still_asks_for_admin(self):
         p, _ = self.make_pipeline(interactive=False)
-        p.skills_read.add("prompt-basics")
-        out = run(p.execute("c1", "generate_video", {"prompt": "x"}, run_mode="approve"))
+        out = run(p.execute("c1", "register_custom_provider", {"kind": "image"}, run_mode="auto"))
         self.assertEqual(out.status, "denied")
 
 
@@ -166,52 +150,80 @@ class TestPlanRoundTrip(TempStore):
         lp.pipeline = FakePipeline()
         return lp
 
-    def test_plan_off_restores_previous_combo(self):
-        lp = self.make_loop(run_mode="create_auto")
+    def test_plan_off_restores_previous_mode(self):
+        lp = self.make_loop(run_mode="create")
         lp.set_run_mode("plan")
         self.assertTrue(lp.plan_mode)
-        self.assertEqual(lp._pre_plan_run_mode, "create_auto")
+        self.assertEqual(lp._pre_plan_run_mode, "create")
         lp.set_run_mode(lp._pre_plan_run_mode)
-        self.assertEqual(lp.run_mode, "create_auto")
+        self.assertEqual(lp.run_mode, "create")
         self.assertFalse(lp.plan_mode)
 
     def test_plan_auto_is_readonly_behavior(self):
-        lp = self.make_loop(run_mode="approve")
+        lp = self.make_loop(run_mode="auto")
         lp.set_run_mode("plan_auto")
         self.assertTrue(lp.plan_mode)
         self.assertTrue(lp.pipeline.plan_mode)
-        self.assertEqual(lp.run_mode, "plan_auto")
+        self.assertEqual(lp.run_mode, "plan")
 
 
 class TestHotSwitchExecutionDim(TempStore):
-    """执行维=auto 即放行挂起审批：create_auto 不能因为不是字符串 "auto" 而被漏判。"""
-
-    def test_switch_to_create_auto_resolves_pending(self):
+    def test_mode_switch_does_not_auto_approve_pending_ask(self):
         from app.agent.runtime.loop import AgentLoop
-        sid = self.unique("hot_create_auto")
-        lp = AgentLoop(sid, run_mode="create", mode="execute", interactive=True, store=self.store)
-        lp.pipeline.skills_read.add("prompt-basics")  # 预读技能解锁提示词门控，聚焦审批热切换
+        sid = self.unique("hot_mode_switch")
+        lp = AgentLoop(sid, run_mode="auto", mode="execute", interactive=True, store=self.store)
         events = []
         lp.attach(lambda ev: events.append(ev))
 
         async def scenario():
             task = asyncio.create_task(lp.pipeline.execute(
-                "c1", "generate_video", {"prompt": "x"}, run_mode=lp.run_mode))
+                "c1", "register_custom_provider", {"kind": "image"}, run_mode=lp.run_mode))
             for _ in range(200):
                 if any(e.get("event") == "approval_required" for e in events):
                     break
                 await asyncio.sleep(0.01)
             self.assertTrue(any(e.get("event") == "approval_required" for e in events))
-            await lp.apply_run_mode("create_auto")
+            pending = list(lp.pipeline.approvals._pending.keys())
+            self.assertEqual(len(pending), 1)
+            await lp.apply_run_mode("create")
+            self.assertEqual(len(lp.pipeline.approvals._pending), 1)
+            lp.pipeline.resolve_approval(pending[0], False)
             return await task
 
         out = run(scenario())
-        self.assertEqual(lp.run_mode, "create_auto")
-        self.assertIn(out.status, ("success", "error"))
-        acks = [e for e in events if e.get("event") == "approval_ack"]
-        self.assertEqual(len(acks), 1)
-        self.assertTrue(acks[0]["approved"])
-        self.assertTrue(acks[0]["resolved"])
+        self.assertEqual(lp.run_mode, "create")
+        self.assertEqual(out.status, "denied")
+
+
+class TestModeSwitchApproval(TempStore):
+    def test_request_create_requires_user_approval(self):
+        from app.agent.tools.pipeline import ToolPipeline
+        events = []
+        switched = []
+
+        async def emit(ev):
+            events.append(ev)
+
+        pipe = ToolPipeline(self.unique("mode_switch"), emit, interactive=True)
+        pipe.mode_switch_callback = switched.append
+
+        async def scenario():
+            task = asyncio.create_task(pipe.execute(
+                "c1", "request_mode_switch", {"target": "create", "reason": "需要造能力"},
+                run_mode="auto"))
+            for _ in range(200):
+                if any(e.get("event") == "approval_required" for e in events):
+                    break
+                await asyncio.sleep(0.01)
+            pending = list(pipe.approvals._pending.keys())
+            self.assertEqual(len(pending), 1)
+            self.assertEqual(switched, [])
+            pipe.resolve_approval(pending[0], True)
+            return await task
+
+        out = run(scenario())
+        self.assertEqual(out.status, "success")
+        self.assertEqual(switched, ["create"])
 
 
 class TestPromptDims(unittest.TestCase):

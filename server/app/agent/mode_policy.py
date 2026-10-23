@@ -1,28 +1,23 @@
 # -*- coding: utf-8 -*-
 """
-运行模式策略 — 两个正交维度（行为 × 执行），UI 分开展示、可自由组合：
+运行模式策略 — 只保留 plan / auto / create。
 
-行为模式 behavior（能干什么，代码硬门控，不靠提示词）：
-  - standard 标准：常规工具集，按风险分级放行
-  - create   创造：缺能力先造能力（Creator 提案链），能力变更类默认人审
-  - plan     计划：只读侦察（绑定层只给只读工具 + 执行口二次拒绝写工具），产出计划
+模式只决定自动程度：
+  - plan   只读侦察（绑定层只给只读工具 + 执行口二次拒绝写工具），产出计划
+  - auto   按项目权限执行：allow 直接做、ask 确认、deny 拒绝
+  - create 在 auto 基础上允许 Creator 提案；系统变更仍需用户批准
 
-执行方式 execution（要不要逐项人审）：
-  - approve 审批：变异动作先审后干（问答式确认）
-  - auto    自动：全部工具自动执行、不再逐项弹确认（含删源/可信写/命令）
-
-组合 token（单一 wire/持久化口径）：
-  approve = 标准+审批 / auto = 标准+自动 / create = 创造+审批 / create_auto = 创造+自动
-  plan = 计划+审批 / plan_auto = 计划+自动（计划只读，两 token 等价，保留仅为 UI 往返）
+具体工具能否执行由项目级 ProjectPolicy 决定（app.agent.policy），不靠提示词。
+旧 token（approve / create_auto / plan_auto）只做兼容归一。
 
 fail-closed：无 answerer（HTTP/SSE 无交互通道）时 ask 一律按拒绝处理。
 """
 from typing import Any, Dict, Optional
 
-RUN_MODES = ("approve", "auto", "create", "create_auto", "plan", "plan_auto")
+RUN_MODES = ("plan", "auto", "create")
 
-BEHAVIOR_MODES = ("standard", "create", "plan")
-EXECUTION_MODES = ("approve", "auto")
+BEHAVIOR_MODES = ("plan", "auto", "create")
+EXECUTION_MODES = ("auto",)
 
 # 计划模式只读白名单（单一来源：绑定层 app.agent.tools.registry 与执行口 pipeline 都从这里取，
 # 模型即使想变更也无工具可调、调了也会被拒——模式约束靠代码，不靠提示词）。
@@ -86,7 +81,10 @@ TOOL_RISK: Dict[str, str] = {
     "provider_key_status": "low", "migrate_provider_inline_key": "medium",
     "creator_inspect_runtime": "low", "creator_propose_capability": "medium",
     "creator_start_test": "medium", "creator_finalize": "high",
-    # 可信双工具
+    "creator_propose_change_set": "medium", "creator_test_change_set": "medium",
+    "creator_apply_change_set": "high", "creator_rollback_change_set": "high",
+    "request_mode_switch": "medium",
+    # 可信双工�?
     "fs_file": "high", "shell_exec": "high",
     # 子代理集群 / 一键成片原子工具
     "subagent_run": "medium", "subagent_list": "low", "subagent_status": "low",
@@ -105,63 +103,47 @@ CREATE_REVIEW_TOOLS = frozenset({
 })
 
 MODE_BUDGETS: Dict[str, Dict[str, Any]] = {
-    # max_steps 仅用于计划展示与死循环兜底（引擎默认 200，可用 AGENT_MAX_ITERATIONS 覆盖）
-    "approve": {"max_steps": 100, "deadline_s": 1200, "auto_confirm": False},
-    "auto": {"max_steps": 200, "deadline_s": 1200, "auto_confirm": True, "still_confirm": []},
-    "create": {"max_steps": 120, "deadline_s": 1200, "auto_confirm": False},
-    "create_auto": {"max_steps": 200, "deadline_s": 1200, "auto_confirm": True, "still_confirm": []},
-    # 计划模式：只读侦察 + 产出计划，不执行任何变更（工具由引擎绑定层硬门控）
     "plan": {"max_steps": 60, "deadline_s": 1200, "auto_confirm": True, "readonly": True},
-    "plan_auto": {"max_steps": 60, "deadline_s": 1200, "auto_confirm": True, "readonly": True},
+    "auto": {"max_steps": 200, "deadline_s": 1200, "auto_confirm": True, "still_confirm": []},
+    "create": {"max_steps": 120, "deadline_s": 1200, "auto_confirm": True, "still_confirm": []},
 }
 
 _ALIASES = {
-    # 旧值 / 口语值 → 组合 token
-    "supervisor": "approve", "approval": "approve", "ask": "approve",
-    "standard": "approve", "normal": "approve", "default": "approve",
-    "automation": "auto", "automatic": "auto", "never": "auto", "yolo": "auto",
+    "supervisor": "auto", "approval": "auto", "ask": "auto",
+    "standard": "auto", "normal": "auto", "default": "auto",
+    "approve": "auto", "automation": "auto", "automatic": "auto",
+    "never": "auto", "yolo": "auto",
     "creator": "create", "creation": "create", "creative": "create",
+    "create-auto": "create", "create+auto": "create", "create:auto": "create",
+    "createauto": "create", "creator_auto": "create", "auto_create": "create",
+    "create_auto": "create",
     "plan": "plan", "planning": "plan", "plan_mode": "plan", "readonly": "plan",
-    "create-auto": "create_auto", "create+auto": "create_auto", "create:auto": "create_auto",
-    "createauto": "create_auto", "creator_auto": "create_auto", "auto_create": "create_auto",
-    "plan-auto": "plan_auto", "plan+auto": "plan_auto", "plan:auto": "plan_auto",
-    "planauto": "plan_auto", "auto_plan": "plan_auto",
+    "plan-auto": "plan", "plan+auto": "plan", "plan:auto": "plan",
+    "planauto": "plan", "auto_plan": "plan", "plan_auto": "plan",
 }
 
 
 def normalize_run_mode(m: Optional[str]) -> str:
-    s = (m or "approve").strip().lower()
+    s = (m or "auto").strip().lower()
     s = _ALIASES.get(s, s)
-    return s if s in RUN_MODES else "approve"
+    return s if s in RUN_MODES else "auto"
 
 
 def behavior_of(run_mode: Optional[str]) -> str:
-    """从组合 token 取行为维度：standard / create / plan。"""
-    m = normalize_run_mode(run_mode)
-    if m.startswith("plan"):
-        return "plan"
-    if m.startswith("create"):
-        return "create"
-    return "standard"
+    return normalize_run_mode(run_mode)
 
 
 def execution_of(run_mode: Optional[str]) -> str:
-    """从组合 token 取执行维度：approve / auto。"""
-    m = normalize_run_mode(run_mode)
-    return "auto" if m.endswith("auto") else "approve"
+    return "auto" if normalize_run_mode(run_mode) in ("auto", "create") else "approve"
 
 
-def compose_run_mode(behavior: Optional[str], execution: Optional[str]) -> str:
-    """行为 × 执行 → 组合 token（UI 两个选择器的唯一合成口径）。"""
-    b = str(behavior or "standard").strip().lower()
-    e = str(execution or "approve").strip().lower()
-    b = b if b in BEHAVIOR_MODES else "standard"
-    e = e if e in EXECUTION_MODES else "approve"
-    if b == "plan":
-        return "plan_auto" if e == "auto" else "plan"
-    if b == "create":
-        return "create_auto" if e == "auto" else "create"
-    return "auto" if e == "auto" else "approve"
+def compose_run_mode(behavior: Optional[str], execution: Optional[str] = None) -> str:
+    b = str(behavior or "auto").strip().lower()
+    if b in ("plan", "planning", "readonly", "plan_auto"):
+        return "plan"
+    if b in ("create", "creator", "creation", "creative", "create_auto"):
+        return "create"
+    return "auto"
 
 
 def _provider_kind(tool_name: str) -> str:
@@ -213,23 +195,15 @@ def tool_risk(tool_name: str) -> str:
     return "medium"
 
 
-def requires_confirm(tool_name: str, run_mode: str, has_interactive_channel: bool = True) -> bool:
-    """该工具在该组合模式下是否需要人审。fail-closed：无交互通道时 ask 视为需要确认（调用方应直接拒绝/排队）。"""
-    behavior = behavior_of(run_mode)
-    execution = execution_of(run_mode)
-    if behavior == "plan":
-        # 计划模式只绑定只读工具，无需逐工具审批
+def requires_confirm(tool_name: str, run_mode: str, has_interactive_channel: bool = True,
+                     policy: Optional[Dict[str, Any]] = None,
+                     args: Optional[Dict[str, Any]] = None) -> bool:
+    """项目策略裁决：allow 不弹，ask 弹，deny 也返回 True（由执行口给出明确拒绝）。"""
+    from app.agent.policy import normalize_mode, permission_decision
+    if normalize_mode(run_mode) == "plan":
         return False
-    # 能力提案本身不生效（仅写临时文件，可 discard）；Start/Persist 才是人审门
-    if tool_name == "creator_propose_capability":
+    decision = permission_decision(tool_name, args or {}, run_mode, policy)
+    if decision == "allow":
         return False
-    if execution == "auto":
-        # 自动执行：全部工具自动执行（包括删源/可信写/命令），不再逐项审批。
-        # 风险由前端"自动执行"危险态明示 + 随时暂停/Abort 兜底；可信总闸 STUDIO_TRUSTED_MODE 仍独立生效。
-        return False
-    risk = tool_risk(tool_name)
-    if behavior == "create":
-        # 创造模式：能力变更类必须人来 Start/持久化；普通生成沿用审批口径
-        if tool_name in CREATE_REVIEW_TOOLS:
-            return True
-    return risk in ("medium", "high", "catastrophic")
+    # ask / deny 都返回 True；deny 的具体拒绝由执行口给出
+    return True

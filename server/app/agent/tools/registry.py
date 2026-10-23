@@ -50,7 +50,9 @@ _TODO_TOOL_SCHEMA: Dict[str, Any] = {
     },
 }
 
-INTERNAL_TOOL_NAMES = {"todo_write", "view_media", "ask_user_question",
+INTERNAL_TOOL_NAMES = {"todo_write", "view_media", "ask_user_question", "request_mode_switch",
+                       "creator_propose_change_set", "creator_test_change_set",
+                       "creator_apply_change_set", "creator_rollback_change_set",
                        "job_start", "job_list", "job_status", "job_cancel",
                        "subagent_run", "subagent_wait", "subagent_list", "subagent_status", "subagent_cancel", "subagent_steer",
                        "batch_run", "task_status", "task_wait", "task_cancel",
@@ -91,6 +93,42 @@ _ASK_USER_SCHEMA = _internal_schema(
      "multi_select": {"type": "boolean", "description": "是否允许多选（默认 false）"},
      "detail": {"type": "string", "description": "可选：补充说明/背景，帮助用户决策"}},
     ["question"],
+)
+
+_MODE_SWITCH_SCHEMA = _internal_schema(
+    "request_mode_switch",
+    "请求切换执行模式。切到 create（创造模式）会先弹用户审批；切到 plan/auto 属于降级或安全切换。"
+    "不要用其他工具绕过模式切换。",
+    {"target": {"type": "string", "enum": ["plan", "auto", "create"],
+                "description": "目标执行模式"},
+     "reason": {"type": "string", "description": "切换原因（给用户看）"}},
+    ["target"],
+)
+
+_CHANGE_SET_PROPOSE_SCHEMA = _internal_schema(
+    "creator_propose_change_set",
+    "创造模式：把目标转成统一的系统变更集（ChangeSet），只生成预览，不写生产。"
+    "支持 Provider / 插件 / 画布模板 / 技能 / 分镜槽等资源；应用前必须试跑并让用户批准。",
+    {"goal": {"type": "string", "description": "要改什么，例如「给H3补first_frame插槽」"}},
+    ["goal"],
+)
+_CHANGE_SET_TEST_SCHEMA = _internal_schema(
+    "creator_test_change_set",
+    "试跑一个 ChangeSet（只读/小参，不写生产），返回测试报告。",
+    {"change_set_id": {"type": "string", "description": "变更集 id，如 cs_prop_xxx"}},
+    ["change_set_id"],
+)
+_CHANGE_SET_APPLY_SCHEMA = _internal_schema(
+    "creator_apply_change_set",
+    "应用一个已试跑通过的 ChangeSet（真写生产；需用户批准，失败自动回滚）。",
+    {"change_set_id": {"type": "string", "description": "变更集 id"}},
+    ["change_set_id"],
+)
+_CHANGE_SET_ROLLBACK_SCHEMA = _internal_schema(
+    "creator_rollback_change_set",
+    "回滚一个已应用的 ChangeSet（按备份恢复）。",
+    {"change_set_id": {"type": "string", "description": "变更集 id"}},
+    ["change_set_id"],
 )
 
 
@@ -343,7 +381,10 @@ class ToolRegistryView:
                          _SUBAGENT_LIST_SCHEMA, _SUBAGENT_STATUS_SCHEMA,
                          _ONEKEY_SUMMARY_SCHEMA, _ONEKEY_REVIEW_SCHEMA]
         else:
-            internal += [_JOB_START_SCHEMA, _JOB_LIST_SCHEMA, _JOB_STATUS_SCHEMA, _JOB_CANCEL_SCHEMA,
+            internal += [_MODE_SWITCH_SCHEMA,
+                         _CHANGE_SET_PROPOSE_SCHEMA, _CHANGE_SET_TEST_SCHEMA,
+                         _CHANGE_SET_APPLY_SCHEMA, _CHANGE_SET_ROLLBACK_SCHEMA,
+                         _JOB_START_SCHEMA, _JOB_LIST_SCHEMA, _JOB_STATUS_SCHEMA, _JOB_CANCEL_SCHEMA,
                          _subagent_schema_dynamic(), _SUBAGENT_WAIT_SCHEMA, _SUBAGENT_LIST_SCHEMA, _SUBAGENT_STATUS_SCHEMA,
                          _SUBAGENT_CANCEL_SCHEMA, _SUBAGENT_STEER_SCHEMA,
                          _BATCH_SCHEMA,

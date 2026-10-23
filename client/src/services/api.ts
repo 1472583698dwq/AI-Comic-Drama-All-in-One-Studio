@@ -723,6 +723,45 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
+  async listChangeSets(limit: number = 20): Promise<{ change_sets: any[] }> {
+    const res = await fetch(`${API_BASE_URL}/change-sets?limit=${encodeURIComponent(String(limit))}`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async proposeChangeSet(goal: string, projectId?: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/change-sets/propose`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ goal, project_id: projectId || undefined }),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async testChangeSet(id: string, projectId?: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/change-sets/${encodeURIComponent(id)}/test`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: projectId || undefined }),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async applyChangeSet(id: string, projectId?: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/change-sets/${encodeURIComponent(id)}/apply`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: projectId || undefined }),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async discardChangeSet(id: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/change-sets/${encodeURIComponent(id)}/discard`, { method: 'POST' });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async rollbackChangeSet(id: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/change-sets/${encodeURIComponent(id)}/rollback`, { method: 'POST' });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
   async listCreatorTemplates(): Promise<{ templates: any[] }> {
     const res = await fetch(`${API_BASE_URL}/agent/creator/templates`);
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
@@ -840,6 +879,20 @@ export const apiService = {
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },
+  async getProjectAgentPolicy(projectId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/agent-policy`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async saveProjectAgentPolicy(projectId: string, policy: any): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}/agent-policy`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(policy),
+    });
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
   async deleteProject(projectId: string): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
@@ -926,7 +979,7 @@ export const apiService = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sessions }),
     });
-    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    if (!res.ok) throw makeApiError(res, await res.json().catch(() => null));
     return await res.json();
   },
   async deleteProjectAgentSession(projectId: string, sessionId: string): Promise<any> {
@@ -1323,6 +1376,16 @@ export const apiService = {
   },
   async pluginSpec(): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/plugins/spec`);
+    if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
+    return await res.json();
+  },
+  async scaffoldPlugin(payload: {
+    id: string; name: string; domain: string; description?: string; author?: string;
+  }): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/plugins/scaffold`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
     if (!res.ok) throw new Error(extractErrorMessage(res, await res.json().catch(() => null)));
     return await res.json();
   },

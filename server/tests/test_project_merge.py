@@ -214,7 +214,7 @@ class TestBuildCommand(_Sandbox):
         self.assertIn("-stream_loop", cmd)
         self.assertIn("volume=0.35", graph)
         self.assertIn("amix=inputs=3:duration=first:dropout_transition=0:normalize=0", graph)
-        self.assertIn("subtitles=filename=subs.ass[vout]", graph)
+        self.assertIn("subtitles=filename=subs.ass:wrap_unicode=1[vout]", graph)
         self.assertIn("[vout]", joined)
         self.assertIn("-map", cmd)
 
@@ -231,6 +231,26 @@ class TestBuildCommand(_Sandbox):
         self.assertIn("Dialogue: 0,0:00:00.00,0:00:02.00", ass)
         self.assertIn("Dialogue: 0,0:00:03.50,0:00:04.50", ass)
         self.assertNotIn("第二镜", ass)
+
+
+    def test_subtitle_layout_scales_with_frame(self):
+        layout = self.mod().subtitle_layout(1080, 1920)
+        self.assertEqual(layout["font_size"], 65)
+        self.assertEqual(layout["margin_lr"], 65)
+        self.assertEqual(layout["margin_v"], 115)
+        wide = self.mod().subtitle_layout(1920, 1080)
+        self.assertEqual(wide["font_size"], 65)
+        self.assertGreater(wide["max_units"], layout["max_units"])
+
+    def test_long_subtitle_wraps_within_frame_width(self):
+        text = "\u88ab\u88c1\u7b2c47\u5929\uff0c\u6211\u6446\u4e86\u8fd9\u4e2a\u644a\u3002\u8fd9\u662f\u4e00\u884c\u5f88\u957f\u7684\u5b57\u5e55\u7528\u6765\u6d4b\u8bd5\u81ea\u52a8\u6362\u884c\u548c\u753b\u5e45\u9002\u914d\u3002"
+        ass = self.mod().build_ass([{"duration": 2.0, "subtitle": text}], 1080, 1920)
+        dialogue = next(line for line in ass.splitlines() if line.startswith("Dialogue:"))
+        body = dialogue.rsplit(",,", 1)[1]
+        max_units = self.mod().subtitle_layout(1080, 1920)["max_units"]
+        self.assertIn("\\N", body)
+        for line in body.split("\\N"):
+            self.assertLessEqual(sum(self.mod()._char_units(ch) for ch in line), max_units + 0.01)
 
 
 class TestAudioGuard(_Sandbox):

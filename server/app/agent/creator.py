@@ -531,6 +531,10 @@ def _save(prop: Dict[str, Any]) -> None:
         pass
 
 
+def get_proposal(proposal_id: str):
+    return _load(proposal_id)
+
+
 def list_proposals(limit: int = 20) -> List[Dict[str, Any]]:
     d = _proposal_dir()
     try:

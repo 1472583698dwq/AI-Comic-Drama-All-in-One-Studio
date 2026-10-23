@@ -3,6 +3,8 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 import uuid
 
+from app.models.agent_policy import default_policy
+
 
 class ProjectMeta(BaseModel):
     id: str = Field(default_factory=lambda: f"proj_{uuid.uuid4().hex[:8]}")
@@ -18,6 +20,7 @@ class ProjectMeta(BaseModel):
     source: str = "blank"  # blank | novel | import | canvas
     description: str = ""
     engine: Optional[str] = None
+    agent_policy: Dict[str, Any] = Field(default_factory=default_policy)
 
     def touch(self):
         self.updated_at = datetime.now().isoformat()
@@ -43,3 +46,4 @@ class ProjectMetaUpdate(BaseModel):
     status: Optional[str] = None
     cover_url: Optional[str] = None
     description: Optional[str] = None
+    agent_policy: Optional[Dict[str, Any]] = None

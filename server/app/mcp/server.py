@@ -288,14 +288,27 @@ def _run_trusted_shell(command: str, cwd: str = "", timeout: int = 1200) -> dict
             raise ValueError(f"cwd 不存在或非目录：{workdir}")
     else:
         workdir = _trusted_repo_root()
+    kwargs = dict(cwd=workdir, capture_output=True, text=True, timeout=timeout,
+                  encoding="utf-8", errors="replace")
     if _sys.platform.startswith("win"):
-        proc = _sp.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", cmd],
-                       cwd=workdir, capture_output=True, text=True, timeout=timeout)
+        # PowerShell 5.1 在管道输出时默认跟随控制台代码页；显式切 UTF-8 避免中文乱码，
+        # CREATE_NO_WINDOW 避免打包态/后台调用闪黑框。
+        ps_cmd = "$OutputEncoding = [Console]::OutputEncoding = [Text.UTF8Encoding]::new(); " + cmd
+        kwargs["creationflags"] = getattr(_sp, "CREATE_NO_WINDOW", 0)
+        argv = ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd]
     else:
-        proc = _sp.run(["bash", "-lc", cmd], cwd=workdir, capture_output=True, text=True, timeout=timeout)
+        argv = ["bash", "-lc", cmd]
+    try:
+        proc = _sp.run(argv, **kwargs)
+    except _sp.TimeoutExpired as e:
+        out = (e.stdout or "")[-12000:] if isinstance(e.stdout, str) else (e.stdout or b"").decode("utf-8", "replace")[-12000:]
+        err = (e.stderr or "")[-4000:] if isinstance(e.stderr, str) else (e.stderr or b"").decode("utf-8", "replace")[-4000:]
+        return {"returncode": -1, "stdout": out, "stderr": err, "cwd": workdir,
+                "timeout": timeout, "error": f"命令超时（>{timeout}s），已终止"}
     out = (proc.stdout or "")[-12000:]
     err = (proc.stderr or "")[-4000:]
-    return {"returncode": proc.returncode, "stdout": out, "stderr": err, "cwd": workdir, "truncated": bool(proc.stdout and len(proc.stdout) > 12000)}
+    return {"returncode": proc.returncode, "stdout": out, "stderr": err, "cwd": workdir,
+            "truncated": bool(proc.stdout and len(proc.stdout) > 12000)}
 
 
 def _fs_read_action(path: str, offset: int = 0, limit: int = 500, encoding: str = "utf-8", numbered: bool = False) -> dict:

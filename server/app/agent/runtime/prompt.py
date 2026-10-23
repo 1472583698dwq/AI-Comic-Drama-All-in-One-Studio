@@ -67,15 +67,15 @@ CREATE_MODE_RULES = """## 创造模式（Creator）
 - 提案卡由界面展示给用户，你只负责生成与解释，不要替用户执行 Start/Persist。"""
 
 TRUSTED_RULES = """## 可信模式（仅 STUDIO_TRUSTED_MODE=1 时生效）
-fs_file（list/read/write/append/delete）与 shell_exec 受围栏限制；写操作与命令执行默认先弹窗确认（auto 自动模式除外：一律自动执行）。
+fs_file（list/read/write/append/delete）与 shell_exec 受围栏限制；写操作与命令执行仍受项目权限约束（allow/ask/deny）。
 长任务（视频等）已由框架统一阻塞到成片并返回 video_url；仅当工具提示「仍在生成中」时才用 task_wait 续等 / task_status 查询，不要用 shell_exec 反复轮询。"""
 
-AUTO_MODE_RULES = """## 自动执行（YOLO）
-用户已选择自动执行：全部工具（含删源/写文件/跑命令）自动执行、不会再弹窗打断你。
-你应持续推进直到目标完成；不要停下来问"是否继续/是否确认"，直接动手；风险由用户随时暂停兜底。
-诊断生成源代码优先用 get_provider_code 的 line_offset/line_limit 逐行精读（带行号），或 fs_read 加 numbered=true 带行号查看；定位问题后用 update_custom_provider 增量修复。"""
+AUTO_MODE_RULES = """## 自动执行
+当前是自动模式：项目权限为 allow 的工具会直接执行；ask 仍会弹确认；deny 会直接拒绝。
+你应持续推进直到目标完成，但不要声称所有工具都自动执行，也不要绕过项目权限或审批。
+诊断生成源代码优先用 get_provider_code 的 line_offset/line_limit 逐行精读（带行号），或用 fs_read 的 numbered=true；定位问题后用 update_custom_provider 增量修复。"""
 
-CREATE_AUTO_BRIDGE = """注意：当前执行方式为自动，提案链中的「Start 试跑 / 持久化」不再等待人工点击，你按流程自行推进；
+CREATE_AUTO_BRIDGE = """注意：当前是创造模式。系统变更必须走「提案 → 试跑 → 用户批准 → 持久化」，不要替用户点确认，也不要在未批准时声称已完成。
 每一步都要在回复里说明改了什么、验证结果与如何回滚（creator_finalize(action=discard) 即卸载临时包）。"""
 
 
